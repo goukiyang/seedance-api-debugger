@@ -2,6 +2,8 @@
  * 任务快照服务
  */
 
+import 'server-only';
+
 import { prisma } from '@/lib/prisma';
 import { v4 as uuidv4 } from 'uuid';
 import type { GenerationMode } from '@/types';
@@ -9,6 +11,7 @@ import type { AssetMapping } from './collection';
 import { renderPromptWithAssets } from './collection';
 import { buildContentArray } from '@/lib/provider/jimeng';
 import type { CreateVideoInput } from '@/types';
+import { multiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
 
 // ============================================================================
 // Snapshot 创建
@@ -22,21 +25,25 @@ export interface CreateSnapshotInput {
   input: Omit<CreateVideoInput, 'prompt'> & { prompt: string };
   providerPayloadJson?: string;
   contentOverride?: unknown;
+  promptRenderedOverride?: string;
+  assetMappingOverride?: AssetMapping;
+  protectedRecipeVersion?: string;
 }
 
 /**
  * 创建任务快照（自动渲染 prompt + 构建 content）
  */
 export async function createTaskSnapshot(input: CreateSnapshotInput) {
-  const { promptRendered, assetMapping } = await renderPromptWithAssets(
-    input.promptRaw,
-    input.workspaceId ?? '',
-    input.generationMode
-  );
+  const rendered = input.promptRenderedOverride === undefined
+    ? await renderPromptWithAssets(input.promptRaw, input.workspaceId ?? '', input.generationMode)
+    : { promptRendered: input.promptRenderedOverride, assetMapping: input.assetMappingOverride || {} };
+  const { promptRendered, assetMapping } = rendered;
 
   // 构建 content 数组（用于调试）
   let contentJson: string | null = null;
-  if (input.workspaceId) {
+  if (input.protectedRecipeVersion) {
+    contentJson = JSON.stringify({ protected_module: multiviewPrivateTaskMarker(input.protectedRecipeVersion) });
+  } else if (input.workspaceId) {
     const content = input.contentOverride !== undefined
       ? input.contentOverride
       : buildContentArray({

@@ -7,7 +7,9 @@ import { ProductActionMenu } from '@/components/ProductActionMenu';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { uploadSession } from '@/lib/http/upload-session';
-import { defaultMultiviewGenerationDraft, isMultiviewPresetVersion } from '@/lib/video/multiview-generation-contract';
+import { defaultMultiviewGenerationDraft, isMultiviewGenerationSeed, isMultiviewPresetVersion,
+  type MultiviewRotationPresetPublicDto } from '@/lib/video/multiview-generation-contract';
+import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { isMultiviewSettingsId, parseMultiviewSettingsDto, parseMultiviewGenerationSettingsValue, parseMultiviewFrameSettingsInput,
   type MultiviewGenerationSettingsValue, type MultiviewFrameSettingsInput, type MultiviewSettingsBinding,
   type MultiviewSettingsKind, type MultiviewSettingsSummary, type MultiviewSettingsDto,
@@ -29,6 +31,19 @@ type Props = { kind: MultiviewSettingsKind; ownerId: string; authorityKey: strin
 type Mutation = { mutationId: string; kind: MultiviewSettingsKind };
 const base = '/api/multiview/settings';
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+function publicPreset(value: unknown): MultiviewRotationPresetPublicDto | null {
+  if (!object(value) || value.id !== 'multiview-360' || !isMultiviewPresetVersion(value.version) || !object(value.defaults)) return null;
+  const defaults = value.defaults;
+  if (defaults.provider !== 'seedance' || defaults.generationMode !== 'all_in_one_reference'
+    || typeof defaults.model !== 'string' || defaults.model.length > 160 || !RATIO_OPTIONS.includes(defaults.ratio as never)
+    || typeof defaults.duration !== 'number' || !Number.isFinite(defaults.duration) || !RESOLUTION_OPTIONS.includes(defaults.resolution as never)
+    || !isMultiviewGenerationSeed(defaults.seed) || typeof defaults.generateAudio !== 'boolean'
+    || typeof defaults.returnLastFrame !== 'boolean' || typeof defaults.watermark !== 'boolean') return null;
+  return { id: 'multiview-360', version: value.version, defaults: { provider: 'seedance', generationMode: 'all_in_one_reference',
+    model: defaults.model, ratio: defaults.ratio as (typeof RATIO_OPTIONS)[number], duration: defaults.duration,
+    resolution: defaults.resolution as (typeof RESOLUTION_OPTIONS)[number], seed: defaults.seed,
+    generateAudio: defaults.generateAudio, returnLastFrame: defaults.returnLastFrame, watermark: defaults.watermark } };
+}
 const mutationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function summary(value: unknown, kind: MultiviewSettingsKind): Summary | null {
   if (!object(value) || !isMultiviewSettingsId(value.id) || value.kind !== kind || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 80
@@ -307,10 +322,9 @@ function MultiviewSettingsPickerContent(props: Props) {
       if (live.current.disabled || targetKey !== JSON.stringify(live.current.target || null) || valueKey !== JSON.stringify(valueRef.current)) throw new Error('当前工作现场已变化，请重新选用设置。');
       const result: MultiviewSettingsPickerApplyResult = { settings: applied };
       if (props.kind === 'generation') {
-        const preset = object(payload) && object(payload.preset) ? payload.preset : null;
-        if (!preset || preset.id !== 'multiview-360' || !isMultiviewPresetVersion(preset.version) || typeof preset.prompt !== 'string' || !preset.prompt.trim()
-          || preset.version !== (applied.value as MultiviewGenerationSettingsValue).presetVersion) throw new Error('这份设置的模板提示词暂不可确认，当前输入保留。');
-        result.preset = { id: 'multiview-360', version: preset.version, prompt: preset.prompt };
+        const preset = publicPreset(object(payload) ? payload.preset : null);
+        if (!preset || preset.version !== (applied.value as MultiviewGenerationSettingsValue).presetVersion) throw new Error('这份设置的默认配置暂不可确认，当前输入保留。');
+        result.preset = preset;
       } else {
         const slots = object(payload) ? parseMultiviewFrameSettingsInput({ schema: 1, slots: payload.slots }) : null;
         if (!slots) throw new Error('当前视频暂不能使用这份选帧方案，原选帧保留。');

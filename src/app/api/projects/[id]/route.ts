@@ -10,6 +10,7 @@ import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 import { readProjectAlbumPage } from '@/lib/projects/album-projection';
+import { isPrivateMultiviewTask, projectSelectedMultiviewTask, safeVideoTaskKeywordWhere, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,7 +60,8 @@ function safeTaskProjection<T extends {
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
-}>(task: T) {
+} & TaskProtectionSource>(task: T) {
+  if (isPrivateMultiviewTask(task)) return projectSelectedMultiviewTask(task);
   const {
     public_video_url: _publicVideoUrl,
     local_video_path: _localVideoPath,
@@ -67,7 +69,7 @@ function safeTaskProjection<T extends {
     result_last_frame_url: _resultLastFrameUrl,
     ...safeTask
   } = task;
-  return { ...safeTask, ...taskThumbnailProjection(task) };
+  return projectSelectedMultiviewTask({ ...safeTask, ...taskThumbnailProjection(task) });
 }
 
 async function getProjectSection(
@@ -183,7 +185,7 @@ async function getProjectSection(
           ? failedTaskWhere
           : {};
     const searchWhere = search ? { OR: [
-      { prompt: { contains: search } },
+      safeVideoTaskKeywordWhere(search),
       { model: { contains: search } },
       { provider: { contains: search } },
       { id: { contains: search } },
@@ -204,7 +206,7 @@ async function getProjectSection(
       skip: (page - 1) * pageSize,
       take: pageSize,
       select: {
-        id: true, prompt: true, provider: true, model: true, generation_mode: true,
+        id: true, source_metadata_json: true, prompt: true, provider: true, model: true, generation_mode: true,
         ratio: true, duration: true, resolution: true, local_status: true, delivery_status: true,
         provider_task_id: true, public_video_url: true, result_video_url: true,
         result_last_frame_url: true, local_video_path: true, owner_user_id: true, user_id: true,
@@ -283,7 +285,7 @@ async function getProjectSection(
       orderBy: [{ actual_cost: 'desc' }, { estimated_cost: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
       take: 8,
       select: {
-        id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true,
+        id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true,
         estimated_cost: true, actual_cost: true, provider_cost_status: true, public_video_url: true,
         result_video_url: true, result_last_frame_url: true, local_video_path: true, created_at: true,
         owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
@@ -301,7 +303,7 @@ async function getProjectSection(
         currency: true, usage_quantity: true, usage_unit: true, cost_source: true, confidence: true,
         official_charge_id: true, reason: true, occurred_at: true, created_at: true,
         user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-        task: { select: { id: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
+        task: { select: { id: true, source_metadata_json: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
           delivery_status: true, provider_task_id: true, public_video_url: true, result_video_url: true,
           result_last_frame_url: true, local_video_path: true, provider_cost_status: true,
           provider_official_amount_minor: true, provider_final_amount_minor: true,
@@ -324,7 +326,7 @@ async function getProjectSection(
       currency: true, usage_quantity: true, usage_unit: true, cost_source: true, confidence: true,
       official_charge_id: true, reason: true, occurred_at: true, created_at: true,
       user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-      task: { select: { id: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
+      task: { select: { id: true, source_metadata_json: true, prompt: true, provider: true, model: true, generation_mode: true, local_status: true,
         delivery_status: true, provider_task_id: true, public_video_url: true, result_video_url: true,
         result_last_frame_url: true, local_video_path: true, provider_cost_status: true,
         provider_official_amount_minor: true, provider_final_amount_minor: true,
@@ -398,6 +400,7 @@ function buildCostTotals(
 
 function serializeTaskPreview(task: null | {
   id: string;
+  source_metadata_json: string | null;
   prompt: string;
   provider: string;
   generation_mode: string;
@@ -410,8 +413,9 @@ function serializeTaskPreview(task: null | {
   created_at: Date;
 }) {
   if (!task) return null;
-  return {
+  return projectSelectedMultiviewTask({
     id: task.id,
+    source_metadata_json: task.source_metadata_json,
     prompt: task.prompt,
     provider: task.provider,
     generation_mode: task.generation_mode,
@@ -422,7 +426,7 @@ function serializeTaskPreview(task: null | {
     result_video_url: task.result_video_url,
     result_last_frame_url: task.result_last_frame_url,
     created_at: task.created_at,
-  };
+  });
 }
 
 export async function GET(
@@ -435,7 +439,11 @@ export async function GET(
 
     const access = await assertCanViewProject(user, params.id);
     const section = request.nextUrl.searchParams.get('section');
-    if (section) return getProjectSection(request, user, access, params.id, section);
+    if (section) {
+      const response = await getProjectSection(request, user, access, params.id, section);
+      response.headers.set('Cache-Control', 'private, no-store');
+      return response;
+    }
 
     const project = await prisma.project.findUnique({
       where: { id: params.id },
@@ -475,6 +483,7 @@ export async function GET(
       select: {
         id: true,
         prompt: true,
+        source_metadata_json: true,
         provider: true,
         generation_mode: true,
         local_status: true,
@@ -511,10 +520,10 @@ export async function GET(
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         current_best_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -628,6 +637,7 @@ export async function GET(
             select: {
               id: true,
               prompt: true,
+              source_metadata_json: true,
               provider: true,
               generation_mode: true,
               local_status: true,
@@ -680,6 +690,7 @@ export async function GET(
         select: {
           id: true,
           prompt: true,
+          source_metadata_json: true,
           provider: true,
           generation_mode: true,
           local_status: true,
@@ -703,6 +714,7 @@ export async function GET(
         select: {
           id: true,
           prompt: true,
+          source_metadata_json: true,
           provider: true,
           generation_mode: true,
           local_status: true,
@@ -729,25 +741,25 @@ export async function GET(
       archiveAnomalies: await getVideoCardArchiveAnomalies(tx, params.id),
     }));
     const primaryOfficialCost = officialCostTotals[0] || null;
-    const projectedTasks = tasks.map((task) => ({
+    const projectedTasks = tasks.map((task) => projectSelectedMultiviewTask({
       ...task,
       ...taskThumbnailProjection(task),
     }));
-    const projectedHighCostTasks = highCostTasks.map((task) => ({
+    const projectedHighCostTasks = highCostTasks.map((task) => projectSelectedMultiviewTask({
       ...task,
       ...taskThumbnailProjection(task),
     }));
-    const projectedFailedTasks = failedTasks.map((task) => ({
+    const projectedFailedTasks = failedTasks.map((task) => projectSelectedMultiviewTask({
       ...task,
       error_message: visibleProviderErrorMessage(task.error_message),
       ...taskThumbnailProjection(task),
     }));
     const projectedCostLedgers = costLedgers.map((ledger) => ({
       ...ledger,
-      task: ledger.task ? {
+      task: ledger.task ? projectSelectedMultiviewTask({
         ...ledger.task,
         ...taskThumbnailProjection(ledger.task),
-      } : null,
+      }) : null,
     }));
     const reviewSummary = {
       task_count: taskCount,
@@ -805,7 +817,7 @@ export async function GET(
       review_summary: reviewSummary,
       permissions: await projectCapabilities(access),
       status_version: projectStatusVersion(access.project!),
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

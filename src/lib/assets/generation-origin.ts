@@ -3,11 +3,12 @@ import { canViewStudioPreset } from '@/lib/image-studio/access';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import type { SessionUser } from '@/lib/auth/session';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
-export type GenerationOrigin = { kind: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'unknown';
+export type GenerationOrigin = { kind: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'multiview-output' | 'unknown';
   label: string; templateId?: string; templateName?: string };
 export function assetGenerationOrigin(asset: { id: string; metadata_json: string | null }, origins: Map<string, GenerationOrigin>) {
   if (origins.has(asset.id)) return origins.get(asset.id);
   try { const meta = JSON.parse(asset.metadata_json || '{}');
+    if (meta?.multiviewOutput?.schema === 1) return { kind: 'multiview-output' as const, label: '3D多视图' };
     if (typeof meta.studioTaskId === 'string' || ['image_generation_api', 'workspace_generation'].includes(meta.source)) return { kind: 'unknown' as const, label: '来源待识别' };
   } catch { /* No filename-based provenance. */ }
   return undefined;
@@ -41,6 +42,8 @@ export async function generationOrigins(user: SessionUser, assets: Array<{ id: s
   const moduleById = new Map(modules.map(module => [module.id, module]));
   const result = new Map<string, GenerationOrigin>();
   for (const asset of assets) {
+    const safeOrigin = assetGenerationOrigin(asset, new Map());
+    if (safeOrigin?.kind === 'multiview-output') { result.set(asset.id, safeOrigin); continue; }
     const linked = taskById.get(metadataTasks.get(asset.id) || '');
     const candidates = [...(tasksByAsset.get(asset.id) || []), ...(linked ? [linked] : [])];
     const matches = Array.from(new Map(candidates.filter(task => task.owner_id === asset.owner_id).map(task => [task.id, task])).values());

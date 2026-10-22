@@ -5,13 +5,14 @@ import { AuthError } from '@/lib/auth/session';
 import { assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { createApprovalRequest, normalizeApprovalType, validateApprovalPayload } from '@/lib/approvals';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
 const APPROVAL_INCLUDE = {
   project: { select: { id: true, name: true, type: true, status: true, owner_user_id: true } },
   videoCard: { select: { id: true, title: true, status: true, project_id: true } },
-  task: { select: { id: true, prompt: true, local_status: true } },
+  task: { select: { id: true, source_metadata_json: true, prompt: true, local_status: true } },
   requester: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
   approver: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
 } as const;
@@ -47,7 +48,9 @@ export async function GET(request: NextRequest) {
       take: 100,
     });
 
-    return NextResponse.json({ approvals });
+    return NextResponse.json({ approvals: approvals.map(approval => ({ ...approval,
+      task: approval.task ? projectSelectedMultiviewTask(approval.task) : null,
+    })) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('[Approvals] List error:', error);
     return NextResponse.json(
@@ -113,7 +116,9 @@ export async function POST(request: NextRequest) {
       include: APPROVAL_INCLUDE,
     });
 
-    return NextResponse.json({ approval: created });
+    return NextResponse.json({ approval: created ? { ...created,
+      task: created.task ? projectSelectedMultiviewTask(created.task) : null,
+    } : null }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
+import { multiviewSystemReferenceFileAccess } from '@/lib/video/multiview-recipe-storage.server';
+import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -45,6 +47,10 @@ function contentTypeFor(filePath: string) {
 
 async function generatedAssetAccess(pathname: string) {
   const user = await getSession();
+  const guide = await multiviewSystemReferenceFileAccess(user, pathname);
+  if (guide.protected) return { generated: true, allowed: guide.allowed };
+  const output = await multiviewOutputFileAccess(user, pathname);
+  if (output.protected) return { generated: true, allowed: output.allowed };
   if ((await studioHiddenAssetUrls(user)).includes(pathname)) return { generated: true, allowed: false };
   const assets = await prisma.asset.findMany({
     where: { original_url: pathname },

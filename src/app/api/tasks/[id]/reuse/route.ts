@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
@@ -249,6 +251,7 @@ export async function POST(
       where: { id: params.id },
       select: {
         id: true,
+        source_metadata_json: true,
         provider: true,
         prompt: true,
         generation_mode: true,
@@ -284,6 +287,40 @@ export async function POST(
     }
 
     await assertCanViewTask(user, task);
+
+    if (isPrivateMultiviewTask(task)) {
+      if (task.generation_mode === 'enhance_video') {
+        return NextResponse.json({ error: '此结果可查看和下载；重新生成请到3D多视图选择本人主图。',
+          code: 'MULTIVIEW_OUTPUT_ONLY', target_path: '/multiview', draft: { target_path: '/multiview' } },
+        { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
+      }
+      const safe = readSafePrivateMultiviewInput(task);
+      const ownInput = (task.owner_user_id || task.user_id) === user.id;
+      let mainAssetId: string | null = null;
+      let mainReferenceImageId: string | null = null;
+      if (ownInput && safe.snapshot.mainAssetId) {
+        const asset = await prisma.asset.findUnique({ where: { id: safe.snapshot.mainAssetId },
+          select: { id: true, owner_id: true, status: true, type: true } });
+        if (asset && asset.status === 'active' && asset.type === 'image') {
+          if (safe.snapshot.mainReferenceImageId) {
+            try {
+              const ref = await assertCanUseReferenceImage(user, safe.snapshot.mainReferenceImageId);
+              if (ref.asset_id === asset.id) { mainAssetId = asset.id; mainReferenceImageId = ref.id; }
+            } catch { /* Keep the current primary image when the saved reference is unavailable. */ }
+          } else if (await canUseDirectAsset(user, asset.id)) mainAssetId = asset.id;
+        }
+      }
+      const inputWarnings = !mainAssetId ? ['原任务的本人主图无法安全恢复，请在3D多视图保留或选择自己的主图。'] : [];
+      return NextResponse.json({ target_path: '/multiview', draft: {
+        task_id: task.id, target_path: '/multiview', provider: safe.provider, model: safe.model,
+        ratio: safe.ratio, duration: safe.duration, resolution: safe.resolution, seed: safe.seed,
+        generate_audio: safe.generateAudio, return_last_frame: safe.returnLastFrame, watermark: safe.watermark,
+        resolution_approval_confirmed: false, project_id: task.project_id, video_card_id: task.video_card_id,
+        supplement: ownInput ? safe.snapshot.supplement : '', main_asset_id: mainAssetId,
+        main_reference_image_id: mainReferenceImageId,
+      }, restored_references: mainAssetId ? 1 : 0, skipped_references: mainAssetId ? 0 : 1, inputWarnings },
+      { headers: { 'Cache-Control': 'private, no-store' } });
+    }
 
     const requestBody = await request.json().catch(() => ({}));
     const requestedSurface = requestBody && typeof requestBody === 'object' && !Array.isArray(requestBody)

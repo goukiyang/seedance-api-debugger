@@ -22,6 +22,7 @@ import { candidateFrames, DEFAULT_MULTIVIEW_LAYOUT, multiviewDimensions, parseMu
 import { MultiviewGenerationPanel, type MultiviewGenerationPanelState, type MultiviewGenerationReady } from './MultiviewGenerationPanel';
 import { MultiviewSourcePicker } from './MultiviewSourcePicker';
 import { MultiviewWorks } from './MultiviewWorks';
+import { MultiviewGenerations } from './MultiviewGenerations';
 import { MultiviewFrameSettingsPanel } from './MultiviewFrameSettingsPanel';
 import { encodeMultiviewPreviewFrame } from './multiview-preview-image';
 import { MultiviewFrameImage } from './MultiviewFrameImage';
@@ -97,7 +98,8 @@ function readView(raw: string | null, draft: MultiviewDraft): ViewPreferences {
 function MultiviewPageContent() {
   const query = useSearchParams();
   const explicitTask = query.get('taskId') || '';
-  const [pageView, setPageView] = useState<'editor' | 'works'>(() => query.get('view') === 'works' ? 'works' : 'editor');
+  const [pageView, setPageView] = useState<'editor' | 'generations' | 'works'>(() => query.get('view') === 'works'
+    ? 'works' : query.get('view') === 'generations' ? 'generations' : 'editor');
   const [editorWork, setEditorWork] = useState({ owner: '', id: '' });
   const { user, hasLoadedUser, refreshUser, sessionChanged, userLoadError } = useAppSession();
   const owner = user?.id || '';
@@ -205,12 +207,12 @@ function MultiviewPageContent() {
   const currentSourceKey = `${owner}:${taskId}:${loadedOwner === owner && info?.taskId === taskId ? info.sourceVersion : ''}:${activity}`;
   const sourceKeyRef = useRef(currentSourceKey); sourceKeyRef.current = currentSourceKey;
   useEffect(() => {
-    const view = query.get('view') === 'works' ? 'works' : 'editor'; setPageView(view);
+    const view = query.get('view') === 'works' ? 'works' : query.get('view') === 'generations' ? 'generations' : 'editor'; setPageView(view);
     if (view === 'editor') setEditorWork({ owner, id: query.get('workId') || '' });
   }, [query, owner]);
-  function writeLocation(view: 'editor' | 'works', workId = '', sourceTask = taskId) {
+  function writeLocation(view: 'editor' | 'generations' | 'works', workId = '', sourceTask = taskId) {
     const url = new URL(window.location.href);
-    if (view === 'works') url.searchParams.set('view', 'works'); else url.searchParams.delete('view');
+    if (view === 'works' || view === 'generations') url.searchParams.set('view', view); else url.searchParams.delete('view');
     if (workId) url.searchParams.set('workId', workId); else url.searchParams.delete('workId');
     if (sourceTask && view === 'editor') url.searchParams.set('taskId', sourceTask); else url.searchParams.delete('taskId');
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
@@ -332,7 +334,8 @@ function MultiviewPageContent() {
       if (accountChanged) { setExpanded(typeof settings?.expanded === 'boolean' ? settings.expanded : true); setViewSaved(true); }
     } catch { if (accountChanged) setExpanded(true); setViewSaved(false); }
     const previous = locationRef.current;
-    const nextTask = explicitTask || (query.get('view') !== 'works' && query.get('workId') ? '' : !accountChanged && previous.owner === owner ? previous.taskId : safeTask(restored) ? restored : '');
+    const libraryView = query.get('view') === 'works' || query.get('view') === 'generations';
+    const nextTask = explicitTask || (!libraryView && query.get('workId') ? '' : !accountChanged && previous.owner === owner ? previous.taskId : safeTask(restored) ? restored : '');
     if (previous.owner !== owner || previous.taskId !== nextTask) { setLocation({ owner, taskId: nextTask }); setPendingResult(null); }
     if (accountChanged) {
       setPreviousTask(''); setGeneration({ phase: 'empty', busy: false });
@@ -831,7 +834,7 @@ function MultiviewPageContent() {
   async function selectTask(nextTask: string, automatic = false) {
     if (!safeTask(nextTask) || ownerRef.current !== owner || isClientSessionBlocked()) return;
     const selectionEpoch = context.current; const selectionAuthority = authorityRef.current;
-    if (nextTask === taskId) { if (!automatic && !editingWorkId) setAllowWorkCreate(true); setPickerOpen(false); setPendingResult(null); return; }
+    if (nextTask === taskId) { if (!automatic && !editingWorkId) setAllowWorkCreate(true); setPickerOpen(false); setPendingResult(null); writeLocation('editor', editingWorkId, nextTask); return; }
     if ((unsavedFrames || workState.unsaved) && !await confirm('本次修改尚未保存在此设备。切换会离开当前编辑内容，仍要切换吗？', { title: '切换视频', confirmLabel: '放弃并切换' })) return;
     if (ownerRef.current !== owner || selectionEpoch !== context.current || selectionAuthority !== authorityRef.current || isClientSessionBlocked()) return;
     if (operation.current && !await confirm('拼图仍在准备或复制。切换后停止使用本次临时文件，原选帧会保留。', { title: '切换视频', confirmLabel: '停止并切换' })) return;
@@ -850,7 +853,7 @@ function MultiviewPageContent() {
       setPendingResult(value => value?.taskId === result.taskId ? null : value);
       return;
     }
-    if (pageView === 'works') { setPendingResult(result); return; }
+    if (pageView !== 'editor') { setPendingResult(result); return; }
     if (seenReady.current.has(key) && !result.explicitOpen) return;
     seenReady.current.add(key);
     if (result.explicitOpen || !taskId && !editingWorkId && !operation.current && !quickFrameLock.current && !slotDrag.current && result.startedFromSourceKey === sourceKeyRef.current) void selectTask(result.taskId, !result.explicitOpen); else setPendingResult(result);
@@ -1016,7 +1019,9 @@ function MultiviewPageContent() {
 
   return <div className={styles.page}>
     <PageBanner title="3D多视图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
-    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}>工作台</button><button type="button" aria-pressed={pageView === 'works'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('works'); }}>我的作品</button></div>
+    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}>工作台</button><button type="button" aria-pressed={pageView === 'generations'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('generations'); }}>生成记录</button><button type="button" aria-pressed={pageView === 'works'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('works'); }}>我的作品</button></div>
+    {pageView === 'generations' && <MultiviewGenerations owner={owner} authority={authority} currentPhase={generation.phase} currentTaskId={generation.taskId}
+      onOpenTask={id => void selectTask(id)} onOpenWork={id => writeLocation('works', id)} onOpenDraft={() => writeLocation('editor', editingWorkId)} />}
     {pageView === 'works' && <MultiviewWorks owner={owner} authority={authority} initialWorkId={query.get('workId') || undefined}
       onEdit={(work: MultiviewWorkDto) => { void (async () => {
         if (!owner || isClientSessionBlocked()) return;

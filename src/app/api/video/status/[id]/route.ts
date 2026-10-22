@@ -11,6 +11,7 @@ import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 import { publicVideoTaskPricing } from '@/lib/pricing/video';
 import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
+import { isPrivateMultiviewTask, privateMultiviewFailure, projectPrivateMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 import {
   taskThumbnailProjection,
   type TaskThumbnailProjectionSource,
@@ -28,8 +29,8 @@ function serializeTaskIdentity<T extends {
   result_last_frame_url?: string | null;
   error_message?: string | null;
   local_status?: string | null;
-}>(task: T) {
-  return {
+} & TaskProtectionSource>(task: T) {
+  return projectPrivateMultiviewTask({
     ...publicVideoTaskPricing(task),
     owner: task.owner || task.user || null,
     submitted_user: task.user || null,
@@ -37,13 +38,14 @@ function serializeTaskIdentity<T extends {
       ? visibleProviderErrorMessage(task.error_message)
       : task.error_message,
     ...taskThumbnailProjection(task as T & TaskThumbnailProjectionSource),
-  };
+  });
 }
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  let protectedTask = false;
   try {
     const taskId = params.id;
     const forceProviderRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
@@ -76,6 +78,7 @@ export async function GET(
         { status: 404 },
       );
     }
+    protectedTask = isPrivateMultiviewTask(task);
     if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
       return NextResponse.json(
         { error: '任务是 IP 生成任务', message: '请使用 IP 任务状态接口查询此任务' },
@@ -116,13 +119,13 @@ export async function GET(
                 user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
               },
             });
-            if (recoveredTask) return NextResponse.json(serializeTaskIdentity(recoveredTask));
+            if (recoveredTask) return NextResponse.json(serializeTaskIdentity(recoveredTask), { headers: { 'Cache-Control': 'private, no-store' } });
           }
         } catch {
           // Provider 查询失败时保留 submitted，下一次轮询继续按 clientRequestId 恢复。
         }
       }
-      return NextResponse.json(serializeTaskIdentity(task));
+      return NextResponse.json(serializeTaskIdentity(task), { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
     const fastPathDelivery = isVideoDeliveryFastPathTask(task);
@@ -172,14 +175,21 @@ export async function GET(
     }
 
     if (finalizeResult.providerError) {
-      return NextResponse.json({
-        ...serializeTaskIdentity(responseTask),
+      return NextResponse.json(serializeTaskIdentity({
+        ...responseTask,
         error_message: visibleProviderErrorMessage(responseTask.error_message || finalizeResult.providerError),
-      });
+      }), { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    return NextResponse.json(serializeTaskIdentity(responseTask));
+    return NextResponse.json(serializeTaskIdentity(responseTask), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (protectedTask) {
+      const failure = privateMultiviewFailure(error instanceof Error ? error.message : '', 'unknown');
+      console.error('Get protected multiview task status error:', failure?.code);
+      return NextResponse.json({ error: failure?.code || 'TASK_STATUS_UNAVAILABLE',
+        message: failure?.message || '原任务状态暂时无法确认，请稍后继续核对这个任务。' },
+      { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     console.error('Get task status error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },

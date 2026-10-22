@@ -1,18 +1,34 @@
 import { MAX_GENERATION_PROMPT_CHARS } from '@/lib/prompt/limits';
-import { isSeedanceVideoDuration, isSeedanceVideoModelId, SEEDANCE_2_0_MODEL_ID } from '@/lib/provider/seedance-models';
+import { isSeedanceVideoDuration, isSeedanceVideoModelId, SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS, type VideoRatio, type VideoResolution } from '@/types';
 import { validVideoPricingAmount } from '@/lib/pricing-client';
 
 export const MULTIVIEW_ROTATION_PRESET = Object.freeze({
   id: 'multiview-360', version: '1.0.0',
-  prompt: '根据图片生成360度3d模型旋转效果。固定镜头，角色静态无动作，四边边上预留最少25%出血位 @图片1',
-  defaults: Object.freeze({ provider: 'seedance', generationMode: 'all_in_one_reference', model: SEEDANCE_2_0_MODEL_ID,
-    ratio: '1:1', duration: 4, resolution: '480p', seed: -1, generateAudio: true, returnLastFrame: false, watermark: false }),
+  defaults: Object.freeze({ provider: 'seedance', generationMode: 'all_in_one_reference', model: SEEDANCE_2_5_MODEL_ID,
+    ratio: '1:1', duration: 8, resolution: '480p', seed: -1, generateAudio: false, returnLastFrame: false, watermark: false }),
 } as const);
 
-export type MultiviewRotationPreset = { id: typeof MULTIVIEW_ROTATION_PRESET.id; version: string; prompt: string };
+export type MultiviewRotationDefaults = {
+  provider: 'seedance'; generationMode: 'all_in_one_reference'; model: string; ratio: VideoRatio;
+  duration: number; resolution: VideoResolution; seed: number; generateAudio: boolean;
+  returnLastFrame: boolean; watermark: boolean;
+};
+export type MultiviewCompositionReference = { assetId: string; referenceImageId: string; ownerId: string; sha256: string };
+/** Server-only recipe. Never serialize this type to an ordinary browser response. */
+export type MultiviewRotationPreset = {
+  id: typeof MULTIVIEW_ROTATION_PRESET.id; version: string; prompt: string;
+  defaults: MultiviewRotationDefaults; compositionReference: MultiviewCompositionReference;
+};
 export type MultiviewRotationPresetState = { preset: MultiviewRotationPreset; revision: number };
 export type MultiviewRotationPresetSaveReceipt = MultiviewRotationPresetState & { state: 'saved'; mutationId: string };
+export type MultiviewRotationPresetPublicDto = {
+  id: typeof MULTIVIEW_ROTATION_PRESET.id; version: string; defaults: MultiviewRotationDefaults;
+};
+export type MultiviewRotationPresetPublicState = { preset: MultiviewRotationPresetPublicDto; revision: number };
+export function publicMultiviewRotationPreset(preset: MultiviewRotationPreset): MultiviewRotationPresetPublicDto {
+  return { id: preset.id, version: preset.version, defaults: { ...preset.defaults } };
+}
 export type MultiviewSettingsBinding = { id: string; revision: number };
 export function parseMultiviewSettingsBinding(value: unknown): MultiviewSettingsBinding | null {
   if (!record(value) || Object.keys(value).some(key => !['id', 'revision'].includes(key))
@@ -27,7 +43,7 @@ export function isMultiviewPresetVersion(value: unknown): value is string {
 }
 
 // The existing renderer's exact preamble for one reference-image workspace row.
-export const MULTIVIEW_REFERENCE_PROMPT_PREFIX = '【参考素材说明】图1（参考图）。\n';
+export const MULTIVIEW_REFERENCE_PROMPT_PREFIX = '【参考素材说明】图1（本人主图）、图2（系统构图参考）。\n';
 const SUPPLEMENT_SEPARATOR = '\n\n补充要求（仅补充细节，保持固定镜头、角色静止及完整旋转约束）：\n';
 
 export type MultiviewGenerationDraft = {
@@ -39,12 +55,11 @@ export type MultiviewGenerationDraft = {
   resolutionApprovalConfirmed: boolean; resolutionApprovalId: string;
 };
 export type MultiviewGenerationSnapshot = {
-  schema: 1; presetId: typeof MULTIVIEW_ROTATION_PRESET.id; presetVersion: string;
+  schema: 2; presetId: typeof MULTIVIEW_ROTATION_PRESET.id; presetVersion: string;
   settingsBinding?: MultiviewSettingsBinding;
   supplement: string; workspaceTabId: string; mainAssetId: string; mainReferenceImageId: string;
 };
 export type MultiviewGenerationRequest = {
-  prompt: string; final_prompt_snapshot: string; prompt_user_edited: boolean;
   provider: 'seedance'; model: string; generation_mode: 'all_in_one_reference'; ratio: VideoRatio; duration: number; resolution: VideoResolution;
   seed: number; generate_audio: boolean; return_last_frame: boolean; watermark: boolean; draft: false;
   project_id: string; video_card_id?: string; reference_image_ids: [string];
@@ -105,10 +120,10 @@ export function parseMultiviewGenerationDraft(value: unknown): MultiviewGenerati
 }
 
 export function composeMultiviewGenerationPrompt(supplement: string, presetVersion: string = MULTIVIEW_ROTATION_PRESET.version,
-  preset: MultiviewRotationPreset = MULTIVIEW_ROTATION_PRESET): {
+  preset?: MultiviewRotationPreset): {
   prompt: string; characters: number; remainingCharacters: number; valid: boolean; error: string | null;
 } {
-  if (typeof supplement !== 'string' || !isMultiviewPresetVersion(presetVersion) || presetVersion !== preset.version
+  if (typeof supplement !== 'string' || !preset || !isMultiviewPresetVersion(presetVersion) || presetVersion !== preset.version
     || preset.id !== MULTIVIEW_ROTATION_PRESET.id || typeof preset.prompt !== 'string' || !preset.prompt.trim()) {
     return { prompt: '', characters: 0, remainingCharacters: 0, valid: false, error: '模板提示词暂时无法确认，原输入已保留；请重新读取模板后再生成' };
   }
@@ -121,21 +136,21 @@ export function composeMultiviewGenerationPrompt(supplement: string, presetVersi
 }
 
 export function parseMultiviewGenerationSnapshot(value: unknown): MultiviewGenerationSnapshot | null {
-  if (!record(value) || value.schema !== 1 || value.presetId !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(value.presetVersion)
+  if (!record(value) || value.schema !== 2 || value.presetId !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(value.presetVersion)
     || !boundedString(value.supplement, 40000) || !isMultiviewWorkspaceTabId(value.workspaceTabId) || !identity(value.mainAssetId) || !identity(value.mainReferenceImageId)) return null;
   const settingsBinding = value.settingsBinding === undefined ? undefined : parseMultiviewSettingsBinding(value.settingsBinding);
   if (settingsBinding === null) return null;
-  return { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: value.presetVersion,
+  return { schema: 2, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: value.presetVersion,
     ...(settingsBinding ? { settingsBinding } : {}),
     supplement: value.supplement, workspaceTabId: value.workspaceTabId, mainAssetId: value.mainAssetId, mainReferenceImageId: value.mainReferenceImageId };
 }
 
 export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft, options: {
-  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPreset; pricingRevision?: string | null; pricingQuoteToken?: string;
+  idempotencyKey: string; maxEstimatedCost: number; preset?: MultiviewRotationPresetPublicDto; pricingRevision?: string | null; pricingQuoteToken?: string;
 }): MultiviewGenerationRequest {
   if (!parseMultiviewGenerationDraft(draft)) throw new Error('生成设置无法安全读取，原输入保留');
-  const composed = composeMultiviewGenerationPrompt(draft.supplement, draft.presetVersion, options.preset);
-  if (!composed.valid) throw new Error(composed.error || '完整文案无效');
+  if (draft.supplement.length > 40000) throw new Error('补充要求过长，原输入保留');
+  if (options.preset && options.preset.version !== draft.presetVersion) throw new Error('默认配置已更新，原输入保留；请重新读取后再生成');
   if (draft.provider !== 'seedance' || draft.generationMode !== 'all_in_one_reference') throw new Error('当前旋转预设不支持所选生成通道或模式，已有选择保留');
   if (!isSeedanceVideoModelId(draft.model)) throw new Error('当前型号不在可用普通视频型号中，已有选择保留，请明确选择可用型号');
   if (!isSeedanceVideoDuration(draft.duration, draft.model)) throw new Error('当前型号不支持所选时长，已有选择保留');
@@ -150,7 +165,6 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
   if (!validVideoPricingAmount(options.maxEstimatedCost)) throw new Error('当前报价尚未确认，未提交生成');
   if (options.pricingRevision !== undefined && options.pricingRevision !== null && (typeof options.pricingRevision !== 'string' || options.pricingRevision.length > 160)) throw new Error('报价修订无效，原参数保留');
   return {
-    prompt: composed.prompt, final_prompt_snapshot: composed.prompt, prompt_user_edited: draft.supplement.length > 0,
     provider: 'seedance', model: draft.model, generation_mode: 'all_in_one_reference', ratio: draft.ratio as VideoRatio,
     duration: draft.duration, resolution: draft.resolution as VideoResolution, seed: draft.seed,
     generate_audio: draft.generateAudio, return_last_frame: draft.returnLastFrame, watermark: draft.watermark, draft: false,
@@ -161,7 +175,7 @@ export function buildMultiviewGenerationRequest(draft: MultiviewGenerationDraft,
     ...(options.pricingRevision ? { pricing_revision: options.pricingRevision } : {}),
     ...(options.pricingQuoteToken ? { pricing_quote_token: options.pricingQuoteToken, pricing_fingerprint_version: 2 as const } : {}),
     client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
-    multiview_generation: { schema: 1, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
+    multiview_generation: { schema: 2, presetId: MULTIVIEW_ROTATION_PRESET.id, presetVersion: draft.presetVersion,
       ...(draft.settingsBinding ? { settingsBinding: draft.settingsBinding } : {}),
       supplement: draft.supplement, workspaceTabId: draft.workspaceTabId,
       mainAssetId: draft.mainImage.assetId, mainReferenceImageId: draft.mainImage.referenceImageId },

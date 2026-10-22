@@ -10,6 +10,7 @@ import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { generationOrigins } from '@/lib/assets/generation-origin';
+import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export const dynamic = 'force-dynamic';
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
         OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
-        ...(q ? { AND: [{ OR: [{ id: { contains: q } }, { prompt: { contains: q } }] }] } : {}),
+        AND: [ordinaryVideoTaskWhere(), ...(q ? [safeVideoTaskKeywordWhere(q)] : [])],
       }, select: { id: true, owner_user_id: true, user_id: true, project_id: true, retention_status: true, local_video_path: true, public_video_url: true, duration: true, created_at: true } }) : Promise.resolve([]),
     ]);
     const generatedIds = new Set(generatedTasks.filter(studioTaskHasViewableOutput).map(t => t.asset_id));

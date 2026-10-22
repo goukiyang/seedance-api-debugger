@@ -188,7 +188,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
     if (['library', 'favorites', 'recent'].includes(raw.view || '')) next.view = raw.view!;
     if (scopes.some(([s]) => s === raw.scope)) next.scope = raw.scope!;
-    if (['all', 'uploaded', 'generated', 'other', 'template-image', 'random-person', 'other-generated', 'unknown', 'video-generated'].includes(raw.source || '')) next.source = raw.source!;
+    if (['all', 'uploaded', 'generated', 'other', 'template-image', 'random-person', 'other-generated', 'multiview-output', 'unknown', 'video-generated'].includes(raw.source || '')) next.source = raw.source!;
     if (raw.type === 'all' || types.includes(raw.type as AssetType)) next.type = raw.type!;
     if (typeof raw.query === 'string') next.query = raw.query.slice(0, 160);
     if (raw.sort === 'name') next.sort = 'name';
@@ -524,6 +524,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
               <button type="button" aria-pressed={prefs.source === 'template-image'} onClick={() => changeSource('template-image')}>模板生图</button>
               <button type="button" aria-pressed={prefs.source === 'random-person'} onClick={() => changeSource('random-person')}>随机人物</button>
               <button type="button" aria-pressed={prefs.source === 'other-generated'} onClick={() => changeSource('other-generated')}>其他生成</button>
+              <button type="button" aria-pressed={prefs.source === 'multiview-output'} onClick={() => changeSource('multiview-output')}>3D多视图</button>
               <button type="button" aria-pressed={prefs.source === 'unknown'} onClick={() => changeSource('unknown')}>来源待识别</button>
             </>}
             {types.includes('video') && <button type="button" aria-pressed={prefs.source === 'video-generated'} onClick={() => changeSource('video-generated')}>视频生成</button>}

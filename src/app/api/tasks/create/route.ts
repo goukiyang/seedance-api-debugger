@@ -9,9 +9,12 @@ import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFence, acceptMultiviewRequest,
   rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
-  type MultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
+  type MultiviewGenerationSnapshot, type MultiviewRotationPreset } from '@/lib/video/multiview-generation-contract';
 import { readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
 import { assertMultiviewGenerationSettings, MultiviewSettingsError } from '@/lib/video/multiview-settings.server';
+import { readMultiviewSystemReference } from '@/lib/video/multiview-recipe-storage.server';
+import { consumeTrustedMultiviewRetry, readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
+import { isPrivateMultiviewTask, multiviewPrivateTaskMarker, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { registerMultiviewWorkIntent } from '@/lib/video/multiview-works';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
@@ -193,6 +196,18 @@ function cleanSourceMetadata(value: unknown) {
 
 function cleanClientName(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : null;
+}
+
+function protectedMultiviewTaskPayload<T extends object & { source_metadata_json: string | null; local_status?: string }>(
+  task: T,
+  extra: Record<string, unknown> = {},
+) {
+  const projected = projectPrivateMultiviewTask(task) as unknown as Record<string, unknown>;
+  return { ...projected, ...(projected.local_status ? { status: projected.local_status } : {}), ...extra };
+}
+
+function privateNoStore() {
+  return { 'Cache-Control': 'private, no-store' };
 }
 
 function parseJsonRecord(value: string | null | undefined) {
@@ -676,7 +691,62 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
-  const receivedBody = await request.json();
+  const trustedMultiviewRetry = consumeTrustedMultiviewRetry(request);
+  let trustedMultiviewSourceTask: {
+    id: string; source_metadata_json: string | null; params_json: string | null;
+    project_id: string | null; video_card_id: string | null; video_branch_id: string | null;
+    owner_user_id: string | null; user_id: string | null; workspace_id: string | null;
+    local_status: string; error_code: string | null; frozen_cost: number | null;
+    provider: string; model: string; generation_mode: string; prompt: string; final_prompt_snapshot: string | null;
+    ratio: string | null; duration: number | null; resolution: string | null; seed: number | null;
+    generate_audio: boolean; return_last_frame: boolean; watermark: boolean; reference_image_ids: string | null;
+  } | null = null;
+  let receivedBody = await request.json();
+  if (trustedMultiviewRetry) {
+    const original = await prisma.videoTask.findUnique({ where: { id: trustedMultiviewRetry.originalTaskId }, select: {
+      id: true, source_metadata_json: true, params_json: true, project_id: true, video_card_id: true, video_branch_id: true,
+      owner_user_id: true, user_id: true, workspace_id: true, local_status: true, error_code: true, frozen_cost: true,
+      provider: true, model: true, generation_mode: true, prompt: true, final_prompt_snapshot: true,
+      ratio: true, duration: true, resolution: true, seed: true, generate_audio: true, return_last_frame: true,
+      watermark: true, reference_image_ids: true,
+    } });
+    if (!original || (original.owner_user_id || original.user_id) !== user.id) {
+      return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_DENIED', message: '原任务不存在或不属于当前账号，未重新提交。' },
+        { status: 403, headers: privateNoStore() });
+    }
+    if (original.local_status !== 'failed' || original.error_code?.includes('UNCONFIRMED') || original.frozen_cost !== 0) {
+      return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_NOT_READY', message: '原请求尚未确认失败，请查询原任务；未重新生成。' },
+        { status: 409, headers: privateNoStore() });
+    }
+    let frozen: ReturnType<typeof readSafePrivateMultiviewInput>;
+    try { frozen = readSafePrivateMultiviewInput(original); }
+    catch {
+      return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_UNAVAILABLE', message: '原任务的受保护生成设置无法确认，未恢复或重新提交。' },
+        { status: 409, headers: privateNoStore() });
+    }
+    if (!original.workspace_id || original.video_branch_id || frozen.projectId !== original.project_id
+      || frozen.videoCardId !== original.video_card_id || frozen.recipeVersion !== frozen.snapshot.presetVersion) {
+      return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_UNAVAILABLE', message: '原任务的归属或冻结设置不完整，未恢复或重新提交。' },
+        { status: 409, headers: privateNoStore() });
+    }
+    trustedMultiviewSourceTask = original;
+    receivedBody = {
+      provider: 'seedance', model: frozen.model, generation_mode: 'all_in_one_reference', ratio: frozen.ratio,
+      duration: frozen.duration, resolution: frozen.resolution, seed: frozen.seed,
+      generate_audio: frozen.generateAudio, return_last_frame: frozen.returnLastFrame, watermark: frozen.watermark,
+      draft: false, project_id: frozen.projectId, ...(frozen.videoCardId ? { video_card_id: frozen.videoCardId } : {}),
+      reference_image_ids: [frozen.snapshot.mainReferenceImageId], reference_video_urls: [], reference_audio_urls: [],
+      resolution_approval_confirmed: frozen.resolutionApprovalConfirmed,
+      idempotency_key: trustedMultiviewRetry.idempotencyKey,
+      max_estimated_cost: trustedMultiviewRetry.maxEstimatedCost,
+      ...(trustedMultiviewRetry.pricingRevision ? { pricing_revision: trustedMultiviewRetry.pricingRevision } : {}),
+      ...(trustedMultiviewRetry.pricingQuoteToken ? {
+        pricing_quote_token: trustedMultiviewRetry.pricingQuoteToken, pricing_fingerprint_version: 2,
+      } : {}),
+      client_name: 'multiview', source_metadata: { source: 'multiview', mode: 'rotation' },
+      multiview_generation: frozen.snapshot,
+    };
+  }
   let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
   try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ordinary'); }
   catch (error) {
@@ -696,6 +766,7 @@ export async function POST(request: NextRequest) {
   if (canvasAdmission && response.status >= 400) {
     await recordCanvasVideoBatchRejection(user, canvasAdmission, response.status, await response.clone().json().catch(() => null));
   }
+  if (body.multiview_generation !== undefined) response.headers.set('Cache-Control', 'private, no-store');
   return response;
 
   async function runCanvasAdmission() {
@@ -707,16 +778,19 @@ export async function POST(request: NextRequest) {
       try { await assertCanViewTask(user, existing); }
       catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
       if (existing.request_fingerprint !== stablePricingFingerprint) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: existing.id }, { status: 409 });
-      return NextResponse.json({ id: existing.id, provider: existing.provider, provider_task_id: existing.provider_task_id,
+      const payload = { id: existing.id, provider: existing.provider, provider_task_id: existing.provider_task_id,
         status: existing.local_status, model: existing.model, estimated_cost: existing.estimated_cost, frozen_cost: existing.frozen_cost,
         created_at: existing.created_at, project_id: existing.project_id, video_card_id: existing.video_card_id,
         template_studio_run_id: existing.template_studio_run_id, billing_scope: existing.billing_scope, billing_account_id: existing.billing_account_id,
-        deduplicated: true, fingerprint_verified: true });
+        deduplicated: true, fingerprint_verified: true };
+      return isPrivateMultiviewTask(existing)
+        ? NextResponse.json(protectedMultiviewTaskPayload(existing, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
+        : NextResponse.json(payload);
     }
   }
   let requestClaim: MultiviewRequestClaim | null = null;
   let committedTaskId: string | null = null;
-  const receiptIntentKey = multiviewRequestIntent(body, request.headers.get('x-tab-id'));
+  const receiptIntentKey = trustedMultiviewRetry?.idempotencyKey || multiviewRequestIntent(body, request.headers.get('x-tab-id'));
   if (!receiptIntentKey) return runCreate();
   try {
     const admission = await claimMultiviewRequest(user.id, receiptIntentKey, body);
@@ -724,7 +798,8 @@ export async function POST(request: NextRequest) {
       const receipt = admission.receipt;
       return NextResponse.json({ error: receipt?.code || 'MULTIVIEW_REQUEST_PENDING',
         message: receipt?.message || '原提交结果待确认，请查询同一请求号，不会再次提交。', safeToResubmit: false,
-        ...(receipt ? { request_receipt: receipt, new_request_allowed: true } : {}) }, { status: admission.status });
+        ...(receipt ? { request_receipt: receipt, new_request_allowed: true } : {}) },
+      { status: admission.status, headers: privateNoStore() });
     }
     if (admission.kind === 'claimed') requestClaim = admission.claim;
     const response = await runCreate();
@@ -733,10 +808,11 @@ export async function POST(request: NextRequest) {
     // A task-bearing response must never be replaced by a pre-acceptance rejection.
     if (payload?.id || payload?.task_id || payload?.existing_task_id) return response;
     const receipt = await rejectMultiviewRequest(requestClaim, response.status, payload);
-    return receipt ? NextResponse.json({ ...payload, request_receipt: receipt, new_request_allowed: true, safeToResubmit: false }, { status: response.status }) : response;
+    return receipt ? NextResponse.json({ ...payload, request_receipt: receipt, new_request_allowed: true, safeToResubmit: false },
+      { status: response.status, headers: privateNoStore() }) : response;
   } catch {
     return NextResponse.json({ error: 'MULTIVIEW_REQUEST_UNKNOWN', message: '原提交结果暂时无法确认，请查询原请求号，不要重新提交。',
-      ...(committedTaskId ? { task_id: committedTaskId } : {}), safeToResubmit: false }, { status: 503 });
+      ...(committedTaskId ? { task_id: committedTaskId } : {}), safeToResubmit: false }, { status: 503, headers: privateNoStore() });
   }
 
   async function runCreate() {
@@ -754,10 +830,11 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Validation ---
-  if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
+  const privateMultiviewIntent = body.multiview_generation !== undefined;
+  if (!privateMultiviewIntent && (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim())) {
     return errorJson('提示词不能为空', 400);
   }
-  if (exceedsGenerationPromptLimit(body.prompt)) {
+  if (!privateMultiviewIntent && exceedsGenerationPromptLimit(body.prompt)) {
     return errorJson(GENERATION_PROMPT_LIMIT_MESSAGE, 400);
   }
 
@@ -810,13 +887,13 @@ export async function POST(request: NextRequest) {
   const agentPromptSnapshot = typeof body.agent_prompt_snapshot === 'string' && body.agent_prompt_snapshot.trim()
     ? body.agent_prompt_snapshot.trim()
     : null;
-  const finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
+  let finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
     ? body.final_prompt_snapshot.trim()
-    : body.prompt.trim();
+    : typeof body.prompt === 'string' ? body.prompt.trim() : '';
   if (exceedsGenerationPromptLimit(agentPromptSnapshot)) {
     return errorJson(generationPromptLimitMessage('方案提示词'), 400);
   }
-  if (exceedsGenerationPromptLimit(finalPromptSnapshot)) {
+  if (!privateMultiviewIntent && exceedsGenerationPromptLimit(finalPromptSnapshot)) {
     return errorJson(generationPromptLimitMessage('最终提示词'), 400);
   }
   const promptUserEdited = body.prompt_user_edited === true;
@@ -912,24 +989,36 @@ export async function POST(request: NextRequest) {
     ? body.idempotency_key.trim()
     : undefined;
   let multiviewGeneration: MultiviewGenerationSnapshot | null = null;
+  let multiviewRecipe: MultiviewRotationPreset | null = null;
+  let multiviewSystemReference: Awaited<ReturnType<typeof readMultiviewSystemReference>> | null = null;
   if (body.multiview_generation !== undefined) {
     multiviewGeneration = parseMultiviewGenerationSnapshot(body.multiview_generation);
     if (!multiviewGeneration) return errorJson('3D多视图旋转预设版本或主图记录无效，已有输入保留', 400);
+    const clientSuppliedPrivateMaterial = body.prompt !== undefined || body.final_prompt_snapshot !== undefined
+      || body.agent_prompt_snapshot !== undefined || body.protected_module !== undefined
+      || body.recipe !== undefined || body.recipe_prompt !== undefined || body.system_reference !== undefined
+      || body.system_reference_image_id !== undefined || body.system_asset_id !== undefined
+      || body.callback_url !== undefined;
     // Resolve only the immutable revision here. Existing task/receipt lookup must
     // not substitute today's preset into an already accepted request.
-    let preset;
-    try { preset = await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion); }
+    try { multiviewRecipe = await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion); }
     catch (error) {
       if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
     }
-    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, preset);
+    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe);
     if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
+    if (trustedMultiviewSourceTask && (trustedMultiviewSourceTask.prompt !== composed.prompt.trim()
+      || trustedMultiviewSourceTask.final_prompt_snapshot !== composed.prompt)) {
+      return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_UNAVAILABLE',
+        message: '原任务的受保护文案与冻结配方不一致，未恢复或重新提交。' },
+      { status: 409, headers: privateNoStore() });
+    }
     // Only the complete rotation contract may omit a card; a source label alone is not sufficient.
-    if (!idempotencyKey || request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
+    if (!idempotencyKey || !trustedMultiviewRetry && request.headers.get('x-tab-id') !== multiviewGeneration.workspaceTabId
       || body.client_name !== 'multiview' || cleanSourceMetadata(body.source_metadata).source !== 'multiview'
       || cleanSourceMetadata(body.source_metadata).mode !== 'rotation'
-      || body.prompt !== composed.prompt || body.final_prompt_snapshot !== composed.prompt
+      || clientSuppliedPrivateMaterial || agentPromptSnapshot !== null || promptUserEdited
       || requestedProvider !== 'seedance' || body.provider !== 'seedance' || generationMode !== 'all_in_one_reference'
       || body.generation_mode !== 'all_in_one_reference' || body.model !== selectedModel || body.ratio !== ratio
       || body.duration !== duration || body.resolution !== resolution || !requestedProjectId || body.project_id !== requestedProjectId
@@ -949,6 +1038,17 @@ export async function POST(request: NextRequest) {
       || cleanSourceMetadata(body.source_metadata).canvas_document_id || cleanSourceMetadata(body.source_metadata).canvas_node_id) {
       return errorJson('3D多视图旋转请求不能混入其他素材、模板运行记录或角色工作流', 400);
     }
+    try { multiviewSystemReference = await readMultiviewSystemReference(multiviewRecipe.compositionReference); }
+    catch {
+      return NextResponse.json({ error: 'MULTIVIEW_SYSTEM_REFERENCE_UNAVAILABLE',
+        message: '系统构图参考暂时无法确认，主图和原输入已保留；请联系管理员后再生成。' },
+      { status: 503, headers: privateNoStore() });
+    }
+    // Private prompt material is created only after the safe browser contract has
+    // been validated. It never returns through the ordinary request DTO.
+    body.prompt = composed.prompt;
+    body.final_prompt_snapshot = composed.prompt;
+    finalPromptSnapshot = composed.prompt;
   }
 
   if (!requestedVideoCardId && !multiviewGeneration) {
@@ -1218,7 +1318,7 @@ export async function POST(request: NextRequest) {
               : { code: 'IDEMPOTENCY_STUDIO_LINK_MISMATCH', error: '同一个请求号已用于不同生成链路，请查询已有任务，不要用该请求号重新提交。' };
         return NextResponse.json({ ...conflict, existing_task_id: existing.id }, { status: 409 });
       }
-      return NextResponse.json({
+      const payload = {
         id: existing.id,
         provider: existing.provider,
         provider_task_id: existing.provider_task_id,
@@ -1240,12 +1340,20 @@ export async function POST(request: NextRequest) {
         selected_agent_plan_key: existing.selected_agent_plan_key,
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
-      });
+      };
+      return isPrivateMultiviewTask(existing)
+        ? NextResponse.json(protectedMultiviewTaskPayload(existing, {
+            deduplicated: true, fingerprint_verified: decision.fingerprintVerified,
+          }), { headers: privateNoStore() })
+        : NextResponse.json(payload);
     }
   }
 
   if (multiviewGeneration) {
-    try { await assertMultiviewGenerationSettings(user, multiviewGeneration); }
+    try {
+      if (trustedMultiviewRetry) await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion);
+      else await assertMultiviewGenerationSettings(user, multiviewGeneration);
+    }
     catch (error) {
       if (error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
@@ -1278,7 +1386,9 @@ export async function POST(request: NextRequest) {
   }, { status: 409 });
 
   // --- Workspace + Reference Image Preparation ---
-  const tabId = studioHandoff ? `template-studio-${studioHandoff.runId}` : request.headers.get('x-tab-id') || 'default';
+  const tabId = studioHandoff ? `template-studio-${studioHandoff.runId}`
+    : multiviewGeneration ? multiviewGeneration.workspaceTabId
+      : request.headers.get('x-tab-id') || 'default';
   const bodySourceRequestId = typeof body.source_request_id === 'string' && body.source_request_id.trim()
     ? body.source_request_id.trim()
     : typeof body.codex_request_id === 'string' && body.codex_request_id.trim()
@@ -1290,15 +1400,10 @@ export async function POST(request: NextRequest) {
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
   const effectiveSourceLabel = multiviewGeneration ? '3D多视图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
-  const sourceMetadata: Record<string, unknown> = {
+  const ordinarySourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,
     ...(isUltimateCanvasRequest ? { source: 'ultimate_canvas' } : {}),
-    ...(multiviewGeneration ? { source: 'multiview', multiview_generation: {
-      presetId: multiviewGeneration.presetId, presetVersion: multiviewGeneration.presetVersion,
-      ...(multiviewGeneration.settingsBinding ? { settingsBinding: multiviewGeneration.settingsBinding } : {}),
-      mainAssetId: multiviewGeneration.mainAssetId, mainReferenceImageId: multiviewGeneration.mainReferenceImageId,
-    } } : {}),
     tab_id: tabId,
     idempotency_key: idempotencyKey || null,
     body_source_request_id: bodySourceRequestId,
@@ -1312,8 +1417,13 @@ export async function POST(request: NextRequest) {
     } : {}),
     paid_generation_guard: paidGenerationGuard.metadata,
   };
+  const sourceMetadata: Record<string, unknown> = multiviewGeneration
+    ? { protected_module: multiviewPrivateTaskMarker(multiviewGeneration.presetVersion) }
+    : ordinarySourceMetadata;
   const workspace = multiviewGeneration ? await prisma.workspace.findFirst({
-    where: { owner_id: user.id, status: 'active', name: `默认工作台:${multiviewGeneration.workspaceTabId}` },
+    where: trustedMultiviewSourceTask
+      ? { id: trustedMultiviewSourceTask.workspace_id!, owner_id: user.id, status: 'active' }
+      : { owner_id: user.id, status: 'active', name: `默认工作台:${multiviewGeneration.workspaceTabId}` },
     orderBy: { updated_at: 'desc' }, select: { id: true },
   }) : await getOrCreateWorkspace(tabId, user.id);
   if (!workspace) return errorJson('本页主图工作区尚未准备好，原输入保留，请重新核对素材', 409);
@@ -1734,7 +1844,9 @@ export async function POST(request: NextRequest) {
 
   // --- Prompt validation + rendering ---
   const hasCanvasBindings = body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt);
-  const promptValidation = hasCanvasBindings ? { valid: true, missing: [] } : await validatePromptReferences(body.prompt, workspaceId);
+  const promptValidation = multiviewGeneration || hasCanvasBindings
+    ? { valid: true, missing: [] }
+    : await validatePromptReferences(body.prompt, workspaceId);
   if (!promptValidation.valid) {
     return NextResponse.json(
       { error: 'PROMPT_REFERENCE_ERROR', message: `prompt 中引用的图号不存在: ${promptValidation.missing.join(', ')}` },
@@ -1743,7 +1855,10 @@ export async function POST(request: NextRequest) {
   }
   let promptRendered: string, assetMapping: Record<string, string>;
   try {
-    const rendered = hasCanvasBindings
+    const rendered = multiviewGeneration && multiviewSystemReference
+      ? { promptRendered: MULTIVIEW_REFERENCE_PROMPT_PREFIX + body.prompt,
+          assetMapping: { '图1': multiviewGeneration.mainAssetId, '图2': multiviewSystemReference.assetId } }
+      : hasCanvasBindings
       ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
       : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
     ({ promptRendered, assetMapping } = rendered);
@@ -1751,7 +1866,8 @@ export async function POST(request: NextRequest) {
   } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
   if (multiviewGeneration) {
-    if (assetMapping['图1'] !== multiviewGeneration.mainAssetId || Object.keys(assetMapping).length !== 2
+    if (!multiviewSystemReference || assetMapping['图1'] !== multiviewGeneration.mainAssetId
+      || assetMapping['图2'] !== multiviewSystemReference.assetId || Object.keys(assetMapping).length !== 2
       || promptRendered !== MULTIVIEW_REFERENCE_PROMPT_PREFIX + body.prompt) return errorJson('主图引用顺序或工作区已变化，原请求未提交，请重新核对', 409);
     if (exceedsGenerationPromptLimit(promptRendered)) return errorJson(GENERATION_PROMPT_LIMIT_MESSAGE, 400);
   }
@@ -1813,7 +1929,14 @@ export async function POST(request: NextRequest) {
   // Both callers have authorized their reference records above; keep private URLs out of upstream fetches.
   if (requestedProvider === 'seedance' && (multiviewGeneration || body.canvas_document_id
     || cleanSourceMetadata(body.source_metadata).canvas_document_id || requestSource.source_metadata?.canvas_document_id)) {
-    try { seedanceReferenceTransport = await seedanceLocalReferenceTransport({ ...providerInput, callback_url: requestCallbackUrl || undefined }, generationReferenceImages); }
+    try {
+      seedanceReferenceTransport = await seedanceLocalReferenceTransport(
+        { ...providerInput, callback_url: requestCallbackUrl || undefined },
+        generationReferenceImages,
+        undefined,
+        multiviewSystemReference ? [{ mimeType: multiviewSystemReference.mimeType, bytes: multiviewSystemReference.bytes }] : [],
+      );
+    }
     catch (error) { return errorJson(error instanceof Error ? error.message : '参考原图直传准备失败，尚未提交视频生成', 400); }
   }
   let h3GeneratePayload: H3GeneratePayload | null = null;
@@ -1871,6 +1994,11 @@ export async function POST(request: NextRequest) {
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
+    ...(multiviewGeneration ? {
+      promptRenderedOverride: promptRendered,
+      assetMappingOverride: assetMapping,
+      protectedRecipeVersion: multiviewGeneration.presetVersion,
+    } : {}),
     providerPayloadJson: JSON.stringify(requestedProvider === H3_VIDEO_PROVIDER
       ? {
           provider: H3_VIDEO_PROVIDER,
@@ -1885,7 +2013,8 @@ export async function POST(request: NextRequest) {
             size_bytes: item.size_bytes,
           })) || [],
         }
-      : { model: selectedModel, content_item_count: content.length, referenceCount: preparedImages.length,
+      : { model: selectedModel, content_item_count: multiviewGeneration ? 3 : content.length,
+          referenceCount: preparedImages.length + (multiviewSystemReference ? 1 : 0),
           requested_ratio: ratio,
           ratio: seedanceRatioFollowsFirstFrame(selectedModel, generationMode) ? 'adaptive' : ratio,
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
@@ -1895,7 +2024,7 @@ export async function POST(request: NextRequest) {
     ...(body.max_estimated_cost !== undefined ? { max_estimated_cost: body.max_estimated_cost } : {}),
     ...(videoEditRequested ? { omni_reference_task_type: 'edit', seedance_edit_reference: editReference } : {}),
     provider: requestedProvider,
-    model: selectedModel,
+    model: selectedModel, generationMode,
     ratio, duration, resolution, seed,
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
     referenceAlbumIds: generationReferenceAlbumIds,
@@ -1998,6 +2127,7 @@ export async function POST(request: NextRequest) {
     pricing_snapshot: string | null;
     billing_scope: string;
     billing_account_id: string | null;
+    source_metadata_json: string | null;
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -2011,7 +2141,41 @@ export async function POST(request: NextRequest) {
           provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
         verifyVideoPricingCredential(body.pricing_quote_token, freshPricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
       }
-      if (multiviewGeneration) await assertMultiviewGenerationSettings(user, multiviewGeneration, tx);
+      if (multiviewGeneration && multiviewRecipe && multiviewSystemReference) {
+        const resolved = trustedMultiviewRetry
+          ? { preset: await readMultiviewRotationPresetVersion(multiviewGeneration.presetVersion, tx) }
+          : await assertMultiviewGenerationSettings(user, multiviewGeneration, tx);
+        if (JSON.stringify(resolved.preset) !== JSON.stringify(multiviewRecipe)
+          || resolved.preset.compositionReference.assetId !== multiviewSystemReference.assetId
+          || resolved.preset.compositionReference.referenceImageId !== multiviewSystemReference.referenceImageId
+          || resolved.preset.compositionReference.sha256 !== multiviewSystemReference.sha256) {
+          throw new MultiviewPresetError('3D多视图配方已变化，原输入保留；请重新读取后再生成。', 409, 'MULTIVIEW_PRESET_CHANGED');
+        }
+        const [workspaceInput, mainAsset, mainReference, systemAsset, systemReference, systemOwner] = await Promise.all([
+          tx.workspaceAsset.findFirst({ where: { workspace_id: workspaceId, asset_id: multiviewGeneration.mainAssetId,
+            reference_image_id: multiviewGeneration.mainReferenceImageId }, select: { id: true } }),
+          tx.asset.findUnique({ where: { id: multiviewGeneration.mainAssetId }, select: { status: true, type: true } }),
+          tx.referenceImage.findUnique({ where: { id: multiviewGeneration.mainReferenceImageId },
+            select: { asset_id: true, status: true } }),
+          tx.asset.findUnique({ where: { id: multiviewSystemReference.assetId },
+            select: { owner_id: true, status: true, type: true, mime_type: true, hash: true } }),
+          tx.referenceImage.findUnique({ where: { id: multiviewSystemReference.referenceImageId },
+            select: { asset_id: true, owner_user_id: true, status: true } }),
+          tx.user.findUnique({ where: { id: resolved.preset.compositionReference.ownerId }, select: { status: true } }),
+        ]);
+        if (!workspaceInput || !mainAsset || mainAsset.status !== 'active' || mainAsset.type !== 'image'
+          || !mainReference || mainReference.status !== 'active'
+          || mainReference.asset_id !== multiviewGeneration.mainAssetId || !systemAsset || systemAsset.status !== 'active'
+          || systemAsset.type !== 'image' || systemAsset.mime_type !== 'image/png'
+          || systemAsset.owner_id !== resolved.preset.compositionReference.ownerId
+          || systemAsset.hash !== null && systemAsset.hash !== multiviewSystemReference.sha256
+          || !systemReference || systemReference.status !== 'active'
+          || systemReference.asset_id !== multiviewSystemReference.assetId
+          || systemReference.owner_user_id !== resolved.preset.compositionReference.ownerId
+          || systemOwner?.status !== 'active') {
+          throw new MultiviewPresetError('3D多视图输入权限或系统参考已变化，原输入保留；未提交生成。', 409, 'MULTIVIEW_INPUT_CHANGED');
+        }
+      }
       const task = await tx.videoTask.create({
         data: {
           provider: requestedProvider,
@@ -2055,7 +2219,7 @@ export async function POST(request: NextRequest) {
           agent_prompt_snapshot: agentPromptSnapshot,
           final_prompt_snapshot: storedFinalPromptSnapshot,
           prompt_user_edited: promptUserEdited,
-          visibility: project.type === 'personal' ? 'private' : 'project',
+          visibility: multiviewGeneration ? 'private' : project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
           pricing_snapshot: JSON.stringify(pricing),
@@ -2287,7 +2451,7 @@ export async function POST(request: NextRequest) {
                 : { code: 'IDEMPOTENCY_STUDIO_LINK_MISMATCH', error: '同一个请求号已用于不同生成链路，请查询已有任务，不要用该请求号重新提交。' };
           return NextResponse.json({ ...conflict, existing_task_id: racedTask.id }, { status: 409 });
         }
-        return NextResponse.json({
+        const payload = {
           id: racedTask.id,
           provider: racedTask.provider,
           provider_task_id: racedTask.provider_task_id,
@@ -2303,7 +2467,12 @@ export async function POST(request: NextRequest) {
           agent_run_id: racedTask.agent_run_id,
           deduplicated: true,
           fingerprint_verified: decision.fingerprintVerified,
-        });
+        };
+        return isPrivateMultiviewTask(racedTask)
+          ? NextResponse.json(protectedMultiviewTaskPayload(racedTask, {
+              deduplicated: true, fingerprint_verified: decision.fingerprintVerified,
+            }), { headers: privateNoStore() })
+          : NextResponse.json(payload);
       }
     }
     if (err instanceof MultiviewPresetError || err instanceof MultiviewSettingsError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
@@ -2386,7 +2555,13 @@ export async function POST(request: NextRequest) {
               paidGenerationGuard: paidGenerationGuard.metadata,
             },
           }
-        : {
+        : multiviewGeneration ? {
+            protected_module: multiviewPrivateTaskMarker(multiviewGeneration.presetVersion),
+            provider: 'seedance', model: selectedModel, generation_mode: generationMode,
+            ratio, duration, resolution, reference_count: 2,
+            source: { type: requestSource.source_type, label: effectiveSourceLabel,
+              requestId: sourceRequestId, paidGenerationGuard: paidGenerationGuard.metadata },
+          } : {
             ...providerInput,
             ...(videoEditRequested ? { requested_ratio: ratio, requested_duration: duration, ...seedanceVideoEditParameters(providerInput) } : {}),
             source: {
@@ -2405,7 +2580,11 @@ export async function POST(request: NextRequest) {
           apiToken: h3Settings.api_token || undefined,
           idempotencyKey: providerIdempotencyKey,
         })
-      : await createVideoTask({ ...providerInput, ...seedanceReferenceTransport }, diagnostic => { seedanceDiagnostic.value = diagnostic; });
+      : await createVideoTask(
+          { ...providerInput, ...seedanceReferenceTransport },
+          diagnostic => { seedanceDiagnostic.value = diagnostic; },
+          { sensitiveRecipe: Boolean(multiviewGeneration) },
+        );
 
     await prisma.videoTask.update({
       where: { id: taskId },
@@ -2473,6 +2652,17 @@ export async function POST(request: NextRequest) {
         ? { cacheOnSuccess: false, generateThumbnail: false, enqueueDeliveryOnSuccess: true }
         : {});
     const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
+
+    if (multiviewGeneration) {
+      return NextResponse.json(protectedMultiviewTaskPayload({ ...createdTask,
+        provider_task_id: providerResult.provider_task_id, local_status: 'submitted' }, {
+        status: 'submitted', pricing: publicVideoPricing(priceQuote),
+        reference_image_notice: referenceImageResizeSummary
+          ? `已自动把 ${referenceImageResizeSummary.resized_count} 张过大的本人主图压缩到平台允许尺寸，原图不会被修改。`
+          : null,
+        reference_image_resize_summary: referenceImageResizeSummary,
+      }), { headers: privateNoStore() });
+    }
 
     return NextResponse.json({
       id: taskId,
@@ -2604,7 +2794,7 @@ export async function POST(request: NextRequest) {
         message: userFacingFailure.message,
         task_id: taskId,
       },
-      { status: userFacingFailure.status },
+      { status: userFacingFailure.status, ...(multiviewGeneration ? { headers: privateNoStore() } : {}) },
     );
   }
   }

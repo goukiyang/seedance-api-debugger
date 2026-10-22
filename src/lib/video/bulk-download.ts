@@ -11,6 +11,7 @@ import { assertCanViewProject, assertCanViewTask } from '@/lib/projects/permissi
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { cacheTaskVideoToLocal, type CacheableVideoTask } from '@/lib/video/local-cache';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
+import { isPrivateMultiviewTask, MULTIVIEW_PUBLIC_TASK_TITLE, privateMultiviewFailure } from '@/lib/video/multiview-task-privacy';
 
 export const BULK_VIDEO_DOWNLOAD_LIMIT = 20;
 
@@ -20,6 +21,7 @@ type BulkDownloadScope = {
 };
 
 type BulkVideoTask = CacheableVideoTask & {
+  source_metadata_json: string | null;
   prompt: string;
   resolution: string | null;
   duration: number | null;
@@ -77,6 +79,7 @@ export type BulkVideoDownloadResult = BulkVideoDownloadJsonResult | BulkVideoDow
 
 const taskSelect = {
   id: true,
+  source_metadata_json: true,
   provider: true,
   prompt: true,
   local_status: true,
@@ -262,6 +265,12 @@ function csvCell(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function publicDownloadFailure(item: BulkDownloadItem) {
+  return item.task && isPrivateMultiviewTask(item.task) && item.errorMessage
+    ? privateMultiviewFailure(item.errorMessage, item.task.local_status)?.message || '视频暂时无法下载，请稍后重试'
+    : item.errorMessage;
+}
+
 function buildManifestCsv(items: BulkDownloadItem[]) {
   const headers = [
     '序号',
@@ -292,10 +301,10 @@ function buildManifestCsv(items: BulkDownloadItem[]) {
       task?.duration ?? '',
       task?.ratio || '',
       task ? formatCharge(task) : '',
-      task?.prompt.slice(0, 240) || '',
+      task ? isPrivateMultiviewTask(task) ? MULTIVIEW_PUBLIC_TASK_TITLE : task.prompt.slice(0, 240) : '',
       item.fileName,
       item.status === 'success' ? '成功' : '失败',
-      item.errorMessage || '',
+      publicDownloadFailure(item) || '',
     ].map(csvCell).join(',');
   });
 
@@ -471,7 +480,7 @@ export async function buildBulkVideoDownloadPackage(
       error: '没有可打包的视频',
       failures: items.map((item) => ({
         task_id: item.taskId,
-        message: item.errorMessage,
+        message: publicDownloadFailure(item),
       })),
     });
   }

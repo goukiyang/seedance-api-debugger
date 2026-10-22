@@ -10,6 +10,8 @@ import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { quoteVideoPricing, requireVideoPricingRevision, videoPricingError } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
+import { isPrivateMultiviewTask, projectSelectedMultiviewTask, readMultiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import { createPrivateMultiviewRetry } from '@/lib/video/multiview-private-create.server';
 import {
   PAID_GENERATION_INTENT_HEADER,
   PAID_GENERATION_INTENT_USER_AUTHORIZED,
@@ -65,6 +67,7 @@ export async function POST(
       where: { id: params.id },
       select: {
         id: true,
+        source_metadata_json: true,
         provider: true,
         model: true,
         local_status: true,
@@ -116,8 +119,34 @@ export async function POST(
       user_id: user.id, idempotency_key: `video-retry:${originalTask.id}` } } });
     if (acceptedRetry) {
       await assertCanViewTask(user, acceptedRetry);
-      return NextResponse.json({ id: acceptedRetry.id, local_status: acceptedRetry.local_status,
-        provider_task_id: acceptedRetry.provider_task_id });
+      if (isPrivateMultiviewTask(originalTask)) {
+        const originalMarker = readMultiviewPrivateTaskMarker(originalTask);
+        const retryMarker = readMultiviewPrivateTaskMarker(acceptedRetry);
+        if (!retryMarker || retryMarker.recipeVersion !== originalMarker?.recipeVersion) {
+          return NextResponse.json({ error: 'RETRY_RECEIPT_CONFLICT', message: '原重试回执与私有配方不一致，请保留原任务并联系管理员；未重新提交。' }, { status: 409 });
+        }
+      }
+      return NextResponse.json(projectSelectedMultiviewTask({ id: acceptedRetry.id, local_status: acceptedRetry.local_status,
+        provider_task_id: acceptedRetry.provider_task_id, source_metadata_json: acceptedRetry.source_metadata_json }),
+      { headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    if (isPrivateMultiviewTask(originalTask)) {
+      if (originalTask.local_status !== 'failed' || originalTask.error_code?.includes('UNCONFIRMED') || originalTask.frozen_cost !== 0) {
+        return NextResponse.json({ error: '原请求尚未确认失败，请查询原任务；未重新生成' }, { status: 409 });
+      }
+      if (originalTask.provider !== 'seedance' || originalTask.generation_mode !== 'all_in_one_reference') {
+        return NextResponse.json({ error: 'RETRY_PROVIDER_UNSUPPORTED',
+          message: '此任务请通过原生成入口重新获取报价；原任务未重发。', target_path: '/multiview' }, { status: 409 });
+      }
+      const requested = await request.json().catch(() => ({})) as Record<string, unknown>;
+      const response = await createPrivateMultiviewRetry(request, {
+        originalTaskId: originalTask.id, idempotencyKey: `video-retry:${originalTask.id}`,
+        pricingRevision: typeof requested.pricing_revision === 'string' ? requested.pricing_revision : undefined,
+        pricingQuoteToken: typeof requested.pricing_quote_token === 'string' ? requested.pricing_quote_token : undefined,
+        maxEstimatedCost: typeof requested.max_estimated_cost === 'number' ? requested.max_estimated_cost : Number.NaN,
+      });
+      response.headers.set('Cache-Control', 'private, no-store');
+      return response;
     }
     if (originalTask.provider && !['seedance', 'h3'].includes(originalTask.provider)) {
       return NextResponse.json({ error: 'RETRY_PROVIDER_UNSUPPORTED', message: '此任务不能转到普通生成重试，请从原生成入口重新获取报价；原任务未重发' }, { status: 409 });

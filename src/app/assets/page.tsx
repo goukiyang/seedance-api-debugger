@@ -57,6 +57,7 @@ type AssetSort = 'created_desc' | 'created_asc' | 'completed_desc' | 'project' |
 type AssetGroup = 'date' | 'project' | 'user';
 type AssetCardSize = 'standard' | 'compact';
 type AssetBulkTarget = 'video_project' | 'album';
+type AssetSourceFilter = 'all' | 'multiview-output';
 type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
 type EnhanceResolution = '720p' | '1080p' | '2k' | '4k';
 type EnhanceFps = 'none' | '30' | '60';
@@ -113,7 +114,7 @@ type ReferenceAlbumItem = {
 };
 
 type AssetLibraryItem = {
-  generationOrigin?: { label: string; templateName?: string };
+  generationOrigin?: { kind?: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'multiview-output' | 'unknown'; label: string; templateName?: string };
   id: AssetLibraryItemId;
   kind: 'video' | 'image' | 'audio';
   source: 'video_task' | 'asset' | 'reference_image';
@@ -685,6 +686,8 @@ function AssetsPageContent() {
   const explicitView = params.get('view');
   const hasExplicitView = params.has('view');
   const hasExplicitContent = params.has('content');
+  const explicitSource = params.get('source');
+  const hasExplicitSource = params.has('source');
   const [viewSelection, setViewSelection] = useState<{ userId: string | null; view: AssetView }>({ userId: null, view: 'history' });
   const assetView = viewSelection.userId === (user?.id ?? null) && (viewSelection.view !== 'user' || user?.role === 'admin') ? viewSelection.view : 'history';
   const setAssetView = useCallback((view: AssetView) => setViewSelection({ userId: user?.id ?? null, view }), [user?.id]);
@@ -704,6 +707,7 @@ function AssetsPageContent() {
       setAssetView(nextView); rememberReactionView(nextView);
       return;
     }
+    if (hasExplicitSource) { setAssetView('history'); return; }
     let nextView: AssetView = 'history';
     if (!hasExplicitContent) {
       try {
@@ -712,13 +716,14 @@ function AssetsPageContent() {
       } catch {}
     }
     setAssetView(nextView);
-  }, [user?.id, user?.role, explicitView, hasExplicitView, hasExplicitContent, setAssetView, rememberReactionView]);
+  }, [user?.id, user?.role, explicitView, hasExplicitView, hasExplicitContent, hasExplicitSource, setAssetView, rememberReactionView]);
   const [type, setType] = useState<AssetType>('video');
   const [status, setStatus] = useState<AssetStatus>('succeeded');
   const [sort, setSort] = useState<AssetSort>('created_desc');
   const [groupBy, setGroupBy] = useState<AssetGroup>('date');
   const [cardSize, setCardSize] = useState<AssetCardSize>(() => readSavedAssetCardSize());
   const [showUploadedAssets, setShowUploadedAssets] = useState(() => readSavedShowUploadedAssets());
+  const [sourceFilter, setSourceFilter] = useState<AssetSourceFilter>(() => explicitSource === 'multiview-output' ? 'multiview-output' : 'all');
   const [projectId, setProjectId] = useState('');
   const [ownerUserId, setOwnerUserId] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -729,7 +734,7 @@ function AssetsPageContent() {
   const gridProbe = useRef<HTMLDivElement>(null);
   const latestPage = useRef({ page, capacity: pageCapacity });
   latestPage.current = { page, capacity: pageCapacity };
-  const pageScope = JSON.stringify([user?.id, user?.role, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword.trim()]);
+  const pageScope = JSON.stringify([user?.id, user?.role, assetView, type, status, sort, groupBy, showUploadedAssets, sourceFilter, projectId, ownerUserId, keyword.trim()]);
   const [restoredPageScope, setRestoredPageScope] = useState('');
   const [restoredFiltersOwner, setRestoredFiltersOwner] = useState('');
   const directorySnapshot = useRef({ scope: '', reload: -1, version: '' });
@@ -739,23 +744,25 @@ function AssetsPageContent() {
     try {
       const saved = JSON.parse(localStorage.getItem(`sd2:asset-filters:v1:${user.id}`) || 'null');
       if (saved?.version === 1 && !hasExplicitContent) {
-        if (!hasExplicitView && assetViewTabs.some(tab => tab.id === saved.assetView && (!tab.adminOnly || user.role === 'admin'))) setAssetView(saved.assetView);
+        if (!hasExplicitView && !hasExplicitSource && assetViewTabs.some(tab => tab.id === saved.assetView && (!tab.adminOnly || user.role === 'admin'))) setAssetView(saved.assetView);
         if (!new URLSearchParams(window.location.search).has('type') && isAssetType(saved.type)) setType(saved.type);
         if (['all', 'succeeded', 'running', 'submitted', 'failed', 'cancelled', 'hidden'].includes(saved.status)) setStatus(saved.status);
         if (['created_desc', 'created_asc', 'completed_desc', 'project', 'user', 'duration'].includes(saved.sort)) setSort(saved.sort);
         if (['date', 'project', 'user'].includes(saved.groupBy)) setGroupBy(saved.groupBy);
         if (typeof saved.showUploadedAssets === 'boolean') setShowUploadedAssets(saved.showUploadedAssets);
+        if (!hasExplicitSource && ['all', 'multiview-output'].includes(saved.sourceFilter)) setSourceFilter(saved.sourceFilter);
         if (typeof saved.projectId === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(saved.projectId)) setProjectId(saved.projectId);
         if (user.role === 'admin' && typeof saved.ownerUserId === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(saved.ownerUserId)) setOwnerUserId(saved.ownerUserId);
         if (typeof saved.keyword === 'string' && saved.keyword.length <= 160) { setKeyword(saved.keyword); setKeywordDraft(saved.keyword); }
       }
     } catch {}
+    if (hasExplicitSource) setSourceFilter(explicitSource === 'multiview-output' ? 'multiview-output' : 'all');
     setRestoredFiltersOwner(user.id);
-  }, [user?.id, user?.role, hasExplicitContent, hasExplicitView, setAssetView]);
+  }, [user?.id, user?.role, hasExplicitContent, hasExplicitView, hasExplicitSource, explicitSource, setAssetView]);
   useEffect(() => {
     if (!user?.id || restoredFiltersOwner !== user.id) return;
-    try { localStorage.setItem(`sd2:asset-filters:v1:${user.id}`, JSON.stringify({ version: 1, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword })); } catch {}
-  }, [user?.id, restoredFiltersOwner, assetView, type, status, sort, groupBy, showUploadedAssets, projectId, ownerUserId, keyword]);
+    try { localStorage.setItem(`sd2:asset-filters:v1:${user.id}`, JSON.stringify({ version: 1, assetView, type, status, sort, groupBy, showUploadedAssets, sourceFilter, projectId, ownerUserId, keyword })); } catch {}
+  }, [user?.id, restoredFiltersOwner, assetView, type, status, sort, groupBy, showUploadedAssets, sourceFilter, projectId, ownerUserId, keyword]);
   useLayoutEffect(() => {
     const grid = gridProbe.current;
     if (!grid) return;
@@ -1045,6 +1052,7 @@ function AssetsPageContent() {
   useEffect(() => {
     const requestedType = new URLSearchParams(window.location.search).get('type');
     if (isAssetType(requestedType)) setType(requestedType);
+    else if (new URLSearchParams(window.location.search).get('source') === 'multiview-output') setType('image');
     void refreshUser();
   }, [refreshUser]);
 
@@ -1187,6 +1195,7 @@ function AssetsPageContent() {
     });
     params.set('include_uploads', showUploadedAssets ? 'true' : 'false');
     params.set('include_generated', 'true');
+    if (!isEnhanceView && sourceFilter === 'multiview-output') params.set('source', sourceFilter);
     if (directorySnapshot.current.scope !== pageScope || directorySnapshot.current.reload !== reloadToken) {
       directorySnapshot.current = { scope: pageScope, reload: reloadToken, version: '' };
     }
@@ -1200,7 +1209,7 @@ function AssetsPageContent() {
       let showedCache = false;
       let cached: { items: AssetLibraryItem[]; pagination: Pagination | null } | null = null;
       try {
-        cached = await readAssetLibraryCache<AssetLibraryItem, Pagination>(cacheKey);
+        cached = isEnhanceView || sourceFilter === 'all' ? await readAssetLibraryCache<AssetLibraryItem, Pagination>(cacheKey) : null;
       } catch {
         cached = null;
       }
@@ -1233,7 +1242,7 @@ function AssetsPageContent() {
           if (data.directoryChanged) setError('部分素材刚刚变化，请刷新后查看最新完整页');
           setSelectedIds((current) => current.filter((id) => nextItems.some((item) => item.id === id)));
           setShowingCachedAssets(false);
-          void writeAssetLibraryCache<AssetLibraryItem, Pagination>({
+          if (isEnhanceView || sourceFilter === 'all') void writeAssetLibraryCache<AssetLibraryItem, Pagination>({
             key: cacheKey,
             userId: user.id,
             payload: {
@@ -1267,7 +1276,7 @@ function AssetsPageContent() {
       cancelled = true;
       abort.abort();
     };
-  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
+  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, sourceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
   useEffect(() => {
     if (!user?.id || hasExplicitContent || isReactionView || loading || showingCachedAssets || activeItem
@@ -1957,6 +1966,7 @@ function AssetsPageContent() {
         });
         pageParams.set('include_uploads', showUploadedAssets ? 'true' : 'false');
         pageParams.set('include_generated', 'true');
+        if (!isEnhanceView && sourceFilter === 'multiview-output') pageParams.set('source', sourceFilter);
         if (directorySnapshot.current.scope === pageScope && directorySnapshot.current.version) pageParams.set('directory_version', directorySnapshot.current.version);
         if (enhanceFilter !== 'none') pageParams.set('enhance', enhanceFilter);
         if (scope === 'project' && projectId) pageParams.set('project_id', projectId);
@@ -2029,6 +2039,7 @@ function AssetsPageContent() {
             {selectionMode ? '退出选择' : '选择'}
           </button>
           <Link className="asset-library-secondary-link" href="/tasks">任务列表</Link>
+          <Link className="asset-library-secondary-link" href="/multiview?view=generations">3D多视图</Link>
         </div>
       </header>
 
@@ -2084,6 +2095,22 @@ function AssetsPageContent() {
           >
             <Upload size={14} aria-hidden="true" />
             <span>上传素材</span>
+          </button>
+        )}
+
+        {!isEnhanceView && (
+          <button
+            type="button"
+            className={`asset-library-source-toggle ${sourceFilter === 'multiview-output' ? 'active' : ''}`}
+            aria-pressed={sourceFilter === 'multiview-output'}
+            title="只看本人已保存到素材库的3D多视图成品图"
+            onClick={() => {
+              setSourceFilter(current => current === 'multiview-output' ? 'all' : 'multiview-output');
+              setType('image');
+              resetForFilterChange();
+            }}
+          >
+            <span>3D多视图成品</span>
           </button>
         )}
 

@@ -42,6 +42,7 @@ import {
   validateEnhanceVideoUrl,
 } from '@/lib/tasks/enhance-video-create';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
+import { isPrivateMultiviewTask, readMultiviewPrivateTaskMarker, MULTIVIEW_PUBLIC_TASK_TITLE } from '@/lib/video/multiview-task-privacy';
 
 const LOCAL_UPLOAD_SAFE_MAX_BYTES = 512 * 1024 * 1024;
 
@@ -51,6 +52,7 @@ type SourceTask = Pick<VideoTask,
   | 'provider_task_id'
   | 'generation_mode'
   | 'prompt'
+  | 'source_metadata_json'
   | 'local_status'
   | 'result_video_url'
   | 'local_video_path'
@@ -271,6 +273,7 @@ export async function POST(request: NextRequest) {
         provider_task_id: true,
         generation_mode: true,
         prompt: true,
+        source_metadata_json: true,
         local_status: true,
         result_video_url: true,
         local_video_path: true,
@@ -338,18 +341,31 @@ export async function POST(request: NextRequest) {
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
   const idempotencyKey = body.idempotencyKey || undefined;
+  let privateSourceMarker: ReturnType<typeof readMultiviewPrivateTaskMarker> = null;
+  try {
+    if (sourceTask && isPrivateMultiviewTask(sourceTask)) privateSourceMarker = readMultiviewPrivateTaskMarker(sourceTask);
+  } catch {
+    return jsonError('源任务的私有配方记录暂时无法确认，请保留原任务并联系管理员。', 409, 'SOURCE_RECIPE_UNAVAILABLE');
+  }
 
   if (idempotencyKey) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
     });
     if (existing) {
+      if (privateSourceMarker) {
+        let existingMarker: ReturnType<typeof readMultiviewPrivateTaskMarker> = null;
+        try { existingMarker = readMultiviewPrivateTaskMarker(existing); } catch { /* Preserve the original operation on corrupt metadata. */ }
+        if (!existingMarker || existingMarker.recipeVersion !== privateSourceMarker.recipeVersion) {
+          return jsonError('原操作已绑定其他任务，请核对原任务；未重新提交。', 409, 'IDEMPOTENCY_CONFLICT');
+        }
+      }
       if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
         return jsonError('同一个幂等键已绑定到其他视频卡', 409, 'IDEMPOTENCY_CONFLICT');
       }
       return NextResponse.json({
         id: existing.id,
-        provider_task_id: existing.provider_task_id,
+        ...(!isPrivateMultiviewTask(existing) ? { provider_task_id: existing.provider_task_id } : {}),
         status: existing.local_status,
         estimated_cost: existing.estimated_cost,
         frozen_cost: existing.frozen_cost,
@@ -359,7 +375,7 @@ export async function POST(request: NextRequest) {
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
         created_at: existing.created_at,
-      });
+      }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
   }
 
@@ -395,13 +411,14 @@ export async function POST(request: NextRequest) {
           provider: 'volcengine_mediakit',
           model: 'enhance-video',
           generation_mode: 'enhance_video',
-          prompt: sourceTask
+          prompt: privateSourceMarker ? `${MULTIVIEW_PUBLIC_TASK_TITLE} · 视频超分/画质增强` : sourceTask
             ? `视频超分/画质增强：${sourceTask.prompt.slice(0, 80) || sourceTask.id}`
             : '视频超分/画质增强：外部视频 URL',
           source_type: 'web',
           source_label: 'AI MediaKit 视频超分',
           source_request_id: idempotencyKey || null,
           source_metadata_json: JSON.stringify({
+            ...(privateSourceMarker ? { protected_module: privateSourceMarker } : {}),
             source_task_id: sourceTask?.id || null,
             source_provider: sourceTask?.provider || null,
             source_provider_task_id: sourceTask?.provider_task_id || null,
@@ -570,7 +587,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       id: createdTask.id,
-      provider_task_id: providerResult.provider_task_id,
+      ...(!privateSourceMarker ? { provider_task_id: providerResult.provider_task_id } : {}),
       status: 'submitted',
       provider: 'volcengine_mediakit',
       model: 'enhance-video',
@@ -580,11 +597,11 @@ export async function POST(request: NextRequest) {
       pricing: publicVideoPricing(priceQuote),
       project_id: project.id,
       video_card_id: videoCard.id,
-      source_task_id: sourceTask?.id || null,
+      ...(!privateSourceMarker ? { source_task_id: sourceTask?.id || null } : {}),
       billing_scope: billingScope,
       billing_account_id: billingAccountId,
       created_at: new Date().toISOString(),
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const errorMessage = error instanceof Error ? redactAiMediaKitLog(error.message) : 'AI MediaKit 调用异常';
     if (providerRequestId) {

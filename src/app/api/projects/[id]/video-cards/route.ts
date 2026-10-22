@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
@@ -33,6 +34,7 @@ function asOptionalNumber(value: unknown) {
 
 function serializeTaskPreview(task: null | {
   id: string;
+  source_metadata_json: string | null;
   prompt: string;
   provider?: string | null;
   generation_mode?: string | null;
@@ -45,8 +47,9 @@ function serializeTaskPreview(task: null | {
   created_at: Date;
 }) {
   if (!task) return null;
-  return {
+  return projectSelectedMultiviewTask({
     id: task.id,
+    source_metadata_json: task.source_metadata_json,
     prompt: task.prompt,
     provider: task.provider ?? null,
     generation_mode: task.generation_mode ?? null,
@@ -57,7 +60,7 @@ function serializeTaskPreview(task: null | {
     result_last_frame_url: task.result_last_frame_url ?? null,
     ...taskThumbnailProjection(task),
     created_at: task.created_at,
-  };
+  });
 }
 
 function serializeDeliverySpecs(card: {
@@ -133,10 +136,10 @@ export async function GET(
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       current_best_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -157,7 +160,7 @@ export async function GET(
         can_generate: access.canGenerate,
         can_manage_project: access.canManageProject,
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -244,10 +247,10 @@ export async function POST(
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       current_best_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -262,7 +265,7 @@ export async function POST(
     const summaryMap = await getVideoCardSummaryMap([card.id]);
     return NextResponse.json(
       { video_card: serializeVideoCard(card, summaryMap.get(card.id)) },
-      { status: 201 },
+      { status: 201, headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
     if (error instanceof AuthError) {

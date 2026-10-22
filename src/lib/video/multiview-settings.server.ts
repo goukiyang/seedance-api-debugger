@@ -6,7 +6,8 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { multiviewInfo, multiviewSourceVersion } from './multiview';
 import { assertMultiviewWorkSource } from './multiview-works';
 import type { MultiviewInfo } from './multiview-contract';
-import { composeMultiviewGenerationPrompt, type MultiviewGenerationSnapshot } from './multiview-generation-contract';
+import { composeMultiviewGenerationPrompt, publicMultiviewRotationPreset,
+  type MultiviewGenerationSnapshot } from './multiview-generation-contract';
 import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPresetVersion } from './multiview-preset.server';
 import { isMultiviewSettingsId, isMultiviewSettingsMutationId, parseMultiviewSettingsBinding, parseMultiviewGenerationSettingsValue,
   parseMultiviewFrameSettingsInput, parseMultiviewSettingsDto,
@@ -274,7 +275,7 @@ export async function applyMultiviewSettings(user: SessionUser, id: string, inpu
     if (input.target !== undefined) throw invalid('生成设置不接收媒体或项目归属。');
     const preset = await readMultiviewRotationPresetVersion(settings.value.presetVersion);
     if (!composeMultiviewGenerationPrompt(settings.value.supplement, preset.version, preset).valid) throw unavailable();
-    return { settings, preset };
+    return { settings, preset: publicMultiviewRotationPreset(preset) };
   }
   const target = parseSource(input.target);
   const info = await sourceInfo(user, target, request);

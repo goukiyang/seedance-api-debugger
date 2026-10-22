@@ -24,6 +24,7 @@ import {
 import { buildSeedanceDraftContent } from './seedance-draft';
 import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
 import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
+import { privateMultiviewFailure } from '../video/multiview-task-privacy';
 
 // ============================================================================
 // Environment Configuration
@@ -61,6 +62,58 @@ function pickNumber(record: Record<string, unknown>, keys: string[]): number | u
   }
 
   return undefined;
+}
+
+const sensitiveProviderStatuses = new Set([
+  'created', 'init', 'submitted', 'pending', 'queued', 'waiting', 'running', 'processing',
+  'generating', 'in_progress', 'progress', 'succeeded', 'success', 'completed', 'done', 'finished',
+  'ready', 'failed', 'error', 'failure', 'cancelled', 'canceled', 'aborted', 'rejected', 'expired',
+  'timeout', 'unknown',
+]);
+
+function sensitiveProviderStatus(data: Record<string, unknown>): string {
+  const status = pickString(data, ['status', 'state'])?.trim().toLowerCase();
+  return status && sensitiveProviderStatuses.has(status) ? status : 'unknown';
+}
+
+function sensitiveCreateFailureState(diagnostic: ProviderCreateDiagnostic): 'failed' | 'unknown' {
+  return diagnostic.phase === 'response_validation'
+    && diagnostic.http_status !== null
+    && (diagnostic.http_status < 200 || diagnostic.http_status >= 300)
+    ? 'failed'
+    : 'unknown';
+}
+
+type SeedanceStatusConsole = Pick<Console, 'log' | 'warn' | 'error'>;
+export type SeedanceStatusQueryOptions = {
+  sensitiveRecipe?: boolean;
+  fetch?: typeof fetch;
+  console?: SeedanceStatusConsole;
+};
+
+function sensitiveStatusSummary(httpStatus: number, data: Record<string, unknown>) {
+  const content = data.content && typeof data.content === 'object' && !Array.isArray(data.content)
+    ? data.content as Record<string, unknown>
+    : null;
+  const billingFields = ['actual_cost', 'actualCost', 'currency_or_credit_type', 'currencyOrCreditType',
+    'currency', 'billing_status', 'billingStatus', 'billing_time', 'billingTime'];
+  return {
+    http_status: httpStatus,
+    provider_status: sensitiveProviderStatus(data),
+    response_field_count: Object.keys(data).length,
+    content_field_count: content ? Object.keys(content).length : 0,
+    billing_field_count: billingFields.filter((key) => Object.prototype.hasOwnProperty.call(data, key)).length,
+  };
+}
+
+function sensitiveStatusQueryError(error: unknown) {
+  const failure = privateMultiviewFailure(
+    error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
+    'unknown',
+  ) || privateMultiviewFailure('unknown', 'unknown')!;
+  const safe = new Error(failure.message) as Error & { code?: string };
+  safe.code = failure.code;
+  return safe;
 }
 
 function redactProviderResponseForLog(value: unknown): unknown {
@@ -167,7 +220,10 @@ export function isApiKeyConfigured(): boolean {
  * 将官方 status 映射为本地 local_status
  * 注意：未知状态按 running 处理，不要直接判 failed
  */
-export function mapProviderStatus(status?: string): LocalStatus {
+export function mapProviderStatus(
+  status?: string,
+  options: { sensitiveRecipe?: boolean; console?: Pick<Console, 'warn'> } = {},
+): LocalStatus {
   switch (status) {
     case 'succeeded':
       return 'succeeded';
@@ -186,7 +242,9 @@ export function mapProviderStatus(status?: string): LocalStatus {
       return 'submitted';
     default:
       // 未知状态按 running 处理，保留 raw_status_response 用于调试
-      console.warn(`[mapProviderStatus] Unknown status: ${status}, treating as 'running'`);
+      (options.console || console).warn(options.sensitiveRecipe
+        ? "[mapProviderStatus] Protected task has an unknown provider status; treating as 'running'"
+        : `[mapProviderStatus] Unknown status: ${status}, treating as 'running'`);
       return 'running';
   }
 }
@@ -388,7 +446,8 @@ export function redactInlineImageTransport(value: unknown): unknown {
 
 export async function createVideoTask(
   input: SeedanceProviderInput & { generation_mode: GenerationMode },
-  onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void
+  onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void,
+  options: { sensitiveRecipe?: boolean } = {},
 ): Promise<ProviderCreateResponse> {
   if (!isApiKeyConfigured()) throw new Error('API key not configured');
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
@@ -408,7 +467,7 @@ export async function createVideoTask(
   console.log(`Endpoint:  ${endpoint}`);
   console.log(`Model:     ${model}`);
   console.log(`Mode:      ${input.generation_mode}`);
-  console.log(`Prompt:    ${input.prompt?.slice(0, 100)}...`);
+  console.log(`Prompt:    ${options.sensitiveRecipe ? '[protected multiview recipe]' : `${input.prompt?.slice(0, 100)}...`}`);
   console.log(`Duration:  ${input.duration || 'default'}s`);
   console.log(`Ratio:     ${payload.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
@@ -452,7 +511,10 @@ export async function createVideoTask(
     if (hasInlineImages) data = redactInlineImageTransport(data) as Record<string, unknown>;
 
     console.log(`[Create] HTTP Status: ${response.status}`);
-    console.log(`[Create] Response:`, JSON.stringify(data, null, 2));
+    console.log(`[Create] Response:`, JSON.stringify(options.sensitiveRecipe
+      ? { http_status: response.status, accepted: Boolean(response.ok && data.id),
+          provider_status: sensitiveProviderStatus(data), response_key_count: Object.keys(data).length }
+      : data, null, 2));
 
     phase = 'response_validation';
     if (!response.ok) {
@@ -467,17 +529,31 @@ export async function createVideoTask(
       throw new Error(providerErrorMessage || 'Seedance 创建任务响应缺少任务 ID');
     }
 
-    console.log(`\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
+    console.log(options.sensitiveRecipe
+      ? '\n✅ Step1 Complete: protected provider task accepted\n'
+      : `\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
 
     phase = 'complete';
     capture();
     return {
       provider_task_id: providerTaskId,
-      raw: data,
+      raw: options.sensitiveRecipe
+        ? { id: providerTaskId, status: sensitiveProviderStatus(data) }
+        : data,
     };
   } catch (error) {
     const diagnostic = capture(error);
-    const safeError = hasInlineImages ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败'))) : error;
+    const safeError = options.sensitiveRecipe ? (() => {
+      const failure = privateMultiviewFailure(
+        error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
+        sensitiveCreateFailureState(diagnostic),
+      ) || privateMultiviewFailure('unknown', 'unknown')!;
+      const sanitized = new Error(failure.message) as Error & { code?: string };
+      sanitized.code = failure.code;
+      return sanitized;
+    })() : hasInlineImages
+      ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败')))
+      : error;
     console.error('\n❌ Step1 Create failed:', safeError instanceof Error ? safeError.message : 'Seedance 创建任务失败', diagnostic);
     throw safeError;
   }
@@ -542,22 +618,31 @@ export async function createSeedanceDraftUpgradeTask(input: {
 // ============================================================================
 
 export async function getVideoTaskStatus(
-  providerTaskId: string
+  providerTaskId: string,
+  options: SeedanceStatusQueryOptions = {},
 ): Promise<ProviderStatusResponse> {
   const endpoint = `${SEEDANCE_BASE_URL}/getResult`;
+  const output = options.console || console;
+  const request = options.fetch || fetch;
 
   const payload = {
     id: providerTaskId,
   };
 
-  console.log('\n---------- Step2: Query Task Status ----------');
-  console.log(`Endpoint:    ${endpoint}`);
-  console.log(`Task ID:     ${providerTaskId}`);
-  console.log(`API Key:     ${maskKey(SEEDANCE_API_KEY)}`);
-  console.log('-------------------------------------------\n');
+  if (options.sensitiveRecipe) {
+    output.log('\n---------- Step2: Query Protected Task Status ----------');
+    output.log('Protected query context: active');
+    output.log('------------------------------------------------------\n');
+  } else {
+    output.log('\n---------- Step2: Query Task Status ----------');
+    output.log(`Endpoint:    ${endpoint}`);
+    output.log(`Task ID:     ${providerTaskId}`);
+    output.log(`API Key:     ${maskKey(SEEDANCE_API_KEY)}`);
+    output.log('-------------------------------------------\n');
+  }
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await request(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -578,14 +663,16 @@ export async function getVideoTaskStatus(
     }
     data = redactInlineImageTransport(data) as Record<string, unknown>;
 
-    console.log(`[Status] HTTP Status: ${response.status}`);
-    console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
+    output.log(`[Status] HTTP Status: ${response.status}`);
+    output.log(`[Status] Response:`, JSON.stringify(options.sensitiveRecipe
+      ? sensitiveStatusSummary(response.status, data)
+      : redactProviderResponseForLog(data), null, 2));
 
     if (!response.ok) {
       const failedStatus = buildProviderHttpErrorStatus(providerTaskId, response.status, data);
       if (failedStatus) {
-        console.log(`\n❌ Step2 Complete: status = failed`);
-        console.log(`   Error: ${failedStatus.error_message || 'Unknown error'}\n`);
+        output.log(`\n❌ Step2 Complete: status = failed`);
+        if (!options.sensitiveRecipe) output.log(`   Error: ${failedStatus.error_message || 'Unknown error'}\n`);
         return failedStatus;
       }
       throw new Error(`Get video task failed: ${response.status} ${JSON.stringify(data)}`);
@@ -593,7 +680,10 @@ export async function getVideoTaskStatus(
 
     // 解析官方返回结构
     const officialStatus = data.status as string | undefined;
-    const localStatus = mapProviderStatus(officialStatus);
+    const localStatus = mapProviderStatus(officialStatus, {
+      sensitiveRecipe: options.sensitiveRecipe,
+      console: output,
+    });
     const content = data.content as Record<string, unknown> | undefined;
 
     // 提取视频地址
@@ -626,21 +716,23 @@ export async function getVideoTaskStatus(
     const providerTaskIdFromRaw = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']) || providerTaskId;
 
     // 状态日志
-    if (localStatus === 'succeeded') {
-      console.log(`\n✅ Step2 Complete: status = succeeded`);
-      console.log(`   Video URL: ${resultVideoUrl ? maskVideoUrl(resultVideoUrl) : '(none)'}`);
-      console.log(`   Model:     ${providerModel || '(none)'}`);
-      console.log(`   Seed:      ${seed ?? 'N/A'}`);
-      console.log(`   Resolution: ${resolution || '(none)'}`);
-      console.log(`   Ratio:     ${ratio || '(none)'}`);
-      console.log(`   Duration:  ${duration ?? 'N/A'}s`);
-      console.log(`   FPS:       ${framesPerSecond ?? 'N/A'}\n`);
-      console.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
+    if (options.sensitiveRecipe) {
+      output.log(`[Status] Protected query complete: provider_status=${sensitiveProviderStatus(data)}; local_status=${localStatus}`);
+    } else if (localStatus === 'succeeded') {
+      output.log(`\n✅ Step2 Complete: status = succeeded`);
+      output.log(`   Video URL: ${resultVideoUrl ? maskVideoUrl(resultVideoUrl) : '(none)'}`);
+      output.log(`   Model:     ${providerModel || '(none)'}`);
+      output.log(`   Seed:      ${seed ?? 'N/A'}`);
+      output.log(`   Resolution: ${resolution || '(none)'}`);
+      output.log(`   Ratio:     ${ratio || '(none)'}`);
+      output.log(`   Duration:  ${duration ?? 'N/A'}s`);
+      output.log(`   FPS:       ${framesPerSecond ?? 'N/A'}\n`);
+      output.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
     } else if (localStatus === 'failed') {
-      console.log(`\n❌ Step2 Complete: status = failed`);
-      console.log(`   Error: ${userFacingErrorMessage || 'Unknown error'}\n`);
+      output.log(`\n❌ Step2 Complete: status = failed`);
+      output.log(`   Error: ${userFacingErrorMessage || 'Unknown error'}\n`);
     } else {
-      console.log(`\n⏳ Step2 Complete: status = ${officialStatus || 'unknown'} (${localStatus})\n`);
+      output.log(`\n⏳ Step2 Complete: status = ${officialStatus || 'unknown'} (${localStatus})\n`);
     }
 
     return {
@@ -668,7 +760,12 @@ export async function getVideoTaskStatus(
       raw: data,
     };
   } catch (error) {
-    console.error('\n❌ Step2 Query failed:', error);
+    if (options.sensitiveRecipe) {
+      const safeError = sensitiveStatusQueryError(error);
+      output.error('\n❌ Step2 protected query failed:', safeError.message, { code: safeError.code });
+      throw safeError;
+    }
+    output.error('\n❌ Step2 Query failed:', error);
     throw error;
   }
 }

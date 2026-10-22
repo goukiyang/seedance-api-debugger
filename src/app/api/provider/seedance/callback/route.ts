@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { getExternalCallbackUrlFromParams } from '@/lib/video/delivery-policy';
+import { isPrivateMultiviewTask, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { isPublicHttpUrl } from '@/lib/media/public-url';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -165,7 +167,20 @@ export async function POST(request: NextRequest) {
   const forwardResult = await forwardExternalCallback({
     taskId: task.id,
     paramsJson: finalTask.params_json || task.params_json,
-    payload,
+    payload: isPrivateMultiviewTask(task) ? (() => {
+      const safe = projectPrivateMultiviewTask({ ...finalTask, source_metadata_json: task.source_metadata_json }) as unknown as Record<string, unknown>;
+      const resultVideoUrl = finalTask.local_status === 'succeeded'
+        ? [finalTask.public_video_url, finalTask.result_video_url].find(value => {
+          if (!isPublicHttpUrl(value)) return false;
+          const url = new URL(value!);
+          return !url.username && !url.password && !url.pathname.startsWith('/api/provider/seedance/callback');
+        }) || null : null;
+      return { task_id: safe.id, local_status: safe.local_status, provider_status: safe.provider_status,
+        result_video_url: resultVideoUrl,
+        play_url: safe.play_url, download_url: safe.download_url, thumbnail_url: safe.thumbnail_url,
+        delivery_status: safe.delivery_status,
+        error_code: safe.error_code, error_message: safe.error_message };
+    })() : payload,
   });
 
   return NextResponse.json({

@@ -11,6 +11,7 @@ import { MultiviewError, multiviewInfoForWork, multiviewSourceVersion, renderMul
 import { isMultiviewWorkId, parseMultiviewWorkManifest, type MultiviewWorkManifest, type MultiviewWorkFileRole } from './multiview-work-contract';
 import { assertMultiviewWorkSource, claimNextMultiviewWork, completeMultiviewWork, failMultiviewWork,
   initializeMultiviewWork, multiviewWorkActor, multiviewWorkDirectory, type MultiviewWorkLease } from './multiview-works';
+import { registerNextSavedMultiviewOutputs } from './multiview-output-assets.server';
 
 const GiB = 1024 ** 3;
 export const MULTIVIEW_WORK_RESOURCE_POLICY = Object.freeze({
@@ -305,6 +306,8 @@ export async function processNextMultiviewWork(): Promise<MultiviewWorkProcessRe
   const signal = AbortSignal.timeout(MULTIVIEW_WORK_RESOURCE_POLICY.renderTimeoutMs);
   try {
     await assertMultiviewWorkConsumerLock();
+    const registeredWork = await registerNextSavedMultiviewOutputs(multiviewWorkAdmission);
+    if (registeredWork) return { state: 'ready', workId: registeredWork };
     lease = await claimNextMultiviewWork();
     if (!lease) return { state: 'empty' };
     await multiviewWorkAdmission();

@@ -5,6 +5,7 @@ import type { UsageFactReadOptions } from './facts';
 import { isExternalUser } from '@/lib/access/external-role';
 import type { PublicUsageScope, UsagePublicQuery } from './dto';
 import { usageScopeUser } from './access';
+import { MULTIVIEW_PUBLIC_TASK_TITLE } from '@/lib/video/multiview-task-privacy';
 
 const FALSE = Prisma.sql`0 = 1`;
 
@@ -70,7 +71,9 @@ export async function resolveUsageReadOptions(db: Prisma.TransactionClient, scop
     video_task: Prisma.sql`${common('video_task', Prisma.sql`"VideoTask"."id"`, Prisma.sql`COALESCE(NULLIF("owner_user_id", ''), "user_id")`, Prisma.sql`"project_id"`)}
       AND ${visibleProject(Prisma.sql`"VideoTask"."project_id"`)} AND "retention_status" IN ('active', 'retained')
       AND ${scope.kind === 'self' ? Prisma.sql`COALESCE(NULLIF("owner_user_id", ''), "user_id") = ${user.id}` : Prisma.sql`1 = 1`}
-      AND ${keyword(Prisma.sql`"VideoTask"."id"`, Prisma.sql`"model"`, Prisma.sql`"prompt"`)}`,
+      AND ${keyword(Prisma.sql`"VideoTask"."id"`, Prisma.sql`"model"`, Prisma.sql`CASE
+        WHEN instr(COALESCE("VideoTask"."source_metadata_json", ''), '"protected_module"') > 0
+        THEN ${MULTIVIEW_PUBLIC_TASK_TITLE} ELSE "VideoTask"."prompt" END`)}`,
     image_task: Prisma.sql`${common('image_task', Prisma.sql`"ImageStudioTask"."id"`, Prisma.sql`"owner_id"`, Prisma.sql`(SELECT json_extract(CASE WHEN json_valid(f."snapshot_json") THEN f."snapshot_json" ELSE '{}' END, '$.project_id') FROM "ToolFlowRun" f WHERE f."id" = "tool_flow_run_id" AND json_extract(CASE WHEN json_valid(f."snapshot_json") THEN f."snapshot_json" ELSE '{}' END, '$.schema') = 'toolflow.v1')`)}
       AND ${scope.kind === 'project' && user.role === 'admin' ? Prisma.sql`1 = 1` : Prisma.sql`"owner_id" = ${user.id}`}
       AND ${keyword(Prisma.sql`"ImageStudioTask"."id"`, Prisma.sql`"model"`, Prisma.sql`"prompt"`)}`,

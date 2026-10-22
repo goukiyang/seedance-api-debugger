@@ -7,6 +7,7 @@ import { buildSeedanceVideoPayload, SEEDANCE_INLINE_REQUEST_MAX_BYTES } from './
 type AuthorizedImage = { url: string; asset?: {
   original_url: string; type: string; status: string; mime_type: string; file_size: number;
 } | null };
+export type PrivateInlineReferenceImage = { mimeType: 'image/png'; bytes: Buffer };
 const MAX_SINGLE_IMAGE_BYTES = 30_000_000;
 // Client request ID and callback URL are added later by the existing task route.
 const TASK_METADATA_RESERVE_BYTES = 8192;
@@ -37,7 +38,8 @@ async function readLocalOriginal(url: string): Promise<Buffer> {
 // Call only with records already checked by getAuthorizedReferenceImagesForUse.
 // Originals and durable snapshots stay untouched; bytes exist only for this POST.
 export async function seedanceLocalReferenceTransport(input: CreateVideoInput,
-  authorized: AuthorizedImage[], read = readLocalOriginal): Promise<Partial<CreateVideoInput>> {
+  authorized: AuthorizedImage[], read = readLocalOriginal,
+  privateReferences: PrivateInlineReferenceImage[] = []): Promise<Partial<CreateVideoInput>> {
   const sources = new Map<string, NonNullable<AuthorizedImage['asset']>>();
   for (const image of authorized) {
     const asset = image.asset;
@@ -48,7 +50,7 @@ export async function seedanceLocalReferenceTransport(input: CreateVideoInput,
   const urls = input.generation_mode === 'first_last_frame' ? [input.first_frame_url, input.last_frame_url].filter(Boolean)
     : input.generation_mode === 'smart_multi_frame' ? input.frame_image_urls || [] : input.reference_image_urls || [];
   const inlineSources = urls.map(url => sources.get(siteUploadPathFromUrl(url!) || '')).filter(Boolean);
-  if (!inlineSources.length) return {};
+  if (!inlineSources.length && !privateReferences.length) return {};
   const baseRequestBytes = Buffer.byteLength(JSON.stringify(buildSeedanceVideoPayload(input)));
   let predictedBytes = baseRequestBytes + TASK_METADATA_RESERVE_BYTES;
   for (const asset of inlineSources) {
@@ -57,6 +59,13 @@ export async function seedanceLocalReferenceTransport(input: CreateVideoInput,
     }
     // Count every occurrence in the JSON body, even when the file is read once.
     predictedBytes += 4 * Math.ceil(asset.file_size / 3) + 64;
+  }
+  for (const image of privateReferences) {
+    if (image.mimeType !== 'image/png' || !Buffer.isBuffer(image.bytes) || image.bytes.length < 24
+      || image.bytes.length >= MAX_SINGLE_IMAGE_BYTES || !image.bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+      throw Error('系统参考图无法安全读取，尚未提交视频生成');
+    }
+    predictedBytes += 4 * Math.ceil(image.bytes.length / 3) + 64;
   }
   if (predictedBytes > SEEDANCE_INLINE_REQUEST_MAX_BYTES) throw Error('原图编码后的请求超过64MB，尚未提交视频生成');
   const cached = new Map<string, string>();
@@ -76,7 +85,10 @@ export async function seedanceLocalReferenceTransport(input: CreateVideoInput,
   if (input.generation_mode === 'all_in_one_reference' && input.reference_image_urls?.length) {
     const values = [];
     for (const url of input.reference_image_urls) values.push(await convert(url));
-    if (cached.size) patch.reference_image_base64_data = values;
+    for (const image of privateReferences) values.push(`data:${image.mimeType};base64,${image.bytes.toString('base64')}`);
+    if (cached.size || privateReferences.length) patch.reference_image_base64_data = values;
+  } else if (input.generation_mode === 'all_in_one_reference' && privateReferences.length) {
+    patch.reference_image_base64_data = privateReferences.map(image => `data:${image.mimeType};base64,${image.bytes.toString('base64')}`);
   } else if (input.generation_mode === 'first_last_frame') {
     if (input.first_frame_url) {
       const value = await convert(input.first_frame_url);

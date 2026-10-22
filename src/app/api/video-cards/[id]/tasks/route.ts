@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
@@ -51,6 +52,7 @@ export async function GET(
           provider: true,
           provider_task_id: true,
           prompt: true,
+          source_metadata_json: true,
           generation_mode: true,
           ratio: true,
           duration: true,
@@ -88,7 +90,7 @@ export async function GET(
     ]);
 
     return NextResponse.json({
-      tasks: tasks.map((task) => ({
+      tasks: tasks.map((task) => projectSelectedMultiviewTask({
         ...task,
         error_message: task.local_status === 'failed'
           ? visibleProviderErrorMessage(task.error_message)
@@ -101,7 +103,7 @@ export async function GET(
         total,
         total_pages: Math.max(1, Math.ceil(total / limit)),
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });

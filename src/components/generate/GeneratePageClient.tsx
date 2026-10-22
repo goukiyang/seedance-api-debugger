@@ -41,6 +41,7 @@ import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
 import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
 import { readImageResultHandoff, resumeImageResultVideoImport } from '@/lib/image-result-next/client';
 import type { ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
+import { issueMultiviewReuseHandoff } from '@/lib/video/multiview-reuse-handoff.client';
 import {
   taskReuseAutoAction,
   taskReuseContextMatches,
@@ -1937,7 +1938,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       let data: {
+        target_path?: string;
         draft?: {
+          target_path?: string;
           provider?: string | null;
           model?: string | null;
           task_id?: string;
@@ -1955,6 +1958,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           video_card_id?: string | null;
           video_branch_id?: string | null;
           video_card?: { id?: string; project_id?: string } | null;
+          supplement?: string;
+          main_asset_id?: string | null;
+          main_reference_image_id?: string | null;
         };
         skipped_references?: number;
         restored_references?: number;
@@ -1967,6 +1973,33 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         data = await readJsonResponse<typeof data>(res);
       } catch {
         markOutcomeUnknown('服务器返回内容无法确认。当前参数未替换，但参考区可能已变化；请重新读取并核对，不会自动重试。');
+        return;
+      }
+      const multiviewTarget = data.target_path === '/multiview' && data.draft?.target_path === '/multiview';
+      const multiviewOutputOnly = res.status === 409 && data.code === 'MULTIVIEW_OUTPUT_ONLY';
+      if (multiviewTarget && (res.ok || multiviewOutputOnly)) {
+        // This protected response never writes the ordinary workspace. Hand it to
+        // the owning 3D module only after the explicit reuse action is confirmed.
+        postMayHaveWritten = false;
+        if (!contextStillMatches()) {
+          try { sessionStorage.removeItem(receiptKey); } catch { /* A known read-only response needs no replay fence. */ }
+          transitionReuseSourceUrl(taskId, 'retryable');
+          retainIntent('failed', '读取期间账号或工作现场已变化，未跳转或覆盖任何输入；可从原任务重新选择复用。');
+          return;
+        }
+        try {
+          const handoff = issueMultiviewReuseHandoff(accountId, taskId, data, multiviewOutputOnly);
+          if (!handoff) throw new Error('3D多视图复用数据不完整，当前输入未改变。');
+          try { sessionStorage.removeItem(receiptKey); } catch { /* The handoff itself is independently retained and verified. */ }
+          consumeQuery('applied');
+          updateReuseIntent({ ...intent, phase: 'done' });
+          setReuseMessage(multiviewOutputOnly ? '正在打开3D多视图，当前草稿会保留。' : '正在把本人输入交给3D多视图，不会自动生成或扣费。');
+          window.location.assign(handoff.href);
+        } catch (cause) {
+          try { sessionStorage.removeItem(receiptKey); } catch { /* The server response is known and read-only. */ }
+          transitionReuseSourceUrl(taskId, 'retryable');
+          retainIntent('failed', cause instanceof Error ? cause.message : '3D多视图复用现场未能保留，尚未跳转。');
+        }
         return;
       }
       const parameterOnly = res.status === 409 && data.code === 'REUSE_ASSETS_UNAVAILABLE';

@@ -15,6 +15,7 @@ import { imageBillingView, type ImageBillingView } from '@/lib/image-studio/bill
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
+import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 
 export const dynamic = 'force-dynamic';
@@ -457,7 +458,7 @@ function addKeywordFilter(keyword: string | null): Prisma.VideoTaskWhereInput | 
   return {
     OR: [
       { id: { contains: keyword } },
-      { prompt: { contains: keyword } },
+      safeVideoTaskKeywordWhere(keyword),
       { provider_task_id: { contains: keyword } },
       { source_label: { contains: keyword } },
       { project: { name: { contains: keyword } } },
@@ -487,10 +488,11 @@ async function loadVideoItems(options: {
   removedIds: string[];
   directory?: boolean;
   ids?: string[];
+  multiviewOutputsOnly?: boolean;
 }) {
   const user = options.user;
 
-  if (options.type !== 'all' && options.type !== 'video') {
+  if (options.multiviewOutputsOnly || (options.type !== 'all' && options.type !== 'video')) {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
@@ -499,7 +501,7 @@ async function loadVideoItems(options: {
     includeAdminAll: user.role === 'admin',
     includeDeleted,
   });
-  const filters: Prisma.VideoTaskWhereInput[] = [];
+  const filters: Prisma.VideoTaskWhereInput[] = [ordinaryVideoTaskWhere()];
   if (options.removedIds.length) filters.push({ NOT: {
     id: { in: options.removedIds },
     OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
@@ -637,6 +639,7 @@ async function loadAssetItems(options: {
   keyword: string | null;
   includeUploads: boolean;
   includeGenerated: boolean;
+  multiviewOutputsOnly?: boolean;
   take: number;
   removedIds: string[];
   directory?: boolean;
@@ -655,6 +658,7 @@ async function loadAssetItems(options: {
 
   const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
+    ...(options.multiviewOutputsOnly ? { metadata_json: { contains: '"multiviewOutput"' } } : {}),
   };
   const removedIds = options.removedIds;
   if (removedIds.length) where.NOT = { id: { in: removedIds }, owner_id: options.userId };
@@ -705,10 +709,11 @@ async function loadAssetItems(options: {
         : Prisma.empty;
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
     const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
-    const generatedFilter = Prisma.sql`AND EXISTS (
+    const outputFlag = Prisma.sql`json_extract(CASE WHEN json_valid(asset."metadata_json") THEN asset."metadata_json" ELSE '{}' END, '$.multiviewOutput.schema') = 1`;
+    const generatedFilter = options.multiviewOutputsOnly ? Prisma.sql`AND ${outputFlag}` : Prisma.sql`AND (${outputFlag} OR EXISTS (
       SELECT 1 FROM "ImageStudioTask" generated_task
       WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
-    )`;
+    ))`;
     const idFilter = options.ids ? (options.ids.length ? Prisma.sql`AND asset."id" IN (${Prisma.join(options.ids)})` : Prisma.sql`AND 0 = 1`) : Prisma.empty;
     if (options.directory) {
       const rows = await prisma.$queryRaw<Array<{ id: string; created_at: Date | string; owner_id: string }>>(Prisma.sql`
@@ -817,6 +822,7 @@ async function loadReferenceItems(options: {
   take: number;
   removedIds: string[];
   removedAssetIds: string[];
+  multiviewOutputsOnly?: boolean;
   directory?: boolean;
   ids?: string[];
 }) {
@@ -832,6 +838,7 @@ async function loadReferenceItems(options: {
 
   const where: Prisma.ReferenceImageWhereInput = {
     status: options.status === 'hidden' ? 'deleted' : 'active',
+    ...(options.multiviewOutputsOnly ? { asset: { is: { metadata_json: { contains: '"multiviewOutput"' } } } } : {}),
     AND: [await studioVisibleReferenceWhere(options.user), { NOT: {
       owner_user_id: options.user.id,
       OR: [
@@ -911,6 +918,7 @@ export async function GET(request: NextRequest) {
     const limit = positiveInt(searchParams.get('limit'), 40, 100);
     const includeUploads = searchParams.get('include_uploads') === 'true';
     const includeGenerated = searchParams.get('include_generated') === 'true';
+    const multiviewOutputsOnly = searchParams.get('source') === 'multiview-output';
     // Private library preferences must not alter project/shared or admin audit views.
     const removed = scope === 'history' && !projectId && status !== 'hidden'
       ? await removedLibraryResources(user.id) : { asset: [], video_task: [], reference_image: [] };
@@ -919,15 +927,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
     }
 
-    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword,
+    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword, multiviewOutputsOnly,
       page: 1, limit, includeForMerge: false, removedIds: removed.video_task };
     const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId,
-      keyword, includeUploads, includeGenerated, take: limit, removedIds: removed.asset };
+      keyword, includeUploads, includeGenerated, multiviewOutputsOnly, take: limit, removedIds: removed.asset };
     const referenceOptions = { user, type, enhance, scope, status, projectId, ownerUserId, keyword,
-      take: limit, removedIds: removed.reference_image, removedAssetIds: removed.asset };
+      take: limit, multiviewOutputsOnly, removedIds: removed.reference_image, removedAssetIds: removed.asset };
     const directoryResults = await Promise.all([
       loadVideoItems({ ...videoOptions, directory: true }),
-      includeUploads || includeGenerated ? loadAssetItems({ ...assetOptions, directory: true }) : null,
+      includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, directory: true }) : null,
       loadReferenceItems({ ...referenceOptions, directory: true }),
     ]);
     const directory = sortItems(Array.from(new Map(directoryResults.flatMap(result =>
@@ -943,7 +951,7 @@ export async function GET(request: NextRequest) {
     const ids = (source: LibraryItemSource) => selected.filter(item => item.id.startsWith(`${source}:`)).map(item => item.id.slice(source.length + 1));
     const [videoResult, assetResult, referenceResult] = await Promise.all([
       loadVideoItems({ ...videoOptions, ids: ids('video_task') }),
-      includeUploads || includeGenerated ? loadAssetItems({ ...assetOptions, ids: ids('asset') }) : null,
+      includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, ids: ids('asset') }) : null,
       loadReferenceItems({ ...referenceOptions, ids: ids('reference_image') }),
     ]);
     const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items].map(item => [item.id, item]));
@@ -964,6 +972,7 @@ export async function GET(request: NextRequest) {
         enhance,
         include_uploads: includeUploads,
         include_generated: includeGenerated,
+        source: multiviewOutputsOnly ? 'multiview-output' : null,
         group_by: groupBy,
         project_id: projectId,
         owner_user_id: ownerUserId,

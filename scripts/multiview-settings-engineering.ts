@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -15,6 +15,7 @@ async function main() {
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined);
   process.env.DATABASE_URL = `file:${path.join(directory, 'synthetic.db')}`;
   process.env.SESSION_SECRET = randomBytes(32).toString('hex');
+  Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   globalThis.fetch = async () => { throw new Error('External requests prohibited in isolated multiview settings fixture'); };
   const childEnv: NodeJS.ProcessEnv = { NODE_ENV: 'test' };
@@ -24,6 +25,17 @@ async function main() {
     '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env: childEnv, encoding: 'utf8', timeout: 120000 });
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
   const require = createRequire(import.meta.url);
+  // Match Next's official server compilation alias inside this raw-Node fixture
+  // only. Production modules keep their server-only boundary unchanged.
+  type ResolveFilename = (request: string, ...arguments_: unknown[]) => string;
+  const moduleLoader = require('node:module') as { _resolveFilename: ResolveFilename };
+  const originalResolveFilename = moduleLoader._resolveFilename;
+  const serverOnlyEmpty = require.resolve('next/dist/compiled/server-only/empty.js');
+  moduleLoader._resolveFilename = function (request: string, ...arguments_: unknown[]) {
+    return request === 'server-only' || request === 'next/dist/compiled/server-only'
+      ? serverOnlyEmpty : originalResolveFilename.call(moduleLoader, request, ...arguments_);
+  };
+  try {
   const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   // One module graph keeps real error class identity under Node20/tsx. Mixing
@@ -42,6 +54,8 @@ async function main() {
   const mutation = require('../src/app/api/multiview/settings/mutations/[mutationId]/route') as typeof import('../src/app/api/multiview/settings/mutations/[mutationId]/route');
   const estimateRoute = require('../src/app/api/tasks/estimate/route') as typeof import('../src/app/api/tasks/estimate/route');
   const createRoute = require('../src/app/api/tasks/create/route') as typeof import('../src/app/api/tasks/create/route');
+  const privacy = require('../src/lib/video/multiview-task-privacy') as typeof import('../src/lib/video/multiview-task-privacy');
+  const sharp = require('sharp') as typeof import('sharp');
   const checks: string[] = [];
   const evidencePath = path.join(directory, 'receipt.json');
   let completed = false;
@@ -84,9 +98,42 @@ async function main() {
     assert.equal((await invoke('settings-external', 'GET', '?kind=generation')).status, 403);
     assert.equal((await invoke('settings-owner', 'POST', '', {}, false)).status, 403);
     assert.equal(await prisma.platformSetting.count(), 0);
+    await assert.rejects(presets.readMultiviewRotationPreset());
+    await assert.rejects(presets.readMultiviewRotationPresetVersion('1.0.0'));
+    assert.equal(await prisma.platformSetting.count(), 0);
     checks.push('real_session_company_boundary_and_origin_rejection_no_writes');
 
-    const value = { schema: 1 as const, presetId: 'multiview-360' as const, presetVersion: generation.MULTIVIEW_ROTATION_PRESET.version,
+    const syntheticPrompt = '仅用于隔离设置测试：图1为本人主图，图2为合成构图参考，完成一周旋转。';
+    const guideBytes = await sharp({ create: { width: 2, height: 2, channels: 4,
+      background: { r: 16, g: 32, b: 48, alpha: 1 } } }).png().toBuffer();
+    const guideMetadata = await sharp(guideBytes).metadata();
+    assert.equal(guideMetadata.format, 'png'); assert.equal(guideMetadata.width, 2); assert.equal(guideMetadata.height, 2);
+    const guideSha256 = createHash('sha256').update(guideBytes).digest('hex');
+    writeFileSync(path.join(directory, 'synthetic-system-reference.png'), guideBytes, { mode: 0o600 });
+    await prisma.referenceAlbum.create({ data: { id: 'settings-system-reference-album', owner_user_id: 'settings-admin',
+      name: 'Synthetic private guide', album_type: 'personal', visibility: 'private' } });
+    await prisma.asset.create({ data: { id: 'settings-system-reference-asset', owner_id: 'settings-admin', type: 'image',
+      original_url: `/uploads/assets/${guideSha256}.png`, file_name: 'synthetic-system-reference.png', mime_type: 'image/png',
+      file_size: guideBytes.length, width: guideMetadata.width, height: guideMetadata.height, hash: guideSha256 } });
+    await prisma.referenceImage.create({ data: { id: 'settings-system-reference', owner_user_id: 'settings-admin',
+      album_id: 'settings-system-reference-album', asset_id: 'settings-system-reference-asset', url: `/uploads/assets/${guideSha256}.png` } });
+    const syntheticPreset: import('../src/lib/video/multiview-generation-contract').MultiviewRotationPreset = {
+      id: generation.MULTIVIEW_ROTATION_PRESET.id, version: '1.0.0', prompt: syntheticPrompt,
+      defaults: { ...generation.MULTIVIEW_ROTATION_PRESET.defaults }, compositionReference: {
+        assetId: 'settings-system-reference-asset', referenceImageId: 'settings-system-reference', ownerId: 'settings-admin', sha256: guideSha256,
+      },
+    };
+    const initialPresetState = JSON.stringify({ revision: 0, preset: syntheticPreset });
+    await prisma.$transaction([
+      prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:current', value_json: initialPresetState, updated_by: 'settings-admin' } }),
+      prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:version:1.0.0', value_json: initialPresetState, updated_by: 'settings-admin' } }),
+    ]);
+    assert.equal(await prisma.platformSetting.count(), 2);
+    const initialPrivatePreset = await presets.readMultiviewRotationPreset();
+    assert.equal(initialPrivatePreset.revision, 0); assert.deepEqual(initialPrivatePreset.preset, syntheticPreset);
+    checks.push('synthetic_private_current_and_immutable_recipe_with_real_png_binding_seeded_only_in_isolated_database');
+
+    const value = { schema: 1 as const, presetId: 'multiview-360' as const, presetVersion: syntheticPreset.version,
       ...generation.MULTIVIEW_ROTATION_PRESET.defaults, supplement: '合成可复用补充要求' };
     const request = { mutationId: randomUUID(), kind: 'generation', name: '合成共享设置', value };
     const first = await invoke('settings-owner', 'POST', '', request);
@@ -97,12 +144,21 @@ async function main() {
     const binding = { id: saved.id, revision: saved.revision };
     assert.equal((await invoke('settings-peer', 'GET', '?kind=generation')).body.items.length, 1);
     const applied = await invoke('settings-peer', 'POST', `/${saved.id}/apply`, { expectedRevision: 1 });
-    assert.equal(applied.status, 200); assert.equal(applied.body.preset.prompt, generation.MULTIVIEW_ROTATION_PRESET.prompt);
+    assert.equal(applied.status, 200);
+    assert.deepEqual(applied.body.preset, generation.publicMultiviewRotationPreset(syntheticPreset));
+    assert.equal(Object.prototype.hasOwnProperty.call(applied.body.preset, 'prompt'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(applied.body.preset, 'compositionReference'), false);
+    assert.ok(!JSON.stringify(applied.body).includes(syntheticPrompt));
+    assert.ok(!JSON.stringify(applied.body).includes(guideSha256));
+    assert.ok(!JSON.stringify(applied.body).includes(syntheticPreset.compositionReference.assetId));
+    const appliedByOwner = await invoke('settings-owner', 'POST', `/${saved.id}/apply`, { expectedRevision: 1 });
+    assert.equal(appliedByOwner.status, 200); assert.deepEqual(appliedByOwner.body.preset, applied.body.preset);
     assert.equal((await invoke('settings-peer', 'PATCH', `/${saved.id}`, { mutationId: randomUUID(), expectedRevision: 1, name: 'forbidden', value })).status, 403);
     const recovered = await invoke('settings-owner', 'GET', `/mutations/${request.mutationId}`);
     assert.deepEqual(recovered.body, first.body);
     assert.deepEqual((await invoke('settings-owner', 'POST', '', request)).body, first.body);
-    assert.equal(await prisma.platformSetting.count(), 1);
+    assert.equal(await prisma.platformSetting.count({ where: { key: { startsWith: 'multiview_settings_v1:' } } }), 1);
+    assert.equal(await prisma.platformSetting.count(), 3);
     const reused = await invoke('settings-owner', 'POST', '', { ...request, name: 'changed-input' });
     assert.equal(reused.status, 409); assert.notEqual(reused.body.notCommitted, true);
     checks.push('shared_default_fresh_apply_owner_only_cas_durable_original_receipt_and_replay');
@@ -115,10 +171,18 @@ async function main() {
       projectId: 'isolated-settings-project', mainImage: { assetId: 'isolated-image', referenceImageId: 'isolated-reference' } };
     const body = generation.buildMultiviewGenerationRequest(draft, { idempotencyKey: randomUUID(), maxEstimatedCost: 0 });
     assert.deepEqual(body.multiview_generation.settingsBinding, binding);
+    assert.equal(body.multiview_generation.schema, 2);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'prompt'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body.source_metadata, 'protected_module'), false);
+    assert.deepEqual(body.reference_image_ids, [draft.mainImage.referenceImageId]);
+    assert.ok(!JSON.stringify(body).includes(syntheticPrompt));
+    assert.ok(!JSON.stringify(body).includes(guideSha256));
     const frozen = JSON.stringify(body);
     await presets.saveMultiviewRotationPreset({ mutationId: randomUUID(), expectedRevision: 0, prompt: '合成新的全局旋转基准 @图片1' }, 'settings-admin');
     await withActor('settings-peer', async user => {
-      assert.equal((await service.resolveMultiviewGenerationSettings(user, value.presetVersion, binding)).preset.prompt, generation.MULTIVIEW_ROTATION_PRESET.prompt);
+      const original = await service.resolveMultiviewGenerationSettings(user, value.presetVersion, binding);
+      assert.equal(original.preset.prompt, syntheticPrompt);
+      assert.deepEqual(original.preset.compositionReference, syntheticPreset.compositionReference);
       await assert.rejects(service.resolveMultiviewGenerationSettings(user, value.presetVersion));
     });
     const historicalGuess = await invoke('settings-peer', 'POST', '', { ...request, mutationId: randomUUID(), name: 'unauthorized-old-version' });
@@ -146,9 +210,21 @@ async function main() {
     await prisma.project.create({ data: { id: 'isolated-peer-project', name: 'Synthetic peer private project', type: 'personal', owner_user_id: 'settings-peer', created_by: 'settings-peer' } });
     const acceptedBody = { ...body, project_id: 'isolated-peer-project', pricing_fingerprint_version: 2 };
     const acceptedId = 'isolated-settings-accepted-task';
+    const composed = generation.composeMultiviewGenerationPrompt(value.supplement, value.presetVersion, syntheticPreset);
+    assert.equal(composed.valid, true); assert.ok(composed.prompt.startsWith(syntheticPrompt));
+    const acceptedFingerprint = pricing.videoPricingBusinessFingerprint(acceptedBody);
+    assert.ok(acceptedFingerprint.startsWith('pricing-v2:'));
     await prisma.videoTask.create({ data: { id: acceptedId, user_id: 'settings-peer', owner_user_id: 'settings-peer', project_id: 'isolated-peer-project',
-      provider: 'seedance', model: value.model, generation_mode: 'all_in_one_reference', prompt: body.prompt, local_status: 'queued',
-      idempotency_key: body.idempotency_key, request_fingerprint: pricing.videoPricingBusinessFingerprint(acceptedBody) } });
+      provider: 'seedance', model: value.model, generation_mode: 'all_in_one_reference', prompt: composed.prompt.trim(),
+      final_prompt_snapshot: composed.prompt, local_status: 'queued', ratio: value.ratio, duration: value.duration, resolution: value.resolution,
+      seed: value.seed, generate_audio: value.generateAudio, return_last_frame: value.returnLastFrame, watermark: value.watermark,
+      source_metadata_json: JSON.stringify({ protected_module: privacy.multiviewPrivateTaskMarker(value.presetVersion) }),
+      reference_image_ids: JSON.stringify([body.multiview_generation.mainReferenceImageId]),
+      params_json: JSON.stringify({ provider: 'seedance', model: value.model, generationMode: 'all_in_one_reference',
+        ratio: value.ratio, duration: value.duration, resolution: value.resolution, seed: value.seed, generateAudio: value.generateAudio,
+        returnLastFrame: value.returnLastFrame, watermark: value.watermark, resolutionApprovalConfirmed: false,
+        referenceImageIds: [body.multiview_generation.mainReferenceImageId], multiviewGeneration: body.multiview_generation }),
+      idempotency_key: body.idempotency_key, request_fingerprint: acceptedFingerprint } });
 
     const update = { mutationId: randomUUID(), expectedRevision: 1, name: saved.name, isShared: false, value, sourceSettingsBinding: binding };
     const withdrawn = await invoke('settings-owner', 'PATCH', `/${saved.id}`, update);
@@ -184,7 +260,16 @@ async function main() {
         headers: { 'Content-Type': 'application/json', 'x-app-session-user': user.id, 'x-tab-id': draft.workspaceTabId }, body: JSON.stringify(acceptedBody) }));
       const result = await response.json();
       assert.equal(response.status, 200); assert.equal(result.id, acceptedId); assert.equal(result.deduplicated, true);
+      assert.equal(result.fingerprint_verified, true); assert.equal(result.protected_module, true);
+      assert.equal(result.prompt, '3D多视图');
+      assert.equal(Object.prototype.hasOwnProperty.call(result, 'params_json'), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(result, 'raw_status_response'), false);
+      assert.ok(!JSON.stringify(result).includes(syntheticPrompt)); assert.ok(!JSON.stringify(result).includes(guideSha256));
     });
+    const originalAcceptedTask = await prisma.videoTask.findUniqueOrThrow({ where: { id: acceptedId } });
+    assert.equal(originalAcceptedTask.prompt, composed.prompt.trim());
+    assert.equal(originalAcceptedTask.final_prompt_snapshot, composed.prompt);
+    assert.equal(originalAcceptedTask.request_fingerprint, acceptedFingerprint);
     assert.equal(await prisma.videoTask.count(), 1);
     assert.equal(await prisma.providerApiRequest.count(), 0);
     checks.push('real_create_api_returns_original_accepted_key_after_source_sharing_withdrawal_without_upstream_or_second_task');
@@ -245,5 +330,8 @@ async function main() {
       production: false, generatedVideo: 0, upstreamRequests: 0, evidencePath }, null, 2), { mode: 0o600 });
   }
   process.stdout.write(JSON.stringify({ completed, checks, evidencePath }) + '\n');
+  } finally {
+    moduleLoader._resolveFilename = originalResolveFilename;
+  }
 }
 void main().catch(error => { process.stderr.write(String(error?.stack || error) + '\n'); process.exitCode = 1; });

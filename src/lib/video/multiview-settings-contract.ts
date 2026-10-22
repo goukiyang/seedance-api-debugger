@@ -1,6 +1,7 @@
 import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
-import { isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_ROTATION_PRESET, parseMultiviewSettingsBinding, type MultiviewRotationPreset } from './multiview-generation-contract';
+import { isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_ROTATION_PRESET, parseMultiviewSettingsBinding,
+  type MultiviewRotationPresetPublicDto } from './multiview-generation-contract';
 export { parseMultiviewSettingsBinding, type MultiviewSettingsBinding } from './multiview-generation-contract';
 
 export type MultiviewSettingsKind = 'generation' | 'frame';
@@ -24,7 +25,7 @@ export type MultiviewSettingsDto = MultiviewSettingsSummary & { contentHash: str
 );
 export type MultiviewSettingsSource = { taskId: string; sourceVersion: string };
 export type MultiviewSettingsReceipt = { state: 'committed'; mutationId: string; action: 'create' | 'save' | 'rename' | 'delete'; settings: MultiviewSettingsDto };
-export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPreset; slots?: MultiviewFrameSettingsSlot[] };
+export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPresetPublicDto; slots?: MultiviewFrameSettingsSlot[] };
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const only = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).every(key => keys.includes(key));

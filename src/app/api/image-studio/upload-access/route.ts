@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates, canViewStudioPreset, isExplicitPresetAsset } from '@/lib/image-studio/access';
 import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
+import { multiviewSystemReferenceFileAccess } from '@/lib/video/multiview-recipe-storage.server';
+import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
 export const runtime = 'nodejs';
@@ -17,6 +19,10 @@ export async function GET(request: NextRequest) {
 
   const pathname = request.nextUrl.searchParams.get('path') || '';
   const user = await getSession();
+  const guide = await multiviewSystemReferenceFileAccess(user, pathname);
+  if (guide.protected) return new NextResponse(null, { status: guide.allowed ? 204 : 404 });
+  const output = await multiviewOutputFileAccess(user, pathname);
+  if (output.protected) return new NextResponse(null, { status: output.allowed ? 204 : 404 });
   if ((await studioHiddenAssetUrls(user)).includes(pathname)) return new NextResponse(null, { status: 404 });
   if (!pathname.startsWith('/uploads/assets/') && !pathname.startsWith('/uploads/thumbs/')) {
     return new NextResponse(null, { status: 204 });

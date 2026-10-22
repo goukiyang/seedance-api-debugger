@@ -2,7 +2,7 @@ import packageInfo from '../../package.json';
 import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
 
 export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '项目与生成记录改为大封面，图集支持就地创建；费用表、本人用量趋势和手机布局更清楚，任务视频完整显示。'
+  ? '3D多视图使用统一生成配置，保留本人主图和补充要求；新增本人生成记录，保存作品后可直接在素材入口使用拼图和单张。'
   : '原任务、上传和高清结果保留。视频批次可查看和停止未开始项，暂不开始新批次；API质量设置和费率暂时只读，已保存配置不会自动改价。' };
 
 function numericOrder(a: string, b: string) {

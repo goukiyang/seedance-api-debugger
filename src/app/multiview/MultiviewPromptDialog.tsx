@@ -8,8 +8,10 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { MAX_GENERATION_PROMPT_CHARS } from '@/lib/prompt/limits';
-import { isMultiviewPresetVersion, MULTIVIEW_REFERENCE_PROMPT_PREFIX,
+import { isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_REFERENCE_PROMPT_PREFIX,
   type MultiviewRotationPresetState } from '@/lib/video/multiview-generation-contract';
+import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
+import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import dialogStyles from '@/components/ProductDialog.module.css';
 import styles from './multiview-generation.module.css';
 
@@ -19,8 +21,25 @@ export function parsePresetState(value: unknown): MultiviewRotationPresetState |
   if (!Number.isSafeInteger(row.revision) || (row.revision as number) < 0 || !row.preset || typeof row.preset !== 'object' || Array.isArray(row.preset)) return null;
   const preset = row.preset as Record<string, unknown>;
   if (preset.id !== 'multiview-360' || !isMultiviewPresetVersion(preset.version) || typeof preset.prompt !== 'string'
-    || !preset.prompt.trim() || preset.prompt.length + MULTIVIEW_REFERENCE_PROMPT_PREFIX.length > MAX_GENERATION_PROMPT_CHARS) return null;
-  return { revision: row.revision as number, preset: { id: 'multiview-360', version: preset.version, prompt: preset.prompt } };
+    || !preset.prompt.trim() || preset.prompt.length + MULTIVIEW_REFERENCE_PROMPT_PREFIX.length > MAX_GENERATION_PROMPT_CHARS
+    || !preset.defaults || typeof preset.defaults !== 'object' || Array.isArray(preset.defaults)
+    || !preset.compositionReference || typeof preset.compositionReference !== 'object' || Array.isArray(preset.compositionReference)) return null;
+  const defaults = preset.defaults as Record<string, unknown>;
+  const reference = preset.compositionReference as Record<string, unknown>;
+  if (defaults.provider !== 'seedance' || defaults.generationMode !== 'all_in_one_reference'
+    || typeof defaults.model !== 'string' || !isSeedanceVideoModelId(defaults.model) || !RATIO_OPTIONS.includes(defaults.ratio as never)
+    || !isSeedanceVideoDuration(defaults.duration, defaults.model) || !RESOLUTION_OPTIONS.includes(defaults.resolution as never)
+    || !isMultiviewGenerationSeed(defaults.seed) || typeof defaults.generateAudio !== 'boolean'
+    || typeof defaults.returnLastFrame !== 'boolean' || typeof defaults.watermark !== 'boolean'
+    || !['assetId', 'referenceImageId', 'ownerId'].every(key => typeof reference[key] === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,159}$/.test(reference[key] as string))
+    || typeof reference.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(reference.sha256)) return null;
+  return { revision: row.revision as number, preset: { id: 'multiview-360', version: preset.version, prompt: preset.prompt,
+    defaults: { provider: 'seedance', generationMode: 'all_in_one_reference', model: defaults.model,
+      ratio: defaults.ratio as (typeof RATIO_OPTIONS)[number], duration: defaults.duration,
+      resolution: defaults.resolution as (typeof RESOLUTION_OPTIONS)[number], seed: defaults.seed,
+      generateAudio: defaults.generateAudio, returnLastFrame: defaults.returnLastFrame, watermark: defaults.watermark },
+    compositionReference: { assetId: reference.assetId as string, referenceImageId: reference.referenceImageId as string,
+      ownerId: reference.ownerId as string, sha256: reference.sha256 } } };
 }
 
 type Props = { open: boolean; ownerId: string; authorityKey: string; onClose: () => void | boolean;

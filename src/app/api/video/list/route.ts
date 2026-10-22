@@ -8,6 +8,7 @@ import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { projectSelectedMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,17 +24,17 @@ function serializeTaskListItem<T extends {
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
   error_message?: string | null;
-}>(task: T, currentUserId: string) {
+} & TaskProtectionSource>(task: T, currentUserId: string) {
   const ownerId = task.owner_user_id || task.user_id || null;
 
-  return {
+  return projectSelectedMultiviewTask({
     ...task,
     can_delete: Boolean(ownerId && ownerId === currentUserId && task.retention_status !== 'admin_hidden'),
     error_message: task.local_status === 'failed'
       ? visibleProviderErrorMessage(task.error_message)
       : task.error_message,
     ...taskThumbnailProjection(task),
-  };
+  });
 }
 
 export async function GET(request: NextRequest) {
@@ -77,6 +78,7 @@ export async function GET(request: NextRequest) {
       take: limit,
       select: {
         id: true,
+        source_metadata_json: true,
         provider: true,
         model: true,
         provider_task_id: true,
@@ -148,7 +150,7 @@ export async function GET(request: NextRequest) {
         total,
         total_pages: Math.ceil(total / limit),
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(
