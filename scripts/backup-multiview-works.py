@@ -91,6 +91,36 @@ def open_directory(path):
         raise
 
 
+def open_isolated_directory(directory):
+    """Pin a private non-production copy; Linux copies must stay on the actual data disk."""
+    directory = absolute_path(str(directory))
+    require(directory != PRODUCTION_BASE and PRODUCTION_BASE not in directory.parents,
+            'isolated_directory_must_be_outside_production')
+    require(directory.resolve(strict=True) == directory, 'isolated_directory_must_be_canonical')
+    descriptor = open_directory(directory)
+    try:
+        info = os.fstat(descriptor)
+        require(info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o700,
+                'isolated_directory_must_be_owned_private_0700')
+        if sys.platform == 'linux':
+            require(Path('/data') in directory.parents, 'isolated_directory_must_use_data_disk')
+            data_fd = open_directory(Path('/data'))
+            try:
+                data = os.fstat(data_fd)
+                require(data.st_dev != os.stat('/').st_dev, 'real_data_mount_required')
+                require(info.st_dev == data.st_dev, 'isolated_directory_must_use_actual_data_mount')
+            finally:
+                os.close(data_fd)
+        named = os.stat(directory, follow_symlinks=False)
+        require(stat.S_ISDIR(named.st_mode) and info.st_dev == named.st_dev and info.st_ino == named.st_ino
+                and named.st_uid == os.geteuid() and stat.S_IMODE(named.st_mode) == 0o700
+                and directory.resolve(strict=True) == directory, 'isolated_directory_identity_changed')
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def regular_file(directory_fd, name):
     descriptor = os.open(name, READ_FLAGS, dir_fd=directory_fd)
     try:
@@ -705,7 +735,7 @@ def read_private_json(directory_fd, name, maximum_bytes):
 def verify_backup(directory):
     """Read-only recovery proof in an isolated copy. Never restore a live DB."""
     require(directory != PRODUCTION_BASE and PRODUCTION_BASE not in directory.parents, 'recovery_verification_requires_isolated_copy')
-    root_fd = open_directory(directory)
+    root_fd = open_isolated_directory(directory)
     try:
         require(stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'backup_directory_not_private')
         record = read_private_json(root_fd, 'mapping.json', 256 * 1024 * 1024)

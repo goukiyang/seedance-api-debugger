@@ -52,13 +52,31 @@ function findAstNode<T extends ts.Node>(root: ts.Node, predicate: (node: ts.Node
   return found;
 }
 
-function evaluateAstExpression<T>(expression: string, globals: UnknownRecord = {}): T {
+function evaluateAstExpression<T>(expression: string, globals: UnknownRecord = {}, label = 'unknown'): T {
   const compiled = ts.transpileModule(`module.exports = (${expression});`, { compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
   } }).outputText;
   const sandbox = { module: { exports: undefined as unknown }, exports: {}, ...globals };
-  vm.runInNewContext(compiled, sandbox, { filename: 'multiview-panel-ast-fixture.js' });
+  assert.match(label, /^[a-z][a-z0-9-]{0,39}$/);
+  vm.runInNewContext(compiled, sandbox, { filename: `multiview-panel-${label}-ast-fixture.js` });
   return sandbox.module.exports as T;
+}
+
+function syntheticFailureDiagnostic(error: unknown) {
+  const record = error && typeof error === 'object' ? error as UnknownRecord : {};
+  const rawName = typeof record.name === 'string' ? record.name : 'NonErrorThrown';
+  const rawCode = typeof record.code === 'string' || typeof record.code === 'number' ? String(record.code) : 'none';
+  const stack = typeof record.stack === 'string' ? record.stack : '';
+  const location = stack.match(/(multiview-panel-[a-z0-9-]+-ast-fixture\.js:\d+:\d+|(?:scripts|src)\/[^()\s]+:\d+:\d+)/)?.[1] || 'unknown';
+  const missingMatch = rawName === 'ReferenceError' && typeof record.message === 'string'
+    ? /^([A-Za-z_$][A-Za-z0-9_$]{0,79}) is not defined$/.exec(record.message) : null;
+  return {
+    phase: location.match(/^multiview-panel-([a-z0-9-]+)-ast-fixture\.js:/)?.[1] || 'fixture',
+    name: /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(rawName) ? rawName : 'Error',
+    code: /^[A-Za-z0-9_.-]{1,80}$/.test(rawCode) ? rawCode : 'unknown',
+    location,
+    missing: missingMatch?.[1] || 'none',
+  };
 }
 
 function assertPanelDefaultAndScopeContinuations(root: string, generation: typeof import('../src/lib/video/multiview-generation-contract')) {
@@ -77,19 +95,35 @@ function assertPanelDefaultAndScopeContinuations(root: string, generation: typeo
   assert.ok(captureDeclaration.initializer && ts.isArrowFunction(captureDeclaration.initializer));
 
   const restorationMarker = findAstNode(component, (node): node is ts.ExpressionStatement => ts.isExpressionStatement(node)
-    && node.getText(ast).includes('awaitingInitialPresetDefaults.current = !restored'),
+    && ts.isBinaryExpression(node.expression) && node.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    && node.expression.left.getText(ast) === 'awaitingInitialPresetDefaults.current'
+    && node.expression.right.getText(ast) === '!restored',
   'Restoration must initialize the one-time server-default marker from the actual restored draft');
   const adoption = findAstNode(component, (node): node is ts.IfStatement => ts.isIfStatement(node)
     && node.expression.getText(ast).includes('awaitingInitialPresetDefaults.current')
     && node.thenStatement.getText(ast).includes('...value.preset.defaults')
     && node.thenStatement.getText(ast).includes('setDraft(next)'),
   'The actual initial-preset continuation must remain extractable');
+  const adoptionBlock = adoption.parent;
+  assert.ok(ts.isBlock(adoptionBlock), 'The preset adoption must remain in its real continuation block');
+  const adoptionIndex = adoptionBlock.statements.indexOf(adoption);
+  assert.ok(adoptionIndex > 0, 'The preset adoption must retain its preceding draft capture');
+  const previousDraftStatement = adoptionBlock.statements[adoptionIndex - 1];
+  assert.ok(ts.isVariableStatement(previousDraftStatement)
+    && previousDraftStatement.declarationList.declarations.length === 1,
+  'The preset adoption must retain one adjacent draft capture statement');
+  const previousDraftDeclaration = previousDraftStatement.declarationList.declarations[0];
+  assert.ok(ts.isIdentifier(previousDraftDeclaration.name) && previousDraftDeclaration.name.text === 'previous'
+    && previousDraftDeclaration.initializer?.getText(ast) === 'draftRef.current',
+  'The preset adoption must use the adjacent real draftRef capture');
   const setRestorationMarker = evaluateAstExpression<(restored: unknown, marker: { current: boolean }) => void>(
     `function (restored, awaitingInitialPresetDefaults) { ${restorationMarker.getText(ast)} }`,
+    {}, 'restoration-marker',
   );
   const runAdoption = evaluateAstExpression<(binding: unknown, marker: { current: boolean }, draftRef: { current: UnknownRecord | null },
     value: UnknownRecord, setDraft: (value: UnknownRecord) => void) => void>(
-      `function (binding, awaitingInitialPresetDefaults, draftRef, value, setDraft) { ${adoption.getText(ast)} }`,
+      `function (binding, awaitingInitialPresetDefaults, draftRef, value, setDraft) { ${previousDraftStatement.getText(ast)} ${adoption.getText(ast)} }`,
+      {}, 'preset-adoption',
     );
 
   const personalDraft = {
@@ -135,7 +169,7 @@ function assertPanelDefaultAndScopeContinuations(root: string, generation: typeo
     ready: true, current: () => true, capture: () => ({}), submitLock: { current: null }, draftRef: editedRef,
     awaitingInitialPresetDefaults: editedMarker, setDraft: (value: UnknownRecord) => editedWrites.push(value),
     setError: () => {}, setSaved: () => {}, setDraftEdited: () => {},
-  });
+  }, 'draft-change');
   changeDraft({ model: 'human-edited-model' });
   assert.equal(editedMarker.current, false);
   assert.equal(editedRef.current?.model, 'human-edited-model');
@@ -172,18 +206,18 @@ function assertPanelDefaultAndScopeContinuations(root: string, generation: typeo
   const liveSessionReady = { current: true }, upload = { ownerId: 'owner-a', epoch: 11 };
   const captureScope = evaluateAstExpression<() => UnknownRecord>(captureDeclaration.initializer!.getText(ast), {
     owner: 'owner-a', authorityKey: 'authority-a', epoch, uploadSession: () => ({ ...upload }),
-  });
+  }, 'scope-capture');
   const currentScope = evaluateAstExpression<(scope: UnknownRecord) => boolean>(currentDeclaration.initializer!.getText(ast), {
     mountedOwner, epoch, liveAuthority, liveSessionReady, isClientSessionBlocked: () => false, uploadSession: () => ({ ...upload }),
-  });
+  }, 'scope-current');
   const handoffScope = captureScope();
   const statuses: string[] = [], errors: string[] = [];
   const thenContinuation = evaluateAstExpression<() => void>(thenNode.getText(ast), {
     current: currentScope, handoffScope, setStatus: (value: string) => statuses.push(value), doneMessage: 'handoff complete',
-  });
+  }, 'handoff-then');
   const catchContinuation = evaluateAstExpression<(cause: unknown) => void>(catchNode.getText(ast), {
     current: currentScope, handoffScope, setError: (value: string) => errors.push(value), message: (_cause: unknown, fallback: string) => fallback,
-  });
+  }, 'handoff-catch');
   mountedOwner.current = 'owner-b'; epoch.current = 8; upload.ownerId = 'owner-b'; upload.epoch = 12;
   thenContinuation(); catchContinuation(new Error('stale handoff'));
   assert.deepEqual(statuses, []);
@@ -457,7 +491,8 @@ async function main() {
   }
 }
 
-void main().catch(() => {
-  console.error('Multiview private engineering failed');
+void main().catch(error => {
+  const failure = syntheticFailureDiagnostic(error);
+  console.error(`Multiview private engineering failed [phase=${failure.phase}; name=${failure.name}; code=${failure.code}; at=${failure.location}; missing=${failure.missing}]`);
   process.exitCode = 1;
 });
