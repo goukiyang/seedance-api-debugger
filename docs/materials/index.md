@@ -2,6 +2,8 @@
 
 ## DESIGN01/02 设计对齐前置工单（2026-10-21）
 
+DESIGN03/04实施收口（2026-10-22）：正式原单D01–D11已全范围保现功能落地并保护部署v0.102.2，实际源4fb7f841/BUILD qwBCyuUR2RcM8M-vL8KoV；10:33:12Z正常切换，10:35Z收窗，两辅助服务未重启。guard4b1adbba/BUILD oNhpz_gPaennYmwMTqTBf保留，只回程序不回DB/配置/账本/媒体/回执，未实际回退演练。双完整构建保原时间，29固定入口/16Linux控制/同lead Review及56唯一公网编译资源有证；原失败分类、恢复与所有原件保留。正式根同单§9.7、implementation/deployment-closure-r08.json及父线程最终只读薄核为完整私有入口。A01–A10和真实旧客户端更新提醒仍用户手验，无浏览器/业务API/收费验收。以下是前置阶段历史，不代表当前仍未实施；完整正文/原图/实页/日志不上传公开Git。
+
 来源：用户要求对照最终设计图与“我的项目”相关实页，明确不是旧读表故障，并授权独立窗口只读查看。正式根私有正文`tasks/todo/2026-10-21-projects-design-alignment-preflight.md` v1.0.0/R02，覆盖项目/记录/图集/结果/费用/成员/手机/本人用量；复用素材v1.0.0最终8图。D01–D11含原因、修改位置、选定方案与A01–A10、回退；**必要前置完成，未实施**，替代R01等待取证状态。正式根`docs/materials/2026-10-21-projects-design-alignment/`保source-comparison.json、live-screenshots-manifest.json、live-dom-evidence.json及16实页原件；v0.102.1/R01，已核加载版、35引用入口、PNG尺寸/字节及源摘要。手机模拟、非空项目图集无实页样本且由源码确定遗漏，边界不冒功能验收。仅脱敏登记推Git；完整正文、图片及私有证据保正式根，无业务实现、收费或部署。
 
 ## LIB01/LIB02 整单实施（2026-10-21）

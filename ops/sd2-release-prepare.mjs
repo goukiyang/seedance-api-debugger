@@ -16,6 +16,23 @@ const sha = /^[a-f0-9]{40}$/, sha256 = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export const REUSE_SCHEMA = 'sd2-candidate-build-reuse.v1';
 export const CONTINUATION_V2 = 'sd2-normal-continuation-input.v2';
+export const UNPUBLISHED_PAIR = Object.freeze({
+  run: 'e6044ae3-4f29-4dfd-8f12-93a94cdfa9ff',
+  manifestSha256: '9ce497c4318e25234c251b2a96d2795523d4d8dd37cb81600313e29ab93d030a',
+  main: { source: '4fb7f841ec05f38759bede3e3b4bea73e19c027f', version: '0.102.2', build: 'qwBCyuUR2RcM8M-vL8KoV',
+    sha256: '9bac43895caf236770eda2f7f71ffc45dc567277f573ee3e48ccba5c446f8496' },
+  guard: { source: '4b1adbbab77c80449ec1a7fc326d59b28249e34b', version: '0.102.2+projects-design-guard.1', build: 'oNhpz_gPaennYmwMTqTBf',
+    sha256: 'a5bd86c476f13cb1104e2dc21154c4d2a6f2d42cc67b0470cc975ba98d961a57' },
+});
+export function exactUnpublishedPlan(plan) {
+  if (plan.reuseBuilds?.sourceRun !== UNPUBLISHED_PAIR.run) return false;
+  assert.equal(plan.contract.normalContinuation, null);
+  assert.notEqual(plan.contract.recoveryRunId, UNPUBLISHED_PAIR.run);
+  assert.equal(plan.contract.mainSource, UNPUBLISHED_PAIR.main.source);
+  assert.equal(plan.contract.recoveryGuardSource, UNPUBLISHED_PAIR.guard.source);
+  for (const kind of ['main', 'guard']) assert.equal(plan.contract.versions[kind], UNPUBLISHED_PAIR[kind].version);
+  return true;
+}
 export const CONTINUATION_COMMON_FIELDS = ['schema', 'chainId', 'attempt', 'sourceRun', 'sourceManifestSha256',
   'beforeSha256', 'approvalSha256', 'refusalSha256', 'lineageSha256'];
 export function assertContinuationInput(value) {
@@ -149,6 +166,7 @@ export function validatePlan(plan, original, now = Date.now()) {
     assert.notEqual(c.normalContinuation.sourceRun, c.recoveryRunId);
   }
   const continuationV2 = c.normalContinuation?.schema === CONTINUATION_V2;
+  const exactUnpublished = exactUnpublishedPlan(plan);
   if (continuationV2) {
     assert.ok(c.deployedUsageSchema && c.deployedCanvasBatchSchema && c.canvasVideoBatchSchema && plan.reuseBuilds,
       'Continuation v2 requires both deployed schemas and the original full-build pair');
@@ -157,21 +175,21 @@ export function validatePlan(plan, original, now = Date.now()) {
   if (c.canvasVideoBatchSchema) {
     assertCanvasBatchSchemaInput(c.canvasVideoBatchSchema);
     assert.ok(c.deployedUsageSchema, 'Additive canvas migration retains the deployed usage schema proof');
-    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
+    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
   }
   if (c.deployedCanvasBatchSchema) {
     assertDeployedCanvasInput(c.deployedCanvasBatchSchema);
     assert.ok(c.canvasVideoBatchSchema && c.deployedUsageSchema);
     if (!continuationV2) assert.equal(c.normalContinuation, null);
     assert.notEqual(c.deployedCanvasBatchSchema.migrationRun, c.recoveryRunId);
-    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
+    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
   }
   if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
     const value = c.deployedUsageSchema;
     keys(value, DEPLOYED_FIELDS); assert.equal(value.schema, DEPLOYED_SCHEMA);
     for (const key of ['publicationRun', 'migrationRun']) { assert.match(value[key], uuid); assert.notEqual(value[key], c.recoveryRunId); }
     for (const key of DEPLOYED_FIELDS.filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
-    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
+    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
     keys(plan.deployedUsageProof, ['stdoutFile', 'commandReceiptFile']);
     for (const file of Object.values(plan.deployedUsageProof)) assert.ok(typeof file === 'string' && path.isAbsolute(file));
   } else {
@@ -259,11 +277,13 @@ export function reuseInput(plan) {
   if (plan.reuseBuilds === null) return null;
   const { sourceRun, directory } = plan.reuseBuilds, result = { schema: 'sd2-original-build-reuse-input.v1', sourceRun };
   const continuation = plan.contract.normalContinuation && assertContinuationInput(plan.contract.normalContinuation);
+  const exactUnpublished = exactUnpublishedPlan(plan);
   let original;
-  if (continuation?.schema === CONTINUATION_V2) {
+  const manifestSha256 = exactUnpublished ? UNPUBLISHED_PAIR.manifestSha256 : continuation?.sourceManifestSha256;
+  if (continuation?.schema === CONTINUATION_V2 || exactUnpublished) {
     assert.ok(plan.contract.deployedUsageSchema && plan.contract.deployedCanvasBatchSchema && plan.contract.canvasVideoBatchSchema);
-    assert.equal(sourceRun, continuation.sourceRun);
-    const bytes = read(path.join(directory, 'manifest.json')); assert.equal(digest(bytes), continuation.sourceManifestSha256);
+    assert.equal(sourceRun, exactUnpublished ? UNPUBLISHED_PAIR.run : continuation.sourceRun);
+    const bytes = read(path.join(directory, 'manifest.json')); assert.equal(digest(bytes), manifestSha256);
     original = JSON.parse(bytes);
     assert.equal(original.schema, 'rate-impl2-release.v1'); assert.equal(original.project, 'video-api-debugger');
     assert.equal(original.runId, sourceRun); assert.equal(original.stage, '/data/video-api-debugger/release-staging/' + sourceRun);
@@ -287,12 +307,19 @@ export function reuseInput(plan) {
     assert.equal(value.originalReceipt.version, plan.contract.versions[kind]);
     assert.equal(value.originalReceipt.exitCode, 0); assert.equal(value.originalReceipt.verifiedSourceAndGates, true);
     assert.ok(value.snapshot && value.originalReceipt.build && value.originalReceipt.finishedAt);
+    if (exactUnpublished) {
+      assert.equal(digest(bytes), UNPUBLISHED_PAIR[kind].sha256);
+      assert.equal(value.originalReceipt.build, UNPUBLISHED_PAIR[kind].build);
+      const sealed = Date.parse(value.sealedAt);
+      assert.ok(Number.isSafeInteger(sealed) && sealed >= value.originalReceipt.finishedAt
+        && sealed - value.originalReceipt.startedAt < 1800000);
+    }
     if (original) {
-      assert.equal(value.originalManifestSha256, continuation.sourceManifestSha256);
+      assert.equal(value.originalManifestSha256, manifestSha256);
       assert.equal(value.originalReceiptFile, original.stage + '/' + kind + '-build.json');
       const receipt = read(path.join(directory, kind + '-build.json'));
       assert.equal(digest(receipt), value.originalReceiptSha256); assert.deepEqual(JSON.parse(receipt), value.originalReceipt);
-      assert.equal(digest(read(path.join(directory, 'manifest.json'))), continuation.sourceManifestSha256,
+      assert.equal(digest(read(path.join(directory, 'manifest.json'))), manifestSha256,
         'Original manifest changed during local reuse preparation');
     }
     result[kind] = { file: '/data/video-api-debugger/release-staging/' + sourceRun + '/' + file, sha256: digest(bytes) };

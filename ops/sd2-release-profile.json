@@ -8,11 +8,11 @@
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
     "root": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-21-projects-design-alignment/implementation",
-    "template": "release-projects-design-r01",
-    "wrapper": "run-projects-design-r01.mjs",
+    "template": "release-projects-design-r03",
+    "wrapper": "run-projects-design-r03.mjs",
     "controllerCount": 49,
-    "controllerSetSha256": "332b662d9c11646a82fcccb9ed5c0cfed7907358a3048a1281b8ae7e42292eb6",
-    "wrapperSha256": "2bfdf3a8c3cb0e2bc066f8e5461bf8e1dceaef6065a4c3cb1ac226d1e9249457",
+    "controllerSetSha256": "2e5bf579d8b7c197deda20891d4cfabf2c1a5be5e9cdf9fad1689428be4f3620",
+    "wrapperSha256": "09fa6cb80a1c4e4872a57956175b225fbe20a8a07928ea5187b5d5f198545c45",
     "changed": [
       "candidate-inputs.mjs",
       "candidate-reuse-engineering.mjs",

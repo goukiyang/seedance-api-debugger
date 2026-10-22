@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
-  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput } from './sd2-release-prepare.mjs';
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -56,6 +56,34 @@ await test('Mixed main and guard cannot reuse old pair', () => {
   assert.throws(() => reuseInput(mixed));
 });
 await test('Fresh builds never claim reused evidence', () => assert.equal(reuseInput({ ...plan, reuseBuilds: null }), null));
+await test('Exact unpublished pair retains original sealed bytes and rejects changed pair, seal, hash and manifest', () => {
+  const base = profile.promotion.root, pin = UNPUBLISHED_PAIR;
+  const originalPlan = JSON.parse(fs.readFileSync(path.join(base, 'plan-r05.json')));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-exact-pair-'));
+  try {
+    const value = structuredClone(originalPlan); value.contract.recoveryRunId = randomUUID();
+    value.liveCapture.observedAt = new Date(now).toISOString();
+    value.reuseBuilds = { sourceRun: pin.run, directory };
+    fs.copyFileSync(path.join(originalPlan.outputRoot, pin.run, 'manifest.json'), path.join(directory, 'manifest.json'));
+    for (const kind of ['main', 'guard']) for (const [from, to] of [
+      [kind + '-immutable-success-r02.json', kind + '-immutable-success.json'], [kind + '-build-r02.json', kind + '-build.json']])
+      fs.copyFileSync(path.join(base, from), path.join(directory, to));
+    validatePlan(value, original, now);
+    const result = reuseInput(value);
+    for (const kind of ['main', 'guard']) assert.equal(result[kind].sha256, pin[kind].sha256);
+    for (const change of [x => { x.contract.mainSource = '0'.repeat(40); }, x => { x.contract.recoveryGuardSource = '0'.repeat(40); },
+      x => { x.reuseBuilds.sourceRun = randomUUID(); }, x => { x.contract.deployedUsageSchema.publicationRun = randomUUID(); }]) {
+      const changed = structuredClone(value); change(changed); assert.throws(() => { validatePlan(changed, original, now); reuseInput(changed); });
+    }
+    const file = path.join(directory, 'main-immutable-success.json'), bytes = fs.readFileSync(file);
+    for (const change of [x => { x.originalReceipt.exitCode = 1; }, x => { x.sealedAt = new Date(x.originalReceipt.startedAt + 1800001).toISOString(); },
+      x => { x.originalReceipt.build += 'forged'; }]) {
+      const changed = JSON.parse(bytes); change(changed); fs.writeFileSync(file, JSON.stringify(changed));
+      assert.throws(() => reuseInput(value)); fs.writeFileSync(file, bytes);
+    }
+    fs.appendFileSync(path.join(directory, 'manifest.json'), ' '); assert.throws(() => reuseInput(value));
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});
 const deployedPlan = () => {
   const value = structuredClone(plan); value.reuseBuilds = null;
   value.contract.normalContinuation = null;

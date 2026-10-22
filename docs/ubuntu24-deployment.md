@@ -6,6 +6,10 @@
 
 固定准备入口为 `ops/sd2-release-prepare.mjs`，控制来源由同目录 `sd2-release-profile.json` 锁定。它先逐字核实正式根私有 `docs/materials/2026-10-19-upload-unknown-recovery/release-r16/` 的36个成功控制模块及原成功证据；ADMIN-USAGE另封新控制包，经profile的promotion精确锁定新增及允许变动文件，其余原模块逐字保留，不另建发布引擎、不上传私有材料到Git。r16及其原run只读，禁止复制旧run/PID/价格修订冒新鲜现场。根因及原附件见正式根费率工单§24.5。
 
+DESIGN03/04于2026-10-22T10:33:12.763Z正常保护发布v0.102.2，实际四writer源4fb7f841、BUILD`qwBCyuUR2RcM8M-vL8KoV`，相容guard4b1adbba/BUILD`oNhpz_gPaennYmwMTqTBf`。当前profile晋升私有`release-projects-design-r03`49模块，历史r08/r01/r02及失败run均不改。新增精确分流仅认原e6044ae3未发布整对4fb/4b，pin原manifest与两+i成功证SHA/source/version/BUILD；完整核source/lock/deps/env/Node/artifact/check metadata和字节，原封存在原30分钟内，后续原时间不改、另发30分钟fresh，不接受任意过期pair或伪造拒绝进入v2。
+
+来源provenance核对与正常维护前runtime/保护/schema鲜核必须分层：schema后续reader也需要读原来源，不得让底层来源核对反调schema/保护入口导致互递归。整批正反fixture及原16组控制完成后才晋升；实际原run无switch/stop/503/fence/pair、候选/别名未运行及原身份/配置/权限/备份均须真实核对。原exit0/完整cgroup、费用/租约/未知保护、backup、启动屏障、fence与guard不放宽；现场不稳定则保拒绝原证、原站与累计次数，待原因/状态有新证再鲜准入。只回程序不回数据，后续发布/回退需新窗口/批准，不能借本次已过期批准。原单§9.7及固定todo保完整私有证据；56唯一公网资源及服务健康不是A01–A10用户手验。
+
 ```bash
 node ops/sd2-release-prepare.mjs check-template /Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-19-upload-unknown-recovery
 ssh -o BatchMode=yes root@42.193.221.253 'node --input-type=module' < ops/sd2-release-live-capture.mjs > /ABSOLUTE/PRIVATE/live.json 2> /ABSOLUTE/PRIVATE/live-proof.json
