@@ -153,7 +153,7 @@ export function observeMultiviewWorksStart(contract, observationAdapter) {
   validateContract(contract);
   assert.equal(adapter.platform, 'linux');
   const nodeMajor = Number(String(adapter.nodeVersion).split('.')[0]);
-  assert.ok(Number.isSafeInteger(nodeMajor) && nodeMajor >= 22, 'Node 22 or newer is required');
+  assert.ok(Number.isSafeInteger(nodeMajor) && nodeMajor >= 20, 'Node 20 or newer is required');
   assert.equal(adapter.uid(), contract.appUid, 'The consumer is not running as the admitted application UID');
   const data = directory(adapter, '/data');
   const system = adapter.stat('/');
