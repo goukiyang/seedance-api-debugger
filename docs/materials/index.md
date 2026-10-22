@@ -1,8 +1,8 @@
 # 项目资料索引
 
-## DESIGN01/02 设计对齐前置调查（2026-10-21）
+## DESIGN01/02 设计对齐前置工单（2026-10-21）
 
-来源：用户要求对照最终设计图与“我的项目”相关实页，明确不是旧读表故障。正式根私有正文`tasks/todo/2026-10-21-projects-design-alignment-preflight.md` v0.1.0/R01，主题覆盖项目/记录/图集/结果/费用/成员/手机/本人用量；复用素材v1.0.0最终8图，不重出图。源码与附件核对存`docs/materials/2026-10-21-projects-design-alignment/source-comparison.json`。当前实页截图缺口仍由本对话完成，**不是正式就绪执行单**。仅脱敏登记推Git；完整正文、图片及私有证据保正式根，无业务实现或部署。
+来源：用户要求对照最终设计图与“我的项目”相关实页，明确不是旧读表故障，并授权独立窗口只读查看。正式根私有正文`tasks/todo/2026-10-21-projects-design-alignment-preflight.md` v1.0.0/R02，覆盖项目/记录/图集/结果/费用/成员/手机/本人用量；复用素材v1.0.0最终8图。D01–D11含原因、修改位置、选定方案与A01–A10、回退；**必要前置完成，未实施**，替代R01等待取证状态。正式根`docs/materials/2026-10-21-projects-design-alignment/`保source-comparison.json、live-screenshots-manifest.json、live-dom-evidence.json及16实页原件；v0.102.1/R01，已核加载版、35引用入口、PNG尺寸/字节及源摘要。手机模拟、非空项目图集无实页样本且由源码确定遗漏，边界不冒功能验收。仅脱敏登记推Git；完整正文、图片及私有证据保正式根，无业务实现、收费或部署。
 
 ## LIB01/LIB02 整单实施（2026-10-21）
 
