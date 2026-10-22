@@ -62,6 +62,25 @@ export const R08_RECOVERED_GUARD = Object.freeze({
   proofSha256: '6918a2124c9943c6dc7076d9d9bda3d0821b25076a4bde48e8e4cf42c60e1edb',
   proofCommandSha256: 'c49d8b0f5aa8d2f88f2cc8020fbc1950f4804d15114366cdb5e1f9b38c5afe91',
 });
+export const R10_RECOVERED_GUARD = Object.freeze({
+  schema: 'sd2-multiview-r10-recovered-guard.v1',
+  runId: '7a2b5381-e43f-4bfa-8377-019a91bfb8f5',
+  manifestSha256: 'ed23f65e91aea8037b490e25e2a2889d95e8895a4f878963bacb8254bd1486f9',
+  fixedGuardSha256: '4156c603ef918f434ed0666ecd5fa40f78d1b4cfbc2d89de97c2b510fe989254',
+  guardBuildReceiptSha256: 'e5509d7727ac06b5dcfed767b6297321640cf7e16b27f9b655737206d6418c39',
+  guardImmutableSuccessSha256: '9a5f41b3214d3f2aa04583d180bdd9d3db77bd3a6629dfe6f0c86f5822d1c097',
+  recoveryCompleteSha256: 'ab0a2224d1362cb5596f3fe5d56600b62da9fc3b332be5fb51882fcb317c2cfb',
+  switchCommandSha256: 'f29b8fa7b52ed91748ebb26350624fb095848f917b5d77e65c1c4a854ee36dac',
+  proofSha256: '06e1a94e3e48c61c1295d25119614e377b19df87d3a64e58dba36ef4ca4421c7',
+  proofCommandSha256: '3da9189d8501a8b26ec0bd719cfbe90d02018be08138d75b21931a049e62924b',
+  recoveryEvidenceIndexSha256: 'e0f48916580b2df60216873118719f41e4deab1d160d081abb17dceb4d4c05d9',
+  worksReadyGuardSha256: '9e91a1710036118d66f7caed54a5398f92195e35b4d67d2040cc65ae8a6c742d',
+});
+function assertRecoveredGuardInput(value) {
+  const expected = value?.schema === R10_RECOVERED_GUARD.schema ? R10_RECOVERED_GUARD : R08_RECOVERED_GUARD;
+  assert.deepEqual(value, expected, 'Only the exact retained R08/c9 or R10/2c recovery may supply the live baseline');
+  return expected;
+}
 export function assertDeployedCanvasInput(value) {
   keys(value, DEPLOYED_CANVAS_FIELDS);
   assert.equal(value.schema, 'sd2-deployed-canvas-video-batch-schema-input.v1');
@@ -207,16 +226,19 @@ export function validatePlan(plan, original, now = Date.now()) {
     assert.equal(plan.deployedUsageProof || null, null, 'Historical proof payload is only valid in deployed-schema mode');
   }
   if (c.recoveredGuardBaseline) {
-    assert.deepEqual(c.recoveredGuardBaseline, R08_RECOVERED_GUARD, 'Only the exact retained R08/c9 recovery may supply the live baseline');
+    const recovered = assertRecoveredGuardInput(c.recoveredGuardBaseline), r10 = recovered.schema === R10_RECOVERED_GUARD.schema;
+    const priorMain = r10 ? 'eae4475e5da2ebf3b68c31593a37117b59e6a09a' : '4e1fe5b888c1fdb20a9cbccdd6517b84452fa604';
     assert.ok(c.deployedUsageSchema && c.deployedCanvasBatchSchema && c.privateMultiviewInstall);
     assert.equal(c.normalContinuation, null); assert.equal(plan.reuseBuilds, null);
-    assert.notEqual(c.recoveryRunId, R08_RECOVERED_GUARD.runId);
-    assert.equal(c.baselineSource, 'c9f0a60d753b286db470626ad33c1987ff1c72bf');
+    assert.notEqual(c.recoveryRunId, recovered.runId);
+    assert.equal(c.baselineSource, r10 ? '2c1eafbd875fceeca63ddfe0da0e08c15bb9cbb7' : 'c9f0a60d753b286db470626ad33c1987ff1c72bf');
     assert.equal(c.sourceBase, c.baselineSource);
     assert.equal(c.baselineVersion, '0.103.0+multiview-private-guard.1');
-    assert.equal(c.baselineBuild, 'B7Ef-SggrUGg4-T5FAA_0');
+    assert.equal(c.baselineBuild, r10 ? 'j2d9GY6_bj4uOIMROXnsi' : 'B7Ef-SggrUGg4-T5FAA_0');
     for (const source of [c.mainSource, c.recoveryGuardSource])
-      assert.ok(!['4e1fe5b888c1fdb20a9cbccdd6517b84452fa604', c.baselineSource].includes(source), 'R08 builds cannot become a fresh pair');
+      assert.ok(![priorMain, c.baselineSource].includes(source), 'Recovered run builds cannot become a fresh pair');
+    if (r10) for (const key of ['publicationRun', 'migrationRun'])
+      assert.notEqual(c.deployedUsageSchema[key], recovered.runId, 'A failed recovery cannot replace normal schema history');
   }
   assert.match(c.recoveryRunId, uuid); assert.notEqual(c.recoveryRunId, profile.successfulRun);
   for (const key of ['mainSource', 'recoveryGuardSource', 'baselineSource', 'sourceBase', 'guardDisplaySource']) assert.match(c[key], sha);
@@ -272,7 +294,7 @@ export function checkSources(repo, c) {
   assert.equal(git(repo, ['rev-parse', c.mainBranch]), c.mainSource, 'Main branch moved');
   assert.equal(git(repo, ['rev-parse', c.guardReference]), c.recoveryGuardSource, 'Guard branch moved');
   if (c.recoveredGuardBaseline) {
-    assert.deepEqual(c.recoveredGuardBaseline, R08_RECOVERED_GUARD);
+    assertRecoveredGuardInput(c.recoveredGuardBaseline);
     const create = 'src/app/api/tasks/create/route.ts';
     assert.equal(git(repo, ['show', c.mainSource + ':' + create]), git(repo, ['show', '4e1fe5b888c1fdb20a9cbccdd6517b84452fa604:' + create]));
     assert.equal(git(repo, ['show', c.recoveryGuardSource + ':' + create]), git(repo, ['show', 'c9f0a60d753b286db470626ad33c1987ff1c72bf:' + create]));
