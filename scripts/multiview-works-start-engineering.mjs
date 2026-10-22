@@ -87,7 +87,7 @@ function shape(stat, virtual) {
 }
 function adapter(cwd, uid = appUid) {
   return {
-    platform: 'linux', nodeVersion: '22.11.0', uid: () => uid, cwd: () => cwd,
+    platform: 'linux', nodeVersion: '20.20.2', uid: () => uid, cwd: () => cwd,
     realpath: virtual => {
       const actual = fs.realpathSync(local(virtual));
       const relative = path.relative(fs.realpathSync(virtualRoot), actual);
@@ -134,6 +134,10 @@ try {
     source: guard.source, build: guard.build, actualUid: appUid, verified: true,
   });
   checks.push('actual_observer_main_and_guard_complete_allowlist');
+
+  assert.equal(observeMultiviewWorksStart(contract, { ...adapter(main.root), nodeVersion: '22.11.0' }).verified, true);
+  assert.throws(() => observeMultiviewWorksStart(contract, { ...adapter(main.root), nodeVersion: '18.20.0' }));
+  checks.push('deployed_node20_and_node22_supported_older_runtime_rejected');
 
   replace(main.root + '/.deployed-commit', 'd'.repeat(40), () => {
     assert.throws(() => observeMultiviewWorksStart(contract, adapter(main.root)));
