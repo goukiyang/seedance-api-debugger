@@ -16,6 +16,7 @@ const runtimePath = '/data/video-api-debugger/role-coordinator/runtime.json';
 let startup: { pid: number; sourceRoot: string; startedAt: string; version: string; loadedModuleSha: Record<string, string> };
 const running = new Map<string, { token: string; epoch: number; promise: Promise<void> }>();
 let stopped = false, lastHeartbeat = 0;
+let runtimeWrite: Promise<void> = Promise.resolve();
 let attemptAfter: { started_at: Date; id: string } | null = null;
 let recoveryAfter: { lease_until: Date; id: string } | null = null;
 process.once('SIGTERM', () => { stopped = true; });
@@ -36,10 +37,17 @@ async function log(code: string) {
 function errorCode(error: unknown) { return error instanceof RoleError ? error.code : 'coordinator_operation_unconfirmed'; }
 
 async function publishRuntime(state: 'active' | 'stopping' | 'stopped') {
-  const temporary = `${runtimePath}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify({ protocol: 'role.collaboration.v2', ...startup,
-    heartbeatAt: new Date().toISOString(), state, inFlight: running.size }) + '\n', { mode: 0o600 });
-  await rename(temporary, runtimePath);
+  const temporary = `${runtimePath}.${process.pid}.${randomUUID()}.tmp`;
+  const payload = JSON.stringify({ protocol: 'role.collaboration.v2', ...startup,
+    heartbeatAt: new Date().toISOString(), state, inFlight: running.size }) + '\n';
+  const writing = runtimeWrite.catch(() => {}).then(async () => {
+    try {
+      await writeFile(temporary, payload, { mode: 0o600 });
+      await rename(temporary, runtimePath);
+    } finally { await unlink(temporary).catch(() => {}); }
+  });
+  runtimeWrite = writing;
+  await writing;
 }
 
 async function recordStartup() {
@@ -165,11 +173,10 @@ async function main() {
   if (isRoleCollaborationReadOnly()) throw new Error('collaboration_guard');
   await recordStartup();
   await log('started');
-  let heartbeatBusy = false;
+  let heartbeatTask: Promise<void> | null = null;
   const timer = setInterval(() => {
-    if (heartbeatBusy) return;
-    heartbeatBusy = true;
-    void heartbeat().catch(error => log(errorCode(error))).finally(() => { heartbeatBusy = false; });
+    if (heartbeatTask) return;
+    heartbeatTask = heartbeat().catch(error => log(errorCode(error))).finally(() => { heartbeatTask = null; });
   }, 10000);
   while (!stopped) {
     try {
@@ -179,8 +186,15 @@ async function main() {
   }
   await Promise.all(Array.from(running.values()).map(task => task.promise));
   clearInterval(timer);
+  if (heartbeatTask) await heartbeatTask;
   await publishRuntime('stopped');
   await log('stopped');
   await prisma.$disconnect();
 }
-main().catch(async () => { await log('startup_failed'); await prisma.$disconnect(); process.exit(1); });
+main().catch(async (error: unknown) => {
+  const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    && /^(?:E[A-Z0-9_]{1,30}|P\d{4})$/.test(error.code) ? error.code : 'unclassified';
+  await log('startup_failed');
+  await log(`${stopped ? 'shutdown' : 'startup'}_exit_${code}`);
+  await prisma.$disconnect(); process.exit(1);
+});

@@ -109,6 +109,8 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/role-runtime-engineering.mjs', schema: 'role-runtime-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: ['scripts/role-runtime-engineering.mjs', 'scripts/canvas-role-coordinator.ts'] },
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
@@ -268,6 +270,12 @@ function validatePublicUsageFixture(fixture, recorded, runId, batchStart, batchE
   for (const key of ['forbiddenCalls', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0);
   if (value.productionWrites !== undefined) assert.equal(value.productionWrites, 0);
   assert.ok(Array.isArray(value.checks) && value.checks.length > 0 && new Set(value.checks).size === value.checks.length);
+  if (fixture.schema === 'role-runtime-engineering.v1') {
+    assert.equal(value.mode, 'verify'); assert.equal(value.maximumWrites, 1); assert.deepEqual(value.rejectedCodes, []);
+    assert.deepEqual(value.checks, ['actual_runtime_writer_serializes_concurrent_atomic_publication',
+      'write_failure_propagates_and_later_publication_recovers',
+      'actual_shutdown_waits_pending_heartbeat_before_terminal_publication_and_disconnect']);
+  }
   for (const file of fixture.sources) assert.equal(value.sourceSha256?.[file], sourceSha256[file]);
   for (const [file, digest] of Object.entries(value.sourceSha256 || {})) assert.equal(sourceSha256[file], digest);
 }
