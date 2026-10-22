@@ -66,6 +66,7 @@ const user = { id: 'self', role: 'user', status: 'active', account_type: 'intern
 const first = await readProjectAlbumPage(user, 'team', 20);
 assert.deepEqual(JSON.parse(JSON.stringify(first[0].thumbnail_urls)), ['cover1', 'image1', 'image2', 'image3'].map(id => `/api/reference-images/${id}/content?variant=thumbnail`));
 assert.equal(first[0].image_count, 9);
+assert.equal(first[0]._count.images, first[0].image_count);
 assert.equal(reads, 2);
 assert.equal(first[0].owner_user_id, undefined); assert.equal(first[0].shares, undefined);
 covers = [{ id: 'cover1', album_id: 'different-album' }];

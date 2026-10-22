@@ -28,6 +28,7 @@ export async function readProjectAlbumPage(user: SessionUser, projectId: string,
       id: album.id, name: album.name, description: album.description, album_type: album.album_type,
       visibility: album.visibility, status: album.status, updated_at: album.updated_at,
       image_count: album._count.images,
+      _count: { images: album._count.images },
       thumbnail_urls: ids.map((id) => `/api/reference-images/${encodeURIComponent(id)}/content?variant=thumbnail`),
     };
   }));

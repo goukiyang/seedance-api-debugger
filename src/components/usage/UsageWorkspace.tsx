@@ -65,15 +65,22 @@ function recordTarget(record: UsageRecordDTO) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-function ProjectUsageRow({ record, onNavigate }: { record: UsageRecordDTO; onNavigate: (id: string) => void }) {
+function ProjectUsageRow({ record, onNavigate, onPreview }: { record: UsageRecordDTO; onNavigate: (id: string) => void; onPreview: (record: UsageRecordDTO) => void }) {
   const href = recordTarget(record);
+  const download = safeHref(record.media?.downloadUrl);
+  const preview = record.type === 'image' ? safeHref(record.media?.imageUrl, true) : record.type === 'video' ? safeHref(record.media?.videoUrl) : null;
   return <tr id={`usage-${record.id}`}>
     <td data-label="时间"><RelativeTime value={record.occurredAt} /></td>
     <td data-label="类型 / 模型">{labels[record.type]}<br /><span className={styles.muted}>{record.model ? seedanceVideoModelLabel(record.model) : '型号待确认'}</span></td>
     <td data-label="生成状态">{statusText(record.status)}</td>
     <td data-label="确认人民币"><strong>{formatUsageMoney(record.cash.netCnyMicros)}</strong><br /><span className={styles.muted}>{cashState(record.cash)}</span></td>
     <td data-label="净扣点数">{point(record.points.net)}</td>
-    <td data-label="原记录">{href ? <Link className="link" href={href} onClick={() => onNavigate(record.id)}>查看原记录</Link> : <span className={styles.muted}>暂无可用入口</span>}<CashDetails cash={record.cash} points={record.points} /></td>
+    <td data-label="原记录"><div className={styles.actions}>
+      {href && <Link className="link" href={href} onClick={() => onNavigate(record.id)}>查看原记录</Link>}
+      {preview && <button className="btn btn-secondary" type="button" title={record.type === 'image' ? '查看图片' : '播放视频'} aria-label={record.type === 'image' ? '查看图片' : '播放视频'} onClick={() => onPreview(record)}>{record.type === 'image' ? <ImageIcon size={15} /> : <Play size={15} />}</button>}
+      {download && <a className="btn btn-secondary" title="下载" aria-label="下载" href={download}><Download size={15} /></a>}
+      {!href && !preview && <span className={styles.muted}>暂无可用入口</span>}
+    </div><CashDetails cash={record.cash} points={record.points} /></td>
   </tr>;
 }
 
@@ -290,7 +297,10 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
       {report.records.updated && <p role="status" className={styles.muted}>记录已更新，已显示有效页。</p>}
       {report.query.type === 'other' && <p>{report.summary.other.cash.netCnyMicros === null ? '其他业务实际费用待核' : `其他业务已确认 ${formatUsageMoney(report.summary.other.cash.netCnyMicros)}`} · 运行 {count(report.summary.other.taskCount)} 次</p>}
       {report.records.items.length === 0 ? <p className={styles.muted}>当前范围没有可读记录。{report.restricted ? '部分来源受限。' : ''}</p>
-        : projectId ? <div className={styles.projectTable}><table className="table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>确认人民币</th><th>净扣点数</th><th>原记录与明细</th></tr></thead><tbody>{report.records.items.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} />)}</tbody></table></div>
+        : projectId ? <div className={styles.projectTable}><table className="table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>确认人民币</th><th>净扣点数</th><th>原记录与明细</th></tr></thead>
+          {report.query.type === 'image' ? Array.from(groups, ([id, records]) => <tbody key={id}><tr><th colSpan={6} scope="rowgroup">{records[0].groupId ? '原批次' : '原请求'} · 当前页 {records.length} 条 · 费用保留原请求口径</th></tr>{records.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>)
+            : <tbody>{report.records.items.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>}
+        </table></div>
         : report.query.type === 'image' ? <div className={styles.records}>{Array.from(groups, ([id, records]) => <details className={styles.group} key={id} open={view.value.groups[id] ?? records.length === 1} onToggle={(event) => { const open = event.currentTarget.open; if (view.ready && open !== (view.value.groups[id] ?? records.length === 1)) view.update({ groups: { ...view.value.groups, [id]: open } }); }}>
           <summary>{records[0].groupId ? '原批次' : '原请求'} · 当前页 {records.length} 条图片记录 · <span className={styles.muted}>费用保留原请求口径</span></summary>
           <div className={styles.imageGrid}>{records.map((record) => <UsageRecord key={record.id} record={record} onPreview={setPreview} onNavigate={onNavigate} />)}</div>
