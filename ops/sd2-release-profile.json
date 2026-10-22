@@ -11,10 +11,11 @@
     "template": "release-multiview-private-r01",
     "wrapper": "run-multiview-private-r01.mjs",
     "controllerCount": 51,
-    "controllerSetSha256": "72f8b05eecc9275787393cab33408fa30e383806e9b7c6426c654c5757224941",
+    "controllerSetSha256": "d4341f880ce70ffbc81d005a91281ac2231c39e157d422c2f91d201acacd083a",
     "wrapperSha256": "8b4f085d8181d026d8daab84f61e0428b24ab16eb20f5eae52924a94f7df2830",
     "changed": [
       "candidate-inputs.mjs",
+      "candidate.mjs",
       "candidate-reuse-engineering.mjs",
       "candidate-reuse.mjs",
       "common.mjs",
