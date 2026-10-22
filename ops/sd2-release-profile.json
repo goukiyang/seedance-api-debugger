@@ -11,7 +11,7 @@
     "template": "release-multiview-private-r01",
     "wrapper": "run-multiview-private-r01.mjs",
     "controllerCount": 53,
-    "controllerSetSha256": "2d2433092f74a7c8c6d8fbabcf394689567b8a58fb48051927e0e35221bb8ba4",
+    "controllerSetSha256": "5f72608093c9cb01af6b47eb385eb1caf16218f63ecc2bd12b39897bb4cf04b9",
     "wrapperSha256": "8b4f085d8181d026d8daab84f61e0428b24ab16eb20f5eae52924a94f7df2830",
     "changed": [
       "candidate-inputs.mjs",
