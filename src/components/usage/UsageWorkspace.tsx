@@ -156,7 +156,7 @@ function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<type
           <XAxis dataKey="month" tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} />
           <YAxis domain={['auto', 'auto']} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} width={60} />
           <Tooltip contentStyle={{ background: 'var(--bg-panel)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }} />
-          <Legend /><ReferenceLine y={0} stroke="var(--text-secondary)" />
+          <Legend /><ReferenceLine y={0} ifOverflow="extendDomain" stroke="var(--text-secondary)" />
           <Bar dataKey="video" name={metric === 'cash' ? '视频（元）' : '视频（点）'} fill="#57a9da" minPointSize={value => value === 0 ? 2 : 0} isAnimationActive={false} />
           <Bar dataKey="image" name={metric === 'cash' ? '图片（元）' : '图片（点）'} fill="#62b49b" minPointSize={value => value === 0 ? 2 : 0} isAnimationActive={false} />
         </BarChart>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { Download, Eye, MoreHorizontal, Play, Repeat2 } from 'lucide-react';
+import { Download, Eye, MoreHorizontal, Play, Repeat2, RotateCcw } from 'lucide-react';
 import ProjectFilters from '@/components/projects/ProjectFilters';
 import ReferenceAlbumsClient from '@/app/collections/ReferenceAlbumsClient';
 import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
@@ -1784,6 +1784,7 @@ export default function ProjectDetailPage() {
             onChange={(event) => setWorkspace((current) => ({ ...current, taskSort: event.target.value as ProjectViewState['taskSort'], taskPage: 1 }))} aria-label="排序生成记录">
             <option value="newest">最近生成</option><option value="oldest">最早生成</option>
           </select>
+          <button className="btn btn-secondary" type="button" aria-label="重置记录筛选" title="重置记录筛选" onClick={() => setWorkspace((current) => ({ ...current, taskSearch: '', taskStatus: 'all', taskSort: 'newest', taskPage: 1 }))}><RotateCcw size={16} /></button>
           </ProjectFilters>
         </div>
         {tasks.length === 0 ? (
