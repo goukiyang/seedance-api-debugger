@@ -15,6 +15,19 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const sha = /^[a-f0-9]{40}$/, sha256 = /^[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export const REUSE_SCHEMA = 'sd2-candidate-build-reuse.v1';
+export const CONTINUATION_V2 = 'sd2-normal-continuation-input.v2';
+export const CONTINUATION_COMMON_FIELDS = ['schema', 'chainId', 'attempt', 'sourceRun', 'sourceManifestSha256',
+  'beforeSha256', 'approvalSha256', 'refusalSha256', 'lineageSha256'];
+export function assertContinuationInput(value) {
+  assert.ok(['sd2-normal-continuation-input.v1', CONTINUATION_V2].includes(value.schema), 'Unknown normal continuation schema');
+  const migration = value.schema === 'sd2-normal-continuation-input.v1';
+  keys(value, [...CONTINUATION_COMMON_FIELDS, ...(migration
+    ? ['migrationRun', 'migrationManifestSha256', 'migrationReceiptSha256', 'backupProofSha256'] : [])]);
+  for (const key of ['chainId', 'sourceRun', ...(migration ? ['migrationRun'] : [])]) assert.match(value[key], uuid);
+  for (const key of Object.keys(value).filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
+  assert.ok(Number.isSafeInteger(value.attempt) && value.attempt > 1);
+  return value;
+}
 export const DEPLOYED_SCHEMA = 'sd2-deployed-usage-schema-input.v1';
 export const DEPLOYED_FIELDS = ['schema', 'publicationRun', 'publicationManifestSha256', 'switchCompleteSha256',
   'finalProofSha256', 'finalProofCommandSha256', 'migrationRun', 'migrationManifestSha256', 'migrationBeforeSha256',
@@ -131,39 +144,38 @@ export function validatePlan(plan, original, now = Date.now()) {
   const observed = Date.parse(live.observedAt);
   assert.ok(Number.isSafeInteger(observed) && observed <= now && now - observed <= 300000, 'Capture must be fresh; historical evidence is not current runtime');
   assert.equal(c.sourceReady, true); assert.equal(c.baselineReconciled, true);
-  assert.ok(!(c.normalContinuation && c.deployedUsageSchema), 'Schema adoption modes are mutually exclusive');
+  if (c.normalContinuation) {
+    assertContinuationInput(c.normalContinuation);
+    assert.notEqual(c.normalContinuation.sourceRun, c.recoveryRunId);
+  }
+  const continuationV2 = c.normalContinuation?.schema === CONTINUATION_V2;
+  if (continuationV2) {
+    assert.ok(c.deployedUsageSchema && c.deployedCanvasBatchSchema && c.canvasVideoBatchSchema && plan.reuseBuilds,
+      'Continuation v2 requires both deployed schemas and the original full-build pair');
+    assert.equal(plan.reuseBuilds.sourceRun, c.normalContinuation.sourceRun);
+  } else assert.ok(!(c.normalContinuation && c.deployedUsageSchema), 'Schema adoption modes are mutually exclusive');
   if (c.canvasVideoBatchSchema) {
     assertCanvasBatchSchemaInput(c.canvasVideoBatchSchema);
     assert.ok(c.deployedUsageSchema, 'Additive canvas migration retains the deployed usage schema proof');
-    assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
+    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
   }
   if (c.deployedCanvasBatchSchema) {
     assertDeployedCanvasInput(c.deployedCanvasBatchSchema);
     assert.ok(c.canvasVideoBatchSchema && c.deployedUsageSchema);
-    assert.equal(c.normalContinuation, null);
+    if (!continuationV2) assert.equal(c.normalContinuation, null);
     assert.notEqual(c.deployedCanvasBatchSchema.migrationRun, c.recoveryRunId);
-    assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
+    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
   }
   if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
     const value = c.deployedUsageSchema;
     keys(value, DEPLOYED_FIELDS); assert.equal(value.schema, DEPLOYED_SCHEMA);
     for (const key of ['publicationRun', 'migrationRun']) { assert.match(value[key], uuid); assert.notEqual(value[key], c.recoveryRunId); }
     for (const key of DEPLOYED_FIELDS.filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
-    assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
+    if (!continuationV2) assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
     keys(plan.deployedUsageProof, ['stdoutFile', 'commandReceiptFile']);
     for (const file of Object.values(plan.deployedUsageProof)) assert.ok(typeof file === 'string' && path.isAbsolute(file));
   } else {
     assert.equal(plan.deployedUsageProof || null, null, 'Historical proof payload is only valid in deployed-schema mode');
-  }
-  if (c.normalContinuation) {
-    const value = c.normalContinuation;
-    keys(value, ['schema', 'chainId', 'attempt', 'sourceRun', 'sourceManifestSha256', 'beforeSha256', 'approvalSha256',
-      'refusalSha256', 'lineageSha256', 'migrationRun', 'migrationManifestSha256', 'migrationReceiptSha256', 'backupProofSha256']);
-    assert.equal(value.schema, 'sd2-normal-continuation-input.v1');
-    for (const key of ['chainId', 'sourceRun', 'migrationRun']) assert.match(value[key], uuid);
-    for (const key of Object.keys(value).filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
-    assert.ok(Number.isSafeInteger(value.attempt) && value.attempt > 1);
-    assert.notEqual(value.sourceRun, c.recoveryRunId);
   }
   assert.match(c.recoveryRunId, uuid); assert.notEqual(c.recoveryRunId, profile.successfulRun);
   for (const key of ['mainSource', 'recoveryGuardSource', 'baselineSource', 'sourceBase', 'guardDisplaySource']) assert.match(c[key], sha);
@@ -246,6 +258,25 @@ export function checkSources(repo, c) {
 export function reuseInput(plan) {
   if (plan.reuseBuilds === null) return null;
   const { sourceRun, directory } = plan.reuseBuilds, result = { schema: 'sd2-original-build-reuse-input.v1', sourceRun };
+  const continuation = plan.contract.normalContinuation && assertContinuationInput(plan.contract.normalContinuation);
+  let original;
+  if (continuation?.schema === CONTINUATION_V2) {
+    assert.ok(plan.contract.deployedUsageSchema && plan.contract.deployedCanvasBatchSchema && plan.contract.canvasVideoBatchSchema);
+    assert.equal(sourceRun, continuation.sourceRun);
+    const bytes = read(path.join(directory, 'manifest.json')); assert.equal(digest(bytes), continuation.sourceManifestSha256);
+    original = JSON.parse(bytes);
+    assert.equal(original.schema, 'rate-impl2-release.v1'); assert.equal(original.project, 'video-api-debugger');
+    assert.equal(original.runId, sourceRun); assert.equal(original.stage, '/data/video-api-debugger/release-staging/' + sourceRun);
+    assert.equal(original.normalContinuation || null, null); assert.equal(original.reuseBuilds || null, null);
+    for (const key of ['deployedUsageSchema', 'deployedCanvasBatchSchema', 'canvasVideoBatchSchema'])
+      assert.deepEqual(original[key], plan.contract[key]);
+    assert.equal(original.mainSource, plan.contract.mainSource); assert.equal(original.guardSource, plan.contract.recoveryGuardSource);
+    for (const kind of ['main', 'guard']) {
+      assert.equal(original[kind].source, original[kind + 'Source']);
+      assert.equal(original[kind].root, '/data/video-api-debugger/managed-releases/' + original[kind].source);
+      assert.equal(original[kind].version, plan.contract.versions[kind]);
+    }
+  }
   for (const [kind, source] of [['main', plan.contract.mainSource], ['guard', plan.contract.recoveryGuardSource]]) {
     const file = kind + '-immutable-success.json', bytes = read(path.join(directory, file)), value = JSON.parse(bytes);
     assert.equal(value.schema, 'sd2-immutable-successful-build.v1');
@@ -256,6 +287,14 @@ export function reuseInput(plan) {
     assert.equal(value.originalReceipt.version, plan.contract.versions[kind]);
     assert.equal(value.originalReceipt.exitCode, 0); assert.equal(value.originalReceipt.verifiedSourceAndGates, true);
     assert.ok(value.snapshot && value.originalReceipt.build && value.originalReceipt.finishedAt);
+    if (original) {
+      assert.equal(value.originalManifestSha256, continuation.sourceManifestSha256);
+      assert.equal(value.originalReceiptFile, original.stage + '/' + kind + '-build.json');
+      const receipt = read(path.join(directory, kind + '-build.json'));
+      assert.equal(digest(receipt), value.originalReceiptSha256); assert.deepEqual(JSON.parse(receipt), value.originalReceipt);
+      assert.equal(digest(read(path.join(directory, 'manifest.json'))), continuation.sourceManifestSha256,
+        'Original manifest changed during local reuse preparation');
+    }
     result[kind] = { file: '/data/video-api-debugger/release-staging/' + sourceRun + '/' + file, sha256: digest(bytes) };
   }
   return result;

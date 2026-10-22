@@ -6,7 +6,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
-  DEPLOYED_SCHEMA, DEPLOYED_FIELDS, deployedProofInput } from './sd2-release-prepare.mjs';
+  DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -63,6 +64,76 @@ const deployedPlan = () => {
   value.deployedUsageProof = { stdoutFile: '/tmp/retained-proof.stdout', commandReceiptFile: '/tmp/retained-proof-command.json' };
   return value;
 };
+const continuationPlan = () => {
+  const value = deployedPlan(), sourceRun = randomUUID();
+  value.reuseBuilds = { sourceRun, directory: '/tmp/original-full-pair' };
+  value.contract.normalContinuation = Object.fromEntries(CONTINUATION_COMMON_FIELDS.map(key => [key,
+    key === 'schema' ? CONTINUATION_V2 : key === 'attempt' ? 2 : key === 'sourceRun' || key === 'chainId' ? sourceRun : 'b'.repeat(64)]));
+  value.contract.canvasVideoBatchSchema = { schema: 'sd2-canvas-video-batch-schema-input.v1', previousPrismaSha256: 'c'.repeat(64),
+    newPrismaSha256: 'd'.repeat(64), sqlSha256: 'e'.repeat(64), migrationModuleSha256: 'f'.repeat(64) };
+  value.contract.deployedCanvasBatchSchema = Object.fromEntries(DEPLOYED_CANVAS_FIELDS.map(key => [key,
+    key === 'schema' ? 'sd2-deployed-canvas-video-batch-schema-input.v1' : key.endsWith('Sha256') ? 'a'.repeat(64) : randomUUID()]));
+  return value;
+};
+await test('Only exact v2 permits both deployed schemas and same original pair reuse', async () => {
+  const value = continuationPlan(); validatePlan(value, original, now);
+  const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'normal-continuation.mjs')));
+  assert.equal(consumer.CONTINUATION_V2, CONTINUATION_V2);
+  assert.deepEqual(consumer.CONTINUATION_COMMON_FIELDS, CONTINUATION_COMMON_FIELDS);
+  consumer.assertContinuationInput(value.contract.normalContinuation);
+  const v1 = { ...value.contract.normalContinuation, schema: 'sd2-normal-continuation-input.v1', migrationRun: randomUUID(),
+    migrationManifestSha256: 'a'.repeat(64), migrationReceiptSha256: 'b'.repeat(64), backupProofSha256: 'c'.repeat(64) };
+  assertContinuationInput(v1); consumer.assertContinuationInput(v1);
+});
+await test('Continuation v2 rejects missing schemas mixed run unknown mode and migration-only fields', () => {
+  for (const change of [v => { delete v.contract.deployedUsageSchema; }, v => { v.contract.deployedCanvasBatchSchema = null; },
+    v => { v.contract.canvasVideoBatchSchema = null; }, v => { v.reuseBuilds = null; },
+    v => { v.reuseBuilds.sourceRun = randomUUID(); }, v => { v.contract.normalContinuation.schema = 'sd2-normal-continuation-input.v3'; },
+    v => { v.contract.normalContinuation.migrationRun = randomUUID(); }, v => { v.contract.normalContinuation.allowEffects = true; },
+    v => { delete v.contract.normalContinuation.refusalSha256; }, v => { v.contract.normalContinuation.attempt = 1; },
+    v => { v.contract.normalContinuation.sourceRun = v.contract.recoveryRunId; }]) {
+    const value = continuationPlan(); change(value); assert.throws(() => validatePlan(value, original, now));
+  }
+});
+await test('V2 local producer pins original manifest exact pair and unmodified original receipts', () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-v2-reuse-'));
+  try {
+    const value = continuationPlan(); value.reuseBuilds.directory = temporary;
+    const sourceRun = value.reuseBuilds.sourceRun, stage = '/data/video-api-debugger/release-staging/' + sourceRun;
+    const origin = { schema: 'rate-impl2-release.v1', project: 'video-api-debugger', runId: sourceRun, stage,
+      mainSource: value.contract.mainSource, guardSource: value.contract.recoveryGuardSource,
+      deployedUsageSchema: value.contract.deployedUsageSchema, deployedCanvasBatchSchema: value.contract.deployedCanvasBatchSchema,
+      canvasVideoBatchSchema: value.contract.canvasVideoBatchSchema };
+    const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+    const put = (file, object) => { const bytes = Buffer.from(JSON.stringify(object)); fs.writeFileSync(path.join(temporary, file), bytes); return bytes; };
+    for (const kind of ['main', 'guard']) origin[kind] = { source: origin[kind + 'Source'],
+      root: '/data/video-api-debugger/managed-releases/' + origin[kind + 'Source'], version: value.contract.versions[kind] };
+    value.contract.normalContinuation.sourceManifestSha256 = hash(put('manifest.json', origin));
+    for (const kind of ['main', 'guard']) {
+      const receipt = { runId: sourceRun, source: origin[kind].source, version: origin[kind].version,
+        build: kind + '-original', startedAt: 1000, finishedAt: 2000, exitCode: 0, verifiedSourceAndGates: true };
+      const bytes = put(kind + '-build.json', receipt);
+      put(kind + '-immutable-success.json', { schema: 'sd2-immutable-successful-build.v1', kind, sourceRun,
+        originalManifestSha256: value.contract.normalContinuation.sourceManifestSha256,
+        originalReceiptFile: stage + '/' + kind + '-build.json', originalReceiptSha256: hash(bytes), originalReceipt: receipt,
+        originallyVerifiedWithinThirtyMinuteGate: true, originalTimesChanged: false, newCompilationClaimed: false, snapshot: {} });
+    }
+    const before = fs.readFileSync(path.join(temporary, 'main-immutable-success.json'));
+    const output = reuseInput(value);
+    assert.equal(output.sourceRun, sourceRun); assert.equal(output.main.sha256, hash(before));
+    assert.deepEqual(fs.readFileSync(path.join(temporary, 'main-immutable-success.json')), before);
+    const mixed = structuredClone(value); mixed.contract.recoveryGuardSource = '0'.repeat(40);
+    assert.throws(() => reuseInput(mixed));
+    const wrongRun = structuredClone(value); wrongRun.reuseBuilds.sourceRun = randomUUID(); assert.throws(() => reuseInput(wrongRun));
+    const changedSchema = structuredClone(value); changedSchema.contract.deployedCanvasBatchSchema.backupSha256 = '0'.repeat(64);
+    assert.throws(() => reuseInput(changedSchema));
+    const manifest = fs.readFileSync(path.join(temporary, 'manifest.json'));
+    fs.appendFileSync(path.join(temporary, 'manifest.json'), '\n'); assert.throws(() => reuseInput(value));
+    fs.writeFileSync(path.join(temporary, 'manifest.json'), manifest);
+    const receipt = JSON.parse(fs.readFileSync(path.join(temporary, 'main-build.json'))); receipt.startedAt = 3000;
+    put('main-build.json', receipt); assert.throws(() => reuseInput(value));
+  } finally { fs.rmSync(temporary, { recursive: true }); }
+});
 await test('Deployed schema is explicit nullable and requires fresh full pair', async () => {
   assert.equal(original.deployedUsageSchema, null);
   const value = deployedPlan(); validatePlan(value, original, now);

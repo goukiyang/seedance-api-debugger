@@ -8,11 +8,11 @@
   "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
   "promotion": {
     "root": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-21-project-list-timeout/implementation",
-    "template": "release-project-list-r06",
-    "wrapper": "run-project-list-r06.mjs",
+    "template": "release-project-list-r07",
+    "wrapper": "run-project-list-r07.mjs",
     "controllerCount": 49,
-    "controllerSetSha256": "2849dd68265221d1b5aeee460aea8580cda6961aeb7c907dcf395dfbe8a48f0e",
-    "wrapperSha256": "a2921f3ec8e014fcdcd6938cd6e036c6aa454f8f0104fe172fe4a51956d77d7a",
+    "controllerSetSha256": "cf8282ea1b12b08990c10d3dcd5c350b1aadea0c97dc07d6919d2dfb494b6ffb",
+    "wrapperSha256": "c5540e5935f1caa32bdb4e79cac7d08faf12861fe8d10819a78e1d97bb5f6e31",
     "changed": [
       "candidate-inputs.mjs",
       "candidate-reuse-engineering.mjs",
@@ -20,6 +20,7 @@
       "common.mjs",
       "control-preflight.mjs",
       "cutover-driver.mjs",
+      "cutover-safety-engineering.mjs",
       "cutover-safety.mjs",
       "guard-recovery.mjs",
       "hd-closed-cache-engineering.mjs",
@@ -29,7 +30,8 @@
       "release-protection-engineering.mjs",
       "release.mjs",
       "retired-hd-cache-engineering.mjs",
-      "switch.mjs"
+      "switch.mjs",
+      "writer-network-fence.mjs"
     ],
     "added": [
       "candidate-lifecycle-engineering.mjs",
