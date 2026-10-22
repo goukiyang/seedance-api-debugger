@@ -36,10 +36,6 @@ const SINK_WIRING = Object.freeze([
   ['src/app/uploads/[...path]/route.ts', ['multiviewSystemReferenceFileAccess', 'multiviewOutputFileAccess']],
 ] as const);
 
-function occurrences(source: string, token: string) {
-  return source.split(token).length - 1;
-}
-
 function findAstNode<T extends ts.Node>(root: ts.Node, predicate: (node: ts.Node) => node is T, label: string): T {
   let found: T | undefined;
   const visit = (node: ts.Node) => {
@@ -229,21 +225,88 @@ function assertPanelDefaultAndScopeContinuations(root: string, generation: typeo
   assert.match(errors[0], /原主图加入结果待确认/);
 }
 
+function assertSinkSyntax(source: string, file: string, tokens: readonly string[]) {
+  const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const nodes: ts.Node[] = [];
+  const visit = (node: ts.Node) => { nodes.push(node); ts.forEachChild(node, visit); };
+  visit(ast);
+  const named = (node: ts.Node | undefined, name: string) => Boolean(node
+    && (ts.isIdentifier(node) || ts.isStringLiteral(node)) && node.text === name);
+  for (const token of tokens) {
+    if (token === 'source_metadata_json') {
+      assert.ok(nodes.some(node => ts.isPropertyAssignment(node) && named(node.name, token)
+        && node.initializer.kind === ts.SyntaxKind.TrueKeyword && ts.isObjectLiteralExpression(node.parent)
+        && ts.isPropertyAssignment(node.parent.parent) && named(node.parent.parent.name, 'select')
+        && node.parent.parent.initializer === node.parent), `${file}: missing selected protection field`);
+      continue;
+    }
+    const declared = nodes.some(node => ts.isImportSpecifier(node) && named(node.name, token)
+      && !node.isTypeOnly && !node.parent.parent.isTypeOnly
+      || ts.isFunctionDeclaration(node) && named(node.name, token) && Boolean(node.body)
+      || ts.isVariableDeclaration(node) && named(node.name, token) && Boolean(node.initializer));
+    assert.ok(declared, `${file}: missing runtime import/definition for ${token}`);
+    if (token === 'multiviewOutputsOnly' || token === 'MULTIVIEW_PUBLIC_TASK_TITLE') {
+      const used = nodes.some(node => {
+        if (!ts.isIdentifier(node) || node.text !== token) return false;
+        const parent = node.parent;
+        return ts.isShorthandPropertyAssignment(parent)
+          || ts.isPropertyAssignment(parent) && parent.initializer === node
+          || ts.isTemplateSpan(parent) && parent.expression === node
+          || ts.isBinaryExpression(parent) || ts.isConditionalExpression(parent);
+      });
+      assert.ok(used, `${file}: missing runtime value use for ${token}`);
+      continue;
+    }
+    const invoked = nodes.some(node => ts.isCallExpression(node) && (
+      ts.isIdentifier(node.expression) && node.expression.text === token
+      // The ledger uses the real array predicate, not a direct call expression.
+      || token === 'isPrivateMultiviewTask' && ts.isPropertyAccessExpression(node.expression)
+        && node.expression.name.text === 'filter' && node.arguments[0]
+        && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === token
+    ));
+    assert.ok(invoked, `${file}: missing helper invocation for ${token}`);
+  }
+}
+
+function assertSinkSyntaxRefusals() {
+  const tokens = ['source_metadata_json', 'projectSelectedMultiviewTask', 'multiviewOutputsOnly'];
+  const source = `import { projectSelectedMultiviewTask } from 'synthetic';
+    const args = { select: { id: true, source_metadata_json: true } };
+    const multiviewOutputsOnly = true; const options = { multiviewOutputsOnly };
+    const result = projectSelectedMultiviewTask(task);`;
+  const check = (value: string) => assertSinkSyntax(value, 'synthetic-sink.ts', tokens);
+  check(source);
+  assert.throws(() => check(source.replace('source_metadata_json: true', '/* source_metadata_json: true */')));
+  assert.throws(() => check(source.replace('source_metadata_json: true', 'source_metadata_json: false')));
+  assert.throws(() => check(source.replace('select: { id: true, source_metadata_json: true }',
+    'source_metadata_json: true, select: { id: true }')));
+  assert.throws(() => check(source.replace('projectSelectedMultiviewTask(task)', 'task /* projectSelectedMultiviewTask(task) */')));
+  assert.throws(() => check(source.replace("import { projectSelectedMultiviewTask } from 'synthetic';",
+    '/* import projectSelectedMultiviewTask */')));
+  assert.throws(() => check(source.replace('const options = { multiviewOutputsOnly }',
+    'const options = { multiviewOutputsOnly: false }; /* multiviewOutputsOnly */')));
+  assertSinkSyntax('function privateNoStore() { return {}; } privateNoStore();', 'synthetic-local.ts', ['privateNoStore']);
+  assert.throws(() => assertSinkSyntax('function privateNoStore() { return {}; } /* privateNoStore(); */',
+    'synthetic-local.ts', ['privateNoStore']));
+  const predicate = "import { isPrivateMultiviewTask } from 'synthetic'; rows.filter(isPrivateMultiviewTask);";
+  assertSinkSyntax(predicate, 'synthetic-predicate.ts', ['isPrivateMultiviewTask']);
+  assert.throws(() => assertSinkSyntax(predicate.replace('rows.filter(isPrivateMultiviewTask)',
+    'rows /* filter(isPrivateMultiviewTask) */'), 'synthetic-predicate.ts', ['isPrivateMultiviewTask']));
+  const title = "import { MULTIVIEW_PUBLIC_TASK_TITLE } from 'synthetic'; const output = { prompt: MULTIVIEW_PUBLIC_TASK_TITLE };";
+  assertSinkSyntax(title, 'synthetic-title.ts', ['MULTIVIEW_PUBLIC_TASK_TITLE']);
+  assert.throws(() => assertSinkSyntax(title.replace('prompt: MULTIVIEW_PUBLIC_TASK_TITLE',
+    "prompt: 'MULTIVIEW_PUBLIC_TASK_TITLE'"), 'synthetic-title.ts', ['MULTIVIEW_PUBLIC_TASK_TITLE']));
+}
+
 function assertTwentySinkStaticWiring(root: string) {
   assert.equal(SINK_WIRING.length, 20, 'The static sink inventory must stay at the reviewed 20 endpoints');
-  for (const [file, tokens] of SINK_WIRING) {
-    const source = readFileSync(path.join(root, file), 'utf8');
-    for (const token of tokens) {
-      assert.ok(occurrences(source, token) >= 2, `${file} must both import/define and use ${token}`);
-    }
+  assertSinkSyntaxRefusals();
+  for (const [file, tokens] of SINK_WIRING) assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, tokens);
+  for (const file of ['src/lib/video/multiview-output-assets.server.ts', 'src/lib/video/multiview-work-render.ts']) {
+    assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, ['parseMultiviewWorkManifest']);
   }
-  const manifestSource = readFileSync(path.join(root, 'src/lib/video/multiview-output-assets.server.ts'), 'utf8')
-    + readFileSync(path.join(root, 'src/lib/video/multiview-work-render.ts'), 'utf8');
-  assert.ok(occurrences(manifestSource, 'parseMultiviewWorkManifest') >= 4,
-    'Output publication and rendering must both validate the real manifest');
-  const protectedAssets = readFileSync(path.join(root, 'src/lib/image-studio/protected-assets.ts'), 'utf8');
-  assert.ok(occurrences(protectedAssets, 'multiviewOutputFileAccess') >= 2,
-    'Shared asset authorization must invoke the multiview output access helper');
+  const file = 'src/lib/image-studio/protected-assets.ts';
+  assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, ['multiviewOutputFileAccess']);
 }
 
 function makePng(width = 1, height = 1) {
