@@ -65,7 +65,7 @@ export const SWITCH_ADMISSION_REPAIR_ORIGIN = Object.freeze({
   predecessorControllerSetSha256: '7d2b206a8c3f3337be67bd7858b94e06b22680ac6d12cf5801ab93882f2285c6',
 });
 const SWITCH_ADMISSION_REPAIR_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs',
-  'switch.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs',
+  'switch.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs', 'candidate-inputs.mjs',
   'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs']);
 export const ARM_PROCESSOR_REPAIR_ORIGIN = Object.freeze({
   terminalEventSha256: '6ebd203b66cc8c5c6111c970982cb9840c565b350a4b11122ed180a575bc067c',
@@ -764,6 +764,9 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase,
   assert.ok(reobservations.length <= 1, 'Only one post-repair candidate reobservation is authorized');
   if (reobservations.length) runtime.candidateReobservation = readCandidateReobservationProof(batch, loaded, runtime, reobservations[0]);
   if (switchEvents.length) runtime.switchAdmissionRepair = readSwitchAdmissionRepairProof(batch, batchFile, loaded, runtime, switchEvents[0]);
+  const switchObservations = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_switch_observation');
+  assert.ok(switchObservations.length <= 1, 'Only one candidate observation after this switch admission repair is authorized');
+  if (switchObservations.length) runtime.candidateSwitchObservation = readCandidateSwitchObservationProof(batch, loaded, runtime, switchObservations[0]);
   return runtime;
 }
 
@@ -1334,33 +1337,63 @@ export function assertCandidateReobservationAdmission(loaded, runtime, now) {
   assert.equal(loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'candidate_reobservation'), false);
 }
 
-function readCandidateReobservationProof(batch, loaded, runtime, event) {
-  assert.ok(['arm', 'switch', 'proof', 'recovery'].includes(runtime.phase)); assert.ok(runtime.armProcessorRepair);
+export function assertCandidateSwitchObservationAdmission(loaded, runtime, now, scene) {
+  assert.equal(loaded.derivedState.status, 'running'); assert.equal(loaded.derivedState.activePhase, null);
+  assert.equal(nextReleasePhase(loaded), 'switch'); assert.equal(runtime.phase, 'switch');
+  assert.equal(runtime.switchAdmissionRepair?.schema, 'sd2-release-switch-admission-repair-runtime.v1');
+  assert.equal(runtime.candidateReobservation?.schema, 'sd2-release-candidate-observation-runtime.v1');
+  assert.ok(Number.isSafeInteger(now) && now >= runtime.candidateReobservation.proof.expiresAt,
+    'Only the expired retained post-processor observation permits this switch observation');
+  const repairs = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_admission_repair');
+  assert.equal(repairs.length, 1); assert.equal(repairs[0].value.value.proofSha256, runtime.switchAdmissionRepair.proofSha256);
+  const previous = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_reobservation');
+  assert.equal(previous.length, 1); assert.equal(previous[0].value.value.proofSha256, runtime.candidateReobservation.proofSha256);
+  assert.equal(loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'candidate_switch_observation'), false);
+  assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+  assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+  const request = runtime.switchAdmissionRepair.proof.request;
+  for (const [name, hash] of [['fixed-guard-recovery.json', request.originalFixedGuardSha256], ['switch-before.json', request.originalSwitchBeforeSha256]])
+    assert.equal(scene.facts.files[name]?.sha256, hash);
+  for (const name of ['switch-complete.json', 'ingress-503-switch.json', 'pricing-pair-published.json', 'guard-recovery-complete.json'])
+    assert.equal(Boolean(scene.facts.files[name]), false);
+  assert.equal(loaded.events.some(item => item.value.kind === 'phase_intent' && item.value.phase === 'proof'), false);
+}
+
+function readCandidateSwitchObservationProof(batch, loaded, runtime, event) {
+  return readCandidateReobservationProof(batch, loaded, runtime, event, { switchStage: true });
+}
+
+function readCandidateReobservationProof(batch, loaded, runtime, event, { switchStage = false } = {}) {
+  assert.ok((switchStage ? ['switch', 'proof', 'recovery'] : ['arm', 'switch', 'proof', 'recovery']).includes(runtime.phase));
+  const prior = switchStage ? runtime.candidateReobservation : runtime.candidateObservation;
+  const repairRuntime = switchStage ? runtime.switchAdmissionRepair : runtime.armProcessorRepair;
+  assert.ok(prior && repairRuntime);
   const reference = event.value.value; exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'candidate reobservation reference');
   assert.equal(reference.schema, 'sd2-release-candidate-observation-reference.v1');
   assert.equal(reference.proofFile, candidateObservationProofFile(loaded, reference.proofSha256));
   const document = rootDocument(reference.proofFile, 1024 * 1024), proof = document.value;
   assert.equal(document.snapshot.sha256, reference.proofSha256); assert.equal(proof.schema, 'sd2-release-candidate-observation-proof.v1');
-  assert.equal(proof.previousObservationProofSha256, runtime.candidateObservation.proofSha256);
-  assert.equal(proof.armProcessorRepairProofSha256, runtime.armProcessorRepair.proofSha256);
+  assert.equal(proof.previousObservationProofSha256, prior.proofSha256);
+  assert.equal(proof[switchStage ? 'switchAdmissionRepairProofSha256' : 'armProcessorRepairProofSha256'], repairRuntime.proofSha256);
   for (const key of ['runId', 'taskId', 'attemptId', 'manifestSha256', 'originalContinuationSha256', 'retryProofSha256', 'readerProofSha256'])
-    assert.equal(proof[key], runtime.candidateObservation.proof[key]);
+    assert.equal(proof[key], prior.proof[key]);
   assert.deepEqual(proof.engine, batch.engine); assert.equal(proof.eventHeadSha256, event.value.previousSha256);
   const previous = loaded.events.findIndex(item => item.sha256 === proof.eventHeadSha256), repair = loaded.events.findIndex(item =>
-    item.value.kind === 'observation' && item.value.name === 'arm_processor_repair');
+    item.value.kind === 'observation' && item.value.name === (switchStage ? 'switch_admission_repair' : 'arm_processor_repair'));
   assert.ok(repair >= 0 && previous >= repair);
   assert.equal(loaded.events[previous + 1].sha256, event.sha256);
-  const processor = runtime.armProcessorRepair.proof;
+  if (switchStage) assert.deepEqual(event.value.owner, loaded.events[previous].value.owner);
+  const processor = repairRuntime.proof;
   assert.equal(proof.verifier.file, path.join(processor.processor.root, 'candidate-reuse.mjs'));
   assert.equal(proof.verifier.sha256, processor.processorControllers['candidate-reuse.mjs']); assert.equal(proof.verifier.method, 'verifyOriginalSuccess');
-  assert.ok(Number.isSafeInteger(proof.verifier.startedAt) && proof.verifier.startedAt >= runtime.candidateObservation.proof.expiresAt);
+  assert.ok(Number.isSafeInteger(proof.verifier.startedAt) && proof.verifier.startedAt >= prior.proof.expiresAt);
   assert.ok(Number.isSafeInteger(proof.verifier.finishedAt) && proof.verifier.finishedAt >= proof.verifier.startedAt);
   assert.equal(proof.observedAt, proof.verifier.finishedAt); assert.equal(proof.expiresAt, proof.observedAt + 1800000);
   assert.equal(proof.protectionComparison, 'assertProtection'); assert.deepEqual(proof.protectionFields, OBSERVATION_PROTECTION_FIELDS);
   assert.match(proof.protectionSha256, HASH);
   for (const key of ['readOnly', 'newCompilationClaimed', 'originalTimesChanged', 'continuousUnchangedIntervalClaimed'])
     assert.equal(proof[key], key === 'readOnly');
-  assert.deepEqual(proof.candidates, runtime.candidateObservation.proof.candidates);
+  assert.deepEqual(proof.candidates, prior.proof.candidates);
   for (const kind of ['main', 'guard']) {
     const candidate = proof.candidates[kind], capsule = rootDocument(candidate.capsuleFile, 128 * 1024 * 1024);
     assert.equal(capsule.snapshot.sha256, candidate.capsuleSha256);
@@ -1464,6 +1497,67 @@ function switchAdmissionRetainedState(batch, runtime, request) {
     oldGuardWindowSnapshot: oldWindow.snapshot };
 }
 
+export function assertSwitchAdmissionApprovalPath(stage, file) {
+  assert.ok(['r01', 'r02'].some(round => file === path.join(stage, `hd-release-safety-approval-switch-admission-${round}.json`)),
+    'Switch admission approval must be its exact r01 or r02 stage file');
+  return file;
+}
+
+export function assertLegacyTemplateBuildAlias(expected, pinned, value, uid, previous = null) {
+  const source = '1a3d1dec878c376b2930c8847f13607aa0d2b35f';
+  assert.equal(expected.root, '/srv/video-api-debugger/app'); assert.equal(expected.source, source);
+  assert.equal(expected.version, '0.63.0'); assert.equal(expected.build, '9-SIeKXWbuHjBUnUInI0q');
+  for (const key of ['root', 'source', 'version', 'build']) assert.equal(pinned[key], expected[key]);
+  assert.equal(pinned.sourceManifest, null); assert.equal(pinned.archive, null);
+  const releaseRoot = '/data/video-api-debugger/releases/' + source, buildRoot = releaseRoot + '/.next-prod-candidate';
+  assert.equal(value.alias.file, expected.root + '/.next-prod'); assert.equal(value.alias.realPath, buildRoot);
+  assert.equal(value.alias.linkTarget, '/srv/video-api-debugger/releases/' + source + '/.next-prod-candidate');
+  assert.equal(value.alias.identity.mode & 0o170000, 0o120000); assert.equal(value.alias.identity.nlink, 1);
+  assert.equal(value.releaseAlias.file, '/srv/video-api-debugger/releases');
+  assert.equal(value.releaseAlias.realPath, '/data/video-api-debugger/releases');
+  assert.equal(value.releaseAlias.identity.mode & 0o170000, 0o120000);
+  assert.equal(value.releaseAlias.linkTarget, '/data/video-api-debugger/releases'); assert.equal(value.releaseAlias.identity.nlink, 1);
+  for (const node of [value.alias, value.releaseAlias, value.releasesDirectory, value.releaseDirectory, value.buildDirectory]) {
+    assert.ok([0, uid].includes(node.identity.uid));
+    for (const key of ['dev', 'ino', 'gid', 'size', 'mtimeMs', 'ctimeMs']) assert.ok(Number.isFinite(node.identity[key]) && node.identity[key] >= 0);
+  }
+  for (const [key, directory] of [['releasesDirectory', '/data/video-api-debugger/releases'], ['releaseDirectory', releaseRoot], ['buildDirectory', buildRoot]]) {
+    const node = value[key]; assert.equal(node.file, directory); assert.equal(node.realPath, directory);
+    assert.equal(node.linkTarget, null); assert.equal(node.identity.mode & 0o170000, 0o040000);
+    assert.equal(node.identity.mode & 0o7022, 0); assert.ok(node.identity.nlink >= 1);
+  }
+  assert.equal(value.historicalAliasIdentityClaimed, false);
+  if (previous) assert.deepEqual(value, previous, 'Template build alias/entity changed during this observation');
+  return buildRoot + '/BUILD_ID';
+}
+
+function switchAdmissionBuildSnapshot(m, role, expected, uid) {
+  const requested = expected.root + '/.next-prod/BUILD_ID', buildFile = fs.realpathSync(requested);
+  const legacyTemplate = role === 'template' && m.fullRelease.liveRoles.template.sourceManifest === null;
+  if (!legacyTemplate) {
+    assert.ok(buildFile.startsWith(expected.root + '/'), 'Live build leaves its pinned runtime root');
+    const build = readTypedFile({ file: buildFile, category: 'app', expectedUid: uid });
+    assert.equal(build.bytes.toString('utf8').trim(), expected.build); return { buildId: build.snapshot };
+  }
+  assert.equal(role, 'template', 'Only the unchanged independent template has this external build alias');
+  const capture = () => {
+    const node = file => { const stat = fs.lstatSync(file); return { file, realPath: fs.realpathSync(file),
+      linkTarget: stat.isSymbolicLink() ? fs.readlinkSync(file) : null, identity: probeIdentity(stat) }; };
+    return { alias: node(expected.root + '/.next-prod'), releaseAlias: node('/srv/video-api-debugger/releases'),
+      releasesDirectory: node('/data/video-api-debugger/releases'),
+      releaseDirectory: node('/data/video-api-debugger/releases/' + expected.source),
+      buildDirectory: node('/data/video-api-debugger/releases/' + expected.source + '/.next-prod-candidate'),
+      historicalAliasIdentityClaimed: false };
+  };
+  const before = capture(), allowed = assertLegacyTemplateBuildAlias(expected, m.fullRelease.liveRoles.template, before, uid);
+  assert.equal(buildFile, allowed);
+  const build = readTypedFile({ file: allowed, category: 'app', expectedUid: uid });
+  assert.equal(build.bytes.toString('utf8').trim(), expected.build); assert.equal(fs.realpathSync(requested), allowed);
+  const after = capture(); assertLegacyTemplateBuildAlias(expected, m.fullRelease.liveRoles.template, after, uid, before);
+  assertTypedFileUnchanged(build.snapshot);
+  return { buildId: build.snapshot, buildAliasSnapshot: before };
+}
+
 function switchAdmissionLiveSnapshot(batch, saved) {
   const m = assertManifest(batch), services = {}, sources = {}, configurations = {}, original = {};
   const collect = value => {
@@ -1498,9 +1592,7 @@ function switchAdmissionLiveSnapshot(batch, saved) {
     sources[role] = readFullLiveSourceFiles(m, ['package.json'], role);
     const marker = readTypedFile({ file: expected.root + '/.deployed-commit', category: 'app', expectedUid: uid });
     assert.equal(marker.bytes.toString('utf8').trim(), expected.source);
-    const buildFile = fs.realpathSync(expected.root + '/.next-prod/BUILD_ID'); assert.ok(buildFile.startsWith(expected.root + '/'));
-    const build = readTypedFile({ file: buildFile, category: 'app', expectedUid: uid }); assert.equal(build.bytes.toString('utf8').trim(), expected.build);
-    sources[role] = { ...sources[role], deployedCommit: marker.snapshot, buildId: build.snapshot };
+    sources[role] = { ...sources[role], deployedCommit: marker.snapshot, ...switchAdmissionBuildSnapshot(m, role, expected, uid) };
     services[role] = { ...state, kernelStartTicks: kernelStart, cwd };
   }
   return { services, sources, configurations, historicalConfigurationScope: 'Original writer policies, roleControl and protected files only; no historical works/template unit-byte snapshot is claimed' };
@@ -1524,6 +1616,8 @@ function readSwitchAdmissionRepairProof(batch, batchFile, loaded, runtime, event
   assert.equal(proof.originalArmProcessorRepairProofFile, runtime.armProcessorRepair.proofFile);
   assert.equal(proof.originalArmProcessorRepairProofSha256, runtime.armProcessorRepair.proofSha256);
   assert.equal(proof.request.armProcessorRepairProofSha256, runtime.armProcessorRepair.proofSha256);
+  assert.equal(proof.candidateObservationProofFile, runtime.candidateReobservation.proofFile);
+  assert.equal(proof.candidateObservationProofSha256, runtime.candidateReobservation.proofSha256);
   const identity = switchAdmissionProcessor(batch, runtime.armProcessorRepair.proof, proof.request.processorControllerSetSha256);
   for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
   const continued = loaded.events.filter(item => item.value.kind === 'failure_continued' && item.value.failureReceiptSha256 === reference.proofSha256);
@@ -1542,7 +1636,7 @@ function readSwitchAdmissionRepairProof(batch, batchFile, loaded, runtime, event
     assert.equal(proof[key].requestedPath, value.requestedPath); assert.equal(proof[key].sha256, value.sha256); assertTypedFileUnchanged(proof[key]);
   } else assert.deepEqual(proof[key], value);
   assert.equal(proof.liveSnapshotSha256, digest(JSON.stringify(proof.liveSnapshot)));
-  assert.equal(proof.approvalFile, path.join(path.dirname(batch.manifestFile), 'hd-release-safety-approval-switch-admission-r01.json'));
+  assertSwitchAdmissionApprovalPath(path.dirname(batch.manifestFile), proof.approvalFile);
   assert.equal(proof.approvalFile, proof.request.approvalFile); assert.equal(proof.approvalSha256, proof.request.approvalSha256);
   assert.equal(proof.approvalSnapshot.requestedPath, proof.approvalFile); assert.equal(proof.approvalSnapshot.sha256, proof.approvalSha256); assertTypedFileUnchanged(proof.approvalSnapshot);
   assert.equal(proof.windowSha256, proof.request.windowSha256); assert.equal(proof.windowSnapshot.sha256, proof.windowSha256);
@@ -2287,7 +2381,46 @@ export function createReleaseController(overrides = {}) {
   async function observeCandidates(batchFile, windowFile) {
     const batch = readReleaseBatch(batchFile), context = assertContext(batch, batchFile);
     assertSeed(batch); assertManifest(batch);
-    const initial = load(batchFile, batch), initialRuntime = readGuardBuildTailProof(batch, batchFile, initial, 'arm');
+    const initial = load(batchFile, batch), phase = nextReleasePhase(initial);
+    if (phase === 'switch') {
+      const initialRuntime = readGuardBuildTailProof(batch, batchFile, initial, 'switch');
+      assertCandidateSwitchObservationAdmission(initial, initialRuntime, deps.now(), deps.scene(batch, deps.now()));
+      const savedBefore = rootJson(initialRuntime.switchAdmissionRepair.proof.originalSwitchBeforeFile, 32 * 1024 * 1024);
+      assert.deepEqual(switchAdmissionLiveSnapshot(batch, savedBefore), initialRuntime.switchAdmissionRepair.proof.liveSnapshot);
+      const acquired = acquire(batchFile, windowFile);
+      assert.ok(['takeover', 'takeover_stop_or_refuse'].includes(acquired.decision.action));
+      const loaded = load(batchFile, batch), runtime = readGuardBuildTailProof(batch, batchFile, loaded, 'switch');
+      const before = deps.scene(batch, deps.now()); assertCandidateSwitchObservationAdmission(loaded, runtime, deps.now(), before);
+      const liveSnapshot = switchAdmissionLiveSnapshot(batch, savedBefore);
+      assert.deepEqual(liveSnapshot, runtime.switchAdmissionRepair.proof.liveSnapshot);
+      const head = loaded.derivedState.lastEventSha256, processor = runtime.switchAdmissionRepair.proof;
+      const successfulArtifacts = runtime.reader.proof.successfulArtifacts;
+      const { verified, verifierFile, verifierRead, startedAt, finishedAt, protectionSha256 }
+        = await verifyRetainedCandidateObservation(batch, context, runtime, processor, successfulArtifacts, deps.now);
+      assert.ok(startedAt >= runtime.candidateReobservation.proof.expiresAt);
+      const current = load(batchFile, batch); assert.equal(current.derivedState.lastEventSha256, head);
+      const after = deps.scene(batch, deps.now()); assertCandidateSwitchObservationAdmission(current, runtime, finishedAt, after);
+      assert.equal(after.sha256, before.sha256); assert.deepEqual(switchAdmissionLiveSnapshot(batch, savedBefore), liveSnapshot);
+      releaseWindowReference(batch, windowFile, deps.now());
+      const previous = runtime.candidateReobservation.proof;
+      const proof = { ...previous, previousObservationProofSha256: runtime.candidateReobservation.proofSha256,
+        switchAdmissionRepairProofSha256: runtime.switchAdmissionRepair.proofSha256, eventHeadSha256: head,
+        observedAt: finishedAt, expiresAt: finishedAt + 1800000,
+        verifier: { file: verifierFile, sha256: verifierRead.snapshot.sha256, method: 'verifyOriginalSuccess', startedAt, finishedAt },
+        protectionComparison: 'assertProtection', protectionFields: OBSERVATION_PROTECTION_FIELDS, protectionSha256,
+        candidates: Object.fromEntries(['main', 'guard'].map(kind => [kind, {
+          capsuleFile: successfulArtifacts[kind].inputs.capsule.file, capsuleSha256: successfulArtifacts[kind].inputs.capsule.sha256,
+          receiptFile: successfulArtifacts[kind].inputs.build.file, receiptSha256: successfulArtifacts[kind].inputs.build.sha256,
+          snapshotSha256: digest(JSON.stringify(verified[kind].snapshot)) }])) };
+      assert.deepEqual(proof.candidates, previous.candidates);
+      const hash = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+      const saved = writeJsonExclusive(candidateObservationProofFile(loaded, hash), proof); assert.equal(saved.sha256, hash);
+      const recorded = recordAttemptEvent({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner: acquired.owner,
+        name: 'candidate_switch_observation', value: { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: saved.file, proofSha256: hash }, now: deps.now() });
+      assert.equal(recorded.event.previousSha256, head);
+      return { candidateSwitchObservation: saved, eventHead: recorded.eventSha256 };
+    }
+    const initialRuntime = readGuardBuildTailProof(batch, batchFile, initial, 'arm');
     assertCandidateReobservationAdmission(initial, initialRuntime, deps.now());
     armProcessorRepairScene(batch, deps.now(), deps.scene);
     const acquired = acquire(batchFile, windowFile); assert.equal(acquired.decision.action, 'takeover');
@@ -2339,7 +2472,7 @@ export function createReleaseController(overrides = {}) {
       const savedBefore = rootJson(retained.originalSwitchBeforeFile, 32 * 1024 * 1024);
       const liveSnapshot = switchAdmissionLiveSnapshot(batch, savedBefore);
       const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
-      assert.equal(request.approvalFile, path.join(path.dirname(batch.manifestFile), 'hd-release-safety-approval-switch-admission-r01.json'));
+      assertSwitchAdmissionApprovalPath(path.dirname(batch.manifestFile), request.approvalFile);
       assert.equal(assertApproval(batch, request.approvalFile, now).sha256, request.approvalSha256);
       assert.equal(rootDocument(windowFile, 256 * 1024).snapshot.sha256, request.windowSha256);
       const window = releaseWindowReference(batch, windowFile, deps.now()); assert.equal(window.sha256, request.windowSha256);
@@ -2354,6 +2487,7 @@ export function createReleaseController(overrides = {}) {
         ...Object.fromEntries(['runId', 'taskId', 'attemptId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256']
           .map(key => [key, runtime.armProcessorRepair.proof[key]])), engine: batch.engine,
         originalArmProcessorRepairProofFile: runtime.armProcessorRepair.proofFile, originalArmProcessorRepairProofSha256: runtime.armProcessorRepair.proofSha256,
+        candidateObservationProofFile: runtime.candidateReobservation.proofFile, candidateObservationProofSha256: runtime.candidateReobservation.proofSha256,
         predecessorProcessor: runtime.armProcessorRepair.proof.processor, ...identity, ...failed, ...retained,
         liveSnapshot, liveSnapshotSha256: digest(JSON.stringify(liveSnapshot)),
         approvalFile: request.approvalFile, approvalSha256: request.approvalSha256, approvalSnapshot: approval.snapshot,

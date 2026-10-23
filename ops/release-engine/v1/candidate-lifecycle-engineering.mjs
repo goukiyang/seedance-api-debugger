@@ -1701,6 +1701,66 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     assert.deepEqual(runtime.candidateObservation, retainedObservation);
     assert.deepEqual(documents.get(observationFile), retainedBytes); assert.deepEqual(receipts, retainedReceipts);
     for (const kind of ['main', 'guard']) assert.deepEqual(documents.get(candidateRecords[kind].receiptFile), retainedReceiptBytes[kind]);
+    // A separate switch observation follows only this now-expired verified
+    // reobservation. Both older references and their journal entries stay bound.
+    {
+      const priorReference = copy(runtime.candidateReobservation), priorBytes = Buffer.from(documents.get(priorReference.proofFile));
+      const switchRepair = { ...processor('/isolated-reader/switch-processor'),
+        candidateObservationProofSha256: priorReference.proofSha256, candidateObservationProofFile: priorReference.proofFile };
+      const switchRepairSha = 'e'.repeat(64);
+      runtime.switchAdmissionRepair = { proofSha256: switchRepairSha, proof: switchRepair };
+      const switchRepairEvent = { sha256: '9'.repeat(64), value: { kind: 'observation', name: 'switch_admission_repair', sequence: 6,
+        previousSha256: events.at(-1).sha256, owner,
+        value: { schema: 'sd2-release-switch-admission-repair-reference.v1', proofSha256: switchRepairSha } } };
+      events.push(switchRepairEvent);
+      const switchNow = fresh.expiresAt + 1000, switchHead = events.at(-1).sha256;
+      const latest = { ...copy(fresh), eventHeadSha256: switchHead,
+        previousObservationProofSha256: priorReference.proofSha256, switchAdmissionRepairProofSha256: switchRepairSha,
+        observedAt: switchNow - 1, expiresAt: switchNow - 1 + 1800000,
+        verifier: { file: switchRepair.processor.root + '/candidate-reuse.mjs', sha256: switchRepair.processorControllers['candidate-reuse.mjs'],
+          method: 'verifyOriginalSuccess', startedAt: fresh.expiresAt + 1, finishedAt: switchNow - 1 } };
+      delete latest.armProcessorRepairProofSha256;
+      const latestEvent = { sha256: 'f'.repeat(64), value: { kind: 'observation', name: 'candidate_switch_observation', sequence: 7,
+        previousSha256: switchHead, owner, value: null } };
+      events.push(latestEvent);
+      const publishLatest = (patch = {}) => {
+        const value = { ...copy(latest), ...patch }, bytes = Buffer.from(JSON.stringify(value)), hash = sha(bytes);
+        const file = taskRoot + '/attempts/' + runId + '/candidate-observation-' + hash + '.json'; put(file, bytes);
+        runtime.candidateSwitchObservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: file, proofSha256: hash, proof: value };
+        latestEvent.value.value = { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: file, proofSha256: hash };
+      };
+      publishLatest();
+      for (const kind of ['main', 'guard']) {
+        assert.deepEqual(copy(freshApi.assertFreshCandidateEvidence(receipts[kind], m, kind, switchNow)), retainedReceipts[kind]);
+        assert.equal(freshApi.candidateEvidenceExpiresAt(receipts[kind], m, kind, switchNow), latest.expiresAt);
+        const bound = freshApi.candidateGateObservation(receipts[kind], m, kind, switchNow);
+        assert.equal(bound.candidateObservation.proofSha256, runtime.candidateSwitchObservation.proofSha256);
+        assert.equal(bound.observedAt, latest.observedAt);
+      }
+      const rejectLatest = patch => {
+        publishLatest(patch); assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow)); publishLatest();
+      };
+      rejectLatest({ previousObservationProofSha256: observationSha256 });
+      rejectLatest({ switchAdmissionRepairProofSha256: '0'.repeat(64) });
+      rejectLatest({ verifier: { ...latest.verifier, file: fresh.verifier.file, sha256: fresh.verifier.sha256 } });
+      rejectLatest({ verifier: { ...latest.verifier, startedAt: fresh.expiresAt - 1 } });
+      latestEvent.value.previousSha256 = mainHead;
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow)); latestEvent.value.previousSha256 = switchHead;
+      latestEvent.value.owner = { token: 'another-owner' };
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow)); latestEvent.value.owner = owner;
+      latestEvent.value.name = 'unbound_switch_observation';
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow)); latestEvent.value.name = 'candidate_switch_observation';
+      events.push({ ...latestEvent, sha256: '8'.repeat(64) });
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow)); events.pop();
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', latest.expiresAt), /expired/);
+      assert.deepEqual(runtime.candidateReobservation, priorReference); assert.deepEqual(documents.get(priorReference.proofFile), priorBytes);
+      assert.deepEqual(runtime.candidateObservation, retainedObservation); assert.deepEqual(documents.get(observationFile), retainedBytes);
+      for (const kind of ['main', 'guard']) assert.deepEqual(documents.get(candidateRecords[kind].receiptFile), retainedReceiptBytes[kind]);
+      delete runtime.candidateSwitchObservation;
+      assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow), /expired/);
+      delete runtime.switchAdmissionRepair; events.pop(); events.pop();
+      add('candidate_switch_observation_actual_consumers_require_exact_prior_reobservation_switch_repair_current_verifier_journal_owner_and_real_expiry');
+    }
     delete runtime.candidateReobservation;
     assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow), /expired/);
     delete runtime.armProcessorRepair; events.pop();
@@ -2024,6 +2084,15 @@ console.log(${JSON.stringify(image ? 'Image recovery build gate verified (native
     const refreshed = namespace.nativeVerify({ ...options, tailContext: reobservedContext });
     assert.match(refreshed, /Image recovery build gate verified/); assert.match(refreshed, /Pricing policy build gate verified/);
     assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }));
+    runtime.candidateSwitchObservation = { ...runtime.candidateReobservation, proofSha256: 'e'.repeat(64) };
+    const switchObservedContext = { ...observedContext, candidateObservation: runtime.candidateSwitchObservation };
+    const switchVerified = namespace.nativeVerify({ ...options, tailContext: switchObservedContext });
+    assert.match(switchVerified, /Image recovery build gate verified/); assert.match(switchVerified, /Pricing policy build gate verified/);
+    assert.throws(() => namespace.nativeVerify({ ...options, tailContext: reobservedContext }));
+    assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }));
+    delete runtime.candidateSwitchObservation;
+    assert.match(namespace.nativeVerify({ ...options, tailContext: reobservedContext }), /Pricing policy build gate verified/);
+    add('native_switch_observation_' + kind + '_selects_exact_latest_reference_and_refuses_both_earlier_references');
     delete runtime.candidateReobservation;
     add('native_reobservation_' + kind + '_selects_new_bound_reference_and_retains_nested_pricing');
     delete capsule.snapshot.checks[path.relative(root + '/.role-tests', pricingFile)];

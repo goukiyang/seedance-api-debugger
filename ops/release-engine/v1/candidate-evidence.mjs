@@ -178,7 +178,7 @@ function verifySwitchAdmissionRepair(m, runtime, predecessor) {
   assert.equal(proof.request.processorControllerSetSha256, proof.processor.controllerSetSha256);
   processorBytes(proof, m);
   const allowed = new Set(['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs',
-    'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs',
+    'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs', 'candidate-inputs.mjs',
     'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs']);
   for (const [name, digest] of Object.entries(proof.processorControllers))
     if (digest !== predecessor.processorControllers[name]) assert.ok(allowed.has(name), 'Unreviewed armed switch continuation controller: ' + name);
@@ -201,7 +201,9 @@ function verifySwitchAdmissionRepair(m, runtime, predecessor) {
   assert.equal(proof.oldGuardWindowFile, m.stage + '/window-evidence/' + proof.oldGuardWindowSha256 + '.json');
   assert.equal(sha(rootFile(proof.oldGuardWindowFile)), proof.oldGuardWindowSha256);
   assert.equal(JSON.parse(rootFile(proof.oldGuardApprovalFile)).windowSha256, proof.oldGuardWindowSha256);
-  assert.equal(proof.approvalFile, m.stage + '/hd-release-safety-approval-switch-admission-r01.json');
+  assert.ok(['hd-release-safety-approval-switch-admission-r01.json', 'hd-release-safety-approval-switch-admission-r02.json'].map(name => m.stage + '/' + name).includes(proof.approvalFile));
+  assert.equal(proof.candidateObservationProofFile, runtime.candidateReobservation.proofFile);
+  assert.equal(proof.candidateObservationProofSha256, runtime.candidateReobservation.proofSha256);
   assert.equal(proof.approvalFile, proof.request.approvalFile); assert.equal(proof.approvalSha256, proof.request.approvalSha256);
   assert.equal(proof.windowSha256, proof.request.windowSha256);
   assert.equal(proof.windowFile, m.stage + '/window-evidence/' + proof.windowSha256 + '.json');
@@ -345,7 +347,7 @@ export function assertGuardBuildTailObservation(value, m, now = Date.now(), { re
 // original receipts, while explicitly making no continuous-interval claim.
 export function assertCandidateObservation(value, m, kind, now = Date.now()) {
   if (!isSharedEngine(m) || m.reuseBuilds) return null;
-  const runtime = guardBuildTailRuntime(m), reference = runtime?.candidateReobservation || runtime?.candidateObservation;
+  const runtime = guardBuildTailRuntime(m), reference = runtime?.candidateSwitchObservation || runtime?.candidateReobservation || runtime?.candidateObservation;
   if (!reference) return null;
   assert.ok(['main', 'guard'].includes(kind)); assert.ok(runtime.reader);
   assert.equal(reference.schema, 'sd2-release-candidate-observation-runtime.v1');
@@ -365,18 +367,53 @@ export function assertCandidateObservation(value, m, kind, now = Date.now()) {
   let verifierProcessor = runtime.retry?.proof || runtime.proof;
   if (runtime.candidateReobservation) {
     assert.ok(runtime.armProcessorRepair, 'A repeated observation belongs only to the exact processor repair');
-    assert.notEqual(reference.proofSha256, originalReference.proofSha256);
-    assert.equal(proof.previousObservationProofSha256, originalReference.proofSha256);
-    assert.equal(proof.armProcessorRepairProofSha256, runtime.armProcessorRepair.proofSha256);
+    const priorReference = runtime.candidateReobservation;
+    const prior = runtimeRootProof(priorReference, 'candidate-observation-', CANDIDATE_OBSERVATION_SCHEMA, m);
+    assert.notEqual(priorReference.proofSha256, originalReference.proofSha256);
+    assert.equal(prior.previousObservationProofSha256, originalReference.proofSha256);
+    assert.equal(prior.armProcessorRepairProofSha256, runtime.armProcessorRepair.proofSha256);
     const fresh = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_reobservation');
     assert.equal(fresh.length, 1); const event = fresh[0];
-    assert.deepEqual(event.value.value, { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
-    assert.equal(event.value.previousSha256, proof.eventHeadSha256);
-    const head = loaded.events[loaded.events.indexOf(event) - 1]; assert.equal(head.sha256, proof.eventHeadSha256);
+    assert.deepEqual(event.value.value, { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: priorReference.proofFile, proofSha256: priorReference.proofSha256 });
+    assert.equal(event.value.previousSha256, prior.eventHeadSha256);
+    const head = loaded.events[loaded.events.indexOf(event) - 1]; assert.equal(head.sha256, prior.eventHeadSha256);
     assert.deepEqual(event.value.owner, head.value.owner);
-    assert.ok(proof.verifier.startedAt >= original.expiresAt, 'A new observation must actually verify after the original observation expired');
+    assert.ok(prior.verifier.startedAt >= original.expiresAt, 'A new observation must actually verify after the original observation expired');
     verifierProcessor = runtime.armProcessorRepair.proof;
-  } else assert.equal(proof.eventHeadSha256, runtime.reader.proof.eventHeadSha256);
+    if (runtime.candidateSwitchObservation) {
+      assert.ok(runtime.switchAdmissionRepair, 'A switch observation belongs only to the exact armed continuation');
+      assert.notEqual(reference.proofSha256, priorReference.proofSha256);
+      assert.equal(proof.previousObservationProofSha256, priorReference.proofSha256);
+      assert.equal(proof.switchAdmissionRepairProofSha256, runtime.switchAdmissionRepair.proofSha256);
+      assert.equal(runtime.switchAdmissionRepair.proof.candidateObservationProofSha256, priorReference.proofSha256);
+      assert.equal(runtime.switchAdmissionRepair.proof.candidateObservationProofFile, priorReference.proofFile);
+      assert.deepEqual(proof.candidates, prior.candidates); assert.deepEqual(prior.candidates, original.candidates);
+      assert.equal(prior.verifier.file, verifierProcessor.processor.root + '/candidate-reuse.mjs');
+      assert.equal(prior.verifier.sha256, verifierProcessor.processorControllers['candidate-reuse.mjs']);
+      assert.equal(sha(rootFile(prior.verifier.file)), prior.verifier.sha256); assert.equal(prior.verifier.method, 'verifyOriginalSuccess');
+      assert.ok(Number.isSafeInteger(prior.verifier.startedAt) && Number.isSafeInteger(prior.verifier.finishedAt)
+        && prior.verifier.finishedAt >= prior.verifier.startedAt && prior.verifier.finishedAt === prior.observedAt);
+      assert.equal(prior.expiresAt, prior.observedAt + 1800000);
+      for (const [flag, expected] of Object.entries({ readOnly: true, newCompilationClaimed: false, originalTimesChanged: false,
+        continuousUnchangedIntervalClaimed: false })) assert.equal(prior[flag], expected);
+      assert.equal(prior.protectionComparison, 'assertProtection'); assert.deepEqual(prior.protectionFields, PROTECTION_FIELDS);
+      assert.match(prior.protectionSha256 || '', /^[a-f0-9]{64}$/);
+      const switched = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_switch_observation');
+      assert.equal(switched.length, 1); const observed = switched[0];
+      assert.deepEqual(observed.value.value, { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
+      assert.equal(observed.value.previousSha256, proof.eventHeadSha256);
+      const previous = loaded.events[loaded.events.indexOf(observed) - 1]; assert.equal(previous.sha256, proof.eventHeadSha256);
+      assert.deepEqual(observed.value.owner, previous.value.owner);
+      const repair = loaded.events.find(item => item.value.kind === 'observation' && item.value.name === 'switch_admission_repair');
+      assert.ok(repair && repair.value.sequence < observed.value.sequence);
+      assert.equal(repair.value.value.proofSha256, runtime.switchAdmissionRepair.proofSha256);
+      assert.ok(proof.verifier.startedAt >= prior.expiresAt, 'A switch observation must actually verify after the previous observation expired');
+      verifierProcessor = runtime.switchAdmissionRepair.proof;
+    } else assert.equal(reference.proofSha256, priorReference.proofSha256);
+  } else {
+    assert.equal(runtime.candidateSwitchObservation, undefined, 'A switch observation must retain the previous observation');
+    assert.equal(proof.eventHeadSha256, runtime.reader.proof.eventHeadSha256);
+  }
   for (const [flag, expected] of Object.entries({ readOnly: true, newCompilationClaimed: false, originalTimesChanged: false,
     continuousUnchangedIntervalClaimed: false })) assert.equal(proof[flag], expected);
   assert.equal(proof.protectionComparison, 'assertProtection'); assert.deepEqual(proof.protectionFields, PROTECTION_FIELDS);
@@ -422,7 +459,7 @@ export function candidateGateObservation(value, m, kind, now = Date.now()) {
   const observation = assertCandidateObservation(value, m, kind, now);
   if (observation) {
     const runtime = guardBuildTailRuntime(m);
-    return { manifest: m, runtime, observedAt: observation.observedAt, candidateObservation: runtime.candidateReobservation || runtime.candidateObservation };
+    return { manifest: m, runtime, observedAt: observation.observedAt, candidateObservation: runtime.candidateSwitchObservation || runtime.candidateReobservation || runtime.candidateObservation };
   }
   if (kind !== 'guard' || value.schema !== GUARD_BUILD_TAIL_SCHEMA) return undefined;
   const runtime = guardBuildTailRuntime(m); assert.ok(runtime);

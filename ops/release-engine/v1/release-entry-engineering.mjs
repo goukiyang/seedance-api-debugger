@@ -18,7 +18,8 @@ import {
   validateArmProcessorRepair, assertArmProcessorRepairFailure, assertArmProcessorRepairControllerDifference,
   assertArmProcessorRepairAdmission, ARM_PROCESSOR_REPAIR_ORIGIN, assertCandidateReobservationAdmission,
   validateSwitchAdmissionRepair, assertSwitchAdmissionRepairFailure, assertSwitchAdmissionControllerDifference,
-  assertSwitchAdmissionRepairAdmission, SWITCH_ADMISSION_REPAIR_ORIGIN,
+  assertSwitchAdmissionRepairAdmission, SWITCH_ADMISSION_REPAIR_ORIGIN, assertSwitchAdmissionApprovalPath,
+  assertLegacyTemplateBuildAlias, assertCandidateSwitchObservationAdmission,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -666,14 +667,14 @@ function scenarioSwitchAdmissionRepair() {
     { ...child, stderr: JSON.stringify({ error, cause: cause.replace('deadline', 'anotherDeadline') }) },
     { ...child, stderr: JSON.stringify({ error: { ...error, code: 'another_failure' }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
     assert.throws(() => assertSwitchAdmissionRepairFailure(value));
-  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'cutover-driver.mjs',
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'cutover-driver.mjs', 'candidate-inputs.mjs',
     'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs', 'release-entry-engineering.mjs',
     'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs'];
-  const retained = ['attempt-state.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'candidate-reuse.mjs', 'pricing-start-pair.mjs',
+  const retained = ['attempt-state.mjs', 'candidate.mjs', 'candidate-reuse.mjs', 'pricing-start-pair.mjs',
     'common.mjs', 'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'writer-network-fence.mjs'];
   const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('7d2b:' + name)]));
   const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('switch-repair:' + name)])) };
-  assert.equal(Object.keys(assertSwitchAdmissionControllerDifference(predecessor, processor)).length, 12);
+  assert.equal(Object.keys(assertSwitchAdmissionControllerDifference(predecessor, processor)).length, 13);
   for (const name of retained) assert.throws(() => assertSwitchAdmissionControllerDifference(predecessor, { ...processor, [name]: HASH }));
   assert.throws(() => assertSwitchAdmissionControllerDifference(predecessor, predecessor));
   const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
@@ -694,7 +695,74 @@ function scenarioSwitchAdmissionRepair() {
     { ...before.facts, files: { ...before.facts.files, 'switch-before.json': { sha256: HASH } } },
     { ...before.facts, files: { ...before.facts.files, 'pricing-pair-published.json': { sha256: HASH } } }])
     assert.throws(() => assertSwitchAdmissionRepairAdmission(failed, request, { facts }));
+  for (const round of ['r01', 'r02']) assert.equal(assertSwitchAdmissionApprovalPath('/fixture', `/fixture/hd-release-safety-approval-switch-admission-${round}.json`),
+    `/fixture/hd-release-safety-approval-switch-admission-${round}.json`);
+  for (const file of ['/fixture/hd-release-safety-approval-switch-admission-r03.json', '/elsewhere/hd-release-safety-approval-switch-admission-r01.json',
+    '/fixture/../fixture/hd-release-safety-approval-switch-admission-r02.json', '/fixture/arbitrary.json'])
+    assert.throws(() => assertSwitchAdmissionApprovalPath('/fixture', file));
+  const switchRepairSha = digest('bound-switch-repair'), previousSha = digest('original-0723'), running = structuredClone(failed);
+  running.derivedState.status = 'running';
+  running.events.push({ value: { kind: 'observation', name: 'candidate_reobservation', value: { proofSha256: previousSha } } },
+    { value: { kind: 'observation', name: 'switch_admission_repair', value: { proofSha256: switchRepairSha } } });
+  const runtime = { phase: 'switch', switchAdmissionRepair: { schema: 'sd2-release-switch-admission-repair-runtime.v1',
+    proofSha256: switchRepairSha, proof: { request } }, candidateReobservation: {
+    schema: 'sd2-release-candidate-observation-runtime.v1', proofSha256: previousSha, proof: { expiresAt: 2000 } } };
+  assertCandidateSwitchObservationAdmission(running, runtime, 2000, before);
+  assert.throws(() => assertCandidateSwitchObservationAdmission(running, runtime, 1999, before));
+  for (const edit of [value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.status = 'failed'; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'candidate_switch_observation' } }); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'switch_admission_repair'); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'candidate_reobservation'); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(running); edit(value);
+    assert.throws(() => assertCandidateSwitchObservationAdmission(value, runtime, 2001, before));
+  }
+  assert.throws(() => assertCandidateSwitchObservationAdmission(running, { ...runtime, phase: 'arm' }, 2001, before));
+  assert.throws(() => assertCandidateSwitchObservationAdmission(running, { ...runtime, switchAdmissionRepair: undefined }, 2001, before));
+  for (const facts of [{ ...before.facts, effectsStarted: true }, { ...before.facts, switchComplete: true },
+    { ...before.facts, files: { ...before.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...before.facts, files: { ...before.facts.files, 'ingress-503-switch.json': { sha256: HASH } } }])
+    assert.throws(() => assertCandidateSwitchObservationAdmission(running, runtime, 2001, { facts }));
   return 'exact_premaintenance_switch_failure_preserves_armed_guard_original_before_and_all_prior_repair_receipts';
+}
+
+function scenarioLegacyTemplateBuildAlias() {
+  const source = '1a3d1dec878c376b2930c8847f13607aa0d2b35f', releaseRoot = '/data/video-api-debugger/releases/' + source;
+  const expected = { root: '/srv/video-api-debugger/app', source, version: '0.63.0', build: '9-SIeKXWbuHjBUnUInI0q' };
+  const pinned = { ...expected, sourceManifest: null, archive: null };
+  const directory = (file, ino, uid = 1004, gid = 1004) => ({ file, realPath: file, linkTarget: null,
+    identity: { dev: 2, ino, uid, gid, mode: 0o040755, nlink: 6, size: 4096, mtimeMs: 1000, ctimeMs: 1000 } });
+  const link = (file, realPath, target, ino, uid = 1004, gid = 1004) => ({ file, realPath, linkTarget: target,
+    identity: { dev: 2, ino, uid, gid, mode: 0o120777, nlink: 1, size: target.length, mtimeMs: 1000, ctimeMs: 1000 } });
+  const snapshot = { alias: link(expected.root + '/.next-prod', releaseRoot + '/.next-prod-candidate',
+    '/srv/video-api-debugger/releases/' + source + '/.next-prod-candidate', 100),
+    releaseAlias: link('/srv/video-api-debugger/releases', '/data/video-api-debugger/releases', '/data/video-api-debugger/releases', 101, 0, 0),
+    releasesDirectory: directory('/data/video-api-debugger/releases', 102, 0, 0),
+    releaseDirectory: directory(releaseRoot, 103), buildDirectory: directory(releaseRoot + '/.next-prod-candidate', 104),
+    historicalAliasIdentityClaimed: false };
+  assert.equal(assertLegacyTemplateBuildAlias(expected, pinned, snapshot, 1004), releaseRoot + '/.next-prod-candidate/BUILD_ID');
+  assertLegacyTemplateBuildAlias(expected, pinned, structuredClone(snapshot), 1004, snapshot);
+  for (const key of ['root', 'source', 'version', 'build']) {
+    assert.throws(() => assertLegacyTemplateBuildAlias({ ...expected, [key]: 'different' }, pinned, snapshot, 1004));
+    assert.throws(() => assertLegacyTemplateBuildAlias(expected, { ...pinned, [key]: 'different' }, snapshot, 1004));
+  }
+  for (const edit of [value => { value.alias.linkTarget = '/srv/video-api-debugger/releases/' + 'f'.repeat(40) + '/.next-prod-candidate'; },
+    value => { value.alias.realPath = releaseRoot + '/different-build'; },
+    value => { value.alias.identity.mode = 0o040755; }, value => { value.alias.identity.nlink = 2; },
+    value => { value.alias.identity.uid = 99; }, value => { value.releaseAlias.linkTarget = '/unapproved/releases'; },
+    value => { value.releaseAlias.realPath = '/unapproved/releases'; },
+    value => { value.releaseDirectory.realPath = '/unapproved/' + source; },
+    value => { value.buildDirectory.identity.mode = 0o040775; }, value => { value.buildDirectory.identity.mode = 0o040757; },
+    value => { value.buildDirectory.identity.mode = 0o120777; }, value => { value.historicalAliasIdentityClaimed = true; }]) {
+    const value = structuredClone(snapshot); edit(value); assert.throws(() => assertLegacyTemplateBuildAlias(expected, pinned, value, 1004));
+  }
+  for (const node of ['alias', 'releaseAlias', 'releasesDirectory', 'releaseDirectory', 'buildDirectory'])
+    for (const key of ['dev', 'ino', 'gid', 'mtimeMs', 'ctimeMs']) {
+      const value = structuredClone(snapshot); value[node].identity[key]++;
+      assert.throws(() => assertLegacyTemplateBuildAlias(expected, pinned, value, 1004, snapshot));
+    }
+  return 'only_exact_legacy_template_build_alias_has_fresh_link_entity_permissions_and_no_historical_alias_claim';
 }
 
 export async function runReleaseEntryEngineering(dependencies = {}) {
@@ -704,7 +772,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }
