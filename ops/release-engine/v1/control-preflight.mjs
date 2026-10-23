@@ -577,7 +577,13 @@ function sealedDependencyTrust(m, root, uid) {
     assert.equal(candidate.source, m.fullRelease ? m.live.hd.source : m.live.web.source);
     assert.equal(candidate.source, m.live.hd.source); assert.equal(original.appUser, m.appUser);
     const file = stage + '/' + kind + '-immutable-success.json', bytes = rootFile(file, 128 * 1024 * 1024), capsule = JSON.parse(bytes);
-    if (compiled) { assert.equal(compiled.file, file); assert.equal(sha(bytes), compiled.sha256); assert.ok(capsule.originalReceipt.hdCompiledCache); }
+    if (compiled) {
+      assert.equal(compiled.file, file); assert.equal(sha(bytes), compiled.sha256);
+      // FULL pins a direct successful dependency seal. Historical R09 has the
+      // complete byte/entity table below and predates the HD compiler receipt.
+      if (m.fullRelease) assert.deepEqual(compiled, m.fullRelease.dependencyCapsule);
+      else assert.ok(capsule.originalReceipt.hdCompiledCache);
+    }
     else if (recovered) { assert.equal(sha(manifestBytes), recovered.manifestSha256); assert.equal(sha(bytes), recovered.guardImmutableSuccessSha256); }
     else {
       assert.equal(m.reuseBuilds.sourceRun, normal.sourceRun); assert.equal(sha(manifestBytes), normal.sourceManifestSha256);
