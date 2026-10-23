@@ -10,6 +10,7 @@ import {
   postcheckReleasePhase, releaseChildAction, releaseResumeDecision, runPhaseTransaction, validateNativeFixture,
   validatePackageRequest, validatePrepareTailContinuation, assertPrepareTailControllerDifference, assertPrepareTailChildRoute,
   validateGuardBuildTailContinuation, assertGuardBuildTailControllerDifference, assertGuardBuildTailPhase, GUARD_BUILD_TAIL_PHASES,
+  validateGuardBuildTailRetry, assertGuardBuildTailRetryControllerDifference, assertGuardBuildTailRetryFailure,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -347,13 +348,13 @@ function scenarioGuardBuildTailContract() {
   assert.throws(() => validateGuardBuildTailContinuation({ ...request, compiledTreeSha256: HASH }));
   assert.throws(() => validatePrepareTailContinuation(request));
   const names = ['release-entry.mjs', 'attempt-state.mjs', 'release.mjs', 'release-entry-engineering.mjs', 'attempt-state-engineering.mjs',
-    'candidate.mjs', 'candidate-evidence.mjs', 'candidate-reuse.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs',
+    'candidate.mjs', 'candidate-evidence.mjs', 'candidate-reuse.mjs', 'candidate-inputs.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs',
     'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs', 'hd-storage-preflight-engineering.mjs',
     'engine-context.mjs', 'release-contract.mjs'];
   const original = Object.fromEntries(names.map(name => [name, digest('old:' + name)]));
   const processor = Object.fromEntries(names.map(name => [name, name.startsWith('engine-context') || name.startsWith('release-contract')
     ? original[name] : digest('new:' + name)]));
-  assert.equal(Object.keys(assertGuardBuildTailControllerDifference(original, processor)).length, 14);
+  assert.equal(Object.keys(assertGuardBuildTailControllerDifference(original, processor)).length, 15);
   for (const name of ['engine-context.mjs', 'release-contract.mjs'])
     assert.throws(() => assertGuardBuildTailControllerDifference(original, { ...processor, [name]: HASH }));
   assert.throws(() => assertGuardBuildTailControllerDifference(original, { ...processor, 'new-compiler.mjs': HASH }));
@@ -384,6 +385,54 @@ function scenarioGuardBuildTailContract() {
   return 'guard_tail_binds_exact_original_and_observed_inputs_then_uses_only_reviewed_processor_readers_without_guard_recompile';
 }
 
+function scenarioGuardBuildTailRetry() {
+  const request = { schema: 'sd2-release-guard-build-tail-retry.v1', originalContinuationSha256: digest('original-proof'),
+    terminalEventSha256: digest('postcheck-terminal'), phaseResultEventSha256: digest('postcheck-result'),
+    childReceiptSha256: digest('postcheck-child'), processorControllerSetSha256: digest('retry-processor'),
+    hdCompiledCacheSha256: digest('successful-original-HDv2'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateGuardBuildTailRetry(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateGuardBuildTailRetry(missing));
+    assert.throws(() => validateGuardBuildTailRetry({ ...request, [key]: 'unbound' }));
+  }
+  assert.throws(() => validateGuardBuildTailRetry({ ...request, retryCount: 2 }));
+  assert.throws(() => validateGuardBuildTailContinuation(request));
+  const failure = { error: { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true },
+    cause: ['AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:', '+ actual - expected ... Lines skipped', '',
+      '  [', "    'scripts/upload-client-recovery-engineering.ts',", '...', "    'src/lib/assets/upload-log.ts',",
+      "    'src/lib/assets/verified-upload.ts',", "+   'src/lib/hooks/useWorkspace.ts',", "    'src/lib/http/file-upload.ts',",
+      "    'src/lib/http/upload-session.ts'", '  ]'].join('\n') };
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'guard-build', child: { status: 1, signal: null, error: null },
+    stderr: JSON.stringify(failure) + '\n' };
+  assertGuardBuildTailRetryFailure(child);
+  const withFailure = value => ({ ...child, stderr: JSON.stringify(value) + '\n' });
+  for (const value of [{ ...child, stderr: 'ERR_ASSERTION: src/lib/hooks/useWorkspace.ts' },
+    withFailure({ ...failure, cause: 'Error: ERR_ASSERTION mentioning src/lib/hooks/useWorkspace.ts' }),
+    ...["+   'src/lib/hooks/another-source.ts',", "-   'src/lib/hooks/another-source.ts',"].map(line =>
+      withFailure({ ...failure, cause: failure.cause.replace('  ]', line + '\n  ]') })),
+    withFailure({ ...failure, error: { ...failure.error, category: 'input_permanent' } }),
+    withFailure({ ...failure, error: { ...failure.error, schema: 'another-error.v1' } }),
+    withFailure({ ...failure, error: { ...failure.error, code: 'another_internal_failure' } }),
+    withFailure({ ...failure, error: { ...failure.error, object: { kind: 'release_operation', id: 'controller' } } }),
+    withFailure({ ...failure, error: { ...failure.error, stop: false } }),
+    withFailure({ ...failure, unrelated: true }), { ...child, stderr: child.stderr + child.stderr },
+    { ...child, schema: 'another-child.v1' }, { ...child, phase: 'main-build' }, { ...child, child: { ...child.child, status: 0 } },
+    { ...child, child: { ...child.child, signal: 'SIGTERM' } }]) assert.throws(() => assertGuardBuildTailRetryFailure(value));
+  const names = ['release-entry.mjs', 'attempt-state.mjs', 'release.mjs', 'candidate.mjs', 'candidate-evidence.mjs',
+    'candidate-inputs.mjs', 'candidate-lifecycle-engineering.mjs', 'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'engine-context.mjs'];
+  const original = Object.fromEntries(names.map(name => [name, digest('old:' + name)]));
+  const processor = { ...original };
+  for (const name of names.filter(name => !name.startsWith('hd-') && name !== 'engine-context.mjs')) processor[name] = digest('retry:' + name);
+  assert.equal(Object.keys(assertGuardBuildTailRetryControllerDifference(original, processor)).length, 7);
+  for (const name of ['hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'engine-context.mjs'])
+    assert.throws(() => assertGuardBuildTailRetryControllerDifference(original, { ...processor, [name]: HASH }));
+  assert.throws(() => assertGuardBuildTailRetryControllerDifference(original, { ...processor, 'extra-executor.mjs': HASH }));
+  return 'single_guard_postcheck_retry_keeps_original_proof_and_successful_HD_implementation_while_refusing_unrelated_failures';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -391,7 +440,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

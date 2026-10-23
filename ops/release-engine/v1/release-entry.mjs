@@ -47,10 +47,12 @@ const PREPARE_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate.
   'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs']);
 const GUARD_TAIL_SCHEMA = 'sd2-release-guard-build-tail-continuation.v1';
 const GUARD_TAIL_PROOF = 'sd2-release-guard-build-tail-proof.v1';
+const GUARD_TAIL_RETRY_SCHEMA = 'sd2-release-guard-build-tail-retry.v1';
+const GUARD_TAIL_RETRY_PROOF = 'sd2-release-guard-build-tail-retry-proof.v1';
 export const GUARD_BUILD_TAIL_PHASES = Object.freeze(['guard-build', 'main-build', 'verify', 'arm', 'switch', 'proof', 'recovery']);
 const GUARD_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'attempt-state.mjs', 'release.mjs',
   'release-entry-engineering.mjs', 'attempt-state-engineering.mjs', 'candidate.mjs', 'candidate-evidence.mjs',
-  'candidate-reuse.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs', 'hd-compiled-cache.mjs',
+  'candidate-reuse.mjs', 'candidate-inputs.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs', 'hd-compiled-cache.mjs',
   'hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs', 'hd-storage-preflight-engineering.mjs']);
 
 function exactKeys(value, expected, name) {
@@ -430,11 +432,13 @@ export function assertGuardBuildTailControllerDifference(original, processor) {
   return changed;
 }
 
-function guardBuildTailProcessor(batch, hash) {
+function guardBuildTailProcessor(batch, hash, { directory = here, requireHere = true } = {}) {
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
-  validateEngine(processor, batch.projectRoot); assert.equal(here, processor.root); assert.notEqual(here, batch.engine.root);
-  const original = stableControllerHashes(batch.engine.root), processorControllers = stableControllerHashes(here);
+  validateEngine(processor, batch.projectRoot); assert.equal(directory, processor.root);
+  if (requireHere) assert.equal(here, directory);
+  assert.notEqual(directory, batch.engine.root);
+  const original = stableControllerHashes(batch.engine.root), processorControllers = stableControllerHashes(directory);
   assert.equal(digest(JSON.stringify(original)), batch.engine.controllerSetSha256);
   assert.equal(digest(JSON.stringify(processorControllers)), hash);
   return { processor, processorControllers, changedControllers: assertGuardBuildTailControllerDifference(original, processorControllers) };
@@ -544,14 +548,121 @@ function guardBuildTailSnapshot(batch, request, { initial = false } = {}) {
 
 function guardBuildTailProofFile(loaded, hash) { assert.match(hash, HASH); return path.join(loaded.place.attempt, `guard-build-tail-${hash}.json`); }
 
+export function validateGuardBuildTailRetry(value) {
+  exactKeys(value, ['schema', 'originalContinuationSha256', 'terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256',
+    'processorControllerSetSha256', 'hdCompiledCacheSha256', 'observedAt'], 'single guard-tail postcheck retry');
+  assert.equal(value.schema, GUARD_TAIL_RETRY_SCHEMA);
+  for (const [key, hash] of Object.entries(value)) if (!['schema', 'observedAt'].includes(key)) assert.match(hash, HASH);
+  assert.equal(typeof value.observedAt, 'string'); parseTime(value.observedAt, 'retry observation'); return value;
+}
+
+export function assertGuardBuildTailRetryFailure(receipt) {
+  assert.equal(receipt.schema, 'sd2-release-phase-child.v1'); assert.equal(receipt.phase, 'guard-build');
+  assert.equal(receipt.child.status, 1); assert.equal(receipt.child.signal, null); assert.equal(receipt.child.error, null);
+  assert.equal(typeof receipt.stderr, 'string');
+  const failure = JSON.parse(receipt.stderr); exactKeys(failure, ['error', 'cause'], 'proven guard-tail postcheck failure');
+  assert.deepEqual(failure.error, { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true });
+  assert.equal(typeof failure.cause, 'string');
+  const lines = failure.cause.split('\n');
+  assert.equal(lines[0], 'AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:');
+  assert.equal(lines[1], '+ actual - expected ... Lines skipped'); assert.equal(lines[2], '');
+  assert.equal(lines[3], '  ['); assert.equal(lines.at(-1), '  ]');
+  assert.deepEqual(lines.slice(2).filter(line => /^[ \t]*[+-]/.test(line)), ["+   'src/lib/hooks/useWorkspace.ts',"],
+    'Only the proven single upload-source addition may be retried');
+}
+
+export function assertGuardBuildTailRetryControllerDifference(original, processor) {
+  assert.deepEqual(Object.keys(original).sort(), Object.keys(processor).sort()); const changed = {};
+  const allowed = GUARD_TAIL_CONTROLLERS.filter(name => !name.startsWith('hd-'));
+  for (const name of Object.keys(original).sort()) {
+    assert.match(original[name], HASH); assert.match(processor[name], HASH);
+    if (original[name] !== processor[name]) {
+      assert.ok(allowed.includes(name), 'A postcheck retry cannot replace the successful HD probe implementation: ' + name);
+      changed[name] = { originalSha256: original[name], processorSha256: processor[name] };
+    }
+  }
+  for (const name of ['release-entry.mjs', 'attempt-state.mjs', 'candidate.mjs', 'candidate-evidence.mjs']) assert.ok(changed[name]);
+  return changed;
+}
+
+const probeIdentity = stat => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+function guardBuildTailRetrySnapshot(batch, request) {
+  const m = assertManifest(batch), stage = path.dirname(batch.manifestFile), hdInputs = {};
+  const receiptFile = stage + '/guard-hd-compiled-cache.json';
+  const receiptRead = readTypedFile({ file: receiptFile, category: 'root_control' });
+  assert.equal(receiptRead.snapshot.sha256, request.hdCompiledCacheSha256);
+  const receipt = JSON.parse(receiptRead.bytes), prepared = rootJson(stage + '/guard-prepared.json');
+  const input = rootJson(prepared.receipt), uid = input.uid;
+  assert.ok(Number.isSafeInteger(uid) && uid > 0); assert.equal(input.candidateRoot, m.guard.root); assert.equal(input.runId, m.runId);
+  assert.equal(receipt.schema, 'sd2-hd-compiled-cache.v2'); assert.equal(receipt.runId, m.runId); assert.equal(receipt.kind, 'guard');
+  assert.equal(receipt.noBusinessWorkDispatched, true); assert.equal(receipt.descriptor.sourceRoot, m.guard.root);
+  assert.equal(receipt.descriptor.source, m.guard.source); assert.equal(receipt.sourceManifestSha256, batch.artifacts.guard.sourceManifestSha256);
+  const commandFile = stage + '/guard-hd-compile-command.json', commandRead = readTypedFile({ file: commandFile, category: 'root_control' });
+  assert.equal(commandRead.snapshot.sha256, receipt.commandReceiptSha256); assert.deepEqual(JSON.parse(commandRead.bytes), receipt.command);
+  assert.equal(receipt.command.status, 1); assert.equal(receipt.command.expectedUnusedChildExit, 1);
+  assert.equal(receipt.command.signal, null); assert.equal(receipt.command.error, null); assert.equal(receipt.command.errorCode, null);
+  assert.equal(receipt.command.ipcChannel, false); assert.equal(receipt.command.workMessagesSent, 0);
+  assert.ok(receipt.command.finishedAt - receipt.command.startedAt >= 10000);
+  const logFile = stage + '/guard-hd-compile.log'; assert.equal(receipt.command.logFile, logFile);
+  assert.equal(fs.realpathSync(logFile), logFile); const logBefore = fs.lstatSync(logFile);
+  assert.ok(logBefore.isFile() && !logBefore.isSymbolicLink() && logBefore.uid === 0 && logBefore.nlink === 1 && !(logBefore.mode & 0o022));
+  assert.equal(logBefore.size, 0);
+  const fd = fs.openSync(logFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    assert.deepEqual(probeIdentity(fs.fstatSync(fd)), probeIdentity(logBefore));
+    const bytes = fs.readFileSync(fd); assert.equal(bytes.length, 0); assert.equal(digest(bytes), receipt.command.logSha256);
+    assert.deepEqual(probeIdentity(fs.fstatSync(fd)), probeIdentity(logBefore));
+    assert.deepEqual(probeIdentity(fs.lstatSync(logFile)), probeIdentity(logBefore));
+  } finally { fs.closeSync(fd); }
+  hdInputs.receipt = { file: receiptFile, sha256: receiptRead.snapshot.sha256, snapshot: receiptRead.snapshot };
+  hdInputs.command = { file: commandFile, sha256: commandRead.snapshot.sha256, snapshot: commandRead.snapshot };
+  hdInputs.log = { file: logFile, sha256: receipt.command.logSha256,
+    snapshot: { schema: 'sd2-empty-hd-probe-log.v1', identity: probeIdentity(logBefore) } };
+  const directory = safeAbsolute(receipt.probeDirectory, 'successful probe directory');
+  assert.equal(path.dirname(directory), prepared.buildEnv.TMPDIR);
+  assert.match(path.basename(directory), /^hd-compile-probe-tail-[a-f0-9]+$/);
+  const directories = {}, files = {}, device = fs.statSync('/data').dev;
+  assert.notEqual(device, fs.statSync('/').dev);
+  const walk = relative => {
+    const file = path.join(directory, relative), before = fs.lstatSync(file);
+    assert.equal(fs.realpathSync(file), file); assert.ok(before.isDirectory() && !before.isSymbolicLink() && before.uid === uid
+      && before.dev === device && !(before.mode & 0o022));
+    directories[relative] = probeIdentity(before); const names = fs.readdirSync(file).sort();
+    for (const name of names) {
+      const child = path.join(file, name), key = path.join(relative, name), stat = fs.lstatSync(child);
+      assert.ok(!stat.isSymbolicLink());
+      if (stat.isDirectory()) walk(key);
+      else files[key] = readTypedFile({ file: child, category: 'app', expectedUid: uid, maximumBytes: 8 * 1024 * 1024 }).snapshot;
+    }
+    assert.deepEqual(fs.readdirSync(file).sort(), names); assert.deepEqual(probeIdentity(fs.lstatSync(file)), directories[relative]);
+  };
+  walk(''); assert.equal(directories[''].mode & 0o777, 0o700);
+  const expected = receipt.descriptor.entries.map(entry => {
+    assert.ok(entry.cacheFile.startsWith(directory + path.sep)); const key = path.relative(directory, entry.cacheFile);
+    assert.equal(files[key]?.sha256, entry.cacheSha256); assert.equal(files[key]?.identity.size, entry.cacheBytes); return key;
+  }).sort();
+  assert.deepEqual(Object.keys(files).sort(), expected);
+  const probeSnapshot = { directory, directories, files };
+  return { hdCompiledCache: { file: receiptFile, sha256: receiptRead.snapshot.sha256, schema: receipt.schema }, hdInputs,
+    probeSnapshot: { ...probeSnapshot, sha256: digest(JSON.stringify(probeSnapshot)) } };
+}
+
+function guardBuildTailRetryProofFile(loaded, hash) { assert.match(hash, HASH); return path.join(loaded.place.attempt, `guard-build-tail-retry-${hash}.json`); }
+
 export function assertGuardBuildTailPhase(phase, state) {
   assert.ok(GUARD_BUILD_TAIL_PHASES.includes(phase), 'Phase is outside the guard-tail processor reader contract');
   if (phase === 'guard-build') assert.equal(state.status, 'pending', 'Guard compilation/tail cannot be replayed');
   else assert.equal(state.status, 'completed', 'The guard tail must complete before later phases');
 }
 
-function readGuardBuildTailProof(batch, batchFile, loaded, phase) {
-  const binding = loaded.derivedState.guardBuildTail; assert.ok(binding); assertGuardBuildTailPhase(phase, binding);
+function readGuardBuildTailProof(batch, batchFile, loaded, phase, { retryAdmission = false } = {}) {
+  const binding = loaded.derivedState.guardBuildTail; assert.ok(binding);
+  const retryBinding = loaded.derivedState.guardBuildTailRetry;
+  if (retryAdmission) { assert.equal(binding.status, 'failed'); assert.equal(retryBinding, undefined); }
+  else assertGuardBuildTailPhase(phase, retryBinding || binding);
   const event = loaded.events.find(item => item.sha256 === binding.continuationEventSha256);
   assert.equal(event?.value.kind, 'failure_continued'); assert.equal(event.value.failureReceiptSha256, binding.proofSha256);
   const file = guardBuildTailProofFile(loaded, binding.proofSha256), doc = rootDocument(file, 1024 * 1024), proof = doc.value;
@@ -563,7 +674,8 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase) {
   assert.equal(proof.seedSha256, digest(rootDocument(batch.seedFile).bytes));
   assert.equal(proof.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
   assert.equal(proof.artifactsSha256, digest(JSON.stringify(batch.artifacts))); assert.deepEqual(proof.engine, batch.engine);
-  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256);
+  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256,
+    { directory: proof.processor.root, requireHere: !retryBinding && !retryAdmission });
   for (const name of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[name], identity[name]);
   assert.equal(proof.request.processorControllerSetSha256, binding.processorControllerSetSha256);
   const failure = guardBuildTailFailure(batch, loaded, proof.request, inspectControllerOwner);
@@ -579,7 +691,38 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase) {
       assert.equal(proof.inputs[name].snapshot.identity[key], retained.inputs[name].snapshot.identity[key]);
   }
   assertAttemptBindings(loaded, kernelBindings(batchFile, batch));
-  return { schema: 'sd2-release-guard-build-tail-runtime.v1', phase, proofFile: file, continuationSha256: binding.proofSha256, proof };
+  const runtime = { schema: 'sd2-release-guard-build-tail-runtime.v1', phase, proofFile: file, continuationSha256: binding.proofSha256, proof };
+  if (retryBinding) runtime.retry = readGuardBuildTailRetryProof(batch, batchFile, loaded, runtime);
+  return runtime;
+}
+
+function readGuardBuildTailRetryProof(batch, batchFile, loaded, original) {
+  const binding = loaded.derivedState.guardBuildTailRetry, file = guardBuildTailRetryProofFile(loaded, binding.proofSha256);
+  const doc = rootDocument(file, 1024 * 1024), proof = doc.value; assert.equal(digest(doc.bytes), binding.proofSha256);
+  assert.equal(proof.schema, GUARD_TAIL_RETRY_PROOF); validateGuardBuildTailRetry(proof.request);
+  assert.equal(proof.originalContinuationSha256, original.continuationSha256); assert.equal(proof.originalProofFile, original.proofFile);
+  assert.equal(proof.originalObservedAt, original.proof.observedAt);
+  for (const key of ['taskId', 'attemptId', 'runId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256'])
+    assert.equal(proof[key], original.proof[key]);
+  assert.deepEqual(proof.engine, batch.engine);
+  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256);
+  for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
+  assert.deepEqual(proof.retryControllerChanges, assertGuardBuildTailRetryControllerDifference(original.proof.processorControllers, identity.processorControllers));
+  assert.equal(proof.request.originalContinuationSha256, original.continuationSha256);
+  assert.equal(proof.request.processorControllerSetSha256, binding.processorControllerSetSha256);
+  const request = { ...original.proof.request, terminalEventSha256: proof.request.terminalEventSha256,
+    phaseResultEventSha256: proof.request.phaseResultEventSha256, childReceiptSha256: proof.request.childReceiptSha256 };
+  const failure = guardBuildTailFailure(batch, loaded, request, inspectControllerOwner);
+  const child = readChildReceipt(childReceiptFile(loaded, 'guard-build', failure.result.value.intentSha256), 'guard-build', failure.result.value.intentSha256);
+  assertGuardBuildTailRetryFailure(child.receipt);
+  assert.equal(binding.originalFailureResultSha256, failure.result.sha256);
+  const event = loaded.events.find(item => item.sha256 === binding.continuationEventSha256);
+  assert.equal(event?.value.kind, 'failure_continued'); assert.equal(event.value.previousTerminalSha256, failure.terminal.sha256);
+  assert.equal(event.value.failureReceiptSha256, binding.proofSha256);
+  assert.equal(proof.processReceiptSha256, failure.processReceiptSha256); assert.equal(proof.invocationSha256, failure.invocationSha256);
+  const snapshot = guardBuildTailRetrySnapshot(batch, proof.request);
+  for (const key of ['hdCompiledCache', 'hdInputs', 'probeSnapshot']) assert.deepEqual(proof[key], snapshot[key]);
+  return { schema: 'sd2-release-guard-build-tail-retry-runtime.v1', proofFile: file, proofSha256: binding.proofSha256, proof };
 }
 
 function parseTime(value, name) {
@@ -849,13 +992,18 @@ function candidateEvidence(batch, kind) {
     if (value.schema === 'sd2-candidate-build-tail.v1') {
       assert.equal(kind, 'guard');
       const loaded = readAttempt({ root: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId });
-      const phase = loaded.derivedState.guardBuildTail?.status === 'pending' ? 'guard-build' : 'verify';
+      const status = loaded.derivedState.guardBuildTailRetry?.status ?? loaded.derivedState.guardBuildTail?.status;
+      const phase = status === 'pending' ? 'guard-build' : 'verify';
       const runtime = readGuardBuildTailProof(batch, loaded.header.manifest.file, loaded, phase);
       assert.equal(value.tailPostchecks.continuationSha256, runtime.continuationSha256);
       assert.equal(value.tailPostchecks.proofFile, runtime.proofFile); assert.equal(value.helperProbePhase, 'prepare');
       assert.equal(value.tailPostchecks.retainedOriginalCommand, true);
       assert.equal(value.tailPostchecks.originalCompiledSnapshotUnavailable, true);
       assert.equal(value.tailPostchecks.originalBuildCommandSha256, runtime.proof.request.buildCommandSha256);
+      if (runtime.retry) {
+        assert.equal(value.tailPostchecks.retryProofSha256, runtime.retry.proofSha256);
+        assert.equal(value.tailPostchecks.retryProofFile, runtime.retry.proofFile);
+      }
       assert.equal(value.startedAt, runtime.proof.originalBuild.startedAt); assert.equal(value.finishedAt, runtime.proof.originalBuild.finishedAt);
       assert.equal(value.build, runtime.proof.originalBuild.build);
       const capsule = rootJson(path.join(stage, 'guard-immutable-success.json'), 128 * 1024 * 1024);
@@ -1233,6 +1381,46 @@ export function createReleaseController(overrides = {}) {
   function continueFailed(batchFile, windowFile, failureFile) {
     const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); assertManifest(batch);
     const loaded = load(batchFile, batch), request = rootJson(failureFile, 16384);
+    if (request.schema === GUARD_TAIL_RETRY_SCHEMA) {
+      validateGuardBuildTailRetry(request);
+      assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
+      assert.equal(loaded.events.at(-1).sha256, request.terminalEventSha256); assert.equal(nextReleasePhase(loaded), 'guard-build');
+      assert.equal(loaded.derivedState.guardBuildTail?.status, 'failed'); assert.equal(loaded.derivedState.guardBuildTailRetry, undefined);
+      assert.equal(request.originalContinuationSha256, loaded.derivedState.guardBuildTail.proofSha256);
+      assert.equal(request.phaseResultEventSha256, loaded.derivedState.guardBuildTail.resultSha256);
+      assert.equal(loaded.events.some(item => item.value.name === 'artifact_capsule'), false);
+      const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+      const original = readGuardBuildTailProof(batch, batchFile, loaded, 'guard-build', { retryAdmission: true });
+      const failedRequest = { ...original.proof.request, terminalEventSha256: request.terminalEventSha256,
+        phaseResultEventSha256: request.phaseResultEventSha256, childReceiptSha256: request.childReceiptSha256 };
+      const failure = guardBuildTailFailure(batch, loaded, failedRequest, deps.inspectOwner);
+      const child = readChildReceipt(childReceiptFile(loaded, 'guard-build', failure.result.value.intentSha256), 'guard-build', failure.result.value.intentSha256);
+      assertGuardBuildTailRetryFailure(child.receipt);
+      const identity = guardBuildTailProcessor(batch, request.processorControllerSetSha256);
+      const retryControllerChanges = assertGuardBuildTailRetryControllerDifference(original.proof.processorControllers, identity.processorControllers);
+      guardBuildTailSnapshot(batch, original.proof.request, { initial: true });
+      const snapshot = guardBuildTailRetrySnapshot(batch, request), now = deps.now(), observed = parseTime(request.observedAt, 'retry observation');
+      assert.ok(observed <= now && now - observed < 300000, 'Retry requires a fresh retained-evidence observation');
+      const scene = deps.scene(batch, now); assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+      assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+      const owner = deps.createOwner(), window = releaseWindowReference(batch, windowFile, now);
+      const proof = { schema: GUARD_TAIL_RETRY_PROOF, originalContinuationSha256: original.continuationSha256,
+        originalProofFile: original.proofFile, originalObservedAt: original.proof.observedAt,
+        taskId: batch.taskId, attemptId: batch.attemptId, runId: batch.runId, batchFile,
+        batchSha256: bindings.manifest.sha256, contextSha256: original.proof.contextSha256, seedSha256: original.proof.seedSha256,
+        manifestSha256: original.proof.manifestSha256, artifactsSha256: original.proof.artifactsSha256, engine: batch.engine,
+        ...identity, retryControllerChanges, request, ...snapshot,
+        processReceiptSha256: failure.processReceiptSha256, invocationSha256: failure.invocationSha256, observedAt: new Date(now).toISOString() };
+      const hash = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+      const saved = writeJsonExclusive(guardBuildTailRetryProofFile(loaded, hash), proof); assert.equal(saved.sha256, hash);
+      const result = continueFailedAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId,
+        owner, ...bindings, window, terminalEventSha256: request.terminalEventSha256, failureReceiptSha256: hash,
+        continuation: { schema: 'sd2-release-guard-build-tail-retry-binding.v1', phase: 'guard-build', proofSha256: hash,
+          processorControllerSetSha256: identity.processor.controllerSetSha256,
+          originalContinuationSha256: original.continuationSha256, originalFailureResultSha256: failure.result.sha256 },
+        before: scene, now, inspectOwner: deps.inspectOwner });
+      return { ...result, continuation: saved, processor: identity.processor };
+    }
     if (request.schema === GUARD_TAIL_SCHEMA) {
       validateGuardBuildTailContinuation(request);
       assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);

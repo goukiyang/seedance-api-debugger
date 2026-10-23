@@ -5,7 +5,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validateManifest, assertReleaseWindow, readProtection, assertProtection,
   writeJsonExclusive, call, unit, rootFile, sha, liveArtifactSource, isSharedEngine, sharedReadOnlyHdBounds } from './common.mjs';
-import { preparePricingInputs, readPreparedPricingInputs, verifyPricingInputs, verifyPricingGateReceipt } from './candidate-inputs.mjs';
+import { preparePricingInputs, readPreparedPricingInputs, verifyPricingInputs, verifyPricingGateReceipt,
+  verifyNativeGateReceipt } from './candidate-inputs.mjs';
 import { verifyRateSourceArchive } from './package-candidates.mjs';
 import { verifyUploadPrivateDirectory } from './upload-directory-preflight.mjs';
 import { probeHdCandidateResolver, verifyHdCandidateResolver, inspectHdReconciliation } from './hd-storage-preflight.mjs';
@@ -83,7 +84,7 @@ const UPLOAD_FIXTURE_SOURCES = ['scripts/upload-recovery-engineering.mjs',
   'scripts/upload-private-directory-engineering.ts', 'scripts/upload-client-recovery-engineering.ts',
   'scripts/upload-raw-recovery-engineering.mjs', 'scripts/upload-root-cure-smoke.ts',
   'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts', 'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts',
-  'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/http/file-upload.ts',
+  'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/hooks/useWorkspace.ts', 'src/lib/http/file-upload.ts',
   'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
   'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts', 'src/app/api/assets/upload-proxy/route.ts',
   'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
@@ -265,6 +266,18 @@ function compiledTree(c) {
 }
 function verifyGates(m, kind, source, prepared, receipt) {
   const c = m[kind], uid = Number(call('id', ['-u', m.appUser]));
+  const tailContext = kind === 'guard' && receipt.schema === GUARD_BUILD_TAIL_SCHEMA
+    ? { manifest: m, runtime: guardBuildTailRuntime(m), observedAt: receipt.tailPostchecks?.observedAt ?? Date.now() }
+    : undefined;
+  if (tailContext) {
+    assert.ok(tailContext.runtime);
+    assert.equal(receipt.startedAt, tailContext.runtime.proof.originalBuild.startedAt);
+    assert.equal(receipt.finishedAt, tailContext.runtime.proof.originalBuild.finishedAt);
+    assert.equal(receipt.logSha256, tailContext.runtime.proof.request.buildLogSha256);
+    assert.equal(receipt.gateReceipt, tailContext.runtime.proof.originalBuild.imageGateReceiptFile);
+    assert.ok(Number.isSafeInteger(tailContext.observedAt) && tailContext.observedAt <= Date.now()
+      && Date.now() - tailContext.observedAt < 1800000, 'The bound guard-tail observation is stale');
+  }
   const gate = appReceipt(receipt.gateReceipt, c.root, uid);
   assert.equal(gate.value.schema, 'image-recovery-build-gate.v1'); assert.equal(gate.value.completed, true);
   assert.equal(gate.value.runId, m.runId); assert.equal(gate.value.candidateRoot, c.root);
@@ -350,14 +363,13 @@ function verifyGates(m, kind, source, prepared, receipt) {
   for (const value of [gate.value, appReceipt(gate.value.pricingReceipt, c.root, uid).value]) {
     assert.equal(value.runId, m.runId); assert.equal(value.candidateRoot, c.root);
     assert.ok(value.startedAt >= receipt.startedAt && value.finishedAt >= value.startedAt && value.finishedAt <= receipt.finishedAt);
-    assert.ok(Date.now() - value.startedAt < 30 * 60_000, 'The complete candidate gate is stale');
+    if (!tailContext) assert.ok(Date.now() - value.startedAt < 30 * 60_000, 'The complete candidate gate is stale');
   }
   const pricing = verifyPricingGateReceipt({ candidateRoot: c.root, source: c.source, runId: m.runId,
-    appUser: m.appUser, sourceFiles: source.files, receipt: gate.value.pricingReceipt, since: receipt.startedAt });
-  const output = call('runuser', ['-u', m.appUser, '--', 'env', '-i',
-    ...Object.entries(prepared.buildEnv).map(([key, value]) => key + '=' + value),
-    'node', 'scripts/check-image-recovery.mjs', '--verify', receipt.gateReceipt, '--since', String(receipt.startedAt)],
-  { cwd: c.root, timeout: 60000 });
+    appUser: m.appUser, sourceFiles: source.files, receipt: gate.value.pricingReceipt, since: receipt.startedAt, tailContext });
+  const output = verifyNativeGateReceipt({ candidateRoot: c.root, source: c.source, runId: m.runId,
+    appUser: m.appUser, sourceFiles: source.files, entry: 'scripts/check-image-recovery.mjs',
+    receipt: receipt.gateReceipt, since: receipt.startedAt, buildEnv: prepared.buildEnv, tailContext });
   assert.match(output, /Image recovery build gate verified/);
   assert.equal(appReceipt(receipt.gateReceipt, c.root, uid).sha256, gate.sha256);
   return { imageReceiptSha256: gate.sha256, pricing };
@@ -627,9 +639,12 @@ export async function completeSuccessfulGuardBuildTail(m, continuation) {
   const uploadHelperProbe = prepared.uploadHelperProbe, hdHelperProbe = prepared.hdHelperProbe;
   verifyUploadHelperProbe(m, c, source, prepared, uploadHelperProbe, 'prepare');
   verifyHdCandidateResolver(m, c, prepared, hdHelperProbe, { phase: 'prepare' });
-  const hdCompiledCache = captureHdCompiledCache(m, kind, prepared, {
-    probeDirectory: prepared.preparedRoot + '/hd-compile-probe-tail-' + runtime.continuationSha256.slice(0, 16),
-  });
+  const hdCompiledCache = runtime.retry
+    ? runtime.retry.proof.hdCompiledCache
+    : captureHdCompiledCache(m, kind, prepared, {
+      probeDirectory: prepared.preparedRoot + '/hd-compile-probe-tail-' + runtime.continuationSha256.slice(0, 16),
+    });
+  if (runtime.retry) verifyHdCompiledCacheReceipt(m, kind, hdCompiledCache);
   const proof = { schema: GUARD_BUILD_TAIL_SCHEMA, label: kind, source: c.source, version: c.version, build: built.build,
     runId: m.runId, engine: m.engine, operation: m.operation, manifestSha256: info.manifestSha256,
     startedAt: command.startedAt, finishedAt: command.finishedAt, exitCode: 0,
@@ -649,7 +664,8 @@ export async function completeSuccessfulGuardBuildTail(m, continuation) {
   const observedAt = Date.now();
   proof.tailPostchecks = { schema: 'sd2-guard-build-tail-seal.v1', continuationSha256: runtime.continuationSha256,
     proofFile: runtime.proofFile, observedAt, expiresAt: observedAt + 1800000, retainedOriginalCommand: true,
-    originalCompiledSnapshotUnavailable: true, originalBuildCommandSha256: request.buildCommandSha256 };
+    originalCompiledSnapshotUnavailable: true, originalBuildCommandSha256: request.buildCommandSha256,
+    ...(runtime.retry ? { retryProofSha256: runtime.retry.proofSha256, retryProofFile: runtime.retry.proofFile } : {}) };
   assertFreshCandidateEvidence(proof, m, kind, observedAt);
   writeJsonExclusive(m.stage + '/guard-build.json', proof);
   await sealOriginalSuccess(m, kind);

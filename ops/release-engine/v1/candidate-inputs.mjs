@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { guardBuildTailRuntime, assertGuardBuildTailObservation } from './candidate-evidence.mjs';
 
 // Preparation and native receipt verification only. No service, production DB,
 // build, release switch, upload, or guard process is controlled by this module.
@@ -258,7 +260,146 @@ export function readPreparedPricingInputs({ candidateRoot, source, runId, appUse
   return prepared;
 }
 
-export function verifyPricingGateReceipt({ candidateRoot, source, runId, appUser, sourceFiles, receipt, since }) {
+const NATIVE_GATE_AGES = Object.freeze({
+  'scripts/check-image-recovery.mjs': "assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Build gate receipt is stale');",
+  'scripts/check-pricing-policy.mjs': "assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Pricing gate receipt is stale');",
+});
+const __sd2TailFs = fs, __sd2TailHash = createHash;
+function __sd2ReadTailEntity(file, uid, privateFile) {
+  assert.equal(__sd2TailFs.realpathSync(file), file);
+  const fields = ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'];
+  const identity = stat => Object.fromEntries(fields.map(key => [key, stat[key]]));
+  const before = __sd2TailFs.lstatSync(file);
+  assert.ok(before.isFile() && !before.isSymbolicLink() && before.uid === uid && before.nlink === 1
+    && before.size > 0 && before.size <= 8 * 1024 * 1024 && !(before.mode & (privateFile ? 0o077 : 0o022)));
+  const fd = __sd2TailFs.openSync(file, __sd2TailFs.constants.O_RDONLY | __sd2TailFs.constants.O_NOFOLLOW);
+  try {
+    assert.deepEqual(identity(__sd2TailFs.fstatSync(fd)), identity(before));
+    const bytes = __sd2TailFs.readFileSync(fd);
+    assert.deepEqual(identity(__sd2TailFs.fstatSync(fd)), identity(before));
+    assert.deepEqual(identity(__sd2TailFs.lstatSync(file)), identity(before));
+    return { file, identity: identity(before), sha256: __sd2TailHash('sha256').update(bytes).digest('hex'), bytes };
+  } finally { __sd2TailFs.closeSync(fd); }
+}
+function __sd2AssertTailNativeAge(value, binding, entry) {
+  const target = binding.entries.find(item => item.file === entry);
+  assert.ok(target, 'Unknown native tail verifier');
+  assert.equal(process.argv.length, 6); assert.equal(__sd2TailFs.realpathSync(process.argv[1]), entry);
+  assert.equal(process.argv[2], '--verify'); assert.equal(process.argv[3], target.gate.file);
+  assert.equal(process.argv[4], '--since'); assert.equal(process.argv[5], String(binding.since));
+  assert.equal(__sd2TailFs.realpathSync(process.cwd()), binding.candidateRoot);
+  assert.equal(process.getuid(), binding.uid);
+  const observed = __sd2ReadTailEntity(target.gate.file, binding.uid, true);
+  assert.equal(observed.sha256, target.gate.sha256); assert.deepEqual(observed.identity, target.gate.identity);
+  assert.equal(value.runId, binding.runId); assert.equal(value.candidateRoot, binding.candidateRoot);
+  assert.equal(value.startedAt, target.gate.startedAt); assert.equal(value.finishedAt, target.gate.finishedAt);
+  assert.ok(value.startedAt >= binding.since && value.finishedAt >= value.startedAt && value.finishedAt <= binding.originalFinishedAt);
+  const now = Date.now();
+  assert.ok(binding.observedAt <= now && now < binding.expiresAt, 'Fresh bound tail observation expired');
+  assert.equal(binding.expiresAt, binding.observedAt + 1800000);
+}
+function nativeTailBinding({ candidateRoot, source, runId, uid, receipt, since, tailContext }) {
+  assert.equal(process.getuid(), 0, 'Only the root owning processor may bind a native tail observation');
+  const m = tailContext.manifest, runtime = guardBuildTailRuntime(m);
+  assert.ok(runtime, 'Native tail verification requires its current journal-bound runtime');
+  assert.deepEqual(tailContext.runtime, runtime);
+  assert.equal(m.reuseBuilds, undefined); assert.equal(m.guard.root, candidateRoot); assert.equal(m.guard.source, source);
+  assert.equal(m.runId, runId); assert.equal(runtime.proof.runId, runId);
+  const original = runtime.proof.originalBuild, request = runtime.proof.request, now = Date.now();
+  assert.equal(since, original.startedAt);
+  const observedAt = tailContext.observedAt;
+  const parse = value => typeof value === 'number' ? value : Date.parse(value);
+  const requestObservedAt = parse(runtime.retry ? runtime.retry.proof.observedAt : request.observedAt);
+  assert.ok(Number.isSafeInteger(requestObservedAt) && requestObservedAt > 0);
+  assert.ok(Number.isSafeInteger(observedAt) && observedAt >= requestObservedAt && observedAt >= original.finishedAt
+    && observedAt <= now && now < observedAt + 1800000, 'Fresh tail observation is missing or expired');
+  const sealedFile = m.stage + '/guard-build.json';
+  if (fs.existsSync(sealedFile)) {
+    const stat = regular(sealedFile); assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o022, 0);
+    const sealed = json(sealedFile); assertGuardBuildTailObservation(sealed, m, now);
+    assert.equal(observedAt, sealed.tailPostchecks.observedAt, 'A sealed tail observation cannot be refreshed during verification');
+  } else assert.ok(now < requestObservedAt + 1800000, 'The root tail proof needs its own fresh real observation');
+  const entries = [
+    ['scripts/check-image-recovery.mjs', original.imageGateReceiptFile, request.imageGateReceiptSha256, 'image-recovery-build-gate.v1'],
+    ['scripts/check-pricing-policy.mjs', original.pricingGateReceiptFile, request.pricingGateReceiptSha256, 'pricing-policy-build-gate.v1'],
+  ].map(([entry, file, expected, schema]) => {
+    assert.ok(typeof file === 'string' && file.startsWith(candidateRoot + '/.role-tests/'));
+    const read = __sd2ReadTailEntity(file, uid, true), value = JSON.parse(read.bytes);
+    assert.equal(read.sha256, expected); assert.equal(value.schema, schema); assert.equal(value.completed, true);
+    assert.equal(value.runId, runId); assert.equal(value.candidateRoot, candidateRoot);
+    assert.ok(Number.isSafeInteger(value.startedAt) && Number.isSafeInteger(value.finishedAt)
+      && value.startedAt >= since && value.finishedAt >= value.startedAt && value.finishedAt <= original.finishedAt);
+    return { entry, file: candidateRoot + '/' + entry, gate: { file, sha256: read.sha256, identity: read.identity,
+      startedAt: value.startedAt, finishedAt: value.finishedAt } };
+  });
+  assert.ok(entries.some(item => item.gate.file === receipt));
+  assert.equal(json(entries[0].gate.file).pricingReceipt, entries[1].gate.file, 'The original image verifier must retain its bound pricing child');
+  return { candidateRoot, source, runId, uid, since, originalFinishedAt: original.finishedAt,
+    continuationSha256: runtime.continuationSha256, retryProofSha256: runtime.retry?.proofSha256 || null,
+    observedAt, expiresAt: observedAt + 1800000, entries };
+}
+function nativeTailNodeOptions(binding) {
+  // Only these two locked modules are transformed, and only their unique age
+  // assertion. Hash sets, child logs, receipt intervals and fixture validators
+  // remain the original code. The nested pricing --verify inherits NODE_OPTIONS.
+  const load = `
+export async function load(url, context, nextLoad) {
+  const target = binding.entries.find(item => item.url === url);
+  if (!target) return nextLoad(url, context);
+  const before = __sd2ReadTailEntity(target.file, binding.uid, false);
+  assert.equal(before.sha256, target.sha256); assert.deepEqual(before.identity, target.identity);
+  const result = await nextLoad(url, context);
+  assert.equal(result.format, 'module');
+  const source = Buffer.from(result.source).toString('utf8');
+  assert.equal(__sd2TailHash('sha256').update(source).digest('hex'), target.sha256);
+  assert.equal(source.split(target.age).length, 2, 'Native gate age assertion must occur exactly once');
+  const after = __sd2ReadTailEntity(target.file, binding.uid, false);
+  assert.equal(after.sha256, before.sha256); assert.deepEqual(after.identity, before.identity);
+  const prefix = ${JSON.stringify("import * as __sd2TailFs from 'node:fs';import {createHash as __sd2TailHash} from 'node:crypto';\n" + __sd2ReadTailEntity.toString() + '\n' + __sd2AssertTailNativeAge.toString() + '\n')}
+    + 'const __sd2TailBinding=' + JSON.stringify(binding) + ';' + String.fromCharCode(10);
+  return {...result, source: prefix + source.replace(target.age,
+    '__sd2AssertTailNativeAge(value,__sd2TailBinding,' + JSON.stringify(target.file) + ');')};
+}`;
+  const module = "import assert from 'node:assert/strict';import * as __sd2TailFs from 'node:fs';import {createHash as __sd2TailHash} from 'node:crypto';\n"
+    + __sd2ReadTailEntity.toString() + '\nlet binding;export function initialize(value){binding=value;}\n' + load;
+  const loader = 'data:text/javascript;base64,' + Buffer.from(module).toString('base64');
+  const bootstrap = "import {register} from 'node:module';register(" + JSON.stringify(loader)
+    + ',{parentURL:import.meta.url,data:' + JSON.stringify(binding) + '});';
+  return '--import=data:text/javascript;base64,' + Buffer.from(bootstrap).toString('base64');
+}
+
+export function verifyNativeGateReceipt({ candidateRoot, source, runId, appUser, sourceFiles, entry, receipt, since, buildEnv, tailContext }) {
+  assert.ok(Object.hasOwn(NATIVE_GATE_AGES, entry), 'Only the original image/pricing --verify entries are allowed');
+  const root = canonicalCandidate(candidateRoot, source), { uid } = identity(appUser);
+  assert.match(runId, /^[a-f0-9-]{36}$/); assert.ok(Number.isSafeInteger(since) && since > 0 && since <= Date.now());
+  assert.ok(typeof receipt === 'string' && receipt.startsWith(root + '/.role-tests/'));
+  const env = entry === 'scripts/check-image-recovery.mjs' ? { ...buildEnv } : { PATH: SYSTEM_PATH, LANG: 'C.UTF-8' };
+  if (entry === 'scripts/check-image-recovery.mjs') assert.ok(buildEnv && Object.keys(buildEnv).length > 0);
+  let binding;
+  if (tailContext !== undefined) {
+    binding = nativeTailBinding({ candidateRoot: root, source, runId, uid, receipt, since, tailContext });
+    for (const target of binding.entries) {
+      const read = __sd2ReadTailEntity(target.file, uid, false);
+      assert.equal(read.sha256, sourceFiles[target.entry], 'Native verifier source changed');
+      assert.equal(read.bytes.toString('utf8').split(NATIVE_GATE_AGES[target.entry]).length, 2, 'Unique original native age assertion required');
+      Object.assign(target, { url: pathToFileURL(target.file).href, sha256: read.sha256, identity: read.identity, age: NATIVE_GATE_AGES[target.entry] });
+    }
+    assert.equal(Object.hasOwn(env, 'NODE_OPTIONS'), false, 'Do not replace an existing loader environment');
+    env.NODE_OPTIONS = nativeTailNodeOptions(binding);
+  }
+  const output = call('runuser', ['-u', appUser, '--', 'env', '-i', ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
+    entry === 'scripts/check-image-recovery.mjs' ? 'node' : process.execPath, entry, '--verify', receipt, '--since', String(since)], { cwd: root, timeout: 60000 });
+  if (binding) {
+    assert.deepEqual(nativeTailBinding({ candidateRoot: root, source, runId, uid, receipt, since, tailContext }),
+      { ...binding, entries: binding.entries.map(({ entry: name, file, gate }) => ({ entry: name, file, gate })) });
+    for (const target of binding.entries) {
+      const read = __sd2ReadTailEntity(target.file, uid, false); assert.equal(read.sha256, target.sha256); assert.deepEqual(read.identity, target.identity);
+    }
+  }
+  return output;
+}
+
+export function verifyPricingGateReceipt({ candidateRoot, source, runId, appUser, sourceFiles, receipt, since, tailContext }) {
   const root = canonicalCandidate(candidateRoot, source), { uid } = identity(appUser);
   assert.match(runId, /^[a-f0-9-]{36}$/);
   assert.ok(Number.isSafeInteger(since) && since > 0 && since <= Date.now());
@@ -277,11 +418,12 @@ export function verifyPricingGateReceipt({ candidateRoot, source, runId, appUser
   const fixture = json(value.fixtureReceipt);
   assert.equal(fixture.rootInputManifest?.source, source);
   assert.ok(value.startedAt >= since && value.finishedAt >= value.startedAt && value.finishedAt <= Date.now() + 1000);
-  assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Pricing receipt is stale');
+  if (tailContext === undefined) assert.ok(Date.now() - value.startedAt <= 30 * 60_000, 'Pricing receipt is stale');
+  else nativeTailBinding({ candidateRoot: root, source, runId, uid, receipt, since, tailContext });
   // The native verifier proves G01-G30, all fourteen actual transcripts,
   // root/immutable inputs, process identity, every candidate hash, and receipt times.
-  const output = call('runuser', ['-u', appUser, '--', 'env', '-i', `PATH=${SYSTEM_PATH}`, 'LANG=C.UTF-8',
-    process.execPath, 'scripts/check-pricing-policy.mjs', '--verify', receipt, '--since', String(since)], { cwd: root, timeout: 60000 });
+  const output = verifyNativeGateReceipt({ candidateRoot: root, source, runId, appUser, sourceFiles,
+    entry: 'scripts/check-pricing-policy.mjs', receipt, since, tailContext });
   assert.match(output, /Pricing policy build gate verified/);
   assert.equal(sourceSnapshot(root, sourceFiles), sourceSha256);
   assert.equal(sha(fs.readFileSync(receipt)), receiptSha256, 'Pricing receipt changed during native verification');

@@ -9,6 +9,7 @@ import {
   createAttemptIdentity,
   continueFailedAttempt,
   validateGuardBuildTailBinding,
+  validateGuardBuildTailRetryBinding,
   finishAttempt,
   finishPhase,
   readAttempt,
@@ -261,6 +262,74 @@ function runAttempts(root, checks) {
   checks.push('guard_tail_preserves_failed_journal_and_header_requires_dead_owner_then_finishes_once_before_main');
 }
 
+function runGuardBuildTailRetryAttempts(root, checks) {
+  for (const succeeds of [true, false]) {
+    const taskId = 'guard-postcheck-retry-' + succeeds, attemptId = succeeds
+      ? '10000000-0000-4000-8000-000000000008' : '10000000-0000-4000-8000-000000000009';
+    const bindings = fixtureBindings(root, 'input'), first = owner(2201, UUIDS.ownerOne), tailOwner = owner(2202, UUIDS.ownerTwo),
+      retryOwner = owner(2203, UUIDS.ownerOne);
+    let now = 1_800_000_001_000;
+    const read = () => readAttempt({ root, taskId, attemptId });
+    const phase = (controller, outcome) => {
+      const loaded = read(), intent = startPhase({ root, taskId, attemptId, owner: controller, phase: 'guard-build',
+        dependencyEventSha256: loaded.derivedState.lastEventSha256, before: scene(++now, 'guard'), now });
+      return finishPhase({ root, taskId, attemptId, owner: controller, phase: 'guard-build', intentSha256: intent.eventSha256,
+        outcome, child: child(outcome === 'succeeded' ? 0 : 1), after: scene(++now, 'guard-result'), now });
+    };
+    const terminal = (controller, outcome) => finishAttempt({ root, taskId, attemptId, owner: controller, outcome,
+      after: scene(++now, 'terminal'), now });
+    start(root, taskId, attemptId, first, now, bindings); phase(first, 'failed'); terminal(first, 'failed');
+    const originalSha = sha('original-guard-proof-' + succeeds);
+    const continueWith = (controller, continuation, inspectOwner = () => 'dead') => continueFailedAttempt({ root, taskId, attemptId,
+      owner: controller, ...bindings, terminalEventSha256: read().derivedState.terminal.eventSha256,
+      failureReceiptSha256: continuation.proofSha256, continuation,
+      window: windowReference(root, attemptId, ++now, now + 1000, 'postcheck-window-' + now),
+      before: scene(now, 'postcheck-read', { effectsStarted: false, switchComplete: false }), now, inspectOwner });
+    continueWith(tailOwner, { schema: 'sd2-release-guard-build-tail-binding.v1', phase: 'guard-build',
+      proofSha256: originalSha, processorControllerSetSha256: sha('first-tail-processor') });
+    phase(tailOwner, 'failed'); terminal(tailOwner, 'failed');
+    const failed = read(), originalState = structuredClone(failed.derivedState.guardBuildTail);
+    const header = fs.readFileSync(path.join(failed.place.attempt, 'attempt.json'));
+    const preserved = failed.events.map((_, index) => fs.readFileSync(path.join(failed.place.events, String(index + 1).padStart(6, '0') + '.json')));
+    const retry = { schema: 'sd2-release-guard-build-tail-retry-binding.v1', phase: 'guard-build', proofSha256: sha('retry-proof-' + succeeds),
+      processorControllerSetSha256: sha('retry-processor'), originalContinuationSha256: originalSha,
+      originalFailureResultSha256: originalState.resultSha256 };
+    assert.deepEqual(validateGuardBuildTailRetryBinding(retry), retry);
+    assert.throws(() => validateGuardBuildTailRetryBinding({ ...retry, phase: 'main-build' }));
+    for (const status of ['alive', 'unknown']) assert.throws(() => continueWith(retryOwner, retry, () => status));
+    assert.throws(() => continueWith(retryOwner, { ...retry, originalContinuationSha256: sha('wrong-original') }));
+    assert.equal(read().events.length, preserved.length);
+    continueWith(retryOwner, retry);
+    assert.deepEqual(read().derivedState.guardBuildTail, originalState);
+    assert.equal(read().derivedState.guardBuildTailRetry.status, 'pending');
+    const pending = read();
+    assert.throws(() => startPhase({ root, taskId, attemptId, owner: retryOwner, phase: 'main-build',
+      dependencyEventSha256: pending.derivedState.lastEventSha256, before: scene(++now, 'too-early'), now }));
+    assert.equal(read().events.length, pending.events.length);
+    phase(retryOwner, succeeds ? 'succeeded' : 'failed');
+    assert.deepEqual(read().derivedState.guardBuildTail, originalState);
+    assert.equal(read().derivedState.guardBuildTailRetry.status, succeeds ? 'completed' : 'failed');
+    if (succeeds) {
+      const done = read();
+      assert.throws(() => startPhase({ root, taskId, attemptId, owner: retryOwner, phase: 'guard-build',
+        dependencyEventSha256: done.derivedState.lastEventSha256, before: scene(++now, 'forbidden-second-retry'), now }));
+      const main = startPhase({ root, taskId, attemptId, owner: retryOwner, phase: 'main-build',
+        dependencyEventSha256: done.derivedState.lastEventSha256, before: scene(++now, 'allowed-main'), now });
+      finishPhase({ root, taskId, attemptId, owner: retryOwner, phase: 'main-build', intentSha256: main.eventSha256,
+        outcome: 'succeeded', child: child(0), after: scene(++now, 'main-result'), now });
+      terminal(retryOwner, 'succeeded');
+    } else {
+      terminal(retryOwner, 'failed'); const count = read().events.length;
+      assert.throws(() => continueWith(first, { ...retry, proofSha256: sha('unauthorized-second-retry') }));
+      assert.equal(read().events.length, count);
+    }
+    assert.deepEqual(fs.readFileSync(path.join(failed.place.attempt, 'attempt.json')), header);
+    for (let index = 0; index < preserved.length; index++)
+      assert.deepEqual(fs.readFileSync(path.join(failed.place.events, String(index + 1).padStart(6, '0') + '.json')), preserved[index]);
+    checks.push('guard_tail_single_retry_' + (succeeds ? 'completed_then_main' : 'failed_no_second_retry') + '_preserves_original_failed_state_and_events');
+  }
+}
+
 function runTypedFilesAndErrors(root, checks) {
   assert.equal(process.platform, 'linux', 'System-file engineering fixtures require the production Linux semantics');
   assert.equal(process.getuid(), 0, 'System-file engineering fixtures require the production root reader');
@@ -326,6 +395,7 @@ export function runAttemptStateEngineeringFixtures() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-attempt-state-engineering-')));
   const checks = [];
   runAttempts(root, checks);
+  runGuardBuildTailRetryAttempts(root, checks);
   runTypedFilesAndErrors(root, checks);
   return { schema: 'sd2-release-attempt-state-engineering.v1', completed: true, checks, count: checks.length,
     root, scenarios: ['A', 'B', 'C', 'D'], productionCalls: 0, serviceCalls: 0, paidRequests: 0, browserRuns: 0,

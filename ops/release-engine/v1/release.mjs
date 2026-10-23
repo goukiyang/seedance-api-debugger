@@ -32,9 +32,10 @@ function protectedDirectory(file) {
   const stat = fs.lstatSync(file); assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o022));
 }
 function trustedCode(m, runtime = null) {
-  const hashes = runtime ? runtime.proof.processorControllers : m.privateSha256;
+  const processorProof = runtime?.retry?.proof || runtime?.proof;
+  const hashes = processorProof ? processorProof.processorControllers : m.privateSha256;
   if (runtime) {
-    assert.equal(sha(JSON.stringify(hashes)), runtime.proof.processor.controllerSetSha256);
+    assert.equal(sha(JSON.stringify(hashes)), processorProof.processor.controllerSetSha256);
     assert.deepEqual(fs.readdirSync(directory).filter(file => file.endsWith('.mjs')).sort(), Object.keys(hashes).sort());
   }
   for (const [file, expected] of Object.entries(hashes)) {
@@ -55,7 +56,8 @@ function guardBuildTailRuntime(m, mode, kind) {
   assert.equal(runtime.proof.schema, 'sd2-release-guard-build-tail-proof.v1');
   assert.ok(guardBuildTailReleaseAction(runtime.phase, mode, kind), 'Guard-tail processor may not compile guard or enter an unbound phase');
   assert.deepEqual(context.contract.engine, m.engine); assert.deepEqual(runtime.proof.engine, m.engine);
-  assert.equal(runtime.proof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
+  const processorProof = runtime.retry?.proof || runtime.proof;
+  assert.equal(processorProof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
   assert.equal(runtime.proof.runId, m.runId); assert.equal(runtime.proof.taskId, m.operation.taskId);
   assert.equal(runtime.proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
   const file = m.operation.taskRoot + '/attempts/' + m.runId + '/guard-build-tail-' + runtime.continuationSha256 + '.json';
@@ -63,9 +65,21 @@ function guardBuildTailRuntime(m, mode, kind) {
   assert.equal(sha(bytes), runtime.continuationSha256); assert.deepEqual(JSON.parse(bytes), runtime.proof);
   const loaded = readAttempt({ root: m.projectRoot + '/release-tasks', taskId: m.operation.taskId, attemptId: m.runId });
   assert.equal(loaded.derivedState.status, 'running'); assert.equal(loaded.derivedState.activePhase?.phase, runtime.phase);
-  assert.equal(loaded.derivedState.guardBuildTail?.status, 'completed');
+  assert.equal((loaded.derivedState.guardBuildTailRetry || loaded.derivedState.guardBuildTail)?.status, 'completed');
   assert.equal(loaded.derivedState.guardBuildTail.proofSha256, runtime.continuationSha256);
   assert.equal(loaded.derivedState.guardBuildTail.processorControllerSetSha256, runtime.proof.processor.controllerSetSha256);
+  if (runtime.retry) {
+    const retry = runtime.retry, proof = retry.proof, retryBytes = rootFile(retry.proofFile);
+    assert.equal(retry.schema, 'sd2-release-guard-build-tail-retry-runtime.v1');
+    assert.equal(proof.schema, 'sd2-release-guard-build-tail-retry-proof.v1');
+    assert.equal(sha(retryBytes), retry.proofSha256); assert.deepEqual(JSON.parse(retryBytes), proof);
+    assert.equal(proof.originalContinuationSha256, runtime.continuationSha256); assert.equal(proof.originalProofFile, runtime.proofFile);
+    for (const key of ['runId', 'taskId', 'attemptId', 'manifestSha256']) assert.equal(proof[key], runtime.proof[key]);
+    assert.deepEqual(proof.engine, runtime.proof.engine);
+    assert.equal(loaded.derivedState.guardBuildTail.status, 'failed');
+    assert.equal(loaded.derivedState.guardBuildTailRetry.proofSha256, retry.proofSha256);
+    assert.equal(loaded.derivedState.guardBuildTailRetry.processorControllerSetSha256, proof.processor.controllerSetSha256);
+  } else assert.equal(loaded.derivedState.guardBuildTailRetry, undefined);
   return runtime;
 }
 function liveInfo(name) {

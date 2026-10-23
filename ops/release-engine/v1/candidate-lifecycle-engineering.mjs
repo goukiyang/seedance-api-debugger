@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateEvidenceExpiresAt, REUSE_SCHEMA,
   GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
 import { parseReleaseTimestamp, isSharedEngine, engineDirectory } from './common.mjs';
@@ -619,7 +620,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     : migrationContext.api;
   const denied = name => () => { throw new Error('Unimplemented isolated native operation: ' + name); };
   const pricingInputs = load('candidate-inputs.mjs', {},
-    ['cleanBuildEnv', 'sourceSnapshot', 'markerSnapshot', 'inspectMultiviewFixtureRoot', 'verifyPricingInputs', 'verifyPricingGateReceipt']);
+    ['cleanBuildEnv', 'sourceSnapshot', 'markerSnapshot', 'inspectMultiviewFixtureRoot', 'verifyPricingInputs', 'verifyPricingGateReceipt', 'verifyNativeGateReceipt']);
   const hdCandidate = load('hd-storage-preflight.mjs', {
     os, APPROVED_HD_LEGACY_READY: null, APPROVED_HD_HISTORICAL_VERSIONS: null,
     inspectRetiredHdCaches: denied('retired HD inventory'),
@@ -646,6 +647,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     validateManifest: value => { assert.deepEqual(copy(value), json(stage + '/manifest.json')); return value; },
     verifyUploadPrivateDirectory: verifyUploadDirectory,
     verifyPricingInputs: pricingInputs.verifyPricingInputs, verifyPricingGateReceipt: pricingInputs.verifyPricingGateReceipt,
+    verifyNativeGateReceipt: pricingInputs.verifyNativeGateReceipt,
     verifyHdCandidateResolver: hdCandidate.verifyHdCandidateResolver,
     preparePricingInputs: denied('native pricing preparation'), verifyRateSourceArchive: denied('native archive extraction'),
     spawnSync: denied('npm build'), probeHdCandidateResolver: denied('native HD subprocess'),
@@ -1463,6 +1465,125 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   }
   add('guard-build-tail_actual-body_' + scenario);
 }
+// Native Node loader/TTL transport only. Minimal verifier modules retain each
+// exact age assertion from the real frozen script and its original nested
+// pricing spawn. This does not rerun or claim all original business fixtures.
+const nativeTailBase = '/data/video-api-debugger-engineering';
+assert.equal(fs.realpathSync('/data'), '/data');
+const nativeTailData = fs.lstatSync('/data');
+assert.ok(nativeTailData.isDirectory() && !nativeTailData.isSymbolicLink());
+assert.notEqual(nativeTailData.dev, fs.statSync('/').dev, 'Native tail fixture requires the real separate data volume');
+assert.equal(execFileSync('findmnt', ['-n', '-o', 'TARGET', '-T', '/data'], { encoding: 'utf8' }).trim(), '/data');
+assert.equal(fs.realpathSync(nativeTailBase), nativeTailBase);
+const nativeTailBaseStat = fs.lstatSync(nativeTailBase);
+assert.ok(nativeTailBaseStat.isDirectory() && !nativeTailBaseStat.isSymbolicLink() && nativeTailBaseStat.uid === 0
+  && (nativeTailBaseStat.mode & 0o7777) === 0o755 && nativeTailBaseStat.dev === nativeTailData.dev,
+'Native tail fixture requires the existing protected root-owned data engineering base');
+const nativeTailDirectory = fs.realpathSync(fs.mkdtempSync(nativeTailBase + '/sd2-native-tail-age-'));
+fs.chmodSync(nativeTailDirectory, 0o711);
+try {
+  const uid = Number(execFileSync('id', ['-u', 'gouki'], { encoding: 'utf8' }).trim());
+  const gid = Number(execFileSync('id', ['-g', 'gouki'], { encoding: 'utf8' }).trim());
+  assert.ok(uid > 0 && gid > 0);
+  const root = nativeTailDirectory + '/candidate', stage = nativeTailDirectory + '/root-stage';
+  for (const file of [root, root + '/scripts', root + '/.role-tests']) {
+    fs.mkdirSync(file, { mode: 0o700 }); fs.chownSync(file, uid, gid);
+  }
+  fs.mkdirSync(stage, { mode: 0o700 });
+  const writeApp = (file, bytes) => { fs.writeFileSync(file, bytes, { mode: 0o600 }); fs.chownSync(file, uid, gid); };
+  const entries = ['scripts/check-image-recovery.mjs', 'scripts/check-pricing-policy.mjs'];
+  const frozenRoot = releaseDependencyRoot(MV_DIRECT), frozenSources = {}, ages = {};
+  let nestedPricing;
+  for (const entry of entries) {
+    const bytes = fs.readFileSync(frozenRoot + '/' + entry, 'utf8'); frozenSources[entry] = sha(bytes);
+    const parsed = ts.createSourceFile(entry, bytes, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    assert.equal(parsed.parseDiagnostics.length, 0);
+    const verify = parsed.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'verify');
+    assert.equal(verify.length, 1);
+    const age = verify[0].body.statements.filter(node => node.getText(parsed).includes('Date.now() - value.startedAt'));
+    assert.equal(age.length, 1); ages[entry] = age[0].getText(parsed);
+    if (entry === entries[0]) {
+      const spawn = verify[0].body.statements.filter(node => node.getText(parsed).startsWith('const pricing = spawnSync('));
+      assert.equal(spawn.length, 1); nestedPricing = spawn[0].getText(parsed);
+    }
+  }
+  const pricingFile = root + '/.role-tests/pricing.json', imageFile = root + '/.role-tests/image.json';
+  const logFile = root + '/.role-tests/child.log'; writeApp(logFile, 'synthetic verifier-only child transcript\n');
+  const logSha256 = sha(fs.readFileSync(logFile));
+  const nativeSources = {};
+  for (const entry of entries) {
+    const image = entry === entries[0];
+    const body = `import assert from 'node:assert/strict';import fs from 'node:fs';import {spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';
+const root=fs.realpathSync(process.cwd()),pricingGate='scripts/check-pricing-policy.mjs';
+const hash=value=>createHash('sha256').update(value).digest('hex');
+const sources=()=>Object.fromEntries(${JSON.stringify(entries)}.map(file=>[file,hash(fs.readFileSync(root+'/'+file))]));
+assert.equal(process.argv.length,6);assert.equal(process.argv[2],'--verify');assert.equal(process.argv[4],'--since');
+const since=Number(process.argv[5]),value=JSON.parse(fs.readFileSync(process.argv[3]));
+assert.equal(value.candidateRoot,root);assert.ok(value.startedAt>=since&&value.finishedAt>=value.startedAt&&value.finishedAt<=Date.now()+1000);
+${ages[entry]}
+assert.deepEqual(value.sourceSha256,sources());assert.equal(hash(fs.readFileSync(value.childLog)),value.childLogSha256);
+${image ? nestedPricing + "\nassert.ifError(pricing.error);assert.equal(pricing.status,0,(pricing.stderr||'')+(pricing.stdout||''));process.stdout.write(pricing.stdout);" : ''}
+console.log(${JSON.stringify(image ? 'Image recovery build gate verified (native verifier-only fixture)' : 'Pricing policy build gate verified (native verifier-only fixture)')});
+`;
+    writeApp(root + '/' + entry, body); nativeSources[entry] = sha(body);
+  }
+  const runId = randomUUID(), sourceId = 'f'.repeat(40), now = Date.now(), since = now - 7200000;
+  const commonGate = { completed: true, candidateRoot: root, runId, startedAt: since + 1000, finishedAt: since + 2000,
+    sourceSha256: nativeSources, childLog: logFile, childLogSha256: logSha256 };
+  writeApp(pricingFile, JSON.stringify({ ...commonGate, schema: 'pricing-policy-build-gate.v1' }));
+  writeApp(imageFile, JSON.stringify({ ...commonGate, schema: 'image-recovery-build-gate.v1', pricingReceipt: pricingFile }));
+  const m = { stage, runId, appUser: 'gouki', guard: { root, source: sourceId } };
+  const runtime = { schema: 'sd2-release-guard-build-tail-runtime.v1', phase: 'guard-build', continuationSha256: 'a'.repeat(64),
+    proof: { runId, request: { observedAt: now - 7200000, imageGateReceiptSha256: sha(fs.readFileSync(imageFile)),
+      pricingGateReceiptSha256: sha(fs.readFileSync(pricingFile)) },
+      originalBuild: { startedAt: since, finishedAt: since + 10000, imageGateReceiptFile: imageFile, pricingGateReceiptFile: pricingFile } },
+    retry: { proofSha256: 'b'.repeat(64), proof: { observedAt: now - 1 } } };
+  let bound = true, nativeCalls = 0;
+  const namespace = { assert, fs, path, Buffer, JSON, Date, process, createHash, pathToFileURL,
+    execFileSync: (file, args, options) => { if (file === 'runuser') nativeCalls++; return execFileSync(file, args, options); },
+    guardBuildTailRuntime: value => { assert.equal(value, m); return bound ? runtime : null; },
+    assertGuardBuildTailObservation: (value, manifest, at) => { assert.equal(manifest, m);
+      assert.equal(value.schema, GUARD_BUILD_TAIL_SCHEMA); assert.equal(value.tailPostchecks.continuationSha256, runtime.continuationSha256);
+      assert.equal(value.tailPostchecks.expiresAt, value.tailPostchecks.observedAt + 1800000);
+      assert.ok(at < value.tailPostchecks.expiresAt); } };
+  vm.runInNewContext(scriptBody(sources['candidate-inputs.mjs'])
+    + '\ncanonicalCandidate=(candidateRoot,source)=>{assert.equal(candidateRoot,' + JSON.stringify(root)
+    + ');assert.equal(source,' + JSON.stringify(sourceId) + ');return candidateRoot;};globalThis.nativeVerify=verifyNativeGateReceipt;', namespace);
+  const options = { candidateRoot: root, source: sourceId, runId, appUser: 'gouki', sourceFiles: nativeSources,
+    entry: entries[0], receipt: imageFile, since, buildEnv: { PATH: '/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C.UTF-8', NODE_ENV: 'test' } };
+  const tailContext = { manifest: m, runtime, observedAt: now };
+  assert.throws(() => namespace.nativeVerify(options));
+  assert.throws(() => namespace.nativeVerify({ ...options, entry: entries[1], receipt: pricingFile }));
+  const output = namespace.nativeVerify({ ...options, tailContext });
+  assert.match(output, /Image recovery build gate verified/); assert.match(output, /Pricing policy build gate verified/);
+  assert.equal(JSON.parse(fs.readFileSync(imageFile)).startedAt, commonGate.startedAt);
+  assert.equal(JSON.parse(fs.readFileSync(pricingFile)).finishedAt, commonGate.finishedAt);
+  add('native_tail_two_exact_age_assertions_preserve_original_times_and_nested_pricing_verify_inheritance');
+  const reject = (name, change, restore) => {
+    const before = nativeCalls; change();
+    try { assert.throws(() => namespace.nativeVerify({ ...options, tailContext })); }
+    finally { restore(); }
+    add('native_tail_refuses_' + name); return before;
+  };
+  reject('unbound_root_context', () => { bound = false; }, () => { bound = true; });
+  assert.throws(() => namespace.nativeVerify({ ...options, tailContext: { ...tailContext, observedAt: now - 1800001 } }));
+  assert.throws(() => namespace.nativeVerify({ ...options, entry: 'scripts/not-an-original-verifier.mjs', tailContext }));
+  add('native_tail_expired_observation_and_unknown_entry_are_refused');
+  const originalSource = fs.readFileSync(root + '/' + entries[1]);
+  reject('source_drift', () => fs.appendFileSync(root + '/' + entries[1], '\n// drift'), () => fs.writeFileSync(root + '/' + entries[1], originalSource));
+  const originalGate = fs.readFileSync(pricingFile);
+  reject('receipt_time_drift', () => fs.writeFileSync(pricingFile, JSON.stringify({ ...JSON.parse(originalGate), startedAt: since + 2 })),
+    () => fs.writeFileSync(pricingFile, originalGate));
+  reject('child_log_drift', () => fs.appendFileSync(logFile, 'drift'), () => fs.writeFileSync(logFile, 'synthetic verifier-only child transcript\n'));
+  reject('stale_retry_proof_observation', () => { runtime.retry.proof.observedAt = now - 1800001; }, () => { runtime.retry.proof.observedAt = now - 1; });
+  const seal = { schema: GUARD_BUILD_TAIL_SCHEMA, tailPostchecks: { continuationSha256: runtime.continuationSha256,
+    observedAt: now - 1000, expiresAt: now - 1000 + 1800000 } };
+  fs.writeFileSync(stage + '/guard-build.json', JSON.stringify(seal), { mode: 0o600 });
+  assert.throws(() => namespace.nativeVerify({ ...options, tailContext }));
+  add('native_tail_sealed_observation_cannot_be_refreshed_on_later_verification');
+  traces.push({ nativeTailVerifierOnly: true, frozenVerifierSourceSha256: frozenSources, exactNativeAgeStatements: ages,
+    nativeSubprocesses: nativeCalls, completeOriginalBusinessGatesRerun: false, applicationDatabaseOpened: false });
+} finally { fs.rmSync(nativeTailDirectory, { recursive: true, force: true }); }
 for (const invalid of [NaN, Infinity, 1.5, '2026-02-30T00:00:00Z', '2026-10-21', '1792590000000'])
   assert.ok(Number.isNaN(parseReleaseTimestamp(invalid)));
 add('shared-approval-time-parser-rejects-invalid-or-ambiguous-values');

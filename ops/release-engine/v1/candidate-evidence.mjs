@@ -21,20 +21,35 @@ export function guardBuildTailRuntime(m) {
   assert.equal(proof.attemptId, m.operation.attemptId); assert.deepEqual(proof.engine, m.engine);
   assert.equal(proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
   assert.equal(proof.engine.root, engineDirectory(m));
-  assert.equal(path.dirname(fileURLToPath(import.meta.url)), proof.processor.root);
-  assert.notEqual(proof.processor.root, proof.engine.root);
   assert.equal(proof.originalCompiledSnapshotUnavailable, true);
-  assert.deepEqual(Object.keys(proof.processorControllers).sort(), Object.keys(m.privateSha256).sort());
-  assert.equal(sha(JSON.stringify(proof.processorControllers)), proof.processor.controllerSetSha256);
-  for (const [name, expected] of Object.entries(proof.processorControllers)) {
+  let active = proof;
+  if (runtime.retry) {
+    const retry = runtime.retry;
+    assert.equal(retry.schema, 'sd2-release-guard-build-tail-retry-runtime.v1');
+    assert.match(retry.proofSha256 || '', /^[a-f0-9]{64}$/);
+    const retryBytes = rootFile(retry.proofFile), retryProof = JSON.parse(retryBytes);
+    assert.equal(sha(retryBytes), retry.proofSha256); assert.deepEqual(retryProof, retry.proof);
+    assert.equal(retryProof.schema, 'sd2-release-guard-build-tail-retry-proof.v1');
+    assert.equal(retryProof.originalContinuationSha256, runtime.continuationSha256);
+    assert.equal(retryProof.originalProofFile, runtime.proofFile);
+    for (const name of ['runId', 'taskId', 'attemptId', 'manifestSha256']) assert.equal(retryProof[name], proof[name]);
+    assert.deepEqual(retryProof.engine, proof.engine);
+    active = retryProof;
+  }
+  assert.equal(path.dirname(fileURLToPath(import.meta.url)), active.processor.root);
+  assert.notEqual(active.processor.root, proof.engine.root);
+  assert.deepEqual(Object.keys(active.processorControllers).sort(), Object.keys(m.privateSha256).sort());
+  assert.equal(sha(JSON.stringify(active.processorControllers)), active.processor.controllerSetSha256);
+  for (const [name, expected] of Object.entries(active.processorControllers)) {
     assert.equal(path.basename(name), name); assert.match(expected, /^[a-f0-9]{64}$/);
-    assert.equal(sha(rootFile(proof.processor.root + '/' + name)), expected, 'Compatible guard-tail reader changed: ' + name);
+    assert.equal(sha(rootFile(active.processor.root + '/' + name)), expected, 'Compatible guard-tail reader changed: ' + name);
   }
   return runtime;
 }
 
 export function candidateCompatibilityDirectory(m) {
-  return guardBuildTailRuntime(m)?.proof.processor.root || engineDirectory(m);
+  const runtime = guardBuildTailRuntime(m);
+  return (runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
 }
 
 export function assertGuardBuildTailObservation(value, m, now = Date.now(), { requireFresh = true } = {}) {
@@ -45,6 +60,14 @@ export function assertGuardBuildTailObservation(value, m, now = Date.now(), { re
   assert.equal(value.helperProbePhase, 'prepare');
   assert.equal(tail?.schema, 'sd2-guard-build-tail-seal.v1');
   assert.equal(tail.continuationSha256, runtime.continuationSha256); assert.equal(tail.proofFile, runtime.proofFile);
+  if (runtime.retry) {
+    assert.equal(tail.retryProofSha256, runtime.retry.proofSha256);
+    assert.equal(tail.retryProofFile, runtime.retry.proofFile);
+    const retryObservedAt = Date.parse(runtime.retry.proof.observedAt);
+    assert.ok(Number.isSafeInteger(retryObservedAt) && tail.observedAt >= retryObservedAt);
+  } else {
+    assert.equal(tail.retryProofSha256, undefined); assert.equal(tail.retryProofFile, undefined);
+  }
   assert.equal(tail.retainedOriginalCommand, true); assert.equal(tail.originalCompiledSnapshotUnavailable, true);
   assert.equal(tail.originalBuildCommandSha256, request.buildCommandSha256);
   assert.equal(value.logSha256, request.buildLogSha256);
