@@ -664,11 +664,29 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     for (const file of [root + '/.role-tests', preparedRoot, runtimeRoot]) appDirectory(file);
     const buildEnv = pricingInputs.cleanBuildEnv({ preparedRoot, source: c.source, runId });
     const privateFixtureRoot = buildEnv.MULTIVIEW_PRIVATE_FIXTURE_ROOT;
-    for (const directory of ['/data/video-api-debugger-engineering', path.dirname(privateFixtureRoot)]) {
+    const engineering = '/data/video-api-debugger-engineering', runRoot = engineering + '/' + runId;
+    for (const directory of ['/data', engineering]) {
       io.mkdirSync(directory, { recursive: true, mode: 0o755 }); io.chmodSync(directory, 0o755); io.chownSync(directory, 0, 0);
     }
+    io.mkdirSync(runRoot, { recursive: true, mode: 0o700 }); io.chmodSync(runRoot, 0o700); io.chownSync(runRoot, 0, 0);
+    const protectedRun = io.lstatSync(runRoot);
+    assert.equal(privateFixtureRoot, engineering + '/private-' + runId + '-' + c.source);
+    assert.equal(path.dirname(privateFixtureRoot), engineering);
     appDirectory(privateFixtureRoot);
     const privateFixtureIdentity = pricingInputs.inspectMultiviewFixtureRoot(c.source, runId, 1004, 1004);
+    const legacy = runRoot + '/' + c.source; appDirectory(legacy);
+    assert.throws(() => pricingInputs.inspectMultiviewFixtureRoot(c.source, runId, 1004, 1004, legacy), /ancestor is inaccessible/);
+    io.chmodSync(runRoot, 0o755);
+    assert.equal(pricingInputs.inspectMultiviewFixtureRoot(c.source, runId, 1004, 1004, legacy).path, legacy);
+    const legacyEnv = pricingInputs.cleanBuildEnv({ preparedRoot, source: c.source, runId, multiviewFixtureRoot: legacy });
+    assert.equal(legacyEnv.MULTIVIEW_PRIVATE_FIXTURE_ROOT, legacy);
+    io.chmodSync(runRoot, 0o700);
+    io.chmodSync(privateFixtureRoot, 0o750);
+    assert.throws(() => pricingInputs.inspectMultiviewFixtureRoot(c.source, runId, 1004, 1004));
+    io.chmodSync(privateFixtureRoot, 0o700);
+    assert.throws(() => pricingInputs.inspectMultiviewFixtureRoot(c.source, runId, 1004, 1004, engineering + '/private-' + runId + '-' + '0'.repeat(40)));
+    const afterRun = io.lstatSync(runRoot);
+    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(afterRun[key], protectedRun[key]);
     for (const file of [buildEnv.TMPDIR, buildEnv.HOME, buildEnv.XDG_CACHE_HOME, buildEnv.NPM_CONFIG_CACHE]) appDirectory(file);
     const markers = {};
     for (const kind of ['strict', 'ordinary', 'unprotected', 'wrong-schema', 'extra-field']) {

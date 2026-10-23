@@ -26,7 +26,6 @@ import { projectSharedStudioCapabilities, studioStateReason } from './shared-cap
 import { assertStudioDeletionIdle, parseStudioDeletionReceipt, recordStudioSourceReselection, studioSourceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionReceipt } from './shared-types';
 import type { SharedStudioSharingCurrent, SharedStudioSharingReceipt, SharedStudioCommandStatus, SharedStudioLifecycleHistory } from './shared-types';
-import { resolveStudioTemplateAuthor } from './template-author';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -101,6 +100,7 @@ function decodeQuickPresetIds(value: string | undefined, ownerId: string): strin
 }
 
 export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: string, presetId?: string) {
+  const { resolveStudioTemplateAuthor } = await import('./template-author');
   user = await assertStudioActor(user.id);
   if (presetId !== undefined) {
     const { publicDTO } = await resolveSharedStudioDefinition(user, presetId);

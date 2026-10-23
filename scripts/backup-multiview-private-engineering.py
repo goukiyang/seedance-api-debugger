@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sqlite3
 import struct
 import sys
@@ -53,9 +54,20 @@ def temporary_fixture_directory():
         parent = backup.absolute_path(prepared)
         if sys.platform == 'linux':
             engineering = Path('/data/video-api-debugger-engineering')
-            backup.require(engineering in parent.parents and len(parent.relative_to(engineering).parts) == 2
-                           and all(backup.BACKUP_NAME.fullmatch(part) for part in parent.relative_to(engineering).parts),
-                           'fixture_root_must_use_dedicated_engineering_path')
+            backup.require(engineering in parent.parents, 'fixture_root_must_use_dedicated_engineering_path')
+            parts = parent.relative_to(engineering).parts
+            uuid = r'[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'
+            current = re.fullmatch(r'private-(' + uuid + r')-([a-f0-9]{40})', parts[0]) if len(parts) == 1 else None
+            legacy = (len(parts) == 2 and re.fullmatch(uuid, parts[0])
+                      and re.fullmatch(r'[a-f0-9]{40}', parts[1]))
+            backup.require(current is not None or legacy, 'fixture_root_must_use_dedicated_engineering_path')
+            run_id, source = current.groups() if current is not None else parts
+            for name, expected in [('IMAGE_RECOVERY_GATE_RUN_ID', run_id), ('PRICING_SOURCE_SHA', source),
+                                   ('RATE_G19_FIXTURE_SOURCE_SHA', source)]:
+                if name in os.environ:
+                    backup.require(os.environ[name] == expected, 'fixture_root_run_or_source_mismatch')
+            # Legacy shape remains readable only through the real no-follow
+            # directory walk below, with the same uid/private-0700 leaf check.
         parent_fd = backup.open_isolated_directory(parent)
     else:
         backup.require(sys.platform != 'linux', 'MULTIVIEW_PRIVATE_FIXTURE_ROOT_required_on_linux')

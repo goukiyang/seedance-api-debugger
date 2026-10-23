@@ -30,13 +30,16 @@ function evaluate(source, imports = {}, globals = {}) {
 const base = evaluate(declarations(read('src/lib/assets/verified-upload.ts'), [
   'VerifiedUploadError', 'uploadDigest', 'assertUploadOwner', 'uploadRequestId', 'verifiedUploadFailure',
 ]), {}, { createHash: crypto.createHash });
-const checks = [];
+const checks = [], boundaryFailures = [];
+function boundary(run) {
+  try { return run(); } catch (error) { boundaryFailures.push(error); throw error; }
+}
 const check = async (name, run) => { await run(); checks.push(name); };
 const fixtureBytes = Buffer.from('synthetic-preflight-no-decoding');
 
-function environment({ rejectDirectory = false, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false } = {}) {
-  const rows = new Map(), receipts = new Map(), phases = [], logs = [];
-  let writes = 0, directoryChecks = 0;
+function environment({ rejectDirectory = false, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false, foreignCommittedAsset = false } = {}) {
+  const rows = new Map(), receipts = new Map(), phases = [], logs = [], committedAssets = new Map(), hdRequests = [];
+  let writes = 0, directoryChecks = 0, hdAssetReads = 0;
   const owner = 'isolated-upload-owner';
   const prisma = { platformSetting: {
     async findUnique({ where }) { return rows.has(where.key) ? structuredClone(rows.get(where.key)) : null; },
@@ -49,7 +52,20 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
       if (!row || row.value_json !== where.value_json || refuseRejectionCas && next.phase === 'notAccepted') return { count: 0 };
       rows.set(where.key, { ...row, ...data }); phases.push(next.phase); return { count: 1 };
     },
-  }, asset: { findUnique: async () => null }, user: { findUnique: async () => ({ id: owner, status: 'active' }) },
+  }, asset: {
+    findUnique: async () => null,
+    async findFirst({ where, select }) {
+      hdAssetReads++;
+      return boundary(() => {
+        assert.equal(where.id, 'isolated-asset'); assert.equal(where.owner_id, owner);
+        assert.equal(where.status, 'active'); assert.equal(where.type, 'image');
+        assert.deepEqual(Object.keys(select).sort(), ['id', 'original_url', 'owner_id']);
+        const asset = committedAssets.get(where.id);
+        return asset && asset.owner_id === where.owner_id && asset.status === where.status && asset.type === where.type
+          ? { id: asset.id, owner_id: asset.owner_id, original_url: asset.original_url } : null;
+      });
+    },
+  }, user: { findUnique: async () => ({ id: owner, status: 'active' }) },
   $transaction: async run => run(prisma) };
   const verified = { ...base, uploadIdentity: async () => ({ id: owner }),
     releaseVerifiedUpload: async () => {}, readVerifiedUploadReceipt: async (_owner, id) => receipts.get(id) || null,
@@ -70,15 +86,24 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
   const route = evaluate(read('src/app/api/assets/upload/route.ts'), {
     'next/server': { NextResponse: { json: (data, init) => Response.json(data, init) } },
     '@/lib/auth/session': { getSession: async () => ({ id: owner }) }, 'node:crypto': crypto,
+    '@/lib/prisma': { prisma },
     '@/lib/assets/verified-upload': verified, '@/lib/assets/raw-upload-state': state,
     '@/lib/assets/site-upload': { ...metadata, validateSiteUploadInput: () => null, getSiteUploadKind: () => 'image',
       uploadSiteAsset: async (_bytes, _name, _mime, _size, _owner, _batch, requestId) => {
         writes++;
         if (failAfterWriting) throw new base.VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传服务暂不可用', 503);
+        committedAssets.set('isolated-asset', { id: 'isolated-asset', owner_id: foreignCommittedAsset ? 'other-owner' : owner,
+          original_url: '/uploads/isolated.png', status: 'active', type: 'image' });
         return { assetId: 'isolated-asset', originalUrl: '/uploads/isolated.png', mimeType: 'image/png', upload: { requestId, verified: true } };
       } },
     '@/lib/assets/upload-log': { recordAssetUploadLog: async value => logs.push(value) },
-    '@/lib/media/hd-derivatives': { requestHd: async () => {} },
+    '@/lib/media/hd-derivatives': { requestHd: async (source, priority, preserveText, options, context) => boundary(() => {
+      assert.equal(source, '/uploads/isolated.png'); assert.equal(priority, 0);
+      assert.equal(preserveText, undefined); assert.equal(options, undefined);
+      assert.equal(context.owner.kind, 'asset'); assert.equal(context.owner.id, 'isolated-asset'); assert.equal(context.owner.ownerId, owner);
+      assert.equal(committedAssets.get(context.owner.id)?.owner_id, owner);
+      hdRequests.push({ source, context });
+    }) },
   });
   const identity = { ownerId: owner, requestId: 'isolated-original-request', hash: base.uploadDigest(fixtureBytes), fileSize: fixtureBytes.length, mimeType: 'image/png' };
   const post = nonce => route.POST(new Request('https://fixture.invalid/api/assets/upload', {
@@ -86,7 +111,8 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
       'X-File-Name': 'fixture.png', 'X-File-Hash': identity.hash, 'X-Upload-Owner-Id': owner,
       'X-Upload-Request-Id': identity.requestId, 'X-Raw-Upload-Version': '2', 'X-Raw-Upload-Nonce': nonce }, body: fixtureBytes,
   }));
-  return { state, route, identity, post, rows, receipts, phases, logs, counters: () => ({ writes, directoryChecks }) };
+  return { state, route, identity, post, rows, receipts, phases, logs, hdRequests,
+    counters: () => ({ writes, directoryChecks, hdAssetReads }) };
 }
 
 await check('preflight_rejection_retains_cause_and_current_nonce_without_file_write', async () => {
@@ -95,7 +121,7 @@ await check('preflight_rejection_retains_cause_and_current_nonce_without_file_wr
   assert.equal(response.status, 503); assert.equal(data.code, 'RAW_UPLOAD_NOT_ACCEPTED');
   assert.equal(data.causeCode, 'UPLOAD_PRIVATE_DIRECTORY_INVALID'); assert.equal(data.errorStage, 'private-directory');
   assert.equal(data.notAccepted, true); assert.equal(data.rawUpload.nonce, prepared.rawUpload.nonce);
-  assert.deepEqual(env.phases, ['prepared', 'receiving', 'notAccepted']); assert.equal(env.counters().writes, 0);
+  assert.deepEqual(env.phases, ['prepared', 'receiving', 'notAccepted']); assert.equal(env.counters().writes, 0); assert.equal(env.counters().hdAssetReads, 0); assert.equal(env.hdRequests.length, 0);
   assert.equal(env.logs.length, 1); assert.equal(env.logs[0].errorCode, data.causeCode);
 });
 await check('rejection_losing_nonce_cas_remains_unknown_not_retryable', async () => {
@@ -136,6 +162,21 @@ await check('completed_original_receipt_returns_without_directory_or_new_dispatc
   const response = await env.post('a'.repeat(48)), data = await response.json();
   assert.equal(response.status, 200); assert.equal(data.asset.id, 'original-asset');
   assert.equal(env.counters().writes, 0); assert.equal(env.counters().directoryChecks, 0);
+  assert.equal(env.counters().hdAssetReads, 0); assert.equal(env.hdRequests.length, 0);
+});
+await check('successful_raw_image_hd_registration_requires_fresh_owned_committed_asset', async () => {
+  const env = environment(), prepared = await env.state.prepareRawUpload(env.identity);
+  const response = await env.post(prepared.rawUpload.nonce);
+  await Promise.resolve();
+  assert.equal(response.status, 200); assert.equal(env.counters().writes, 1);
+  assert.equal(env.counters().hdAssetReads, 1); assert.equal(env.hdRequests.length, 1);
+  assert.equal(env.hdRequests[0].context.owner.ownerId, env.identity.ownerId);
+  const revoked = environment({ foreignCommittedAsset: true }), original = await revoked.state.prepareRawUpload(revoked.identity);
+  const delivered = await revoked.post(original.rawUpload.nonce);
+  await Promise.resolve();
+  assert.equal(delivered.status, 200, 'Unavailable HD context cannot undo an accepted upload');
+  assert.equal(revoked.counters().writes, 1); assert.equal(revoked.counters().hdAssetReads, 1);
+  assert.equal(revoked.hdRequests.length, 0, 'Never queue the response URL without a current owned asset');
 });
 await check('retired_writer_exact_proof_rotates_nonce_without_upload_and_stale_writer_is_rejected', async () => {
   const env = environment({ failAfterWriting: true, retiredProof: true });
@@ -173,6 +214,7 @@ await check('existing_safe_log_records_only_request_digest_and_sanitized_fields'
   assert.equal(detail.errorStage, 'private-directory'); assert.ok(!saved.detail.includes(requestId));
   assert.ok(!saved.detail.includes('secret')); assert.ok(!saved.detail.includes('https://'));
 });
+assert.equal(boundaryFailures.length, 0, 'A caught route/HD adapter assertion must still fail this fixture');
 console.log('UPLOAD_RAW_ENGINEERING=' + JSON.stringify({ completed: true, checks,
   method: 'Actual candidate route/state/log modules; isolated in-memory CAS and synthetic upload adapter. Not media decoding, real auth or production upload acceptance.',
   forbiddenCalls: { network: 0, productionWrites: 0, productionDatabase: 0, supplier: 0, paid: 0, browser: 0 } }));

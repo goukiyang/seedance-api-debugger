@@ -24,7 +24,6 @@ import { assertStudioDeletionIdle, assertStudioWorkspaceNotDeleted, listStudioDe
   recordStudioWorkspaceDeletion, studioWorkspaceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionNotApplied, StudioDeletionReceipt } from './shared-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
-import { resolveStudioTemplateAuthor } from './template-author';
 
 export { deleteStudioGroup };
 
@@ -70,6 +69,8 @@ type StudioModuleRow = {
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string; updated_at?: Date }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
   const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
   if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, identity);
+  // Author projection belongs to the Web DTO, not the shared Node worker graph.
+  const { resolveStudioTemplateAuthor } = await import('./template-author');
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const protectedSource = !isAdmin && Boolean(row.source_preset_id) && sourcePreset?.owner_id !== ownerId;
   const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
@@ -208,6 +209,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const resolution = normalizeImageResolution(model, overrides.resolution ?? defaults?.resolution);
   const personalPolicy = await getStudioModuleReferencePolicy(ownerId, row.id, ids, defaults?.referenceLimit ?? row.reference_limit);
   const referencePolicy = defaults ? { ...defaults.referencePolicy, primaryIds: personalPolicy.primaryIds } : personalPolicy;
+  const { resolveStudioTemplateAuthor } = await import('./template-author');
   const templateRead = (await resolveStudioTemplateAuthor(actor, { presetId: binding.presetId })).templateRead;
   const intent = resolved?.definition.intent || unavailableIntent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
   const state = sharedRead.state ?? projectSharedStudioCapabilities({ objectKind: binding.mode, lifecycle: dto || repairDefinition ? 'active' : 'missing',

@@ -322,15 +322,20 @@ function visit(node: ts.Node) {
 }
 visit(pickerAst);
 assert.ok(uploadArrow && directoryEffect, 'Actual picker upload and directory effect must be extractable');
-const pickerHelpers = evaluate(declarations(pickerSource, ['reconcileUploadFailures', 'removeUploadFailure']), {}, {}, 'picker-helpers.engineering.ts');
+const pickerHelpers = evaluate(declarations(pickerSource, ['reconcileUploadFailures', 'removeUploadFailure', 'defaults', 'pickerFilterKey'])
+  + '\nexport { defaults, pickerFilterKey };', {}, {}, 'picker-helpers.engineering.ts');
 
 function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: string }>, sessionReady = true) {
-  const state = { selected: [] as Array<{ identity: string }>, failed: [] as any[], error: '', directoryError: 'old directory error', notice: '', directoryNotice: '', busy: false, epoch: 0, label: '' };
+  const state = { selected: [] as Array<{ identity: string }>, failed: [] as any[], error: '', directoryError: 'old directory error', notice: '', directoryNotice: '', busy: false, epoch: 0, label: '',
+    navigation: null as any, query: 'old-filter', page: 3, loadedFilter: 'old-filter',
+    prefs: { ...pickerHelpers.defaults, scope: 'shared', query: 'old-filter', filtersOpen: true, selectionOpen: true } };
+  const browseRevision = { current: 0 }, sequence = { current: 0 }, readingMore = { current: false }, restoring = { current: false };
   const locked = { current: false }, session = { current: 1 }, active = { current: true };
   const apply = <T>(current: T, value: T | ((previous: T) => T)) => typeof value === 'function' ? (value as (previous: T) => T)(current) : value;
   const uploadCalls = new Map<string, number>();
   const module = evaluate(`export const upload = ${uploadArrow!.getText(pickerAst)};\nexport const effect = ${directoryEffect!.getText(pickerAst)};`, {
-    locked, session, active, sessionReady,
+    locked, session, active, sessionReady, browseRevision, sequence, readingMore, restoring,
+    defaults: pickerHelpers.defaults, pickerFilterKey: pickerHelpers.pickerFilterKey,
     types: ['image'], labels: { image: '图片' }, selected: [], target: 'workspace', typesKey: 'image', confirmLabel: '添加到参考区',
     uniqueUploadFiles: async (files: File[]) => ({ files, duplicates: 0 }), canSelect: () => '', existing: () => false,
     failedUploadIds: { current: new WeakMap<File, string>() }, crypto: { randomUUID: crypto.randomUUID },
@@ -342,14 +347,14 @@ function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: str
     setBusy: (value: boolean) => { state.busy = value; }, setError: (value: string) => { state.error = value; },
     setNotice: (value: string) => { state.notice = value; }, setProgress: () => {}, setUploadLabel: (value: string) => { state.label = value; },
     setSelected: (value: any) => { state.selected = apply(state.selected, value); }, setFailedUploads: (value: any) => { state.failed = apply(state.failed, value); },
-    change: () => {}, setQuery: () => {}, setEpoch: (value: any) => { state.epoch = apply(state.epoch, value); },
-    open: true, ready: true, sessionOwner: 'picker-owner', prefsKey: 'picker-owner', sequence: { current: 0 },
-    setLoading: () => {}, setDirectoryError: (value: string) => { state.directoryError = value; }, setItems: () => {}, setLoadedFilter: () => {}, setHasMore: () => {},
-    restoring: { current: false }, prefs: { pages: 1, template: '', album: '', project: '', scope: 'mine' }, readCursor: { current: null },
+    change: () => {}, setQuery: (value: string) => { state.query = value; }, setNavigation: (value: any) => { state.navigation = value; }, setEpoch: (value: any) => { state.epoch = apply(state.epoch, value); },
+    open: true, ready: true, sessionOwner: 'picker-owner', prefsKey: 'picker-owner',
+    setLoading: () => {}, setDirectoryError: (value: string) => { state.directoryError = value; }, setItems: () => {}, setLoadedFilter: (value: string) => { state.loadedFilter = value; }, setHasMore: () => {},
+    prefs: state.prefs, readCursor: { current: null },
     fetchPage: async () => ({ items: [], albums: [], templates: [], total: 0, page: 1, hasMore: false, notice: '用途提示' }),
-    setAlbums: () => {}, setTemplates: () => {}, setTotal: () => {}, setPage: () => {}, setDirectoryNotice: (value: string) => { state.directoryNotice = value; }, setPrefs: () => {}, filterKey: 'picker-filter',
+    setAlbums: () => {}, setTemplates: () => {}, setTotal: () => {}, setPage: (value: number) => { state.page = value; }, setDirectoryNotice: (value: string) => { state.directoryNotice = value; }, setPrefs: (value: any) => { state.prefs = apply(state.prefs, value); }, filterKey: 'picker-filter',
   }, {}, 'picker-callbacks.engineering.ts');
-  return { module, state, locked, session, active, uploadCalls };
+  return { module, state, locked, session, active, uploadCalls, browseRevision, sequence, readingMore, restoring };
 }
 
 const okFile = new File([Buffer.from('ok')], 'ok.png', { type: 'image/png' });
@@ -364,6 +369,11 @@ const picker = pickerHarness(async (file) => {
 });
 await picker.module.upload([okFile, pendingFile]);
 assert.equal(picker.state.selected.length, 1);
+assert.equal(picker.state.navigation.targetId, 'asset:asset-ok');
+assert.equal(picker.state.navigation.revision, picker.browseRevision.current);
+assert.equal(picker.state.navigation.filterKey, pickerHelpers.pickerFilterKey('image', picker.state.prefs));
+assert.equal(picker.state.prefs.scope, 'mine'); assert.equal(picker.state.query, ''); assert.equal(picker.state.page, 1);
+assert.equal(picker.state.prefs.filtersOpen, true); assert.equal(picker.state.prefs.selectionOpen, true);
 assert.equal(picker.state.failed.length, 1);
 assert.equal(picker.state.failed[0].message, '原上传结果待确认');
 assert.equal(picker.state.failed[0].code, 'RAW_UPLOAD_RESULT_UNKNOWN');
@@ -416,7 +426,27 @@ releaseHolder.resolve('asset-late');
 await lateUpload;
 assert.equal(late.state.selected.length, 0);
 assert.equal(late.state.failed.length, 0);
-assert.equal(late.state.notice, '');
+assert.equal(late.state.notice, ''); assert.equal(late.state.navigation, null);
+
+// A valid upload may still finish after a deliberate filter/page interaction.
+// Keep the uploaded selection but do not move the user's newer browse surface.
+const browseStarted: { resolve?: () => void } = {}, browseRelease: { resolve?: (value: string) => void } = {};
+const browsingStarted = new Promise<void>(resolve => { browseStarted.resolve = resolve; });
+const browsing = pickerHarness(() => {
+  browseStarted.resolve?.(); return new Promise<string>(resolve => { browseRelease.resolve = resolve; });
+});
+const browsingUpload = browsing.module.upload([new File([Buffer.from('browse')], 'browse.png', { type: 'image/png' })]);
+await browsingStarted;
+browsing.browseRevision.current++;
+browsing.state.prefs = { ...browsing.state.prefs, scope: 'project', query: 'newer-user-filter' };
+browsing.state.query = 'newer-user-filter'; browsing.state.page = 4;
+const newerPreferences = JSON.stringify(browsing.state.prefs);
+assert.equal(typeof browseRelease.resolve, 'function');
+browseRelease.resolve!('asset-ok'); await browsingUpload;
+assert.equal(browsing.state.selected.length, 1); assert.equal(browsing.uploadCalls.get('browse.png'), 1);
+assert.equal(browsing.state.navigation, null); assert.equal(JSON.stringify(browsing.state.prefs), newerPreferences);
+assert.equal(browsing.state.query, 'newer-user-filter'); assert.equal(browsing.state.page, 4);
+assert.equal(browsing.state.busy, false); assert.equal(browsing.locked.current, false);
 
 // Empty/nested connection errors keep a safe explanation and original-query
 // action through the actual server diagnostic and client proxy boundary.
@@ -458,6 +488,7 @@ const checks = [
   'two-file partial success keeps the successful selection and does not retransmit it',
   'removing a failed row leaves the original upload marker untouched',
   'late upload completion cannot enter a changed account or target session',
+  'verified uploaded asset receives a scoped focus intent while newer browsing is preserved',
 ];
 process.stdout.write(`UPLOAD_CLIENT_ENGINEERING=${JSON.stringify({ completed: true, checks, forbiddenCalls: { network: 0, productionWrites: 0 } })}\n`);
 }

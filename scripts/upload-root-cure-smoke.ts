@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
+import { randomUUID } from 'node:crypto';
+import { File } from 'node:buffer';
+import ts from 'typescript';
 
 const root = process.cwd();
 
@@ -227,16 +231,78 @@ assertIncludes(
   'retryPendingAttach',
   '工作台必须提供只重试业务挂载的恢复函数。',
 );
-assertIncludes(
-  workspaceHook,
-  '素材已上传成功，但加入参考区失败',
-  '工作台挂载失败提示必须区分文件上传成功和加入参考区失败。',
+const workspaceAst = ts.createSourceFile('useWorkspace.ts', workspaceHook, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const workspaceCallbacks = new Map<string, ts.ArrowFunction>();
+function collectWorkspaceCallbacks(node: ts.Node) {
+  if (ts.isVariableDeclaration(node) && ['uploadAsset', 'retryPendingAttach'].includes(node.name.getText(workspaceAst))
+    && node.initializer && ts.isCallExpression(node.initializer) && node.initializer.expression.getText(workspaceAst) === 'useCallback') {
+    const callback = node.initializer.arguments[0];
+    assert.ok(callback && ts.isArrowFunction(callback), '工作台上传和重试必须能核对实际回调');
+    const name = node.name.getText(workspaceAst);
+    assert.equal(workspaceCallbacks.has(name), false, '同名回调不能被模糊抽取');
+    workspaceCallbacks.set(name, callback);
+  }
+  ts.forEachChild(node, collectWorkspaceCallbacks);
+}
+collectWorkspaceCallbacks(workspaceAst);
+assert.equal(workspaceCallbacks.size, 2);
+assertMatches(
+  workspaceCallbacks.get('uploadAsset')!.getText(workspaceAst),
+  /素材已上传成功[^\n]*加入参考区[^\n]*(?:失败|未确认)/,
+  '工作台提示必须区分文件上传成功和加入失败或尚未确认，不能把未知冒充失败。',
 );
 assertMatches(
-  workspaceHook,
-  /retryPendingAttach[\s\S]+attachUploadedAssetsToWorkspace\(pendingWorkspaceAttach\.assetIds\)/,
-  '工作台重试挂载必须只调用业务 JSON 挂载，不能重新上传文件。',
+  workspaceCallbacks.get('retryPendingAttach')!.getText(workspaceAst),
+  /associate\(scope,\s*\{\s*assetIds:\s*pendingWorkspaceAttach\.assetIds\s*\}\)/,
+  '工作台重试必须沿当前账号现场，仅用原 assetIds 重试业务 JSON 关联。',
 );
+
+async function checkWorkspaceRecoveryCallbacks() {
+  type Pending = { assetIds: string[]; fileNames: string[]; statusIds: string[] };
+  const state = { pending: null as Pending | null, statuses: {} as Record<string, string>, error: '', uploads: 0, associations: 0 };
+  const scope = { ownerId: 'fixture-workspace-owner', epoch: 3, tabId: 'fixture-tab', workspaceId: 'fixture-workspace' };
+  let associationAccepted = false;
+  const context: vm.Context = vm.createContext({ exports: {}, Error, crypto: { randomUUID }, pendingWorkspaceAttach: null,
+    uploadAssetToHistory: async () => { state.uploads++; return 'original-uploaded-asset'; },
+    isCurrent: (current: unknown) => current === scope,
+    assertCurrent: (current: unknown) => assert.equal(current, scope),
+    mutate: async (operation: (current: typeof scope) => Promise<unknown>) => {
+      state.error = '';
+      try { return await operation(scope); }
+      catch (cause) { state.error = cause instanceof Error ? cause.message : String(cause); throw cause; }
+    },
+    associate: async (current: unknown, body: { assetIds: string[] }) => {
+      assert.equal(current, scope); assert.deepEqual(Object.keys(body), ['assetIds']);
+      assert.deepEqual(Array.from(body.assetIds), ['original-uploaded-asset']); state.associations++;
+      if (!associationAccepted) throw new Error('原加入结果待核对');
+    },
+    setUploadStatuses: (value: (previous: Record<string, string>) => Record<string, string>) => { state.statuses = value(state.statuses); },
+    setPendingWorkspaceAttach: (value: Pending | null) => { state.pending = value; context.pendingWorkspaceAttach = value; },
+    fetch: () => assert.fail('重试业务关联不能在隔离检查中发送网络请求'),
+    require: (name: string) => assert.fail(`未批准的工作台回调依赖: ${name}`),
+  });
+  const callbackSource = Array.from(workspaceCallbacks, ([name, callback]) => `export const ${name} = ${callback.getText(workspaceAst)};`).join('\n');
+  vm.runInContext(ts.transpileModule(callbackSource, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+  } }).outputText, context, { filename: 'workspace-upload-recovery.engineering.ts' });
+  const callbacks = context.exports as { uploadAsset: (file: File) => Promise<void>; retryPendingAttach: () => Promise<void> };
+  await callbacks.uploadAsset(new File([Buffer.from('fixture')], 'original.png', { type: 'image/png' }));
+  assert.equal(state.uploads, 1); assert.equal(state.associations, 1);
+  assert.match(state.error, /素材已上传成功[^\n]*加入参考区[^\n]*(?:失败|未确认)/);
+  assert.ok(state.pending); const originalPending = JSON.stringify(state.pending);
+  assert.deepEqual(Array.from(state.pending.assetIds), ['original-uploaded-asset']);
+  assert.deepEqual(Array.from(state.pending.fileNames), ['original.png']);
+  assert.equal(Object.values(state.statuses).filter(status => status === 'failed').length, 1);
+  await callbacks.retryPendingAttach();
+  assert.equal(state.uploads, 1); assert.equal(state.associations, 2);
+  assert.equal(JSON.stringify(state.pending), originalPending, '原关联未知时必须保留同一 assetIds 与状态编号');
+  associationAccepted = true;
+  await callbacks.retryPendingAttach();
+  assert.equal(state.uploads, 1); assert.equal(state.associations, 3);
+  assert.equal(state.pending, null); assert.deepEqual(Object.keys(state.statuses), []);
+  await callbacks.retryPendingAttach();
+  assert.equal(state.uploads, 1); assert.equal(state.associations, 3, '确认加入后不得再次执行旧关联');
+}
 
 const uploadedPicker = read('src/components/UploadedImagePicker.tsx');
 assertIncludes(uploadedPicker, '<ResourceLibraryPicker {...props}', '兼容弹窗须将原回调完整交给当前共享素材选择器。');
@@ -259,4 +325,6 @@ assertIncludes(feedbackWidget, 'assetId?: string', '反馈截图状态必须保�
 assertIncludes(feedbackWidget, 'retrySubmitUploadedAssets', '反馈提交失败必须允许复用已上传截图重新提交。');
 assertIncludes(feedbackWidget, '截图已上传成功，但反馈提交失败', '反馈提交失败提示必须区分截图上传和反馈入库。');
 
-console.log('upload-root-cure-smoke: ok');
+void checkWorkspaceRecoveryCallbacks().then(() => { console.log('upload-root-cure-smoke: ok'); }).catch((error: unknown) => {
+  console.error(error); process.exitCode = 1;
+});

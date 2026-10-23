@@ -14,7 +14,7 @@ const sources = [
   'scripts/upload-client-recovery-engineering.ts', 'scripts/upload-raw-recovery-engineering.mjs',
   'scripts/upload-root-cure-smoke.ts', 'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts',
   'src/lib/assets/upload-log.ts', 'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts', 'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts',
-  'src/lib/http/file-upload.ts', 'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
+  'src/lib/http/file-upload.ts', 'src/lib/http/upload-session.ts', 'src/lib/hooks/useWorkspace.ts', 'src/components/ResourceLibraryPicker.tsx',
   'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
   'src/app/api/assets/upload-proxy/route.ts', 'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
   'src/lib/assets/raw-upload-recovery-proof.ts', 'src/app/api/assets/upload/recover/route.ts',

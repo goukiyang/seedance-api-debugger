@@ -711,11 +711,13 @@ export async function POST(request: NextRequest) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: {
       user_id: user.id, idempotency_key: receivedBody.idempotency_key,
     } } });
-    if (original) {
+    // Frozen batch inputs and legacy fingerprints still use their original validators below.
+    if (original?.request_fingerprint?.startsWith('pricing-v2:')
+      && receivedBody.canvas_video_batch === undefined && !receivedBody.idempotency_key.startsWith('cvb:')) {
       await assertCanViewTask(user, original);
-      if (original.request_fingerprint?.startsWith('pricing-v2:') && original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      if (original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
       return isPrivateMultiviewTask(original)
-        ? NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true }), { headers: privateNoStore() })
+        ? NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
         : NextResponse.json(canvasVideoBatchTaskResponse(original));
     }
   }

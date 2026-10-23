@@ -265,6 +265,12 @@ async function main() {
       assert.equal(Object.prototype.hasOwnProperty.call(result, 'params_json'), false);
       assert.equal(Object.prototype.hasOwnProperty.call(result, 'raw_status_response'), false);
       assert.ok(!JSON.stringify(result).includes(syntheticPrompt)); assert.ok(!JSON.stringify(result).includes(guideSha256));
+      const changed = structuredClone(acceptedBody);
+      changed.multiview_generation.supplement = 'same-key changed input';
+      const mismatch = await createRoute.POST(new NextRequest('http://mv-settings-isolated.invalid/api/tasks/create', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': user.id, 'x-tab-id': draft.workspaceTabId }, body: JSON.stringify(changed) }));
+      assert.equal(mismatch.status, 409);
+      assert.equal((await mismatch.json()).code, 'IDEMPOTENCY_PAYLOAD_MISMATCH');
     });
     const originalAcceptedTask = await prisma.videoTask.findUniqueOrThrow({ where: { id: acceptedId } });
     assert.equal(originalAcceptedTask.prompt, composed.prompt.trim());

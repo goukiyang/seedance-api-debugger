@@ -103,17 +103,24 @@ function markerSnapshot(runtimeRoot, bootstrap) {
 function multiviewFixturePath(source, runId) {
   assert.match(source, /^[a-f0-9]{40}$/);
   assert.match(runId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
-  return path.join(MULTIVIEW_ENGINEERING_ROOT, runId, source);
+  return path.join(MULTIVIEW_ENGINEERING_ROOT, `private-${runId}-${source}`);
 }
-function inspectMultiviewFixtureRoot(source, runId, uid, gid) {
-  const root = multiviewFixturePath(source, runId);
+function inspectMultiviewFixtureRoot(source, runId, uid, gid, root = multiviewFixturePath(source, runId)) {
+  const current = multiviewFixturePath(source, runId), legacy = path.join(MULTIVIEW_ENGINEERING_ROOT, runId, source);
+  assert.ok(root === current || root === legacy, 'Private fixture must match the exact run and source');
   const data = fs.lstatSync('/data'), system = fs.statSync('/');
   assert.ok(data.isDirectory() && !data.isSymbolicLink() && data.dev !== system.dev);
-  for (const directory of ['/data', MULTIVIEW_ENGINEERING_ROOT, path.dirname(root), root]) {
+  for (const directory of ['/data', MULTIVIEW_ENGINEERING_ROOT, ...(root === legacy ? [path.dirname(root)] : []), root]) {
     const stat = fs.lstatSync(directory);
     assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && fs.realpathSync(directory) === directory && stat.dev === data.dev);
     assert.equal(stat.uid, directory === root ? uid : 0);
     assert.equal(stat.mode & (directory === root ? 0o077 : 0o022), 0);
+    if (directory !== root) {
+      // The Python reader opens every ancestor O_RDONLY|O_DIRECTORY. Search
+      // alone is insufficient; do not repair a private release-run container.
+      const readAndSearch = stat.uid === uid ? 0o500 : stat.gid === gid ? 0o050 : 0o005;
+      assert.equal(stat.mode & readAndSearch, readAndSearch, 'Private fixture ancestor is inaccessible to the build identity');
+    }
   }
   const stat = fs.lstatSync(root);
   assert.equal(stat.gid, gid); assert.equal(stat.mode & 0o777, 0o700);
@@ -121,7 +128,9 @@ function inspectMultiviewFixtureRoot(source, runId, uid, gid) {
 }
 function prepareMultiviewFixtureRoot(source, runId, uid, gid) {
   const root = multiviewFixturePath(source, runId);
-  for (const directory of [MULTIVIEW_ENGINEERING_ROOT, path.dirname(root)]) {
+  // Release-run containers hold root-only restore/binding evidence. New app
+  // fixtures are siblings of those containers, never children or adoptees.
+  for (const directory of [MULTIVIEW_ENGINEERING_ROOT]) {
     try { fs.mkdirSync(directory, { mode: 0o755 }); }
     catch (error) { if (error.code !== 'EEXIST') throw error; }
     const stat = fs.lstatSync(directory);
@@ -131,7 +140,9 @@ function prepareMultiviewFixtureRoot(source, runId, uid, gid) {
   fs.mkdirSync(root, { mode: 0o700 }); fs.chownSync(root, uid, gid);
   return inspectMultiviewFixtureRoot(source, runId, uid, gid);
 }
-function cleanBuildEnv({ preparedRoot, source, runId }) {
+function cleanBuildEnv({ preparedRoot, source, runId, multiviewFixtureRoot = multiviewFixturePath(source, runId) }) {
+  assert.ok(multiviewFixtureRoot === multiviewFixturePath(source, runId)
+    || multiviewFixtureRoot === path.join(MULTIVIEW_ENGINEERING_ROOT, runId, source), 'Private fixture must match the exact run and source');
   const temporary = path.join(preparedRoot, 'build-tmp');
   return {
     PATH: SYSTEM_PATH, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TZ: 'UTC', NODE_ENV: 'production',
@@ -141,7 +152,7 @@ function cleanBuildEnv({ preparedRoot, source, runId }) {
     NEXT_DIST_DIR: '.next-prod-candidate', DATABASE_URL: `file:${path.join(preparedRoot, 'candidate-build.db')}`,
     PRICING_GATE_PREPARED_ROOT: preparedRoot, PRICING_SOURCE_SHA: source, RATE_G19_FIXTURE_SOURCE_SHA: source,
     PRICING_GATE_RUN_ID: runId, IMAGE_RECOVERY_GATE_RUN_ID: runId,
-    MULTIVIEW_PRIVATE_FIXTURE_ROOT: multiviewFixturePath(source, runId),
+    MULTIVIEW_PRIVATE_FIXTURE_ROOT: multiviewFixtureRoot,
     SESSION_SECRET: 'rate-impl2-candidate-isolated-build-not-a-production-secret',
   };
 }
@@ -241,7 +252,7 @@ export function readPreparedPricingInputs({ candidateRoot, source, runId, appUse
   assert.equal(value.buildsRun, false, 'Prepared input must not have been consumed');
   const prepared = { candidateRoot: root, source, runId, appUser, preparedRoot,
     runtimeRoot: path.join(preparedRoot, 'pricing-legacy-fixture-runtime'),
-    buildEnv: cleanBuildEnv({ preparedRoot, source, runId }), receipt,
+    buildEnv: cleanBuildEnv({ preparedRoot, source, runId, multiviewFixtureRoot: value.privateFixtureRoot?.path }), receipt,
     sourceSha256: value.sourceSha256, bootstrapReceiptSha256: value.bootstrapReceiptSha256 };
   verifyPricingInputs({ candidateRoot: root, source, runId, appUser, sourceFiles, prepared });
   return prepared;
@@ -286,7 +297,8 @@ export function verifyPricingInputs({ candidateRoot, source, runId, appUser, sou
   const runtimeRoot = path.join(preparedRoot, 'pricing-legacy-fixture-runtime');
   assert.equal(prepared.preparedRoot, preparedRoot); assert.equal(prepared.runtimeRoot, runtimeRoot);
   assert.equal(fs.realpathSync(preparedRoot), preparedRoot); assert.equal(fs.realpathSync(runtimeRoot), runtimeRoot);
-  assert.deepEqual(prepared.buildEnv, cleanBuildEnv({ preparedRoot, source, runId }));
+  const privateFixtureRoot = prepared.buildEnv.MULTIVIEW_PRIVATE_FIXTURE_ROOT;
+  assert.deepEqual(prepared.buildEnv, cleanBuildEnv({ preparedRoot, source, runId, multiviewFixtureRoot: privateFixtureRoot }));
   const receipt = path.join(preparedRoot, 'candidate-inputs.json'); assert.equal(prepared.receipt, receipt);
   const stat = regular(receipt, 65536); assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o777, 0o444);
   const value = json(receipt);
@@ -294,7 +306,7 @@ export function verifyPricingInputs({ candidateRoot, source, runId, appUser, sou
   assert.equal(value.source, source); assert.equal(value.runId, runId); assert.equal(value.uid, uid); assert.equal(value.gid, gid);
   assert.equal(value.productionDatabaseCopied, false); assert.equal(value.servicesChanged, false);
   assert.equal(value.preparedRoot, preparedRoot); assert.equal(value.runtimeRoot, runtimeRoot);
-  assert.deepEqual(inspectMultiviewFixtureRoot(source, runId, uid, gid), value.privateFixtureRoot);
+  assert.deepEqual(inspectMultiviewFixtureRoot(source, runId, uid, gid, privateFixtureRoot), value.privateFixtureRoot);
   assert.equal(value.sourceSha256, sourceSnapshot(root, sourceFiles)); assert.equal(value.sourceSha256, prepared.sourceSha256);
   const manifest = path.join(runtimeRoot, 'g19-bootstrap.json'), bootstrapStat = regular(manifest, 65536);
   assert.equal(bootstrapStat.uid, 0); assert.equal(bootstrapStat.mode & 0o777, 0o444);

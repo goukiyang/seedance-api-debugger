@@ -29,13 +29,13 @@ async function isolatedFixtureRoot(sourceRoot: string) {
   assert.ok(configured && path.isAbsolute(configured) && path.normalize(configured) === configured);
   const relative = path.relative(FIXTURE_ROOT_BASE, configured);
   const parts = relative.split(path.sep);
-  assert.equal(parts.length, 2);
   const runId = process.env.IMAGE_RECOVERY_GATE_RUN_ID;
-  assert.ok(runId && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId));
-  assert.equal(parts[0], runId);
-  assert.equal(parts[1], source);
-  const runRoot = path.join(FIXTURE_ROOT_BASE, parts[0]);
-  for (const directory of ['/data', FIXTURE_ROOT_BASE, runRoot, configured]) {
+  assert.ok(runId && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(runId));
+  const current = relative === `private-${runId}-${source}`;
+  const legacy = parts.length === 2 && parts[0] === runId && parts[1] === source;
+  assert.ok(current || legacy, 'Private fixture must match the exact run and source');
+  const runRoot = path.join(FIXTURE_ROOT_BASE, runId);
+  for (const directory of ['/data', FIXTURE_ROOT_BASE, ...(legacy ? [runRoot] : []), configured]) {
     const info = await lstat(directory);
     assert.ok(info.isDirectory() && !info.isSymbolicLink());
     assert.equal(await realpath(directory), directory);
