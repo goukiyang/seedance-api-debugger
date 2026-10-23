@@ -25,7 +25,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const sameAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(copy(a), copy(b), message) };
 const source = name => fs.readFileSync(new URL(name, import.meta.url), 'utf8');
 const sources = Object.fromEntries(['common.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'hd-storage-preflight.mjs',
-  'candidate-reuse.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs',
+  'candidate-reuse.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'typed-files.mjs',
   'guard-recovery.mjs', 'pricing-start-pair.mjs', 'normal-continuation.mjs', 'usage-role-control.mjs',
   'usage-role-start.mjs', 'deployed-usage-schema.mjs', 'canvas-batch-schema.mjs', 'canvas-batch-schema-contract.mjs',
   'raw-upload-recovery-proof.mjs', 'nginx-maintenance.mjs', 'package-candidates.mjs', 'writer-network-fence.mjs',
@@ -1789,9 +1789,20 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   current.roleControl.runtime.heartbeatAt = new Date(now - 1).toISOString();
   const docs = new Map(), put = (file, value) => { const bytes = Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)); docs.set(file, bytes); return sha(bytes); };
   const originalFile = stage + '/switch-before.json', originalSha = put(originalFile, { runId, ...original });
-  const configFile = '/etc/isolated-original-writer.conf', configSha = put(configFile, 'original anchored configuration');
+  const configFile = '/srv/isolated-app/.env'; put(configFile, 'synthetic app-owned configuration');
+  const configIdentity = { dev: 1, ino: 91, uid: 1004, gid: 1004, mode: 0o100600, nlink: 1, mtimeMs: now - 10000, ctimeMs: now - 10000 };
+  const configStat = file => { assert.equal(file, configFile); return { ...configIdentity, size: docs.get(file).length,
+    isFile: () => true, isDirectory: () => false, isSymbolicLink: () => false }; };
+  const typedNamespace = { assert: sameAssert, path, createHash, Buffer,
+    fs: { constants: fs.constants, lstatSync: configStat, realpathSync: file => { assert.equal(file, configFile); return file; },
+      openSync: file => { assert.equal(file, configFile); return 17; },
+      fstatSync: fd => { assert.equal(fd, 17); return configStat(configFile); },
+      readFileSync: fd => { assert.equal(fd, 17); return docs.get(configFile); }, closeSync: fd => assert.equal(fd, 17) } };
+  vm.runInNewContext(scriptBody(sources['typed-files.mjs']) + '\nglobalThis.typed={readTypedFile,assertTypedFileUnchanged};', typedNamespace);
+  const typed = typedNamespace.typed;
+  const configSnapshot = typed.readTypedFile({ file: configFile, category: 'app', expectedUid: 1004 }).snapshot;
   const liveSnapshot = { services: Object.fromEntries(roles.map((role, i) => [role, { kernelStartTicks: String(1000 + i), cwd: m.live[role].root }])),
-    configurations: { [configFile]: { sha256: configSha } } };
+    configurations: { [configFile]: configSnapshot } };
   const units = Object.fromEntries(roles.map(role => [m.live[role].unit, { ActiveState: 'active', SubState: 'running', ControlPID: '0',
     MainPID: String(m.live[role].pid), InvocationID: m.live[role].invocation, WorkingDirectory: m.live[role].root }]));
   // Optional capture keys may be absent on both sides. Preserve the native
@@ -1799,13 +1810,16 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const beforeAssert = { ...sameAssert, deepEqual: (a, b, message) => a === undefined || b === undefined
     ? assert.deepEqual(a, b, message) : sameAssert.deepEqual(a, b, message) };
   const beforeNamespace = { assert: beforeAssert, sha, Date, assertFreshLegacyCapture, assertFreshPricingCapture,
+    assertTypedFileUnchanged: typed.assertTypedFileUnchanged,
     assertProtection: (before, after) => assert.deepEqual(copy(after), copy(before)),
     unit: name => units[name], liveArtifactSource: root => { const role = roles.find(role => m.live[role].root === root); assert.ok(role); return m.live[role].source; },
     fs: { realpathSync: file => {
       const role = roles.find(role => file === '/proc/' + m.live[role].pid + '/cwd'); return role ? m.live[role].root : file;
     } }, processState: pid => { const i = roles.findIndex(role => m.live[role].pid === pid); assert.ok(i >= 0);
       return { start: String(1000 + i), cwd: m.live[roles[i]].root }; },
-    rootFile: file => { assert.ok(docs.has(file)); return docs.get(file); } };
+    rootFile: file => { assert.notEqual(file, configFile, 'Root input must not read app-owned configuration');
+      assert.ok(docs.has(file)); return docs.get(file); } };
+  assert.throws(() => beforeNamespace.rootFile(configFile), /Root input must not read app-owned configuration/);
   const freshBefore = vm.runInNewContext('(' + functionNode('switch.mjs', 'assertSwitchAdmissionBefore').node.getText() + ')', beforeNamespace);
   assert.equal(Object.keys(freshBefore(m, current, original, liveSnapshot)).length, 6);
   for (const change of [value => { value.privateWebPids = [m.live.web.pid]; },
@@ -1818,7 +1832,18 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   assert.throws(() => freshBefore(m, current, original, badLive));
   units['template.service'].InvocationID = 'changed'; assert.throws(() => freshBefore(m, current, original, liveSnapshot));
   units['template.service'].InvocationID = m.live.template.invocation;
-  put(configFile, 'changed configuration'); assert.throws(() => freshBefore(m, current, original, liveSnapshot)); put(configFile, 'original anchored configuration');
+  put(configFile, 'changed configuration'); assert.throws(() => freshBefore(m, current, original, liveSnapshot)); put(configFile, 'synthetic app-owned configuration');
+  for (const [key, changed] of [['ino', 92], ['uid', 1005], ['gid', 1005], ['mode', 0o100640], ['nlink', 2], ['mtimeMs', now - 9999], ['ctimeMs', now - 9999]]) {
+    const prior = configIdentity[key]; configIdentity[key] = changed;
+    try { assert.throws(() => freshBefore(m, current, original, liveSnapshot)); }
+    finally { configIdentity[key] = prior; }
+  }
+  const badConfigPath = copy(liveSnapshot); badConfigPath.configurations[configFile].requestedPath = '/srv/other-app/.env';
+  assert.throws(() => freshBefore(m, current, original, badConfigPath), /configuration path changed/);
+  const badConfigHash = copy(liveSnapshot); badConfigHash.configurations[configFile].sha256 = sha('different configuration');
+  assert.throws(() => freshBefore(m, current, original, badConfigHash));
+  assert.equal(Object.keys(freshBefore(m, current, original, liveSnapshot)).length, 6);
+  add('switch_admission_actual_typed_app_snapshot_passes_without_root_reader_and_refuses_path_sha_identity_owner_mode_drift');
   const repairSha = 'e'.repeat(64), repair = { originalSwitchBeforeFile: originalFile, originalSwitchBeforeSha256: originalSha, liveSnapshot };
   const switchNode = functionNode('switch.mjs', 'switchPair'), branches = [];
   const visit = node => { if (ts.isIfStatement(node) && node.expression.getText(switchNode.parsed) === 'admissionRepair') branches.push(node);
@@ -1868,7 +1893,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -1877,28 +1902,36 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const m = { privateSha256: sets.original.proof.processorControllers };
   const runtime = { proof: sets.tail.proof, retry: { proof: sets.retry.proof }, reader: { proof: sets.reader.proof },
     armPairRepair: { proof: sets.pair.proof }, armProcessorRepair: { proof: sets.processor.proof },
+    switchAdmissionRepair: { proof: sets.switch.proof }, switchTypedRepair: { proof: sets.typed.proof },
     candidateObservation: { proof: { observedAt: 1792796185000, expiresAt: 1792797985000 } } };
   const originalRuntime = copy(runtime), reads = [];
-  let activeBytes = sets.processor.bytes, actualFiles = [...files];
+  let activeBytes = sets.typed.bytes, actualFiles = [...files], selectedRuntime = runtime;
   const namespace = { assert: sameAssert, path, JSON, sha, directory,
+    guardBuildTailRuntime: value => { assert.equal(value, m); return selectedRuntime; }, engineDirectory: () => '/isolated-trusted/original-engine',
     fs: { readdirSync: root => { assert.equal(root, directory); return actualFiles; } },
     rootFile: file => { assert.equal(path.dirname(file), directory); reads.push(path.basename(file));
       const bytes = activeBytes[path.basename(file)]; assert.ok(bytes, 'Unknown isolated private module'); return bytes; } };
   const trusted = functionNode('release.mjs', 'trustedCode');
-  vm.runInNewContext(trusted.node.getText().replace(/^export /, '') + '\nglobalThis.verify=trustedCode;', namespace);
+  vm.runInNewContext(trusted.node.getText().replace(/^export /, '') + '\n'
+    + functionNode('candidate-evidence.mjs', 'candidateCompatibilityDirectory').node.getText().replace(/^export /, '')
+    + '\nglobalThis.verify=trustedCode;globalThis.compatibility=candidateCompatibilityDirectory;', namespace);
   namespace.verify(m, runtime); assert.deepEqual(reads.sort(), [...files].sort()); assert.deepEqual(runtime, originalRuntime);
+  assert.equal(namespace.compatibility(m), sets.typed.proof.processor.root);
   activeBytes = sets.reader.bytes; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
-  activeBytes = sets.processor.bytes;
-  const badDigest = copy(runtime); badDigest.armProcessorRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
+  activeBytes = sets.typed.bytes;
+  const badDigest = copy(runtime); badDigest.switchTypedRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
   assert.throws(() => namespace.verify(m, badDigest));
   actualFiles = [...files, 'unexpected.mjs']; assert.throws(() => namespace.verify(m, runtime)); actualFiles = [...files];
-  const corrupt = { ...sets.processor.bytes, 'release.mjs': Buffer.from('changed private source') };
+  const corrupt = { ...sets.typed.bytes, 'release.mjs': Buffer.from('changed private source') };
   activeBytes = corrupt; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
   const fallback = copy(runtime);
-  for (const [remove, selected] of [['armProcessorRepair', 'pair'], ['armPairRepair', 'reader'], ['reader', 'retry'], ['retry', 'tail']]) {
-    delete fallback[remove]; activeBytes = sets[selected].bytes; namespace.verify(m, fallback);
+  for (const [remove, selected] of [['switchTypedRepair', 'switch'], ['switchAdmissionRepair', 'processor'],
+    ['armProcessorRepair', 'pair'], ['armPairRepair', 'reader'], ['reader', 'retry'], ['retry', 'tail']]) {
+    delete fallback[remove]; activeBytes = sets[selected].bytes; selectedRuntime = fallback; namespace.verify(m, fallback);
+    assert.equal(namespace.compatibility(m), sets[selected].proof.processor.root);
   }
-  activeBytes = sets.original.bytes; namespace.verify(m);
+  activeBytes = sets.original.bytes; selectedRuntime = null; namespace.verify(m);
+  assert.equal(namespace.compatibility(m), '/isolated-trusted/original-engine');
   assert.deepEqual(runtime.reader, originalRuntime.reader); assert.deepEqual(runtime.candidateObservation, originalRuntime.candidateObservation);
   add('trustedCode_actual_body_selects_processor_then_pair_reader_retry_original_and_refuses_hash_or_module_drift');
 }
@@ -1922,6 +1955,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const recoverySelector = functionNode('candidate-evidence.mjs', 'guardRecoveryApprovalFile');
   vm.runInNewContext(recoverySelector.node.getText().replace(/^export /, '') + '\nglobalThis.recoverySelect=guardRecoveryApprovalFile;', namespace);
   assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
+  runtime.switchTypedRepair = { proof: { ...copy(runtime.switchAdmissionRepair.proof),
+    approvalFile: m.stage + '/hd-release-safety-approval-switch-typed-r01.json' } };
+  assert.equal(namespace.select(m), runtime.switchTypedRepair.proof.approvalFile);
+  assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
   for (const name of ['privateHdAdmissionBounds', 'sharedHdAdmissionBounds']) {
     const { parsed, node } = functionNode('switch.mjs', name);
     const files = node.body.statements.filter(statement => ts.isVariableStatement(statement))
@@ -1930,8 +1967,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     const properties = files[0].initializer.properties.filter(property => property.name?.getText(parsed) === 'approval');
     assert.equal(properties.length, 1); assert.equal(properties[0].initializer.getText(parsed), 'hdMaintenanceApprovalFile(m)');
     const actual = vm.runInNewContext(properties[0].initializer.getText(parsed), { m, hdMaintenanceApprovalFile: namespace.select });
-    assert.equal(actual, runtime.switchAdmissionRepair.proof.approvalFile);
+    assert.equal(actual, runtime.switchTypedRepair.proof.approvalFile);
   }
+  delete runtime.switchTypedRepair; assert.equal(namespace.select(m), runtime.switchAdmissionRepair.proof.approvalFile);
+  assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
   delete runtime.switchAdmissionRepair; assert.equal(namespace.select(m), runtime.armProcessorRepair.proof.approvalFile);
   delete runtime.armProcessorRepair; assert.equal(namespace.select(m), runtime.armPairRepair.proof.approvalFile);
   delete runtime.armPairRepair; assert.equal(namespace.select(m), m.stage + '/hd-release-safety-approval.json');

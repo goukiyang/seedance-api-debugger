@@ -20,6 +20,8 @@ import {
   validateSwitchAdmissionRepair, assertSwitchAdmissionRepairFailure, assertSwitchAdmissionControllerDifference,
   assertSwitchAdmissionRepairAdmission, SWITCH_ADMISSION_REPAIR_ORIGIN, assertSwitchAdmissionApprovalPath,
   assertLegacyTemplateBuildAlias, assertCandidateSwitchObservationAdmission,
+  validateSwitchTypedRepair, assertSwitchTypedRepairFailure, assertSwitchTypedRepairRefusalLog,
+  assertSwitchTypedRepairControllerDifference, assertSwitchTypedRepairAdmission, assertSwitchTypedApprovalPath, SWITCH_TYPED_REPAIR_ORIGIN,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -765,6 +767,84 @@ function scenarioLegacyTemplateBuildAlias() {
   return 'only_exact_legacy_template_build_alias_has_fresh_link_entity_permissions_and_no_historical_alias_claim';
 }
 
+function scenarioSwitchTypedRepair() {
+  const request = { schema: 'sd2-release-switch-typed-repair.v1',
+    ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'switchAdmissionRepairProofSha256',
+      'candidateSwitchObservationProofSha256', 'refusalLogSha256'].map(key => [key, SWITCH_TYPED_REPAIR_ORIGIN[key]])),
+    childReceiptSha256: digest('original-typed-failure-child'), processorControllerSetSha256: digest('typed-repair-processor'),
+    approvalFile: '/fixture/hd-release-safety-approval-switch-typed-r01.json', approvalSha256: digest('new-typed-approval'),
+    windowSha256: digest('new-typed-window'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateSwitchTypedRepair(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateSwitchTypedRepair(missing));
+    assert.throws(() => validateSwitchTypedRepair({ ...request, [key]: 'unbound' }));
+  }
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'switchAdmissionRepairProofSha256', 'candidateSwitchObservationProofSha256', 'refusalLogSha256'])
+    assert.throws(() => validateSwitchTypedRepair({ ...request, [key]: digest('different:' + key) }));
+  assert.throws(() => validateSwitchTypedRepair({ ...request, resetAdmission: true }));
+  const error = { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true };
+  const cause = 'AssertionError [ERR_ASSERTION]: Untrusted root input: /srv/video-api-debugger/app/.env';
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'switch', intentSha256: SWITCH_TYPED_REPAIR_ORIGIN.failureIntentSha256,
+    child: { status: 1, signal: null, error: null }, stderr: JSON.stringify({ error, cause }) + '\n' };
+  assertSwitchTypedRepairFailure(child); assert.throws(() => assertSwitchAdmissionRepairFailure(child));
+  for (const value of [{ ...child, phase: 'arm' }, { ...child, intentSha256: HASH }, { ...child, child: { status: 0, signal: null, error: null } },
+    { ...child, stderr: JSON.stringify({ error, cause: cause + '\n' }) },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('/.env', '/different.env') }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, category: 'another_failure' }, cause }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, stop: false }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
+    assert.throws(() => assertSwitchTypedRepairFailure(value));
+  const root = '/data/video-api-debugger/release-engines/1.0.0-' + SWITCH_TYPED_REPAIR_ORIGIN.predecessorControllerSetSha256;
+  const stack = cause + '\n' + `    at rootFile (file://${root}/common.mjs:33:10)\n`
+    + `    at assertSwitchAdmissionBefore (file://${root}/switch.mjs:869:22)\n`
+    + `    at file://${root}/switch.mjs:1255:24\n` + `    at async locked (file://${root}/switch.mjs:800:16)\n`
+    + `    at async releaseEntryCli (file://${root}/release-entry.mjs:2785:62)`;
+  assertSwitchTypedRepairRefusalLog(Buffer.from(stack));
+  for (const value of [stack + '\n', stack.replace(':869:22', ':870:22'), stack.replace('rootFile', 'anotherReader'), stack.replace(root, '/another-processor')])
+    assert.throws(() => assertSwitchTypedRepairRefusalLog(Buffer.from(value)));
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs'];
+  const retained = ['attempt-state.mjs', 'common.mjs', 'typed-files.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'candidate-reuse.mjs',
+    'pricing-start-pair.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs',
+    'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs'];
+  const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('cebe:' + name)]));
+  const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('typed-repair:' + name)])) };
+  assert.equal(Object.keys(assertSwitchTypedRepairControllerDifference(predecessor, processor)).length, 6);
+  for (const name of retained) assert.throws(() => assertSwitchTypedRepairControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertSwitchTypedRepairControllerDifference(predecessor, predecessor));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'switch_admission_repair', value: { proofSha256: request.switchAdmissionRepairProofSha256 } } },
+    { value: { kind: 'observation', name: 'candidate_switch_observation', value: { proofSha256: request.candidateSwitchObservationProofSha256 } } });
+  const failed = { events, derivedState: { status: 'failed', activePhase: null, lastPhase: {
+    phase: 'switch', outcome: 'failed', resultSha256: request.phaseResultEventSha256 }, terminal: { eventSha256: request.terminalEventSha256 },
+    lastEventSha256: request.terminalEventSha256 } };
+  const originalFixedGuardSha256 = digest('original-fixed-guard'), originalSwitchBeforeSha256 = digest('original-switch-before');
+  const runtime = { phase: 'switch', switchAdmissionRepair: { proofSha256: request.switchAdmissionRepairProofSha256,
+    proof: { originalFixedGuardSha256, originalSwitchBeforeSha256 } }, candidateSwitchObservation: { proofSha256: request.candidateSwitchObservationProofSha256 } };
+  const scene = { facts: { effectsStarted: false, switchComplete: false, files: {
+    'fixed-guard-recovery.json': { sha256: originalFixedGuardSha256 }, 'switch-before.json': { sha256: originalSwitchBeforeSha256 } } } };
+  assertSwitchTypedRepairAdmission(failed, request, runtime, scene);
+  for (const edit of [value => { value.derivedState.status = 'running'; }, value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.lastPhase.phase = 'arm'; }, value => { value.derivedState.terminal.eventSha256 = HASH; },
+    value => { value.events = value.events.filter(item => item.value.name !== 'switch_admission_repair'); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'candidate_switch_observation'); },
+    value => { value.events.push({ value: { kind: 'observation', name: 'switch_typed_repair' } }); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(failed); edit(value); assert.throws(() => assertSwitchTypedRepairAdmission(value, request, runtime, scene));
+  }
+  assert.throws(() => assertSwitchTypedRepairAdmission(failed, request, { ...runtime, phase: 'arm' }, scene));
+  for (const facts of [{ ...scene.facts, effectsStarted: true }, { ...scene.facts, switchComplete: true },
+    { ...scene.facts, files: { ...scene.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...scene.facts, files: { ...scene.facts.files, 'ingress-503-switch.json': { sha256: HASH } } }])
+    assert.throws(() => assertSwitchTypedRepairAdmission(failed, request, runtime, { facts }));
+  for (const round of ['r01', 'r02']) assertSwitchTypedApprovalPath('/fixture', `/fixture/hd-release-safety-approval-switch-typed-${round}.json`);
+  for (const file of ['/fixture/hd-release-safety-approval-switch-typed-r03.json', '/elsewhere/hd-release-safety-approval-switch-typed-r01.json',
+    '/fixture/hd-release-safety-approval-switch-admission-r02.json', '/fixture/arbitrary.json'])
+    assert.throws(() => assertSwitchTypedApprovalPath('/fixture', file));
+  return 'only_exact_typed_env_failure_with_original_ed7_d3ec_stack_and_no_effects_can_continue_switch_once';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -772,7 +852,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

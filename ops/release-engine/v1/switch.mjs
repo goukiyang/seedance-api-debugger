@@ -29,6 +29,7 @@ import { finishPrivateMultiviewPreopen, ensurePrivateMultiviewGuard, stopMultivi
 import { inspectMultiviewBackupProtection, privateMultiviewBackupFileProtection } from './multiview-backup-control.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
 import { releaseBoundary } from './engine-context.mjs';
+import { assertTypedFileUnchanged } from './typed-files.mjs';
 
 const PRICING_ROLES = ['web', 'image'];
 const ROLES = [...PRICING_ROLES, 'hd'];
@@ -865,8 +866,12 @@ function assertSwitchAdmissionBefore(m, current, original, liveSnapshot) {
   assert.deepEqual(runtimeIdentity(current.roleControl.runtime), runtimeIdentity(original.roleControl.runtime));
   assertProtection(original.protection, current.protection);
   assert.ok(liveSnapshot?.services && liveSnapshot.configurations, 'Missing bound original six-process observation');
-  for (const [file, expected] of Object.entries(liveSnapshot.configurations))
-    assert.equal(sha(rootFile(file)), expected.sha256, 'Original live configuration changed: ' + file);
+  for (const [file, expected] of Object.entries(liveSnapshot.configurations)) {
+    assert.equal(expected.requestedPath, file, 'Bound live configuration path changed');
+    const actual = assertTypedFileUnchanged(expected);
+    assert.equal(actual.sha256, expected.sha256, 'Original live configuration changed: ' + file);
+    assert.deepEqual(actual.identity, expected.identity, 'Original live configuration identity changed: ' + file);
+  }
   const live = {};
   for (const role of ['web', 'image', 'hd', 'works', 'role', 'template']) {
     const expected = m.live[role]; assert.ok(expected, 'Missing original live process: ' + role);
@@ -1236,7 +1241,8 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
     const builds = await verifyBoth(m, manifestSha256);
     await loadHdCompiledCacheProofs(m);
     const admissionRepair = mode === 'switch' ? assertSwitchAdmissionRepair(m) : null;
-    const repairSha256 = admissionRepair ? guardBuildTailRuntime(m).switchAdmissionRepair.proofSha256 : null;
+    const repairRuntime = admissionRepair ? guardBuildTailRuntime(m) : null;
+    const repairSha256 = repairRuntime ? (repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
     if (repairSha256) assert.match(repairSha256, /^[a-f0-9]{64}$/);
     const admissionName = name => repairSha256 ? name + '-' + repairSha256 : name;
     let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;
