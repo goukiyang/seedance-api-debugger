@@ -16,6 +16,7 @@ import { inspectRetainedUploadProof } from './raw-upload-recovery-proof.mjs';
 import { verifyNormalContinuation, recordHdAdmission } from './normal-continuation.mjs';
 import { verifyDeployedUsageSchema, assertPriorUsageRoleControl, assertCurrentPublishedBaseline } from './deployed-usage-schema.mjs';
 import { inspectInstalledMultiviewRecipeAdoption } from './multiview-works-control.mjs';
+import { throwReleaseError } from './release-errors.mjs';
 
 const NATIVE_FILES = ['release-protection-engineering.mjs', 'guard-recovery-engineering.mjs',
   'candidate-reuse-engineering.mjs', 'retired-hd-cache-engineering.mjs', 'hd-closed-cache-engineering.mjs',
@@ -504,28 +505,165 @@ function sharedNativeContext(m) {
   }
   return { file, sha256: sha(bytes), projectionSha256: sha(JSON.stringify(projection)) };
 }
-function sharedDependencyTree(root, owners, cutoff) {
-  assert.equal(fs.realpathSync(root), root);
+function dependencyBoundary(file, category, code, action) {
+  try { return action(); } catch (cause) {
+    if (cause?.releaseError) throw cause;
+    const actualCategory = ['ENOENT', 'ENODATA'].includes(cause?.code) ? 'evidence_missing' : category;
+    try {
+      throwReleaseError({ category: actualCategory,
+        code, object: { kind: 'application_dependency', id: file },
+        reason: actualCategory === 'input_permanent' ? 'The dependency violates its sealed source, ownership, or permission contract.'
+          : 'The exact dependency evidence is missing or changed during observation.',
+        nextStep: 'Stop dependent work; inspect the preserved original exception and restore or recapture the exact trusted input before a new attempt.' }, { cause });
+    } catch (error) {
+      // Entry keeps String(error) in its private child evidence, not Error.cause.
+      // Keep the fixed public classification separate from bounded private detail.
+      error.message += '\nPrivate dependency cause: ' + String(cause).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 2000);
+      throw error;
+    }
+  }
+}
+function dependencyIdentity(stat) {
+  return Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+}
+function dependencyGroup(appUser, uid) {
+  return dependencyBoundary(appUser, 'input_permanent', 'dependency_group_rejected', () => {
+    const gid = Number(call('id', ['-g', appUser])); assert.ok(Number.isSafeInteger(gid) && gid > 0);
+    const group = call('getent', ['group', String(gid)]).split(':');
+    assert.equal(group.length, 4); assert.equal(Number(group[2]), gid);
+    const accounts = call('getent', ['passwd']).split('\n').map(line => line.split(':'));
+    for (const row of accounts) assert.ok(row.length === 7 && Number.isSafeInteger(Number(row[2])) && Number.isSafeInteger(Number(row[3])));
+    const primary = accounts.filter(row => Number(row[3]) === gid).map(row => ({ name: row[0], uid: Number(row[2]) })).sort((a, b) => a.name.localeCompare(b.name));
+    assert.ok(primary.some(row => row.name === appUser && row.uid === uid));
+    const members = group[3].split(',').filter(Boolean).sort().map(name => ({ name, uid: Number(call('id', ['-u', name])) }));
+    assert.ok([...primary, ...members].every(row => row.uid === uid), 'Application dependency group has an additional writer');
+    const sources = Object.fromEntries(['/etc/passwd', '/etc/group', '/etc/nsswitch.conf'].map(file => {
+      const bytes = rootFile(file); return [file, { ...dependencyIdentity(fs.lstatSync(file)), sha256: sha(bytes) }];
+    }));
+    return { uid, gid, name: group[0], primary, members, sources };
+  });
+}
+function dependencyAcl(root) {
+  return dependencyBoundary(root, 'input_permanent', 'dependency_acl_rejected', () => {
+    // One bounded metadata inventory per tree, not one subprocess per entry.
+    const code = "import os,sys,json,stat\nroot=sys.argv[1];pending=[root];count=0;acl=[]\nwhile pending:\n p=pending.pop();count+=1\n if count>120000:raise ValueError('dependency ACL inventory exceeded bound')\n s=os.lstat(p)\n if any(n in ('system.posix_acl_access','system.posix_acl_default') for n in os.listxattr(p,follow_symlinks=False)):acl.append(os.path.relpath(p,root))\n if stat.S_ISDIR(s.st_mode):pending.extend(os.path.join(p,n) for n in os.listdir(p))\nprint(json.dumps({'count':count,'acl':sorted(acl)}))";
+    const value = JSON.parse(call('/usr/bin/python3', ['-B', '-I', '-c', code, root]));
+    assert.deepEqual(Object.keys(value).sort(), ['acl', 'count']); assert.ok(Number.isSafeInteger(value.count) && value.count > 0 && value.count <= 120000);
+    assert.deepEqual(value.acl, [], 'Additional/default dependency ACL writers are not authorized'); return value;
+  });
+}
+function sealedDependencyTrust(m, root, uid) {
+  return dependencyBoundary(root, 'evidence_missing', 'dependency_seal_rejected', () => {
+    const compiled = m.live.hd.sourceProof?.compiledCapsule, recovered = m.recoveredGuardBaseline, normal = m.normalContinuation;
+    assert.ok(compiled || recovered || normal && m.reuseBuilds, 'No direct live baseline dependency seal was supplied');
+    const runId = compiled?.sourceRun || recovered?.runId || normal.sourceRun;
+    assert.match(runId, /^[a-f0-9-]{36}$/);
+    const stage = m.projectRoot + '/release-staging/' + runId;
+    const manifestFile = stage + '/manifest.json', manifestBytes = rootFile(manifestFile), original = JSON.parse(manifestBytes);
+    assert.equal(original.runId, runId); assert.equal(original.stage, stage);
+    const kind = compiled?.kind || (recovered ? 'guard' : ['main', 'guard'].find(label => original[label].root + '/node_modules' === root));
+    assert.ok(['main', 'guard'].includes(kind)); const candidate = original[kind];
+    assert.equal(candidate.root + '/node_modules', root); assert.equal(candidate.source, m.live.web.source);
+    assert.equal(candidate.source, m.live.hd.source); assert.equal(original.appUser, m.appUser);
+    const file = stage + '/' + kind + '-immutable-success.json', bytes = rootFile(file, 128 * 1024 * 1024), capsule = JSON.parse(bytes);
+    if (compiled) { assert.equal(compiled.file, file); assert.equal(sha(bytes), compiled.sha256); assert.ok(capsule.originalReceipt.hdCompiledCache); }
+    else if (recovered) { assert.equal(sha(manifestBytes), recovered.manifestSha256); assert.equal(sha(bytes), recovered.guardImmutableSuccessSha256); }
+    else {
+      assert.equal(m.reuseBuilds.sourceRun, normal.sourceRun); assert.equal(sha(manifestBytes), normal.sourceManifestSha256);
+      assert.equal(m.reuseBuilds[kind].file, file); assert.equal(sha(bytes), m.reuseBuilds[kind].sha256);
+    }
+    assert.ok(call('lsattr', ['-d', '--', file]).split(/\s+/)[0].includes('i'));
+    assert.equal(capsule.schema, 'sd2-immutable-successful-build.v1'); assert.equal(capsule.kind, kind); assert.equal(capsule.sourceRun, original.runId);
+    assert.equal(capsule.originalManifestSha256, sha(manifestBytes));
+    assert.equal(capsule.originalTimesChanged, false); assert.equal(capsule.newCompilationClaimed, false);
+    assert.equal(capsule.originallyVerifiedWithinThirtyMinuteGate, true);
+    assert.equal(capsule.originalReceiptFile, stage + '/' + kind + '-build.json');
+    const receiptBytes = rootFile(capsule.originalReceiptFile);
+    assert.equal(sha(receiptBytes), capsule.originalReceiptSha256); assert.deepEqual(JSON.parse(receiptBytes), capsule.originalReceipt);
+    const receipt = capsule.originalReceipt; assert.equal(receipt.source, candidate.source); assert.equal(receipt.version, candidate.version); assert.equal(receipt.exitCode, 0);
+    assert.equal(receipt.schema, 'rate-impl2-candidate-build.v1'); assert.equal(receipt.verifiedSourceAndGates, true);
+    assert.equal(receipt.runId, original.runId); assert.equal(receipt.label, kind); assert.equal(receipt.manifestSha256, sha(manifestBytes));
+    assert.deepEqual(capsule.originalPrivateSha256, original.privateSha256);
+    assert.ok(Number.isSafeInteger(receipt.startedAt) && receipt.startedAt < receipt.finishedAt && receipt.finishedAt < Date.now());
+    if (m.live.hd.sourceProof) {
+      assert.equal(candidate.sourceManifest, m.live.hd.sourceProof.sourceManifest); assert.equal(candidate.archive, m.live.hd.sourceProof.archive);
+    }
+    const sourceBytes = rootFile(candidate.sourceManifest), source = JSON.parse(sourceBytes);
+    assert.equal(sha(sourceBytes), capsule.originalSourceManifestSha256); assert.equal(source.source, receipt.source);
+    const lock = capsule.snapshot.lock; assert.deepEqual(lock, capsule.snapshot.sourceFiles['package-lock.json']);
+    assert.equal(lock.sha256, source.files['package-lock.json']);
+    assert.equal(sha(sizeLogApplicationFile(candidate.root + '/package-lock.json', candidate.root, uid)), lock.sha256);
+    assert.deepEqual(dependencyIdentity(fs.lstatSync(candidate.root + '/package-lock.json')),
+      Object.fromEntries(Object.entries(lock).filter(([key]) => key !== 'sha256')));
+    const entries = capsule.snapshot.dependencies; assert.ok(entries && Object.keys(entries).length > 0 && Object.keys(entries).length <= 120000);
+    const group = dependencyGroup(m.appUser, uid), acl = dependencyAcl(root);
+    return { uid, gid: group.gid, entries, buildStartedAt: receipt.startedAt,
+      sourceProof: { sourceManifest: candidate.sourceManifest, archive: candidate.archive },
+      proof: { schema: 'sd2-sealed-application-dependencies.v1', manifest: { file: manifestFile, sha256: sha(manifestBytes) },
+        capsule: { file, sha256: sha(bytes) }, receipt: { file: capsule.originalReceiptFile, sha256: sha(receiptBytes) },
+        sourceManifest: { file: candidate.sourceManifest, sha256: sha(sourceBytes) }, lockSha256: lock.sha256,
+        snapshotSha256: sha(JSON.stringify(entries)), group, acl } };
+  });
+}
+function dependencyModeAllowed(stat, trust) {
+  return stat.isSymbolicLink() || !(stat.mode & 0o002) && !(stat.mode & 0o7000)
+    && (!(stat.mode & 0o020) || trust && stat.uid === trust.uid && stat.gid === trust.gid);
+}
+function readApplicationDependency(file, root, stat, expected) {
+  dependencyBoundary(file, 'input_permanent', 'dependency_input_rejected', () => {
+    assert.equal(fs.realpathSync(file), file); assert.ok(file.startsWith(root + '/'));
+    assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size >= 0 && stat.size <= 512 * 1024 * 1024);
+  });
+  const identity = dependencyIdentity(stat), fd = dependencyBoundary(file, 'input_permanent', 'dependency_input_rejected', () =>
+    fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW));
+  let bytes;
+  try {
+    dependencyBoundary(file, 'evidence_missing', 'dependency_changed_during_observation', () => {
+      assert.deepEqual(dependencyIdentity(fs.fstatSync(fd)), identity); bytes = fs.readFileSync(fd);
+      assert.equal(bytes.length, stat.size); assert.deepEqual(dependencyIdentity(fs.fstatSync(fd)), identity);
+      assert.deepEqual(dependencyIdentity(fs.lstatSync(file)), identity);
+    });
+  } finally { fs.closeSync(fd); }
+  dependencyBoundary(file, 'input_permanent', 'dependency_bytes_unsealed', () => assert.equal(sha(bytes), expected.sha256));
+  return bytes;
+}
+function sharedDependencyTree(root, owners, cutoff, trust = null) {
+  dependencyBoundary(root, 'input_permanent', 'dependency_input_rejected', () => assert.equal(fs.realpathSync(root), root));
   const entries = {}; let count = 0, latestCtimeMs = 0;
   const visit = file => {
-    assert.ok(++count <= 120000, 'Native dependency inventory exceeded its bound');
-    const stat = fs.lstatSync(file);
+    dependencyBoundary(root, 'input_permanent', 'dependency_inventory_unbounded', () => assert.ok(++count <= 120000));
+    const stat = dependencyBoundary(file, 'evidence_missing', 'dependency_changed_during_observation', () => fs.lstatSync(file));
     latestCtimeMs = Math.max(latestCtimeMs, stat.ctimeMs);
-    assert.ok(owners.includes(stat.uid) && (stat.isSymbolicLink() || !(stat.mode & 0o022)) && stat.ctimeMs < cutoff,
-      'Native dependency owner/mode/time changed: ' + file);
-    const identity = Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+    dependencyBoundary(file, 'input_permanent', 'dependency_input_rejected', () => {
+      assert.ok(owners.includes(stat.uid) && dependencyModeAllowed(stat, trust), 'Native dependency owner/mode rejected');
+      if (stat.isFile()) assert.ok(stat.nlink === 1 && stat.size >= 0 && stat.size <= 512 * 1024 * 1024);
+    });
+    dependencyBoundary(file, 'evidence_missing', 'dependency_changed_during_observation', () => assert.ok(stat.ctimeMs < cutoff));
+    const identity = dependencyIdentity(stat), relative = path.relative(root, file) || '.', expected = trust?.entries[relative];
+    if (trust) dependencyBoundary(file, 'evidence_missing', 'dependency_snapshot_mismatch', () => {
+      assert.ok(expected && expected.ctimeMs <= trust.buildStartedAt, 'Dependency is absent from the original successful build');
+      assert.deepEqual(identity, Object.fromEntries(Object.entries(expected).filter(([key]) => !['sha256', 'link'].includes(key))));
+    });
     if (stat.isSymbolicLink()) {
-      assert.ok(fs.realpathSync(file).startsWith(root + '/'), 'Native dependency alias escapes its input tree');
+      dependencyBoundary(file, 'input_permanent', 'dependency_alias_rejected', () =>
+        assert.ok(fs.realpathSync(file).startsWith(root + '/'), 'Native dependency alias escapes its input tree'));
       identity.link = fs.readlinkSync(file);
     } else if (stat.isFile()) {
-      identity.sha256 = sha(sizeLogApplicationFile(file, root, stat.uid, 512 * 1024 * 1024, true));
-    } else assert.ok(stat.isDirectory(), 'Unsupported native dependency type');
-    entries[path.relative(root, file) || '.'] = identity;
+      identity.sha256 = sha(trust ? readApplicationDependency(file, root, stat, expected)
+        : sizeLogApplicationFile(file, root, stat.uid, 512 * 1024 * 1024, true));
+    } else dependencyBoundary(file, 'input_permanent', 'dependency_type_rejected', () => assert.ok(stat.isDirectory()));
+    if (trust) dependencyBoundary(file, 'input_permanent', 'dependency_source_mismatch', () => assert.deepEqual(identity, expected));
+    entries[relative] = identity;
     if (stat.isDirectory()) for (const name of fs.readdirSync(file).sort()) visit(path.join(file, name));
-    assert.deepEqual(Object.fromEntries(Object.keys(identity).filter(key => !['sha256', 'link'].includes(key))
-      .map(key => [key, fs.lstatSync(file)[key]])), Object.fromEntries(Object.entries(identity).filter(([key]) => !['sha256', 'link'].includes(key))));
+    dependencyBoundary(file, 'evidence_missing', 'dependency_changed_during_observation', () =>
+      assert.deepEqual(dependencyIdentity(fs.lstatSync(file)), dependencyIdentity(stat)));
   };
-  visit(root); return { root, count, latestCtimeMs, sha256: sha(JSON.stringify(entries)) };
+  visit(root);
+  if (trust) dependencyBoundary(root, 'evidence_missing', 'dependency_snapshot_mismatch', () => {
+    assert.deepEqual(Object.keys(entries).sort(), Object.keys(trust.entries).sort());
+    assert.equal(count, trust.proof.acl.count);
+  });
+  return { root, count, latestCtimeMs, sha256: sha(JSON.stringify(entries)), ...(trust ? { sealedSource: trust.proof } : {}) };
 }
 function latestDependencyChange(value) {
   if (!value || typeof value !== 'object') return 0;
@@ -547,7 +685,8 @@ function sharedControlDependencies(m, cutoff) {
     return { binary, sqliteVersion: value.sqliteVersion, files: [value.python, value.wrapper, value.extension, ...value.libraries]
       .map(file => sizeLogRuntimeFile(file, cutoff, [0], true)) };
   });
-  const sourceProof = m.live.hd.sourceProof; assert.ok(sourceProof, 'Shared controls require the verified live writer source reference');
+  const dependencyRoot = m.live.web.root + '/node_modules', dependencyTrust = sealedDependencyTrust(m, dependencyRoot, applicationUid);
+  const sourceProof = m.live.hd.sourceProof || dependencyTrust.sourceProof;
   const sourceBytes = rootFile(sourceProof.sourceManifest), source = JSON.parse(sourceBytes);
   assert.equal(source.source, m.live.hd.source); assert.equal(source.source, m.live.web.source);
   const sourceFiles = {};
@@ -589,7 +728,7 @@ function sharedControlDependencies(m, cutoff) {
   const result = { engine: m.engine, runtime, pythonSqlite,
     typescript: sizeLogRuntimeFile(typescript, cutoff, owners),
     baseline: { sourceManifest: sourceProof.sourceManifest, sourceManifestSha256: sha(sourceBytes), sourceFiles,
-      dependencies: sharedDependencyTree(m.live.web.root + '/node_modules', owners, cutoff) }, historicalSources, immutableOriginal };
+      dependencies: sharedDependencyTree(dependencyRoot, owners, cutoff, dependencyTrust) }, historicalSources, immutableOriginal };
   assert.ok(latestDependencyChange(result) < cutoff, 'Application/runtime dependency metadata changed after this batch began');
   return result;
 }
@@ -640,7 +779,8 @@ function sharedReusedOutcome(m, ref, currentInput) {
   assert.ok(receipt.controlInput, 'Historical atomic lacks actual shared control input evidence');
   const oldDependencies = currentInput.inputs.dependencies;
   assert.equal(origin.live.web.root, currentInput.inputs.cwd);
-  assert.equal(origin.live.hd.sourceProof.sourceManifest, oldDependencies.baseline.sourceManifest);
+  if (origin.live.hd.sourceProof) assert.equal(origin.live.hd.sourceProof.sourceManifest, oldDependencies.baseline.sourceManifest);
+  else assert.ok(origin.normalContinuation && origin.reuseBuilds, 'Original live source proof is missing');
   assert.equal(origin.appUser, m.appUser);
   assert.ok(latestDependencyChange(oldDependencies) < Date.parse(receipt.startedAt), 'Dependency metadata postdates the direct original leaf');
   const oldInput = sharedNativeInput(origin, ref.file, receipt.controlInput.argv.slice(4), oldDependencies, Date.parse(receipt.startedAt));
@@ -867,8 +1007,9 @@ export async function controlPreflight(m) {
   if (shared) assertSharedNativeBatch(m, batch, sharedDependencies); else assertNativeBatch(m, batch);
   }
   if (isSharedEngine(m)) {
-    assert.deepEqual(sharedControlDependencies(m, Date.parse(batch.startedAt)), sharedDependencies,
-      'Static native dependencies changed during execution');
+    dependencyBoundary(m.live.web.root + '/node_modules', 'evidence_missing', 'dependency_changed_during_observation', () =>
+      assert.deepEqual(sharedControlDependencies(m, Date.parse(batch.startedAt)), sharedDependencies,
+        'Static native dependencies changed during execution'));
     return batch;
   }
   return finishControlAdmission(m, batch, batchFile, admission, sharedDependencies);
@@ -924,7 +1065,8 @@ async function finishControlAdmission(m, batch, batchFile, admission, sharedDepe
   assert.equal(call('findmnt', ['-n', '-o', 'TARGET', '-T', m.stage]), '/data');
   if (isSharedEngine(m)) {
     const after = sharedControlDependencies(m, Date.parse(batch.startedAt));
-    assert.deepEqual(after, sharedDependencies, 'Native control dependencies changed during the batch/admission interval');
+    dependencyBoundary(m.live.web.root + '/node_modules', 'evidence_missing', 'dependency_changed_during_observation', () =>
+      assert.deepEqual(after, sharedDependencies, 'Native control dependencies changed during the batch/admission interval'));
     sharedDependencies = after;
   }
   writeJsonExclusive(directory + '/receipt.json', { schema: 'mv-hd-upload-native-control-preflight.v1', runId: m.runId,

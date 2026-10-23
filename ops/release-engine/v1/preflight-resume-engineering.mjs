@@ -6,6 +6,9 @@ import vm from 'node:vm';
 import os from 'node:os';
 import { isSharedEngine, engineDirectory } from './engine-context.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
+import { throwReleaseError, classifyReleaseError } from './release-errors.mjs';
+import { execFileSync } from 'node:child_process';
+import { rootFile } from './common.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.getuid(), 0);
@@ -42,7 +45,7 @@ function harness(options = {}) {
     writeFileSync: (file, value, options) => { assert.equal(options.flag, 'wx'); assert.ok(!files.has(file)); files.set(file, value); },
   };
   const context = { assert: normalizedAssert, fs: fakeFs, path, process, Date, JSON, Buffer,
-    structuredClone, isSharedEngine, engineDirectory,
+    structuredClone, isSharedEngine, engineDirectory, throwReleaseError,
     randomUUID: () => `20000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
     sha, rootFile, writeJsonExclusive: write, validateManifest: value => assert.equal(value, m), assertReleaseWindow: () => {},
     assertCurrentPublishedBaseline: value => assert.equal(value, m),
@@ -866,7 +869,7 @@ assert.deepEqual(sharedFailure.rootFile(sharedFailureFile), failedBytes); assert
 const changedDuring = sharedHarness({ spawnResult: ({ call }) => {
   if (call === 19) changedDuring.dependencies.runtime.observedSha256 = sha('changed during batch'); return null;
 } });
-await assert.rejects(changedDuring.api.controlPreflight(changedDuring.m), /Native|native|dependencies|input/i);
+await assert.rejects(changedDuring.api.controlPreflight(changedDuring.m), error => error.releaseError?.code === 'dependency_changed_during_observation');
 assert.equal(changedDuring.counts().spawnCalls, 19);
 assert.equal(changedDuring.files.has(changedDuring.m.stage + '/native-control-preflight/receipt.json'), false);
 checks.push('shared_failed_or_mid_batch_changed_inputs_never_become_admission_and_original_evidence_is_not_overwritten');
@@ -874,9 +877,9 @@ checks.push('shared_failed_or_mid_batch_changed_inputs_never_become_admission_an
 const dependencyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-native-input-tree-'));
 try {
   fs.chmodSync(dependencyRoot, 0o700); const input = dependencyRoot + '/input.js'; fs.writeFileSync(input, 'original dependency', { mode: 0o600 });
-  const scope = { assert: normalizedAssert, fs, path, sha, Date };
+  const scope = { assert: normalizedAssert, fs, path, sha, Date, throwReleaseError };
   const readerStart = source.indexOf('function sizeLogApplicationFile('), readerEnd = source.indexOf('\nfunction sizeLogRuntimeFile(', readerStart);
-  const treeStart = source.indexOf('function sharedDependencyTree('), treeEnd = source.indexOf('\nfunction latestDependencyChange(', treeStart);
+  const treeStart = source.indexOf('function dependencyBoundary('), treeEnd = source.indexOf('\nfunction latestDependencyChange(', treeStart);
   vm.runInNewContext(source.slice(readerStart, readerEnd) + '\n' + source.slice(treeStart, treeEnd) + '\nglobalThis.read=sharedDependencyTree;', scope);
   const before = scope.read(dependencyRoot, [0], Date.now() + 1000);
   assert.deepEqual(scope.read(dependencyRoot, [0], Date.now() + 1000), before);
@@ -889,6 +892,116 @@ try {
   fs.symlinkSync('/etc/passwd', dependencyRoot + '/escape'); assert.throws(() => scope.read(dependencyRoot, [0], Date.now() + 1000));
 } finally { fs.rmSync(dependencyRoot, { recursive: true, force: true }); }
 checks.push('shared_actual_bounded_dependency_reader_binds_bytes_identity_owner_time_and_refuses_hardlinks_or_escaping_aliases');
+
+{
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-sealed-dependencies-'));
+  try {
+    const runId = '91000000-0000-4000-8000-000000000001', sourceId = 'd'.repeat(40), stage = temporary + '/release-staging/' + runId;
+    const appRoot = temporary + '/managed-releases/' + sourceId, dependencyRoot = appRoot + '/node_modules';
+    fs.mkdirSync(stage + '/guard', { recursive: true, mode: 0o700 }); fs.mkdirSync(dependencyRoot, { recursive: true, mode: 0o755 });
+    const uid = 1004, gid = 1004, generated = dependencyRoot + '/generated-native.bin', lockFile = appRoot + '/package-lock.json';
+    fs.writeFileSync(generated, 'original sealed native bytes', { mode: 0o775 }); fs.chmodSync(generated, 0o775); fs.chownSync(generated, uid, gid);
+    fs.writeFileSync(lockFile, 'original sealed lock', { mode: 0o644 }); fs.chownSync(lockFile, uid, gid);
+    fs.writeFileSync(dependencyRoot + '/empty.js', '', { mode: 0o644 }); fs.chownSync(dependencyRoot + '/empty.js', uid, gid);
+    fs.chownSync(dependencyRoot, uid, gid); fs.symlinkSync('generated-native.bin', dependencyRoot + '/internal-alias'); fs.lchownSync(dependencyRoot + '/internal-alias', uid, gid);
+    const identity = stat => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+    const entry = file => { const stat = fs.lstatSync(file), value = identity(stat);
+      if (stat.isSymbolicLink()) value.link = fs.readlinkSync(file); else if (stat.isFile()) value.sha256 = sha(fs.readFileSync(file)); return value; };
+    const dependencies = Object.fromEntries(['.', ...fs.readdirSync(dependencyRoot).sort()].map(relative => [relative, entry(relative === '.' ? dependencyRoot : dependencyRoot + '/' + relative)]));
+    const lock = entry(lockFile), original = { runId, stage, appUser: 'fixture-app', privateSha256: {},
+      main: { root: temporary + '/managed-releases/' + 'e'.repeat(40) },
+      guard: { root: appRoot, source: sourceId, version: '0.1.0', sourceManifest: stage + '/guard/source-manifest.json', archive: stage + '/guard/source.tar.gz' } };
+    const originalBytes = JSON.stringify(original); fs.writeFileSync(stage + '/manifest.json', originalBytes, { mode: 0o600 });
+    const sourceBytes = JSON.stringify({ source: sourceId, files: { 'package-lock.json': lock.sha256 } });
+    fs.writeFileSync(original.guard.sourceManifest, sourceBytes, { mode: 0o600 });
+    const startedAt = Math.ceil(Math.max(...Object.values(dependencies).map(value => value.ctimeMs), lock.ctimeMs)) + 1;
+    while (Date.now() <= startedAt + 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    const receipt = { schema: 'rate-impl2-candidate-build.v1', runId, label: 'guard', source: sourceId, version: '0.1.0',
+      manifestSha256: sha(originalBytes), startedAt, finishedAt: startedAt + 1, exitCode: 0, verifiedSourceAndGates: true };
+    const capsule = { schema: 'sd2-immutable-successful-build.v1', kind: 'guard', sourceRun: runId,
+      originalManifestSha256: sha(originalBytes), originalSourceManifestSha256: sha(sourceBytes), originalPrivateSha256: {},
+      originalReceiptFile: stage + '/guard-build.json', originalReceipt: receipt, originalReceiptSha256: sha(JSON.stringify(receipt)),
+      originallyVerifiedWithinThirtyMinuteGate: true, originalTimesChanged: false, newCompilationClaimed: false,
+      snapshot: { dependencies, lock, sourceFiles: { 'package-lock.json': lock } } };
+    fs.writeFileSync(capsule.originalReceiptFile, JSON.stringify(receipt), { mode: 0o600 });
+    const capsuleFile = stage + '/guard-immutable-success.json'; fs.writeFileSync(capsuleFile, JSON.stringify(capsule), { mode: 0o600 });
+    const m = { projectRoot: temporary, appUser: 'fixture-app', recoveredGuardBaseline: { runId, manifestSha256: sha(originalBytes),
+      guardImmutableSuccessSha256: sha(JSON.stringify(capsule)) }, live: { web: { root: appRoot, source: sourceId },
+      hd: { root: appRoot, source: sourceId, sourceProof: { sourceManifest: original.guard.sourceManifest, archive: original.guard.archive } } } };
+    let otherMember = false, aclWriter = false, immutable = true, aclReads = 0;
+    const call = (binary, args) => {
+      if (binary === 'id') return args[0] === '-g' ? String(gid) : String(args[1] === 'extra-writer' ? uid + 1 : uid);
+      if (binary === 'getent') return args[0] === 'group' ? `fixture-app:x:${gid}:${otherMember ? 'extra-writer' : ''}`
+        : `fixture-app:x:${uid}:${gid}::/nonexistent:/usr/sbin/nologin`;
+      if (binary === 'lsattr') return (immutable ? '----i-----' : '----------') + ' ' + args.at(-1);
+      assert.equal(binary, '/usr/bin/python3'); assert.deepEqual(args.slice(0, 2), ['-B', '-I']); aclReads++;
+      if (aclWriter) return JSON.stringify({ count: Object.keys(dependencies).length, acl: ['generated-native.bin'] });
+      return execFileSync(binary, args, { encoding: 'utf8', timeout: 30000 }).trim();
+    };
+    const scope = { assert: normalizedAssert, fs: { ...fs }, path, sha, Date, call, rootFile, throwReleaseError };
+    const applicationStart = source.indexOf('function sizeLogApplicationFile('), applicationEnd = source.indexOf('\nfunction sizeLogRuntimeFile(', applicationStart);
+    const start = source.indexOf('function dependencyBoundary('), end = source.indexOf('\nfunction latestDependencyChange(', start);
+    assert.ok(start > 0 && end > start);
+    vm.runInNewContext(source.slice(applicationStart, applicationEnd) + '\n' + source.slice(start, end)
+      + '\nglobalThis.api={sealedDependencyTrust,sharedDependencyTree,readApplicationDependency};', scope);
+    const trust = () => scope.api.sealedDependencyTrust(m, dependencyRoot, uid), read = () => scope.api.sharedDependencyTree(dependencyRoot, [0, uid], Date.now() + 1000, trust());
+    const accepted = read(); assert.equal(accepted.count, 4); assert.equal(accepted.sealedSource.capsule.sha256, m.recoveredGuardBaseline.guardImmutableSuccessSha256);
+    assert.deepEqual(read(), accepted); assert.ok(aclReads >= 2, 'ACL metadata must be freshly observed, not accepted from the old seal');
+    assert.throws(() => scope.api.sharedDependencyTree(dependencyRoot, [0, uid], Date.now() + 1000), error => error.releaseError.category === 'input_permanent');
+    // The original ordinary app reader remains strict: 775 is not a source-file exception.
+    const strict = { assert: normalizedAssert, fs, path };
+    vm.runInNewContext(source.slice(applicationStart, applicationEnd) + '\nglobalThis.read=sizeLogApplicationFile;', strict);
+    assert.throws(() => strict.read(generated, dependencyRoot, uid));
+    for (const change of [
+      () => { otherMember = true; return () => { otherMember = false; }; },
+      () => { aclWriter = true; return () => { aclWriter = false; }; },
+      () => { immutable = false; return () => { immutable = true; }; },
+      () => { const old = m.recoveredGuardBaseline.guardImmutableSuccessSha256; m.recoveredGuardBaseline.guardImmutableSuccessSha256 = '0'.repeat(64); return () => { m.recoveredGuardBaseline.guardImmutableSuccessSha256 = old; }; },
+      () => { const old = m.recoveredGuardBaseline.manifestSha256; m.recoveredGuardBaseline.manifestSha256 = '0'.repeat(64); return () => { m.recoveredGuardBaseline.manifestSha256 = old; }; },
+      () => { fs.renameSync(capsuleFile, capsuleFile + '.held'); return () => fs.renameSync(capsuleFile + '.held', capsuleFile); },
+      () => { const old = fs.readFileSync(capsule.originalReceiptFile); fs.appendFileSync(capsule.originalReceiptFile, ' '); return () => fs.writeFileSync(capsule.originalReceiptFile, old); },
+      () => { const old = fs.readFileSync(original.guard.sourceManifest); fs.appendFileSync(original.guard.sourceManifest, ' '); return () => fs.writeFileSync(original.guard.sourceManifest, old); },
+    ]) { const restore = change(); assert.throws(read); restore(); }
+    const saved = m.recoveredGuardBaseline; delete m.recoveredGuardBaseline;
+    m.normalContinuation = { sourceRun: runId, sourceManifestSha256: sha(originalBytes) };
+    m.reuseBuilds = { sourceRun: runId, guard: { file: capsuleFile, sha256: saved.guardImmutableSuccessSha256 } };
+    assert.equal(read().sealedSource.capsule.sha256, saved.guardImmutableSuccessSha256);
+    delete m.normalContinuation; delete m.reuseBuilds;
+    assert.throws(read, error => error.releaseError.category === 'evidence_missing');
+    m.recoveredGuardBaseline = saved;
+    const capsuleBytes = fs.readFileSync(capsuleFile), receiptBytes = fs.readFileSync(capsule.originalReceiptFile);
+    const compiledCapsule = structuredClone(capsule);
+    compiledCapsule.originalReceipt.hdCompiledCache = { file: stage + '/guard-hd-compiled-cache.json', sha256: 'a'.repeat(64) };
+    const compiledReceiptBytes = JSON.stringify(compiledCapsule.originalReceipt);
+    compiledCapsule.originalReceiptSha256 = sha(compiledReceiptBytes);
+    fs.writeFileSync(capsule.originalReceiptFile, compiledReceiptBytes); fs.writeFileSync(capsuleFile, JSON.stringify(compiledCapsule));
+    delete m.recoveredGuardBaseline;
+    m.live.hd.sourceProof.compiledCapsule = { file: capsuleFile, sha256: sha(JSON.stringify(compiledCapsule)), kind: 'guard', sourceRun: runId };
+    assert.equal(read().sealedSource.capsule.sha256, m.live.hd.sourceProof.compiledCapsule.sha256);
+    m.live.hd.sourceProof.compiledCapsule.sha256 = '0'.repeat(64); assert.throws(read);
+    delete m.live.hd.sourceProof.compiledCapsule; m.recoveredGuardBaseline = saved;
+    fs.writeFileSync(capsule.originalReceiptFile, receiptBytes); fs.writeFileSync(capsuleFile, capsuleBytes);
+    const originalOpen = scope.fs.openSync;
+    scope.fs.openSync = () => { const error = new Error('denied exact dependency'); error.code = 'EACCES'; throw error; };
+    assert.throws(() => scope.api.readApplicationDependency(generated, dependencyRoot, fs.lstatSync(generated), dependencies['generated-native.bin']),
+      error => error.releaseError.category === 'input_permanent' && error.releaseError.object.id === generated && error.cause.code === 'EACCES'
+        && String(error).includes('denied exact dependency') && !error.releaseError.reason.includes('denied exact dependency'));
+    scope.fs.openSync = originalOpen;
+    const originalFstat = scope.fs.fstatSync; let changedFd = false;
+    scope.fs.fstatSync = fd => { const stat = originalFstat(fd); if (changedFd) return { ...stat, ino: stat.ino + 1 }; changedFd = true; return stat; };
+    assert.throws(() => scope.api.readApplicationDependency(generated, dependencyRoot, fs.lstatSync(generated), dependencies['generated-native.bin']),
+      error => classifyReleaseError(error).category === 'evidence_missing' && error.releaseError.code === 'dependency_changed_during_observation' && error.releaseError.retryable === false);
+    scope.fs.fstatSync = originalFstat;
+    fs.chmodSync(generated, 0o777); assert.throws(read, error => error.releaseError.category === 'input_permanent'); fs.chmodSync(generated, 0o775);
+    assert.throws(read, error => error.releaseError.code === 'dependency_snapshot_mismatch', 'Restored same mode does not restore original identity/time');
+    const altered = { ...dependencies['generated-native.bin'], sha256: '0'.repeat(64) };
+    assert.throws(() => scope.api.readApplicationDependency(generated, dependencyRoot, fs.lstatSync(generated), altered),
+      error => error.releaseError.category === 'input_permanent' && error.releaseError.code === 'dependency_bytes_unsealed');
+    fs.appendFileSync(lockFile, ' changed');
+    assert.throws(read, error => error.releaseError.code === 'dependency_seal_rejected');
+  } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+}
+checks.push('shared_sealed_dependencies_accept_private_app_group_only_with_original_seal_source_lock_receipt_and_fresh_acl_while_rejecting_drift');
 
 console.log(JSON.stringify({ schema: 'sd2-preflight-resume-engineering.v1', completed: true, checks,
   count: checks.length, sourceSha256: { 'control-preflight.mjs': sha(source), 'cutover-safety.mjs': sha(safety),
