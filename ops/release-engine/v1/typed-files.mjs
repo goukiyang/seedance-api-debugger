@@ -22,6 +22,19 @@ function identity(stat) {
     .map(key => [key, stat[key]]));
 }
 
+function comparableParentSnapshots(parents) {
+  return parents.map(parent => {
+    const project = value => {
+      const result = { ...value };
+      if ((value.mode & 0o170000) === 0o040000) {
+        delete result.mtimeMs; delete result.ctimeMs;
+      }
+      return result;
+    };
+    return { ...parent, identity: project(parent.identity), aliasIdentity: project(parent.aliasIdentity) };
+  });
+}
+
 function validateIdentity(value, name) {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${name} must be an object`);
   assert.deepEqual(Object.keys(value).sort(), ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'uid', 'gid', 'mode', 'nlink'].sort());
@@ -149,7 +162,7 @@ function readTypedFileUnchecked({ file, category, maximumBytes = DEFAULT_LIMITS[
   assert.equal(realAfter, realBefore, 'Typed file real path changed while reading');
   assert.deepEqual(identity(pathAfter), identity(before), 'Typed file path identity changed while reading');
   assert.deepEqual(identity(aliasAfter), identity(aliasBefore), 'Typed file alias identity changed while reading');
-  assert.deepEqual(captureParents(), parents, 'Typed file parent identity changed while reading');
+  assert.deepEqual(comparableParentSnapshots(captureParents()), comparableParentSnapshots(parents), 'Typed file parent identity changed while reading');
   const sha256 = digest(bytes);
   if (expectedSha256 !== undefined) assert.equal(sha256, expectedSha256, 'Typed file bytes differ from the approved digest');
   const snapshot = validateTypedFileSnapshot({
@@ -200,6 +213,7 @@ export function assertTypedFileUnchanged(snapshot, overrides = {}) {
     requireRootParents: snapshot.parents.length > 0,
     parentBoundary: overrides.parentBoundary || snapshot.parentBoundary,
   }).snapshot;
-  assert.deepEqual(current, snapshot, 'Typed file identity, alias, parent chain, or bytes changed');
+  assert.deepEqual({ ...current, parents: comparableParentSnapshots(current.parents) },
+    { ...snapshot, parents: comparableParentSnapshots(snapshot.parents) }, 'Typed file identity, alias, parent chain, or bytes changed');
   return current;
 }

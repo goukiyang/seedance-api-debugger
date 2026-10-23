@@ -1,4 +1,4 @@
-import { releaseDependencyRoot, fullSchemaBefore } from './full-release-contract.mjs';
+import { releaseDependencyRoot, fullSchemaBefore, applyFullSchema } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -941,6 +941,10 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
   const historicalHdAdmissionHook = async () => { throw Error('Private HD waiting is unavailable in the historical non-private lifecycle fixture'); };
   const switchApi = load('switch.mjs', {
     ...pair, ...guard, ...canvasSchema, PRICING_START_CONTROL: control, MV_DIRECT: { recoveryRunId: runId }, fixtureNative: native,
+    applyFullSchema: (value, ...args) => {
+      assert.equal(value.fullRelease, undefined, 'Historical lifecycle fixture must not invoke native full-schema I/O');
+      return applyFullSchema(value, ...args);
+    },
     fixtureRawUpload: rawUpload,
     verifyCandidate: async (_m, kind) => previous ? candidate.verifyCandidate(_m, kind) : reuse.verifyReusedCandidate(_m, kind),
     readDeployedUsageEvidence: deployed.readDeployedUsageEvidence, assertPriorUsageRoleControl: deployed.assertPriorUsageRoleControl,
