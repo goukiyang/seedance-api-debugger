@@ -119,6 +119,28 @@ export function assertFullReleaseContext(context) {
   assert.equal(full.liveRoles.web.source, context.baselineSource ?? context.live?.web.source);
   return full;
 }
+// Select the already pinned application dependency tree. The existing seal,
+// entity/ACL and complete-tree readers still prove its bytes; this selector
+// never promotes the Web source authority into an HD dependency authority.
+export function releaseDependencyRoot(context) {
+  if (!context.fullRelease) {
+    const root = context.live?.web?.root || '/data/video-api-debugger/managed-releases/' + context.baselineSource;
+    assert.ok(path.isAbsolute(root) && path.resolve(root) === root); return root;
+  }
+  const { liveRoles, dependencyCapsule } = context.fullRelease, hd = liveRoles.hd;
+  assert.match(hd.source, SOURCE); assert.equal(hd.root, '/data/video-api-debugger/managed-releases/' + hd.source);
+  assert.match(dependencyCapsule.sha256, HASH); assert.ok(['main', 'guard'].includes(dependencyCapsule.kind));
+  assert.match(dependencyCapsule.sourceRun, /^[a-f0-9-]{36}$/);
+  assert.equal(dependencyCapsule.file, '/data/video-api-debugger/release-staging/' + dependencyCapsule.sourceRun
+    + '/' + dependencyCapsule.kind + '-immutable-success.json');
+  if (context.live?.hd) {
+    for (const key of ['root', 'source', 'version', 'build']) assert.equal(context.live.hd[key], hd[key], 'Pinned HD dependency role changed: ' + key);
+    assert.deepEqual(context.live.hd.sourceProof, { sourceManifest: hd.sourceManifest, archive: hd.archive,
+      compiledCapsule: dependencyCapsule }, 'HD dependency proof must belong to the pinned HD role');
+  }
+  return hd.root;
+}
+
 export function captureFullReleaseLive(authorities) {
   keys(authorities, ['schema', 'roles']); assert.equal(authorities.schema, 'sd2-full-release-live-authorities.v1'); keys(authorities.roles, FULL_ROLES);
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);

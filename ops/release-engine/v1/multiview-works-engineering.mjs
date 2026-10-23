@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,7 @@ import { createHash } from 'node:crypto';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(directory + '/multiview-works-control.mjs', 'utf8');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const require = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json');
+const require = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json');
 const ts = require('typescript');
 function functionDeclarationSource(text, name, file = 'fixture.mjs') {
   const parsed = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);

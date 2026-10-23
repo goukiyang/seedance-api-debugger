@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -171,7 +172,7 @@ function nativeTasks(m, reference) {
       m.hdRoot + '/.runs/0208f07e63d8493327c22864a73973c8730ef21b48510be1302a1d1174a865c3.f27b0cf8-8156-4500-b195-2105d3f4173c/tsx-1004']],
     ['cutover-driver-engineering.mjs', []],
     ['cutover-safety-engineering.mjs', []],
-    ['hd-storage-preflight-engineering.mjs', [m.live.web.root]],
+    ['hd-storage-preflight-engineering.mjs', [releaseDependencyRoot(m)]],
     ['certificate-engineering.mjs', [m.stage + '/fix01-release']],
     ['usage-role-engineering.mjs', []],
     ['preflight-resume-engineering.mjs', []],
@@ -695,7 +696,7 @@ function sharedControlDependencies(m, cutoff) {
     return { binary, sqliteVersion: value.sqliteVersion, files: [value.python, value.wrapper, value.extension, ...value.libraries]
       .map(file => sizeLogRuntimeFile(file, cutoff, [0], true)) };
   });
-  const dependencyRoot = (m.fullRelease ? m.live.hd.root : m.live.web.root) + '/node_modules', dependencyTrust = sealedDependencyTrust(m, dependencyRoot, applicationUid);
+  const dependencyRoot = releaseDependencyRoot(m) + '/node_modules', dependencyTrust = sealedDependencyTrust(m, dependencyRoot, applicationUid);
   const sourceProof = m.live.hd.sourceProof || dependencyTrust.sourceProof;
   const sourceBytes = rootFile(sourceProof.sourceManifest), source = JSON.parse(sourceBytes);
   assert.equal(source.source, m.live.hd.source);
@@ -729,7 +730,7 @@ function sharedControlDependencies(m, cutoff) {
     })) };
   }
   assert.equal(Object.keys(historicalSources).length, 4, 'Closed-cache actual source proof inputs changed');
-  const typescript = createRequire(m.live.web.root + '/package.json').resolve('typescript');
+  const typescript = createRequire(releaseDependencyRoot(m) + '/package.json').resolve('typescript');
   let immutableOriginal = null;
   if (MV_DIRECT.immutableOriginalManifest !== undefined) {
     const file = MV_DIRECT.immutableOriginalManifest, bytes = rootFile(file), original = JSON.parse(bytes);
@@ -798,7 +799,7 @@ function assertSharedLeafEngineCompatibility(m, origin, file) {
   assert.ok(Object.hasOwn(current, file), 'Direct native fixture is missing');
   if (originalDirectory !== currentDirectory)
     assert.notEqual(file, 'preflight-resume-engineering.mjs', 'The current outer native validator must actually execute');
-  const ts = createRequire(m.live.web.root + '/package.json')('typescript'), visited = new Set(), pending = [file];
+  const ts = createRequire(releaseDependencyRoot(m) + '/package.json')('typescript'), visited = new Set(), pending = [file];
   while (pending.length) {
     const name = pending.pop(); if (visited.has(name)) continue; visited.add(name);
     // The outer validator executes for this attempt; keep its existing global
@@ -1135,7 +1136,7 @@ async function finishControlAdmission(m, batch, batchFile, admission, sharedDepe
     throw error;
   }
   assert.equal(nativeBeforeMaintenance.completed, true);
-  const hdAdmission = await inspectHdReconciliation(m, { sourceRoot: m.live.web.root, retiredCachePhase: 'admission',
+  const hdAdmission = await inspectHdReconciliation(m, { sourceRoot: releaseDependencyRoot(m), retiredCachePhase: 'admission',
     ...(isSharedEngine(m) ? sharedReadOnlyHdBounds(m) : {}) });
   recordHdAdmission(m, hdAdmission);
   assert.equal(hdAdmission.canEnterControlledDrain, true);

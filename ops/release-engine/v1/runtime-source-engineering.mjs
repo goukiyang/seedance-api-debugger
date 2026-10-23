@@ -1,4 +1,4 @@
-import { readFullLiveSourceFiles } from './full-release-contract.mjs';
+import { releaseDependencyRoot, readFullLiveSourceFiles } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,7 +19,7 @@ assert.equal(process.argv[2], m.stage + '/manifest.json');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const clone = value => JSON.parse(JSON.stringify(value));
 const sameAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(clone(a), clone(b), message) };
-const require = createRequire(m.live.web.root + '/package.json'), ts = require('typescript');
+const require = createRequire(releaseDependencyRoot(m) + '/package.json'), ts = require('typescript');
 const sources = Object.fromEntries(['legacy-maintenance.mjs', 'release.mjs', 'switch.mjs']
   .map(file => [file, fs.readFileSync(new URL('./' + file, import.meta.url), 'utf8')]));
 const checks = [];

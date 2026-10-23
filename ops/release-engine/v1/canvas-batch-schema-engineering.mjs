@@ -1,4 +1,4 @@
-import { fullSchemaBefore, verifyFullCandidateSources } from './full-release-contract.mjs';
+import { releaseDependencyRoot, fullSchemaBefore, verifyFullCandidateSources } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -244,7 +244,7 @@ print(json.dumps(mod.apply_schema(m['database'],pathlib.Path(m['stage'])/'canvas
     const moduleText = fs.readFileSync(new URL('./canvas-batch-schema.mjs', import.meta.url), 'utf8');
     assert.ok(moduleText.includes("import { assertProtectedIncrementCandidate } from './release-contract.mjs';"));
     assert.equal(context.assertProtectedIncrementCandidate, assertProtectedIncrementCandidate);
-    const ts = createRequire(real.live.web.root + '/package.json')('typescript');
+    const ts = createRequire(releaseDependencyRoot(real) + '/package.json')('typescript');
     const parsed = ts.createSourceFile('canvas-batch-schema.mjs', moduleText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
     assert.equal(parsed.parseDiagnostics.length, 0);
     const edits = [];

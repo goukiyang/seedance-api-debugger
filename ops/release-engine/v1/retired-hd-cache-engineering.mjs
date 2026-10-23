@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -6,9 +7,13 @@ import { createHash } from 'node:crypto';
 import { assertWholeHdDrain, inspectRetiredHdCaches } from './retired-hd-cache.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
 import { validateRecoveryCertificate } from './certificate.mjs';
-const checks=[],source='/data/video-api-debugger/managed-releases/'+MV_DIRECT.baselineSource;
+const checks=[],source=releaseDependencyRoot(MV_DIRECT);
 const good={ActiveState:'inactive',MainPID:'0',ControlPID:'0',Result:'success',Restart:'no',SendSIGKILL:'no',TimeoutStopUSec:'infinity',WorkingDirectory:source};
 assertWholeHdDrain(good,[],[],3435513);checks.push('actual-validator-complete-service-drain');
+if (MV_DIRECT.fullRelease && MV_DIRECT.fullRelease.liveRoles.web.root !== source) {
+  assert.throws(()=>assertWholeHdDrain({...good,WorkingDirectory:MV_DIRECT.fullRelease.liveRoles.web.root},[],[],3435513));
+  checks.push('mixed-source-web-root-cannot-prove-hd-drain');
+}
 for(const [field,value] of Object.entries({ActiveState:'active',MainPID:'3435513',ControlPID:'77',Result:'timeout',Restart:'on-failure',SendSIGKILL:'yes',TimeoutStopUSec:'3min',WorkingDirectory:'/other'})){
   assert.throws(()=>assertWholeHdDrain({...good,[field]:value},[],[],3435513));checks.push('reject-'+field);
 }

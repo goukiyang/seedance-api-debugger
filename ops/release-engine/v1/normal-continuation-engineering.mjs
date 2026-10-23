@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +22,7 @@ const priorRun = '10000000-0000-4000-8000-000000000001', currentRun = '10000000-
 const priorStage = '/data/video-api-debugger/release-staging/' + priorRun;
 const stage = '/data/video-api-debugger/release-staging/' + currentRun;
 const checks = [];
-const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+const ts = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json')('typescript');
 function moduleBody(source) {
   const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
   assert.equal(tree.parseDiagnostics.length, 0);

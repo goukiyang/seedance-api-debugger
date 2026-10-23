@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,7 +30,7 @@ const sources = Object.fromEntries(['common.mjs', 'candidate.mjs', 'candidate-in
   'multiview-works-control.mjs'].map(name => [name, source(name)]));
 const cases = [], traces = [];
 const add = name => cases.push(name);
-const require = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json');
+const require = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json');
 const ts = require('typescript');
 function scriptBody(text) {
   const parsed = ts.createSourceFile('fixture.mjs', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
@@ -417,7 +418,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
       assertPrivateSwitchBindings(imports, historicalPrivateHooks);
       assertHdAdmissionBinding(imports, historicalHdAdmissionHook);
     }
-    const context = vm.createContext({ ...common, ...imports });
+    const context = vm.createContext({ releaseDependencyRoot, createRequire, ...common, ...imports });
     const code = scriptBody(transform(sources[name]));
     vm.runInContext(code + '\n' + suffix + '\nglobalThis.api={' + names.join(',') + '};', context, { filename: name });
     return context.api;

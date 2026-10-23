@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,7 +36,7 @@ function snapshot(file, kind) {
 export function assertWholeHdDrain(state, members, processes, originalPid) {
   assert.equal(state.ActiveState,'inactive');assert.equal(state.MainPID,'0');assert.equal(state.ControlPID,'0');
   assert.equal(state.Result,'success');assert.equal(state.Restart,'no');assert.equal(state.SendSIGKILL,'no');
-  assert.equal(state.TimeoutStopUSec,'infinity');assert.equal(state.WorkingDirectory,'/data/video-api-debugger/managed-releases/'+MV_DIRECT.baselineSource);
+  assert.equal(state.TimeoutStopUSec,'infinity');assert.equal(state.WorkingDirectory,releaseDependencyRoot(MV_DIRECT));
   assert.deepEqual(members,[]);
   assert.ok(!processes.some(p=>p.pid===originalPid || p.related), 'Original or escaped HD processor/ffmpeg remains');
   return true;
@@ -57,7 +58,7 @@ function groupMembers(directory) {
 }
 export function inspectRetiredHdCaches(m,phase) {
   assert.equal(m.runId,RUN);assert.ok(['admission','drained'].includes(phase));
-  assert.equal(m.hdRoot,ROOT);assert.equal(m.live.hd.root,'/data/video-api-debugger/managed-releases/'+MV_DIRECT.baselineSource);
+  assert.equal(m.hdRoot,ROOT);assert.equal(m.live.hd.root,releaseDependencyRoot(MV_DIRECT));
   assert.equal(m.live.hd.pid,MV_DIRECT.starts.hd[0]);
   assert.equal(fs.readdirSync(ROOT).some(name=>name.includes('.lock')||name.endsWith('.publish.json')||name.endsWith('.tmp')),false);
   const jobs=OBJECTS.map(object=>{

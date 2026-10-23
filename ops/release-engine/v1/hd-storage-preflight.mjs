@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1250,7 +1251,8 @@ export async function inspectHdReconciliation(m, { sourceRoot, final = false, re
     const temporary = l.isolated ? m.hdStorageIsolationRoot : m.stage;
     assert.ok(typeof temporary === 'string' && temporary.startsWith(l.isolated ? m.hdStorageIsolationRoot : m.projectRoot + '/release-staging/'));
     assert.equal(fs.realpathSync(temporary), temporary);
-    const output = call(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', SOURCE_IDENTITY_PROGRAM,
+    const tsx = createRequire(path.join(sourceRoot, 'package.json')).resolve('tsx');
+    const output = call(process.execPath, ['--import', tsx, '--input-type=module', '-e', SOURCE_IDENTITY_PROGRAM,
       ], { cwd: sourceRoot, input: JSON.stringify({ sourceRoot, uploadsRoot: m.uploadsRoot, hdRoot: m.hdRoot, items }),
       ...(admission ? { timeout: admission.remaining() } : {}),
       env: { PATH: SYSTEM_PATH, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TZ: 'UTC', TSX_DISABLE_CACHE: '1',

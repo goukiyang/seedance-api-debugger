@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +22,7 @@ import { DEPLOYED_CANVAS_FIELDS } from './canvas-batch-schema.mjs';
 import { currentReleaseContext } from './engine-context.mjs';
 import { rootFile } from './common.mjs';
 
-const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+const ts = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json')('typescript');
 function moduleBody(source) {
   const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
   assert.equal(tree.parseDiagnostics.length, 0);
@@ -406,8 +407,17 @@ const checks = [], add = name => checks.push(name), now = 100_000_000;
 {
   const live = Object.fromEntries(Object.entries(MV_DIRECT.starts).map(([role, [pid, invocation, execMainStartTimestampMonotonic]]) =>
     [role, { pid, invocation, execMainStartTimestampMonotonic, source: MV_DIRECT.baselineSource,
-      version: MV_DIRECT.baselineVersion, build: MV_DIRECT.baselineBuild }]));
+      version: MV_DIRECT.baselineVersion, build: MV_DIRECT.baselineBuild,
+      ...(MV_DIRECT.fullRelease ? MV_DIRECT.fullRelease.liveRoles[role] : {}) }]));
   assertCapturedLive(live); add('exact-captured-current-guard-starts-accepted');
+  if (MV_DIRECT.fullRelease && live.web.root !== live.hd.root) {
+    const changed = structuredClone(live); changed.hd = { ...changed.hd, root: live.web.root, source: live.web.source };
+    assert.throws(() => assertCapturedLive(changed)); add('mixed-source-web-role-cannot-replace-pinned-hd');
+    assert.equal(releaseDependencyRoot({ fullRelease: MV_DIRECT.fullRelease, live: { hd: { ...live.hd, sourceProof: {
+      sourceManifest: live.hd.sourceManifest, archive: live.hd.archive, compiledCapsule: MV_DIRECT.fullRelease.dependencyCapsule } } } }), live.hd.root);
+    assert.throws(() => releaseDependencyRoot({ fullRelease: MV_DIRECT.fullRelease, live: { hd: changed.hd } }));
+    add('mixed-source-dependency-root-rejects-web-authority-as-hd');
+  }
   for (const key of ['pid', 'invocation', 'execMainStartTimestampMonotonic', 'source', 'version', 'build']) {
     const changed = structuredClone(live); changed.web[key] = key === 'pid' ? 1 : 'changed';
     assert.throws(() => assertCapturedLive(changed)); add('current-guard-capture-rejects-' + key);

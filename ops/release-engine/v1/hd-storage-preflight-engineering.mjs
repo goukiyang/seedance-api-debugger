@@ -1,3 +1,5 @@
+import { MV_DIRECT } from './release-contract.mjs';
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,8 +16,11 @@ import { APPROVED_HD_LEGACY_READY, APPROVED_HD_HISTORICAL_VERSIONS } from './hd-
 // actual site/resolver sources and installed Sharp are read from the source cwd.
 process.exitCode = 1;
 async function main() {
-  const applicationRoot = fs.realpathSync(process.argv[2] || process.cwd());
+  const pinnedDependencyRoot = releaseDependencyRoot(MV_DIRECT);
+  const applicationRoot = fs.realpathSync(process.argv[2] || (MV_DIRECT.fullRelease ? pinnedDependencyRoot : process.cwd()));
+  if (MV_DIRECT.fullRelease) assert.equal(applicationRoot, pinnedDependencyRoot, 'FULL HD engineering must use the pinned HD dependency role');
   const require = createRequire(path.join(applicationRoot, 'package.json')), sharp = require('sharp');
+  const tsx = require.resolve('tsx');
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-hd-storage-engineering-')));
   fs.chmodSync(directory, 0o700);
   const previousEnv = process.env.NODE_ENV; process.env.NODE_ENV = 'test';
@@ -59,7 +64,7 @@ for(const cwd of input.roots)assert.equal(core.resolveHdDirectory({cwd,env:{NODE
 assert.throws(()=>core.resolveHdDirectory({env:{NODE_ENV:'production',HD_DERIVATIVES_ROOT:input.root}}));
 await core.assertHdStorageRoot();assert.equal(core.hdWorkerLockPath(),input.lock);
 console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true,readOnly:true}));`;
-    const resolverOutput = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', resolver,
+    const resolverOutput = execFileSync(process.execPath, ['--import', tsx, '--input-type=module', '-e', resolver,
       JSON.stringify({ roots, root: m.hdRoot, lock: m.hdWorkerLockPath })], { cwd: roots[0], encoding: 'utf8', timeout: 30000,
       env: { PATH: '/usr/local/bin:/usr/bin:/bin', NODE_ENV: 'test', TSX_DISABLE_CACHE: '1', HD_DERIVATIVES_ROOT: m.hdRoot } });
     assert.deepEqual(JSON.parse(resolverOutput.trim()), { sameCanonical: true, productionRefusesPrivateRoot: true, readOnly: true });

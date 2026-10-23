@@ -1,3 +1,4 @@
+import { releaseDependencyRoot } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -16,7 +17,7 @@ assert.equal(process.platform, 'linux');
 assert.equal(process.getuid(), 0);
 const source = fs.readFileSync(new URL('./control-preflight.mjs', import.meta.url), 'utf8');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+const ts = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json')('typescript');
 function moduleBody(source) {
   const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
   assert.equal(tree.parseDiagnostics.length, 0);
@@ -76,7 +77,7 @@ function harness(options = {}) {
     readdirSync: directory => [...files.keys(), ...directories].filter(file => path.dirname(file) === directory).map(file => path.basename(file)),
     writeFileSync: (file, value, options) => { assert.equal(options.flag, 'wx'); assert.ok(!files.has(file)); files.set(file, value); },
   };
-  const context = { assert: normalizedAssert, fs: fakeFs, path, process, Date, JSON, Buffer,
+  const context = { assert: normalizedAssert, fs: fakeFs, path, process, Date, JSON, Buffer, releaseDependencyRoot,
     structuredClone, isSharedEngine, engineDirectory, throwReleaseError,
     randomUUID: () => `20000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`,
     sha, rootFile, writeJsonExclusive: write, validateManifest: value => assert.equal(value, m), assertReleaseWindow: () => {},
