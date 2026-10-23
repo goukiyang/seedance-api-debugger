@@ -15,6 +15,8 @@ import {
   assertReaderSuccessorAdmission, READER_SUCCESSOR_PHASES,
   validateArmPairRepair, assertArmPairRepairFailure, assertArmPairRepairControllerDifference,
   assertArmPairRepairAdmission, ARM_PAIR_REPAIR_ORIGIN,
+  validateArmProcessorRepair, assertArmProcessorRepairFailure, assertArmProcessorRepairControllerDifference,
+  assertArmProcessorRepairAdmission, ARM_PROCESSOR_REPAIR_ORIGIN, assertCandidateReobservationAdmission,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -574,6 +576,68 @@ function scenarioArmPairRepair() {
   return 'single_exact_failed_arm_pair_repair_preserves_reader_observation_and_refuses_effects_unrelated_causes_and_module_drift';
 }
 
+function scenarioArmProcessorRepair() {
+  const request = { schema: 'sd2-release-arm-processor-repair.v1',
+    ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'armPairRepairProofSha256']
+      .map(key => [key, ARM_PROCESSOR_REPAIR_ORIGIN[key]])), childReceiptSha256: digest('trusted-code-child'),
+    processorControllerSetSha256: digest('trusted-code-processor'), approvalFile: '/fixture/stage/hd-release-safety-approval-arm-processor-r01.json',
+    approvalSha256: digest('processor-approval'), windowSha256: digest('processor-window'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateArmProcessorRepair(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateArmProcessorRepair(missing));
+    assert.throws(() => validateArmProcessorRepair({ ...request, [key]: 'unbound' }));
+  }
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'armPairRepairProofSha256'])
+    assert.throws(() => validateArmProcessorRepair({ ...request, [key]: digest('different:' + key) }));
+  assert.throws(() => validateArmPairRepair(request)); assert.throws(() => validateArmProcessorRepair({ ...request, retry: 2 }));
+  const error = { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true };
+  const cause = "AssertionError [ERR_ASSERTION]: Private release code changed: candidate-evidence.mjs\n+ actual - expected\n\n+ 'fdfd2f1f64e23b6baf165db565dd2dd26a307b2a501db7597d6b33ef575dd468'\n- 'defe51ae9c70099256708e675dd1db27dca204cbb87c96f7e687cc160ccbee71'";
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'arm', child: { status: 1, signal: null, error: null },
+    stderr: JSON.stringify({ error, cause }) + '\n' };
+  assertArmProcessorRepairFailure(child); assert.throws(() => assertArmPairRepairFailure(child));
+  for (const value of [{ ...child, phase: 'switch' }, { ...child, child: { status: 0, signal: null, error: null } },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('candidate-evidence.mjs', 'another-module.mjs') }) },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('fdfd2f1f', '00000000') }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, stop: false }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
+    assert.throws(() => assertArmProcessorRepairFailure(value));
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'candidate-inputs.mjs',
+    'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs'];
+  const retained = ['attempt-state.mjs', 'pricing-start-pair.mjs', 'switch.mjs', 'cutover-driver.mjs', 'guard-recovery.mjs',
+    'common.mjs', 'candidate.mjs', 'candidate-reuse.mjs', 'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs'];
+  const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('27d386:' + name)]));
+  const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('processor-repair:' + name)])) };
+  assert.equal(Object.keys(assertArmProcessorRepairControllerDifference(predecessor, processor)).length, allowed.length);
+  for (const name of retained) assert.throws(() => assertArmProcessorRepairControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertArmProcessorRepairControllerDifference(predecessor, predecessor));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('arm')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'arm_pair_repair', value: { proofSha256: request.armPairRepairProofSha256 } } });
+  const failed = { events, derivedState: { status: 'failed', activePhase: null,
+    lastPhase: { phase: 'arm', outcome: 'failed', resultSha256: request.phaseResultEventSha256 },
+    terminal: { eventSha256: request.terminalEventSha256 }, lastEventSha256: request.terminalEventSha256 } };
+  const before = { facts: { effectsStarted: false, switchComplete: false, files: {} } };
+  assertArmProcessorRepairAdmission(failed, request, before);
+  for (const edit of [value => { value.derivedState.status = 'running'; }, value => { value.derivedState.activePhase = { phase: 'arm' }; },
+    value => { value.events = value.events.filter(item => item.value.name !== 'arm_pair_repair'); },
+    value => { value.events.push({ value: { kind: 'observation', name: 'arm_processor_repair' } }); }]) {
+    const value = structuredClone(failed); edit(value); assert.throws(() => assertArmProcessorRepairAdmission(value, request, before));
+  }
+  const repairSha = digest('actual-new-repair'), running = structuredClone(failed); running.derivedState.status = 'running';
+  running.events.push({ value: { kind: 'observation', name: 'arm_processor_repair', value: { proofSha256: repairSha } } });
+  const runtime = { phase: 'arm', armProcessorRepair: { schema: 'sd2-release-arm-processor-repair-runtime.v1', proofSha256: repairSha },
+    candidateObservation: { proof: { expiresAt: 2000 } } };
+  assertCandidateReobservationAdmission(running, runtime, 2000);
+  assert.throws(() => assertCandidateReobservationAdmission(running, runtime, 1999));
+  const active = structuredClone(running); active.derivedState.activePhase = { phase: 'arm' };
+  assert.throws(() => assertCandidateReobservationAdmission(active, runtime, 2001));
+  const duplicate = structuredClone(running); duplicate.events.push({ value: { kind: 'observation', name: 'candidate_reobservation' } });
+  assert.throws(() => assertCandidateReobservationAdmission(duplicate, runtime, 2001));
+  assert.throws(() => assertCandidateReobservationAdmission(running, { ...runtime, armProcessorRepair: undefined }, 2001));
+  return 'exact_trusted_code_failure_has_one_new_proof_and_only_expired_inactive_candidates_may_be_reobserved_once';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -581,7 +645,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

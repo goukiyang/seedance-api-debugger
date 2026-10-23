@@ -25,7 +25,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const sameAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(copy(a), copy(b), message) };
 const source = name => fs.readFileSync(new URL(name, import.meta.url), 'utf8');
 const sources = Object.fromEntries(['common.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'hd-storage-preflight.mjs',
-  'candidate-reuse.mjs', 'candidate-evidence.mjs', 'switch.mjs',
+  'candidate-reuse.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs',
   'guard-recovery.mjs', 'pricing-start-pair.mjs', 'normal-continuation.mjs', 'usage-role-control.mjs',
   'usage-role-start.mjs', 'deployed-usage-schema.mjs', 'canvas-batch-schema.mjs', 'canvas-batch-schema-contract.mjs',
   'raw-upload-recovery-proof.mjs', 'nginx-maintenance.mjs', 'package-candidates.mjs', 'writer-network-fence.mjs',
@@ -1636,8 +1636,117 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   rejects('snapshot_or_source_drift', () => put(candidateRecords.guard.capsuleFile, 'changed snapshot'),
     () => documents.set(candidateRecords.guard.capsuleFile, originalCapsule));
   rejects('unbound_observation_journal', () => { events[3].value.previousSha256 = mainHead; }, () => { events[3].value.previousSha256 = readerHead; });
+  // Reobservation retains the real consumer and its root-document/capsule
+  // checks. Only the already-authorized runtime is adapted: this is not the
+  // root observe-candidates entry or the full processor-repair authorization.
+  {
+    const retainedObservation = copy(runtime.candidateObservation), retainedReceipts = copy(receipts);
+    const retainedBytes = Buffer.from(documents.get(observationFile));
+    const retainedReceiptBytes = Object.fromEntries(['main', 'guard'].map(kind => [kind, Buffer.from(documents.get(candidateRecords[kind].receiptFile))]));
+    const repair = { ...processor('/isolated-reader/current-processor'), proofSha256: 'a'.repeat(64) };
+    runtime.armProcessorRepair = { proofSha256: repair.proofSha256, proof: repair };
+    const freshNow = observation.expiresAt + 1000, reobservationHead = events.at(-1).sha256;
+    const fresh = { ...copy(observation), eventHeadSha256: reobservationHead,
+      previousObservationProofSha256: observationSha256, armProcessorRepairProofSha256: repair.proofSha256,
+      observedAt: freshNow - 1, expiresAt: freshNow - 1 + 1800000,
+      verifier: { file: repair.processor.root + '/candidate-reuse.mjs', sha256: repair.processorControllers['candidate-reuse.mjs'],
+        method: 'verifyOriginalSuccess', startedAt: observation.expiresAt + 1, finishedAt: freshNow - 1 } };
+    const reobservedEvent = { sha256: 'b'.repeat(64), value: { kind: 'observation', name: 'candidate_reobservation', sequence: 5,
+      previousSha256: reobservationHead, owner, value: null } };
+    events.push(reobservedEvent);
+    const publish = (patch = {}) => {
+      const value = { ...copy(fresh), ...patch }, bytes = Buffer.from(JSON.stringify(value)), hash = sha(bytes);
+      const file = taskRoot + '/attempts/' + runId + '/candidate-observation-' + hash + '.json'; put(file, bytes);
+      runtime.candidateReobservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: file, proofSha256: hash, proof: value };
+      reobservedEvent.value.value = { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: file, proofSha256: hash };
+      return value;
+    };
+    publish();
+    let runtimeAuthorized = true;
+    const freshNamespace = { ...namespace, fixtureVerifiedRuntime: value => {
+      assert.equal(value, m); assert.ok(runtimeAuthorized, 'Unbound reobservation runtime'); return runtime;
+    } };
+    vm.runInNewContext(scriptBody(sources['candidate-evidence.mjs']).replace(here, 'fixtureHere')
+      + '\nguardBuildTailRuntime=fixtureVerifiedRuntime;globalThis.freshApi={assertCandidateObservation,assertFreshCandidateEvidence,candidateEvidenceExpiresAt,candidateGateObservation};', freshNamespace);
+    const freshApi = freshNamespace.freshApi;
+    for (const kind of ['main', 'guard']) {
+      assert.deepEqual(copy(freshApi.assertFreshCandidateEvidence(receipts[kind], m, kind, freshNow)), retainedReceipts[kind]);
+      assert.equal(freshApi.candidateEvidenceExpiresAt(receipts[kind], m, kind, freshNow), fresh.expiresAt);
+      const bound = freshApi.candidateGateObservation(receipts[kind], m, kind, freshNow);
+      assert.equal(bound.candidateObservation.proofSha256, runtime.candidateReobservation.proofSha256);
+      assert.equal(bound.observedAt, fresh.observedAt);
+    }
+    const mustReject = patch => {
+      publish(patch); assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow)); publish();
+    };
+    mustReject({ previousObservationProofSha256: 'c'.repeat(64) });
+    mustReject({ armProcessorRepairProofSha256: 'd'.repeat(64) });
+    mustReject({ verifier: { ...fresh.verifier, file: observation.verifier.file, sha256: observation.verifier.sha256 } });
+    mustReject({ verifier: { ...fresh.verifier, startedAt: observation.expiresAt - 1 } });
+    reobservedEvent.value.previousSha256 = mainHead;
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow));
+    reobservedEvent.value.previousSha256 = reobservationHead;
+    reobservedEvent.value.name = 'unbound_reobservation';
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow));
+    reobservedEvent.value.name = 'candidate_reobservation';
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', fresh.expiresAt), /expired/);
+    runtimeAuthorized = false;
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow), /Unbound reobservation runtime/);
+    runtimeAuthorized = true;
+    const verifierFile = fresh.verifier.file, originalVerifier = documents.get(verifierFile);
+    put(verifierFile, 'changed current verifier bytes');
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow)); put(verifierFile, originalVerifier);
+    assert.deepEqual(runtime.candidateObservation, retainedObservation);
+    assert.deepEqual(documents.get(observationFile), retainedBytes); assert.deepEqual(receipts, retainedReceipts);
+    for (const kind of ['main', 'guard']) assert.deepEqual(documents.get(candidateRecords[kind].receiptFile), retainedReceiptBytes[kind]);
+    delete runtime.candidateReobservation;
+    assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', freshNow), /expired/);
+    delete runtime.armProcessorRepair; events.pop();
+    add('candidate_reobservation_actual_consumers_select_new_reference_and_reject_wrong_predecessor_repair_verifier_journal_time_without_rewriting_old_proof');
+    traces.push({ candidateReobservationConsumer: true, verifiedRootRuntimeAdapter: true, productionAuthorizerRerun: false,
+      originalObservationAndReceiptBytesRetained: true, applicationDatabaseOpened: false });
+  }
   traces.push({ successorReaderConsumers: true, productionAuthorizerRerun: false, originalBuildTimesRetained: true,
     observations: ['isolated protected root documents', 'isolated validated journal projection'], applicationDatabaseOpened: false });
+}
+
+// Execute the real release entry's byte verifier. Runtime authorization is an
+// explicit isolated input here; no selector expression is copied or rewritten.
+{
+  const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor'].map(name => {
+    const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
+    const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
+    return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
+      processorControllers: hashes } }];
+  }));
+  const m = { privateSha256: sets.original.proof.processorControllers };
+  const runtime = { proof: sets.tail.proof, retry: { proof: sets.retry.proof }, reader: { proof: sets.reader.proof },
+    armPairRepair: { proof: sets.pair.proof }, armProcessorRepair: { proof: sets.processor.proof },
+    candidateObservation: { proof: { observedAt: 1792796185000, expiresAt: 1792797985000 } } };
+  const originalRuntime = copy(runtime), reads = [];
+  let activeBytes = sets.processor.bytes, actualFiles = [...files];
+  const namespace = { assert: sameAssert, path, JSON, sha, directory,
+    fs: { readdirSync: root => { assert.equal(root, directory); return actualFiles; } },
+    rootFile: file => { assert.equal(path.dirname(file), directory); reads.push(path.basename(file));
+      const bytes = activeBytes[path.basename(file)]; assert.ok(bytes, 'Unknown isolated private module'); return bytes; } };
+  const trusted = functionNode('release.mjs', 'trustedCode');
+  vm.runInNewContext(trusted.node.getText().replace(/^export /, '') + '\nglobalThis.verify=trustedCode;', namespace);
+  namespace.verify(m, runtime); assert.deepEqual(reads.sort(), [...files].sort()); assert.deepEqual(runtime, originalRuntime);
+  activeBytes = sets.reader.bytes; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
+  activeBytes = sets.processor.bytes;
+  const badDigest = copy(runtime); badDigest.armProcessorRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
+  assert.throws(() => namespace.verify(m, badDigest));
+  actualFiles = [...files, 'unexpected.mjs']; assert.throws(() => namespace.verify(m, runtime)); actualFiles = [...files];
+  const corrupt = { ...sets.processor.bytes, 'release.mjs': Buffer.from('changed private source') };
+  activeBytes = corrupt; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
+  const fallback = copy(runtime);
+  for (const [remove, selected] of [['armProcessorRepair', 'pair'], ['armPairRepair', 'reader'], ['reader', 'retry'], ['retry', 'tail']]) {
+    delete fallback[remove]; activeBytes = sets[selected].bytes; namespace.verify(m, fallback);
+  }
+  activeBytes = sets.original.bytes; namespace.verify(m);
+  assert.deepEqual(runtime.reader, originalRuntime.reader); assert.deepEqual(runtime.candidateObservation, originalRuntime.candidateObservation);
+  add('trustedCode_actual_body_selects_processor_then_pair_reader_retry_original_and_refuses_hash_or_module_drift');
 }
 
 {
@@ -1650,6 +1759,9 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   runtime.armPairRepair = { proof: { approvalFile: m.stage + '/hd-release-safety-approval-arm-pair-r01.json' } };
   assert.equal(namespace.select(m), runtime.armPairRepair.proof.approvalFile);
   assert.deepEqual(runtime.candidateObservation, before.candidateObservation);
+  runtime.armProcessorRepair = { proof: { approvalFile: m.stage + '/hd-release-safety-approval-arm-processor-r01.json' } };
+  assert.equal(namespace.select(m), runtime.armProcessorRepair.proof.approvalFile);
+  assert.deepEqual(runtime.candidateObservation, before.candidateObservation);
   for (const name of ['privateHdAdmissionBounds', 'sharedHdAdmissionBounds']) {
     const { parsed, node } = functionNode('switch.mjs', name);
     const files = node.body.statements.filter(statement => ts.isVariableStatement(statement))
@@ -1658,8 +1770,11 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     const properties = files[0].initializer.properties.filter(property => property.name?.getText(parsed) === 'approval');
     assert.equal(properties.length, 1); assert.equal(properties[0].initializer.getText(parsed), 'hdMaintenanceApprovalFile(m)');
     const actual = vm.runInNewContext(properties[0].initializer.getText(parsed), { m, hdMaintenanceApprovalFile: namespace.select });
-    assert.equal(actual, runtime.armPairRepair.proof.approvalFile);
+    assert.equal(actual, runtime.armProcessorRepair.proof.approvalFile);
   }
+  delete runtime.armProcessorRepair; assert.equal(namespace.select(m), runtime.armPairRepair.proof.approvalFile);
+  delete runtime.armPairRepair; assert.equal(namespace.select(m), m.stage + '/hd-release-safety-approval.json');
+  assert.deepEqual(runtime.candidateObservation, before.candidateObservation);
   namespace.guardBuildTailRuntime = () => { throw Error('unbound approval runtime'); };
   assert.throws(() => namespace.select(m), /unbound approval runtime/);
   add('hd_approval_selector_defaults_to_original_and_both_switch_consumers_use_bound_repair_without_refreshing_observation');
@@ -1803,6 +1918,13 @@ console.log(${JSON.stringify(image ? 'Image recovery build gate verified (native
     assert.match(verified, /Image recovery build gate verified/); assert.match(verified, /Pricing policy build gate verified/);
     assert.equal(JSON.parse(fs.readFileSync(stage + '/' + kind + '-build.json')).startedAt, since);
     add('native_independent_observation_' + kind + '_retains_original_receipt_and_nested_pricing');
+    runtime.candidateReobservation = { ...runtime.candidateObservation, proofSha256: 'd'.repeat(64) };
+    const reobservedContext = { ...observedContext, candidateObservation: runtime.candidateReobservation };
+    const refreshed = namespace.nativeVerify({ ...options, tailContext: reobservedContext });
+    assert.match(refreshed, /Image recovery build gate verified/); assert.match(refreshed, /Pricing policy build gate verified/);
+    assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }));
+    delete runtime.candidateReobservation;
+    add('native_reobservation_' + kind + '_selects_new_bound_reference_and_retains_nested_pricing');
     delete capsule.snapshot.checks[path.relative(root + '/.role-tests', pricingFile)];
     fs.writeFileSync(capsuleFile, JSON.stringify(capsule));
     assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }), /complete check snapshot/);

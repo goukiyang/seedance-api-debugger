@@ -307,18 +307,19 @@ function nativeTailBinding({ candidateRoot, source, runId, uid, receipt, since, 
   assert.equal(m.runId, runId); assert.equal(runtime.proof.runId, runId);
   const now = Date.now(), observedAt = tailContext.observedAt;
   let original, definitions, observationProofSha256 = null;
-  if (runtime.candidateObservation) {
+  const currentObservation = runtime.candidateReobservation || runtime.candidateObservation;
+  if (currentObservation) {
     const kind = ['main', 'guard'].find(role => m[role]?.root === candidateRoot);
     assert.ok(kind, 'Independent observation must bind an original candidate');
     assert.equal(m[kind].source, source);
-    assert.deepEqual(tailContext.candidateObservation, runtime.candidateObservation);
+    assert.deepEqual(tailContext.candidateObservation, currentObservation);
     const originalFile = m.stage + '/' + kind + '-build.json', stat = regular(originalFile);
     assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o022, 0);
     original = json(originalFile);
     const observation = assertCandidateObservation(original, m, kind, now);
     assert.ok(observation, 'Independent native verification requires the root candidate observation');
     assert.equal(observedAt, observation.observedAt);
-    observationProofSha256 = runtime.candidateObservation.proofSha256;
+    observationProofSha256 = currentObservation.proofSha256;
     const capsule = json(observation.candidates[kind].capsuleFile);
     const imageFile = original.gateReceipt;
     assert.ok(typeof imageFile === 'string' && imageFile.startsWith(candidateRoot + '/.role-tests/'));
