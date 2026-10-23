@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 export const release = { version: packageInfo.version, channel: 'production',
-  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看、上传与3D多视图拼图。' };
+  summary: '兼容保护运行中，新的视频创作、批量和3D多视图生成暂停；已有任务、作品和输入保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
