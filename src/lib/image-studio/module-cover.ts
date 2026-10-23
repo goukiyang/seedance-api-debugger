@@ -373,20 +373,20 @@ export async function prepareModuleCoverSnapshot(user: ImageStudioIdentity, modu
       if (changed.count !== 1) throw new ModuleCoverError('原封面准备正在接续，请核对原请求', 409);
       return renewed;
     }
-    const module = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
-    if (!module) throw new ModuleCoverError('模板工作区不存在或无权读取', 404);
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+    if (!workspace) throw new ModuleCoverError('模板工作区不存在或无权读取', 404);
     await assertStudioWorkspaceNotDeleted(actor.id, moduleId, tx);
     // Existing shared definitions never acquire a later private result as part
     // of an ordinary definition save or sharing toggle.
     if (await studioSharedBinding(actor.id, moduleId, tx)) return null;
-    if (module.source_preset_id) {
-      const source = await tx.imageStudioPreset.findUnique({ where: { id: module.source_preset_id } });
+    if (workspace.source_preset_id) {
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
       if (!source || source.owner_id !== fresh.id || source.is_shared) return null;
     }
     const [moduleCover, presetCover] = await Promise.all([
       readRecord({ kind: 'module', id: moduleId }, tx), readRecord({ kind: 'preset', id: targetPresetId }, tx),
     ]);
-    const pending: CoverPreparation = { version: 1, ownerId: fresh.id, moduleId, moduleRevision: module.revision,
+    const pending: CoverPreparation = { version: 1, ownerId: fresh.id, moduleId, moduleRevision: workspace.revision,
       targetPresetId, requestId, operationFingerprint: operationFingerprint!, fingerprint: '', lease: randomUUID(),
       expiresAt: Date.now() + 180000, status: 'ready', disposition: moduleCover || presetCover ? 'existing' : 'none',
       recipe: null, moduleCoverHash: moduleCover ? hash(moduleCover.raw) : null, presetCoverHash: presetCover ? hash(presetCover.raw) : null };
@@ -394,7 +394,7 @@ export async function prepareModuleCoverSnapshot(user: ImageStudioIdentity, modu
       const latest = await tx.imageStudioTask.findFirst({ where: { module_id: moduleId, owner_id: actor.id, deleted_at: null,
         asset_id: { not: null }, AND: [studioOutputTaskWhere] }, orderBy: [{ finished_at: 'desc' }, { id: 'desc' }],
         select: { id: true, asset_id: true, status: true, usage_json: true } });
-      const candidateId = latest?.asset_id && studioTaskHasViewableOutput(latest) ? latest.asset_id : module.banner_asset_id;
+      const candidateId = latest?.asset_id && studioTaskHasViewableOutput(latest) ? latest.asset_id : workspace.banner_asset_id;
       if (candidateId) {
         try {
           const state: TargetState = { target: { kind: 'module', id: moduleId }, ownerId: actor.id, canManage: true, shared: true };
@@ -482,8 +482,8 @@ export async function commitPreparedModuleCoverSnapshot(actor: ImageStudioIdenti
   if (current.status !== 'ready' || current.fingerprint !== prepared.fingerprint || current.lease !== prepared.lease
     || current.expiresAt <= Date.now() || JSON.stringify(current.files) !== JSON.stringify(prepared.files))
     throw new ModuleCoverError('自动封面准备结果已变化，请核对原请求', 409);
-  const module = await client.imageStudioModule.findFirst({ where: { id: transition.moduleId, owner_id: actor.id }, select: { revision: true, source_preset_id: true } });
-  if (!module || module.revision !== transition.afterRevision || module.source_preset_id !== prepared.targetPresetId
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: transition.moduleId, owner_id: actor.id }, select: { revision: true, source_preset_id: true } });
+  if (!workspace || workspace.revision !== transition.afterRevision || workspace.source_preset_id !== prepared.targetPresetId
     || await studioPublisherModule(actor.id, prepared.targetPresetId, client) !== transition.moduleId)
     throw new ModuleCoverError('模板工作区版本或创建者已变化，自动封面未提交', 409);
   if (prepared.moduleId !== transition.moduleId) {
@@ -732,9 +732,9 @@ async function assertFrozenTarget(actor: ImageStudioIdentity, item: FrozenShared
   if (actor.id !== item.ownerId || state.ownerId !== actor.id || !state.canManage || !state.shared
     || preset.updated_at.toISOString() !== item.presetRevision || await readStudioDeletedSource(actor.id, item.presetId, client))
     throw new ModuleCoverError('模板归属、共享或版本已变化，跳过原清单项', 409);
-  const module = await client.imageStudioModule.findFirst({ where: { id: item.moduleId, owner_id: actor.id } });
+  const workspace = await client.imageStudioModule.findFirst({ where: { id: item.moduleId, owner_id: actor.id } });
   await assertStudioWorkspaceNotDeleted(actor.id, item.moduleId, client);
-  if (!module || module.revision !== item.moduleRevision || module.source_preset_id !== item.presetId)
+  if (!workspace || workspace.revision !== item.moduleRevision || workspace.source_preset_id !== item.presetId)
     throw new ModuleCoverError('原工作区或版本已变化，跳过原清单项', 409);
   const publisher = await studioPublisherModule(actor.id, item.presetId, client);
   const binding = await studioSharedBinding(actor.id, item.moduleId, client);

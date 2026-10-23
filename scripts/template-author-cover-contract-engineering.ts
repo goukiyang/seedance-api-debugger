@@ -112,7 +112,7 @@ async function main() {
         if (!allowWrites || name !== 'setting') return forbidden(`write:${name}`);
         if (rejectCasKey === where.key) { rejectCasKey = null; return { count: 0 }; }
         let count = 0;
-        for (const [id, row] of rows) if (matches(row, where)) { syntheticWrites++; rows.set(id, { ...row, ...data }); count++; }
+        for (const [id, row] of Array.from(rows)) if (matches(row, where)) { syntheticWrites++; rows.set(id, { ...row, ...data }); count++; }
         return { count };
       },
     };
@@ -125,7 +125,7 @@ async function main() {
   db.$transaction = async (callback: (tx: Exports) => Promise<unknown>) => {
     const snapshot = new Map(Array.from(settings, ([key, row]) => [key, { ...row }]));
     try { return await callback(db); }
-    catch (error) { settings.clear(); for (const [key, row] of snapshot) settings.set(key, row); throw error; }
+    catch (error) { settings.clear(); for (const [key, row] of Array.from(snapshot)) settings.set(key, row); throw error; }
   };
   const prisma = new Proxy(db, { get: (target, property) => Object.hasOwn(target, property) ? target[String(property)]
     : () => forbidden(`prisma:${String(property)}`) });
@@ -218,6 +218,7 @@ async function main() {
   const beforeRead = JSON.stringify(Array.from(settings)), originalWrites = syntheticWrites;
   await assert.rejects(definition.readStudioTemplateDefinition(peer, { presetId: preset.id }), (error: any) => error.status === 404);
   const ownerRead = await definition.readStudioTemplateDefinition(owner, { presetId: preset.id });
+  assert.deepEqual(plain(ownerRead.definition.contextVersion), { code: 'AB12C', state: 'ready' });
   assert.equal(ownerRead.definition.templatePrompt, preset.prompt); assert.equal(ownerRead.generation.available, false);
   assert.equal(ownerRead.generation.reasonCode, 'dependency-invalid'); assert.equal(noteReads, 0);
   const adminRead = await definition.readStudioTemplateDefinition(admin, { presetId: preset.id });
@@ -242,7 +243,9 @@ async function main() {
   settings.delete(archiveKey);
   definitionResolution = 'unknown';
   assert.equal((await definition.readStudioTemplateDefinition(owner, { presetId: preset.id })).generation.available, null);
-  assert.equal((await definition.readStudioTemplateDefinition(owner, { moduleId: 'local-module' })).definition.sourceRevision, '3');
+  const localRead = await definition.readStudioTemplateDefinition(owner, { moduleId: 'local-module' });
+  assert.equal(localRead.definition.sourceRevision, '3');
+  assert.deepEqual(plain(localRead.definition.contextVersion), { code: 'AB12C', state: 'ready' });
   assert.equal(JSON.stringify(Array.from(settings)), beforeRead); assert.equal(syntheticWrites, originalWrites);
   checks.push('definition_read_is_separate_from_generation_and_never_projects_source_media_or_writes');
 
@@ -436,7 +439,7 @@ async function main() {
   checks.push('fixed_cover_public_dto_and_original_status_hide_source_and_recheck_revocation');
 
   assert.equal(forbiddenCalls, 0); assert.ok(syntheticWrites > 0); assert.equal(checks.length, 10); assert.equal(new Set(checks).size, checks.length);
-  for (const file of evaluatedSources) assert.ok(Object.hasOwn(sourceSha256, file), `Unbound evaluated source: ${file}`);
+  for (const file of Array.from(evaluatedSources)) assert.ok(Object.hasOwn(sourceSha256, file), `Unbound evaluated source: ${file}`);
   for (const [file, digest] of Object.entries(sourceSha256)) assert.equal(sha(readFileSync(path.join(root, file))), digest, `${file} changed during the gate`);
   const receipt = { schema: 'template-author-cover-contract-engineering.v1', synthetic: true, completed: true,
     runId, startedAt, finishedAt: Date.now(), fixtureSha256: sourceSha256[fixtureFile], sourceSha256,

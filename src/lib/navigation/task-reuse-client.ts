@@ -3,7 +3,7 @@ import type { WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
 export type TaskReuseInputBackup = { version: 1; workspace: WorkspaceInputRecovery; fields: {
   prompt: string; generationMode: string; ratio: string; duration: number; resolution: string; seed: number;
   generateAudio: boolean; returnLastFrame: boolean; watermark: boolean; resolutionApprovalConfirmed: boolean;
-  model: string; provider?: string; auxiliary?: string | null; projectId?: string; videoCardId?: string; videoBranchId?: string;
+  model: string; provider?: string | null; auxiliary?: string | null; projectId?: string; videoCardId?: string; videoBranchId?: string;
 } };
 export type TaskReuseClientRecord = { version: 2; accountId: string; sourceTaskId: string; operation: TaskReuseOperationRequest;
   context: TaskReuseContext; backup: TaskReuseInputBackup; serverStatus?: TaskReuseOperationStatus['status'] | 'read-only' };

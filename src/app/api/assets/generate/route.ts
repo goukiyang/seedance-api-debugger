@@ -378,7 +378,7 @@ export async function POST(request: NextRequest) {
     const requestedProjectId = cleanString(body.project_id) || videoCard?.project_id;
     if (!requestedProjectId || videoCard && requestedProjectId !== videoCard.project_id) throw new AuthError('请选择正确的保存项目', 400);
     const project = await getProjectForGeneration(user, requestedProjectId);
-    if (videoCard) await assertCanGenerateInVideoCard(user, project.id, videoCardId);
+    if (videoCard) await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
 
     const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
     const canvasNodeId = cleanString(body.canvas_node_id || body.canvasNodeId) || null;

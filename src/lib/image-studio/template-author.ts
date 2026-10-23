@@ -33,19 +33,19 @@ export async function resolveStudioTemplateAuthor(user: ImageStudioIdentity,
   if (hasPreset === hasModule) throw new Error('模板来源参数无效');
   let presetId = hasPreset ? target.presetId! : null;
   if (hasModule) {
-    const module = await client.imageStudioModule.findFirst({ where: { id: target.moduleId!, owner_id: actor.id },
+    const workspace = await client.imageStudioModule.findFirst({ where: { id: target.moduleId!, owner_id: actor.id },
       select: { id: true, owner_id: true, source_preset_id: true, revision: true } });
-    if (!module) throw new Error('模板不存在或无权读取');
-    if (!module.source_preset_id) {
-      const owner = await client.user.findUnique({ where: { id: module.owner_id }, select: { id: true, name: true, username: true,
+    if (!workspace) throw new Error('模板不存在或无权读取');
+    if (!workspace.source_preset_id) {
+      const owner = await client.user.findUnique({ where: { id: workspace.owner_id }, select: { id: true, name: true, username: true,
         avatar_url: true, account_type: true, status: true, feishu_open_id: true, feishu_tenant_key: true } });
       const known = owner?.account_type === 'internal';
       return { actor, preset: null, owner: known ? owner : null, bindingConfirmed: known, ordinarilyVisible: true,
-        templateRead: known ? { sourceKind: 'local-module', sourceId: module.id, sourceRevision: String(module.revision),
+        templateRead: known ? { sourceKind: 'local-module', sourceId: workspace.id, sourceRevision: String(workspace.revision),
           author: { state: 'known', displayName: displayUserName(owner), avatarUrl: owner.avatar_url, isSelf: owner.id === actor.id },
-          canViewTemplateContext: owner.id === actor.id } : unknown('local-module', module.id, String(module.revision)) };
+          canViewTemplateContext: owner.id === actor.id } : unknown('local-module', workspace.id, String(workspace.revision)) };
     }
-    presetId = module.source_preset_id;
+    presetId = workspace.source_preset_id;
   }
   const preset = await client.imageStudioPreset.findUnique({ where: { id: presetId! } });
   if (!preset) return { actor, preset: null, owner: null, bindingConfirmed: false, ordinarilyVisible: false,

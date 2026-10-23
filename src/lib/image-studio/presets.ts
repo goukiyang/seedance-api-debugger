@@ -204,7 +204,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
         return { id: reference.assetId, originalUrl: available ? studioTemplateAssetUrl(reference.assetId) : null,
           thumbnailUrl: available ? studioTemplateAssetUrl(reference.assetId, true) : null,
           width: available ? asset?.width ?? null : null, height: available ? asset?.height ?? null : null,
-          note: canSeeContext ? reference.note : '', available };
+          note: templateRead.canViewTemplateContext ? reference.note : '', available };
       }),
       banner: row.banner_asset_id ? toPayload(row.banner_asset_id) : null,
       fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),

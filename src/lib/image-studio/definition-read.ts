@@ -23,7 +23,7 @@ export async function readStudioTemplateDefinition(user: ImageStudioIdentity,
   if (!resolved.preset) {
     const row = await prisma.imageStudioModule.findFirst({ where: { id: resolved.templateRead.sourceId, owner_id: resolved.actor.id } });
     if (!row) throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
-    const contextVersion = await resolveModuleContextVersion(row.context).catch(() => null);
+    const contextVersion = await resolveModuleContextVersion(row.context).then(code => ({ code, state: 'ready' })).catch(() => null);
     return { templateRead: resolved.templateRead, definition: { name: row.name, templatePrompt: row.prompt, context: row.context,
       sourceRevision: String(row.revision), contextVersion, limits: { count: row.count, referenceLimit: row.reference_limit, aspectRatio: row.aspect_ratio },
       referenceNotes: [] }, lifecycle: 'active', generation: { available: true, reasonCode: null }, readAt: new Date().toISOString() };
@@ -40,7 +40,7 @@ export async function readStudioTemplateDefinition(user: ImageStudioIdentity,
       } else { available = null; reasonCode = 'read-unavailable'; }
     }
   }
-  const contextVersion = await resolveModuleContextVersion(source.context).catch(() => null);
+  const contextVersion = await resolveModuleContextVersion(source.context).then(code => ({ code, state: 'ready' })).catch(() => null);
   let referenceNotes: string[] = [];
   if (resolved.actor.role === 'admin') {
     try { referenceNotes = (await getStudioPresetFixedReferences(resolved.actor, source)).map(item => item.note); }

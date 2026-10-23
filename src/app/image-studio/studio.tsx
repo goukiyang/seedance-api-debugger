@@ -1682,6 +1682,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ImagePreviewState | null>(null);
   const sharedReferencePreviewId = useRef<string | null>(null);
+  const taskReadScope = `${userId}:${module.id}`;
   const [copyFeedback, setCopyFeedback] = useState<(ImageResultOperation & { id: string; text: string }) | null>(null);
   const copyFeedbackAnchor = useRef<HTMLElement | null>(null), copyOperationSequence = useRef(0);
   useEffect(() => { copyOperationSequence.current++; setCopyFeedback(null); }, [taskReadScope, viewToken, active, hidden]);
@@ -1694,7 +1695,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [tasksError, setTasksError] = useState('');
   const [taskReadAction, setTaskReadAction] = useState<'idle' | 'initial' | 'refresh' | 'more'>('initial');
   const [taskRetryCursor, setTaskRetryCursor] = useState<string | undefined>();
-  const taskReadScope = `${userId}:${module.id}`;
   const taskReadScopeRef = useRef(taskReadScope);
   taskReadScopeRef.current = taskReadScope;
   const recheckScopeKey = JSON.stringify([userId, module.id, sessionUser?.id, sessionUser?.role, sessionChanged, active, hidden, viewToken]);
@@ -3955,7 +3955,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </p>}
           {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
           {settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}
-          {sourceSharingBlocked && <TaskNotice kind="recoverable">{sharedLive?.unavailableReason || '模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。'} <button type="button" onClick={() => { setResultView('images'); document.getElementById(`studio-results-${module.id}`)?.scrollIntoView({ block: 'start' }); }}>查看本人历史</button>{definitionReady && repairDefinition && <button type="button" onClick={openModuleDialog}>修复模板</button>}</TaskNotice>}
+          {sourceSharingBlocked && <TaskNotice kind="recoverable">{sharedLive?.unavailableReason || '模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。'} <button type="button" onClick={() => { setResultView('images'); document.getElementById(`studio-results-${module.id}`)?.scrollIntoView({ block: 'start' }); }}>查看本人历史</button>{definitionReady && repairDefinition && <button type="button" onClick={() => openModuleDialog()}>修复模板</button>}</TaskNotice>}
           {sharingPending && <p role="status" className={styles.muted}>{sharingMessage || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}
           {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
             if ((await confirm('上次提交可能已受理。放弃核对后，再次生成会新建任务，可能再次产生上游费用。确定放弃核对吗？', { title: '放弃核对', confirmLabel: '放弃核对' }))) { setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} }

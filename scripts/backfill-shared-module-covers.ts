@@ -48,7 +48,7 @@ async function main() {
     throw new Error('授权作者的当前内部身份无法确认，停止补齐');
   console.log(JSON.stringify({ mode: options.apply ? 'apply' : 'dry-run', inventorySha256: digest, rows: 30, eligible: 24 }));
   const outcomes: Record<string, number> = {};
-  for (const [index, row] of inventory.rows.entries()) {
+  for (const [index, row] of Array.from(inventory.rows.entries())) {
     if (row.disposition !== 'eligible-frozen-single-image') {
       // All six exclusions remain exclusions even if a new result now exists.
       // Observe drift for the two preserved covers, but never rewrite them.

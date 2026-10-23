@@ -19,6 +19,7 @@ import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usa
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
+import { videoPricingBusinessFingerprint } from '@/lib/pricing/video-context';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
 import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
@@ -65,7 +66,7 @@ import {
   isVolcengineIpApiReady,
 } from '@/lib/integrations/volcengine-ip';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -454,9 +455,10 @@ export async function POST(request: NextRequest) {
   const receivedBody = await request.json();
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
-    if (original) {
+    if (original?.request_fingerprint?.startsWith('pricing-v2:')
+      && receivedBody.canvas_video_batch === undefined && !receivedBody.idempotency_key.startsWith('cvb:')) {
       await assertCanViewTask(user, original);
-      if (original.request_fingerprint?.startsWith('pricing-v2:') && original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      if (original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
       return NextResponse.json(canvasVideoBatchTaskResponse(original));
     }
   }
