@@ -16,6 +16,7 @@ import {
   PAID_GENERATION_INTENT_HEADER,
   PAID_GENERATION_INTENT_USER_AUTHORIZED,
   PAID_GENERATION_REASON_HEADER,
+  userRetryGenerationReason,
 } from '@/lib/tasks/paid-generation-guard';
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -250,7 +251,7 @@ export async function POST(
     headers.set('Content-Type', 'application/json');
     headers.set('x-tab-id', request.headers.get('x-tab-id') || 'default');
     headers.set(PAID_GENERATION_INTENT_HEADER, PAID_GENERATION_INTENT_USER_AUTHORIZED);
-    headers.set(PAID_GENERATION_REASON_HEADER, `用户通过后台重试任务 ${originalTask.id}`);
+    headers.set(PAID_GENERATION_REASON_HEADER, userRetryGenerationReason('video', originalTask.id));
 
     const cookie = request.headers.get('cookie');
     if (cookie) headers.set('cookie', cookie);
