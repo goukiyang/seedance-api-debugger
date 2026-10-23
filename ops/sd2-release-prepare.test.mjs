@@ -5,6 +5,7 @@ import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
   CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD,
@@ -119,6 +120,28 @@ const protectedPlan = () => {
   Object.assign(value.liveCapture, { source: c.baselineSource, version: c.baselineVersion, build: c.baselineBuild });
   return value;
 };
+await test('Protected public proof reads only the pinned application-owned regular artifacts', async () => {
+  const source = activeTemplate.files['public-proof.mjs'].toString();
+  const ts = createRequire(import.meta.url)('typescript');
+  const ast = ts.createSourceFile('public-proof.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  assert.equal(ast.parseDiagnostics.length, 0);
+  const declarations = ast.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'readApplicationArtifact');
+  assert.equal(declarations.length, 1);
+  const read = new Function('assert', 'fs', 'path', 'return (' + declarations[0].getText(ast).replace(/^export /, '') + ');')(assert, fs, path);
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-app-artifact-'))), file = root + '/source.js';
+  fs.writeFileSync(file, 'actual application artifact', { mode: 0o644 });
+  const uid = fs.statSync(file).uid;
+  assert.equal(read(file, root, uid).toString(), 'actual application artifact');
+  assert.throws(() => read(file, root, uid + 1));
+  assert.throws(() => read(file, root + '/other', uid));
+  assert.throws(() => read(file, root, uid, 1));
+  fs.chmodSync(file, 0o664); assert.throws(() => read(file, root, uid)); fs.chmodSync(file, 0o644);
+  fs.symlinkSync(file, root + '/alias.js'); assert.throws(() => read(root + '/alias.js', root, uid));
+  fs.linkSync(file, root + '/linked.js'); assert.throws(() => read(file, root, uid));
+  for (const expression of ["read(c.root, sourceFile)", "read(m.live.web.root, sourceFile)",
+    "read(c.root, 'src/lib/pricing/build-mode.ts')", 'read(buildRoot, relativeFile)']) assert.ok(source.includes(expression));
+  assert.ok(source.includes("kind === 'main' && !m.protectedIncrement"));
+});
 await test('Protected increment producer and every consumer use the same closed capability contract', async () => {
   const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'release-contract.mjs')));
   const recovery = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
