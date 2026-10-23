@@ -622,7 +622,7 @@ function guardBuildTailRetrySnapshot(batch, request) {
   hdInputs.log = { file: logFile, sha256: receipt.command.logSha256,
     snapshot: { schema: 'sd2-empty-hd-probe-log.v1', identity: probeIdentity(logBefore) } };
   const directory = safeAbsolute(receipt.probeDirectory, 'successful probe directory');
-  assert.equal(path.dirname(directory), prepared.buildEnv.TMPDIR);
+  assert.equal(path.dirname(directory), prepared.preparedRoot);
   assert.match(path.basename(directory), /^hd-compile-probe-tail-[a-f0-9]+$/);
   const directories = {}, files = {}, device = fs.statSync('/data').dev;
   assert.notEqual(device, fs.statSync('/').dev);
