@@ -76,20 +76,25 @@ export async function runCompatibleSafetyReaderEngineering() {
       restorePhases: ['pre-stop-installation-abort', 'before-new-writer-after-proven-old-stop'] } };
   m.windowFile = m.stage + '/window.json';
   let bound = true, prepared = 0, constructed = 0, approvalFile = m.stage + '/hd-release-safety-approval.json'; const reads = [];
+  const guardApprovalFile = approvalFile, guardApprovalBytes = Buffer.from(JSON.stringify(approval));
   const rootFile = file => {
     reads.push(file);
     if (file.startsWith(originalDirectory + '/')) { const bytes = files.get(path.basename(file)); assert.ok(bytes); return bytes; }
     if (file === m.stage + '/manifest.json') return manifest;
     if (file === m.windowFile) return window;
+    if (file === guardApprovalFile) return guardApprovalBytes;
     if (file === approvalFile) return Buffer.from(JSON.stringify(approval));
     for (const kind of ['main', 'guard']) if (file === m.stage + '/' + kind + '-build.json') return builds[kind];
     throw Error('Unexpected isolated reader input: ' + file);
   };
   const namespace = { assert, path, process, Date, Buffer, JSON, Object, sourceFilename: readerDirectory + '/cutover-driver.mjs', rootFile, sha: hash,
     engineDirectory: () => originalDirectory, candidateCompatibilityDirectory: () => bound ? readerDirectory : originalDirectory,
-    validateManifest: value => value, assertReleaseWindow: () => {}, assertHdMaintenanceApproval,
+    validateManifest: value => value, assertReleaseWindow: () => {}, assertHdMaintenanceApproval, privateFreezeSha256,
     candidateEvidenceFile: (value, kind) => value.stage + '/' + kind + '-build.json',
     hdMaintenanceApprovalFile: value => { assert.equal(value, m); return approvalFile; },
+    guardRecoveryApprovalFile: value => { assert.equal(value, m); return guardApprovalFile; },
+    readGuardRecovery: value => { assert.equal(value, m); return { manifestSha256: hash(manifest),
+      approvalReceiptSha256: hash(guardApprovalBytes), guardEntry: { source: m.guardSource } }; },
     fs: { readdirSync: file => { assert.equal(file, originalDirectory); return [...files.keys()]; }, existsSync: () => true,
       lstatSync: () => ({ isDirectory: () => true, isSymbolicLink: () => false, uid: 0, mode: 0o40700 }), realpathSync: value => value },
     prepareOperationFenceModule: async value => { assert.equal(value, m); prepared++; return { originalFence: true }; },
@@ -134,6 +139,12 @@ export async function runCompatibleSafetyReaderEngineering() {
   assert.equal((await namespace.load(m, 'switch')).isolated, true);
   assert.ok(reads.includes(approvalFile)); assert.equal(constructed, 2);
   cases.push('bound_repair_selects_its_distinct_approval_file_without_overwriting_the_original');
+  approvalFile = m.stage + '/hd-release-safety-approval-switch-admission-r01.json'; approval.issuedAt = now - 500;
+  assert.equal((await namespace.load(m, 'switch')).isolated, true);
+  const startRecoveryRead = reads.length; assert.equal((await namespace.load(m, 'recovery')).isolated, true);
+  assert.ok(reads.slice(startRecoveryRead).includes(guardApprovalFile));
+  assert.equal(reads.slice(startRecoveryRead).includes(approvalFile), false);
+  cases.push('fresh_switch_admission_uses_new_approval_and_recovery_keeps_immutable_original_guard_approval');
   return { schema: 'sd2-compatible-safety-reader-engineering.v1', completed: true, cases,
     nativeFenceExecuted: false, productionWrites: 0, serviceCalls: 0, databaseCalls: 0,
     boundary: 'Actual reader/delegation decision bodies with isolated IO; original native helper source, target and SELF are not edited' };

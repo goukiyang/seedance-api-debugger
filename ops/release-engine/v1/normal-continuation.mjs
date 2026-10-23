@@ -628,7 +628,11 @@ export function recordHdAdmission(m, detail) {
   writeJsonExclusive(file, { runId: m.runId, manifestSha256: sha(rootFile(m.stage + '/manifest.json')),
     observedAt: new Date().toISOString(), detail }); return file;
 }
-export function recordNormalRefusal(m, before, error, hdFile) {
+export function recordNormalRefusal(m, before, error, hdFile, { receiptName = 'normal-switch-refusal.json',
+  logName = 'normal-switch-refusal.log' } = {}) {
+  assert.match(receiptName, /^normal-switch-refusal(?:-[a-f0-9]{64})?\.json$/);
+  assert.match(logName, /^normal-switch-refusal(?:-[a-f0-9]{64})?\.log$/);
+  assert.equal(receiptName.slice(0, -5), logName.slice(0, -4), 'Refusal receipt and log must belong to the same attempt');
   assertNoCutoverEffects(fs.readdirSync(m.stage).filter(file => file !== '.switch.lock'));
   for (const role of ['web', 'image', 'hd', 'role']) {
     const current = unit(m.live[role].unit);
@@ -637,10 +641,10 @@ export function recordNormalRefusal(m, before, error, hdFile) {
     assert.equal(fs.realpathSync('/proc/' + current.MainPID + '/cwd'), m.live[role].root);
   }
   assertProtection(before.protection, readProtection(m));
-  const logFile = 'normal-switch-refusal.log', bytes = Buffer.from(String(error.stack || error));
+  const logFile = logName, bytes = Buffer.from(String(error.stack || error));
   fs.writeFileSync(m.stage + '/' + logFile, bytes, { flag: 'wx', mode: 0o600 });
   const fd = fs.openSync(m.stage + '/' + logFile, 'r'); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  writeJsonExclusive(m.stage + '/normal-switch-refusal.json', { schema: 'sd2-normal-switch-refusal.v1', runId: m.runId,
+  writeJsonExclusive(m.stage + '/' + receiptName, { schema: 'sd2-normal-switch-refusal.v1', runId: m.runId,
     manifestSha256: sha(rootFile(m.stage + '/manifest.json')), phase: 'before-maintenance', effectsStarted: false,
     exitCode: 1, at: new Date().toISOString(), logFile, logSha256: sha(bytes),
     hdDetailFile: hdFile ? path.basename(hdFile) : null, hdDetailSha256: hdFile ? sha(rootFile(hdFile)) : null,

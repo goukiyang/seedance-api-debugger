@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { validateManifest, assertReleaseWindow, readProtection, assertProtection,
   writeJsonExclusive, call, unit, rootFile, sha, liveArtifactSource, rejectedPricingRoots, parseReleaseTimestamp, isSharedEngine, engineDirectory, sharedReadOnlyHdBounds } from './common.mjs';
 import { verifyCandidate } from './candidate.mjs';
-import { verifyNormalContinuation, recordHdAdmission, recordNormalRefusal } from './normal-continuation.mjs';
+import { verifyNormalContinuation, recordHdAdmission, recordNormalRefusal, assertFreshLegacyCapture, assertFreshPricingCapture } from './normal-continuation.mjs';
 import { readDeployedUsageEvidence, assertPriorUsageRoleControl, readPublishedBaselineSourceFiles } from './deployed-usage-schema.mjs';
 import { applyCanvasBatchMigration, readCanvasBatchMigration } from './canvas-batch-schema.mjs';
 import { capturePricingStartControl, buildPair, publishPricingStartPair, markPricingWriterStartIntent,
@@ -21,7 +21,7 @@ import { inspectHdReconciliation, inspectHdBeforeMaintenance, readHdStorageProte
   probeHdCandidateResolver } from './hd-storage-preflight.mjs';
 import { armGuardRecovery, readGuardRecovery, inspectGuardRecoveryControl, verifyGuardRecovery, runGuardRecovery, markFixedGuardStart } from './guard-recovery.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
+import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory, hdMaintenanceApprovalFile, guardRecoveryApprovalFile, assertSwitchAdmissionRepair, guardBuildTailRuntime } from './candidate-evidence.mjs';
 import { originalPreparedFile, originalManifestForInputs, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 import { captureUsageRole, stopUsageRole, startUsageRole, assertUsageRoleStopped, inspectUsageRoleAdmission,
   restoreOriginalUsageRole, usageRoleProof } from './usage-role-control.mjs';
@@ -853,6 +853,57 @@ export function normalizeSavedSwitchBefore(saved, runId, manifestSha256) {
   return before;
 }
 
+function assertSwitchAdmissionBefore(m, current, original, liveSnapshot) {
+  assert.equal(current.manifestSha256, original.manifestSha256);
+  for (const key of ['writers', 'policies', 'protectedFileIdentities', 'hdLegacy', 'privateWebPids'])
+    assert.deepEqual(current[key], original[key], 'Switch admission original configuration changed: ' + key);
+  assertFreshLegacyCapture(current.legacy, original.legacy);
+  assertFreshPricingCapture(current.captured, original.captured);
+  for (const key of ['state', 'fragment', 'dropins', 'loadedModuleSha'])
+    assert.deepEqual(current.roleControl[key], original.roleControl[key], 'Original role configuration changed: ' + key);
+  const runtimeIdentity = value => { const { heartbeatAt, ...identity } = value; return identity; };
+  assert.deepEqual(runtimeIdentity(current.roleControl.runtime), runtimeIdentity(original.roleControl.runtime));
+  assertProtection(original.protection, current.protection);
+  assert.ok(liveSnapshot?.services && liveSnapshot.configurations, 'Missing bound original six-process observation');
+  for (const [file, expected] of Object.entries(liveSnapshot.configurations))
+    assert.equal(sha(rootFile(file)), expected.sha256, 'Original live configuration changed: ' + file);
+  const live = {};
+  for (const role of ['web', 'image', 'hd', 'works', 'role', 'template']) {
+    const expected = m.live[role]; assert.ok(expected, 'Missing original live process: ' + role);
+    assert.equal(liveArtifactSource(expected.root), expected.source, 'Original live source changed: ' + role);
+    const observed = unit(expected.unit);
+    assert.equal(observed.ActiveState, 'active'); assert.equal(observed.SubState, 'running'); assert.equal(observed.ControlPID, '0');
+    assert.equal(Number(observed.MainPID), expected.pid); assert.equal(observed.InvocationID, expected.invocation);
+    assert.equal(fs.realpathSync('/proc/' + observed.MainPID + '/cwd'), expected.root);
+    assert.equal(fs.realpathSync(observed.WorkingDirectory), expected.root);
+    const instance = processState(expected.pid, true), prior = liveSnapshot.services[role]; assert.ok(prior);
+    assert.equal(instance.start, String(prior.kernelStartTicks)); assert.equal(instance.cwd, prior.cwd);
+    live[role] = { unit: expected.unit, pid: Number(observed.MainPID), invocation: observed.InvocationID, root: expected.root, kernelStartTicks: instance.start };
+  }
+  return live;
+}
+function assertSwitchAdmissionWindows(m, fixed, repair) {
+  if (!repair) return;
+  assert.equal(repair.originalFixedGuardFile, m.stage + '/fixed-guard-recovery.json');
+  assert.equal(sha(rootFile(repair.originalFixedGuardFile)), repair.originalFixedGuardSha256);
+  const oldApprovalFile = guardRecoveryApprovalFile(m); assert.equal(oldApprovalFile, repair.oldGuardApprovalFile);
+  const oldApprovalBytes = rootFile(oldApprovalFile), oldApproval = JSON.parse(oldApprovalBytes);
+  assert.equal(sha(oldApprovalBytes), repair.oldGuardApprovalSha256);
+  assert.equal(sha(rootFile(repair.oldGuardWindowFile)), repair.oldGuardWindowSha256);
+  assert.equal(fixed.originalWindowSha256, repair.oldGuardWindowSha256);
+  assert.equal(fixed.approvalReceiptSha256, repair.oldGuardApprovalSha256);
+  assert.equal(oldApproval.windowSha256, repair.oldGuardWindowSha256);
+  const approvalFile = hdMaintenanceApprovalFile(m); assert.equal(approvalFile, repair.approvalFile);
+  const approvalBytes = rootFile(approvalFile), approval = JSON.parse(approvalBytes);
+  assert.equal(sha(approvalBytes), repair.approvalSha256); assert.equal(m.windowFile, repair.windowFile);
+  assert.equal(sha(rootFile(m.windowFile)), repair.windowSha256); assert.equal(approval.windowSha256, repair.windowSha256);
+  for (const key of ['runId', 'mainSource', 'guardSource', 'manifestSha256', 'mainBuildReceiptSha256', 'guardBuildReceiptSha256'])
+    assert.equal(approval[key], oldApproval[key], 'Switch approval changed the frozen candidate binding: ' + key);
+  assert.equal(approval.runId, m.runId); assert.equal(approval.mainSource, m.mainSource); assert.equal(approval.guardSource, m.guardSource);
+  assert.equal(approval.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
+  for (const kind of ['main', 'guard']) assert.equal(approval[kind + 'BuildReceiptSha256'], sha(rootFile(candidateEvidenceFile(m, kind))));
+}
+
 export async function recoverStandaloneSwitch(m, input = {}) {
   const { manifestSha256 } = context(m), saved = boundRecord(m, 'switch-before', manifestSha256);
   const before = normalizeSavedSwitchBefore(saved, m.runId, manifestSha256);
@@ -1184,22 +1235,37 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
   return locked(m, async () => {
     const builds = await verifyBoth(m, manifestSha256);
     await loadHdCompiledCacheProofs(m);
-    let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, controlledDrainPhase = false;
+    const admissionRepair = mode === 'switch' ? assertSwitchAdmissionRepair(m) : null;
+    const repairSha256 = admissionRepair ? guardBuildTailRuntime(m).switchAdmissionRepair.proofSha256 : null;
+    if (repairSha256) assert.match(repairSha256, /^[a-f0-9]{64}$/);
+    const admissionName = name => repairSha256 ? name + '-' + repairSha256 : name;
+    let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;
     try {
       if (mode === 'switch') {
-        before = captureSwitchBefore(m, manifestSha256);
-        verifyNormalContinuation(m, before);
+        const currentBefore = captureSwitchBefore(m, manifestSha256);
+        before = currentBefore;
+        if (admissionRepair) {
+          assert.equal(admissionRepair.originalSwitchBeforeFile, m.stage + '/switch-before.json');
+          assert.equal(sha(rootFile(admissionRepair.originalSwitchBeforeFile)), admissionRepair.originalSwitchBeforeSha256);
+          before = normalizeSavedSwitchBefore(boundRecord(m, 'switch-before', manifestSha256), m.runId, manifestSha256);
+        }
+        verifyNormalContinuation(m, currentBefore);
         if (m.deployedUsageSchema) { readDeployedUsageEvidence(m); assertPriorUsageRoleControl(m); }
-        const { captured, hdLegacy } = before;
-        protectedState = before.protection;
-        save(m, 'switch-before', before);
+        if (admissionRepair) {
+          const live = assertSwitchAdmissionBefore(m, currentBefore, before, admissionRepair.liveSnapshot);
+          const file = save(m, admissionName('switch-admission-before'), { ...currentBefore, originalBeforeSha256: admissionRepair.originalSwitchBeforeSha256,
+            repairProofSha256: repairSha256, originalRecoveryBaselineRetained: true, live, boundLiveSnapshot: admissionRepair.liveSnapshot });
+          admissionObservation = { file, sha256: sha(rootFile(file)) };
+        } else { before = currentBefore; save(m, 'switch-before', before); }
+        const { captured, hdLegacy } = currentBefore;
+        protectedState = currentBefore.protection;
         let hdBefore;
         if (m.privateMultiviewInstall === true) {
           const bounds = privateHdAdmissionBounds(m, builds, manifestSha256);
-          save(m, 'hd-discovery-admission-bounds', bounds.receipt);
-          hdBefore = await inspectHdBeforeMaintenance(m, { sourceRoot: m.main.root,
-            ...(isSharedEngine(m) ? { scanDeadline: bounds.scanDeadline, waitBudgetMs: bounds.waitBudgetMs } : { deadline: bounds.deadline }), check: bounds.check,
-            record: (name, value) => save(m, 'hd-discovery-admission-' + name, { manifestSha256, ...value }) });
+          save(m, admissionName('hd-discovery-admission-bounds'), bounds.receipt);
+          hdBefore = await inspectHdBeforeMaintenance(m, { sourceRoot: m.main.root, deadline: bounds.deadline,
+            ...(isSharedEngine(m) ? { scanDeadline: bounds.scanDeadline, waitBudgetMs: bounds.waitBudgetMs } : {}), check: bounds.check,
+            record: (name, value) => save(m, admissionName('hd-discovery-admission-' + name), { manifestSha256, ...value }) });
           bounds.check();
         } else hdBefore = await inspectHdReconciliation(m, { sourceRoot: m.main.root, retiredCachePhase: 'admission' });
         hdAdmissionRecord = recordHdAdmission(m, hdBefore);
@@ -1211,6 +1277,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
           main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
         if (isSharedEngine(m)) {
           const fixed = verifyGuardRecovery(m, before).value;
+          assertSwitchAdmissionWindows(m, fixed, admissionRepair);
           assert.equal(fixed.pair.runId, recoveryPair.runId);
           assert.equal(fixed.pair.manifestSha256, recoveryPair.manifestSha256);
           for (const kind of ['main', 'guard']) {
@@ -1369,6 +1436,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
       const finalCapability = capability(m, kind);
       const finalHd = verifyHdSupervisor(m, kind);
       const after = assertProtected(m, protectedState);
+      if (admissionObservation) assert.equal(sha(rootFile(admissionObservation.file)), admissionObservation.sha256, 'Fresh switch admission observation changed');
       const result = { schema: 'rate-impl2-switch-complete.v1', runId: m.runId, mode, manifestSha256, kind, healthy,
         imageCapability: finalCapability, nginx: restored,
         web: running(m, 'web', kind), image: running(m, 'image', kind), hd: finalHd, role, multiviewPrivate, roleProof: usageRoleProof(m), protection: after,
@@ -1381,7 +1449,9 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
     } catch (error) {
       if (mode === 'switch' && before && !installed && !published
         && !fs.readdirSync(m.stage).some(file => /^(usage-role-transition|natural-stop)/.test(file))) {
-        recordNormalRefusal(m, before, error, hdAdmissionRecord);
+        recordNormalRefusal(m, before, error, hdAdmissionRecord, repairSha256 ? {
+          receiptName: admissionName('normal-switch-refusal') + '.json', logName: admissionName('normal-switch-refusal') + '.log',
+        } : undefined);
       }
       if (before && !installed && !published) {
         try {

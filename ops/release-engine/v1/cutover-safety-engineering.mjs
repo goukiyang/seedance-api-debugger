@@ -316,6 +316,24 @@ export async function runHdCutoverSafetyEngineering() {
   }
   assert.equal(parseAllOwnerSynchronousRows([record('accepted_unknown')], 100000).runningRequests, 0);
   add('ended_unknown_acceptance_is_not_an_executing_promise');
+  {
+    const source = fs.readFileSync(new URL('./cutover-safety.mjs', import.meta.url), 'utf8');
+    const marker = 'const saved = d.bytes(', start = source.indexOf(marker); assert.ok(start > 0);
+    assert.equal(source.indexOf(marker, start + 1), -1);
+    const end = source.indexOf(');', start), expression = source.slice(start + 'const saved = '.length, end + 1);
+    const readCheckpointApproval = new Function('d', 'm', 'hdMaintenanceApprovalFile', 'return ' + expression + ';');
+    const m = { stage: '/isolated-current-approval' }, reads = [];
+    const io = { bytes: file => { reads.push(file); return Buffer.from(file); } };
+    for (const filename of ['hd-release-safety-approval.json', 'hd-release-safety-approval-switch-admission-r01.json']) {
+      const selected = m.stage + '/' + filename;
+      assert.equal(readCheckpointApproval(io, m, value => { assert.equal(value, m); return selected; }).toString(), selected);
+      assert.equal(reads.at(-1), selected);
+    }
+    const prior = reads.length; assert.throws(() => readCheckpointApproval(io, m, () => { throw Error('Unbound current approval'); }));
+    assert.equal(reads.length, prior);
+    add('actual_checkpoint_approval_expression_reads_current_bound_file_and_propagates_refusal');
+  }
+
   const sourceSha256 = Object.fromEntries(['cutover-safety.mjs', 'cutover-safety-engineering.mjs'].map(file => [
     file, sha(fs.readFileSync(fileURLToPath(new URL('./' + file, import.meta.url)))),
   ]));

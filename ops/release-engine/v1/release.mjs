@@ -33,7 +33,7 @@ function protectedDirectory(file) {
   const stat = fs.lstatSync(file); assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o022));
 }
 function trustedCode(m, runtime = null) {
-  const processorProof = runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof;
+  const processorProof = runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof;
   const hashes = processorProof ? processorProof.processorControllers : m.privateSha256;
   if (runtime) {
     assert.equal(sha(JSON.stringify(hashes)), processorProof.processor.controllerSetSha256);
@@ -58,7 +58,7 @@ function guardBuildTailRuntime(m, mode, kind) {
   assert.equal(runtime.proof.schema, 'sd2-release-guard-build-tail-proof.v1');
   assert.ok(guardBuildTailReleaseAction(runtime.phase, mode, kind), 'Guard-tail processor may not compile guard or enter an unbound phase');
   assert.deepEqual(context.contract.engine, m.engine); assert.deepEqual(runtime.proof.engine, m.engine);
-  const processorProof = runtime.armProcessorRepair?.proof || runtime.armPairRepair?.proof || runtime.reader?.proof || runtime.retry?.proof || runtime.proof;
+  const processorProof = runtime.switchAdmissionRepair?.proof || runtime.armProcessorRepair?.proof || runtime.armPairRepair?.proof || runtime.reader?.proof || runtime.retry?.proof || runtime.proof;
   assert.equal(processorProof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
   assert.equal(runtime.proof.runId, m.runId); assert.equal(runtime.proof.taskId, m.operation.taskId);
   assert.equal(runtime.proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));

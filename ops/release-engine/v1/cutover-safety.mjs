@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { rootFile, sha, call, assertReleaseWindow, liveArtifactSource, rejectedPricingRoots, engineDirectory } from './common.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateCompatibilityDirectory, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
 import { cwdBytes, assertNaturalExitEvidence, protectedFileSnapshot } from './switch.mjs';
 import { captureNginxUpstreamSockets } from './nginx-maintenance.mjs';
 import { fileIdentity } from './legacy-maintenance.mjs';
@@ -400,7 +400,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
     assert.match(manifestSha256, HASH); assert.match(approvalSha256, HASH);
     const manifest = d.bytes(m.stage + '/manifest.json'); assert.equal(sha(manifest), manifestSha256); assert.deepEqual(JSON.parse(manifest), m);
     d.assertWindow();
-    const saved = d.bytes(m.stage + '/hd-release-safety-approval.json');
+    const saved = d.bytes(hdMaintenanceApprovalFile(m));
     assert.equal(sha(saved), approvalSha256); assert.deepEqual(JSON.parse(saved), approval);
     assert.equal(approval.schema, 'hd-release-maintenance-approval.v1');
     for (const key of ['runId', 'mainSource', 'guardSource']) assert.equal(approval[key], m[key]);

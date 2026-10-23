@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { assertReleaseWindow, rootFile, sha, writeJsonExclusive, call, parseReleaseTimestamp, engineDirectory } from './common.mjs';
 import { capturePricingStartControl, PRICING_START_CONTROL, verifyFixedProgramEntry } from './pricing-start-pair.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, hdMaintenanceApprovalFile, guardRecoveryApprovalFile } from './candidate-evidence.mjs';
 import { assertOriginalSnapshotStable, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 
 const ROLES = ['web', 'image', 'hd'];
@@ -103,7 +103,7 @@ export function readGuardRecovery(m) {
   assert.deepEqual(json(candidateEvidenceFile(m, 'guard')), value.originalGuardBuild);
   assert.equal(value.originalGuardBuild.exitCode, 0); assert.equal(value.originalGuardBuild.verifiedSourceAndGates, true);
   assert.equal(value.originalGuardBuild.build, value.guardEntry.build);
-  assert.equal(sha(rootFile(hdMaintenanceApprovalFile(m))), value.approvalReceiptSha256);
+  assert.equal(sha(rootFile(guardRecoveryApprovalFile(m))), value.approvalReceiptSha256);
   return value;
 }
 export function inspectGuardRecoveryControl(m, before) {

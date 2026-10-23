@@ -17,6 +17,8 @@ import {
   assertArmPairRepairAdmission, ARM_PAIR_REPAIR_ORIGIN,
   validateArmProcessorRepair, assertArmProcessorRepairFailure, assertArmProcessorRepairControllerDifference,
   assertArmProcessorRepairAdmission, ARM_PROCESSOR_REPAIR_ORIGIN, assertCandidateReobservationAdmission,
+  validateSwitchAdmissionRepair, assertSwitchAdmissionRepairFailure, assertSwitchAdmissionControllerDifference,
+  assertSwitchAdmissionRepairAdmission, SWITCH_ADMISSION_REPAIR_ORIGIN,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -638,6 +640,63 @@ function scenarioArmProcessorRepair() {
   return 'exact_trusted_code_failure_has_one_new_proof_and_only_expired_inactive_candidates_may_be_reobserved_once';
 }
 
+function scenarioSwitchAdmissionRepair() {
+  const request = { schema: 'sd2-release-switch-admission-repair.v1',
+    ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'armProcessorRepairProofSha256']
+      .map(key => [key, SWITCH_ADMISSION_REPAIR_ORIGIN[key]])), childReceiptSha256: digest('failed-switch-child'),
+    originalFixedGuardSha256: digest('immutable-original-guard'), originalSwitchBeforeSha256: digest('original-switch-before'),
+    processorControllerSetSha256: digest('switch-admission-processor'), approvalFile: '/fixture/hd-release-safety-approval-switch-admission-r01.json',
+    approvalSha256: digest('new-switch-approval'), windowSha256: digest('new-switch-window'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateSwitchAdmissionRepair(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateSwitchAdmissionRepair(missing));
+    assert.throws(() => validateSwitchAdmissionRepair({ ...request, [key]: 'unbound' }));
+  }
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'armProcessorRepairProofSha256'])
+    assert.throws(() => validateSwitchAdmissionRepair({ ...request, [key]: digest('different-' + key) }));
+  assert.throws(() => validateSwitchAdmissionRepair({ ...request, resetArm: true }));
+  const error = { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true };
+  const cause = "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(Number.isSafeInteger(deadline) && typeof check === 'function' && typeof record === 'function')\n";
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'switch', child: { status: 1, signal: null, error: null }, stderr: JSON.stringify({ error, cause }) + '\n' };
+  assertSwitchAdmissionRepairFailure(child); assert.throws(() => assertArmProcessorRepairFailure(child));
+  for (const value of [{ ...child, phase: 'arm' }, { ...child, child: { status: 0, signal: null, error: null } },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('deadline', 'anotherDeadline') }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, code: 'another_failure' }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
+    assert.throws(() => assertSwitchAdmissionRepairFailure(value));
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'cutover-driver.mjs',
+    'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs', 'release-entry-engineering.mjs',
+    'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs'];
+  const retained = ['attempt-state.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'candidate-reuse.mjs', 'pricing-start-pair.mjs',
+    'common.mjs', 'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'writer-network-fence.mjs'];
+  const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('7d2b:' + name)]));
+  const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('switch-repair:' + name)])) };
+  assert.equal(Object.keys(assertSwitchAdmissionControllerDifference(predecessor, processor)).length, 12);
+  for (const name of retained) assert.throws(() => assertSwitchAdmissionControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertSwitchAdmissionControllerDifference(predecessor, predecessor));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'arm_processor_repair', value: { proofSha256: request.armProcessorRepairProofSha256 } } });
+  const failed = { events, derivedState: { status: 'failed', activePhase: null,
+    lastPhase: { phase: 'switch', outcome: 'failed', resultSha256: request.phaseResultEventSha256 },
+    terminal: { eventSha256: request.terminalEventSha256 }, lastEventSha256: request.terminalEventSha256 } };
+  const before = { facts: { effectsStarted: false, switchComplete: false, files: {
+    'fixed-guard-recovery.json': { sha256: request.originalFixedGuardSha256 }, 'switch-before.json': { sha256: request.originalSwitchBeforeSha256 } } } };
+  assertSwitchAdmissionRepairAdmission(failed, request, before);
+  for (const edit of [value => { value.derivedState.status = 'running'; }, value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.lastPhase.phase = 'arm'; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'switch_admission_repair' } }); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(failed); edit(value); assert.throws(() => assertSwitchAdmissionRepairAdmission(value, request, before));
+  }
+  for (const facts of [{ ...before.facts, effectsStarted: true }, { ...before.facts, switchComplete: true },
+    { ...before.facts, files: { ...before.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...before.facts, files: { ...before.facts.files, 'pricing-pair-published.json': { sha256: HASH } } }])
+    assert.throws(() => assertSwitchAdmissionRepairAdmission(failed, request, { facts }));
+  return 'exact_premaintenance_switch_failure_preserves_armed_guard_original_before_and_all_prior_repair_receipts';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -645,7 +704,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }
