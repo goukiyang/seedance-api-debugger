@@ -50,7 +50,7 @@ const historicalHdSources = Object.fromEntries(Object.entries(historicalHdDigest
   return [file, bytes.toString()];
 }));
 assert.match(source, /import \{ inspectInstalledMultiviewRecipeAdoption \} from '\.\/multiview-works-control\.mjs';/);
-assert.match(source, /if \(m\.recoveredGuardBaseline\?\.schema === 'sd2-multiview-r17-recovered-guard\.v1'\) inspectInstalledMultiviewRecipeAdoption\(m\);/);
+assert.match(source, /if \((?:m\.fullRelease \|\| )?m\.recoveredGuardBaseline\?\.schema === 'sd2-multiview-r17-recovered-guard\.v1'\) inspectInstalledMultiviewRecipeAdoption\(m\);/);
 const stage = '/data/video-api-debugger/release-staging/10000000-0000-4000-8000-000000000001';
 
 function harness(options = {}) {

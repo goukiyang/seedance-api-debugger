@@ -276,7 +276,7 @@ function oldScript(captured) {
   return configured;
 }
 function exactRecoveredBackupOrigin(m, a, captured) {
-  const input = m.recoveredGuardBaseline, origin = a.recoveredBackupOrigin;
+  const input = m.fullRelease?.privateRecipeOrigin || m.recoveredGuardBaseline, origin = a.recoveredBackupOrigin;
   for (const key of ['schema', 'runId', 'manifestSha256', 'backupCaptureSha256', 'backupTransitionSha256',
     'backupPublishedSha256', 'recoveryCompleteSha256'])
     assert.equal(input?.[key], origin[key], 'The managed backup script lacks the exact R17 recovery origin: ' + key);
