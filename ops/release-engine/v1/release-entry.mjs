@@ -478,7 +478,11 @@ export function postcheckReleasePhase({ batch, phase, receipt }) {
   if (phase === 'capture') { assertManifest(batch); requireMarker(stage, 'capture.json'); }
   else if (phase === 'preflight') requireMarker(stage, 'native-control-preflight/batch.json');
   else if (phase === 'admission') requireMarker(stage, 'native-control-preflight/receipt.json');
-  else if (phase === 'prepare') { requireMarker(stage, 'main-prepared.json'); requireMarker(stage, 'guard-prepared.json'); }
+  else if (phase === 'prepare') {
+    if (assertManifest(batch).reuseBuilds) {
+      for (const kind of ['main', 'guard']) assert.deepEqual(output[kind], candidateEvidence(batch, kind).value);
+    } else { requireMarker(stage, 'main-prepared.json'); requireMarker(stage, 'guard-prepared.json'); }
+  }
   else if (phase === 'guard-build') assert.deepEqual(output, candidateEvidence(batch, 'guard').value);
   else if (phase === 'main-build') assert.deepEqual(output, candidateEvidence(batch, 'main').value);
   else if (phase === 'verify') { assert.ok(output.main && output.guard); }

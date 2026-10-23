@@ -262,13 +262,21 @@ function scenarioReuseNoBuild(root) {
     writeJson(path.join(stage, `${kind}-candidate-reuse.json`), candidate);
   }
   writeJson(batch.manifestFile, { schema: 'rate-impl2-release.v1', runId, stage, engine, operation: operation(batch), reuseBuilds });
+  const prepared = Object.fromEntries(['main', 'guard'].map(kind =>
+    [kind, JSON.parse(fs.readFileSync(path.join(stage, `${kind}-candidate-reuse.json`)))]));
+  const prepareReceipt = value => ({ child: { status: 0, signal: null, error: null }, stdout: JSON.stringify(value) + '\n' });
+  postcheckReleasePhase({ batch, phase: 'prepare', receipt: prepareReceipt(prepared) });
+  assert.throws(() => postcheckReleasePhase({ batch, phase: 'prepare', receipt: prepareReceipt({ main: prepared.main }) }));
+  const changed = structuredClone(prepared); changed.main.build = 'different-build';
+  assert.throws(() => postcheckReleasePhase({ batch, phase: 'prepare', receipt: prepareReceipt(changed) }));
   for (const kind of ['guard', 'main']) {
     const value = JSON.parse(fs.readFileSync(path.join(stage, `${kind}-candidate-reuse.json`))), child = { status: 0, signal: null, error: null };
     postcheckReleasePhase({ batch, phase: `${kind}-build`, receipt: { child, stdout: JSON.stringify(value) + '\n' } });
     assert.equal(fs.existsSync(path.join(stage, `${kind}-build.json`)), false);
     assert.equal(fs.existsSync(path.join(stage, `${kind}-immutable-success.json`)), false);
+    assert.equal(fs.existsSync(path.join(stage, `${kind}-prepared.json`)), false);
   }
-  return 'reuse_candidate_refs_original_immutable_with_zero_new_build_markers';
+  return 'reuse_prepare_and_build_reference_original_immutable_without_new_build_or_prepared_markers';
 }
 
 function scenarioE() {
