@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { isSharedEngine, engineDirectory, rootFile, sha } from './common.mjs';
 import { currentReleaseContext } from './engine-context.mjs';
 import { readAttempt } from './attempt-state.mjs';
+import { assertTypedFileUnchanged } from './typed-files.mjs';
 
 export const REUSE_SCHEMA = 'sd2-candidate-build-reuse.v1';
 export const GUARD_BUILD_TAIL_SCHEMA = 'sd2-candidate-build-tail.v1';
@@ -57,6 +58,65 @@ function successorJournal(m, runtime) {
   assert.equal((loaded.derivedState.guardBuildTailRetry || loaded.derivedState.guardBuildTail)?.status, 'completed');
   return { loaded, readerRecord: observed };
 }
+function assertArmPairRepair(m, runtime, predecessor) {
+  const reference = runtime.armPairRepair;
+  assert.equal(reference.schema, 'sd2-release-arm-pair-repair-runtime.v1');
+  assert.ok(['arm', 'switch', 'proof', 'recovery'].includes(runtime.phase));
+  const proof = runtimeRootProof(reference, 'arm-pair-repair-', 'sd2-release-arm-pair-repair-proof.v1', m);
+  assert.equal(proof.originalReaderProofFile, runtime.reader.proofFile);
+  assert.equal(proof.originalReaderProofSha256, runtime.reader.proofSha256);
+  assert.equal(proof.candidateObservationProofFile, runtime.candidateObservation.proofFile);
+  assert.equal(proof.candidateObservationProofSha256, runtime.candidateObservation.proofSha256);
+  assert.equal(proof.request.readerProofSha256, runtime.reader.proofSha256);
+  assert.equal(proof.request.candidateObservationProofSha256, runtime.candidateObservation.proofSha256);
+  assert.deepEqual(proof.predecessorProcessor, predecessor.processor);
+  assert.equal(proof.request.processorControllerSetSha256, proof.processor.controllerSetSha256);
+  processorBytes(proof, m);
+  const allowed = new Set(['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'pricing-start-pair.mjs',
+    'switch.mjs', 'cutover-driver.mjs', 'guard-recovery.mjs', 'release-entry-engineering.mjs',
+    'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs']);
+  for (const [name, digest] of Object.entries(proof.processorControllers))
+    if (digest !== predecessor.processorControllers[name]) assert.ok(allowed.has(name), 'Unreviewed arm pair repair controller: ' + name);
+  assert.equal(proof.approvalFile, m.stage + '/hd-release-safety-approval-arm-pair-r01.json');
+  assert.equal(proof.approvalFile, proof.request.approvalFile);
+  assert.equal(proof.approvalSha256, proof.request.approvalSha256);
+  assert.equal(proof.windowSha256, proof.request.windowSha256);
+  assert.equal(proof.windowFile, m.stage + '/window-evidence/' + proof.windowSha256 + '.json');
+  assert.equal(assertTypedFileUnchanged(proof.windowSnapshot).sha256, proof.windowSha256);
+  assert.equal(assertTypedFileUnchanged(proof.approvalSnapshot).sha256, proof.approvalSha256);
+  const approval = JSON.parse(rootFile(proof.approvalFile));
+  assert.equal(approval.runId, m.runId); assert.equal(approval.manifestSha256, proof.manifestSha256);
+  assert.equal(approval.windowSha256, proof.windowSha256);
+  const { loaded } = successorJournal(m, runtime);
+  const records = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'arm_pair_repair');
+  assert.equal(records.length, 1);
+  const observed = records[0];
+  assert.deepEqual(observed.value.value, { schema: 'sd2-release-arm-pair-repair-reference.v1',
+    proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
+  const continued = loaded.events.find(item => item.sha256 === observed.value.previousSha256);
+  assert.equal(continued?.value.kind, 'failure_continued');
+  assert.equal(continued.value.failureReceiptSha256, reference.proofSha256);
+  assert.equal(continued.value.previousTerminalSha256, proof.request.terminalEventSha256);
+  assert.equal(continued.value.previousSha256, proof.request.terminalEventSha256);
+  assert.equal(continued.value.continuation, undefined);
+  assert.deepEqual(observed.value.owner, continued.value.owner);
+  for (const name of ['terminal', 'result', 'child', 'process', 'invocation']) {
+    const value = proof.failure[name];
+    const attempt = m.operation.taskRoot + '/attempts/' + m.runId;
+    if (['terminal', 'result'].includes(name)) {
+      assert.equal(path.dirname(value.file), attempt + '/events'); assert.match(path.basename(value.file), /^\d{6}\.json$/);
+    } else assert.equal(value.file, attempt + '/arm-' + proof.failureIntentSha256 + '.'
+      + ({ child: 'child', process: 'process', invocation: 'invocation' })[name] + '.json');
+    assert.equal(value.snapshot.requestedPath, value.file);
+    assert.equal(assertTypedFileUnchanged(value.snapshot).sha256, value.sha256, 'Original arm failure record changed: ' + name);
+  }
+  assert.equal(proof.failure.terminal.sha256, proof.request.terminalEventSha256);
+  assert.equal(proof.failure.result.sha256, proof.request.phaseResultEventSha256);
+  assert.equal(proof.failure.child.sha256, proof.request.childReceiptSha256);
+  assert.equal(loaded.events[loaded.events.indexOf(observed) - 1]?.sha256, continued.sha256);
+  return proof;
+}
+
 export function guardBuildTailRuntime(m) {
   const context = currentReleaseContext(), runtime = context?.guardBuildTail;
   if (!runtime) return null;
@@ -99,13 +159,22 @@ export function guardBuildTailRuntime(m) {
     for (const name of ['batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'artifactsSha256']) assert.equal(reader[name], active[name]);
     processorBytes(reader, m); successorJournal(m, runtime); active = reader;
   } else assert.equal(runtime.candidateObservation, undefined, 'Independent observation requires its authorized reader');
+  if (runtime.armPairRepair) {
+    assert.ok(runtime.reader && runtime.candidateObservation, 'Arm pair repair must retain the original reader and observation');
+    active = assertArmPairRepair(m, runtime, active);
+  }
   assert.equal(path.dirname(fileURLToPath(import.meta.url)), active.processor.root);
   return runtime;
 }
 
 export function candidateCompatibilityDirectory(m) {
   const runtime = guardBuildTailRuntime(m);
-  return (runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
+  return (runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
+}
+
+export function hdMaintenanceApprovalFile(m) {
+  const runtime = guardBuildTailRuntime(m);
+  return runtime?.armPairRepair?.proof.approvalFile || m.stage + '/hd-release-safety-approval.json';
 }
 
 export function assertGuardBuildTailObservation(value, m, now = Date.now(), { requireFresh = true } = {}) {

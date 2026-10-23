@@ -58,7 +58,7 @@ function guardBuildTailRuntime(m, mode, kind) {
   assert.equal(runtime.proof.schema, 'sd2-release-guard-build-tail-proof.v1');
   assert.ok(guardBuildTailReleaseAction(runtime.phase, mode, kind), 'Guard-tail processor may not compile guard or enter an unbound phase');
   assert.deepEqual(context.contract.engine, m.engine); assert.deepEqual(runtime.proof.engine, m.engine);
-  const processorProof = runtime.reader?.proof || runtime.retry?.proof || runtime.proof;
+  const processorProof = runtime.armPairRepair?.proof || runtime.reader?.proof || runtime.retry?.proof || runtime.proof;
   assert.equal(processorProof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
   assert.equal(runtime.proof.runId, m.runId); assert.equal(runtime.proof.taskId, m.operation.taskId);
   assert.equal(runtime.proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));

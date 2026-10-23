@@ -21,7 +21,7 @@ import { inspectHdReconciliation, inspectHdBeforeMaintenance, readHdStorageProte
   probeHdCandidateResolver } from './hd-storage-preflight.mjs';
 import { armGuardRecovery, readGuardRecovery, inspectGuardRecoveryControl, verifyGuardRecovery, runGuardRecovery, markFixedGuardStart } from './guard-recovery.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
+import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
 import { originalPreparedFile, originalManifestForInputs, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 import { captureUsageRole, stopUsageRole, startUsageRole, assertUsageRoleStopped, inspectUsageRoleAdmission,
   restoreOriginalUsageRole, usageRoleProof } from './usage-role-control.mjs';
@@ -1077,7 +1077,7 @@ export function privateHdAdmissionBounds(m, builds, manifestSha256) {
   if (isSharedEngine(m)) return sharedHdAdmissionBounds(m, builds, manifestSha256);
   assert.equal(m.reuseBuilds || null, null, 'Discovery waiting never relabels an original reused build');
   assertReleaseWindow(m);
-  const files = { manifest: m.stage + '/manifest.json', window: m.windowFile, approval: m.stage + '/hd-release-safety-approval.json',
+  const files = { manifest: m.stage + '/manifest.json', window: m.windowFile, approval: hdMaintenanceApprovalFile(m),
     main: m.stage + '/main-build.json', guard: m.stage + '/guard-build.json' };
   const bytes = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, rootFile(file)]));
   const pinnedSha256 = Object.fromEntries(Object.entries(bytes).map(([key, value]) => [key, sha(value)]));
@@ -1124,7 +1124,7 @@ export async function armSwitch(m) {
   const before = captureSwitchBefore(m, manifestSha256);
   verifyNormalContinuation(m, before);
   if (m.deployedUsageSchema) { readDeployedUsageEvidence(m); assertPriorUsageRoleControl(m); }
-  const pair = buildPair({ captured: before.captured, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
+  const pair = buildPair({ captured: before.captured, manifest: m, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
     main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
   save(m, 'arm-before', before);
   const armed = armGuardRecovery(m, { before, pair, builds });
@@ -1135,7 +1135,7 @@ export async function armSwitch(m) {
 function sharedHdAdmissionBounds(m, builds, manifestSha256) {
   const outer = sharedReadOnlyHdBounds(m);
   const files = { manifest: m.stage + '/manifest.json', window: m.windowFile,
-    approval: m.stage + '/hd-release-safety-approval.json',
+    approval: hdMaintenanceApprovalFile(m),
     main: candidateEvidenceFile(m, 'main'), guard: candidateEvidenceFile(m, 'guard') };
   const bytes = Object.fromEntries(Object.entries(files).map(([key, file]) => [key, rootFile(file)]));
   const pinnedSha256 = Object.fromEntries(Object.entries(bytes).map(([key, value]) => [key, sha(value)]));
@@ -1207,7 +1207,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         save(m, 'hd-reconciliation-before', { manifestSha256, ...hdBefore });
         const masterPid = Number(call('systemctl', ['show', 'nginx.service', '-p', 'MainPID', '--value']));
         master = { masterPid, masterStart: processState(masterPid).start }; save(m, 'nginx-master', { manifestSha256, ...master });
-        const recoveryPair = buildPair({ captured, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
+        const recoveryPair = buildPair({ captured, manifest: m, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
           main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
         if (isSharedEngine(m)) {
           const fixed = verifyGuardRecovery(m, before).value;
@@ -1264,7 +1264,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         assert.deepEqual(captureHdMetadata(m), hdMetadata, 'HD metadata changed after all original writers stopped');
         const fresh = await verifyBoth(m, manifestSha256); Object.assign(builds, fresh);
         assertReleaseWindow(m);
-        const pair = buildPair({ captured, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
+        const pair = buildPair({ captured, manifest: m, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
           main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
         save(m, 'pricing-pair-definition', { manifestSha256, pair });
         await releaseBoundary(m, 'publish', 'intent', { manifestSha256, effectsStarted: true,

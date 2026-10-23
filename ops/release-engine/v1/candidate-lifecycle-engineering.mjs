@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateEvidenceExpiresAt, REUSE_SCHEMA,
-  GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory, candidateGateObservation } from './candidate-evidence.mjs';
+  GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory, candidateGateObservation, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
 import { parseReleaseTimestamp, isSharedEngine, engineDirectory } from './common.mjs';
 import { releaseBoundary } from './engine-context.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
@@ -411,7 +411,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     rootFile, sha, writeJsonExclusive: exclusive, call, execFileSync: nativeExec, unit,
     assertReleaseWindow: assertWindow, validateManifest: value => value, parseReleaseTimestamp,
     isSharedEngine, engineDirectory, loadHdCompiledCacheProofs, releaseBoundary,
-    candidateEvidenceFile, REUSE_SCHEMA, GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory,
+    candidateEvidenceFile, REUSE_SCHEMA, GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory, hdMaintenanceApprovalFile,
     candidateGateObservation: (value, m, kind, now = clock) => candidateGateObservation(value, m, kind, now),
     candidateEvidenceExpiresAt: (value, m, kind, now = clock) => candidateEvidenceExpiresAt(value, m, kind, now),
     assertFreshCandidateEvidence: (value, m, kind, now = clock) => assertFreshCandidateEvidence(value, m, kind, now),
@@ -1481,8 +1481,8 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   };
   const m = { runId, stage, projectRoot: '/isolated-reader', engine: { root: '/isolated-reader/engine' },
     operation: { taskRoot, taskId: 'reader-task', attemptId: runId }, privateSha256: { 'candidate-evidence.mjs': '0'.repeat(64), 'candidate-reuse.mjs': '0'.repeat(64) },
-    main: { root: '/isolated-reader/main', source: 'a'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/main-source.json' },
-    guard: { root: '/isolated-reader/guard', source: 'b'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/guard-source.json' } };
+    main: { root: '/data/video-api-debugger/managed-releases/' + 'a'.repeat(40), source: 'a'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/main-source.json' },
+    guard: { root: '/data/video-api-debugger/managed-releases/' + 'b'.repeat(40), source: 'b'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/guard-source.json' } };
   const manifestSha256 = put(stage + '/manifest.json', m);
   const controllerNames = Object.keys(m.privateSha256), controllerSets = new Map();
   const processor = root => {
@@ -1505,7 +1505,8 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const receipts = {}, candidateRecords = {}, successfulArtifacts = {};
   for (const role of ['main', 'guard']) {
     const receipt = { schema: role === 'guard' ? GUARD_BUILD_TAIL_SCHEMA : 'rate-impl2-candidate-build.v1',
-      engine: m.engine, operation: m.operation, runId, label: role, source: m[role].source, version: m[role].version,
+      engine: m.engine, operation: m.operation, manifestSha256, runId, label: role, source: m[role].source, version: m[role].version,
+      gateReceipt: m[role].root + '/.role-tests/original-image.json',
       exitCode: 0, verifiedSourceAndGates: true, startedAt: start, finishedAt: start + 10000, build: 'original-build' };
     if (role === 'guard') Object.assign(receipt, { helperProbePhase: 'prepare', logSha256: request.buildLogSha256,
       compiledTreeSha256: request.observedCompiledTreeSha256, tailPostchecks: { schema: 'sd2-guard-build-tail-seal.v1',
@@ -1575,6 +1576,47 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     assert.equal(receipts[kind].startedAt, start); assert.equal(receipts[kind].finishedAt, start + 10000);
   }
   add('reader_independent_observation_admits_exact_old_main_and_guard_without_changing_original_times');
+  // Run the actual nested pair producer and candidate entry against the SAME
+  // production evidence consumer above. Source-tree observations are explicit
+  // adapters; the complete fixed-tree helper already has lifecycle coverage.
+  const pairFactory = functionNode('pricing-start-pair.mjs', 'createPricingStartPairHelper');
+  const nestedPairFunction = name => {
+    const found = pairFactory.node.body.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.equal(found.length, 1); return found[0].getText(pairFactory.parsed);
+  };
+  const sourceFiles = Object.fromEntries(Array.from({ length: 101 }, (_, i) => ['source-' + i + '.js', sha('source:' + i)]));
+  const buildFiles = Object.fromEntries(Array.from({ length: 11 }, (_, i) => ['server/chunk-' + i + '.js', sha('build:' + i)]));
+  const entries = Object.fromEntries(['main', 'guard'].map(kind => [kind, { ...m[kind], build: receipts[kind].build,
+    buildProof: receipts[kind], sourceManifest: { source: m[kind].source, version: m[kind].version, files: sourceFiles } }]));
+  const captured = { allowed: { sha256: '7'.repeat(64), value: { runId: 'previous-run', releases: [
+    { source: 'c'.repeat(40) }, { source: 'd'.repeat(40) }] } }, guard: { sha256: '8'.repeat(64) }, marker: { sha256: '9'.repeat(64) } };
+  const pairNamespace = { assert: sameAssert, path, Buffer, JSON, structuredClone, GUARD_BUILD_TAIL_SCHEMA,
+    PROJECT: '/data/video-api-debugger', SOURCE: /^[a-f0-9]{40}$/, HASH: /^[a-f0-9]{64}$/, hash: sha,
+    io: { realpathSync: value => value }, now: () => now, privileged: () => {}, runIdCheck: value => assert.equal(value, runId),
+    assertCaptured: value => assert.equal(value, captured), allowedShape: value => value, jsonOf: value => value.value,
+    assertFreshCandidateEvidence: api.assertFreshCandidateEvidence,
+    exactSourceFiles: (root, files) => { assert.ok([m.main.root, m.guard.root].includes(root)); assert.deepEqual(copy(files), sourceFiles); },
+    compiledHashes: root => { assert.ok([m.main.root, m.guard.root].includes(root)); return buildFiles; },
+    sourceCheck: (root, allowed) => { assert.equal(allowed.releases.length, 1); assert.equal(allowed.releases[0].root, root); } };
+  vm.runInNewContext(functionNode('pricing-start-pair.mjs', 'assertPricingPairTransition').node.getText().replace(/^export /, '')
+    + '\n' + nestedPairFunction('candidateEntry') + '\n' + nestedPairFunction('buildPair') + '\nglobalThis.makePair=buildPair;', pairNamespace);
+  const pairInput = { captured, runId, manifestSha256, manifest: m, main: entries.main, guard: entries.guard };
+  const paired = pairNamespace.makePair(pairInput), publicPair = JSON.parse(Buffer.from(paired.bytesBase64, 'base64'));
+  assert.deepEqual(copy(publicPair), copy(paired.allowed));
+  for (const entry of publicPair.releases) assert.deepEqual(Object.keys(entry).sort(), ['build', 'buildFiles', 'root', 'source', 'sourceFiles', 'version']);
+  assert.doesNotMatch(JSON.stringify(paired), /tailPostchecks|processorControllers|proofFile|candidateObservation|guardBuildTail/);
+  assert.throws(() => pairNamespace.makePair({ ...pairInput, manifest: undefined }), /real private release manifest/);
+  assert.throws(() => pairNamespace.makePair({ ...pairInput, reuseBuilds: { schema: 'sd2-original-build-reuse-input.v1' } }));
+  assert.throws(() => pairNamespace.makePair({ ...pairInput, manifest: { ...m, reuseBuilds: {} } }), /not a reused candidate/);
+  assert.throws(() => pairNamespace.makePair({ ...pairInput, main: { ...entries.main, buildProof: { ...receipts.guard, source: m.main.source } } }), /only a guard/);
+  assert.throws(() => pairNamespace.makePair({ ...pairInput, guard: { ...entries.guard,
+    buildProof: { ...receipts.guard, tailPostchecks: { ...receipts.guard.tailPostchecks, observedAt: now } } } }));
+  const originalContext = namespace.currentReleaseContext; namespace.currentReleaseContext = () => null;
+  try { assert.throws(() => pairNamespace.makePair(pairInput), /journal-bound compatible reader/); }
+  finally { namespace.currentReleaseContext = originalContext; }
+  add('pricing_pair_guard_tail_uses_actual_manifest_and_evidence_consumer_and_never_serializes_runtime');
+  add('pricing_pair_refuses_main_tail_reuse_missing_manifest_missing_runtime_and_wrong_original_receipt');
+
   const rejects = (name, change, restore, action = () => api.assertFreshCandidateEvidence(receipts.main, m, 'main', now)) => {
     change(); try { assert.throws(action); } finally { restore(); } add('reader_observation_refuses_' + name);
   };
@@ -1596,6 +1638,31 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   rejects('unbound_observation_journal', () => { events[3].value.previousSha256 = mainHead; }, () => { events[3].value.previousSha256 = readerHead; });
   traces.push({ successorReaderConsumers: true, productionAuthorizerRerun: false, originalBuildTimesRetained: true,
     observations: ['isolated protected root documents', 'isolated validated journal projection'], applicationDatabaseOpened: false });
+}
+
+{
+  const m = { stage: '/isolated-approval/stage' }, observedAt = 1792796185000;
+  const runtime = { candidateObservation: { proof: { observedAt, expiresAt: observedAt + 1800000 } } };
+  const before = copy(runtime), namespace = { m, guardBuildTailRuntime: value => { assert.equal(value, m); return runtime; } };
+  const selector = functionNode('candidate-evidence.mjs', 'hdMaintenanceApprovalFile');
+  vm.runInNewContext(selector.node.getText().replace(/^export /, '') + '\nglobalThis.select=hdMaintenanceApprovalFile;', namespace);
+  assert.equal(namespace.select(m), m.stage + '/hd-release-safety-approval.json');
+  runtime.armPairRepair = { proof: { approvalFile: m.stage + '/hd-release-safety-approval-arm-pair-r01.json' } };
+  assert.equal(namespace.select(m), runtime.armPairRepair.proof.approvalFile);
+  assert.deepEqual(runtime.candidateObservation, before.candidateObservation);
+  for (const name of ['privateHdAdmissionBounds', 'sharedHdAdmissionBounds']) {
+    const { parsed, node } = functionNode('switch.mjs', name);
+    const files = node.body.statements.filter(statement => ts.isVariableStatement(statement))
+      .flatMap(statement => [...statement.declarationList.declarations]).filter(declaration => declaration.name.getText(parsed) === 'files');
+    assert.equal(files.length, 1);
+    const properties = files[0].initializer.properties.filter(property => property.name?.getText(parsed) === 'approval');
+    assert.equal(properties.length, 1); assert.equal(properties[0].initializer.getText(parsed), 'hdMaintenanceApprovalFile(m)');
+    const actual = vm.runInNewContext(properties[0].initializer.getText(parsed), { m, hdMaintenanceApprovalFile: namespace.select });
+    assert.equal(actual, runtime.armPairRepair.proof.approvalFile);
+  }
+  namespace.guardBuildTailRuntime = () => { throw Error('unbound approval runtime'); };
+  assert.throws(() => namespace.select(m), /unbound approval runtime/);
+  add('hd_approval_selector_defaults_to_original_and_both_switch_consumers_use_bound_repair_without_refreshing_observation');
 }
 
 const nativeTailBase = '/data/video-api-debugger-engineering';

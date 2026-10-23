@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { rootFile, sha, assertReleaseWindow, validateManifest, parseReleaseTimestamp, engineDirectory } from './common.mjs';
 import { createHdReleaseSafety, prepareOperationFenceModule } from './cutover-safety.mjs';
 import { readGuardRecovery } from './guard-recovery.mjs';
-import { candidateEvidenceFile, candidateCompatibilityDirectory, REUSE_SCHEMA } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, candidateCompatibilityDirectory, hdMaintenanceApprovalFile, REUSE_SCHEMA } from './candidate-evidence.mjs';
 
 export const HD_MAINTENANCE_APPROVAL_SCHEMA = 'hd-release-maintenance-approval.v1';
 export const privateFreezeSha256 = m => sha(Buffer.from(JSON.stringify(m.privateSha256)));
@@ -51,7 +51,7 @@ export async function loadHdReleaseSafety(m, mode) {
     assert.equal(sha(rootFile(path.join(originalDirectory, file))), expected, 'Frozen private release source changed: ' + file);
   }
   const manifestSha256 = sha(rootFile(m.stage + '/manifest.json'));
-  const approvalFile = m.stage + '/hd-release-safety-approval.json';
+  const approvalFile = hdMaintenanceApprovalFile(m);
   const approvalBytes = rootFile(approvalFile, 65536), approval = JSON.parse(approvalBytes);
   if (mode === 'recovery') {
     const fixed = readGuardRecovery(m);

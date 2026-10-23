@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { assertFreshCandidateEvidence } from './candidate-evidence.mjs';
+import { assertFreshCandidateEvidence, GUARD_BUILD_TAIL_SCHEMA } from './candidate-evidence.mjs';
 
 // Importing this module does nothing. The installed guard and original marker
 // are read-only inputs. All actual switching belongs to the release controller.
@@ -198,12 +198,20 @@ export function createPricingStartPairHelper({ filesystem = fs, call = realCall,
     walk(root); same(Object.keys(files).sort(), actual.sort(), 'Source manifest must cover the exact program source tree');
     for (const [file, expected] of Object.entries(files)) { relative(file); assert.match(expected, HASH); assert.equal(hash(io.readFileSync(path.join(root, file))), expected); }
   }
-  function candidateEntry(candidate, label, runId, manifestSha256) {
+  function candidateEntry(candidate, label, runId, manifestSha256, releaseManifest) {
     assert.ok(candidate && typeof candidate === 'object'); assert.match(candidate.source, SOURCE);
     assert.equal(candidate.root, PROJECT + '/managed-releases/' + candidate.source);
     assert.equal(io.realpathSync(candidate.root), candidate.root);
     const proof = candidate.buildProof;
-    assert.ok(['rate-impl2-candidate-build.v1', 'sd2-candidate-build-reuse.v1'].includes(proof?.schema));
+    assert.ok(['rate-impl2-candidate-build.v1', 'sd2-candidate-build-reuse.v1', GUARD_BUILD_TAIL_SCHEMA].includes(proof?.schema));
+    if (proof.schema === GUARD_BUILD_TAIL_SCHEMA) {
+      assert.equal(label, 'guard', 'A retained build tail is only a guard candidate');
+      assert.ok(releaseManifest && typeof releaseManifest === 'object', 'A guard tail requires the real private release manifest');
+      assert.equal(releaseManifest.reuseBuilds, undefined, 'A guard tail is not a reused candidate admission');
+      assert.equal(releaseManifest.runId, runId); assert.equal(releaseManifest.guard.root, candidate.root);
+      assert.equal(releaseManifest.guard.source, candidate.source); assert.equal(releaseManifest.guard.version, candidate.version);
+      assertFreshCandidateEvidence(proof, releaseManifest, 'guard', now());
+    }
     if (proof.schema === 'sd2-candidate-build-reuse.v1') {
       assert.equal(proof.newCompilationClaimed, false); assert.equal(proof.originalTimesChanged, false);
       assert.equal(proof.reuseInputsFullyVerified, true); assert.equal(proof.originalBuild.source, candidate.source);
@@ -231,10 +239,11 @@ export function createPricingStartPairHelper({ filesystem = fs, call = realCall,
     return { source: entry.source, build: entry.build, sourceFiles: Object.keys(entry.sourceFiles).length,
       buildFiles: Object.keys(entry.buildFiles).length, readOnly: true, candidateFreshGateClaimed: false };
   }
-  function buildPair({ captured, runId, manifestSha256, main, guard, reuseBuilds }) {
+  function buildPair({ captured, runId, manifestSha256, main, guard, reuseBuilds, manifest }) {
     privileged(); assertCaptured(captured); runIdCheck(runId); assert.match(manifestSha256, HASH);
     const previous = allowedShape(jsonOf(captured.allowed)); assert.notEqual(runId, previous.runId);
-    const releases = [candidateEntry(main, 'main', runId, manifestSha256), candidateEntry(guard, 'guard', runId, manifestSha256)];
+    if (guard?.buildProof?.schema === GUARD_BUILD_TAIL_SCHEMA) assert.equal(reuseBuilds, undefined);
+    const releases = [candidateEntry(main, 'main', runId, manifestSha256, manifest), candidateEntry(guard, 'guard', runId, manifestSha256, manifest)];
     assert.notEqual(releases[0].source, releases[1].source);
     assertPricingPairTransition({ previous, releases, proofs: { main: main.buildProof, guard: guard.buildProof },
       reuseBuilds, runId, manifestSha256 }, now());

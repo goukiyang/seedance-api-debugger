@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { assertReleaseWindow, rootFile, sha, writeJsonExclusive, call, parseReleaseTimestamp, engineDirectory } from './common.mjs';
 import { capturePricingStartControl, PRICING_START_CONTROL, verifyFixedProgramEntry } from './pricing-start-pair.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
 import { assertOriginalSnapshotStable, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 
 const ROLES = ['web', 'image', 'hd'];
@@ -70,7 +70,7 @@ export function armGuardRecovery(m, { before, pair, builds }) {
   const entry = pair.allowed.releases.find(item => item.source === m.guardSource);
   assert.ok(entry); assert.equal(entry.root, m.guard.root); assert.equal(entry.build, builds.guard.build);
   verifyFixedProgramEntry(entry);
-  const approval = json(m.stage + '/hd-release-safety-approval.json'), now = Date.now();
+  const approval = json(hdMaintenanceApprovalFile(m)), now = Date.now();
   const issued = parseReleaseTimestamp(approval.issuedAt), expires = parseReleaseTimestamp(approval.expiresAt);
   assert.equal(approval.runId, m.runId); assert.equal(approval.manifestSha256, manifestSha256);
   assert.equal(approval.windowSha256, sha(rootFile(m.windowFile)));
@@ -79,7 +79,7 @@ export function armGuardRecovery(m, { before, pair, builds }) {
   const value = { schema: 'mv-hd-upload-fixed-guard-recovery.v1', runId: m.runId, manifestSha256,
     authorization: 'Supervisor explicit one-batch fixed compatible guard recovery contract; no general release-age exception',
     armedAt: new Date().toISOString(), originalGuardBuild: builds.guard,
-    approvalReceiptSha256: sha(rootFile(m.stage + '/hd-release-safety-approval.json')),
+    approvalReceiptSha256: sha(rootFile(hdMaintenanceApprovalFile(m))),
     originalWindowSha256: sha(rootFile(m.windowFile)),
     guardBuildReceiptSha256: sha(rootFile(candidateEvidenceFile(m, 'guard'))), guardEntry: entry,
     candidateEvidenceKind: builds.guard.schema, originalFullGuardBuild: builds.guard.originalBuild || builds.guard,
@@ -103,7 +103,7 @@ export function readGuardRecovery(m) {
   assert.deepEqual(json(candidateEvidenceFile(m, 'guard')), value.originalGuardBuild);
   assert.equal(value.originalGuardBuild.exitCode, 0); assert.equal(value.originalGuardBuild.verifiedSourceAndGates, true);
   assert.equal(value.originalGuardBuild.build, value.guardEntry.build);
-  assert.equal(sha(rootFile(m.stage + '/hd-release-safety-approval.json')), value.approvalReceiptSha256);
+  assert.equal(sha(rootFile(hdMaintenanceApprovalFile(m))), value.approvalReceiptSha256);
   return value;
 }
 export function inspectGuardRecoveryControl(m, before) {

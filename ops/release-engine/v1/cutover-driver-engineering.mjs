@@ -75,13 +75,13 @@ export async function runCompatibleSafetyReaderEngineering() {
     writerFence: { install: true, helperSha256: m.privateSha256['writer-network-fence.mjs'],
       restorePhases: ['pre-stop-installation-abort', 'before-new-writer-after-proven-old-stop'] } };
   m.windowFile = m.stage + '/window.json';
-  let bound = true, prepared = 0, constructed = 0; const reads = [];
+  let bound = true, prepared = 0, constructed = 0, approvalFile = m.stage + '/hd-release-safety-approval.json'; const reads = [];
   const rootFile = file => {
     reads.push(file);
     if (file.startsWith(originalDirectory + '/')) { const bytes = files.get(path.basename(file)); assert.ok(bytes); return bytes; }
     if (file === m.stage + '/manifest.json') return manifest;
     if (file === m.windowFile) return window;
-    if (file === m.stage + '/hd-release-safety-approval.json') return Buffer.from(JSON.stringify(approval));
+    if (file === approvalFile) return Buffer.from(JSON.stringify(approval));
     for (const kind of ['main', 'guard']) if (file === m.stage + '/' + kind + '-build.json') return builds[kind];
     throw Error('Unexpected isolated reader input: ' + file);
   };
@@ -89,6 +89,7 @@ export async function runCompatibleSafetyReaderEngineering() {
     engineDirectory: () => originalDirectory, candidateCompatibilityDirectory: () => bound ? readerDirectory : originalDirectory,
     validateManifest: value => value, assertReleaseWindow: () => {}, assertHdMaintenanceApproval,
     candidateEvidenceFile: (value, kind) => value.stage + '/' + kind + '-build.json',
+    hdMaintenanceApprovalFile: value => { assert.equal(value, m); return approvalFile; },
     fs: { readdirSync: file => { assert.equal(file, originalDirectory); return [...files.keys()]; }, existsSync: () => true,
       lstatSync: () => ({ isDirectory: () => true, isSymbolicLink: () => false, uid: 0, mode: 0o40700 }), realpathSync: value => value },
     prepareOperationFenceModule: async value => { assert.equal(value, m); prepared++; return { originalFence: true }; },
@@ -129,6 +130,10 @@ export async function runCompatibleSafetyReaderEngineering() {
   bound = false; await assert.rejects(() => delegate.prepare(m)); bound = true;
   files.set('cutover-driver.mjs', Buffer.from('drift')); await assert.rejects(() => delegate.prepare(m)); files.set('cutover-driver.mjs', original);
   assert.equal(imports, 1); cases.push('unbound_reader_and_original_source_drift_cannot_select_fence_import');
+  approvalFile = m.stage + '/hd-release-safety-approval-arm-pair-r01.json';
+  assert.equal((await namespace.load(m, 'switch')).isolated, true);
+  assert.ok(reads.includes(approvalFile)); assert.equal(constructed, 2);
+  cases.push('bound_repair_selects_its_distinct_approval_file_without_overwriting_the_original');
   return { schema: 'sd2-compatible-safety-reader-engineering.v1', completed: true, cases,
     nativeFenceExecuted: false, productionWrites: 0, serviceCalls: 0, databaseCalls: 0,
     boundary: 'Actual reader/delegation decision bodies with isolated IO; original native helper source, target and SELF are not edited' };
