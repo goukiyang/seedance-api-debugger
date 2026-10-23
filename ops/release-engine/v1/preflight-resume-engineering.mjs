@@ -731,6 +731,26 @@ assert.equal(reusedBatch.reusedOriginal.runtime.category, 'system');
 assert.equal(reusedBatch.reusedOriginal.runtime.nlink, 2);
 assert.equal(reusedBatch.reusedOriginal.runtime.file, reused.executable);
 assert.equal(reusedBatch.reusedOriginal.typescript.category, 'application');
+{
+  const f = sizeLogHarness(), read = f.context.fs.readFileSync;
+  f.context.fs.readFileSync = fd => {
+    const bytes = read(fd), parent = f.stats.get('/');
+    parent.mtimeMs += 1; parent.ctimeMs += 1; return bytes;
+  };
+  assert.doesNotThrow(() => f.api.sizeLogOriginalCheckpoint(f.m));
+  assert.equal(f.counts().spawnCalls, 0);
+}
+for (const field of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size']) rejectDelta(f => {
+  const read = f.context.fs.readFileSync;
+  f.context.fs.readFileSync = fd => { const bytes = read(fd); f.stats.get('/')[field] += 1; return bytes; };
+});
+for (const [target, field] of [['runtime', 'mtimeMs'], ['alias', 'mtimeMs'], ['alias', 'ctimeMs']]) rejectDelta(f => {
+  const read = f.context.fs.readFileSync;
+  f.context.fs.readFileSync = fd => {
+    const bytes = read(fd); f.stats.get(target === 'runtime' ? f.executable : process.execPath)[field] += 1; return bytes;
+  };
+});
+checks.push('real_ancestor_directory_time_noise_preserves_full_file_alias_path_permission_and_identity_checks');
 for (const mutate of [
   f => { f.stats.get(f.executable).uid = 1004; },
   f => { f.stats.get(f.executable).mode = 0o100775; },
