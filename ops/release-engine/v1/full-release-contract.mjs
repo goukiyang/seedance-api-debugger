@@ -29,6 +29,43 @@ function input(file, maximum = 32 * 1024 * 1024) {
   } finally { fs.closeSync(fd); }
 }
 function rootInput(file, maximum) { assert.equal(fs.lstatSync(file).uid, 0); return input(file, maximum); }
+function legacyTemplatePackageSnapshot(root, expected) {
+  // This unchanged independent service predates immutable source archives.
+  // Only its live package/version snapshot admits its observed group-write bit;
+  // this is never an immutable source or candidate-build authority.
+  assert.equal(root, '/srv/video-api-debugger/app'); assert.equal(fs.realpathSync(root), root);
+  const file = root + '/package.json'; assert.equal(fs.realpathSync(file), file);
+  assert.match(expected.source, SOURCE); assert.ok(typeof expected.build === 'string' && expected.build.length > 0 && expected.build.length <= 256);
+  const marker = root + '/.deployed-commit', buildAlias = root + '/.next-prod/BUILD_ID', buildFile = fs.realpathSync(buildAlias);
+  const binding = [marker, buildFile].map(file => ({ file, stat: fs.lstatSync(file), bytes: input(file) }));
+  assert.equal(binding[0].bytes.toString().trim(), expected.source); assert.equal(binding[1].bytes.toString().trim(), expected.build);
+
+  const uid = Number(invoke('id', ['-u', 'gouki'])), gid = Number(invoke('id', ['-g', 'gouki']));
+  assert.ok(Number.isSafeInteger(uid) && uid > 0 && Number.isSafeInteger(gid) && gid > 0);
+  const before = fs.lstatSync(file);
+  assert.ok(before.isFile() && !before.isSymbolicLink() && before.nlink === 1 && before.uid === uid && before.gid === gid
+    && !(before.mode & 0o7002) && before.size > 0 && before.size <= 64 * 1024);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(fd), bytes = fs.readFileSync(fd), after = fs.fstatSync(fd), named = fs.lstatSync(file);
+    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']) {
+      assert.equal(opened[key], before[key]); assert.equal(after[key], before[key]); assert.equal(named[key], before[key]);
+    }
+    assert.equal(bytes.length, before.size); assert.equal(fs.realpathSync(file), file);
+    assert.equal(fs.realpathSync(buildAlias), buildFile);
+    for (const value of binding) {
+      assert.deepEqual(input(value.file), value.bytes);
+      const afterBinding = fs.lstatSync(value.file);
+      for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(afterBinding[key], value.stat[key]);
+    }
+
+    return { bytes, snapshot: { schema: 'sd2-live-template-package-snapshot.v1', file,
+      dev: String(before.dev), ino: String(before.ino), uid, gid, mode: before.mode & 0o7777,
+      size: before.size, sha256: hash(bytes), source: expected.source, build: expected.build,
+      version: JSON.parse(bytes).version, markerSha256: hash(binding[0].bytes), buildIdSha256: hash(binding[1].bytes), immutableSourceEvidence: false } };
+  } finally { fs.closeSync(fd); }
+}
+
 function write(file, value) {
   const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
   try { fs.writeFileSync(fd, JSON.stringify(value, null, 2) + '\n'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -96,18 +133,20 @@ export function captureFullReleaseLive(authorities) {
     const pid = Number(state.MainPID); assert.ok(Number.isSafeInteger(pid) && pid > 1); assert.match(state.InvocationID, /^[a-f0-9]{32}$/);
     const root = fs.realpathSync(state.WorkingDirectory); assert.equal(fs.realpathSync('/proc/' + pid + '/cwd'), root);
     const source = input(root + '/.deployed-commit').toString().trim(); assert.match(source, SOURCE);
-    const version = JSON.parse(input(root + '/package.json')).version, build = input(fs.realpathSync(root + '/.next-prod/BUILD_ID')).toString().trim();
     const a = authorities.roles[role]; keys(a, ['sourceManifest', 'sourceManifestSha256', 'archive', 'archiveSha256']);
-    if (role === 'template' && a.sourceManifest === null) {
-      for (const value of Object.values(a)) assert.equal(value, null);
-    } else {
+    const legacyTemplate = role === 'template' && a.sourceManifest === null;
+    if (legacyTemplate) for (const value of Object.values(a)) assert.equal(value, null);
+    const build = input(fs.realpathSync(root + '/.next-prod/BUILD_ID')).toString().trim();
+    const packageSnapshot = legacyTemplate ? legacyTemplatePackageSnapshot(root, { source, build }) : null;
+    const version = JSON.parse(packageSnapshot ? packageSnapshot.bytes : input(root + '/package.json')).version;
+    if (!legacyTemplate) {
       const bytes = rootInput(a.sourceManifest), manifest = JSON.parse(bytes); assert.equal(hash(bytes), a.sourceManifestSha256);
       assert.equal(manifest.source, source); assert.equal(manifest.version, version); assert.equal(manifest.archiveSha256, a.archiveSha256);
       assert.equal(hash(rootInput(a.archive, 512 * 1024 * 1024)), a.archiveSha256);
       for (const file of ['package.json', 'prisma/schema.prisma']) assert.equal(hash(input(root + '/' + file)), manifest.files[file]);
     }
     liveRoles[role] = { root, source, version, build, ...a };
-    starts[role] = [pid, state.InvocationID, state.ExecMainStartTimestampMonotonic]; observed[role] = { unit: name, ...state };
+    starts[role] = [pid, state.InvocationID, state.ExecMainStartTimestampMonotonic]; observed[role] = { unit: name, ...state, ...(packageSnapshot ? { packageSnapshot: packageSnapshot.snapshot } : {}) };
   }
   const pricingRevision = JSON.parse(invoke('python3', ['-I', '-c',
     "import sqlite3,json; c=sqlite3.connect('file:/data/video-api-debugger/var-lib/dev.db?mode=ro',uri=True);c.execute('PRAGMA query_only=ON');r=c.execute(\"SELECT value_json FROM PlatformSetting WHERE key='pricing_policy_v1'\").fetchone();print(r[0] if r else 'null')"]));
@@ -128,11 +167,11 @@ export function readFullLiveSourceFiles(m, files, role = 'web') {
   const v = full.liveRoles[role];
   if (role === 'template' && v.sourceManifest === null) {
     assert.deepEqual(files, ['package.json'], 'The unchanged legacy template has no archived source authority for other files');
-    const bytes = input(v.root + '/package.json'); assert.equal(JSON.parse(bytes).version, v.version);
+    const { bytes, snapshot } = legacyTemplatePackageSnapshot(v.root, { source: v.source, build: v.build }); assert.equal(JSON.parse(bytes).version, v.version);
     assert.equal(input(v.root + '/.deployed-commit').toString().trim(), v.source);
     assert.equal(input(fs.realpathSync(v.root + '/.next-prod/BUILD_ID')).toString().trim(), v.build);
     return { source: v.source, root: v.root, sourceFiles: { 'package.json': hash(bytes) }, sourceManifestSha256: null,
-      historicalArchiveAvailable: false, unchangedIndependentConsumer: true };
+      historicalArchiveAvailable: false, unchangedIndependentConsumer: true, immutableSourceEvidence: false, packageSnapshot: snapshot };
   }
   const bytes = rootInput(v.sourceManifest), manifest = JSON.parse(bytes);
   assert.equal(hash(bytes), v.sourceManifestSha256); assert.equal(manifest.source, v.source);
