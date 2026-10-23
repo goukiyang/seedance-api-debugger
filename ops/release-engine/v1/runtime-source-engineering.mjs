@@ -230,6 +230,46 @@ function visitCalls(node) {
 visitCalls(before);
 assert.ok(calls.includes('captureLegacyWriterContracts') && calls.includes('captureHdLegacyContract'));
 checks.push('switch_premaintenance_capture_retains_same_source_checks');
+if (m.fullRelease) {
+  const roleDeclarations = switchTree.statements.filter(statement => ts.isVariableStatement(statement)
+    && statement.declarationList.declarations.some(item => ['PRICING_ROLES', 'ROLES'].includes(item.name.getText(switchTree))));
+  assert.equal(roleDeclarations.length, 2);
+  const code = roleDeclarations.map(item => item.getText(switchTree)).join('\n')
+    + '\n' + declaration('program', 'switch.mjs') + '\n' + declaration('captureSwitchBefore', 'switch.mjs');
+  for (const scenario of ['mixed-roles', 'image-as-web', 'image-source-tampered']) {
+    const observed = clone(m), files = new Map(), reached = [];
+    observed.protectedFiles = [];
+    for (const role of ['web', 'image']) {
+      const value = observed.live[role];
+      files.set(value.root + '/.deployed-commit', Buffer.from(value.source));
+      files.set(value.root + '/package.json', Buffer.from(JSON.stringify({ version: value.version })));
+      files.set(value.root + '/.next-prod/BUILD_ID', Buffer.from(value.build));
+    }
+    if (scenario !== 'mixed-roles') files.set(observed.live.image.root + '/.deployed-commit',
+      Buffer.from(scenario === 'image-as-web' ? observed.live.web.source : '0'.repeat(40)));
+    const read = file => { assert.ok(files.has(file), 'Only isolated source observations are readable'); return files.get(file); };
+    const context = { assert: sameAssert, Object, Set, Number, MV_DIRECT: { ...MV_DIRECT, privateMultiviewInstall: false },
+      fs: { realpathSync: file => { assert.ok(['web', 'image'].some(role => observed.live[role].root === file)); return file; },
+        readFileSync: file => read(file).toString('utf8') }, regularBytes: read,
+      call: (name, args) => { assert.equal(name, 'systemctl'); assert.deepEqual(Array.from(args),
+        ['show', observed.live.hd.unit, '-p', 'RefuseManualStart', '--value']); return 'no'; },
+      running: (value, role) => { assert.equal(value, observed); return { state: { role } }; },
+      policy: (value, role) => { assert.equal(value, observed); return { role }; },
+      protectedFileSnapshot: () => assert.fail('No protected files are supplied by this isolated loop'),
+      captureLegacyWriterContracts: value => { assert.equal(value, observed); reached.push('legacy'); return {}; },
+      capturePricingStartControl: () => ({}), captureHdLegacyContract: () => ({}),
+      readProtection: () => ({}), captureUsageRole: () => ({}),
+    };
+    vm.runInNewContext(code + '\nglobalThis.run=captureSwitchBefore;', context);
+    if (scenario === 'mixed-roles') {
+      const value = context.run(observed, 'f'.repeat(64));
+      assert.equal(value.manifestSha256, 'f'.repeat(64)); assert.deepEqual(reached, ['legacy']);
+    } else {
+      assert.throws(() => context.run(observed, 'f'.repeat(64))); assert.deepEqual(reached, []);
+    }
+    checks.push('actual_switch_capture_role_loop_' + scenario);
+  }
+}
 console.log(JSON.stringify({ schema: 'sd2-runtime-source-engineering.v1', completed: true, checks, count: checks.length,
   sourceSha256: Object.fromEntries(Object.entries(sources).map(([file, bytes]) => [file, sha(bytes)])),
   currentSource: m.live.web.source, ioKind: 'actual-source-capture-and-stage-body-with-isolated-service-observations',

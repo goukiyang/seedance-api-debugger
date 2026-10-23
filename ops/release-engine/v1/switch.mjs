@@ -810,8 +810,8 @@ export function captureSwitchBefore(m, manifestSha256) {
     const captured = protectedFileSnapshot(file); assert.equal(captured.sha256, m.expectedProtectedFileSha256[file]);
     return [file, captured];
   }));
-  for (const legacyRoot of new Set(PRICING_ROLES.map(role => m.live[role].root)))
-    assert.equal(program(legacyRoot).source, MV_DIRECT.baselineSource);
+  for (const role of PRICING_ROLES)
+    assert.equal(program(m.live[role].root).source, m.fullRelease ? m.fullRelease.liveRoles[role].source : MV_DIRECT.baselineSource);
   const legacy = captureLegacyWriterContracts(m);
   const captured = capturePricingStartControl(), hdLegacy = captureHdLegacyContract(m);
   const before = { schema: 'rate-impl2-switch-before.v1', manifestSha256, protection: readProtection(m),
