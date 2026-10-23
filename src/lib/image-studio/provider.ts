@@ -26,22 +26,28 @@ async function readProviderErrorBody(response: Response, originalSignal: AbortSi
     responseBytes: length, responseSha256: hash.digest('hex'), bodyComplete: complete,
     parseOutcome: bodyRead === 'timeout' || bodyRead === 'not_read' ? 'read_error' : bodyRead });
   if (!response.body) { bodyRead = 'empty_body'; return { value, bodyRead, observation: observation(), hadBody: false }; }
-  const signal = AbortSignal.any([originalSignal, AbortSignal.timeout(1000)]);
   let reader: ReadableStreamDefaultReader<Uint8Array>;
   try { reader = response.body.getReader(); }
   catch { bodyRead = 'read_error'; return { value, bodyRead, observation: observation(), hadBody: true }; }
+  const controller = new AbortController(), signal = controller.signal;
+  const forwardAbort = () => controller.abort(originalSignal.reason);
+  // Own a referenced total deadline: Node 20's inline timeout/any sources may be weakly held.
+  const deadline = setTimeout(() => controller.abort(), 1000); deadline.ref();
   const chunks: Uint8Array[] = [];
   const abort = () => { void reader.cancel().catch(() => {}); };
-  signal.addEventListener('abort', abort, { once: true });
   try {
+    signal.addEventListener('abort', abort, { once: true });
+    originalSignal.addEventListener('abort', forwardAbort, { once: true });
+    if (originalSignal.aborted) forwardAbort();
     for (;;) {
       if (signal.aborted) { bodyRead = 'timeout'; break; }
+      let fail: (() => void) | undefined;
       const next = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
-        const fail = () => reject(new Error('diagnostic_read_aborted'));
+        fail = () => reject(new Error('diagnostic_read_aborted'));
         signal.addEventListener('abort', fail, { once: true });
-        reader.read().then(resolve, reject).finally(() => signal.removeEventListener('abort', fail));
+        reader.read().then(resolve, reject);
         if (signal.aborted) fail();
-      });
+      }).finally(() => { if (fail) signal.removeEventListener('abort', fail); });
       if (signal.aborted) { bodyRead = 'timeout'; break; }
       if (next.done) { complete = true; bodyRead = length ? 'valid_json' : 'empty_body'; break; }
       const remaining = 64 * 1024 - length, oversize = next.value.byteLength > remaining;
@@ -54,7 +60,10 @@ async function readProviderErrorBody(response: Response, originalSignal: AbortSi
       catch { bodyRead = 'invalid_json'; }
     }
   } catch { bodyRead = signal.aborted ? 'timeout' : 'read_error'; }
-  finally { signal.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); }
+  finally {
+    clearTimeout(deadline); originalSignal.removeEventListener('abort', forwardAbort);
+    signal.removeEventListener('abort', abort); void reader.cancel().catch(() => {});
+  }
   return { value, bodyRead, observation: observation(), hadBody: true };
 }
 function providerErrorCollector(model: string, resumed: boolean, callback?: StudioProviderErrorRecorder) {
