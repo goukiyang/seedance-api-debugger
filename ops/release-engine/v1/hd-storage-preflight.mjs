@@ -157,19 +157,50 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
     prior.remaining(); record('strict-result', { at: Date.now(), result }); return result;
   }
   const startedAt = Date.now(); assert.ok(Number.isSafeInteger(deadline) && typeof check === 'function' && typeof record === 'function');
-  deadline = Math.min(deadline, startedAt + 15000);
-  let attempt = 0, sequence = 0;
+  const fullReleaseClock = isSharedEngine(m) && Boolean(m.fullRelease) && !m.protectedIncrement && m.privateMultiviewInstall === true;
+  if (fullReleaseClock) {
+    assert.ok(Number.isSafeInteger(scanDeadline), 'The shared full release requires its real outer scan deadline');
+    assert.ok(Number.isSafeInteger(waitBudgetMs) && waitBudgetMs > 0 && waitBudgetMs <= 15000);
+  }
+  deadline = fullReleaseClock ? Math.min(deadline, scanDeadline) : Math.min(deadline, startedAt + 15000);
+  let attempt = 0, sequence = 0, waitStartedAt = null, waitAdmission = null;
+  const collisionAdmission = () => {
+    if (!fullReleaseClock) return admission;
+    if (!waitAdmission) {
+      waitStartedAt = Date.now();
+      const waitDeadline = Math.min(deadline, waitStartedAt + waitBudgetMs);
+      waitAdmission = { ...admission, deadline: waitDeadline,
+        remaining() {
+          admission.remaining(); const left = waitDeadline - Date.now();
+          if (left <= 0) throw Object.assign(Error('HD discovery collision waiting deadline expired'), { code: 'HD_DISCOVERY_ADMISSION_DEADLINE' });
+          return Math.min(30000, left);
+        } };
+    }
+    return waitAdmission;
+  };
   const admission = { [DISCOVERY_ADMISSION]: true, deadline, check,
-    remaining() { const value = deadline - Date.now(); if (value <= 0) throw Object.assign(Error('HD discovery admission hard deadline expired'), { code: 'HD_DISCOVERY_ADMISSION_DEADLINE' }); return Math.min(30000, value); },
+    remaining() {
+      if (fullReleaseClock) {
+        try { check(); } catch (error) { error.hdAdmissionFatal = true; throw error; }
+      }
+      const value = deadline - Date.now();
+      if (value <= 0) throw Object.assign(Error(fullReleaseClock ? 'HD reconciliation scan admission expired' : 'HD discovery admission hard deadline expired'),
+        { code: fullReleaseClock ? 'HD_RECONCILIATION_SCAN_DEADLINE' : 'HD_DISCOVERY_ADMISSION_DEADLINE' });
+      return Math.min(30000, value);
+    },
     inventory(root, result) { record('inventory-' + (++sequence), { attempt, at: Date.now(), role: root === m.hdRoot ? 'canonical' : 'fork',
       completed: true, signature: result.signature, transients: result.transients, jobs: result.jobs.size, controlSha256: result.controlSha256 }); },
     observe(phase) {
       admission.remaining();
       record('boundary-' + (++sequence), { attempt, at: Date.now(), phase, completedStrictResult: false });
       if (!fs.existsSync(m.hdRoot + '/discovery.lock')) return;
-      const proof = readDiscoveryOwner(m, l, admission);
+      // The first confirmed collision starts the separate waiting clock before
+      // owner/source/metadata reads; static scanning never spends this budget.
+      const waiting = collisionAdmission();
+      const proof = readDiscoveryOwner(m, l, waiting);
       assert.ok(initialSnapshot, 'Discovery wait lacks an unchanged pre-inspection metadata snapshot');
-      assert.deepEqual(discoveryTreeSnapshot(m, admission), initialSnapshot, 'HD task, cache, control or path identity changed; do not wait into safety');
+      assert.deepEqual(discoveryTreeSnapshot(m, waiting), initialSnapshot, 'HD task, cache, control or path identity changed; do not wait into safety');
+      if (fullReleaseClock) waiting.remaining();
       throw new DiscoveryAdmissionBusy(phase, proof);
     },
   };
@@ -197,15 +228,17 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
   let busy;
   try { return await invoke(); }
   catch (error) { if (!(error instanceof DiscoveryAdmissionBusy)) throw error; busy = error; }
-  record('known-busy', { at: Date.now(), phase: busy.phase, proof: busy.proof, initialSnapshot, maximumMs: 15000, deadline });
+  const waiting = waitAdmission || admission;
+  record('known-busy', { at: Date.now(), phase: busy.phase, proof: busy.proof, initialSnapshot, maximumMs: 15000, deadline: waiting.deadline,
+    ...(fullReleaseClock ? { waitStartedAt, scanDeadline: deadline } : {}) });
   const originalRuntime = Object.fromEntries(['pid', 'host', 'startTicks', 'processGroup', 'cgroup', 'state', 'sources'].map(k => [k, busy.proof[k]]));
   const lockEntry = () => {
     try { return fs.lstatSync(busy.proof.lock); }
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   };
   while (lockEntry()) {
-    check(); admission.remaining();
-    try { assert.deepEqual(readDiscoveryOwner(m, l, admission, busy.proof), busy.proof, 'Discovery owner or file identity drifted while waiting'); }
+    check(); waiting.remaining();
+    try { assert.deepEqual(readDiscoveryOwner(m, l, waiting, busy.proof), busy.proof, 'Discovery owner or file identity drifted while waiting'); }
     catch (error) {
       if (error.code !== 'ENOENT' && !(error instanceof DiscoveryOwnerReleaseCandidate && error.proof === busy.proof)) throw error;
       let ownerAbsent = false;
@@ -227,14 +260,14 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
         if (cleanup.code !== 'ENOENT') throw cleanup;
         assert.equal(lockEntry(), null); break;
       }
-      assert.deepEqual(readDiscoveryRuntime(m, l, admission), originalRuntime);
+      assert.deepEqual(readDiscoveryRuntime(m, l, waiting), originalRuntime);
     }
-    assert.deepEqual(discoveryTreeSnapshot(m, admission), initialSnapshot, 'HD metadata changed while waiting');
-    await new Promise(resolve => setTimeout(resolve, Math.min(10, admission.remaining())));
+    assert.deepEqual(discoveryTreeSnapshot(m, waiting), initialSnapshot, 'HD metadata changed while waiting');
+    await new Promise(resolve => setTimeout(resolve, Math.min(10, waiting.remaining())));
   }
-  check(); admission.remaining();
-  assert.deepEqual(readDiscoveryRuntime(m, l, admission), originalRuntime, 'HD runtime changed during natural discovery release');
-  assert.deepEqual(discoveryTreeSnapshot(m, admission), initialSnapshot, 'HD metadata changed during natural discovery release');
+  check(); waiting.remaining();
+  assert.deepEqual(readDiscoveryRuntime(m, l, waiting), originalRuntime, 'HD runtime changed during natural discovery release');
+  assert.deepEqual(discoveryTreeSnapshot(m, waiting), initialSnapshot, 'HD metadata changed during natural discovery release');
   record('natural-release', { at: Date.now(), originalOwner: busy.proof, forced: false, metadataUnchanged: true });
   // No exception translation on this second call. Only a complete original strict
   // result may reach the caller's unchanged canEnterControlledDrain assertion.

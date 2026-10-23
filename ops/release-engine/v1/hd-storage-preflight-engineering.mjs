@@ -630,11 +630,13 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
       fs.mkdirSync(path.dirname(root + '/' + file), { recursive: true }); fs.copyFileSync(applicationRoot + '/' + file, root + '/' + file);
     }
     const admissionTimings = [];
-    async function admissionCase(name, { held = true, trigger, mutate, reject = false, deadlineMs = 5000, clockJump = false } = {}) {
+    async function admissionCase(name, { held = true, trigger, mutate, reject = false, deadlineMs = 5000, clockJump = false,
+      sharedFull = false, staticOver15 = false, freshScanOver15 = false, ownerOver15 = false, scanDeadlineMs = deadlineMs, checkFailure = false, expectedCode } = {}) {
       const lock = m.hdRoot + '/discovery.lock', marker = path.join(directory, 'owner-ready-' + randomUUID());
       const beforeJob = fs.readFileSync(path.join(m.hdRoot, pending.key + '.json'));
       const candidateFile = roots[1] + '/src/lib/media/hd-discovery.ts', beforeSource = fs.readFileSync(candidateFile);
-      const records = [], actualNow = Date.now, start = actualNow(); let triggered = false, moved = null, invokedAt, invocationDeadline;
+      const records = [], actualNow = Date.now, start = actualNow(); let triggered = false, moved = null, invokedAt, invocationDeadline, invocationScanDeadline, failure;
+      let clockOffset = 0, staticAdvanced = false, ownerDelayInjected = false, authorityChanged = false;
       const program = `const fs=require('node:fs'),os=require('node:os'),crypto=require('node:crypto');process.umask(0o022);
 const [lock,marker,held]=process.argv.slice(1);const acquire=()=>{fs.mkdirSync(lock);fs.writeFileSync(lock+'/owner.json',JSON.stringify({pid:process.pid,host:os.hostname(),token:crypto.randomUUID()}),{mode:384});fs.writeFileSync(marker,'ready');};
 const release=()=>{if(fs.existsSync(lock)){fs.unlinkSync(lock+'/owner.json');fs.rmdirSync(lock);}};
@@ -654,6 +656,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       m.live = { hd: { unit: 'sd2-hd-derivatives.service', pid: info.pid, invocation: unit.InvocationID,
         execMainStartTimestampMonotonic: unit.ExecMainStartTimestampMonotonic, root: roots[0] } };
       m.hdAdmissionFixtureUnit = unit; m.hdAdmissionFixtureCgroup = info.cgroup;
+      if (sharedFull) { m.engine = { schema: 'sd2-release-engine.v1' }; m.fullRelease = {}; }
       const acquireAtBoundary = () => {
         if (fs.existsSync(marker)) fs.unlinkSync(marker); child.send('acquire');
         const limit = records.find(item => item.kind.startsWith('strict-start-'))?.value.deadline ?? invocationDeadline;
@@ -661,6 +664,13 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         assert.ok(fs.existsSync(marker), 'Isolated owner did not acquire its lease at the requested boundary');
       };
       const originalLstat = fs.lstatSync, originalOpen = fs.openSync, originalFstat = fs.fstatSync;
+      if (ownerOver15) fs.openSync = function (target, ...args) {
+        const fd = originalOpen.call(fs, target, ...args);
+        if (!ownerDelayInjected && target === lock + '/owner.json') {
+          ownerDelayInjected = true; clockOffset += 15001; Date.now = () => actualNow() + clockOffset;
+        }
+        return fd;
+      };
       const ownerUnlinkedCase = name.startsWith('owner-file-unlinked-');
       let cleanupRequested = false, cleanupStat = null, cleanupInjected = false;
       let ownerReadFd = null, ownerReadStats = 0, ownerFinalLstat = false;
@@ -722,17 +732,30 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         if (name === 'five-source-drift') fs.writeFileSync(candidateFile, beforeSource + '\n// changed isolated candidate\n');
         if (name === 'unknown-cache') fs.mkdirSync(m.hdRoot + '/.runs/' + pending.key + '.' + randomUUID(), { recursive: true });
         const action = async () => {
-          invokedAt = Date.now(); invocationDeadline = invokedAt + deadlineMs;
-          const result = await inspectHdBeforeMaintenance(m, { sourceRoot: roots[0], deadline: invocationDeadline, check: () => {},
+          invokedAt = Date.now(); invocationDeadline = invokedAt + deadlineMs; invocationScanDeadline = invokedAt + scanDeadlineMs;
+          const result = await inspectHdBeforeMaintenance(m, { sourceRoot: roots[0], deadline: invocationDeadline,
+          ...(sharedFull ? { scanDeadline: invocationScanDeadline } : {}),
+          check: () => { if (authorityChanged) throw Object.assign(Error('Synthetic outer authority drift'), { code: 'SYNTHETIC_AUTHORITY_DRIFT' }); },
           record: (kind, value) => {
             records.push({ kind, value });
+            if (kind.startsWith('boundary-') && staticOver15 && !staticAdvanced) {
+              staticAdvanced = true; clockOffset += 16000; Date.now = () => actualNow() + clockOffset;
+            }
+            if (kind.startsWith('boundary-') && checkFailure) authorityChanged = true;
             if (kind.startsWith('boundary-') && value.phase === trigger && !triggered) { triggered = true; acquireAtBoundary(); }
             if (kind === 'known-busy') {
               if (name === 'natural-release-unlinked-stat' || ownerUnlinkedCase) cleanupRequested = true;
               const firstStrictAt = records.find(item => item.kind.startsWith('strict-start-')).value.at;
-              assert.ok(value.deadline <= firstStrictAt + 15000); assert.ok(value.deadline <= invocationDeadline);
+              if (sharedFull) {
+                assert.ok(Number.isSafeInteger(value.waitStartedAt) && value.waitStartedAt >= firstStrictAt);
+                assert.ok(value.deadline <= value.waitStartedAt + 15000);
+                assert.equal(value.scanDeadline, Math.min(invocationDeadline, invocationScanDeadline));
+                if (staticOver15) assert.ok(value.waitStartedAt >= invokedAt + 16000);
+              } else assert.ok(value.deadline <= firstStrictAt + 15000);
+              assert.ok(value.deadline <= invocationDeadline);
               if (mutate === 'task') save(m.hdRoot, { ...pending, priority: pending.priority + 1 });
               if (mutate === 'unit') unit.InvocationID = '2'.repeat(32);
+              if (mutate === 'source') fs.writeFileSync(candidateFile, beforeSource + '\n// changed during discovery collision\n');
               if (mutate === 'owner') fs.writeFileSync(lock + '/owner.json', JSON.stringify({ pid: info.pid, host: os.hostname(), token: randomUUID() }));
               if (name === 'owner-file-replaced') {
                 const replacement = marker + '.replacement';
@@ -740,27 +763,42 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
                 fs.renameSync(replacement, lock + '/owner.json');
               }
               if (mutate === 'path') { moved = m.hdRoot + '.held'; const old = fs.statSync(m.hdRoot); fs.renameSync(m.hdRoot, moved); fs.mkdirSync(m.hdRoot, { mode: 0o700 }); assert.notEqual(fs.statSync(m.hdRoot).ino, old.ino); }
-              if (clockJump) Date.now = () => actualNow() + 16000;
+              if (clockJump) { clockOffset += 16000; Date.now = () => actualNow() + clockOffset; }
               if (!ownerUnlinkedCase && name !== 'owner-file-replaced'
                 && !['persistent', 'short-deadline', 'hard-cap', 'natural-release-unlinked-stat'].includes(name)
                 && !['path', 'owner'].includes(mutate)) child.send('release');
             }
             if (kind === 'natural-release' && name === 'second-strict-collision') acquireAtBoundary();
+            if (kind === 'natural-release' && freshScanOver15) { clockOffset += 16000; Date.now = () => actualNow() + clockOffset; }
           } });
           assert.equal(result.safe, true, 'The caller must still require the complete original strict result');
           return result;
         };
-        if (reject) await assert.rejects(action, name === 'owner-file-replaced' ? /Bound discovery owner file identity changed/
+        const observedAction = async () => { try { return await action(); } catch (error) { failure = error; throw error; } };
+        if (reject) await assert.rejects(observedAction, name === 'owner-file-replaced' ? /Bound discovery owner file identity changed/
           : name === 'owner-file-unlinked-still-present' ? /requires a fresh absence/
           : ownerUnlinkedCase ? /Bound discovery owner path changed while reading/ : undefined);
         else { const result = await action(); assert.equal(result.safe, true);
           assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, held || trigger ? 2 : 1); }
+        if (expectedCode) assert.equal(failure?.code, expectedCode);
+        if (ownerOver15) { assert.equal(ownerDelayInjected, true); assert.equal(records.some(value => value.kind === 'known-busy'), false); }
+        if (sharedFull && staticOver15 && !reject) {
+          assert.ok(Date.now() - invokedAt >= 16000);
+          assert.ok(records.filter(value => value.kind.startsWith('strict-start-')).every(value => value.value.deadline === Math.min(invocationDeadline, invocationScanDeadline)));
+        }
+        if (freshScanOver15 && !reject) {
+          const busy = records.find(value => value.kind === 'known-busy');
+          assert.ok(records.find(value => value.kind === 'strict-result-2').value.at > busy.value.deadline,
+            'The single fresh strict scan must use outer scan authority after natural release');
+        }
         if (name === 'natural-release-unlinked-stat' || ownerUnlinkedCase) assert.equal(cleanupInjected, true);
         assert.ok(records.filter(v => v.kind.startsWith('strict-start-')).length <= 2);
         if (name === 'unknown-owner') assert.equal(records.some(v => v.kind === 'known-busy'), false);
         if (name === 'second-strict-collision') assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, 2);
         admissionTimings.push({ name, startedAt: start, ownerReadyAt, invokedAt, invocationDeadline,
           boundedDeadline: records.find(v => v.kind.startsWith('strict-start-'))?.value.deadline ?? null,
+          sharedFull, invocationScanDeadline, waitStartedAt: records.find(v => v.kind === 'known-busy')?.value.waitStartedAt ?? null,
+          waitDeadline: records.find(v => v.kind === 'known-busy')?.value.deadline ?? null, observedElapsedMs: Date.now() - invokedAt,
           invocationElapsedMs: actualNow() - invokedAt, durationMs: actualNow() - start, rejected: reject, strictStarts: records.filter(v => v.kind.startsWith('strict-start-')).length,
           completedResults: records.filter(v => v.kind.startsWith('strict-result-')).length, fixtureFinalOnly: true });
         checks.push('bounded-discovery-' + name);
@@ -774,9 +812,23 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         if (fs.existsSync(m.hdRoot + '/unknown.lock')) fs.rmdirSync(m.hdRoot + '/unknown.lock');
         if (name === 'unknown-cache') fs.rmSync(m.hdRoot + '/.runs', { recursive: true });
         if (fs.existsSync(marker)) fs.unlinkSync(marker);
-        for (const key of ['privateMultiviewInstall', 'main', 'live', 'hdAdmissionFixtureUnit', 'hdAdmissionFixtureCgroup']) delete m[key];
+        for (const key of ['privateMultiviewInstall', 'main', 'live', 'hdAdmissionFixtureUnit', 'hdAdmissionFixtureCgroup', 'engine', 'fullRelease']) delete m[key];
       }
     }
+    const fullReleaseClockCases = [
+      ['legacy-static-over-15s-still-refused', { held: false, deadlineMs: 60000, staticOver15: true, reject: true, expectedCode: 'HD_DISCOVERY_ADMISSION_DEADLINE' }],
+      ['shared-full-static-over-15s-uses-outer-scan', { sharedFull: true, held: false, deadlineMs: 60000, scanDeadlineMs: 45000, staticOver15: true }],
+      ['shared-full-expired-scan-refused', { sharedFull: true, held: false, deadlineMs: 60000, scanDeadlineMs: 10000, staticOver15: true, reject: true, expectedCode: 'HD_RECONCILIATION_SCAN_DEADLINE' }],
+      ['shared-full-earlier-fresh-deadline-refused', { sharedFull: true, held: false, deadlineMs: 10000, scanDeadlineMs: 60000, staticOver15: true, reject: true, expectedCode: 'HD_RECONCILIATION_SCAN_DEADLINE' }],
+      ['shared-full-late-collision-and-fresh-strict-have-separate-clocks', { sharedFull: true, held: false, trigger: 'inventory-complete', deadlineMs: 60000, scanDeadlineMs: 45000, staticOver15: true, freshScanOver15: true }],
+      ['shared-full-collision-wait-still-capped-at-15s', { sharedFull: true, held: false, trigger: 'inventory-complete', deadlineMs: 60000, staticOver15: true, clockJump: true, reject: true, expectedCode: 'HD_DISCOVERY_ADMISSION_DEADLINE' }],
+      ['shared-full-owner-verification-spends-collision-budget', { sharedFull: true, held: false, trigger: 'inventory-complete', deadlineMs: 60000, staticOver15: true, ownerOver15: true, reject: true, expectedCode: 'HD_DISCOVERY_ADMISSION_DEADLINE' }],
+      ['shared-full-outer-check-drift-refused', { sharedFull: true, held: false, deadlineMs: 60000, checkFailure: true, reject: true, expectedCode: 'SYNTHETIC_AUTHORITY_DRIFT' }],
+      ['shared-full-collision-metadata-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'task', reject: true }],
+      ['shared-full-collision-owner-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'owner', reject: true }],
+      ['shared-full-collision-source-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'source', reject: true }],
+      ['shared-full-collision-runtime-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'unit', reject: true }],
+    ];
     for (const [name, options] of [
       ['no-collision', { held: false }], ['natural-release', {}], ['natural-release-unlinked-stat', {}],
       ['owner-file-unlinked-stat', {}], ['owner-file-unlinked-inode-changed', { reject: true }],
@@ -790,6 +842,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       ['path-changed', { reject: true, mutate: 'path' }], ['owner-changed', { reject: true, mutate: 'owner' }],
       ['short-deadline', { reject: true, deadlineMs: 1 }], ['hard-cap', { reject: true, deadlineMs: 60000, clockJump: true }],
       ['second-strict-collision', { reject: true }], ['unknown-cache', { reject: true }], ['five-source-drift', { reject: true }],
+      ...fullReleaseClockCases,
     ]) await admissionCase(name, options);
 
     const protectedContinuationTimings = [], protectedSources = [...discoverySources,
@@ -1063,7 +1116,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 49 + protectedCases.length);
+    assert.equal(checks.length, 49 + protectedCases.length + fullReleaseClockCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,

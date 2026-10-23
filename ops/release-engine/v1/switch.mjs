@@ -1242,7 +1242,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
     await loadHdCompiledCacheProofs(m);
     const admissionRepair = mode === 'switch' ? assertSwitchAdmissionRepair(m) : null;
     const repairRuntime = admissionRepair ? guardBuildTailRuntime(m) : null;
-    const repairSha256 = repairRuntime ? (repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
+    const repairSha256 = repairRuntime ? (repairRuntime.switchScanRepair || repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
     if (repairSha256) assert.match(repairSha256, /^[a-f0-9]{64}$/);
     const admissionName = name => repairSha256 ? name + '-' + repairSha256 : name;
     let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;

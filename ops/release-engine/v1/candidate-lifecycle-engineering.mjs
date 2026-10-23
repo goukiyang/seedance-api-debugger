@@ -1893,7 +1893,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -1902,10 +1902,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const m = { privateSha256: sets.original.proof.processorControllers };
   const runtime = { proof: sets.tail.proof, retry: { proof: sets.retry.proof }, reader: { proof: sets.reader.proof },
     armPairRepair: { proof: sets.pair.proof }, armProcessorRepair: { proof: sets.processor.proof },
-    switchAdmissionRepair: { proof: sets.switch.proof }, switchTypedRepair: { proof: sets.typed.proof },
+    switchAdmissionRepair: { proof: sets.switch.proof }, switchTypedRepair: { proof: sets.typed.proof }, switchScanRepair: { proof: sets.scan.proof },
     candidateObservation: { proof: { observedAt: 1792796185000, expiresAt: 1792797985000 } } };
   const originalRuntime = copy(runtime), reads = [];
-  let activeBytes = sets.typed.bytes, actualFiles = [...files], selectedRuntime = runtime;
+  let activeBytes = sets.scan.bytes, actualFiles = [...files], selectedRuntime = runtime;
   const namespace = { assert: sameAssert, path, JSON, sha, directory,
     guardBuildTailRuntime: value => { assert.equal(value, m); return selectedRuntime; }, engineDirectory: () => '/isolated-trusted/original-engine',
     fs: { readdirSync: root => { assert.equal(root, directory); return actualFiles; } },
@@ -1916,16 +1916,16 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     + functionNode('candidate-evidence.mjs', 'candidateCompatibilityDirectory').node.getText().replace(/^export /, '')
     + '\nglobalThis.verify=trustedCode;globalThis.compatibility=candidateCompatibilityDirectory;', namespace);
   namespace.verify(m, runtime); assert.deepEqual(reads.sort(), [...files].sort()); assert.deepEqual(runtime, originalRuntime);
-  assert.equal(namespace.compatibility(m), sets.typed.proof.processor.root);
+  assert.equal(namespace.compatibility(m), sets.scan.proof.processor.root);
   activeBytes = sets.reader.bytes; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
-  activeBytes = sets.typed.bytes;
-  const badDigest = copy(runtime); badDigest.switchTypedRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
+  activeBytes = sets.scan.bytes;
+  const badDigest = copy(runtime); badDigest.switchScanRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
   assert.throws(() => namespace.verify(m, badDigest));
   actualFiles = [...files, 'unexpected.mjs']; assert.throws(() => namespace.verify(m, runtime)); actualFiles = [...files];
-  const corrupt = { ...sets.typed.bytes, 'release.mjs': Buffer.from('changed private source') };
+  const corrupt = { ...sets.scan.bytes, 'release.mjs': Buffer.from('changed private source') };
   activeBytes = corrupt; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
   const fallback = copy(runtime);
-  for (const [remove, selected] of [['switchTypedRepair', 'switch'], ['switchAdmissionRepair', 'processor'],
+  for (const [remove, selected] of [['switchScanRepair', 'typed'], ['switchTypedRepair', 'switch'], ['switchAdmissionRepair', 'processor'],
     ['armProcessorRepair', 'pair'], ['armPairRepair', 'reader'], ['reader', 'retry'], ['retry', 'tail']]) {
     delete fallback[remove]; activeBytes = sets[selected].bytes; selectedRuntime = fallback; namespace.verify(m, fallback);
     assert.equal(namespace.compatibility(m), sets[selected].proof.processor.root);
@@ -1959,6 +1959,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     approvalFile: m.stage + '/hd-release-safety-approval-switch-typed-r01.json' } };
   assert.equal(namespace.select(m), runtime.switchTypedRepair.proof.approvalFile);
   assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
+  runtime.switchScanRepair = { proof: { ...copy(runtime.switchTypedRepair.proof),
+    approvalFile: m.stage + '/hd-release-safety-approval-switch-scan-r01.json' } };
+  assert.equal(namespace.select(m), runtime.switchScanRepair.proof.approvalFile);
+  assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
   for (const name of ['privateHdAdmissionBounds', 'sharedHdAdmissionBounds']) {
     const { parsed, node } = functionNode('switch.mjs', name);
     const files = node.body.statements.filter(statement => ts.isVariableStatement(statement))
@@ -1967,8 +1971,9 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     const properties = files[0].initializer.properties.filter(property => property.name?.getText(parsed) === 'approval');
     assert.equal(properties.length, 1); assert.equal(properties[0].initializer.getText(parsed), 'hdMaintenanceApprovalFile(m)');
     const actual = vm.runInNewContext(properties[0].initializer.getText(parsed), { m, hdMaintenanceApprovalFile: namespace.select });
-    assert.equal(actual, runtime.switchTypedRepair.proof.approvalFile);
+    assert.equal(actual, runtime.switchScanRepair.proof.approvalFile);
   }
+  delete runtime.switchScanRepair; assert.equal(namespace.select(m), runtime.switchTypedRepair.proof.approvalFile);
   delete runtime.switchTypedRepair; assert.equal(namespace.select(m), runtime.switchAdmissionRepair.proof.approvalFile);
   assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
   delete runtime.switchAdmissionRepair; assert.equal(namespace.select(m), runtime.armProcessorRepair.proof.approvalFile);
