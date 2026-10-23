@@ -12,6 +12,9 @@ import { assertCanvasBatchSchemaInput, assertCanvasBatchPrismaExtension } from '
 import { PROTECTED_INCREMENT, PROTECTED_INCREMENT_SOURCE_FILES,
   assertProtectedIncrementCandidate } from './release-contract.mjs';
 import { CANVAS_BATCH_PROBE, readOriginalCanvasBatchMigration, DEPLOYED_CANVAS_FIELDS } from './canvas-batch-schema.mjs';
+import { engineDirectory, isSharedEngine } from './common.mjs';
+import { verifyDeployedContinuationProvenance, verifySharedBuildProvenance } from './normal-continuation.mjs';
+import { verifyDeployedUsageSchema } from './deployed-usage-schema.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const before = 'model CanvasDocument {\n  id String @id\n}\n\nmodel CanvasDocumentRevision {\n  id String @id\n}\n';
@@ -33,9 +36,6 @@ for (const mode of [{ reuseBuilds: {} }, { normalContinuation: { schema: 'sd2-no
     canvasVideoBatchSchema: input, deployedUsageSchema: {}, ...mode }));
 }
 const deployedCanvasSource = fs.readFileSync(new URL('./canvas-batch-schema.mjs', import.meta.url), 'utf8');
-assert.ok(deployedCanvasSource.includes('if (m.normalContinuation || m.reuseBuilds) verifyDeployedContinuationProvenance(m);'));
-assert.ok(deployedCanvasSource.indexOf('verifyDeployedContinuationProvenance(m);')
-  < deployedCanvasSource.indexOf("const original = pinned(stage + '/manifest.json'"));
 
 const protectedBaseline = '31bff5a6544a3d18d433b81fa7735ed57b0d012c';
 assert.equal(PROTECTED_INCREMENT.baselineSource, protectedBaseline);
@@ -125,9 +125,35 @@ print(json.dumps({'database':str(db),'backup':str(backup),'databaseIdentity':[st
   assert.ok(source.includes('applyCanvasBatchMigration(m, () => { assertOriginalStopped(m, before); assertUsageRoleStopped(m); })'));
   assert.ok(source.includes('readCanvasBatchMigration(m, { required: true })'));
   if (process.argv[2]) {
-    // Read only reviewed package bytes; every mutable path below is isolated.
+    // The shared-reuse path reads the actual pinned migration and backup only.
+    // All producer/adoption writes below remain in the isolated sandbox.
     const real = JSON.parse(fs.readFileSync(process.argv[2]));
     assert.ok(real.canvasVideoBatchSchema);
+    if (isSharedEngine(real) && real.reuseBuilds) {
+      const actual = readOriginalCanvasBatchMigration(real);
+      const usage = verifyDeployedUsageSchema(real);
+      assert.equal(actual.receipt.completed, true);
+      assert.equal(actual.observed.databaseWrites, 0);
+      assert.equal(actual.receipt.runId, real.deployedCanvasBatchSchema.migrationRun);
+      assert.equal(actual.receipt.backupSha256, real.deployedCanvasBatchSchema.backupSha256);
+      assert.deepEqual(usage.observed.databaseIdentity, actual.observed.databaseIdentity);
+      assert.equal(usage.observed.databaseWrites, 0); assert.equal(usage.observed.ddlExecuted, false);
+      const invalidReuse = change => {
+        const invalid = structuredClone(real); change(invalid);
+        assert.throws(() => readOriginalCanvasBatchMigration(invalid));
+      };
+      invalidReuse(value => { value.reuseBuilds.sourceRun = value.runId; });
+      invalidReuse(value => { value.reuseBuilds.main.sha256 = '0'.repeat(64); });
+      invalidReuse(value => { value.deployedCanvasBatchSchema.backupSha256 = '0'.repeat(64); });
+      invalidReuse(value => { value.operation.taskRoot += '-other-task'; });
+      assert.throws(() => readOriginalCanvasBatchMigration({ ...real, normalContinuation: {} }),
+        /Shared attempts do not impersonate legacy normal continuations/);
+      assert.throws(() => readOriginalCanvasBatchMigration({ ...real, engine: undefined, operation: undefined }),
+        /Deployed schema reuse requires exact normal continuation v2/);
+      console.log(JSON.stringify({ sharedBuildReuseOriginalCanvasMigration: true,
+        actualPinnedReaderAndUsageConsumerExecuted: true, invalidOriginSealSchemaTaskAndPrivateReuseRejected: true,
+        originalReceiptAndBackupPreserved: true, productionWrites: 0 }));
+    }
     const sandbox = path.join(root, 'producer-consumer');
     fs.mkdirSync(sandbox);
     const put = (file, bytes) => { assert.ok(file.startsWith(sandbox + '/')); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, bytes); };
@@ -200,7 +226,8 @@ print(json.dumps(mod.apply_schema(m['database'],pathlib.Path(m['stage'])/'canvas
       return execFileSync('python3', ['-I', '-c', code, args[1], fixture.stage + '/manifest.json'], { encoding: 'utf8' });
     };
     const normalizedAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) };
-    const context = vm.createContext({ assert: normalizedAssert, fs, ...contract, assertProtectedIncrementCandidate,
+    const context = vm.createContext({ assert: normalizedAssert, fs, ...contract, assertProtectedIncrementCandidate, engineDirectory, isSharedEngine,
+      verifyDeployedContinuationProvenance, verifySharedBuildProvenance,
       rootFile: checked, sha: hash, call,
       writeJsonExclusive: () => { throw new Error('First migration must not create deployed adoption evidence'); },
       assertReleaseWindow: value => { assert.equal(value, fixture); windowChecks++; } });
@@ -319,7 +346,8 @@ print('actual-first-migration-produced')`;
       const values = JSON.parse(args[3]); values.database = physical(values.database); values.backup = physical(values.backup);
       return execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(values)], { encoding: 'utf8' });
     };
-    const adoptionContext = vm.createContext({ assert: normalizedAssert, fs: io, ...contract, assertProtectedIncrementCandidate,
+    const adoptionContext = vm.createContext({ assert: normalizedAssert, fs: io, ...contract, assertProtectedIncrementCandidate, engineDirectory, isSharedEngine,
+      verifyDeployedContinuationProvenance, verifySharedBuildProvenance,
       rootFile: vbytes, sha: hash, call: vcall,
       writeJsonExclusive: (file, value) => { adoptionWrites++; fs.writeFileSync(physical(file), JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); },
       assertReleaseWindow: value => assert.equal(value, next) });

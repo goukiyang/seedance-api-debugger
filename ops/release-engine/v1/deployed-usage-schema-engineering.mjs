@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { DEPLOYED_SCHEMA, DEPLOYED_FIELDS, assertDeployedSchemaInput, DEPLOYED_PROBE, assertRetainedProofCommand, unchangedSchemaInputs, SCHEMA_FILES, assertPriorPublication, readPublishedBaselineSourceFiles, priorUsageRoleControl } from './deployed-usage-schema.mjs';
 import { CANVAS_BATCH_SQL, CANVAS_BATCH_MIGRATOR, CANVAS_BATCH_MODE } from './canvas-batch-schema-contract.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { rootFile } from './common.mjs';
+import { rootFile, validateManifest, isSharedEngine } from './common.mjs';
 import { R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD, R17_RECOVERED_GUARD, assertRecoveredGuardInput, assertRecoveredGuardRecords, readRecoveredGuardBaseline } from './recovered-guard-baseline.mjs';
 
 assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
@@ -245,7 +245,13 @@ if (MV_DIRECT.recoveredGuardBaseline || fixtureManifest) {
   for (const change of [v => { v.reuseBuilds = {}; }, v => { v.privateMultiviewInstall = false; },
     v => { v.mainSource = records.prior.mainSource; }, v => { v.live.web.source = '0'.repeat(40); },
     v => { v.live.role.invocation = '0'.repeat(32); }]) {
-    const bad = structuredClone(m); change(bad); assert.throws(() => assertRecoveredGuardRecords(bad, records, identity));
+    const bad = structuredClone(m); change(bad);
+    if (isSharedEngine(bad) && bad.reuseBuilds && bad.reuseBuilds.schema !== 'sd2-original-build-reuse-input.v1') {
+      // Shared baseline reading permits reuse; malformed reuse is rejected by
+      // the real immutable-manifest entry gate before this baseline consumer.
+      assert.throws(() => validateManifest(bad), error => error.code === 'ERR_ASSERTION'
+        && error.message.includes('sd2-original-build-reuse-input.v1'));
+    } else assert.throws(() => assertRecoveredGuardRecords(bad, records, identity));
   }
   assert.equal(readRecoveredGuardBaseline(m, identity).entry.source, authority.entry.source);
   if (!r10 && !r14 && !r17) {
@@ -316,7 +322,11 @@ if (MV_DIRECT.recoveredGuardBaseline || fixtureManifest) {
         v => { v.deployedCanvasBatchSchema.migrationRun = retained.runId; },
         v => { v.reuseBuilds = { sourceRun: retained.runId }; },
         v => { v.live.works.execMainStartTimestampMonotonic = records.prior.live.works.execMainStartTimestampMonotonic; }]) {
-        const bad = structuredClone(m); change(bad); assert.throws(() => assertRecoveredGuardRecords(bad, records, identity));
+        const bad = structuredClone(m); change(bad);
+        if (isSharedEngine(bad) && bad.reuseBuilds && bad.reuseBuilds.schema !== 'sd2-original-build-reuse-input.v1') {
+          assert.throws(() => validateManifest(bad), error => error.code === 'ERR_ASSERTION'
+            && error.message.includes('sd2-original-build-reuse-input.v1'));
+        } else assert.throws(() => assertRecoveredGuardRecords(bad, records, identity));
       }
       assert.equal(records.recoveryEvidence['private-recipe/apply.json'].revision, 6);
       assert.equal(records.recoveryEvidence['private-recipe/apply.json'].version, '1.0.6');

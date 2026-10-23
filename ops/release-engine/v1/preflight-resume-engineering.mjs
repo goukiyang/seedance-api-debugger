@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
 import os from 'node:os';
@@ -9,14 +10,45 @@ import { ENGINE_VERSION } from './engine-version.mjs';
 import { throwReleaseError, classifyReleaseError } from './release-errors.mjs';
 import { execFileSync } from 'node:child_process';
 import { rootFile } from './common.mjs';
+import { MV_DIRECT } from './release-contract.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.getuid(), 0);
 const source = fs.readFileSync(new URL('./control-preflight.mjs', import.meta.url), 'utf8');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+function moduleBody(source) {
+  const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
+  assert.equal(tree.parseDiagnostics.length, 0);
+  for (const statement of tree.statements) {
+    if (ts.isImportDeclaration(statement)) edits.push([statement.getStart(tree), statement.end, '']);
+    else for (const modifier of statement.modifiers || [])
+      if (modifier.kind === ts.SyntaxKind.ExportKeyword) edits.push([modifier.getStart(tree), modifier.end, '']);
+  }
+  for (const [start, end, text] of edits.sort((a, b) => b[0] - a[0])) source = source.slice(0, start) + text + source.slice(end);
+  return source;
+}
 const normalizedAssert = { ...assert, deepEqual: (a, b, message) =>
   assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) };
 const checks = [];
+// The SIZE harness describes the frozen legacy controls, not this shared
+// engine's newer HD implementation. Read the original files once and bind both
+// the original manifest and every complete file digest before synthesizing IO.
+const historicalHdManifestFile = MV_DIRECT.immutableOriginalManifest
+  || '/data/video-api-debugger/release-staging/1243443f-ca0d-482c-8ca1-cdfc5accab20/manifest.json';
+const historicalHdManifestBytes = rootFile(historicalHdManifestFile), historicalHdManifest = JSON.parse(historicalHdManifestBytes);
+assert.equal(historicalHdManifestFile, '/data/video-api-debugger/release-staging/' + historicalHdManifest.runId + '/manifest.json');
+const historicalHdDigests = Object.freeze({
+  'hd-storage-preflight.mjs': '7a55bce97acbe42c6c475038693bf5e907ef25a78467e76691fda47ae235a48b',
+  'hd-closed-cache-engineering.mjs': '9c97e55f12dc8076b9889d474b41fd709dc7256d5825c53b4a18bcc64fc4c560',
+  'hd-storage-preflight-engineering.mjs': '6cd2e0ae2fa14393b607d5953c8e1c514215ab94daa063c170a14f0f24b8b185',
+});
+const historicalHdSources = Object.fromEntries(Object.entries(historicalHdDigests).map(([file, digest]) => {
+  assert.equal(historicalHdManifest.privateSha256[file], digest);
+  const bytes = rootFile(path.dirname(historicalHdManifestFile) + '/fix01-release/' + file);
+  assert.equal(sha(bytes), digest, 'Frozen legacy HD fixture input changed: ' + file);
+  return [file, bytes.toString()];
+}));
 assert.match(source, /import \{ inspectInstalledMultiviewRecipeAdoption \} from '\.\/multiview-works-control\.mjs';/);
 assert.match(source, /if \(m\.recoveredGuardBaseline\?\.schema === 'sd2-multiview-r17-recovered-guard\.v1'\) inspectInstalledMultiviewRecipeAdoption\(m\);/);
 const stage = '/data/video-api-debugger/release-staging/10000000-0000-4000-8000-000000000001';
@@ -73,8 +105,8 @@ function harness(options = {}) {
     verifyNormalContinuation: () => null,
     recordHdAdmission: (_m, detail) => write(stage + '/hd-admission-proof.json', detail),
   };
-  vm.runInNewContext(source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '')
-    + '\nglobalThis.api={controlPreflight,controlAdmission,assertNativeBatch,assertControlPreflight,sizeLogOriginalCheckpoint,nativeTasks,outcomeFromAtomicReceipt,SIZE_LOG_SOURCE_DELTAS,sharedNativeTasks,sharedNativeContext,sharedControlReferences,sharedDependencyTree,sharedNativeInput};', context);
+  vm.runInNewContext(moduleBody(source)
+    + '\nglobalThis.api={controlPreflight,controlAdmission,assertNativeBatch,assertControlPreflight,sizeLogOriginalCheckpoint,nativeTasks,outcomeFromAtomicReceipt,SIZE_LOG_SOURCE_DELTAS,sharedNativeTasks,sharedNativeContext,sharedControlReferences,sharedDependencyTree,sharedNativeInput,sharedReusedOutcome};', context);
   return { m, files, directories, rootFile, api: context.api, attempts, context, spawned,
     adoptionReads: () => adoptedReads,
     counts: () => ({ spawnCalls, captures, nativeReads }), admit: () => { rejectAdmission = false; } };
@@ -304,7 +336,7 @@ function sizeLogHarness(options = {}) {
     if (file === 'control-preflight.mjs') { oldBytes = originalController; newBytes = source; }
     else if (file === 'preflight-resume-engineering.mjs') { oldBytes = 'synthetic original resume fixture'; newBytes = fs.readFileSync(new URL('./' + file, import.meta.url), 'utf8'); }
     else if (['hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs', 'hd-storage-preflight-engineering.mjs'].includes(file)) {
-      oldBytes = 'synthetic original HD helper:' + file; newBytes = fs.readFileSync(new URL('./' + file, import.meta.url), 'utf8');
+      oldBytes = 'synthetic original HD helper:' + file; newBytes = historicalHdSources[file];
     } else if (file === 'release-contract.mjs') { oldBytes = contractBytes(original); newBytes = contractBytes(f.m); }
     f.files.set(originalStage + '/fix01-release/' + file, oldBytes); original.privateSha256[file] = sha(oldBytes);
     f.files.set(stage + '/fix01-release/' + file, newBytes); f.m.privateSha256[file] = sha(newBytes);
@@ -763,6 +795,15 @@ function sharedHarness(options = {}) {
   f.m.appUser = 'fixture-app'; f.m.live.web.source = 'a'.repeat(40);
   f.m.live.hd = { root: f.m.live.web.root, source: f.m.live.web.source,
     sourceProof: { sourceManifest: '/data/synthetic-original/source-manifest.json', archive: '/data/synthetic-original/source.tar.gz' } };
+  const engineSources = Object.fromEntries([...new Set([...parsedOriginalBatch.outcomes.map(item => item.file),
+    'attempt-state-engineering.mjs', 'release-entry-engineering.mjs', 'multiview-backup-engineering.mjs',
+    'release-entry.mjs', 'control-preflight.mjs', 'common.mjs', 'writer-network-fence.mjs'])]
+    .map(file => [file, '// Explicit isolated engine input: ' + file + '\nexport const fixture = true;\n']));
+  engineSources['writer-network-fence.mjs'] = 'original-fence';
+  engineSources['guard-recovery-engineering.mjs'] = "import './cutover-safety-engineering.mjs';\nexport const fixture = true;\n";
+  engineSources['multiview-works-engineering.mjs'] = "import './multiview-backup-engineering.mjs';\nexport const fixture = true;\n";
+  Object.assign(engineSources, options.engineChanges || {});
+  f.m.privateSha256 = Object.fromEntries(Object.entries(engineSources).map(([file, bytes]) => [file, sha(bytes)]));
   const digest = sha(JSON.stringify(f.m.privateSha256));
   f.m.engine = { schema: 'sd2-release-engine.v1', version: ENGINE_VERSION, controllerSetSha256: digest,
     root: f.m.projectRoot + '/release-engines/' + ENGINE_VERSION + '-' + digest };
@@ -774,14 +815,15 @@ function sharedHarness(options = {}) {
   c.MV_DIRECT = contract;
   const saveManifest = () => f.files.set(f.m.stage + '/manifest.json', JSON.stringify(f.m));
   const saveContext = () => f.files.set(f.m.stage + '/context.json', JSON.stringify({ schema: 'sd2-release-context.v1', contract }));
-  f.files.set(f.m.engine.root + '/writer-network-fence.mjs', 'original-fence');
+  for (const [file, bytes] of Object.entries(engineSources)) f.files.set(f.m.engine.root + '/' + file, bytes);
   f.files.set(f.m.stage + '/control-module-preflight.json', JSON.stringify({ moduleActuallyLoaded: true, sha256: sha('original-fence') }));
-  f.files.set(f.m.engine.root + '/hd-closed-cache-engineering.mjs', 'isolated cache reference declarations');
   saveManifest(); saveContext();
   const dependencies = { engine: f.m.engine, runtime: { observedSha256: sha('actual-runtime-adapter'), ctimeMs: 1 },
-    baseline: { sourceManifest: f.m.live.hd.sourceProof.sourceManifest, dependencies: { sha256: sha('dependencies'), latestCtimeMs: 1 } } };
+    baseline: { sourceManifest: f.m.live.hd.sourceProof.sourceManifest, sourceManifestSha256: sha('original-source-map'),
+      dependencies: { sha256: sha('dependencies'), latestCtimeMs: 1 } } };
   let dependencyReads = 0, expired = false, bounds = 0;
   c.sharedControlDependencies = value => { engineDirectory(value); dependencyReads++; return structuredClone(dependencies); };
+  c.createRequire = () => name => { assert.equal(name, 'typescript'); return ts; };
   c.sharedDependencyTree = root => ({ root, count: 3, latestCtimeMs: 1, sha256: sha('closed-cache-argument:' + root) });
   c.assertReleaseWindow = () => { assert.equal(expired, false, 'expired real admission window'); };
   c.sharedReadOnlyHdBounds = value => { assert.equal(value, f.m); bounds++; return { scanDeadline: Date.now() + 5000, check: c.assertReleaseWindow }; };
@@ -804,31 +846,33 @@ for (const [index, argv] of shared.spawned.entries()) {
   assert.deepEqual(argv.slice(0, 3), [shared.m.engine.root + '/release-entry.mjs', 'native', shared.m.stage + '/context.json']);
   assert.equal(argv[3], sharedBatch.outcomes[index].file);
 }
-assert.deepEqual(sharedBatch.outcomes.slice(-2).map(item => item.file), ['attempt-state-engineering.mjs', 'release-entry-engineering.mjs']);
+assert.deepEqual(Array.from(sharedBatch.outcomes.slice(-2), item => item.file), ['attempt-state-engineering.mjs', 'release-entry-engineering.mjs']);
 assert.deepEqual(shared.spawned.find(args => args[3] === 'certificate-engineering.mjs').slice(4), [shared.m.engine.root]);
 const directFiles = sharedBatch.outcomes.filter(item => !['runtime-source-engineering.mjs', 'canvas-batch-schema-engineering.mjs'].includes(item.file));
-const refs = directFiles.map(item => {
-  const receipt = shared.m.stage + '/native-control-preflight/' + item.file + '.receipt.json', value = JSON.parse(shared.rootFile(receipt));
-  assert.deepEqual(value.controlInput.argv, shared.spawned.find(args => args[3] === item.file));
-  assert.equal(value.controlInput.context.sha256, sha(shared.rootFile(shared.m.stage + '/context.json')));
-  return { file: item.file, manifest: shared.m.stage + '/manifest.json', manifestSha256: sha(shared.rootFile(shared.m.stage + '/manifest.json')),
-    receipt, receiptSha256: sha(shared.rootFile(receipt)), log: value.log.path, logSha256: value.log.sha256 };
-});
+function directReferences(fixture, outcomes) { return outcomes.map(item => {
+  const receipt = fixture.m.stage + '/native-control-preflight/' + item.file + '.receipt.json', value = JSON.parse(fixture.rootFile(receipt));
+  assert.deepEqual(value.controlInput.argv, fixture.spawned.find(args => args[3] === item.file));
+  assert.equal(value.controlInput.context.sha256, sha(fixture.rootFile(fixture.m.stage + '/context.json')));
+  return { file: item.file, manifest: fixture.m.stage + '/manifest.json', manifestSha256: sha(fixture.rootFile(fixture.m.stage + '/manifest.json')),
+    receipt, receiptSha256: sha(fixture.rootFile(receipt)), log: value.log.path, logSha256: value.log.sha256 };
+}); }
+const refs = directReferences(shared, directFiles);
 checks.push('shared_first_batch_executes_19_context_bootstrapped_commands_once_without_claiming_fresh_admission');
 await assert.rejects(shared.api.controlAdmission(shared.m), /expired real admission window/);
 assert.equal(shared.counts().captures, 0);
 
-const nextShared = () => {
-  const f = sharedHarness({ runId: '10000000-0000-4000-8000-000000000002' });
-  for (const [file, bytes] of shared.files) if (file.startsWith(shared.m.stage + '/')) f.files.set(file, bytes);
-  f.m.controlEvidence = { schema: 'sd2-direct-native-control-evidence.v1', leaves: structuredClone(refs) }; f.saveManifest();
+const nextShared = (options = {}, original = shared, originalRefs = refs) => {
+  const f = sharedHarness({ ...options, runId: '10000000-0000-4000-8000-000000000002' });
+  for (const [file, bytes] of original.files)
+    if (file.startsWith(original.m.stage + '/') || file.startsWith(original.m.engine.root + '/')) f.files.set(file, bytes);
+  f.m.controlEvidence = { schema: 'sd2-direct-native-control-evidence.v1', leaves: structuredClone(originalRefs) }; f.saveManifest();
   return f;
 };
-const resumedShared = nextShared(), savedOriginalTimes = directFiles.map(item => [item.file, item.startedAt, item.finishedAt]);
+const resumedShared = nextShared(), savedOriginalTimes = Array.from(directFiles, item => [item.file, item.startedAt, item.finishedAt]);
 const resumedBatch = await resumedShared.api.controlPreflight(resumedShared.m);
 assert.equal(resumedShared.counts().spawnCalls, 2);
 assert.deepEqual(resumedShared.spawned.map(args => args[3]), ['runtime-source-engineering.mjs', 'canvas-batch-schema-engineering.mjs']);
-assert.deepEqual(resumedBatch.outcomes.filter(item => item.execution === 'reused').map(item => [item.file, item.startedAt, item.finishedAt]), savedOriginalTimes);
+assert.deepEqual(Array.from(resumedBatch.outcomes.filter(item => item.execution === 'reused'), item => [item.file, item.startedAt, item.finishedAt]), savedOriginalTimes);
 for (const ref of refs) assert.equal(resumedShared.files.has(resumedShared.m.stage + '/native-control-preflight/' + ref.file + '.receipt.json'), false);
 await assert.rejects(resumedShared.api.controlAdmission(resumedShared.m), /3302/);
 assert.equal(resumedShared.counts().spawnCalls, 2); assert.equal(resumedShared.counts().captures, 1);
@@ -873,6 +917,80 @@ await assert.rejects(changedDuring.api.controlPreflight(changedDuring.m), error 
 assert.equal(changedDuring.counts().spawnCalls, 19);
 assert.equal(changedDuring.files.has(changedDuring.m.stage + '/native-control-preflight/receipt.json'), false);
 checks.push('shared_failed_or_mid_batch_changed_inputs_never_become_admission_and_original_evidence_is_not_overwritten');
+
+{
+  const reusable = ['release-protection-engineering.mjs', 'retired-hd-cache-engineering.mjs', 'cutover-driver-engineering.mjs',
+    'certificate-engineering.mjs', 'usage-role-engineering.mjs', 'multiview-works-engineering.mjs', 'attempt-state-engineering.mjs'];
+  const originalSuccesses = new Set([...reusable, 'guard-recovery-engineering.mjs']);
+  const origin = sharedHarness({ spawnResult: ({ args }) => originalSuccesses.has(args[3]) ? null
+    : { stdout: 'retained isolated original fixture failure', stderr: '', status: 1, signal: null } });
+  await assert.rejects(origin.api.controlPreflight(origin.m), /Release controller preflight failed/);
+  const originalBatchFile = origin.m.stage + '/native-control-preflight/batch.json', originalBytes = origin.rootFile(originalBatchFile);
+  const originalBatch = JSON.parse(originalBytes);
+  assert.equal(originalBatch.completed, false); assert.equal(originalBatch.outcomes.filter(item => item.status === 0).length, 8);
+  assert.equal(originalBatch.outcomes.filter(item => item.status === 1).length, 11);
+  const originalRefs = directReferences(origin, originalBatch.outcomes.filter(item => reusable.includes(item.file)));
+  const changes = Object.fromEntries(originalBatch.outcomes.filter(item => item.status !== 0)
+    .map(item => [item.file, '// Repaired isolated fixture: ' + item.file + '\nexport const repaired = true;\n']));
+  changes['control-preflight.mjs'] = '// Rechecked current outer validator.\nexport const revised = true;\n';
+  const compatible = (extra = {}, references = originalRefs) => nextShared({ engineChanges: { ...changes, ...extra } }, origin, references);
+  const fresh = compatible(), originalTimes = originalBatch.outcomes.filter(item => reusable.includes(item.file))
+    .map(item => [item.file, item.startedAt, item.finishedAt, item.receiptSha256, item.sha256]);
+  const batch = await fresh.api.controlPreflight(fresh.m);
+  assert.equal(fresh.counts().spawnCalls, 12);
+  assert.deepEqual(Array.from(batch.outcomes.filter(item => item.execution === 'reused'), item => item.file), reusable);
+  assert.deepEqual(Array.from(batch.outcomes.filter(item => item.execution === 'reused'),
+    item => [item.file, item.startedAt, item.finishedAt, item.receiptSha256, item.sha256]), originalTimes);
+  assert.ok(fresh.spawned.some(argv => argv[3] === 'guard-recovery-engineering.mjs'));
+  assert.ok(fresh.spawned.some(argv => argv[3] === 'preflight-resume-engineering.mjs'));
+  assert.deepEqual(fresh.rootFile(originalBatchFile), originalBytes);
+  for (const reference of originalRefs) {
+    assert.equal(fresh.files.has(fresh.m.stage + '/native-control-preflight/' + reference.file + '.receipt.json'), false);
+    assert.equal(fresh.files.has(fresh.m.stage + '/native-control-preflight/' + reference.file + '.log'), false);
+  }
+  const inspect = (fixture, file, reference = originalRefs.find(item => item.file === file), args = null) => {
+    const actualArgs = args || new Map(fixture.api.sharedNativeTasks(fixture.m, '/data/fixture-cache')).get(file);
+    return fixture.api.sharedReusedOutcome(fixture.m, reference,
+      fixture.api.sharedNativeInput(fixture.m, file, actualArgs, fixture.dependencies, Date.now() + 1));
+  };
+  for (const name of ['release-entry.mjs', 'common.mjs', 'writer-network-fence.mjs']) {
+    const changed = compatible({ [name]: 'export const changedProduction = true;\n' });
+    assert.throws(() => inspect(changed, reusable[0]), /Native production module changed/);
+    assert.equal(changed.counts().spawnCalls, 0);
+  }
+  assert.throws(() => inspect(compatible({ 'unexpected-production.mjs': 'export const added = true;\n' }), reusable[0]),
+    /Native engine file set changed/);
+  assert.throws(() => inspect(compatible({ [reusable[0]]: 'export const changedLeaf = true;\n' }), reusable[0]),
+    /Direct native fixture dependency changed: release-protection-engineering/);
+  assert.throws(() => inspect(compatible({ 'multiview-backup-engineering.mjs': 'export const changedChild = true;\n' }),
+    'multiview-works-engineering.mjs'), /Direct native fixture dependency changed: multiview-backup-engineering/);
+  const guardRef = directReferences(origin, originalBatch.outcomes.filter(item => item.file === 'guard-recovery-engineering.mjs'))[0];
+  assert.throws(() => inspect(compatible(), guardRef.file, guardRef), /Direct native fixture dependency changed: cutover-safety-engineering/);
+  const validatorRef = directReferences(shared, directFiles.filter(item => item.file === 'preflight-resume-engineering.mjs'))[0];
+  assert.throws(() => inspect(nextShared({ engineChanges: changes }), validatorRef.file, validatorRef), /current outer native validator must actually execute/);
+  const sourceDrift = compatible(); sourceDrift.dependencies.baseline.sourceManifestSha256 = sha('changed original source map');
+  assert.throws(() => inspect(sourceDrift, reusable[0]), /Original native input or runtime dependencies changed/);
+  const runtimeDrift = compatible(); runtimeDrift.dependencies.runtime.observedSha256 = sha('changed system Node');
+  assert.throws(() => inspect(runtimeDrift, reusable[0]), /Original native input or runtime dependencies changed/);
+  const contextDrift = compatible(); contextDrift.contract.protectedIncrement.pricingWrites = true; contextDrift.saveContext();
+  assert.throws(() => inspect(contextDrift, reusable[0]), /Native controller\/contract\/arguments\/dependencies are not equivalent/);
+  assert.throws(() => inspect(compatible(), reusable[0], undefined, ['changed-real-argument']),
+    /Native controller\/contract\/arguments\/dependencies are not equivalent/);
+  const certificateArgs = compatible();
+  assert.throws(() => inspect(certificateArgs, 'certificate-engineering.mjs', undefined, [certificateArgs.m.engine.root, 'unapproved-extra']),
+    /Native controller\/contract\/arguments\/dependencies are not equivalent/);
+  const oldEngineDrift = compatible(), oldFile = origin.m.engine.root + '/common.mjs';
+  oldEngineDrift.files.set(oldFile, oldEngineDrift.files.get(oldFile) + '\n// changed original bytes');
+  assert.throws(() => inspect(oldEngineDrift, reusable[0]), /Native engine original bytes changed/);
+  const missingOriginal = compatible(); missingOriginal.files.delete(originalRefs[0].receipt);
+  assert.throws(() => inspect(missingOriginal, reusable[0]), /Missing fixture file/);
+  const wrongLog = compatible(), changedLog = 'x' + wrongLog.files.get(originalRefs[0].log).toString().slice(1);
+  wrongLog.files.set(originalRefs[0].log, changedLog);
+  assert.throws(() => inspect(wrongLog, reusable[0]), error => error.name === 'AssertionError'
+    && error.actual === sha(changedLog) && error.expected === originalRefs[0].logSha256);
+  checks.push('shared_fixture_only_engine_change_reuses_seven_direct_successes_preserves_failed_aggregate_and_really_executes_twelve');
+  checks.push('shared_engine_compatibility_rejects_production_entry_leaf_transitive_fixture_original_bytes_context_runtime_and_argument_drift');
+}
 
 const dependencyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-native-input-tree-'));
 try {
@@ -934,7 +1052,7 @@ checks.push('shared_actual_bounded_dependency_reader_binds_bytes_identity_owner_
       if (binary === 'getent') return args[0] === 'group' ? `fixture-app:x:${gid}:${otherMember ? 'extra-writer' : ''}`
         : `fixture-app:x:${uid}:${gid}::/nonexistent:/usr/sbin/nologin`;
       if (binary === 'lsattr') return (immutable ? '----i-----' : '----------') + ' ' + args.at(-1);
-      assert.equal(binary, '/usr/bin/python3'); assert.deepEqual(args.slice(0, 2), ['-B', '-I']); aclReads++;
+      assert.equal(binary, '/usr/bin/python3'); assert.deepEqual([...args.slice(0, 2)], ['-B', '-I']); aclReads++;
       if (aclWriter) return JSON.stringify({ count: Object.keys(dependencies).length, acl: ['generated-native.bin'] });
       return execFileSync(binary, args, { encoding: 'utf8', timeout: 30000 }).trim();
     };
@@ -1006,5 +1124,6 @@ checks.push('shared_sealed_dependencies_accept_private_app_group_only_with_origi
 console.log(JSON.stringify({ schema: 'sd2-preflight-resume-engineering.v1', completed: true, checks,
   count: checks.length, sourceSha256: { 'control-preflight.mjs': sha(source), 'cutover-safety.mjs': sha(safety),
     'writer-network-fence.mjs': sha(writerFence), 'cutover-safety-engineering.mjs': sha(safetyEngineering) },
+  historicalHdInputs: { manifestFile: historicalHdManifestFile, manifestSha256: sha(historicalHdManifestBytes), files: historicalHdDigests },
   ioKind: 'actual-control-orchestration-with-isolated-memory-io', nativeAdmissionExecuted: false,
   servicesChanged: false, productionWrites: 0, paidRequests: 0, browserRuns: 0, functionalAcceptance: false }));

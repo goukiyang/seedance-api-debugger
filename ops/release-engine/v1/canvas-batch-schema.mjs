@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { assertProtectedIncrementCandidate } from './release-contract.mjs';
 import fs from 'node:fs';
-import { rootFile, sha, call, assertReleaseWindow, writeJsonExclusive, engineDirectory } from './common.mjs';
-import { verifyDeployedContinuationProvenance } from './normal-continuation.mjs';
+import { rootFile, sha, call, assertReleaseWindow, writeJsonExclusive, engineDirectory, isSharedEngine } from './common.mjs';
+import { verifyDeployedContinuationProvenance, verifySharedBuildProvenance } from './normal-continuation.mjs';
 import { assertCanvasBatchSchemaInput, assertCanvasBatchPrismaExtension,
   CANVAS_BATCH_SQL, CANVAS_BATCH_MIGRATOR, CANVAS_BATCH_MODE } from './canvas-batch-schema-contract.mjs';
 
@@ -39,7 +39,10 @@ function privateStage(stage) {
 export function readOriginalCanvasBatchMigration(m) {
   const input = assertDeployedCanvasInput(m.deployedCanvasBatchSchema);
   assert.ok(m.canvasVideoBatchSchema && m.deployedUsageSchema);
-  if (m.normalContinuation || m.reuseBuilds) verifyDeployedContinuationProvenance(m);
+  if (isSharedEngine(m)) {
+    engineDirectory(m);
+    if (m.reuseBuilds) verifySharedBuildProvenance(m);
+  } else if (m.normalContinuation || m.reuseBuilds) verifyDeployedContinuationProvenance(m);
   assert.notEqual(m.runId, input.migrationRun);
   const stage = stageFor(input.migrationRun); privateStage(stage);
   const original = pinned(stage + '/manifest.json', input.migrationManifestSha256);

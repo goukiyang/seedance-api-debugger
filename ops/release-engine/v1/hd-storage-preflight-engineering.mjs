@@ -20,6 +20,9 @@ async function main() {
   fs.chmodSync(directory, 0o700);
   const previousEnv = process.env.NODE_ENV; process.env.NODE_ENV = 'test';
   const previousMask = process.umask(0o077), checks = [];
+  // Only the isolated fixture owns this process projection. Keep actual /proc
+  // reads for self and every live child used by the owner/lease negative cases.
+  const originalProcReaddir = fs.readdirSync, fixtureProcessIds = new Set([process.pid]);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const project = path.join(directory, 'project');
   const m = { projectRoot: project, hdStorageIsolationRoot: directory,
@@ -28,6 +31,10 @@ async function main() {
     hdWorkerLockPath: project + '/var-lib/storage/hd-worker.lock', uploadsRoot: project + '/var-lib/uploads',
     storageRoot: project + '/releases/80d5cf6f1ec489ea93257d42e8dd5c7e4e782560/storage', publicOrigin: 'https://sd2.youdooart.com' };
   try {
+    fs.readdirSync = function (target, ...args) {
+      const entries = originalProcReaddir.call(this, target, ...args);
+      return target === '/proc' ? entries.filter(name => !/^\d+$/.test(name) || fixtureProcessIds.has(Number(name))) : entries;
+    };
     for (const dir of [m.hdRoot, m.hdForkRoot, m.uploadsRoot, m.storageRoot]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(m.hdWorkerLockPath, '', { mode: 0o600 });
     const roots = [path.join(directory, 'source-a'), path.join(directory, 'source-b')];
@@ -326,15 +333,15 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
     const cacheOriginal = path.join(m.uploadsRoot, 'closed-cache-original.png'); fs.writeFileSync(cacheOriginal, original);
     const cacheQueued = createJob(cacheOriginal), closedProcessor = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
       "import fs from 'node:fs';const t=fs.readFileSync('/proc/self/stat','utf8');console.log(JSON.stringify({pid:process.pid,startTicks:t.slice(t.lastIndexOf(')')+2).trim().split(/\\s+/)[19]}))"], { encoding: 'utf8' }));
-    const createClosedCache = (storage, superseded = false) => {
+    const createClosedCache = (storage, superseded = false, cacheInput = cacheReference) => {
       const executionId = randomUUID(), latestExecutionId = superseded ? randomUUID() : executionId;
       const run = cacheQueued.key + '.' + executionId, runPath = path.join(storage, '.runs', run), cachePath = path.join(runPath, 'tsx-' + process.getuid());
       const began = Date.now() - 1000; fs.mkdirSync(cachePath, { recursive: true, mode: 0o700 });
-      const referenceNames = fs.readdirSync(cacheReference).sort(); assert.equal(referenceNames.length, 3);
+      const referenceNames = fs.readdirSync(cacheInput).sort(); assert.equal(referenceNames.length, 3);
       for (const name of referenceNames) {
         assert.match(name, /^\d+-[a-f0-9]{40}$/);
         const target = path.join(cachePath, Math.floor(Date.now() / 1e8) + '-' + name.split('-')[1]);
-        fs.copyFileSync(path.join(cacheReference, name), target); fs.chmodSync(target, 0o600);
+        fs.copyFileSync(path.join(cacheInput, name), target); fs.chmodSync(target, 0o600);
       }
       const latestCache = Math.max(...[runPath, cachePath, ...fs.readdirSync(cachePath).map(name => path.join(cachePath, name))]
         .flatMap(file => { const stat = fs.lstatSync(file); return [stat.mtimeMs, stat.ctimeMs]; }));
@@ -410,10 +417,18 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
     const archiveBytes = Buffer.from('Synthetic capsule-consumer structure, not an actual successful build'); fs.writeFileSync(archive, archiveBytes, { mode: 0o600 });
     fs.writeFileSync(sourceManifest, JSON.stringify({ project: 'video-api-debugger', source, archiveSha256: sha(archiveBytes),
       files: Object.fromEntries(compiledEntries.map(item => [item.sourceFile, item.sourceSha256])) }), { mode: 0o600 });
+    const compilerDirectory = path.join(directory, 'compiler-inputs'); fs.mkdirSync(compilerDirectory, { mode: 0o700 });
     const compiler = Object.fromEntries([['node', process.version, fs.realpathSync(process.execPath)],
       ['tsx', JSON.parse(fs.readFileSync(applicationRoot + '/node_modules/tsx/package.json')).version, fs.realpathSync(require.resolve('tsx'))],
       ['esbuild', JSON.parse(fs.readFileSync(applicationRoot + '/node_modules/esbuild/package.json')).version, fs.realpathSync(require.resolve('esbuild'))]]
-      .map(([kind, version, file]) => [kind, { version, file, sha256: sha(fs.readFileSync(file)) }]));
+      .map(([kind, version, originalFile]) => {
+        const bytes = fs.readFileSync(originalFile), file = kind === 'node' ? originalFile : path.join(compilerDirectory, kind + '.js');
+        // Consumer structure only: keep the application bytes, but make this
+        // root-owned isolated sample independent of the application's uid.
+        if (kind !== 'node') fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 });
+        assert.deepEqual(fs.readFileSync(file), bytes);
+        return [kind, { version, file, sha256: sha(bytes) }];
+      }));
     const reference = { source, sourceRoot: compileRoot, sourceManifest, archive, compiler, entries: compiledEntries };
     const compiledManifest = { ...m, main: { source, root: compileRoot, sourceManifest, archive } };
     let capsuleCalls = 0;
@@ -486,14 +501,39 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
     const oldRoot = oldMap.slice(0, -(oldRelative.length + 1)), oldSource = path.basename(oldRoot);
     const oldWriter = fs.readFileSync(oldRoot + '/src/lib/media/hd-derivatives.ts');
     assert.equal(sha(oldWriter), '7442f68dd8ce7db49390293e722107c2bc57b72ea43976541427978076858fbf');
+    const legacySourceRoot = path.join(legacyFolder, 'source'), legacyCache = path.join(legacyFolder, 'cache');
+    fs.mkdirSync(legacyCache, { mode: 0o700 });
+    const legacySourceFiles = {};
+    for (const sourceFile of [...sourceFiles, 'src/lib/media/hd-derivatives.ts']) {
+      const file = path.join(legacySourceRoot, sourceFile), bytes = fs.readFileSync(path.join(oldRoot, sourceFile));
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 });
+      legacySourceFiles[sourceFile] = sha(bytes); assert.equal(sha(fs.readFileSync(file)), sha(bytes));
+    }
+    // This source/cache pair models the same legacy consumer contract inside
+    // this private fixture. It is not an original successful-build capsule.
+    const legacyEntries = fs.readdirSync(cacheReference).sort().map(name => {
+      const value = JSON.parse(fs.readFileSync(path.join(cacheReference, name)));
+      const sourceFile = sourceFiles.find(file => value.map.sources[0] === oldRoot + '/' + file); assert.ok(sourceFile);
+      value.map.sources = [legacySourceRoot + '/' + sourceFile];
+      const bytes = Buffer.from(JSON.stringify(value)), cacheKey = createHash('sha1').update(bytes).digest('hex');
+      const cacheFile = path.join(legacyCache, Math.floor(Date.now() / 1e8) + '-' + cacheKey);
+      fs.writeFileSync(cacheFile, bytes, { flag: 'wx', mode: 0o600 });
+      return { sourceFile, sourceSha256: legacySourceFiles[sourceFile], cacheFile, cacheKey, cacheSha256: sha(bytes), cacheBytes: bytes.length };
+    });
+    assert.deepEqual(legacyEntries.map(item => item.sourceFile).sort(), [...sourceFiles].sort());
     const oldArchive = path.join(legacyFolder, 'source.tar.gz'), oldManifest = path.join(legacyFolder, 'source-manifest.json');
     const oldArchiveBytes = Buffer.from('Isolated original-archive consumer structure; not a real sealed archive');
     fs.writeFileSync(oldArchive, oldArchiveBytes, { mode: 0o600 });
     fs.writeFileSync(oldManifest, JSON.stringify({ project: 'video-api-debugger', source: oldSource,
-      archiveSha256: sha(oldArchiveBytes), files: { 'src/lib/media/hd-derivatives.ts': sha(oldWriter) } }), { mode: 0o600 });
-    const oldManifestObject = { ...m, live: { hd: { source: oldSource, root: oldRoot,
+      archiveSha256: sha(oldArchiveBytes), files: legacySourceFiles }), { mode: 0o600 });
+    const legacyCandidate = { source: oldSource, root: legacySourceRoot, sourceManifest: oldManifest, archive: oldArchive };
+    const legacyReference = { source: oldSource, sourceRoot: legacySourceRoot, sourceManifest: oldManifest, archive: oldArchive,
+      compiler, entries: legacyEntries };
+    const oldManifestObject = { ...m, main: legacyCandidate, live: { hd: { source: oldSource, root: legacySourceRoot,
       sourceProof: { sourceManifest: oldManifest, archive: oldArchive } } } };
-    const unrecorded = createClosedCache(m.hdRoot, true), past = Date.now() - 20000;
+    oldManifestObject.hdCompiledCacheProofs = readHdCompiledCacheProofs(oldManifestObject, [legacyReference], value => structuredClone(value));
+    const unrecorded = createClosedCache(m.hdRoot, true, legacyCache), past = Date.now() - 20000;
     Object.assign(unrecorded.job.attemptHistory[0], { startedAt: new Date(past).toISOString(), finishedAt: new Date(past + 1000).toISOString() });
     Object.assign(unrecorded.job.attemptHistory[1], { startedAt: new Date(past + 2000).toISOString(), finishedAt: new Date(past + 3000).toISOString() });
     unrecorded.job.updatedAt = new Date(past + 3000).toISOString(); unrecorded.job.executionExitedAt = new Date(past + 2999).toISOString();
@@ -513,7 +553,9 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
       assert.equal(refused.safe, false); assert.equal(refused.pendingWholeDrain.length, 0); assert.equal(refused.cacheRefusals.canonical.length, 1);
     }
     save(m.hdRoot, unrecorded.job);
-    const absentSource = await inspectHdReconciliation({ ...m }, { sourceRoot: roots[0], final: true });
+    const absentSourceManifest = { ...m, main: legacyCandidate };
+    absentSourceManifest.hdCompiledCacheProofs = readHdCompiledCacheProofs(absentSourceManifest, [legacyReference], value => structuredClone(value));
+    const absentSource = await inspectHdReconciliation(absentSourceManifest, { sourceRoot: roots[0], final: true });
     assert.equal(absentSource.pendingWholeDrain.length, 0); assert.equal(absentSource.cacheRefusals.canonical.length, 1);
     fs.rmSync(unrecorded.runPath, { recursive: true }); fs.unlinkSync(path.join(m.hdRoot, cacheQueued.key + '.json')); fs.rmdirSync(m.hdRoot + '/.runs');
     checks.push('unrecorded_old_verification_requires_exact_legacy_writer_and_original_source_authority_new_protocol_never_downgrades');
@@ -538,6 +580,7 @@ process.on('message',v=>{if(v==='acquire')acquire();if(v==='release')release();i
 if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2).trim().split(/\\s+/);process.send({pid:process.pid,startTicks:f[19],cgroup:fs.readFileSync('/proc/self/cgroup','utf8').trim()});`;
       const child = spawn(process.execPath, ['-e', program, lock, marker, held ? 'yes' : 'no'], { cwd: roots[0], detached: true,
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+      fixtureProcessIds.add(child.pid);
       let childError = ''; child.stderr.on('data', b => { childError += b; });
       const exit = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
       const info = await new Promise((resolve, rejectReady) => { child.once('message', resolve); child.once('error', rejectReady); });
@@ -598,6 +641,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         Date.now = actualNow;
         if (moved) { fs.rmdirSync(m.hdRoot); fs.renameSync(moved, m.hdRoot); }
         child.send('exit'); assert.deepEqual(await exit, { code: 0, signal: null }); assert.equal(childError, '');
+        fixtureProcessIds.delete(child.pid);
         fs.writeFileSync(path.join(m.hdRoot, pending.key + '.json'), beforeJob); fs.writeFileSync(candidateFile, beforeSource);
         if (fs.existsSync(m.hdRoot + '/unknown.lock')) fs.rmdirSync(m.hdRoot + '/unknown.lock');
         if (name === 'unknown-cache') fs.rmSync(m.hdRoot + '/.runs', { recursive: true });
@@ -665,6 +709,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
       if (options.pending) pendingCache = createClosedCache(m.hdRoot, true);
       const child = spawn(process.execPath, ['-e', program, lock, acquire, release, readyMarker, deletedMarker, emptyAcknowledged,
         options.held === false ? 'no' : 'yes'], { cwd: roots[0], detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+      fixtureProcessIds.add(child.pid);
       let childError = ''; child.stderr.on('data', value => { childError += value; });
       const exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
       const info = await new Promise((resolve, rejectReady) => { child.once('message', resolve); child.once('error', rejectReady); });
@@ -832,6 +877,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
         if (movedRoot) { fs.rmdirSync(m.hdRoot); fs.renameSync(movedRoot, m.hdRoot); }
         if (movedLock) { fs.rmdirSync(lock); fs.renameSync(movedLock, lock); }
         child.send('exit'); assert.deepEqual(await exited, { code: 0, signal: null }); assert.equal(childError, '');
+        fixtureProcessIds.delete(child.pid);
         fs.writeFileSync(path.join(m.hdRoot, pending.key + '.json'), beforeJob); fs.writeFileSync(sourceFile, beforeSource);
         for (const suffix of ['unknown.lock', 'unknown.publish.json', 'unknown.tmp']) {
           const file = m.hdRoot + '/' + suffix;
@@ -891,6 +937,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,
       supersededCacheProjectionCovered: true, realWholeServiceDrainProven: false,
+      processInventoryScope: 'fixture-self-and-owned-children-real-proc', productionProcessAbsenceProven: false,
       compiledCacheConsumerStructureOnly: true, actualOriginalCapsuleProvenByFixture: false,
       unrecordedLegacyArchiveConsumerStructureOnly: true,
       helperSha256: sha(fs.readFileSync(helper)), productionWrites: 0, productionDatabaseUsed: false,
@@ -902,6 +949,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     fs.writeFileSync(path.join(directory, 'receipt.json'), JSON.stringify(receipt), { mode: 0o600 });
     console.log(JSON.stringify(receipt));
   } finally {
+    fs.readdirSync = originalProcReaddir;
     process.umask(previousMask);
     if (previousEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnv;
   }

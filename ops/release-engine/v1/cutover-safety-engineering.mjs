@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createHdReleaseSafety, parseAllOwnerSynchronousRows, assertConfigurationIdentity, logPaths } from './cutover-safety.mjs';
 import { protectedFileSnapshot, originalRuntimeBuild } from './switch.mjs';
 import { rootFile } from './common.mjs';
@@ -388,7 +388,10 @@ export function runProtectedConfigurationFileEngineering({ directory }) {
       providerRequests: 0, databaseWrites: 0 }, boundary: 'Real private temporary files only; not production maintenance or functional acceptance' };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const fixtureRoot = path.join('/data/video-api-debugger/release-staging', randomUUID());
+  fs.mkdirSync(fixtureRoot, { mode: 0o700 });
   runHdCutoverSafetyEngineering().then(value => console.log(JSON.stringify({ ...value,
-    configurationFs: runProtectedConfigurationFileEngineering({ directory: path.dirname(path.dirname(fileURLToPath(import.meta.url))) })
-  }))).catch(error => { console.error(error); process.exitCode = 1; });
+    configurationFs: runProtectedConfigurationFileEngineering({ directory: fixtureRoot })
+  }))).catch(error => { console.error(error); process.exitCode = 1; })
+    .finally(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 }

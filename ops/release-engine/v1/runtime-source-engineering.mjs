@@ -10,6 +10,7 @@ import { captureRuntimeSourceContracts, assertCapturedLive } from './release.mjs
 import { captureLegacySourceContract, LEGACY_SOURCE_FILES } from './legacy-maintenance.mjs';
 import { captureHdLegacyContract } from './switch.mjs';
 import { readPublishedBaselineSourceFiles, assertCurrentPublishedBaseline } from './deployed-usage-schema.mjs';
+import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
 
 assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
 const m = validateManifest(JSON.parse(rootFile(process.argv[2])));
@@ -140,7 +141,7 @@ if (m.deployedUsageSchema) {
 // archive and filesystem observations are isolated; source checks run unchanged.
 async function stageCapture(sourceCapture, expectSourceFailure = false) {
   const stop = new Error('fixture reached upload preparation boundary');
-  const counters = { sources: 0, uploads: 0, writes: 0, recoveredAdmission: 0 }, imports = [], seedFile = m.stage + '/seed.json';
+  const counters = { compiledProofs: 0, sources: 0, uploads: 0, writes: 0, recoveredAdmission: 0 }, imports = [], seedFile = m.stage + '/seed.json';
   const seed = { runId: m.runId, mainSource: m.mainSource, guardSource: m.guardSource,
     expectedAllowedSha256: MV_DIRECT.expectedAllowedSha256,
     ...(isSharedEngine(m) ? { engine: m.engine, operation: m.operation } : {}) };
@@ -165,6 +166,10 @@ async function stageCapture(sourceCapture, expectSourceFailure = false) {
     },
     APPROVED_HD_LEGACY_READY: m.hdLegacyReady, APPROVED_HD_HISTORICAL_VERSIONS: m.hdHistoricalVersions,
     assertReleaseWindow: () => {}, trustedCode: () => {},
+    loadHdCompiledCacheProofs: async value => {
+      assert.equal(value, m); counters.compiledProofs++;
+      await loadHdCompiledCacheProofs(value);
+    },
     fixtureImport: async name => {
       imports.push(name);
       if (name === './deployed-usage-schema.mjs') return {
@@ -193,7 +198,8 @@ async function stageCapture(sourceCapture, expectSourceFailure = false) {
   for (const [start, end] of edits.sort((a, b) => b[0] - a[0])) code = code.slice(0, start) + 'fixtureImport' + code.slice(end);
   vm.runInNewContext(code + '\nglobalThis.run=capture;', context);
   await assert.rejects(context.run(seedFile), error => expectSourceFailure ? error !== stop : error === stop);
-  assert.equal(counters.sources, 1); assert.equal(counters.uploads, expectSourceFailure ? 0 : 1); assert.equal(counters.writes, 0);
+  assert.equal(counters.compiledProofs, 1); assert.equal(counters.sources, 1);
+  assert.equal(counters.uploads, expectSourceFailure ? 0 : 1); assert.equal(counters.writes, 0);
   assert.equal(counters.recoveredAdmission, m.recoveredGuardBaseline ? 1 : 0);
   assert.deepEqual(imports, ['./pricing-start-pair.mjs', ...(m.recoveredGuardBaseline ? ['./deployed-usage-schema.mjs'] : [])]);
   await assert.rejects(context.fixtureImport('./unknown-source-fixture.mjs'));

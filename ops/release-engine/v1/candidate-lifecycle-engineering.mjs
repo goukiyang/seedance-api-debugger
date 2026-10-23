@@ -7,7 +7,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { candidateEvidenceFile, assertFreshCandidateEvidence, REUSE_SCHEMA } from './candidate-evidence.mjs';
-import { parseReleaseTimestamp } from './common.mjs';
+import { parseReleaseTimestamp, isSharedEngine, engineDirectory } from './common.mjs';
+import { releaseBoundary } from './engine-context.mjs';
+import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
 import { assertHdMaintenanceApproval, privateFreezeSha256 } from './cutover-driver.mjs';
 import { assertNaturalExitEvidence } from './switch.mjs';
 import { assertNoCutoverEffects, CONTINUATION_V2, assertContinuationInput, assertDeployedContinuationSources } from './normal-continuation.mjs';
@@ -34,7 +36,8 @@ function scriptBody(text) {
   assert.equal(parsed.parseDiagnostics.length, 0);
   const edits = [];
   for (const statement of parsed.statements) {
-    if (ts.isImportDeclaration(statement)) edits.push([statement.getStart(parsed), statement.end]);
+    if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))
+      edits.push([statement.getStart(parsed), statement.end]);
     else for (const modifier of statement.modifiers || [])
       if (modifier.kind === ts.SyntaxKind.ExportKeyword) edits.push([modifier.getStart(parsed), modifier.end]);
   }
@@ -133,10 +136,26 @@ function assertPrivateHdCall(text) {
   walk(tree); assert.equal(calls.length, 1, 'The private admission helper must really be called once');
   const call = calls[0]; assert.equal(call.arguments.length, 2); assert.equal(call.arguments[0].getText(tree), 'm');
   assert.ok(ts.isObjectLiteralExpression(call.arguments[1]));
-  const options = Object.fromEntries(call.arguments[1].properties.map(node => {
+  const assignments = call.arguments[1].properties.filter(ts.isPropertyAssignment);
+  const spreads = call.arguments[1].properties.filter(ts.isSpreadAssignment);
+  assert.equal(assignments.length + spreads.length, call.arguments[1].properties.length);
+  assert.equal(spreads.length, 1, 'The shared/non-shared admission bounds must use one exact conditional spread');
+  const options = Object.fromEntries(assignments.map(node => {
     assert.ok(ts.isPropertyAssignment(node)); return [node.name.getText(tree), node.initializer.getText(tree)];
   }));
-  assert.equal(options.sourceRoot, 'm.main.root'); assert.equal(options.deadline, 'bounds.deadline'); assert.equal(options.check, 'bounds.check');
+  assert.deepEqual(Object.keys(options).sort(), ['check', 'record', 'sourceRoot']);
+  assert.equal(options.sourceRoot, 'm.main.root'); assert.equal(options.check, 'bounds.check');
+  assert.ok(ts.isParenthesizedExpression(spreads[0].expression));
+  const bounds = spreads[0].expression.expression;
+  assert.ok(ts.isConditionalExpression(bounds)); assert.equal(bounds.condition.getText(tree), 'isSharedEngine(m)');
+  assert.ok(ts.isObjectLiteralExpression(bounds.whenTrue)); assert.ok(ts.isObjectLiteralExpression(bounds.whenFalse));
+  const properties = object => Object.fromEntries(object.properties.map(node => {
+    assert.ok(ts.isPropertyAssignment(node)); return [node.name.getText(tree), node.initializer.getText(tree)];
+  }));
+  assert.deepEqual(properties(bounds.whenTrue), {
+    scanDeadline: 'bounds.scanDeadline', waitBudgetMs: 'bounds.waitBudgetMs',
+  });
+  assert.deepEqual(properties(bounds.whenFalse), { deadline: 'bounds.deadline' });
   let branch = call.parent;
   while (branch && !(ts.isIfStatement(branch) && branch.expression.getText(tree) === 'm.privateMultiviewInstall === true')) branch = branch.parent;
   assert.ok(branch, 'Only the explicit private normal branch may wait');
@@ -149,6 +168,8 @@ for (const altered of [
   sources['switch.mjs'].replace('await inspectHdBeforeMaintenance(m,', 'await inspectHdReconciliation(m,'),
   sources['switch.mjs'].replace('m.privateMultiviewInstall === true', 'm.privateMultiviewInstall !== true'),
   sources['switch.mjs'].replace('deadline: bounds.deadline', 'deadline: Date.now() + 15000'),
+  sources['switch.mjs'].replace('scanDeadline: bounds.scanDeadline', 'scanDeadline: bounds.deadline'),
+  sources['switch.mjs'].replace('waitBudgetMs: bounds.waitBudgetMs', 'waitBudgetMs: 15000'),
 ]) { assert.notEqual(altered, sources['switch.mjs']); assert.throws(() => assertPrivateHdCall(altered)); }
 function expression(module, fn, variable) {
   const { parsed, node } = functionNode(module, fn);
@@ -386,6 +407,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
   const common = { assert: sameAssert, fs: io, path, Buffer, JSON, Date: FixtureDate, process: processView, randomUUID, createHash,
     rootFile, sha, writeJsonExclusive: exclusive, call, execFileSync: nativeExec, unit,
     assertReleaseWindow: assertWindow, validateManifest: value => value, parseReleaseTimestamp,
+    isSharedEngine, engineDirectory, loadHdCompiledCacheProofs, releaseBoundary,
     candidateEvidenceFile, REUSE_SCHEMA, assertFreshCandidateEvidence: (value, m, kind, now = clock) => assertFreshCandidateEvidence(value, m, kind, now),
     pathToFileURL, setTimeout, clearTimeout, structuredClone, console,
     CONTINUATION_V2, assertContinuationInput, assertDeployedContinuationSources,
@@ -781,7 +803,8 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     assert.equal(image.length, 1); assert.equal(pricing.length, 1);
     const built = candidate.compiledTree(c);
     const proof = construct(buildExpression, { BUILD_SCHEMA: literalString('candidate.mjs', 'BUILD_SCHEMA'),
-      kind, c, m, built, info, startedAt, finishedAt, image, preparedSha256, uploadHelperProbe, hdHelperProbe, logFile, logBytes });
+      kind, c, m, built, info, startedAt, finishedAt, image, preparedSha256, uploadHelperProbe, hdHelperProbe,
+      hdCompiledCache: undefined, logFile, logBytes });
     const verified = candidate.verifyGates(m, kind, source, prepared, proof);
     assert.equal(verified.pricing.receipt, pricing[0].slice('PRICING_POLICY_GATE_RECEIPT='.length));
     exclusive(stage + '/' + kind + '-build.json', proof);

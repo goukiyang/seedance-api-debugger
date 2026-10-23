@@ -5,6 +5,9 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { isSharedEngine } from './engine-context.mjs';
+import { MV_DIRECT } from './release-contract.mjs';
 import { assertContinuationInput, assertNoCutoverEffects, assertOriginalMigration, assertFreshLegacyCapture, assertFreshPricingCapture, CONTINUATION_V2, EXACT_UNPUBLISHED_PAIR, assertExactUnpublishedFacts, UNPUBLISHED_SCHEMA, verifyExactUnpublishedProvenance } from './normal-continuation.mjs';
 import { assertFirstRuntimeAliasProvenance } from './candidate-reuse.mjs';
 import { assertDeployedSchemaInput, DEPLOYED_FIELDS, DEPLOYED_SCHEMA } from './deployed-usage-schema.mjs';
@@ -18,6 +21,18 @@ const priorRun = '10000000-0000-4000-8000-000000000001', currentRun = '10000000-
 const priorStage = '/data/video-api-debugger/release-staging/' + priorRun;
 const stage = '/data/video-api-debugger/release-staging/' + currentRun;
 const checks = [];
+const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+function moduleBody(source) {
+  const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
+  assert.equal(tree.parseDiagnostics.length, 0);
+  for (const statement of tree.statements) {
+    if (ts.isImportDeclaration(statement)) edits.push([statement.getStart(tree), statement.end, '']);
+    else for (const modifier of statement.modifiers || [])
+      if (modifier.kind === ts.SyntaxKind.ExportKeyword) edits.push([modifier.getStart(tree), modifier.end, '']);
+  }
+  for (const [start, end, text] of edits.sort((a, b) => b[0] - a[0])) source = source.slice(0, start) + text + source.slice(end);
+  return source;
+}
 const sameAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) };
 function harness({ v2 = false } = {}) {
   const files = new Map(), immutable = new Set(); let writes = 0, schemaReads = 0, capsuleReads = 0;
@@ -87,7 +102,7 @@ function harness({ v2 = false } = {}) {
     readFileSync: file => rootFile(file), fstatSync: () => candidateStat,
     lstatSync: file => file.endsWith('/migration.sql') ? candidateStat : ({ isDirectory: () => true, uid: 0, mode: 0o40700 }),
     readdirSync: directory => directory === '/proc' ? [] : [...files.keys()].filter(file => path.dirname(file) === directory).map(file => path.basename(file)) };
-  const context = { assert: sameAssert, fs: fakeFs, path, Buffer, JSON, Date, process: { pid: 1 }, sha, rootFile,
+  const context = { assert: sameAssert, fs: fakeFs, path, Buffer, JSON, Date, process: { pid: 1 }, sha, rootFile, isSharedEngine,
     assertDeployedSchemaInput, assertDeployedCanvasInput, assertCanvasBatchSchemaInput,
     verifyDeployedUsageSchema: value => { assert.equal(value, m); schemaReads++; return { observed: { databaseWrites: 0, ddlExecuted: false } }; },
     readOriginalSuccess: (value, kind) => {
@@ -105,7 +120,7 @@ function harness({ v2 = false } = {}) {
       assert.equal(name, 'python3'); const data = JSON.parse(args.at(-1)); assert.deepEqual(data.identity, ['1', '2']);
       return JSON.stringify({ databaseIdentity: data.identity, newSchemaSha256: data.schemaSha256, databaseWrites: 0 });
     } };
-  vm.runInNewContext(source.replace(/^import .*;\n/gm, '').replace(/^export /gm, '')
+  vm.runInNewContext(moduleBody(source)
     + '\nglobalThis.api={verifyNormalContinuation,verifyDeployedContinuationProvenance,assertDeployedContinuationMode,adoptOriginalMigration,readMigrationEvidence,PROBE};', context);
   return { m, before: { ...before, captured: { at: new Date().toISOString() }, manifestSha256: sha(rootFile(stage + '/manifest.json')) }, files, put, rootFile,
     receipt, proof, original, api: context.api, immutable, schemaReads: () => schemaReads, capsuleReads: () => capsuleReads, writes: () => writes };

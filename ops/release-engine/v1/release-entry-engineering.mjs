@@ -79,7 +79,7 @@ function fixtureFiles(root, boundary, variant) {
     runId: attemptId, engine, contextFile: path.join(stage, 'context.json'), seedFile: path.join(stage, 'seed.json'),
     manifestFile: path.join(stage, 'manifest.json'), artifacts: { main: artifact('main', '1'.repeat(40)),
       guard: artifact('guard', '2'.repeat(40)) }, phases: RELEASE_PHASES };
-  const batchFile = writeJson(path.join(stage, 'release-batch.json'), batch), op = operation(batch), now = Date.now();
+  const batchFile = writeJson(path.join(stage, 'release-batch.json'), batch), op = operation(batch), now = Date.now(), expiresAt = now + 300_000;
   writeJson(batch.contextFile, { schema: 'sd2-release-context.v1', contract: { engine, operation: op } });
   writeJson(batch.seedFile, { schema: 'sd2-release-seed-fixture.v1', runId: attemptId, engine, operation: op });
   writeJson(batch.manifestFile, { schema: 'rate-impl2-release.v1', project: batch.project, projectRoot: root, runId: attemptId,
@@ -88,9 +88,9 @@ function fixtureFiles(root, boundary, variant) {
   writeJson(path.join(stage, 'fixed-guard-recovery.json'), { schema: 'fixture-fixed-guard-recovery.v1', runId: attemptId });
   const windowFile = writeJson(path.join(stage, 'window.json'), { schema: 'fixture-window.v1', project: batch.project,
     runId: attemptId, mainSource: batch.artifacts.main.source, guardSource: batch.artifacts.guard.source,
-    observedAt: now - 1000, expiresAt: now + 300_000 });
+    observedAt: now, expiresAt });
   const approvalFile = writeJson(path.join(stage, 'approval.json'), { schema: 'fixture-approval.v1', runId: attemptId,
-    issuedAt: now - 1000, expiresAt: now + 300_000 });
+    issuedAt: now, expiresAt });
   return { schema: 'sd2-release-entry-process-fixture.v1', root, batchFile, windowFile, approvalFile,
     taskId, attemptId, stage, boundary, variant };
 }

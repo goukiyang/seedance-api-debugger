@@ -55,7 +55,15 @@ const save = (status = 'ready') => {
 const inspect = () => inspectHdClosedExecutionCache(root, run, l, job);
 const reject = name => { assert.throws(inspect); checks.push(name); };
 const baseline = () => { save(); assert.equal(inspect().readOnly, true); };
+// Scope this offline fixture's process namespace, not the production reader.
+// Every admitted PID still uses its real stat/cmdline/environ; owned negative
+// children remain visible until their original exit has been observed.
+const originalProcReaddir = fs.readdirSync, fixtureProcessIds = new Set([process.pid]);
 try {
+  fs.readdirSync = function (target, ...args) {
+    const entries = originalProcReaddir.call(this, target, ...args);
+    return target === '/proc' ? entries.filter(name => !/^\d+$/.test(name) || fixtureProcessIds.has(Number(name))) : entries;
+  };
   assert.throws(() => assertHdE01CacheSourceProof({})); checks.push('unproven_published_source_refused');
   const e01 = '/data/video-api-debugger/managed-releases/e01fb18045e2950b45323b4d4ca7f6ce143a2019/';
   const sourceFiles = ['scripts/process-hd-image.ts', 'src/lib/media/hd-image-processor.ts', 'src/lib/media/hd-encoder.ts',
@@ -169,11 +177,13 @@ try {
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'], env: { ...process.env,
           ...(temporary ? { TMPDIR: temporary } : {}) },
       });
+      fixtureProcessIds.add(child.pid);
       const exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
       await new Promise((resolve, rejectReady) => { child.once('message', resolve); child.once('error', rejectReady); });
       try { action(child); }
       finally {
         child.send('exit'); assert.deepEqual(await exited, { code: 0, signal: null });
+        fixtureProcessIds.delete(child.pid);
         if (kind === 'tmpdir-alias') fs.unlinkSync(alias);
       }
     };
@@ -319,5 +329,6 @@ try {
   console.log(JSON.stringify({ schema: 'hd-closed-tsx-cache-engineering.v1', ok: true, checks, count: checks.length,
     productionWrites: 0, services: 0, originalFilesDeleted: 0, supersededCasesIncluded: sizeLogArtifacts,
     drainedConsumerStructureOnly: true, actualWholeServiceDrainProven: false,
+    processInventoryScope: 'fixture-self-and-owned-children-real-proc', productionProcessAbsenceProven: false,
     cachePolicy: 'exact-observed-published-source-artifact-bytes-only' }));
-} finally { fs.rmSync(directory, { recursive: true, force: true }); }
+} finally { fs.readdirSync = originalProcReaddir; fs.rmSync(directory, { recursive: true, force: true }); }

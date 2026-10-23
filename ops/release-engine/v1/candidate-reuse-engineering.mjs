@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { candidateEvidenceFile, assertFreshCandidateEvidence, REUSE_SCHEMA } from './candidate-evidence.mjs';
 import { inspectReuseTreeForEngineering, assertControlOnlyChange, assertNginxMaintenancePinChange, assertPackagingAncestryChange,
@@ -20,6 +21,18 @@ import { DEPLOYED_CANVAS_FIELDS } from './canvas-batch-schema.mjs';
 import { currentReleaseContext } from './engine-context.mjs';
 import { rootFile } from './common.mjs';
 
+const ts = createRequire('/data/video-api-debugger/managed-releases/' + MV_DIRECT.baselineSource + '/package.json')('typescript');
+function moduleBody(source) {
+  const tree = ts.createSourceFile('source.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS), edits = [];
+  assert.equal(tree.parseDiagnostics.length, 0);
+  for (const statement of tree.statements) {
+    if (ts.isImportDeclaration(statement)) edits.push([statement.getStart(tree), statement.end, '']);
+    else for (const modifier of statement.modifiers || [])
+      if (modifier.kind === ts.SyntaxKind.ExportKeyword) edits.push([modifier.getStart(tree), modifier.end, '']);
+  }
+  for (const [start, end, text] of edits.sort((a, b) => b[0] - a[0])) source = source.slice(0, start) + text + source.slice(end);
+  return source;
+}
 const checks = [], add = name => checks.push(name), now = 100_000_000;
 {
   const m = { reuseBuilds: { sourceRun: 'original-full-run' }, main: { source: 'a'.repeat(40), root: '/data/candidate' }, live: { web: { root: '/data/old', source: 'b'.repeat(40) } } };
@@ -51,7 +64,7 @@ const checks = [], add = name => checks.push(name), now = 100_000_000;
       assert: { ...assert, deepEqual: (a, b, message) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) },
       rootFile: file => fs.readFileSync(file), writeJsonExclusive: (file, value) => fs.writeFileSync(file, JSON.stringify(value), { flag: 'wx', mode: 0o600 }),
       fixtureOriginal: original };
-    vm.runInNewContext(implementation.replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '')
+    vm.runInNewContext(moduleBody(implementation)
       + '\nsourceStage=()=>globalThis.fixtureOriginal;globalThis.prepareAlias=prepareFirstRuntimeAlias;', context);
     context.prepareAlias(actual, 'main', capsule);
     assert.equal(fs.readlinkSync(candidate + '/.next-prod'), '.next-prod-candidate');
@@ -221,7 +234,7 @@ const checks = [], add = name => checks.push(name), now = 100_000_000;
         assert.ok(stat.isFile() && stat.nlink === 1 && stat.uid === process.getuid() && !(stat.mode & 0o022) && stat.size > 0);
         return fs.readFileSync(file);
       }, sha: digest };
-    vm.runInNewContext(source.replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '')
+    vm.runInNewContext(moduleBody(source)
       + '\nglobalThis.collectOrigin=sharedOriginRecords;', context);
     const actualPrior = { ...prior, stage }, proof = context.collectOrigin(actualPrior);
     assertSharedNoEffectsRecords(prior, manifestSha256, proof.records, [], []);
@@ -263,7 +276,7 @@ const checks = [], add = name => checks.push(name), now = 100_000_000;
         assert.equal(options.requireCandidatesStopped, true);
         return { ...provenance, prior: { main: value.main }, input: value.reuseBuilds };
       }, fixtureOriginal: originalStage };
-    vm.runInNewContext(implementation.replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '')
+    vm.runInNewContext(moduleBody(implementation)
       + '\nsourceStage=()=>globalThis.fixtureOriginal;globalThis.prepareAlias=prepareFirstRuntimeAlias;globalThis.readBinding=readSharedRuntimeAliasBinding;', context);
     context.prepareAlias(actual, 'main', capsule);
     const binding = context.readBinding(actual, 'main', capsule), bindingBytes = fs.readFileSync(binding.file);
@@ -322,7 +335,7 @@ const checks = [], add = name => checks.push(name), now = 100_000_000;
       const context = { fs, path, Buffer, JSON, Date, process, isSharedEngine, engineDirectory,
         assert: { ...assert, deepEqual: (a, b, message) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) },
         rootFile: file => fs.readFileSync(file), sha: digest, execFileSync: () => paths.node };
-      vm.runInNewContext(implementation.replace(/^import[\s\S]*?;\n/gm, '').replace(/^export /gm, '')
+      vm.runInNewContext(moduleBody(implementation)
         + '\nglobalThis.captureBuild=capture;globalThis.checkOriginal=verifyOriginalSuccess;', context);
       // The isolated metadata-only snapshot does not execute this synthetic tool.
       const metadataCutoff = Date.now() + 1000;

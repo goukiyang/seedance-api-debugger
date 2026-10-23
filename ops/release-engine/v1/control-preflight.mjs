@@ -486,7 +486,7 @@ function sharedNativeTasks(m, reference) {
       : file === 'candidate-reuse-engineering.mjs' && original ? ['--immutable-original-manifest', original] : args]),
   ['attempt-state-engineering.mjs', []], ['release-entry-engineering.mjs', []]];
 }
-function sharedNativeContext(m) {
+function sharedNativeContext(m, equivalentEngine = null) {
   const file = m.stage + '/context.json', bytes = rootFile(file, 256 * 1024), value = JSON.parse(bytes);
   assert.equal(value.schema, 'sd2-release-context.v1'); assert.deepEqual(value.contract.engine, m.engine);
   assert.deepEqual(value.contract.operation, m.operation);
@@ -503,6 +503,7 @@ function sharedNativeContext(m) {
     assert.equal(sha(rootFile(value.contract.batchFile)), value.contract.batchSha256);
     projection.contract.batchSha256 = '$ATTEMPT_BATCH_SHA';
   }
+  if (equivalentEngine) projection.contract.engine = equivalentEngine;
   return { file, sha256: sha(bytes), projectionSha256: sha(JSON.stringify(projection)) };
 }
 function dependencyBoundary(file, category, code, action) {
@@ -763,11 +764,56 @@ function sharedControlReferences(m) {
   }
   return leaves;
 }
+function assertSharedLeafEngineCompatibility(m, origin, file) {
+  const currentDirectory = engineDirectory(m), originalDirectory = engineDirectory(origin);
+  assert.equal(origin.engine.version, m.engine.version, 'Native engine version changed');
+  const names = Object.keys(m.privateSha256).sort();
+  assert.deepEqual(Object.keys(origin.privateSha256).sort(), names, 'Native engine file set changed');
+  const sources = {};
+  for (const [manifest, directory] of [[origin, originalDirectory], [m, currentDirectory]]) {
+    assert.deepEqual(fs.readdirSync(directory).filter(name => name.endsWith('.mjs')).sort(), names);
+    sources[directory] = Object.fromEntries(names.map(name => {
+      assert.equal(path.basename(name), name); assert.ok(name.endsWith('.mjs'));
+      const bytes = rootFile(directory + '/' + name);
+      assert.equal(sha(bytes), manifest.privateSha256[name], 'Native engine original bytes changed: ' + name);
+      return [name, bytes];
+    }));
+  }
+  const original = sources[originalDirectory], current = sources[currentDirectory];
+  for (const name of names) if (!name.endsWith('-engineering.mjs') && name !== 'control-preflight.mjs')
+    assert.deepEqual(current[name], original[name], 'Native production module changed: ' + name);
+  assert.ok(Object.hasOwn(current, file), 'Direct native fixture is missing');
+  if (originalDirectory !== currentDirectory)
+    assert.notEqual(file, 'preflight-resume-engineering.mjs', 'The current outer native validator must actually execute');
+  const ts = createRequire(m.live.web.root + '/package.json')('typescript'), visited = new Set(), pending = [file];
+  while (pending.length) {
+    const name = pending.pop(); if (visited.has(name)) continue; visited.add(name);
+    assert.deepEqual(current[name], original[name], 'Direct native fixture dependency changed: ' + name);
+    const tree = ts.createSourceFile(name, current[name].toString(), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    assert.equal(tree.parseDiagnostics.length, 0, 'Native fixture dependency is not a valid module: ' + name);
+    const visit = node => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        const moduleReference = ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)
+          || ts.isCallExpression(node.parent) && node.parent.expression.kind === ts.SyntaxKind.ImportKeyword;
+        // Production modules are all byte-identical above. Follow their actual
+        // imports, not policy inventories containing unrelated fixture names.
+        if (name.endsWith('-engineering.mjs') || moduleReference) {
+          const reference = path.basename(node.text);
+          if (Object.hasOwn(current, reference)) pending.push(reference);
+          else if (reference.endsWith('-engineering.mjs')) assert.fail('Unbound native fixture dependency: ' + node.text);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+}
 function sharedReusedOutcome(m, ref, currentInput) {
   const manifestBytes = rootFile(ref.manifest); assert.equal(sha(manifestBytes), ref.manifestSha256);
   const origin = JSON.parse(manifestBytes); assert.equal(isSharedEngine(origin), true); engineDirectory(origin);
   assert.equal(origin.projectRoot, m.projectRoot); assert.notEqual(origin.runId, m.runId);
-  assert.equal(ref.manifest, origin.stage + '/manifest.json'); assert.deepEqual(origin.engine, m.engine);
+  assert.equal(ref.manifest, origin.stage + '/manifest.json');
+  assertSharedLeafEngineCompatibility(m, origin, ref.file);
   assert.equal(ref.receipt, atomicReceiptFile(origin, ref.file)); assert.equal(ref.log, origin.stage + '/native-control-preflight/' + ref.file + '.log');
   const receiptBytes = rootFile(ref.receipt, 64 * 1024 * 1024); assert.equal(sha(receiptBytes), ref.receiptSha256);
   const receipt = JSON.parse(receiptBytes), item = outcomeFromAtomicReceipt(origin, receipt, ref.receiptSha256);
@@ -777,7 +823,8 @@ function sharedReusedOutcome(m, ref, currentInput) {
   // A reused outcome has no new atomic receipt. Consequently only an actual,
   // directly executed original leaf (never a recursive aggregate) can get here.
   assert.ok(receipt.controlInput, 'Historical atomic lacks actual shared control input evidence');
-  const oldDependencies = currentInput.inputs.dependencies;
+  const oldDependencies = structuredClone(currentInput.inputs.dependencies);
+  oldDependencies.engine = origin.engine;
   assert.equal(origin.live.web.root, currentInput.inputs.cwd);
   if (origin.live.hd.sourceProof) assert.equal(origin.live.hd.sourceProof.sourceManifest, oldDependencies.baseline.sourceManifest);
   else assert.ok(origin.normalContinuation && origin.reuseBuilds, 'Original live source proof is missing');
@@ -785,7 +832,15 @@ function sharedReusedOutcome(m, ref, currentInput) {
   assert.ok(latestDependencyChange(oldDependencies) < Date.parse(receipt.startedAt), 'Dependency metadata postdates the direct original leaf');
   const oldInput = sharedNativeInput(origin, ref.file, receipt.controlInput.argv.slice(4), oldDependencies, Date.parse(receipt.startedAt));
   assert.deepEqual(receipt.controlInput, oldInput, 'Original native input or runtime dependencies changed');
-  assert.equal(oldInput.fingerprint, currentInput.fingerprint, 'Native controller/contract/arguments/dependencies are not equivalent');
+  const equivalent = structuredClone(oldInput.inputs);
+  equivalent.engine = m.engine; equivalent.dependencies.engine = m.engine;
+  equivalent.argv[0] = engineDirectory(m) + '/release-entry.mjs';
+  if (ref.file === 'certificate-engineering.mjs') {
+    assert.deepEqual(oldInput.argv.slice(4), [engineDirectory(origin)]);
+    equivalent.argv[4] = engineDirectory(m);
+  }
+  equivalent.contextProjectionSha256 = sharedNativeContext(origin, m.engine).projectionSha256;
+  assert.deepEqual(equivalent, currentInput.inputs, 'Native controller/contract/arguments/dependencies are not equivalent');
   assert.equal(sha(rootFile(ref.log)), ref.logSha256);
   return { ...item, execution: 'reused', original: { runId: origin.runId, manifest: ref.manifest,
     manifestSha256: ref.manifestSha256, receipt: ref.receipt, receiptSha256: ref.receiptSha256,
@@ -813,6 +868,12 @@ function assertSharedNativeBatch(m, value, observedDependencies = null) {
       assert.ok(Date.parse(item.startedAt) >= started && Date.parse(item.finishedAt) <= finished);
       assert.equal(item.status, 0); assert.equal(item.signal, null); assert.equal(item.error, null); assert.equal(item.errorCode, null);
     }
+  }
+  if (value.outcomes.some(item => item.execution === 'reused'
+    && item.original.engine.controllerSetSha256 !== m.engine.controllerSetSha256)) {
+    const validator = value.outcomes.find(item => item.file === 'preflight-resume-engineering.mjs');
+    assert.equal(validator.execution, 'executed', 'A changed outer native validator cannot borrow its original result');
+    assert.equal(validator.status, 0);
   }
   return value;
 }
