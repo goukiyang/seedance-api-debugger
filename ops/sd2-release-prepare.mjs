@@ -90,6 +90,24 @@ export const R14_RECOVERED_GUARD = Object.freeze({
   recoveryEvidenceIndexSha256: '21e383079820a329244b2252f3398057edecd27d43a12ea0cfba5adaf4c9c599',
   worksReadyGuardSha256: '15d5f6f28bd4f7d7a64d040a8e09d188e3a08490a4a0df7c7e074c8ed87ccdde',
 });
+export const R17_RECOVERED_GUARD = Object.freeze({
+  schema: 'sd2-multiview-r17-recovered-guard.v1',
+  runId: '19a7cc3d-b11e-44c8-a754-d79e9c5624d1',
+  manifestSha256: '00d4c9fa89a4368d0761adff3017ff2e58dcd8e58cc76b7698c3bab167cce7c8',
+  fixedGuardSha256: '36c9e71ebc74a8b0fb6c8870b9681a29076a75035fdde4c1a6846fc6b18a4971',
+  guardBuildReceiptSha256: 'a78c79ba444819c9b2f88cb6de9590c02b8dbdcb0d9650adb234971d2f1a3866',
+  guardImmutableSuccessSha256: '85a85eb392ca6fcf7c9f83d3317106c923bfec90003d7346f7f2c7732636576e',
+  recoveryCompleteSha256: 'd4c3feb67e7441cd74b6df492a5ed2652e3a1e1473310f7952ee2a09651dce9b',
+  switchCommandSha256: '478ea114c76323b1a987f8909ca5c4e92466df33687f6c302541af7e0a5bbd0b',
+  proofSha256: '7477870f7c033afabc113a9ef5761f061fc08e0777467c5f03795e9cc6d237f8',
+  proofCommandSha256: '30c151df4647b1d98cfe10b2d27b666a4ba703d1969d1c092639f49271b38c70',
+  recoveryEvidenceIndexSha256: 'd76bc0fa5808b68a5c4b2c347dfbb3d736d6c568b7b5f2d45deb5c54034b5081',
+  worksReadyGuardSha256: '0f4d7005c95d638cbb8cc93006060f1b23db0032a00186a0bdb94adb3b99a724',
+  installedRecipeReceiptSha256: 'ab71ea60b1a7c54f405910ce76389a0a21181058fbb7a81715afd0a47a2349b3',
+  backupCaptureSha256: '9968b7d35f258f185e79b51bea38c6e5566dcdc4f9998d8333da1f87a06461d6',
+  backupTransitionSha256: '01fbea5139db7184ae14238c6b11bf317b648b5bba248e698dcb09a1d2e0a97f',
+  backupPublishedSha256: '78d22884d7bacdbf9d20d8c2d491ab9898f7518100116f037cd5620d58d49e88',
+});
 const RECOVERED_GUARD_PROGRAMS = Object.freeze([
   Object.freeze({ input: R08_RECOVERED_GUARD, source: 'c9f0a60d753b286db470626ad33c1987ff1c72bf',
     main: '4e1fe5b888c1fdb20a9cbccdd6517b84452fa604', build: 'B7Ef-SggrUGg4-T5FAA_0', rejectRecoveryHistory: false }),
@@ -97,11 +115,13 @@ const RECOVERED_GUARD_PROGRAMS = Object.freeze([
     main: 'eae4475e5da2ebf3b68c31593a37117b59e6a09a', build: 'j2d9GY6_bj4uOIMROXnsi', rejectRecoveryHistory: true }),
   Object.freeze({ input: R14_RECOVERED_GUARD, source: 'e06d23538ea110a8c7800729bd8b84eaee697091',
     main: '08b5ce920384edb4f03199a058ca805561ac8fe5', build: 'UgLJVYXAPzAtIB-K4PnB3', rejectRecoveryHistory: true }),
+  Object.freeze({ input: R17_RECOVERED_GUARD, source: '31bff5a6544a3d18d433b81fa7735ed57b0d012c',
+    main: 'd6c611d353b6f3da665993fe62a1a5b4dbe65f81', build: 'j0osjBFM7wvoP8iAYEknx', rejectRecoveryHistory: true }),
 ]);
 function assertRecoveredGuardInput(value) {
   const program = RECOVERED_GUARD_PROGRAMS.find(entry => entry.input.schema === value?.schema);
   assert.ok(program, 'Unknown recovered guard baseline');
-  assert.deepEqual(value, program.input, 'Only the exact retained R08/c9, R10/2c or R14/e06 recovery may supply the live baseline');
+  assert.deepEqual(value, program.input, 'Only the exact retained R08/c9, R10/2c, R14/e06 or R17/31b recovery may supply the live baseline');
   return program;
 }
 export function assertDeployedCanvasInput(value) {
@@ -261,7 +281,7 @@ export function validatePlan(plan, original, now = Date.now()) {
       assert.ok(![program.main, program.source].includes(source), 'Recovered run builds cannot become a fresh pair');
     if (program.rejectRecoveryHistory) for (const key of ['publicationRun', 'migrationRun'])
       assert.notEqual(c.deployedUsageSchema[key], recovered.runId, 'A failed recovery cannot replace normal schema history');
-    if (recovered === R14_RECOVERED_GUARD) {
+    if (recovered === R14_RECOVERED_GUARD || recovered === R17_RECOVERED_GUARD) {
       assert.equal(c.privateMultiviewInstall, true);
       assert.equal(c.deployedUsageSchema.publicationRun, '6a041bed-c909-4370-972f-2299321d7f1f');
       assert.notEqual(c.deployedCanvasBatchSchema.migrationRun, recovered.runId, 'A failed recovery cannot replace canvas schema history');
