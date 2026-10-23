@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
-  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD, R17_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -221,6 +221,58 @@ await test('R14 producer admits only exact e06 recovery with two fresh sources a
     v => { v.contract.deployedUsageSchema.publicationRun = randomUUID(); },
     v => { v.contract.deployedUsageSchema.migrationRun = R14_RECOVERED_GUARD.runId; },
     v => { v.contract.deployedCanvasBatchSchema.migrationRun = R14_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = v.contract.recoveryRunId; },
+    v => { v.contract.deployedUsageSchema.migrationRun = v.contract.recoveryRunId; },
+    v => { v.contract.privateMultiviewInstall = false; }, v => { v.contract.privateMultiviewInstall = 1; },
+    v => { v.contract.deployedUsageSchema = null; }, v => { v.contract.deployedCanvasBatchSchema = null; },
+    v => { v.contract.canvasVideoBatchSchema = null; }, v => { v.reuseBuilds = plan.reuseBuilds; },
+    v => { v.contract.normalContinuation = continuationPlan().contract.normalContinuation; },
+    v => { const continued = continuationPlan(); v.contract.normalContinuation = continued.contract.normalContinuation; v.reuseBuilds = continued.reuseBuilds; }]) {
+    const bad = make(); change(bad); assert.throws(() => validatePlan(bad, original, now));
+  }
+});
+await test('R17 producer and active template have the same complete sixteen fixed recovery and installed-state fields', async () => {
+  const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
+  assert.equal(Object.keys(R17_RECOVERED_GUARD).length, 16);
+  assert.deepEqual(Object.keys(consumer.R17_RECOVERED_GUARD).sort(), Object.keys(R17_RECOVERED_GUARD).sort());
+  for (const [key, value] of Object.entries(R17_RECOVERED_GUARD)) assert.equal(consumer.R17_RECOVERED_GUARD[key], value, key);
+  assert.deepEqual(consumer.R17_RECOVERED_GUARD, R17_RECOVERED_GUARD);
+});
+await test('R17 producer retains exact 31b recovery as runtime source without publishing the failed run or reusing its pair', () => {
+  const make = () => {
+    const value = continuationPlan(); value.reuseBuilds = null; value.contract.normalContinuation = null;
+    const c = value.contract; c.recoveredGuardBaseline = structuredClone(R17_RECOVERED_GUARD); c.privateMultiviewInstall = true;
+    c.baselineSource = c.sourceBase = '31bff5a6544a3d18d433b81fa7735ed57b0d012c';
+    c.baselineVersion = '0.103.0+multiview-private-guard.1'; c.baselineBuild = 'j0osjBFM7wvoP8iAYEknx';
+    c.mainSource = 'a'.repeat(40); c.recoveryGuardSource = 'b'.repeat(40);
+    c.deployedUsageSchema.publicationRun = '6a041bed-c909-4370-972f-2299321d7f1f';
+    Object.assign(value.liveCapture, { source: c.baselineSource, version: c.baselineVersion, build: c.baselineBuild });
+    return value;
+  };
+  validatePlan(make(), original, now);
+  for (const key of Object.keys(R17_RECOVERED_GUARD)) {
+    const missing = make(); delete missing.contract.recoveredGuardBaseline[key]; assert.throws(() => validatePlan(missing, original, now));
+    const changed = make(); changed.contract.recoveredGuardBaseline[key] = 'wrong'; assert.throws(() => validatePlan(changed, original, now));
+  }
+  for (const field of ['mainSource', 'recoveryGuardSource']) for (const source of [
+    'd6c611d353b6f3da665993fe62a1a5b4dbe65f81', '31bff5a6544a3d18d433b81fa7735ed57b0d012c']) {
+    const bad = make(); bad.contract[field] = source; assert.throws(() => validatePlan(bad, original, now));
+  }
+  for (const change of [v => { v.contract.recoveredGuardBaseline.allowOldBuild = true; },
+    v => { v.contract.recoveredGuardBaseline.schema = 'sd2-multiview-r18-recovered-guard.v1'; },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R14_RECOVERED_GUARD); },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R10_RECOVERED_GUARD); },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R08_RECOVERED_GUARD); },
+    v => { v.contract.baselineSource = v.contract.sourceBase = v.liveCapture.source = 'e06d23538ea110a8c7800729bd8b84eaee697091'; },
+    v => { v.contract.sourceBase = 'a'.repeat(40); },
+    v => { v.contract.baselineBuild = v.liveCapture.build = 'UgLJVYXAPzAtIB-K4PnB3'; },
+    v => { v.contract.baselineVersion = v.liveCapture.version = '0.103.0'; },
+    v => { v.contract.recoveryGuardSource = v.contract.mainSource; },
+    v => { v.contract.recoveryRunId = R17_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = R17_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedUsageSchema.publicationRun = randomUUID(); },
+    v => { v.contract.deployedUsageSchema.migrationRun = R17_RECOVERED_GUARD.runId; },
+    v => { v.contract.deployedCanvasBatchSchema.migrationRun = R17_RECOVERED_GUARD.runId; },
     v => { v.contract.deployedUsageSchema.publicationRun = v.contract.recoveryRunId; },
     v => { v.contract.deployedUsageSchema.migrationRun = v.contract.recoveryRunId; },
     v => { v.contract.privateMultiviewInstall = false; }, v => { v.contract.privateMultiviewInstall = 1; },
