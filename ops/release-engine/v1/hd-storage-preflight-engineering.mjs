@@ -603,8 +603,41 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         while (!fs.existsSync(marker) && actualNow() < limit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         assert.ok(fs.existsSync(marker), 'Isolated owner did not acquire its lease at the requested boundary');
       };
-      const originalLstat = fs.lstatSync;
+      const originalLstat = fs.lstatSync, originalOpen = fs.openSync, originalFstat = fs.fstatSync;
+      const ownerUnlinkedCase = name.startsWith('owner-file-unlinked-');
       let cleanupRequested = false, cleanupStat = null, cleanupInjected = false;
+      let ownerReadFd = null, ownerReadStats = 0, ownerFinalLstat = false;
+      if (ownerUnlinkedCase) {
+        fs.openSync = function (target, ...args) {
+          const fd = originalOpen.call(fs, target, ...args);
+          if (cleanupRequested && target === lock + '/owner.json') { ownerReadFd = fd; ownerReadStats = 0; }
+          return fd;
+        };
+        fs.fstatSync = function (fd, ...args) {
+          const stat = originalFstat.call(fs, fd, ...args);
+          if (fd === ownerReadFd && ++ownerReadStats === 2) ownerFinalLstat = true;
+          return stat;
+        };
+        fs.lstatSync = function (target, ...args) {
+          if (!ownerFinalLstat || target !== lock + '/owner.json') return originalLstat.call(fs, target, ...args);
+          ownerFinalLstat = false; cleanupRequested = false; ownerReadFd = null;
+          const prior = originalLstat.call(fs, target, ...args); cleanupInjected = true;
+          if (name !== 'owner-file-unlinked-still-present') {
+            child.send('release'); let absent = false;
+            while (actualNow() < invocationDeadline) {
+              try { originalLstat.call(fs, lock); }
+              catch (error) { if (error.code !== 'ENOENT') throw error; absent = true; break; }
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+            }
+            assert.equal(absent, true, 'The original child must actually release its isolated owner record and directory');
+          }
+          const changes = { nlink: 0 };
+          if (name === 'owner-file-unlinked-inode-changed') changes.ino = prior.ino + 1;
+          if (name === 'owner-file-unlinked-owner-changed') changes.uid = prior.uid + 1;
+          if (name === 'owner-file-unlinked-mode-changed') changes.mode = prior.mode ^ 0o040;
+          return Object.assign(Object.create(Object.getPrototypeOf(prior)), prior, changes);
+        };
+      }
       if (name === 'natural-release-unlinked-stat') fs.lstatSync = function (target, ...args) {
         if (cleanupStat && target === lock) {
           const prior = cleanupStat; cleanupStat = null; cleanupInjected = true;
@@ -638,25 +671,34 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
             records.push({ kind, value });
             if (kind.startsWith('boundary-') && value.phase === trigger && !triggered) { triggered = true; acquireAtBoundary(); }
             if (kind === 'known-busy') {
-              if (name === 'natural-release-unlinked-stat') cleanupRequested = true;
+              if (name === 'natural-release-unlinked-stat' || ownerUnlinkedCase) cleanupRequested = true;
               const firstStrictAt = records.find(item => item.kind.startsWith('strict-start-')).value.at;
               assert.ok(value.deadline <= firstStrictAt + 15000); assert.ok(value.deadline <= invocationDeadline);
               if (mutate === 'task') save(m.hdRoot, { ...pending, priority: pending.priority + 1 });
               if (mutate === 'unit') unit.InvocationID = '2'.repeat(32);
               if (mutate === 'owner') fs.writeFileSync(lock + '/owner.json', JSON.stringify({ pid: info.pid, host: os.hostname(), token: randomUUID() }));
+              if (name === 'owner-file-replaced') {
+                const replacement = marker + '.replacement';
+                fs.writeFileSync(replacement, fs.readFileSync(lock + '/owner.json'), { mode: 0o600 });
+                fs.renameSync(replacement, lock + '/owner.json');
+              }
               if (mutate === 'path') { moved = m.hdRoot + '.held'; const old = fs.statSync(m.hdRoot); fs.renameSync(m.hdRoot, moved); fs.mkdirSync(m.hdRoot, { mode: 0o700 }); assert.notEqual(fs.statSync(m.hdRoot).ino, old.ino); }
               if (clockJump) Date.now = () => actualNow() + 16000;
-              if (!['persistent', 'short-deadline', 'hard-cap', 'natural-release-unlinked-stat'].includes(name) && !['path', 'owner'].includes(mutate)) child.send('release');
+              if (!ownerUnlinkedCase && name !== 'owner-file-replaced'
+                && !['persistent', 'short-deadline', 'hard-cap', 'natural-release-unlinked-stat'].includes(name)
+                && !['path', 'owner'].includes(mutate)) child.send('release');
             }
             if (kind === 'natural-release' && name === 'second-strict-collision') acquireAtBoundary();
           } });
           assert.equal(result.safe, true, 'The caller must still require the complete original strict result');
           return result;
         };
-        if (reject) await assert.rejects(action);
+        if (reject) await assert.rejects(action, name === 'owner-file-replaced' ? /Bound discovery owner file identity changed/
+          : name === 'owner-file-unlinked-still-present' ? /requires a fresh absence/
+          : ownerUnlinkedCase ? /Bound discovery owner path changed while reading/ : undefined);
         else { const result = await action(); assert.equal(result.safe, true);
           assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, held || trigger ? 2 : 1); }
-        if (name === 'natural-release-unlinked-stat') assert.equal(cleanupInjected, true);
+        if (name === 'natural-release-unlinked-stat' || ownerUnlinkedCase) assert.equal(cleanupInjected, true);
         assert.ok(records.filter(v => v.kind.startsWith('strict-start-')).length <= 2);
         if (name === 'unknown-owner') assert.equal(records.some(v => v.kind === 'known-busy'), false);
         if (name === 'second-strict-collision') assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, 2);
@@ -666,7 +708,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
           completedResults: records.filter(v => v.kind.startsWith('strict-result-')).length, fixtureFinalOnly: true });
         checks.push('bounded-discovery-' + name);
       } finally {
-        fs.lstatSync = originalLstat;
+        fs.lstatSync = originalLstat; fs.openSync = originalOpen; fs.fstatSync = originalFstat;
         Date.now = actualNow;
         if (moved) { fs.rmdirSync(m.hdRoot); fs.renameSync(moved, m.hdRoot); }
         child.send('exit'); assert.deepEqual(await exit, { code: 0, signal: null }); assert.equal(childError, '');
@@ -680,6 +722,9 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
     }
     for (const [name, options] of [
       ['no-collision', { held: false }], ['natural-release', {}], ['natural-release-unlinked-stat', {}],
+      ['owner-file-unlinked-stat', {}], ['owner-file-unlinked-inode-changed', { reject: true }],
+      ['owner-file-unlinked-owner-changed', { reject: true }], ['owner-file-unlinked-mode-changed', { reject: true }],
+      ['owner-file-unlinked-still-present', { reject: true }], ['owner-file-replaced', { reject: true }],
       ['retired-entry-collision', { held: false, trigger: 'retired-cache-entry' }],
       ['inventory-mid-collision', { held: false, trigger: 'inventory-complete' }],
       ['unknown-owner', { reject: true }], ['persistent', { reject: true, deadlineMs: 200 }],
@@ -961,7 +1006,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 42 + protectedCases.length);
+    assert.equal(checks.length, 48 + protectedCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,

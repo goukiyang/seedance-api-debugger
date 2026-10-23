@@ -27,6 +27,9 @@ const LEGACY_HD_WRITER_SHA256 = '7442f68dd8ce7db49390293e722107c2bc57b72ea439765
 class DiscoveryAdmissionBusy extends Error {
   constructor(phase, proof) { super('Known canonical discovery lease observed at ' + phase); this.phase = phase; this.proof = proof; }
 }
+class DiscoveryOwnerReleaseCandidate extends Error {
+  constructor(proof) { super('The bound discovery owner record was unlinked during its final observation'); this.proof = proof; }
+}
 const DISCOVERY_SOURCES = ['src/lib/media/hd-derivatives.ts', 'src/lib/media/hd-discovery.ts',
   'src/lib/media/hd-resource-state.ts', 'scripts/process-hd-derivatives.ts', 'src/lib/media/hd-storage-root.ts'];
 const admissionStat = s => Object.fromEntries(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'uid', 'gid', 'mode', 'nlink'].map(k => [k, s[k]]));
@@ -67,7 +70,28 @@ function discoveryTreeSnapshot(m, admission) {
   return trees;
 }
 
-function readDiscoveryOwner(m, l, admission) {
+function readBoundDiscoveryOwnerBytes(file, proof) {
+  const before = fs.lstatSync(file);
+  assert.ok(before.isFile() && !before.isSymbolicLink());
+  assert.deepEqual(admissionStat(before), proof.ownerFile, 'Bound discovery owner file identity changed');
+  assert.equal(before.nlink, 1); assert.ok(before.size > 0 && before.size <= 4096);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const opened = fs.fstatSync(fd); assert.equal(opened.dev, before.dev); assert.equal(opened.ino, before.ino);
+    const bytes = fs.readFileSync(fd), after = fs.fstatSync(fd), linked = fs.lstatSync(file);
+    for (const field of Object.keys(proof.ownerFile)) {
+      assert.equal(after[field], before[field], 'Bound discovery owner changed while reading');
+      if (field !== 'nlink') assert.equal(linked[field], before[field], 'Bound discovery owner path changed while reading');
+    }
+    if (linked.nlink !== before.nlink) {
+      assert.equal(linked.nlink, 0); assert.equal(sha(bytes), proof.ownerRecordSha256);
+      throw new DiscoveryOwnerReleaseCandidate(proof);
+    }
+    return bytes;
+  } finally { fs.closeSync(fd); }
+}
+
+function readDiscoveryOwner(m, l, admission, bound = null) {
   admission.check(); admission.remaining();
   const lock = m.hdRoot + '/discovery.lock';
   assert.equal(fs.realpathSync(lock), lock);
@@ -77,7 +101,7 @@ function readDiscoveryOwner(m, l, admission) {
   const ownerFile = lock + '/owner.json', ownerStat = fs.lstatSync(ownerFile);
   assert.equal(fs.realpathSync(ownerFile), ownerFile); assert.equal(ownerStat.uid, l.uid); assert.equal(ownerStat.gid, l.gid);
   assert.equal(ownerStat.mode & 0o7777, 0o600);
-  const bytes = readRegular(ownerFile, 4096), owner = JSON.parse(bytes);
+  const bytes = bound ? readBoundDiscoveryOwnerBytes(ownerFile, bound) : readRegular(ownerFile, 4096), owner = JSON.parse(bytes);
   assert.equal(owner.pid, m.live.hd.pid); assert.equal(owner.host, os.hostname());
   assert.match(owner.token || '', /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
   const runtime = readDiscoveryRuntime(m, l, admission);
@@ -181,9 +205,13 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
   };
   while (lockEntry()) {
     check(); admission.remaining();
-    try { assert.deepEqual(readDiscoveryOwner(m, l, admission), busy.proof, 'Discovery owner or file identity drifted while waiting'); }
+    try { assert.deepEqual(readDiscoveryOwner(m, l, admission, busy.proof), busy.proof, 'Discovery owner or file identity drifted while waiting'); }
     catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      if (error.code !== 'ENOENT' && !(error instanceof DiscoveryOwnerReleaseCandidate && error.proof === busy.proof)) throw error;
+      let ownerAbsent = false;
+      try { fs.lstatSync(busy.proof.lock + '/owner.json'); }
+      catch (missing) { if (missing.code !== 'ENOENT') throw missing; ownerAbsent = true; }
+      assert.equal(ownerAbsent, true, 'Discovery release requires a fresh absence of the bound owner record');
       const stat = lockEntry();
       if (!stat) break;
       // The already-bound owner removes owner.json before rmdir. An empty,
