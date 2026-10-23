@@ -1,3 +1,4 @@
+import { CreationError } from '@/lib/creation/contract';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { CanvasVideoBatchError } from '@/lib/canvas-video-batches-guards';
@@ -10,6 +11,7 @@ export const runtime = 'nodejs';
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status,
   headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
 function failure(error: unknown) {
+  if (error instanceof CreationError) return json({ error: error.message, code: error.code }, error.status);
   if (error instanceof CanvasVideoBatchError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
   if (error instanceof AuthError) return json({ error: error.message }, error.status);
   const pricing = videoPricingError(error);

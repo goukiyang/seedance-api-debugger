@@ -12,6 +12,9 @@ import type {
 import { checkPrompt } from '@/components/PromptChecker';
 import { useWorkspace, WorkspaceInputRecoveryError, type WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
 import { uploadSession } from '@/lib/http/upload-session';
+import type { TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
@@ -385,6 +388,7 @@ function createModuleBuilderDraft(params: {
 
 interface Props {
   collections: AssetCollection[];
+  creationContextKey?: string;
   initialSettings?: GenerationDefaults | null;
   preferencesReady?: boolean;
   onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
@@ -414,13 +418,13 @@ interface Props {
   imageResultHandoff?: ImageResultVideoHandoff | null;
   interactionLocked?: boolean;
   onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
-  onWorkspaceRefreshReady?: (refresh: (() => Promise<void>) | null) => void;
+  onWorkspaceRefreshReady?: (refresh: (() => Promise<WorkspaceReadResult>) | null) => void;
   inputRecoveryScope?: string | (() => string);
-  onInputRecoveryReady?: (capture: (() => boolean) | null) => void;
-  onCaptureInputRecoveryTarget?: () => (() => void);
+  onInputRecoveryReady?: (capture: (() => TaskReuseInputBackup | false) | null) => void;
+  onCaptureInputRecoveryTarget?: (target?: { projectId: string; videoCardId: string; videoBranchId: string }) => (() => void);
   onReuseStateChange?: (state: ComposerReuseState) => void;
   onPrepareReuseReady?: (prepare: (() => void) | null) => void;
-  onReuseDraftApplied?: (taskId: string, reuseKey: number) => void;
+  onReuseDraftApplied?: (taskId: string, reuseKey: number, outcome: 'applied' | 'read_failed' | 'context_changed' | 'unsupported', message?: string) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -501,6 +505,7 @@ interface Props {
 
 export function GenerationComposer({
   collections,
+  creationContextKey,
   initialSettings,
   preferencesReady = false,
   onSettingsChange,
@@ -721,9 +726,63 @@ export function GenerationComposer({
   const captureInputRecovery = useCallback(() => {
     const value = makeInputRecovery();
     if (!value) { setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
-    setInputRecovery(value); setInputRecoveryMessage('替换前输入已保留在本页，可恢复。'); return true;
-  }, [makeInputRecovery]);
+    setInputRecovery(value); setInputRecoveryMessage('替换前输入已保留，可恢复。'); return { version: 1 as const, workspace: value.workspace, fields: { prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
+  }, [makeInputRecovery, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, selectedVideoCardId]);
   useEffect(() => { onInputRecoveryReady?.(captureInputRecovery); return () => onInputRecoveryReady?.(null); }, [onInputRecoveryReady, captureInputRecovery]);
+  const restoredBackupScope = React.useRef('');
+  useEffect(() => {
+    const current = workspace.workspace, session = uploadSession();
+    if (!current || workspace.loading || current.owner_id !== session.ownerId || restoredBackupScope.current === current.id) return;
+    restoredBackupScope.current = current.id;
+    try {
+      const tab = sessionStorage.getItem('workspace_tab_id') || 'default', backup = readTaskReuseInputBackup(current.owner_id, tab);
+      if (!backup || backup.workspace.workspaceId !== current.id) return;
+      const value = backup.fields;
+      if (!['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(value.generationMode) || typeof value.ratio !== 'string'
+        || typeof value.resolution !== 'string' || !Number.isFinite(value.duration) || !Number.isFinite(value.seed)) return;
+      const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
+      setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, restoreFields: () => {
+        settingsTouchedRef.current = true;
+        setPrompt(value.prompt); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
+        setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
+        setGenerateAudio(value.generateAudio === true); setReturnLastFrame(value.returnLastFrame === true); setWatermark(value.watermark === true); setResolutionApprovalConfirmed(false);
+        if (value.model) { setSelectedModel(value.model); onModelChange?.(value.model); }
+        if (value.provider) onProviderChange?.(value.provider);
+        if (value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
+        restoreTarget?.();
+      } });
+      setInputRecoveryMessage('复用前输入仍保留，可主动恢复。');
+    } catch { /* Optional recovery never replaces current input during initialization. */ }
+  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget]);
+  const ordinaryDraftKey = creationContextKey ? `sd2:video-input-draft:v2:${creationContextKey}` : '';
+  const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
+  React.useLayoutEffect(() => {
+    if (!ordinaryDraftKey || ordinaryDraftLoaded === ordinaryDraftKey || !preferencesReady) return;
+    try {
+      if (!studioHandoff && !imageResultHandoff && !reuseDraft && !interactionLocked && !settingsTouchedRef.current) {
+        const saved = JSON.parse(localStorage.getItem(ordinaryDraftKey) || 'null');
+        if (saved?.version === 2 && typeof saved.prompt === 'string' && saved.prompt.length <= 20000
+          && ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(saved.generationMode)
+          && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
+          && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
+          setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
+          if (saved.model) { setSelectedModel(saved.model); onModelChange?.(saved.model); }
+        }
+      }
+    } catch { /* Invalid optional local data never blocks a new draft. */ }
+    setOrdinaryDraftLoaded(ordinaryDraftKey);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange]);
+  useEffect(() => {
+    if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || studioHandoff || imageResultHandoff || interactionLocked
+      || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, model: selectedModel })); }
+      catch { setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
   const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
   const restoreInputRecovery = async (target = inputRecovery) => {
     if (!target || inputRecoveryBusy || interactionLocked || workspace.loading || workspace.pendingWorkspaceAttach) return;
@@ -1264,7 +1323,8 @@ export function GenerationComposer({
   useEffect(() => {
     const reuseKey = reuseDraft ? `${reuseDraft.taskId}:${reuseDraft.reuseKey}` : null;
     if (!reuseDraft || studioHandoff || appliedReuseDraftRef.current === reuseKey) return;
-    appliedReuseDraftRef.current = reuseKey;
+    appliedReuseDraftRef.current = reuseKey; settingsTouchedRef.current = true;
+    if (reuseDraft.model && modelOptions.length && !modelOptions.some(option => option.id === reuseDraft.model)) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'unsupported', '原模型当前不可用，服务器素材已恢复，当前参数未替换。'); return; }
     setPrompt(reuseDraft.prompt);
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
@@ -1282,9 +1342,11 @@ export function GenerationComposer({
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
     setReuseReadCompleteKey(null);
-    void runWorkspaceOperation(() => workspace.refresh(), false, true).then(() => {
-      if (reuseMountedRef.current && appliedReuseDraftRef.current === reuseKey) setReuseReadCompleteKey(reuseKey);
-    });
+    void runWorkspaceOperation(() => workspace.refresh(), false, true).then(result => {
+      if (!reuseMountedRef.current || appliedReuseDraftRef.current !== reuseKey) return;
+      if (!result.applied) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', result.error || '服务器已完成，参考区读取尚未确认；可以重新读取同一结果。'); return; }
+      setReuseReadCompleteKey(reuseKey);
+    }).catch(() => onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', '服务器已完成，参考区暂不可读。'));
   }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
 
   useEffect(() => {
@@ -1294,9 +1356,9 @@ export function GenerationComposer({
     if (prompt !== reuseDraft.prompt || generationMode !== reuseDraft.generationMode || ratio !== reuseDraft.ratio
       || duration !== reuseDraft.duration || resolution !== reuseDraft.resolution || seed !== reuseDraft.seed
       || generateAudio !== reuseDraft.generateAudio || returnLastFrame !== reuseDraft.returnLastFrame
-      || watermark !== reuseDraft.watermark || (reuseDraft.model && selectedModel !== reuseDraft.model)) return;
+      || watermark !== reuseDraft.watermark || (reuseDraft.model && selectedModel !== reuseDraft.model)) { reportedReuseAppliedRef.current = reuseKey; onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'context_changed', '服务器已完成复用，当前参数已有新编辑，未继续覆盖。'); return; }
     reportedReuseAppliedRef.current = reuseKey;
-    onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey);
+    onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'applied');
   }, [reuseDraft, reuseReadCompleteKey, onReuseDraftApplied, studioHandoff, workspace.loading, workspace.error,
     prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
 
@@ -1383,7 +1445,8 @@ export function GenerationComposer({
   // ============================================================================
 
   useEffect(() => {
-    if (!preferencesReady || !onSettingsChange || studioHandoff || imageResultHandoff || isRestoringStudioSettings) return;
+    if (!preferencesReady || !onSettingsChange || studioHandoff || imageResultHandoff || isRestoringStudioSettings || interactionLocked
+      || ordinaryDraftKey && ordinaryDraftLoaded !== ordinaryDraftKey || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
     const timeout = setTimeout(() => onSettingsChange({
       model: selectedModel || null,
       generationMode,
@@ -1395,7 +1458,7 @@ export function GenerationComposer({
       watermark,
     }), 400);
     return () => clearTimeout(timeout);
-  }, [preferencesReady, onSettingsChange, studioHandoff, imageResultHandoff, isRestoringStudioSettings, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
+  }, [preferencesReady, onSettingsChange, studioHandoff, imageResultHandoff, isRestoringStudioSettings, interactionLocked, ordinaryDraftKey, ordinaryDraftLoaded, reuseDraft, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
 
   const handleSubmit = useCallback(async () => {
     if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
@@ -2393,14 +2456,12 @@ export function GenerationComposer({
           <button
             type="button"
             className="composer-result-reset"
-            title="重置生成参数，保留提示词和素材"
-            aria-label="重置生成参数，保留提示词和素材"
+            title="重置当前模型参数，保留提示词、素材和保存位置"
+            aria-label="重置当前模型参数，保留提示词、素材和保存位置"
             disabled={!preferencesReady || isSubmitting}
             onClick={() => {
               settingsTouchedRef.current = true;
               setGenerationMode(DEFAULT_GENERATION_MODE);
-              setSelectedModel(modelOptions[0]?.id || '');
-              onModelChange?.(modelOptions[0]?.id || '');
               setRatio(DEFAULT_RATIO);
               setDuration(DEFAULT_DURATION);
               setResolution(DEFAULT_RESOLUTION);
@@ -2482,6 +2543,7 @@ export function GenerationComposer({
       />}
 
       <UploadedImagePicker
+        contextKey={creationContextKey || `video:${pricingProjectId || 'draft'}:${selectedVideoCardId || 'new'}`}
         open={(showUploadedImagePicker || showAlbumPicker) && !interactionLocked}
         target="workspace"
         title={generationMode === 'first_last_frame' ? '添加首尾帧素材' : '添加视频参考素材'}

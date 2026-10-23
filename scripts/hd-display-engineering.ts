@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
 import type { HdDescription } from '../src/lib/media/hd-source-session';
 
@@ -38,7 +39,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   let heldDescriptor = '';
   const globals = {
     URL: MemoryURL, URLSearchParams, Blob, Response, Request, Headers, AbortController, AbortSignal, DOMException,
-    Image: DecodedImage, Date: Clock, queueMicrotask, console,
+    Image: DecodedImage, Date: Clock, queueMicrotask, console, crypto: webcrypto,
     navigator: { connection: { saveData: false } }, location: new URL(`${origin}/template-studio`), window: { location: new URL(origin) },
     document: { hidden: false, addEventListener: (_name: string, listener: () => void) => listeners.add(listener),
       removeEventListener: (_name: string, listener: () => void) => listeners.delete(listener),
@@ -49,7 +50,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
       const url = new URL(String(input), origin), id = url.pathname.split('/').at(-1)!;
       assert.equal(url.origin, origin); assert.match(url.pathname, /^\/api\/image-studio\/assets\/[a-z0-9-]+$/);
       const variant = url.searchParams.get('variant') || ['hd-description', 'hd-download', 'hd', 'thumbnail', 'preview', 'download'].find(name => url.searchParams.get(name) === '1') || 'original';
-      const method = init?.method || 'GET', readonly = new Headers(init?.headers).get('X-Image-Read-Intent') === 'prefetch';
+      const method = init?.method || 'GET', readonly = ['prefetch', 'status'].includes(new Headers(init?.headers).get('X-Image-Read-Intent') || '');
       assert.ok(method === 'GET' || method === 'HEAD', 'no business writes are permitted');
       requests.push({ id, variant, method, readonly });
       if (variant === 'hd-description') {
@@ -98,9 +99,15 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     account = `engineering:${++accountSequence}`; reads.setImageReadSessionOwner(account);
     timers.clear(); requests.length = 0; clicked.length = 0; heldDecodes.clear(); decodes.clear();
   };
-  const mount = (id: string, options: { original?: boolean; previewOnly?: boolean } = {}) => {
+  const mount = (id: string, options: { original?: boolean; previewOnly?: boolean; intent?: 'prepare' | 'open' } = {}) => {
     const handle = preview.prepareImagePreview({ account, source: `/api/image-studio/assets/${id}`, ...options });
     const release = handle.subscribe(() => {}); handle.release(); releases.push(release); return handle;
+  };
+  const mountHd = async (id: string) => {
+    const descriptors = load('src/lib/media/hd-source-session.ts') as typeof import('../src/lib/media/hd-source-session');
+    const prefetch = descriptors.prefetchHdImageSource(account, `/api/image-studio/assets/${id}?hd-description=1`);
+    await prefetch.result; prefetch.release(); await flush();
+    return mount(id);
   };
   const advance = async () => {
     const timer = Array.from(timers).sort((a, b) => a[1].at - b[1].at)[0];
@@ -111,40 +118,39 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   const proof = { sourceVersion: 'source-v1', bytes: 4, mime: 'image/avif', variant: 'hd' as const, policy: 'hd-f-v1' as const };
   try {
     reset(); descriptions.set('progressive', { ...ready, status: 'queued' });
-    const progressive = mount('progressive'); await flush();
-    assert.equal(progressive.getSnapshot().displayKind, 'preview'); assert.equal(progressive.getSnapshot().result.decoded, true);
-    assert.equal(reads.canPrefetchImages(), false); progressive.markDisplayed(); assert.equal(reads.canPrefetchImages(), true); noOriginal();
-    heldDecodes.add('image/avif'); descriptions.set('progressive', ready); await advance();
-    assert.equal(progressive.getSnapshot().displayKind, 'hd'); assert.equal(progressive.getSnapshot().retained?.result.decoded, true);
-    assert.equal(reads.canPrefetchImages(), false, 'ready HD reacquires foreground before neighbors');
-    assert.ok(decodes.get('image/avif')); decodes.get('image/avif')!(); await flush();
-    assert.equal(progressive.getSnapshot().result.decoded, true); progressive.markDisplayed();
-    assert.equal(progressive.getSnapshot().retained, undefined); assert.equal(reads.canPrefetchImages(), true); noOriginal();
-    checks.push('pending_preview_ready_decode_handoff_foreground');
+    const progressive = mount('progressive', { intent: 'prepare' }); await flush();
+    assert.equal(progressive.getSnapshot().displayKind, 'preview'); assert.equal(progressive.getSnapshot().result.decoded, true); noOriginal();
+    progressive.confirmOpen(); await flush();
+    assert.equal(progressive.getSnapshot().displayKind, 'original'); assert.equal(progressive.getSnapshot().result.decoded, true);
+    progressive.markDisplayed(); const shownOriginal = progressive.getSnapshot().result.imageSrc;
+    assert.equal(reads.canPrefetchImages(), true);
+    descriptions.set('progressive', ready); await advance();
+    assert.equal(progressive.getSnapshot().displayKind, 'original'); assert.equal(progressive.getSnapshot().result.imageSrc, shownOriginal);
+    assert.equal(progressive.getSnapshot().description?.status, 'ready');
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
+    checks.push('prepare_never_original_confirmed_open_pins_original_after_hd_ready');
 
-    reset(); descriptions.set('failed-image', { ...ready, status: 'running' });
-    const failed = mount('failed-image'); await flush(); failed.markDisplayed();
-    descriptions.set('failed-image', ready); bodies.set('failed-image:hd', 503); await advance();
-    assert.equal(failed.getSnapshot().displayKind, 'preview'); assert.equal(failed.getSnapshot().result.decoded, true);
-    assert.equal(failed.getSnapshot().fallback, true); assert.equal(reads.canPrefetchImages(), true); noOriginal();
-    checks.push('hd_read_failure_keeps_preview_without_original');
+    reset(); descriptions.set('failed-image', { ...ready, status: 'running' }); bodies.set('failed-image:original', 503);
+    const failed = mount('failed-image'); await flush(); await advance(); await advance();
+    assert.equal(failed.getSnapshot().displayKind, 'original'); assert.equal(failed.getSnapshot().result.imageSrc, null);
+    assert.equal(requests.filter(request => request.variant === 'original').length, 3, 'two bounded retries after the first failed GET');
+    assert.equal(failed.getSnapshot().denied, undefined); checks.push('original_read_failure_preserves_object_and_bounds_retries');
 
     reset(); descriptions.set('descriptor-denied', { ...ready, status: 'queued' });
     const revoked = mount('descriptor-denied'); await flush(); revoked.markDisplayed(); descriptions.set('descriptor-denied', 403); await advance();
     assert.equal(revoked.getSnapshot().denied, true); assert.equal(revoked.getSnapshot().result.imageSrc, null);
-    noOriginal(); checks.push('descriptor_denial_removes_displayed_preview');
+    checks.push('descriptor_denial_removes_displayed_original');
 
     reset(); const original = mount('chosen-original', { original: true }); await flush();
     assert.equal(original.getSnapshot().displayKind, 'original'); assert.equal(original.getSnapshot().result.decoded, true);
-    descriptions.set('chosen-original', ready); await flush();
-    assert.equal(requests.some(request => request.variant.startsWith('hd')), false); checks.push('explicit_original_never_auto_switches');
+    assert.equal(requests.some(request => request.variant === 'hd'), false); checks.push('explicit_original_never_auto_switches');
 
-    reset(); bodies.set('conflict:hd', 409); const conflict = mount('conflict'); await flush();
-    assert.equal(requests.filter(request => request.variant === 'hd-description' && request.readonly).length, 1);
-    assert.equal(requests.filter(request => request.variant === 'hd').length, 2);
-    assert.equal(conflict.getSnapshot().displayKind, 'preview'); assert.equal(conflict.getSnapshot().error, true);
-    await advance(); assert.equal(requests.filter(request => request.variant === 'hd').length, 2); noOriginal();
-    checks.push('409_only_one_fresh_confirmation_no_original_loop');
+    reset(); bodies.set('conflict:hd', 409); const conflict = await mountHd('conflict'); await flush();
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 1);
+    assert.equal(requests.filter(request => request.variant === 'hd-description' && request.readonly).length, 2, 'hint plus one fresh representation check');
+    assert.equal(conflict.getSnapshot().displayKind, 'original'); assert.equal(conflict.getSnapshot().result.decoded, true);
+    await advance(); assert.equal(requests.filter(request => request.variant === 'hd').length, 1);
+    checks.push('409_one_fresh_confirmation_then_original_no_hd_loop');
 
     reset(); heldDescriptor = 'late-account'; const late = mount('late-account'); await flush();
     assert.ok(descriptorWait.resolve); reads.setImageReadSessionOwner('different-account');
@@ -152,7 +158,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(late.getSnapshot().denied, true); assert.equal(late.getSnapshot().result.imageSrc, null);
     assert.equal(requests.filter(request => request.variant === 'hd').length, 0); checks.push('late_account_response_cannot_paint');
 
-    reset(); const cached = mount('download'); await flush(); cached.markDisplayed();
+    reset(); const cached = await mountHd('download'); await flush(); cached.markDisplayed();
     const borrowed = reads.borrowImageRead(account, hdSource('download'), 'source-v1', proof); assert.ok(borrowed); borrowed.release();
     for (const changed of [{ bytes: 8 }, { mime: 'image/png' }, { sourceVersion: 'source-v2' }]) {
       assert.equal(reads.borrowImageRead(account, hdSource('download'), 'source-v1', { ...proof, ...changed }), null);
@@ -170,7 +176,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(clicked.length, beforeMismatch); checks.push('fresh_head_exact_hd_borrow_and_native_miss');
 
     for (const status of [401, 403, 404]) {
-      reset(); const handle = mount(`denied-${status}`); await flush(); handle.markDisplayed();
+      reset(); const handle = await mountHd(`denied-${status}`); await flush(); handle.markDisplayed();
       heads.set(`denied-${status}`, { status });
       await assert.rejects(downloads.handHdImageDownloadToBrowser({ account, source: `/api/image-studio/assets/denied-${status}`, sourceVersion: 'source-v1', fileName: 'image.png', isCurrent: () => true }));
       assert.equal(handle.getSnapshot().denied, true); assert.equal(handle.getSnapshot().result.imageSrc, null);
@@ -178,16 +184,16 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     }
     checks.push('fresh_head_401_403_404_clears_family');
 
-    reset(); const originalDenied = mount('original-denied'); await flush(); originalDenied.markDisplayed(); heads.set('original-denied', { status: 403 });
+    reset(); const originalDenied = await mountHd('original-denied'); await flush(); originalDenied.markDisplayed(); heads.set('original-denied', { status: 403 });
     await assert.rejects(downloads.handImageDownloadToBrowser('/api/image-studio/assets/original-denied?download=1', 'image.png'));
     assert.equal(originalDenied.getSnapshot().denied, true); assert.equal(clicked.length, 0);
     checks.push('original_download_denial_clears_hd_family');
 
-    reset(); bodies.set('partial:hd', 206); const partial = mount('partial'); await flush();
-    assert.equal(partial.getSnapshot().result.decoded, true);
+    reset(); bodies.set('partial:hd', 206); const partial = await mountHd('partial'); await flush();
+    assert.equal(partial.getSnapshot().result.decoded, undefined);
     assert.equal(reads.borrowImageRead(account, hdSource('partial'), 'source-v1', proof), null); checks.push('partial_body_cannot_be_download_blob');
 
-    reset(); const prior = mount('downgrade'); await flush(); prior.markDisplayed();
+    reset(); const prior = await mountHd('downgrade'); await flush(); prior.markDisplayed();
     const previewOnly = mount('downgrade', { previewOnly: true }); await flush();
     assert.equal(prior.getSnapshot().denied, true); assert.equal(previewOnly.getSnapshot().displayKind, 'preview');
     assert.equal(previewOnly.getSnapshot().fullSize, false); assert.equal(reads.borrowImageRead(account, hdSource('downgrade'), 'source-v1', proof), null);
@@ -196,7 +202,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     reset(); const previewResults: import('../src/lib/media/image-read-session').ImageReadResult[] = [];
     releases.push(reads.acquireImageRead(account, '/api/image-studio/assets/existing-preview?preview=1', '', 0, value => { previewResults.push(value); })); await flush();
     assert.equal(previewResults.at(-1)?.decoded, true); descriptions.set('existing-preview', { ...ready, status: 'queued' });
-    const existing = mount('existing-preview'); await flush();
+    const existing = mount('existing-preview', { intent: 'prepare' }); await flush();
     assert.match(existing.getSnapshot().readSource, /preview=1/); assert.equal(requests.filter(request => request.variant === 'preview').length, 1); noOriginal();
     checks.push('existing_1600_preview_reuses_same_session');
 

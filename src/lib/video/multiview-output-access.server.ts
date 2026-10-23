@@ -1,4 +1,5 @@
 import type { SessionUser } from '@/lib/auth/session';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { multiviewFileAliases } from './multiview-recipe-storage.server';
 
@@ -13,8 +14,8 @@ type Reader = { id: string; role: string; account_type?: string; status?: string
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 /** A removed Asset must not turn a reused, formerly public filename public again. */
-async function hasDurableOutputAlias(aliases: string[]) {
-  const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: 'multiview_output_registration_v1:receipt:' },
+async function hasDurableOutputAlias(aliases: string[], db: Prisma.TransactionClient = prisma) {
+  const rows = await db.platformSetting.findMany({ where: { key: { startsWith: 'multiview_output_registration_v1:receipt:' },
     OR: aliases.map(url => ({ value_json: { contains: JSON.stringify(url) } })) }, select: { value_json: true } });
   for (const row of rows) {
     let value: unknown;
@@ -30,12 +31,13 @@ async function hasDurableOutputAlias(aliases: string[]) {
 }
 
 /** Output originals use the existing Asset/explicit-album rights, never recipe rights. */
-export async function multiviewOutputFileAccess(user: Reader, rawUrl: string, original = true): Promise<{ protected: boolean; allowed: boolean }> {
+export async function multiviewOutputFileAccess(user: Reader, rawUrl: string, original = true,
+  db: Prisma.TransactionClient = prisma): Promise<{ protected: boolean; allowed: boolean }> {
   const aliases = multiviewFileAliases(rawUrl);
   const [rows, durable] = await Promise.all([
-    prisma.asset.findMany({ where: { OR: [{ original_url: { in: aliases } }, { thumbnail_url: { in: aliases } }] },
+    db.asset.findMany({ where: { OR: [{ original_url: { in: aliases } }, { thumbnail_url: { in: aliases } }] },
       select: { id: true, owner_id: true, status: true, original_url: true, metadata_json: true } }),
-    hasDurableOutputAlias(aliases),
+    hasDurableOutputAlias(aliases, db),
   ]);
   const assets = rows.filter(asset => isMultiviewOutputMetadata(asset.metadata_json) || asset.original_url.includes('/uploads/multiview-outputs/'));
   // A published file is not readable in the gap before its Asset transaction.
@@ -47,15 +49,15 @@ export async function multiviewOutputFileAccess(user: Reader, rawUrl: string, or
   if (user.role === 'admin' && user.account_type === 'internal' || active.some(asset => asset.owner_id === user.id)) return { protected: true, allowed: true };
   // Do not invent output sharing. Reuse only a real, explicit existing album
   // grant, including the distinct original-download permission.
-  const refs = await prisma.referenceImage.findMany({ where: { asset_id: { in: active.map(asset => asset.id) }, status: 'active', album: { status: { not: 'deleted' } } },
+  const refs = await db.referenceImage.findMany({ where: { asset_id: { in: active.map(asset => asset.id) }, status: 'active', album: { status: { not: 'deleted' } } },
     select: { album_id: true } });
   if (!refs.length) return { protected: true, allowed: false };
   const { getAlbumByIdForAccess, getAlbumAccess } = await import('@/lib/reference-albums/permissions');
   const actor = { ...user, status: user.status || 'active' } as SessionUser;
   for (const albumId of Array.from(new Set(refs.map(ref => ref.album_id)))) {
-    const album = await getAlbumByIdForAccess(albumId);
+    const album = await getAlbumByIdForAccess(albumId, db);
     if (!album) continue;
-    const access = await getAlbumAccess(actor, album);
+    const access = await getAlbumAccess(actor, album, db);
     if (original ? access.permissions.download : access.permissions.view) return { protected: true, allowed: true };
   }
   return { protected: true, allowed: false };

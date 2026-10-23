@@ -7,5 +7,14 @@
   },
   "artifactPolicy": "immutable-original-full-build",
   "attemptPolicy": "fresh-window-distinct-attempt",
-  "recoveryPolicy": "fixed-compatible-guard-no-business-data-restore"
+  "recoveryPolicy": "fixed-compatible-guard-no-business-data-restore",
+  "fullRelease": {
+    "schema": "sd2-full-release-contract.v1",
+    "prepareCommand": "prepare-full",
+    "bindCommand": "bind-package",
+    "captureCommand": "capture-full",
+    "sourceManifestPolicy": "retain-original-sealed-bytes",
+    "failedContinuationCommand": "continue-failed",
+    "schemaPolicy": "consistent-backup-stopped-writers-preserve-values-fixed-compatible-guard"
+  }
 }

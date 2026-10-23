@@ -28,21 +28,21 @@ type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (reques
   UltimateCanvasMentionContextMatches?: (requestId: string) => boolean;
   UltimateCanvasUploadContextMatches?: (requestId: string) => boolean };
 type MentionRequest = { requestId: string; prompt: string; cursor: number; candidates: PromptMentionCandidate[]; left: number; top: number };
-type UploadRequest = { requestId: string; userId: string; documentId: string; projectId: string; cardId: string;
+type UploadRequest = { requestId: string; userId: string; documentId: string; projectId: string; cardId: string | null;
   files: Array<{ file: File; nodeId: string }> };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
 
-async function uploadCanvasOriginal(file: File, context: Omit<UploadRequest, 'files'>,
+async function uploadCanvasOriginal(file: File, context: Omit<UploadRequest, 'files'> & { nodeId?: string },
   matches: () => boolean, onProgress?: NonNullable<Parameters<typeof uploadFileAsAsset>[1]>['onProgress']) {
   let markerKey = '';
   try {
     const asset = await uploadFileAsAsset(file, { preserveUnknown: true, fallbackToRaw: false, onProgress,
       beforeUpload: async identity => {
         if (!matches()) throw new Error('画布或账号已变化，未开始上传');
-        markerKey = `sd2_canvas_upload:${context.userId}:${context.projectId}:${context.cardId}:${context.documentId}:${identity.hash}`;
+        markerKey = context.cardId ? `sd2_canvas_upload:${context.userId}:${context.projectId}:${context.cardId}:${context.documentId}:${identity.hash}` : `sd2_canvas_upload:v2:${context.userId}:${context.projectId}:${context.documentId}:${context.nodeId || 'reference'}:${context.requestId}:${identity.hash}`;
         if (localStorage.getItem(markerKey)) {
           const query = new URLSearchParams({ canvas_document_id: context.documentId, project_id: context.projectId,
-            video_card_id: context.cardId, hash: identity.hash, file_size: String(identity.fileSize), mime_type: identity.mimeType });
+            video_card_id: context.cardId || '', creation_contract_version: context.cardId ? '1' : '2', hash: identity.hash, file_size: String(identity.fileSize), mime_type: identity.mimeType });
           const response = await fetch(`/api/tools/ultimate-canvas/upload?${query}`, { credentials: 'same-origin' });
           const result = await readJsonResponse<{ found?: boolean; asset?: { id?: string }; error?: string }>(response);
           if (!matches()) throw new Error('画布或账号已变化，未关联素材');
@@ -111,14 +111,14 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
       let markerKey = '';
       let assetId: string | undefined;
       try {
-        const original = await uploadCanvasOriginal(entry.file, request, matches,
+        const original = await uploadCanvasOriginal(entry.file, { ...request, nodeId: entry.nodeId }, matches,
           progress => { if (matches()) send({ nodeId: entry.nodeId, progress }); });
         const asset = original.asset; markerKey = original.markerKey;
         assetId = asset.id;
         if (!matches()) throw new Error('画布或账号已变化，原素材保留，未写回旧画布');
         const response = await fetch('/api/tools/ultimate-canvas/upload', { method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: request.requestId, asset_id: asset.id,
-            project_id: request.projectId, video_card_id: request.cardId, canvas_document_id: request.documentId, canvas_node_id: entry.nodeId }) });
+            project_id: request.projectId, video_card_id: request.cardId, creation_contract_version: 2, canvas_document_id: request.documentId, canvas_node_id: entry.nodeId }) });
         const result = await readJsonResponse<{ success?: boolean; error?: string }>(response);
         if (!response.ok || !result.success) throw new Error(result.error || '原件已上传，关联尚未确认；重试只恢复关联');
         if (!matches()) throw new Error('画布或账号已变化，未写回旧画布');
@@ -274,7 +274,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         return;
       }
       if (value?.type === 'sd2-canvas-upload-request') {
-        if (!validId(value.requestId) || value.userId !== userId.current || ![value.documentId, value.projectId, value.cardId].every(validId)
+        if (!validId(value.requestId) || value.userId !== userId.current || ![value.documentId, value.projectId].every(validId) || value.cardId !== null && !validId(value.cardId)
           || !Array.isArray(value.files) || value.files.length !== 1
           || !value.files.every((entry: { file?: unknown; nodeId?: unknown }) => entry.file instanceof File && validId(entry.nodeId))
           || !(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasUploadContextMatches?.(value.requestId)) return;
@@ -500,12 +500,13 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     </div>}
     {referenceRequest && referenceRequest.userId === user?.id && <ResourceLibraryPicker key={referenceRequest.requestId}
       open imageOnly target="workspace" title="添加参考图" confirmLabel="添加到参考区"
+      contextKey={`${referenceRequest.userId}:canvas:${referenceRequest.documentId}:${referenceRequest.nodeId}`}
       purpose={`canvas-reference:${referenceRequest.documentId || 'unsaved'}:${referenceRequest.nodeId}`}
       maxSelection={referenceRequest.capacity} currentCount={referenceRequest.currentReferenceImageIds.length}
       currentAssetIds={referenceRequest.currentAssetIds} currentReferenceImageIds={referenceRequest.currentReferenceImageIds}
       onClose={closeReferencePicker}
       onUploadFile={async (file, onProgress) => {
-        if (!referenceContextMatches(referenceRequest) || !referenceRequest.documentId || !referenceRequest.projectId || !referenceRequest.cardId) throw new Error('参考目标已改变，请重新打开');
+        if (!referenceContextMatches(referenceRequest) || !referenceRequest.documentId || !referenceRequest.projectId) throw new Error('参考目标已改变，请重新打开');
         const original = await uploadCanvasOriginal(file, { ...referenceRequest, documentId: referenceRequest.documentId,
           projectId: referenceRequest.projectId, cardId: referenceRequest.cardId }, () => referenceContextMatches(referenceRequest), onProgress);
         return original.asset;

@@ -50,14 +50,16 @@ export const LEGACY_EXECUTION_CONTRACT = Object.freeze({
 });
 export function captureLegacySourceContract({ legacyRoot, manifest = null }) {
   rootOnly(); inside(legacyRoot); assert.equal(fs.realpathSync(legacyRoot), legacyRoot);
-  assert.equal(fs.readFileSync(path.join(legacyRoot, '.deployed-commit'), 'utf8').trim(), LEGACY_SOURCE);
+  const sourceRole = manifest?.fullRelease ? ['web', 'image'].find(role => manifest.live[role].root === legacyRoot) : null;
+  const expectedSource = sourceRole ? manifest.live[sourceRole].source : LEGACY_SOURCE;
+  assert.equal(fs.readFileSync(path.join(legacyRoot, '.deployed-commit'), 'utf8').trim(), expectedSource);
   // The original static map still governs first publication/continuation. A newer
   // deployed source must instead be proven by the exact prior publication bytes.
   assert.deepEqual(manifest?.deployedUsageSchema || null, MV_DIRECT.deployedUsageSchema || null);
   const published = manifest?.deployedUsageSchema
-    ? readPublishedBaselineSourceFiles(manifest, [...Object.keys(LEGACY_SOURCE_FILES), 'scripts/process-image-studio.ts']) : null;
+    ? readPublishedBaselineSourceFiles(manifest, [...Object.keys(LEGACY_SOURCE_FILES), 'scripts/process-image-studio.ts'], sourceRole || 'web') : null;
   if (published) {
-    assert.equal(published.source, LEGACY_SOURCE); assert.equal(published.root, legacyRoot);
+    assert.equal(published.source, expectedSource); assert.equal(published.root, legacyRoot);
   }
   const sourceFiles = published?.sourceFiles || LEGACY_SOURCE_FILES;
   for (const [file, expected] of Object.entries(sourceFiles)) {
@@ -87,7 +89,7 @@ export function captureLegacySourceContract({ legacyRoot, manifest = null }) {
     'assertFrozenSharedStudioTask(current);', 'await assertPricingImageConsumerReady(prisma)',
     'current.billing_deadline <= new Date()', 'Date.parse(contract.deadline!) <= Date.now()'])
     assert.ok(worker.includes(text), 'Final POST authorization contract changed');
-  return { ...LEGACY_EXECUTION_CONTRACT, sourceFiles,
+  return { ...LEGACY_EXECUTION_CONTRACT, source: expectedSource, sourceFiles,
     ...(published ? { publishedBaseline: published } : {}), checkedAt: Date.now() };
 }
 export function captureLegacyWriterContracts(m) {

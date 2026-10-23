@@ -695,7 +695,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
 
       {tab !== 'result'&&!visibleRecords.length&&<p className={styles.empty}>暂无{deleted?'已删除':''}{tab==='config'?'配置':tab==='character'?'人物':'生成历史'}</p>}{tab !== 'result'&&cursor&&<button type="button" className={styles.quiet} disabled={busy} onClick={()=>void run(async()=>{await load(true,cursor);})}>加载更多</button>}
     </section>
-    <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="avatar-reference" initialSource="random-person" title="添加人物参考图" confirmLabel="添加到参考区" maxSelection={MAX_REFERENCE_IMAGES}
+    <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="avatar-reference" contextKey={`${ownerId}:avatar-reference:${ticketId || "draft"}`} initialSource="random-person" title="添加人物参考图" confirmLabel="添加到参考区" maxSelection={MAX_REFERENCE_IMAGES}
       currentCount={referenceIds.length} currentAssetIds={referenceIds} onClose={()=>setPickerOpen(false)} onUploadFile={uploadReference}
       onConfirm={async ids=>{addReferences(ids);return true;}}/>
     {imagePreview&&<ZoomableImagePreview src={imagePreview.src} alt={imagePreview.alt} fileName="avatar.png" imageSharing={false}

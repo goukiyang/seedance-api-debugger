@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, ImagePlus, RefreshCw, Upload } from 'lucide-react';
+import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import CreationAvailability from '@/components/creation/CreationAvailability';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -326,12 +328,16 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const handoffClaim = useRef('');
   const awaitingInitialPresetDefaults = useRef(false);
   const ready = Boolean(sessionReady && loadedAuthority === authorityKey && owner && loadedOwner === owner && draft);
+  const creation = useCreationContext({ ownerId: owner, entry: 'multiview', draftId: sessionTab || 'restoring', projectId: draft?.projectId || null, legacyCardId: draft?.videoCardId || null, enabled: ready,
+    onProjectChange: projectId => setDraft(previous => previous ? { ...previous, projectId } : previous) });
+  const [creationBaselineId, setCreationBaselineId] = useState<string | null>(null);
+  const creationDraftBody = useRef<Record<string, unknown> | null>(null);
   const active = pendingActive(receipt);
   const currentProject = projects.find(item => item.id === draft?.projectId);
   const currentCard = cards.find(item => item.id === draft?.videoCardId && item.project_id === draft?.projectId);
   const cardSelectionInvalid = Boolean(draft?.videoCardId && (!currentCard || !canGenerateInCard(currentCard)));
   const needsApproval = Boolean(currentProject && currentProject.type !== 'personal' && draft?.resolution === '1080p');
-  const approvalBlocked = needsApproval && (!currentCard || !draft?.resolutionApprovalConfirmed);
+  const approvalBlocked = needsApproval && !creation.context?.v2Available && (!currentCard || !draft?.resolutionApprovalConfirmed);
   const presetReady = Boolean(presetState && draft?.presetVersion === presetState.preset.version);
   const quoteKey = draft ? JSON.stringify([owner, authorityKey, draft.provider, draft.model, draft.duration, draft.resolution, draft.presetVersion,
     draft.settingsBinding?.id, draft.settingsBinding?.revision, draft.projectId, draft.videoCardId, draft.ratio]) : '';
@@ -878,9 +884,20 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     let storedBeforeSubmission = false;
     let submissionHttpStatus: number | null = null;
     try {
-      const key = crypto.randomUUID();
-      const body = buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points,
-        pricingRevision: currentQuote.pricingRevision, pricingQuoteToken: currentQuote.pricingQuoteToken, preset: presetState.preset });
+      if (!creation.context?.v2Available) throw new Error('当前创作流程尚未开放，输入已保留');
+      const previousIntent = creation.intent && !['accepted', 'closed', 'batch_active', 'batch_settled', 'rejected'].includes(creation.intent.state) ? creation.intent : null;
+      let key = previousIntent?.request_id || crypto.randomUUID();
+      const body: Record<string, unknown> = { ...buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points,
+        pricingRevision: currentQuote.pricingRevision, pricingQuoteToken: currentQuote.pricingQuoteToken, preset: presetState.preset }),
+        creation_contract_version: 2, entry: 'multiview', action: 'generate', continuation: { mode: 'new' },
+        video_branch_id: null, count: 1, baseline_task_id: creationBaselineId };
+      creationDraftBody.current = body;
+      const prepared = await creation.prepare(body, key, previousIntent);
+      key = prepared.request_id; body.idempotency_key = key;
+      if (!current(scope)) return;
+      if (!prepared.availability?.canSubmit) { setStatus('请完成本次创作条件，当前输入已保留。'); return; }
+      Object.assign(body, { intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
+        ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) });
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(videoPricingBusinessInput(body))));
       if (!current(scope)) return;
       if (presetRef.current?.preset.version !== frozen.presetVersion) { setStatus('模板已更新，正在重新报价；当前输入未提交。'); return; }
@@ -1094,7 +1111,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         </details>
         <div className={styles.destination}>
           <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <details open={cardSelectionInvalid || needsApproval && !currentCard || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
+          <details open={cardSelectionInvalid || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
             <summary>关联视频卡（可选）{currentCard ? `：${currentCard.title}` : ''}</summary>
             <label>视频卡（可选）<select value={draft.videoCardId} disabled={formDisabled || cardLoading || !currentProject} onChange={event => change({ videoCardId: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{cardLoading ? '正在读取视频卡…' : '不关联视频卡'}</option>{draft.videoCardId && !currentCard && <option value={draft.videoCardId}>原视频卡暂不可用，请重新选择或取消关联</option>}{cards.map(item => <option key={item.id} value={item.id} disabled={!canGenerateInCard(item)}>{item.title}{!canGenerateInCard(item) ? '（不可生成）' : ''}</option>)}</select></label>
             {cardSelectionInvalid && !cardLoading && <p className={styles.feedback} role="status">原视频卡暂不可用于生成，请重新选择或明确取消关联，其他输入已保留。</p>}
@@ -1103,8 +1120,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <details open={sections.owner === owner && sections.create} onToggle={event => toggleSection('create', event.currentTarget.open)}><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled || Boolean(projectCreate.pending)} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim() || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)} onClick={() => void createDestination('project')}>新建项目</button></div>
             <div className={styles.createRow}><input aria-label="新视频卡标题" value={cardTitle} maxLength={100} placeholder="新视频卡标题" disabled={formDisabled} onChange={event => setCardTitle(event.target.value)} /><button type="button" disabled={formDisabled || !currentProject || !cardTitle.trim()} onClick={() => void createDestination('card')}>新建视频卡</button></div></details>
         </div>
-        {needsApproval && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
-        {needsApproval && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
+        {needsApproval && !creation.context?.v2Available && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
+        {needsApproval && !creation.context?.v2Available && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
         <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '提交结果待确认' : receipt?.phase === 'accepted' ? '视频任务已记录' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
@@ -1140,7 +1157,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           {requestScan.next !== null && <button type="button" onClick={() => refreshRequests(requestScan.next!)}>继续读取未列记录</button>}</div>
       </details>
     </footer>}
-    {pickerOpen && <UploadedImagePicker open imageOnly target="workspace" title="选择视频主图" purpose="multiview-main-image" maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} onClose={() => setPickerOpen(false)}
+    <CreationAvailability controller={creation} onBaselineChange={id => { setCreationBaselineId(id); if (creation.intent && creationDraftBody.current) void creation.prepare({ ...creationDraftBody.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(message(cause, '基准更新未确认，输入已保留'))); }} />
+    {pickerOpen && <UploadedImagePicker open imageOnly target="workspace" title="选择视频主图" purpose="multiview-main-image" contextKey={`${owner}:multiview:${sessionTab}:main-image`} maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} onClose={() => setPickerOpen(false)}
       onUploadFile={(file, onProgress) => current(capture()) ? uploadFileToHistory(file, { ownerId: owner, onProgress }) : Promise.reject(new Error('当前账号尚未确认，未上传素材。'))} onConfirm={async () => ({ success: false, message: '请选择一张主图。' })} onConfirmSelection={selectItem} />}
     {user.role === 'admin' && <MultiviewPromptDialog open={promptOpen} authorityKey={authorityKey} ownerId={owner} onClose={() => { setPromptOpen(false); setPresetRefresh(count => count + 1); }} onStateChange={setPromptRisk} onSaved={() => {
       if (!current(capture())) return;

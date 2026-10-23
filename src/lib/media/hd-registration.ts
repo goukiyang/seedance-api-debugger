@@ -22,13 +22,14 @@ export async function registerCommittedStudioHd(taskId: string): Promise<boolean
     if (!task || !studioTaskHasViewableOutput(task) || !task.asset_id) return false;
     const asset = await prisma.asset.findFirst({
       where: { id: task.asset_id, owner_id: task.owner_id, type: 'image', status: 'active' },
-      select: { original_url: true, metadata_json: true },
+      select: { id: true, owner_id: true, original_url: true, metadata_json: true },
     });
     if (!asset) return false;
     let preserveText = false;
     try { preserveText = JSON.parse(asset.metadata_json || '{}').preserveText === true; }
     catch { /* Missing legacy metadata does not alter the original. */ }
-    const job = await requestHd(asset.original_url, 0, preserveText);
+    const job = await requestHd(asset.original_url, 0, preserveText, undefined,
+      { owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
     if (!job) console.error('[studio-hd-registration]', JSON.stringify({ taskId, code: 'source_version_unknown' }));
     return Boolean(job);
   } catch (error) {

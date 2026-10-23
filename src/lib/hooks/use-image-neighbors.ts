@@ -12,7 +12,7 @@ export type ImageReadCandidate = { source: string; sourceVersion?: string; thumb
 function sourceFamily(source: string) {
   try {
     const url = new URL(source, 'https://sd2.youdooart.com'); url.hash = '';
-    for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'variant']) url.searchParams.delete(name);
+    for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation', 'variant']) url.searchParams.delete(name);
     url.searchParams.sort();
     return url.pathname.startsWith('/api/') ? `${url.pathname}${url.search}` : url.href;
   } catch { return source; }
@@ -53,7 +53,7 @@ export function useImageNeighbors(candidates: ImageReadCandidate[], enabled: boo
         if (state.denied || state.error) return;
         const hd = state.description;
         if (hd?.status !== 'ready' || hdDescriptionUsesOriginal(hd)) return;
-        start(versionedHdSource(candidate.source, 'hd', hd.sourceVersion), hd.sourceVersion || '');
+        start(versionedHdSource(candidate.source, 'hd', hd.sourceVersion, hd.representationVersion), hd.sourceVersion || '');
       });
     }
     const stop = () => { active = false; for (const release of releases.splice(0)) release(); };

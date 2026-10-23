@@ -3,6 +3,18 @@ import sharp from 'sharp';
 
 export const HD_MAX_PIXELS = 40_000_000;
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
+export type HdEncoderStrategy = 'hd-legacy-e6-v1' | 'hd-avif-e4-v1';
+export const HD_LEGACY_ENCODER_STRATEGY: HdEncoderStrategy = 'hd-legacy-e6-v1';
+export function hdEncoderStrategy(value: unknown = HD_LEGACY_ENCODER_STRATEGY): HdEncoderStrategy {
+  if (value !== 'hd-legacy-e6-v1' && value !== 'hd-avif-e4-v1') throw new Error('invalid_hd_encoder_strategy');
+  return value;
+}
+// The unapproved quality candidate is available only in an explicit isolated
+// candidate environment. Production registration retains its approved effort6.
+export function defaultHdEncoderStrategy(): HdEncoderStrategy {
+  return process.env.NODE_ENV === 'test' && process.env.HD_CANDIDATE_ENCODER_STRATEGY === 'hd-avif-e4-v1'
+    ? 'hd-avif-e4-v1' : HD_LEGACY_ENCODER_STRATEGY;
+}
 type HdIntegrityCheck = { expected: unknown; actual: unknown; ok: boolean };
 export type HdIntegrity = { version: string; checks: Record<string, HdIntegrityCheck>; failedChecks: string[] };
 export type HdEncoderParameters = { format: 'avif' | 'webp'; lossless: boolean; quality?: number; chromaSubsampling?: string; effort: number; orientation: string; bitdepth: number };
@@ -18,15 +30,17 @@ export function hdEligibility(meta: sharp.Metadata) {
   if (meta.hasProfile) return 'unverified_color_profile';
   return null;
 }
-export function hdEncoderParameters(format: 'avif' | 'webp'): HdEncoderParameters {
-  return { format, lossless: format === 'webp', effort: 6, orientation: 'auto', bitdepth: 8,
+export function hdEncoderParameters(format: 'avif' | 'webp', strategy?: HdEncoderStrategy): HdEncoderParameters {
+  const selected = hdEncoderStrategy(strategy);
+  return { format, lossless: format === 'webp', effort: format === 'avif' && selected === 'hd-avif-e4-v1' ? 4 : 6, orientation: 'auto', bitdepth: 8,
     ...(format === 'avif' ? { quality: 95, chromaSubsampling: '4:4:4' } : {}) };
 }
 // Shared with receipt recovery. These are the existing full-size encode and
 // integrity rules, extracted without changing quality, alpha or colour policy.
-export async function encodeHdOutput(input: string, output: string, format: 'avif' | 'webp') {
+export async function encodeHdOutput(input: string, output: string, format: 'avif' | 'webp', strategy?: HdEncoderStrategy) {
+  const parameters = hdEncoderParameters(format, strategy);
   const image = sharp(input, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: 120 });
-  await (format === 'webp' ? image.webp({ lossless: true, effort: 6 }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: 6, bitdepth: 8 })).toFile(output);
+  await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
   await fs.chmod(output, 0o600);
 }
 export async function validateHdOutput(inputFile: string, meta: sharp.Metadata, outputFile: string, format: 'avif' | 'webp'): Promise<HdIntegrity> {

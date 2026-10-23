@@ -24,16 +24,21 @@ export async function assertStudioCoverAssetNotReferenced(assetId: string,
   const aliases = await client.asset.findMany({ where: { OR: [{ id: assetId }, { original_url: { in: urls } }, { thumbnail_url: { in: urls } }] }, select: { id: true } });
   const corrupt = await client.$queryRaw<Array<{ key: string }>>(Prisma.sql`
     SELECT key FROM PlatformSetting WHERE (key GLOB 'studio_module_cover_v1:*'
-      OR key GLOB 'studio_module_cover_history_v1:*' OR key GLOB 'studio_module_cover_request_v1:*')
+      OR key GLOB 'studio_module_cover_history_v1:*' OR key GLOB 'studio_module_cover_request_v1:*'
+      OR key GLOB 'studio_module_cover_prepare_v3:*')
     AND CASE WHEN json_valid(value_json) THEN
-      json_type(value_json, '$.recipe.sources') IS NOT 'array'
-      OR EXISTS (SELECT 1 FROM json_each(value_json, '$.recipe.sources') s WHERE json_type(s.value, '$.assetId') IS NOT 'text')
+      CASE WHEN key GLOB 'studio_module_cover_prepare_v3:*' AND json_extract(value_json, '$.disposition') IN ('none', 'existing')
+        THEN json_type(value_json, '$.recipe') IS NOT 'null'
+        ELSE json_type(value_json, '$.recipe.sources') IS NOT 'array'
+          OR EXISTS (SELECT 1 FROM json_each(value_json, '$.recipe.sources') s WHERE json_type(s.value, '$.assetId') IS NOT 'text') END
     ELSE 1 END LIMIT 1`);
   if (corrupt.length) throw new StudioCoverReferenceError('封面引用无法确认，暂不能移除原图');
   const rows = await client.$queryRaw<Array<{ key: string }>>(Prisma.sql`
     SELECT p.key FROM PlatformSetting p, json_each(p.value_json, '$.recipe.sources') s
     WHERE (p.key GLOB 'studio_module_cover_v1:*' OR p.key GLOB 'studio_module_cover_history_v1:*'
       OR (p.key GLOB 'studio_module_cover_request_v1:*' AND json_extract(p.value_json, '$.status') = 'pending'
+        AND json_extract(p.value_json, '$.expiresAt') > ${Date.now()})
+      OR (p.key GLOB 'studio_module_cover_prepare_v3:*' AND json_extract(p.value_json, '$.status') IN ('pending', 'ready')
         AND json_extract(p.value_json, '$.expiresAt') > ${Date.now()}))
       AND json_extract(s.value, '$.assetId') IN (${Prisma.join(aliases.map(item => item.id))}) LIMIT 1`);
   if (rows.length) throw new StudioCoverReferenceError('这张原图用于永久封面或封面恢复，不能移除；普通生成记录仍可隐藏');
@@ -93,9 +98,9 @@ export async function studioVisibleAssetWhere(user: ImageStudioIdentity, client:
   return hidden.length ? { original_url: { notIn: hidden } } : {};
 }
 
-export async function canReadStudioAsset(user: ImageStudioIdentity, asset: { original_url: string }, client: Client = prisma) {
+export async function canReadStudioAsset(user: ImageStudioIdentity, asset: { original_url: string }, client: Prisma.TransactionClient = prisma) {
   if ((await studioHiddenAssetUrls(user, client)).includes(asset.original_url)) return false;
-  const output = await multiviewOutputFileAccess(user, asset.original_url, false);
+  const output = await multiviewOutputFileAccess(user, asset.original_url, false, client);
   return !output.protected || output.allowed;
 }
 

@@ -1,0 +1,13 @@
+.authorTrigger { display: inline-flex; align-items: center; border: 0; padding: 2px 4px; background: transparent; color: inherit; cursor: pointer; }
+.authorLayer { z-index: 2147482000; width: min(300px, calc(100vw - 24px)); border: 1px solid var(--border, #465057); border-radius: 12px; padding: 14px; background: var(--card-bg, #171c1f); color: var(--text-primary, #eef0f2); box-shadow: 0 8px 30px #0002; }
+.authorLayer > div { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.authorLayer p { margin: 0; font-size: 13px; }
+.definitionDialog { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--border, #465057); border-radius: 16px; padding: 20px; background: var(--card-bg, #171c1f); color: var(--text-primary, #eef0f2); }
+.definitionDialog::backdrop { background: #151b2780; }
+.definitionDialog header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.definitionDialog h2 { margin: 0; font-size: 22px; font-weight: 700; }
+.definitionDialog dd { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 20px; line-height: 1.6; }
+.definitionDialog dt { font-weight: 600; }
+.directory { display: grid; gap: 10px; }
+.directory article { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border, #465057); padding: 10px 0; }
+.directory article > div { display: grid; gap: 6px; }

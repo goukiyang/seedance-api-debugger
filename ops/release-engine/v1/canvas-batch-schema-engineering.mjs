@@ -1,3 +1,4 @@
+import { fullSchemaBefore, verifyFullCandidateSources } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -195,6 +196,15 @@ print(json.dumps({'database':str(db),'backup':str(backup),'databaseIdentity':[st
     }
     const oldSchema = fs.readFileSync(oldRoot + '/prisma/schema.prisma');
     assert.equal(hash(oldSchema), real.canvasVideoBatchSchema.previousPrismaSha256);
+    if (real.fullRelease) {
+      const originalFile = '/data/video-api-debugger/release-staging/' + real.deployedCanvasBatchSchema.migrationRun + '/manifest.json';
+      const originalBytes = fs.readFileSync(originalFile); assert.equal(hash(originalBytes), real.deployedCanvasBatchSchema.migrationManifestSha256);
+      const original = JSON.parse(originalBytes), oldAddedSchema = execFileSync('tar', ['-xOzf', original.main.archive, 'prisma/schema.prisma']);
+      assert.equal(hash(oldAddedSchema), real.canvasVideoBatchSchema.newPrismaSha256);
+      // This sandbox still exercises the original v1 additive producer. The
+      // later widening/data-preservation contract has its own full fixture.
+      for (const kind of ['main', 'guard']) put(fixture[kind].root + '/prisma/schema.prisma', oldAddedSchema);
+    }
     put(fixture.live.web.root + '/prisma/schema.prisma', oldSchema);
     put(fixture.stage + '/manifest.json', JSON.stringify(fixture));
     put(fixture.stage + '/fix01-release/canvas-batch-schema-contract.mjs', fs.readFileSync(new URL('./canvas-batch-schema-contract.mjs', import.meta.url)));
@@ -227,7 +237,7 @@ print(json.dumps(mod.apply_schema(m['database'],pathlib.Path(m['stage'])/'canvas
     };
     const normalizedAssert = { ...assert, deepEqual: (a, b, message) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), message) };
     const context = vm.createContext({ assert: normalizedAssert, fs, ...contract, assertProtectedIncrementCandidate, engineDirectory, isSharedEngine,
-      verifyDeployedContinuationProvenance, verifySharedBuildProvenance,
+      verifyDeployedContinuationProvenance, verifySharedBuildProvenance, fullSchemaBefore, verifyFullCandidateSources,
       rootFile: checked, sha: hash, call,
       writeJsonExclusive: () => { throw new Error('First migration must not create deployed adoption evidence'); },
       assertReleaseWindow: value => { assert.equal(value, fixture); windowChecks++; } });

@@ -610,8 +610,8 @@
     }
 
     function canvasWorkspaceKey() {
-        if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) return '';
-        return `ultimate-canvas:${canvasRuntime.selectedProjectId}:${canvasRuntime.selectedVideoCardId}`;
+        if (!canvasRuntime.selectedProjectId) return '';
+        return canvasRuntime.selectedVideoCardId ? `ultimate-canvas:${canvasRuntime.selectedProjectId}:${canvasRuntime.selectedVideoCardId}` : `ultimate-canvas:v2:${canvasRuntime.bootstrap?.user?.id}:${canvasRuntime.selectedProjectId}:${canvasRuntime.documentId}`;
     }
 
     function workspaceHeaders() {
@@ -828,8 +828,10 @@
 
         const descriptor = window.UltimateCanvasVideoCards.requestFor(operation, {
             ...input,
-            cardId
+            cardId,
+            expected_updated_at: canvasRuntime.videoCardDetails.get(cardId)?.video_card?.updated_at
         });
+        if (descriptor.payload && !operation.startsWith('approval-')) descriptor.payload.expected_updated_at = canvasRuntime.videoCardDetails.get(cardId)?.video_card?.updated_at;
         const result = await requestJson(descriptor.url, {
             method: descriptor.method,
             payload: descriptor.payload
@@ -1328,6 +1330,7 @@
                         prior.input = structuredClone(descriptor.payload);
                         prior.generationPayload = structuredClone(payload);
                     }
+                    if (!unsent) descriptor.payload = await prepareCanvasCreation(descriptor.payload, 1, payload.nodeId);
                     const submission = unsent ? prior : { requestId: payload.requestId, state: 'unconfirmed',
                         userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
                         projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
@@ -4160,8 +4163,8 @@
     });
 
     async function uploadCanvasFile(file, role = '', canvasNodeId = '', onProgress = null, originalRequestId = '') {
-        if (!canvasRuntime.selectedProjectId || !canvasRuntime.selectedVideoCardId) {
-            throw new Error('请先选择项目和视频卡，再上传素材。');
+        if (!canvasRuntime.selectedProjectId) {
+            throw new Error('请先选择项目，再上传素材。');
         }
         if (!canvasRuntime.documentId || !graphEditAllowed() || window.parent === window) throw new Error('请先保存可编辑画布，再上传素材。');
         const requestId = originalRequestId || crypto.randomUUID();
@@ -6720,13 +6723,11 @@
         if (!project?.id || !project.can_generate) {
             return { ready: false, message: '请先选择一个你有生成权限的项目。' };
         }
-        if (!card?.id) {
-            return { ready: false, message: '请先选择或新建视频卡，生成结果才能正确归档。' };
-        }
-        if (!card.can_generate) {
+        if (canvasRuntime.selectedVideoCardId && !card?.id) return { ready: false, message: '原视频卡暂不可用，当前输入保留。' };
+        if (card && !card.can_generate) {
             return { ready: false, message: canvasRuntime.bootstrap?.context?.generation_blocked_reason || '当前视频卡不能继续生成，请切换或新建视频卡。' };
         }
-        if (generationNode?.data?.planSource && generationNode.data.videoCardId && generationNode.data.videoCardId !== card.id) {
+        if (generationNode?.data?.planSource && generationNode.data.videoCardId && generationNode.data.videoCardId !== card?.id) {
             return { ready: false, message: '此方案保留原视频卡归属，请切换到该视频卡后生成，不会自动改归属。' };
         }
         if (payload.kind === 'text' || payload.kind === 'script') {
@@ -6758,7 +6759,7 @@
                 mode: payload.mode,
                 prompt: payload.prompt,
                 projectId: project.id,
-                cardId: card.id,
+                cardId: card?.id || null,
                 referenceImageIds: payload.referenceImageIds || []
             });
             if (!validation.valid) return { ready: false, message: validation.message };
@@ -6777,7 +6778,7 @@
                 mode: payload.mode,
                 prompt: payload.prompt,
                 projectId: project.id,
-                cardId: card.id,
+                cardId: card?.id || null,
                 referenceImageIds: payload.referenceImageIds || [],
                 capabilities: capabilities.video,
                 settings: payload.settings || {}
@@ -6849,9 +6850,108 @@
         renderVideoResultHistory(node.id);
     }
 
+    async function prepareCanvasCreation(input, count, nodeId, suppliedRequestId) {
+        const node = engine.nodes.get(nodeId), captured = currentGenerationContext(nodeId);
+        if (!node || !canvasRuntime.bootstrap?.context?.video_creation_v2_available) throw Error('新的创作流程尚未开放，当前画布与输入保留。');
+        const previous = node.data.creationPreparation;
+        let intent = null;
+        if (previous?.request_id && previous.state === 'unknown') {
+            const result = await requestJson(`/api/video/creation-intents?request_id=${encodeURIComponent(previous.request_id)}`, { cache: 'no-store' });
+            if (!result.intent && result.state === 'rejected') { node.data.creationPreparation.state = 'rejected'; scheduleCanvasSave('creation_prepare_rejected'); throw Error(result.rejection?.message || '原准备已拒绝，请主动开始新的准备。'); }
+            if (!result.intent) throw Error('原准备请求仍待确认，请查询原号；不会新建另一请求。');
+            intent = result.intent;
+        } else if (previous?.intent_id) {
+            intent = (await requestJson(`/api/video/creation-intents/${encodeURIComponent(previous.intent_id)}`, { cache: 'no-store' })).intent;
+        }
+        const reusable = intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(intent.state);
+        const requestId = reusable ? intent.request_id : suppliedRequestId || input.idempotency_key;
+        const quote = await requestJson('/api/tasks/estimate', { method: 'POST', payload: {
+            provider: input.provider || 'seedance', model: input.model, resolution: input.resolution, duration: input.duration,
+            ratio: input.ratio, project_id: input.project_id, video_card_id: input.video_card_id,
+            draft: input.draft === true, reference_video_urls: input.reference_video_urls || [] } });
+        const spec = { ...input, request_id: requestId, count, entry: 'canvas', creation_contract_version: 2,
+            baseline_task_id: previous?.baseline_task_id || input.baseline_task_id || null, pricing_revision: quote.pricing_revision,
+            ...(reusable ? { expected_revision: intent.revision } : {}) };
+        node.data.creationPreparation = { request_id: requestId, state: 'unknown', baseline_task_id: spec.baseline_task_id };
+        scheduleCanvasSave('creation_intent_prepare');
+        const prepared = (await requestJson('/api/video/creation-intents', { method: 'POST', payload: spec })).intent;
+        if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(captured, currentGenerationContext(nodeId))) throw Error('画布目标已变化，请在原画布查询原准备请求。');
+        node.data.creationPreparation = { intent_id: prepared.id, request_id: prepared.request_id, revision: prepared.revision, state: prepared.state,
+            baseline_task_id: prepared.spec?.baseline_task_id || null };
+        scheduleCanvasSave('creation_intent_receipt');
+        if (!prepared.availability?.canSubmit) {
+            renderCanvasCreationAvailability(nodeId, prepared, input, count);
+            throw Error(prepared.availability?.reasons.map(item => item.message).join('；') || '请处理本次创作条件。');
+        }
+        return { ...input, creation_contract_version: 2, intent_id: prepared.id, intent_revision: prepared.revision,
+            idempotency_key: count === 1 ? prepared.request_id : input.idempotency_key,
+            resolution_approval_id: prepared.approval_id || null, baseline_task_id: prepared.spec?.baseline_task_id || null,
+            pricing_revision: prepared.quote?.pricing_revision || quote.pricing_revision,
+            ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
+    }
+
+    async function renderCanvasCreationAvailability(nodeId, intent, input, count) {
+        const node = engine.nodes.get(nodeId), scope = currentGenerationContext(nodeId);
+        const element = engine.canvas.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+        if (!node || !element) return;
+        element.querySelector('[data-creation-availability]')?.remove();
+        const panel = document.createElement('section'); panel.dataset.creationAvailability = ''; panel.className = 'canvas-video-batches';
+        const message = document.createElement('p'); message.textContent = intent.availability?.reasons.map(item => item.message).join('；') || '请核对本次创作'; panel.append(message);
+        if (intent.availability?.reasons.some(item => item.action === 'request_approval')) {
+            const label = document.createElement('label'); label.textContent = '基准视频';
+            const select = document.createElement('select'); select.setAttribute('aria-label', '选择本项目已就绪基准视频');
+            select.add(new Option('选择基准视频', '')); label.append(select); panel.append(label);
+            const purpose = document.createElement('input'); purpose.placeholder = '本次高清预计用途'; purpose.setAttribute('aria-label', '本次高清预计用途'); panel.append(purpose);
+            const apply = document.createElement('button'); apply.type = 'button'; apply.textContent = '申请本次高清'; panel.append(apply);
+            const approvals = document.createElement('a'); approvals.href = '/approvals'; approvals.target = '_top'; approvals.textContent = '查看审批'; panel.append(approvals);
+            try {
+                const result = await requestJson(`/api/creation/baselines?project_id=${encodeURIComponent(input.project_id)}`, { cache: 'no-store' });
+                if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(scope, currentGenerationContext(nodeId))) return;
+                for (const item of result.items || []) select.add(new Option(`${item.model} · ${item.resolution || ''} · ${item.id}`, item.id));
+                select.value = intent.spec?.baseline_task_id || '';
+            } catch { message.textContent += '；基准列表暂未读取，请重新点击生成核对。'; }
+            apply.addEventListener('click', async () => {
+                if (!select.value || !purpose.value.trim()) { message.textContent = '请选择基准视频并填写预计用途。'; return; }
+                if (!window.UltimateCanvasGenerationInteractions.generationContextMatches(scope, currentGenerationContext(nodeId))) return;
+                apply.disabled = true;
+                try {
+                    const next = (await requestJson('/api/video/creation-intents', { method: 'POST', payload: { ...input,
+                        entry: 'canvas', count, baseline_task_id: select.value, request_id: intent.request_id, expected_revision: intent.revision,
+                        pricing_revision: intent.pricing_revision } })).intent;
+                    await requestJson(`/api/video/creation-intents/${next.id}/approval`, { method: 'POST', payload: { expected_revision: next.revision, reason: purpose.value.trim() } });
+                    node.data.creationPreparation = { intent_id: next.id, request_id: next.request_id, revision: next.revision, state: 'awaiting_approval', baseline_task_id: select.value };
+                    scheduleCanvasSave('creation_approval_requested'); message.textContent = '申请已提交，批准后请主动点击生成。';
+                } catch (error) { message.textContent = error.message || '申请暂时无法确认，请查询原请求。'; }
+                finally { apply.disabled = false; }
+            });
+        }
+        element.append(panel);
+    }
+
     videoBatchController = window.UltimateCanvasVideoBatches.create({
         storage: { getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value) },
         request: requestJson,
+        prepare: (scope, input, count, requestId) => prepareCanvasCreation(input, count, scope.nodeId, requestId),
+        requestIdentity: scope => scope.node.data.creationPreparation && !['accepted','closed','batch_active','batch_settled','rejected'].includes(scope.node.data.creationPreparation.state) ? scope.node.data.creationPreparation.request_id : null,
+        authorize: async (scope, batch) => {
+            if (batch.contract_version !== 2 || !batch.creation_intent_id) return {};
+            const intent = (await requestJson(`/api/video/creation-intents/${batch.creation_intent_id}`, { cache: 'no-store' })).intent;
+            if (intent?.spec?.input?.resolution !== '1080p' || selectedProject()?.type === 'personal') return {};
+            if (intent?.approval?.status === 'approved' && intent.approval.authorization_round === batch.authorization_round + 1 && intent.approval.batch_revision === batch.revision) return { resolution_approval_id: intent.approval.id };
+            const nodeEl = engine.canvas.querySelector(`[data-node-id="${CSS.escape(scope.nodeId)}"]`);
+            let panel = nodeEl?.querySelector('[data-creation-reauthorize]');
+            if (!panel && nodeEl) {
+                panel = document.createElement('section'); panel.dataset.creationReauthorize = ''; panel.className = 'canvas-video-batches';
+                const text = document.createElement('p'); text.textContent = '仅为本批未开始项申请新的高清授权，已受理任务保持原号。'; panel.append(text);
+                const reason = document.createElement('input'); reason.placeholder = '本次未开始项的预计用途'; reason.setAttribute('aria-label', '本次未开始项的预计用途'); panel.append(reason);
+                const button = document.createElement('button'); button.type = 'button'; button.textContent = '申请未开始项高清授权'; panel.append(button);
+                button.addEventListener('click', async () => { if (!reason.value.trim() || !canvasVideoBatchCurrent(scope)) return; button.disabled = true;
+                    try { await requestJson(`/api/video/creation-intents/${batch.creation_intent_id}/approval`, { method: 'POST', payload: { expected_revision: intent.revision, expected_batch_revision: batch.revision, reason: reason.value.trim() } }); text.textContent = '申请已提交，批准后请主动重新确认未开始项报价。'; }
+                    catch (error) { text.textContent = error.message || '申请结果待确认，请查询原请求。'; } finally { button.disabled = false; } });
+                nodeEl.append(panel);
+            }
+            throw Error('未开始项需要对应新报价的高清批准，请在本节点申请。');
+        },
         isCurrent: canvasVideoBatchCurrent,
         flush: () => flushCanvasSave('video_batch_before_prepare'),
         confirm: (quote, reauthorize) => {

@@ -51,7 +51,7 @@
         }
         function accept(scope, state, batch) {
             if (!batch || batch.document_id !== scope.documentId || batch.node_id !== scope.nodeId
-                || !validId(batch.id) || batch.contract_version !== 1 || ![2, 4].includes(batch.count)
+                || !validId(batch.id) || ![1, 2].includes(batch.contract_version) || ![2, 4].includes(batch.count)
                 || !Array.isArray(batch.children) || batch.children.length !== batch.count) throw Error('批次回执与当前对象不一致，未继续派发。');
             const previous = state.batches.find(item => item.id === batch.id);
             if (previous && previous.revision > batch.revision) return previous;
@@ -115,8 +115,9 @@
             requireContext(scope);
             state.busy = true; state.error = ''; emit(scope, state);
             try {
-                const requestId = uuid();
-                const body = { contract_version: 1, request_id: requestId, document_id: scope.documentId,
+                const requestId = options.requestIdentity?.(scope) || uuid();
+                if (options.prepare) input = await options.prepare(scope, input, count, requestId);
+                const body = { contract_version: input.creation_contract_version === 2 ? 2 : 1, request_id: requestId, document_id: scope.documentId,
                     node_id: scope.nodeId, count, input: clone(input) };
                 const quote = await options.request(endpoint, { method: 'POST', payload: { ...body, action: 'quote' } });
                 requireContext(scope);
@@ -198,11 +199,12 @@
                 const response = await options.request(`${endpoint}/${encodeURIComponent(batchId)}`, { cache: 'no-store' });
                 const batch = accept(scope, state, response.batch);
                 requireContext(scope);
-                let quote;
+                let quote, authorization = {};
                 if (action === 'reauthorize') {
                     if (batch.children.some(child => state.fence.children?.[child.id])) throw Error('原子请求受理情况尚未确认，请先查询原批次；未更改原报价。');
                     quote = await options.request(endpoint, { method: 'POST', payload: { action: 'quote', batch_id: batch.id, contract_version: 1 } });
                     requireContext(scope);
+                    if (options.authorize) authorization = await options.authorize(scope, batch, quote);
                     if (!await options.confirm(quote, true)) return false;
                 }
                 requireContext(scope);
@@ -210,7 +212,7 @@
                 retainBeforeSend(scope, state, () => { state.fence.operation = { batchId, operationId, action }; });
                 emit(scope, state);
                 const result = await options.request(`${endpoint}/${encodeURIComponent(batchId)}`, { method: 'PATCH', payload: {
-                    action, operation_id: operationId, revision: batch.revision, ...(quote ? { quote_token: quote.quote_token } : {}) } });
+                    action, operation_id: operationId, revision: batch.revision, ...authorization, ...(quote ? { quote_token: quote.quote_token } : {}) } });
                 accept(scope, state, result.batch);
                 delete state.fence.operation; persist(scope, state);
                 return true;

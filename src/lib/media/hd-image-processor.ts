@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fork, ChildProcess } from 'node:child_process';
-import type { HdIntegrity, HdEncoderParameters } from './hd-encoder';
+import { hdEncoderParameters, type HdIntegrity, type HdEncoderParameters, type HdEncoderStrategy } from './hd-encoder';
 
 export const HD_IMAGE_PROTOCOL = 'hd-image-process-v1';
 // Each existing Sharp operation retains its 120 second limit. The parent also
@@ -18,6 +18,7 @@ export type HdImageRequest = {
   protocol: typeof HD_IMAGE_PROTOCOL; key: string; executionId: string; sourceVersion: string;
   inputFile: string; workDirectory: string; preserveText: boolean;
   operation?: 'encode' | 'validate' | 'verify-original'; candidateFormat?: 'avif' | 'webp';
+  encoderStrategy?: HdEncoderStrategy;
 };
 export type HdImageMetadata = { width: number; height: number; originalFormat: string; hasAlpha: boolean; orientation: number; bytes: number };
 export type HdImageResult = {
@@ -25,6 +26,7 @@ export type HdImageResult = {
   inputFile: string; workDirectory: string; outputFile?: string; outputVersion?: string; format?: 'avif' | 'webp'; bytes?: number;
   metadata: HdImageMetadata; skipped?: string; integrity?: HdIntegrity; parameters?: HdEncoderParameters;
   libraries: Record<string, string>; originalVerified?: boolean;
+  encoderStrategy?: HdEncoderStrategy;
 };
 export class HdProcessorError extends Error {
   constructor(readonly kind: string, readonly exited: boolean, readonly diagnostic?: { stage: string; code?: string; message?: string }, readonly integrity?: HdIntegrity) { super(kind); }
@@ -94,7 +96,8 @@ export function validateHdImageResult(value: unknown, request: HdImageRequest): 
     || !Number.isSafeInteger(result.metadata.height) || result.metadata.height < 0
     || !Number.isSafeInteger(result.metadata.bytes) || result.metadata.bytes <= 0 || typeof result.metadata.originalFormat !== 'string'
     || typeof result.metadata.hasAlpha !== 'boolean' || !Number.isInteger(result.metadata.orientation)
-    || !result.libraries || typeof result.libraries !== 'object') return false;
+    || !result.libraries || typeof result.libraries !== 'object'
+    || (result.encoderStrategy || 'hd-legacy-e6-v1') !== (request.encoderStrategy || 'hd-legacy-e6-v1')) return false;
   if (request.operation === 'verify-original') return result.originalVerified === true && !result.outputFile && !result.format;
   if (result.skipped) return ['existing_webp', 'multi_frame', 'pixel_limit', 'high_bit_depth', 'wide_gamut', 'unverified_color_profile'].includes(result.skipped)
     && !result.outputFile && !result.integrity;
@@ -102,6 +105,7 @@ export function validateHdImageResult(value: unknown, request: HdImageRequest): 
     && typeof result.outputVersion === 'string' && /^\d+:\d+:\d+:[0-9.]+:[0-9.]+$/.test(result.outputVersion)
     && Number.isSafeInteger(result.bytes) && result.bytes! > 0 && result.integrity?.version === 'hd-output-integrity-v2'
     && Array.isArray(result.integrity.failedChecks) && result.integrity.failedChecks.length === 0
+    && JSON.stringify(result.parameters) === JSON.stringify(hdEncoderParameters(result.format as 'avif' | 'webp', request.encoderStrategy))
     && Boolean(result.integrity.checks)
     && ['output_metadata', 'width', 'height', 'alpha', 'pages', 'color', 'bitdepth', 'depth', 'format', 'output_full_decode'].every(name => result.integrity!.checks[name]?.ok === true)
     && Object.values(result.integrity.checks).every(check => check && check.ok === true);

@@ -7,11 +7,19 @@ import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readableStudioCoverIds } from './protected-assets';
 import { studioTemplateTaskWhere } from './task-visibility';
-import { studioTaskHasViewableOutput } from './dimension-mismatch';
 
 export type StudioInputMainState = 'ready' | 'none' | 'unknown' | 'unavailable';
+export type StudioInputMainSource = { kind: 'task'; taskId: string }
+  | { kind: 'batch-item'; batchId: string; ordinal: number; attempt: number };
+export type StudioInputMainPreview = {
+  state: StudioInputMainState;
+  source: StudioInputMainSource;
+  thumbnailUrl?: string;
+  count?: number;
+};
 export type StudioInputMainResponse = {
-  taskId: string; state: StudioInputMainState; images: UploadedAssetPayload[]; snapshotToken: string;
+  source: StudioInputMainSource; taskId?: string; state: StudioInputMainState;
+  images: UploadedAssetPayload[]; snapshotToken: string;
 };
 export class StudioInputMainError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -59,20 +67,27 @@ export function frozenStudioInputMainIds(snapshotJson: string | null, referenceI
   } catch { return null; }
 }
 
-export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: string): Promise<StudioInputMainResponse> {
-  if (!canUseCompanyTemplates(user)) throw new StudioInputMainError('无权读取本次输入主图', 403);
-  if (!/^[a-zA-Z0-9-]{1,120}$/.test(taskId)) throw new StudioInputMainError('任务编号无效', 400);
-  const task = await prisma.imageStudioTask.findFirst({
-    where: { ...studioTemplateTaskWhere(user.id, undefined, true), id: taskId },
-    select: { id: true, owner_id: true, snapshot_json: true, reference_ids: true, status: true, usage_json: true, asset_id: true },
-  });
-  if (!task || !studioTaskHasViewableOutput(task)) throw new StudioInputMainError('任务不存在或无权读取', 404);
-  // Hash the frozen input identity, not current output/asset metadata. No private snapshot is returned.
+export function studioInputMainPreview(source: StudioInputMainSource, snapshotJson: string | null,
+  referenceIdsJson: string, readableIds?: ReadonlySet<string>): StudioInputMainPreview {
+  const ids = frozenStudioInputMainIds(snapshotJson, referenceIdsJson);
+  if (ids === null) return { source, state: 'unknown' };
+  if (!ids.length) return { source, state: 'none', count: 0 };
+  const readable = readableIds ? ids.filter(id => readableIds.has(id)) : ids;
+  if (readable.length !== ids.length) return { source, state: 'unavailable', count: ids.length };
+  return { source, state: 'ready', thumbnailUrl: studioTemplateAssetUrl(ids[0], true), count: ids.length };
+}
+
+type FrozenInputMain = { ownerId: string; snapshotJson: string | null; referenceIdsJson: string };
+export async function readFrozenStudioInputMain(user: ImageStudioIdentity, source: StudioInputMainSource,
+  frozen: FrozenInputMain): Promise<StudioInputMainResponse> {
+  if (!canUseCompanyTemplates(user) || frozen.ownerId !== user.id) throw new StudioInputMainError('无权读取本次输入主图', 403);
   const snapshotToken = createHash('sha256').update(JSON.stringify([
-    'studio-direct-input-main-v1', task.id, task.owner_id, task.snapshot_json, task.reference_ids,
+    'studio-direct-input-main-v2', source, frozen.ownerId, frozen.snapshotJson, frozen.referenceIdsJson,
   ])).digest('hex');
-  const response = (state: StudioInputMainState, images: UploadedAssetPayload[] = []): StudioInputMainResponse => ({ taskId: task.id, state, images, snapshotToken });
-  const primaryIds = frozenStudioInputMainIds(task.snapshot_json, task.reference_ids);
+  const response = (state: StudioInputMainState, images: UploadedAssetPayload[] = []): StudioInputMainResponse => ({
+    source, ...(source.kind === 'task' ? { taskId: source.taskId } : {}), state, images, snapshotToken,
+  });
+  const primaryIds = frozenStudioInputMainIds(frozen.snapshotJson, frozen.referenceIdsJson);
   if (primaryIds === null) return response('unknown');
   if (!primaryIds.length) return response('none');
   const assets = await prisma.asset.findMany({ where: { id: { in: primaryIds }, owner_id: user.id, status: 'active', type: 'image' },
@@ -83,8 +98,6 @@ export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: 
   const hashes = assets.flatMap(asset => asset.hash ? [asset.hash] : []);
   if (new Set(sourceKeys).size !== sourceKeys.length || new Set(hashes).size !== hashes.length) return response('unknown');
   try {
-    // Do not use the admin inspection bypass to recover private fixed/style files as personal main images.
-    // This existing bounded alias guard also fails closed on overflow or unreadable protection records.
     const readable = await readableStudioCoverIds({ ...user, role: 'user' }, assets);
     if (primaryIds.some(id => !readable.has(id))) return response('unavailable');
   } catch { return response('unavailable'); }
@@ -95,4 +108,17 @@ export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: 
       width: asset.width, height: asset.height, fileName: asset.file_name, fileSize: asset.file_size,
       mimeType: asset.mime_type || undefined };
   }));
+}
+
+export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: string): Promise<StudioInputMainResponse> {
+  if (!canUseCompanyTemplates(user)) throw new StudioInputMainError('无权读取本次输入主图', 403);
+  if (!/^[a-zA-Z0-9-]{1,120}$/.test(taskId)) throw new StudioInputMainError('任务编号无效', 400);
+  const task = await prisma.imageStudioTask.findFirst({
+    where: { ...studioTemplateTaskWhere(user.id, undefined, true), id: taskId },
+    select: { id: true, owner_id: true, snapshot_json: true, reference_ids: true, status: true, usage_json: true, asset_id: true },
+  });
+  if (!task) throw new StudioInputMainError('任务不存在或无权读取', 404);
+  return readFrozenStudioInputMain(user, { kind: 'task', taskId: task.id }, {
+    ownerId: task.owner_id, snapshotJson: task.snapshot_json, referenceIdsJson: task.reference_ids,
+  });
 }

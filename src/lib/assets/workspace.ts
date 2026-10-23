@@ -7,6 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 import { sameOriginPublicUrlForSiteUpload, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
 // ============================================================================
@@ -30,37 +31,58 @@ function workspaceNameForTab(tabId: string) {
   return `默认工作台:${normalized}`;
 }
 
+export function normalizeWorkspaceTabId(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) return 'default';
+  if (value.length > 96 || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('工作区标签标识无效');
+  return value;
+}
+function workspaceBindingKey(tabId: string, ownerId: string) {
+  return 'workspace_tab_binding_v1:' + createHash('sha256').update(JSON.stringify([ownerId, tabId])).digest('hex');
+}
+export async function readWorkspaceForTab(tabId: string, ownerId: string) {
+  const normalized = normalizeWorkspaceTabId(tabId), key = workspaceBindingKey(normalized, ownerId);
+  const binding = await prisma.platformSetting.findUnique({ where: { key } });
+  if (binding) {
+    const value = JSON.parse(binding.value_json);
+    if (value.version !== 1 || value.ownerId !== ownerId || value.tabId !== normalized || typeof value.workspaceId !== 'string')
+      throw new Error('工作区绑定无法确认，请保留当前输入');
+    const workspace = await prisma.workspace.findFirst({ where: { id: value.workspaceId, owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) } });
+    if (!workspace) throw new Error('原工作区已失效，未切换到其它工作区');
+    return { id: workspace.id };
+  }
+  return prisma.workspace.findFirst({ where: { owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) },
+    orderBy: [{ updated_at: 'desc' }, { id: 'asc' }], select: { id: true } });
+}
+
 /**
  * 获取或创建当前用户的活跃工作区
  * 每个浏览器 tab 有独立 workspace（通过 tabId 区分）
  */
 export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user'): Promise<{ id: string }> {
-  return prisma.$transaction(async db => {
-  const workspaceName = workspaceNameForTab(tabId);
-
-  // 尝试查找当前 tab 的 active workspace，避免复用同用户其他 tab 的旧参考素材。
-  let workspace = await db.workspace.findFirst({
-    where: {
-      owner_id: ownerId,
-      status: 'active',
-      name: workspaceName,
-    },
-    orderBy: { updated_at: 'desc' },
-  });
-
-  if (!workspace) {
-    workspace = await db.workspace.create({
-      data: {
-        id: uuidv4(),
-        owner_id: ownerId,
-        name: workspaceName,
-        status: 'active',
-      },
+  const normalized = normalizeWorkspaceTabId(tabId), key = workspaceBindingKey(normalized, ownerId);
+  const existing = await readWorkspaceForTab(normalized, ownerId);
+  if (existing && await prisma.platformSetting.findUnique({ where: { key }, select: { id: true } })) return existing;
+  try {
+    if (existing) {
+      await prisma.platformSetting.create({ data: { key, updated_by: ownerId,
+        value_json: JSON.stringify({ version: 1, ownerId, tabId: normalized, workspaceId: existing.id }) } });
+      return existing;
+    }
+    return await prisma.$transaction(async db => {
+      const prior = await db.workspace.findFirst({ where: { owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) },
+        orderBy: [{ updated_at: 'desc' }, { id: 'asc' }], select: { id: true } });
+      const workspace = prior || await db.workspace.create({ data: { id: uuidv4(), owner_id: ownerId,
+        name: workspaceNameForTab(normalized), status: 'active' }, select: { id: true } });
+      await db.platformSetting.create({ data: { key, updated_by: ownerId,
+        value_json: JSON.stringify({ version: 1, ownerId, tabId: normalized, workspaceId: workspace.id }) } });
+      return workspace;
     });
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'P2002') throw error;
+    const winner = await readWorkspaceForTab(normalized, ownerId);
+    if (!winner) throw error;
+    return winner;
   }
-
-  return { id: workspace.id };
-  });
 }
 
 /**

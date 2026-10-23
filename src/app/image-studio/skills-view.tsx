@@ -141,6 +141,6 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
       {phase === 'uploading' && busy && <p role="status">封面正在上传，文字尚未保存</p>}{error && <p role="alert" className={styles.error}>{error}</p>}<button className={styles.primary} disabled={busy || !draft.prompt?.trim()} onClick={() => void save()}><Save size={16} />{busy && phase === 'saving' ? '保存中…' : '保存'}</button>
     </>}
   </dialog>
-  <ResourceLibraryPicker open={picker} portalContainer={editor.current} imageOnly target="image-studio" purpose="skills-cover" title="选择封面" confirmLabel="设为封面" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(false)} onUploadFile={file => uploadFileAsAsset(file)} onConfirm={async (ids) => { if (draft && ids[0]) setDraft({ ...draft, coverAssetId: ids[0], coverUrl: `/api/content-reactions/media?key=${encodeURIComponent(`asset:${ids[0]}`)}&variant=thumbnail` }); setPicker(false); }} />
+  <ResourceLibraryPicker open={picker} portalContainer={editor.current} imageOnly target="image-studio" purpose="skills-cover" contextKey={`${userId}:skills-cover:${draft?.id || "new"}`} title="选择封面" confirmLabel="设为封面" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(false)} onUploadFile={file => uploadFileAsAsset(file)} onConfirm={async (ids) => { if (draft && ids[0]) setDraft({ ...draft, coverAssetId: ids[0], coverUrl: `/api/content-reactions/media?key=${encodeURIComponent(`asset:${ids[0]}`)}&variant=thumbnail` }); setPicker(false); }} />
   </>;
 });

@@ -31,9 +31,9 @@ function hdDownloadName(fileName: string, mime: string) {
 // The fresh HEAD authorizes this exact HD version. A cache miss remains a native
 // streaming download; never buffer an original or compare cross-variant ETags.
 export async function handHdImageDownloadToBrowser(options: {
-  account: string; source: string; sourceVersion: string; fileName: string; isCurrent: () => boolean;
+  account: string; source: string; sourceVersion: string; representationVersion?: string; fileName: string; isCurrent: () => boolean;
 }): Promise<{ reused: boolean; bytes: number; mime: string }> {
-  const { account, source, sourceVersion, fileName, isCurrent } = options;
+  const { account, source, sourceVersion, representationVersion, fileName, isCurrent } = options;
   const inScope = captureImageReadSessionScope(account);
   const ensureCurrent = () => {
     if (!inScope() || !isCurrent()) throw new DOMException('已离开当前结果，下载准备已取消', 'AbortError');
@@ -46,6 +46,7 @@ export async function handHdImageDownloadToBrowser(options: {
   const versionedSource = (mode: 'hd' | 'hd-download') => {
     const target = new URL(imageDisplaySource(`${original.pathname}${original.search}`, mode), location.href);
     target.hash = ''; target.searchParams.set('hd-version', sourceVersion);
+    if (representationVersion) target.searchParams.set('hd-representation', representationVersion);
     return target;
   };
   const target = versionedSource('hd-download');
@@ -60,13 +61,15 @@ export async function handHdImageDownloadToBrowser(options: {
   const length = response.headers.get('content-length') || '', bytes = Number(length);
   const encoding = response.headers.get('content-encoding');
   if (response.headers.get('X-Image-Source-Version') !== sourceVersion || !/^image\/[a-z0-9][a-z0-9.+_-]*$/.test(mime)
+    || representationVersion && response.headers.get('X-Image-Representation-Version') !== representationVersion
     || !/^[1-9]\d*$/.test(length) || !Number.isSafeInteger(bytes) || bytes <= 0 || response.headers.has('content-range')
     || encoding && encoding !== 'identity' || response.url && new URL(response.url).origin !== location.origin) {
+    invalidateImageReadSource(source, account);
     throw Error('高清图片版本或完整文件信息已变化，请重新打开后下载');
   }
   const downloadName = hdDownloadName(fileName, mime);
   ensureCurrent();
-  const borrowed = borrowImageRead(account, versionedSource('hd').href, sourceVersion, { sourceVersion, bytes, mime, variant: 'hd', policy: 'hd-f-v1' });
+  const borrowed = borrowImageRead(account, versionedSource('hd').href, sourceVersion, { sourceVersion, representationVersion, bytes, mime, variant: 'hd', policy: 'hd-f-v1' });
   let objectUrl: string | undefined, handedToBrowser = false;
   try {
     ensureCurrent();

@@ -7,10 +7,11 @@ import { hasCachedImagePreview, setImageReadSessionOwner } from '@/lib/media/ima
 import { hdDisplayPolicy } from '@/lib/media/hd-display-policy';
 export type { HdDescription } from '@/lib/media/hd-source-session';
 
-export function versionedHdSource(source: string, mode: 'hd' | 'hd-download', version?: string | null) {
+export function versionedHdSource(source: string, mode: 'hd' | 'hd-download', version?: string | null, representation?: string | null) {
   const value = imageDisplaySource(source, mode);
   const url = new URL(value, window.location.origin);
   if (version) url.searchParams.set('hd-version', version);
+  if (representation) url.searchParams.set('hd-representation', representation);
   return url.origin === window.location.origin ? `${url.pathname}${url.search}` : url.href;
 }
 export function useHdImageSource(source: string, original: boolean, attempt: number, sourceVersion: string, previewOnly = false) {
@@ -35,7 +36,7 @@ export function useHdImageSource(source: string, original: boolean, attempt: num
   const previewSource = imageDisplaySource(source, 'preview');
   const readSource = current?.denied || display.kind === 'pending' ? '' : display.kind === 'preview'
     ? previewOnly || account && hasCachedImagePreview(account, previewSource) ? previewSource : imageDisplaySource(source, 'thumbnail')
-    : display.kind === 'original' ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description?.sourceVersion);
+    : display.kind === 'original' ? imageDisplaySource(source, 'original') : versionedHdSource(source, 'hd', description?.sourceVersion, description?.representationVersion);
   return { readSource, description, pending: display.pending, displayKind: display.kind, denied: current?.denied, error: current?.error,
     refresh, version: display.kind === 'hd' ? description?.sourceVersion || sourceVersion : display.kind === 'preview' ? '' : sourceVersion, fullSize: display.fullSize };
 }

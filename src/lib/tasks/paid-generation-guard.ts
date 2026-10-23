@@ -5,6 +5,17 @@ export const PAID_GENERATION_INTENT_HEADER = 'x-paid-generation-intent';
 export const PAID_GENERATION_REASON_HEADER = 'x-paid-generation-reason';
 export const PAID_GENERATION_INTENT_USER_AUTHORIZED = 'user_authorized_real_provider';
 
+// HTTP headers are ByteString, never user-facing Chinese audit prose.
+export function userRetryGenerationReason(kind: 'video' | 'multiview', taskId: string) {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(taskId)) throw new Error('原重试任务编号无效');
+  return `user_retry_${kind}:${taskId}`;
+}
+export function paidGenerationReasonLabel(reason: string) {
+  if (reason.startsWith('user_retry_video:')) return '用户主动重试视频任务';
+  if (reason.startsWith('user_retry_multiview:')) return '用户主动重试3D多视图任务';
+  return reason;
+}
+
 type PaidGenerationBody = Record<string, unknown>;
 
 export type PaidGenerationGuardDecision = {
@@ -120,6 +131,7 @@ export function evaluatePaidGenerationGuard({
       authorized,
       intent: intent || null,
       reason: reason || null,
+      reason_label: reason ? paidGenerationReasonLabel(reason) : null,
       indicators,
       policy: 'codex_or_script_paid_generation_requires_explicit_user_authorization',
     },
@@ -134,7 +146,7 @@ export function paidGenerationGuardError(decision: PaidGenerationGuardDecision) 
       indicators: decision.indicators,
       required_headers: {
         [PAID_GENERATION_INTENT_HEADER]: PAID_GENERATION_INTENT_USER_AUTHORIZED,
-        [PAID_GENERATION_REASON_HEADER]: '说明当前用户明确要求真实生成的原因',
+        [PAID_GENERATION_REASON_HEADER]: 'user_authorized_video_generation',
       },
     },
   };

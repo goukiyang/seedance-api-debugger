@@ -3,6 +3,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { RelativeTime } from '@/components/RelativeTime';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { showVideoCardManagementUi } from '@/lib/navigation';
@@ -18,6 +19,7 @@ type ApprovalUser = {
 
 type ApprovalItem = {
   id: string;
+  revision: number; can_manage?: boolean; creation_intent_id?: string | null; scope_json?: string | null; used_count?: number; usage_limit?: number | null; authorized_cost_cents?: number; used_cost_cents?: number;
   type: string;
   status: string;
   project_id: string | null;
@@ -51,6 +53,8 @@ function isApprovalTypeValue(value: string | null): value is typeof APPROVAL_TYP
 }
 
 function typeLabel(type: string) {
+  if (type === 'video_creation_1080p') return '本次高清创作';
+  if (type === 'video_delivery_reopen') return '交付重开';
   return APPROVAL_TYPE_OPTIONS.find(([value]) => value === type)?.[1] || type;
 }
 
@@ -69,6 +73,7 @@ function formatTime(value?: string | null) {
 
 export default function ApprovalsPage() {
   const { prompt, productDialog } = useProductDialog();
+  const [actorId, setActorId] = useState('');
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -91,6 +96,28 @@ export default function ApprovalsPage() {
   const [targetStatus, setTargetStatus] = useState('active');
   const [submitting, setSubmitting] = useState(false);
 
+  const revoke = async (approval: ApprovalItem) => {
+    if (!actorId) return;
+    const key = `sd2-approval-revoke:${actorId}:${approval.id}`;
+    try {
+      const retained = sessionStorage.getItem(key);
+      if (retained) {
+        const original = JSON.parse(retained) as { request_id: string };
+        const response = await fetch(`/api/approvals/${approval.id}/revoke?request_id=${encodeURIComponent(original.request_id)}`, { cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok || !data.operation?.state) throw new Error('原撤销操作仍待确认，只查询原号，不会再次提交');
+        sessionStorage.removeItem(key); await load(); return;
+      }
+      const input = { request_id: crypto.randomUUID(), expected_revision: approval.revision, expected_status: approval.status };
+      sessionStorage.setItem(key, JSON.stringify(input));
+      const response = await fetch(`/api/approvals/${approval.id}/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': actorId }, body: JSON.stringify(input) });
+      const data = await response.json();
+      if (!response.ok) { if (response.status < 500) sessionStorage.removeItem(key); throw new Error(data.error || '撤销结果暂未确认'); }
+      if (!data.operation?.state) throw new Error('撤销回执待确认，请查询原操作');
+      sessionStorage.removeItem(key); await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '请重新读取审批'); }
+  };
+
   const load = async () => {
     setLoading(true);
     setError('');
@@ -105,7 +132,7 @@ export default function ApprovalsPage() {
         setError(data.error || data.message || '审批加载失败');
         return;
       }
-      setApprovals(data.approvals || []);
+      setActorId(data.actor_id || ''); setApprovals(data.approvals || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : '审批加载失败');
     } finally {
@@ -362,10 +389,10 @@ export default function ApprovalsPage() {
                   </td>
                   <td><UserIdentityBadge user={approval.requester} size="sm" /></td>
                   <td>{statusLabel(approval.status)}</td>
-                  <td className="truncate" style={{ maxWidth: 280 }} title={approval.reason || ''}>{approval.reason || '-'}</td>
-                  <td>{formatTime(approval.expires_at)}</td>
+                  <td style={{ maxWidth: 280, overflowWrap: 'anywhere' }}>{approval.reason || '-'}{approval.decision_reason && <p>{approval.decision_reason}</p>}{approval.creation_intent_id && <p className="text-gray text-sm">数量 {approval.usage_limit || 0} · 已受理 {approval.used_count || 0} · 尚可授权 {Math.max(0, ((approval.authorized_cost_cents || 0) - (approval.used_cost_cents || 0)) / 100).toFixed(1)} 点</p>}</td>
+                  <td>{approval.expires_at ? <RelativeTime value={approval.expires_at} /> : '-'}</td>
                   <td>
-                    {approval.status === 'pending' ? (
+                    {approval.status === 'pending' && approval.can_manage ? (
                       <div className="approval-actions">
                         <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'approve')}>通过</button>
                         <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'reject')}>拒绝</button>
@@ -373,6 +400,7 @@ export default function ApprovalsPage() {
                     ) : (
                       <span className="text-gray">{approval.approver ? `处理人：${approval.approver.name}` : statusLabel(approval.status)}</span>
                     )}
+                    {approval.can_manage && ['video_creation_1080p','video_delivery_reopen'].includes(approval.type) && ['pending','approved'].includes(approval.status) && <button type="button" className="btn btn-secondary" onClick={() => void revoke(approval)}>撤销未用额度</button>}
                   </td>
                 </tr>
               ))}

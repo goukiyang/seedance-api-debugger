@@ -1,3 +1,4 @@
+import { videoCreationSchemaReady } from '@/lib/creation/context';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -263,7 +264,8 @@ export async function GET(request: NextRequest) {
   const requestedProject = requestedProjectId
     ? projectSummaries.find((project) => project.id === requestedProjectId && project.can_generate) || null
     : null;
-  const selectedProject = requestedProject || projectSummaries.find((project) => project.can_generate) || null;
+  if (requestedProjectId && !requestedProject) return NextResponse.json({ error: '原项目当前不可创作，未更改保存位置', code: 'creation_project_unavailable' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
+  const selectedProject = requestedProjectId ? requestedProject : projectSummaries.find((project) => project.type === 'personal' && project.owner_user_id === user.id && project.can_generate) || null;
   const latestCanvasDocument = selectedProject
     ? await prisma.canvasDocument.findFirst({
         where: {
@@ -362,14 +364,13 @@ export async function GET(request: NextRequest) {
   const requestedVideoCard = requestedVideoCardId
     ? videoCardSummaries.find((card) => card.id === requestedVideoCardId) || null
     : null;
+  if (requestedVideoCardId && !requestedVideoCard) return NextResponse.json({ error: '原视频卡暂不可用，未清除原归属', code: 'creation_legacy_card_unavailable' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
   const restoredVideoCardId = requestedVideoCardId ? '' : savedVideoCardId(latestCanvasDocument?.document_json);
   const restoredVideoCard = restoredVideoCardId
-    ? videoCardSummaries.find((card) => card.id === restoredVideoCardId && card.can_generate) || null
+    ? videoCardSummaries.find((card) => card.id === restoredVideoCardId) || null
     : null;
   const selectedVideoCard = requestedVideoCard
     || restoredVideoCard
-    || videoCardSummaries.find((card) => card.can_generate)
-    || videoCardSummaries[0]
     || null;
 
   const textReady = isMuskApiReady(muskSettings);
@@ -435,8 +436,10 @@ export async function GET(request: NextRequest) {
         updated_at: safeDate(latestCanvasDocument.updated_at),
       } : null,
       needs_project_selection: !selectedProject,
-      needs_video_card_selection: !selectedVideoCard,
-      selected_video_card_can_generate: Boolean(selectedVideoCard?.can_generate),
+      needs_video_card_selection: false,
+      selected_video_card_can_generate: selectedVideoCard ? Boolean(selectedVideoCard.can_generate) : true,
+      creation_contract_version: 2,
+      video_creation_v2_available: process.env.VIDEO_CREATION_FLOW_V2_ENABLED === '1' && await videoCreationSchemaReady(),
       generation_blocked_reason: selectedVideoCard && !selectedVideoCard.can_generate
         ? `视频卡${selectedVideoCard.status_label}，不能继续生成`
         : null,
@@ -478,7 +481,7 @@ export async function GET(request: NextRequest) {
         },
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',
-        requires: ['project_id', 'video_card_id'],
+        requires: ['project_id'],
         message: imageReady ? '可用' : '图片生成能力暂不可用，请稍后联系管理员',
       },
       video: {
@@ -575,7 +578,7 @@ export async function GET(request: NextRequest) {
         },
         status_endpoint_template: '/api/video/status/:taskId?refresh=true',
         billing: 'credits_and_project_budget',
-        requires: ['project_id', 'video_card_id'],
+        requires: ['project_id'],
         message: videoReady ? '可用' : '视频生成能力暂不可用，请稍后联系管理员',
       },
     },

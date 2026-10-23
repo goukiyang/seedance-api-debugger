@@ -1,4 +1,6 @@
 'use client';
+import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import CreationAvailability from '@/components/creation/CreationAvailability';
 
 import { useProductDialog } from '@/components/useProductDialog';
 
@@ -274,6 +276,9 @@ export function TemplateGenerateClient() {
   const [pendingRequestKey, setPendingRequestKey] = useState<string | null>(null);
   const submitLock = useRef(false);
   const submissionScope = useRef('');
+  const creation = useCreationContext({ ownerId: currentUser?.id, entry: 'template', draftId: 'template-generate', projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
+  const [creationBaselineId, setCreationBaselineId] = useState('');
+  const creationDraftBody = useRef<Record<string, unknown> | null>(null);
   submissionScope.current = JSON.stringify([currentUser?.id, selectedProjectId]);
   const submissionCard = useRef(selectedVideoCardId); submissionCard.current = selectedVideoCardId;
   const requestStorageKey = currentUser ? `sd2-template-generation-request-v2:${currentUser.id}` : null;
@@ -427,7 +432,7 @@ export function TemplateGenerateClient() {
   const scopeSummaryText = selectedVideoCard
     ? `保存到 ${selectedProjectLabel} / ${selectedVideoCard.title}`
     : selectedProject
-      ? `保存到 ${selectedProjectLabel}，提交时自动创建视频卡`
+      ? `保存到 ${selectedProjectLabel}`
       : selectedProjectLabel;
 
   useEffect(() => {
@@ -519,13 +524,10 @@ export function TemplateGenerateClient() {
       const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
       setProjects(list);
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
-      const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+      const rememberedProjectId = window.localStorage.getItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`);
       const preferredId = preferredProjectId || requestedProjectId || rememberedProjectId || '';
-      const nextProject = (preferredId ? list.find((project) => project.id === preferredId) : null)
-        || list.find((project) => project.type === 'personal')
-        || list[0]
-        || null;
-      setSelectedProjectId(nextProject?.id || '');
+      const nextProject = preferredId || list.find((project) => project.type === 'personal' && project.owner_user_id === currentUser?.id)?.id || '';
+      setSelectedProjectId(nextProject);
     } catch {
       setProjectMessage({ type: 'error', text: '项目列表加载失败，请刷新后重试' });
     } finally {
@@ -539,7 +541,7 @@ export function TemplateGenerateClient() {
 
   useEffect(() => {
     if (!selectedProjectId) return;
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
+    window.localStorage.setItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`, selectedProjectId);
   }, [selectedProjectId]);
 
   const loadVideoCards = useCallback(async (projectId: string, preferredVideoCardId?: string | null) => {
@@ -557,13 +559,8 @@ export function TemplateGenerateClient() {
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
       const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
-      const rememberedVideoCardId = readRememberedVideoCards()[projectId] || '';
-      const preferredId = preferredVideoCardId || requestedVideoCardId || rememberedVideoCardId || '';
-      const nextCard = (preferredId ? list.find((card) => card.id === preferredId) : null)
-        || list.find((card) => card.status !== 'sealed' && card.status !== 'archived')
-        || list[0]
-        || null;
-      setSelectedVideoCardId(nextCard?.id || '');
+      const preferredId = preferredVideoCardId || requestedVideoCardId || '';
+      setSelectedVideoCardId(preferredId);
     } catch (error) {
       setVideoCards([]);
       setSelectedVideoCardId('');
@@ -925,7 +922,9 @@ export function TemplateGenerateClient() {
       if (!requestStorageKey) throw new Error('请先登录后生成');
       if (await checkPendingRequest()) { setSubmitting(false); submitLock.current = false; return; }
       if (!validVideoPricingAmount(params.quotedEstimatedCost)) throw new Error('请重新获取报价；尚未生成');
-      selectedCard = await ensureVideoCardForSubmit();
+      if (!selectedProjectId) throw new Error('请选择保存到的项目');
+      selectedCard = videoCards.find(card => card.id === selectedVideoCardId) || null;
+      if (selectedVideoCardId && !selectedCard) throw new Error('原视频卡暂不可用，未改变原归属');
       if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
     } catch (ensureError) {
       setError(ensureError instanceof Error ? ensureError.message : '请先选择项目和视频卡');
@@ -933,18 +932,7 @@ export function TemplateGenerateClient() {
       submitLock.current = false;
       return;
     }
-    if (!selectedCard) {
-      setError('请先选择项目和视频卡');
-      setSubmitting(false);
-      submitLock.current = false;
-      return;
-    }
-    if (selectedCard.status === 'sealed' || selectedCard.status === 'archived') {
-      setError('当前视频卡已封板或归档，不能继续生成');
-      setSubmitting(false);
-      submitLock.current = false;
-      return;
-    }
+    if (selectedCard && !['draft','active','reviewing'].includes(selectedCard.status)) { setError('原视频卡当前不可继续创作，请先处理原锁定状态'); setSubmitting(false); submitLock.current = false; return; }
     const selectedH3Model = params.model === H3_INLINE_MODEL_ID;
     const requestedProvider: GenerationProvider = selectedH3Model ? 'h3' : 'seedance';
     const requestedModel = selectedH3Model
@@ -973,12 +961,14 @@ export function TemplateGenerateClient() {
       const draft = requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true;
       const quote = requireVideoPricingWithinCeiling(await requestVideoPricing({ provider: requestedProvider,
         model: requestedModel, resolution: params.resolution, duration: params.duration,
-        context: { project_id: selectedProjectId, video_card_id: selectedCard.id, ratio: params.ratio, draft,
+        context: { project_id: selectedProjectId, video_card_id: selectedCard?.id || null, ratio: params.ratio, draft,
           reference_video_urls: params.referenceVideoUrls || [] } }, undefined, currentUser!.id), params.quotedEstimatedCost);
       if (scope !== submissionScope.current || (selectedVideoCardId
-        ? submissionCard.current !== selectedCard.id
-        : submissionCard.current && submissionCard.current !== selectedCard.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+        ? submissionCard.current !== (selectedCard?.id || '')
+        : submissionCard.current && submissionCard.current !== (selectedCard?.id || ''))) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+      const previous = creation.intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(creation.intent.state) ? creation.intent : null;
       const requestBody = {
+          creation_contract_version: 2, entry: 'template', continuation: { mode: 'new' }, baseline_task_id: creationBaselineId || null, video_branch_id: null,
           pricing_revision: quote.pricing_revision,
           ...(quote.pricing_quote_token ? { pricing_quote_token: quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}),
           max_estimated_cost: params.quotedEstimatedCost,
@@ -992,9 +982,9 @@ export function TemplateGenerateClient() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: previous?.request_id || crypto.randomUUID(),
           project_id: selectedProjectId,
-          video_card_id: selectedCard.id,
+          video_card_id: selectedCard?.id || null,
           reference_image_ids: params.referenceImageIds || [],
           reference_video_urls: params.referenceVideoUrls || [],
           reference_audio_urls: params.referenceAudioUrls || [],
@@ -1009,16 +999,23 @@ export function TemplateGenerateClient() {
           draft,
           lora_id: selectedH3Model ? requestedH3LoraId : undefined,
       };
-      sessionStorage.setItem(requestStorageKey!, JSON.stringify({ key: requestBody.idempotency_key,
+      if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
+      creationDraftBody.current = requestBody;
+      const prepared = await creation.prepare(requestBody, requestBody.idempotency_key, previous);
+      if (!prepared.availability?.canSubmit) { setError('请完成下方本次创作条件'); return; }
+      const acceptedBody = { ...requestBody, idempotency_key: prepared.request_id, intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
+        ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
+      sessionStorage.setItem(requestStorageKey!, JSON.stringify({ key: prepared.request_id,
         fingerprint: stableGenerationPayloadJson(videoPricingBusinessInput(requestBody)) }));
-      setPendingRequestKey(requestBody.idempotency_key);
+      setPendingRequestKey(prepared.request_id);
       const response = await fetch('/api/tasks/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-app-session-user': currentUser!.id,
           'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default' },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(acceptedBody),
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
+      if (response.ok && data.id) creation.setIntent({ ...prepared, state: 'accepted', accepted_task_id: data.id });
       if (scope !== submissionScope.current) return;
       if (!response.ok) {
         if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
@@ -1059,20 +1056,20 @@ export function TemplateGenerateClient() {
           provider_official_amount_micros: null,
           provider_final_amount_micros: null,
           project_id: data.project_id || selectedProjectId,
-          video_card_id: data.video_card_id || selectedCard.id,
+          video_card_id: data.video_card_id || selectedCard?.id || null,
           template_id: data.template_id || params.templateId || null,
           agent_run_id: data.agent_run_id || params.agentRunId || null,
           selected_agent_plan_key: data.selected_agent_plan_key || params.selectedAgentPlanKey || null,
           prompt_user_edited: params.promptUserEdited === true,
           generation_template: null,
           can_delete: true,
-          video_card: {
+          video_card: selectedCard ? {
             id: selectedCard.id,
             title: selectedCard.title,
             objective: selectedCard.objective,
             status: selectedCard.status,
             project_id: selectedCard.project_id,
-          },
+          } : null,
           created_at: data.created_at,
         },
         ...current.filter((task) => task.id !== data.id),
@@ -1233,7 +1230,8 @@ export function TemplateGenerateClient() {
 
           <div className="template-generate-video-card">
             <div className="template-generate-video-card-picker">
-              <span>视频卡</span>
+              <span>视频卡（可选）</span>
+              <button type="button" disabled={submitting || videoCardBusy} onClick={() => setSelectedVideoCardId('')}>新作直接保存到项目</button>
               <div className="template-video-card-list" role="listbox" aria-label="选择视频卡">
                 {loadingVideoCards ? (
                   <span className="template-video-card-empty">正在加载视频卡...</span>
@@ -1298,7 +1296,8 @@ export function TemplateGenerateClient() {
         )}
         </details>
 
-        <GenerationComposer
+        <CreationAvailability controller={creation} onBaselineChange={id => { setCreationBaselineId(id); if (creation.intent && creationDraftBody.current) void creation.prepare({ ...creationDraftBody.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message)); }} />
+      <GenerationComposer
           collections={collections}
           selectedVideoCardId={selectedVideoCardId}
           pricingProjectId={selectedProjectId}
@@ -1306,7 +1305,8 @@ export function TemplateGenerateClient() {
           templateMode="workbench"
           initialTemplateId={initialTemplateId}
           resultReturnTo={templateReturnTo}
-          require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
+          require1080pApproval={false}
+            creationContextKey={creation.contextKey}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
           onCollectionNew={handleCollectionSave}

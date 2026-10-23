@@ -1,4 +1,7 @@
 'use client';
+import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
+import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import CreationAvailability from '@/components/creation/CreationAvailability';
 import { useProductDialog } from '@/components/useProductDialog';
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
@@ -43,6 +46,8 @@ import { readImageResultHandoff, resumeImageResultVideoImport } from '@/lib/imag
 import type { ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
 import { issueMultiviewReuseHandoff } from '@/lib/video/multiview-reuse-handoff.client';
 import {
+  buildTaskReuseOperationRequest,
+  type TaskReuseOperationStatus,
   taskReuseAutoAction,
   taskReuseContextMatches,
   shouldConsumeTaskReuseQuery,
@@ -57,6 +62,8 @@ import {
   type TaskReuseContext,
   type TaskReuseIntent,
 } from '@/lib/navigation/task-reuse-intent';
+import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, type TaskReuseClientRecord, type TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 
 // ============================================================================
 // Types
@@ -556,8 +563,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const selectedVideoCardIdRef = useRef('');
   const selectedVideoBranchIdRef = useRef('');
   const workspaceBridgeKeyRef = useRef('');
-  const workspaceRefreshRef = useRef<{ key: string; refresh: () => Promise<void> } | null>(null);
-  const inputRecoveryRef = useRef<{ key: string; capture: () => boolean } | null>(null);
+  const workspaceRefreshRef = useRef<{ key: string; refresh: () => Promise<WorkspaceReadResult> } | null>(null);
+  const inputRecoveryRef = useRef<{ key: string; capture: () => TaskReuseInputBackup | false } | null>(null);
   const [inputRecoveryTarget, setInputRecoveryTarget] = useState<{ projectId: string; videoCardId: string; videoBranchId: string } | null>(null);
   const composerMainRef = useRef<HTMLElement | null>(null);
   const projectPanelRef = useRef<HTMLDivElement | null>(null);
@@ -769,6 +776,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [reuseRefreshInProgress, setReuseRefreshInProgress] = useState(false);
   const [reuseIntent, setReuseIntent] = useState<TaskReuseIntent | null>(null);
   const [reuseParameterOnlyAvailable, setReuseParameterOnlyAvailable] = useState(false);
+  const confirmedReuseHandler = useRef<((record: TaskReuseClientRecord, body: Record<string, unknown>, status: number) => Promise<void>) | null>(null);
+  const [reuseCanClose, setReuseCanClose] = useState(false);
+  const [reuseServerApplied, setReuseServerApplied] = useState(false);
+  const activeReuseRecord = useRef<TaskReuseClientRecord | null>(null);
   const parameterOnlyReuseRef = useRef<(() => Promise<void>) | null>(null);
   const reuseIntentRef = useRef<TaskReuseIntent | null>(null);
   const reuseEditEpochRef = useRef(0);
@@ -793,6 +804,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }>({ key: '', busy: true, reason: 'loading' });
   const workspaceBusySnapshotRef = useRef(workspaceBusySnapshot);
   const [workspaceRefreshReadyKey, setWorkspaceRefreshReadyKey] = useState('');
+
+  const creation = useCreationContext({ ownerId: currentUser?.id, entry: isIpSurface ? 'ip' : studioRunId ? 'template' : 'ordinary',
+    draftId: surface, projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
+  const [creationBaselineId, setCreationBaselineId] = useState('');
+  const creationDraftBodyRef = useRef<Record<string, unknown> | null>(null);
 
   selectedProjectIdRef.current = selectedProjectId;
   selectedVideoCardIdRef.current = selectedVideoCardId;
@@ -917,19 +933,19 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setWorkspaceBusySnapshot((old) => old.key === value.key && old.busy === value.busy && old.reason === value.reason ? old : value);
   }, [workspaceBridgeKey]);
 
-  const reportWorkspaceRefreshReady = useCallback((refresh: (() => Promise<void>) | null) => {
+  const reportWorkspaceRefreshReady = useCallback((refresh: (() => Promise<WorkspaceReadResult>) | null) => {
     if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
     workspaceRefreshRef.current = refresh ? { key: workspaceBridgeKey, refresh } : null;
     setWorkspaceRefreshReadyKey(refresh ? workspaceBridgeKey : '');
   }, [workspaceBridgeKey]);
 
-  const reportInputRecoveryReady = useCallback((capture: (() => boolean) | null) => {
+  const reportInputRecoveryReady = useCallback((capture: (() => TaskReuseInputBackup | false) | null) => {
     if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
     inputRecoveryRef.current = capture ? { key: workspaceBridgeKey, capture } : null;
   }, [workspaceBridgeKey]);
 
-  const captureInputRecoveryTarget = useCallback(() => {
-    const context = readReuseContext();
+  const captureInputRecoveryTarget = useCallback((target?: { projectId: string; videoCardId: string; videoBranchId: string }) => {
+    const context = { ...readReuseContext(), ...target };
     return () => {
       if (activeAccountIdRef.current !== context.accountId || workspaceBridgeKeyRef.current !== context.workspaceBridgeKey
         || readReuseContext().tabId !== context.tabId) return;
@@ -949,25 +965,52 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     };
   }, [readReuseContext]);
 
-  const requestWorkspaceReadAfterUnknownReuse = useCallback(async () => {
-    const entry = workspaceRefreshRef.current;
-    if (!entry || entry.key !== workspaceBridgeKey) return;
-    const owner = activeAccountIdRef.current;
-    const requestId = reuseRequestIdRef.current;
-    const stillCurrent = () => activeAccountIdRef.current === owner && workspaceBridgeKeyRef.current === entry.key
-      && reuseRequestIdRef.current === requestId;
-    setReuseRefreshRequested(false);
-    setReuseRefreshInProgress(true);
+  const requestWorkspaceReadAfterUnknownReuse = useCallback(async (close = false) => {
+    const entry = workspaceRefreshRef.current, intent = reuseIntentRef.current, owner = activeAccountIdRef.current;
+    if (!entry || entry.key !== workspaceBridgeKey || !intent || !owner) return;
+    const readId = reuseRequestIdRef.current, scope = readReuseContext();
+    const current = () => reuseMountedRef.current && activeAccountIdRef.current === owner && workspaceBridgeKeyRef.current === entry.key && reuseRequestIdRef.current === readId;
+    setReuseRefreshInProgress(true); setReuseCanClose(false);
     try {
-      await entry.refresh();
-      if (stillCurrent()) setReuseRefreshRequested(true);
-    } catch {
-      // The existing workspace refresh swallows errors; keep the result unresolved either way.
-      if (stillCurrent()) setReuseRefreshRequested(true);
-    } finally {
-      if (stillCurrent()) setReuseRefreshInProgress(false);
-    }
-  }, [workspaceBridgeKey]);
+      const record = readTaskReuseClientRecord(owner, scope.tabId, intent.taskId);
+      if (!record) {
+        const read = await entry.refresh();
+        if (!current() || !read.applied || !read.workspace) { if (current()) setReuseMessage(read.error || '原工作区尚未确认，旧等待已保留。'); return; }
+        const params = new URLSearchParams({ tabId: scope.tabId, workspaceId: read.workspace.id });
+        const response = await fetch(`/api/tasks/${encodeURIComponent(intent.taskId)}/reuse/${close ? 'close' : `request-status?${params}`}`, { cache: 'no-store', ...(close ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': scope.tabId }, body: JSON.stringify({ legacy: true, protocolVersion: 1, tabId: scope.tabId, workspaceId: read.workspace.id }) } : {}) });
+        const result = await readJsonResponse<{ canClose?: boolean; closed?: boolean; message?: string; error?: string }>(response);
+        if (!current()) return;
+        setReuseRefreshRequested(true); setReuseCanClose(result.canClose === true);
+        setReuseMessage(result.message || result.error || '旧复用结果无法补查，当前输入保留。');
+        if (response.ok && result.closed === true) { const key = taskReuseReceiptKey(owner, scope.tabId, intent.taskId); sessionStorage.removeItem(key); localStorage.removeItem(key); updateReuseIntent({ ...intent, phase: 'done' }); transitionReuseSourceUrl(intent.taskId, 'consumed'); setReuseOutcomeUnknown(false); setReuseServerApplied(false); }
+        return;
+      }
+      activeReuseRecord.current = record;
+      const url = `/api/tasks/${encodeURIComponent(intent.taskId)}/reuse/${close ? 'close' : `request-status?${taskReuseOperationQuery(record.operation)}`}`;
+      const response = await fetch(url, { ...(close ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': record.operation.tabId }, body: JSON.stringify(record.operation) } : {}), cache: 'no-store' });
+      const body = await readJsonResponse<Record<string, unknown> & { reuse?: TaskReuseOperationStatus; error?: string; message?: string }>(response);
+      if (!current()) return;
+      const outcome = body.reuse, expected = record.operation;
+      if (!outcome || outcome.requestId !== expected.requestId || outcome.requestHash !== expected.requestHash || outcome.nonce !== expected.nonce
+        || outcome.workspaceId !== expected.workspaceId || outcome.tabId !== expected.tabId || outcome.sourceTaskId !== intent.taskId) throw new Error(body.message || body.error || '原复用结果尚未确认，请保留原操作号。');
+      if (outcome.status === 'unknown') { setReuseCanClose(outcome.canClose === true); setReuseMessage('原复用结果尚未确认，可继续查询或安全结束；不会再次发送复用。'); return; }
+      if (outcome.status === 'rejected' || outcome.status === 'closed') {
+        finishTaskReuseClientRecord(record, outcome.status); setReuseOutcomeUnknown(false); setReuseServerApplied(false);
+        updateReuseIntent({ ...intent, phase: 'done' }); transitionReuseSourceUrl(intent.taskId, 'consumed');
+        setReuseMessage(body.message as string || body.error || (outcome.status === 'closed' ? '已结束本次复用，当前输入保留。' : '本次复用未应用，当前输入保留。')); return;
+      }
+      setReuseOutcomeUnknown(false); setReuseServerApplied(true); activeReuseRecord.current = { ...record, serverStatus: 'applied' };
+      if (!body.draft) { finishTaskReuseClientRecord(record, 'applied'); updateReuseIntent({ ...intent, phase: 'done' }); setReuseServerApplied(false); setReuseMessage(outcome.message || '服务器已完成；部分内容当前不可读，当前草稿未替换。'); return; }
+      const currentContext = readReuseContext();
+      if (record.context.projectId !== currentContext.projectId || record.context.videoCardId !== currentContext.videoCardId || record.context.videoBranchId !== currentContext.videoBranchId
+        || record.context.editEpoch !== currentContext.editEpoch) {
+        finishTaskReuseClientRecord(record, 'applied'); updateReuseIntent({ ...intent, phase: 'done' }); setReuseServerApplied(false);
+        setReuseMessage('服务器已完成复用，当前草稿已有新编辑，未继续覆盖；复用前输入已保留。'); return;
+      }
+      await confirmedReuseHandler.current?.(record, body, response.status);
+    } catch (cause) { if (current()) setReuseMessage(cause instanceof Error ? cause.message : '原结果暂时无法确认，请保留原操作号'); }
+    finally { if (current()) setReuseRefreshInProgress(false); }
+  }, [workspaceBridgeKey, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
 
   const requestWorkspaceReadAfterBusyError = useCallback(async () => {
     const entry = workspaceRefreshRef.current;
@@ -1231,7 +1274,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!settings || cancelled) return;
       setGenerationDefaults(settings);
       if (settings.projectId) {
-        window.localStorage.setItem(PROJECT_STORAGE_KEY, settings.projectId);
+        window.localStorage.setItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`, settings.projectId);
       }
       writeLocalGenerationDefaults(currentUser.id, settings, preferenceSurface);
     };
@@ -1397,7 +1440,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setProjects(list);
 
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
-      const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+      const rememberedProjectId = window.localStorage.getItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`);
       const preferredId = options.preferredProjectId
         || (userChangedProjectRef.current ? '' : requestedProjectId || rememberedProjectId || '');
 
@@ -1412,8 +1455,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
         if (currentProject) return currentProject.id;
 
-        const personal = list.find((project) => project.type === 'personal');
-        return (personal || list[0])?.id || '';
+        if (preferredId) return preferredId;
+        const personal = list.find((project) => project.type === 'personal' && project.owner_user_id === accountId);
+        return personal?.id || '';
       });
     } catch (error) {
       if (isCurrentRequest()) {
@@ -1433,7 +1477,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   useEffect(() => {
     if (!selectedProjectId) return;
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
+    window.localStorage.setItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`, selectedProjectId);
   }, [selectedProjectId]);
 
   const loadVideoCards = useCallback(async (
@@ -1494,10 +1538,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         const preferred = preferredId ? list.find((card) => card.id === preferredId
           && (!options.strictPreferred || ['draft', 'active', 'reviewing'].includes(card.status))) : null;
         if (preferred) return preferred.id;
+        if (preferredId) return preferredId;
         if (options.strictPreferred) return '';
         if (currentCard) return currentCard.id;
-        const active = list.find((card) => card.status !== 'sealed' && card.status !== 'archived');
-        return (active || list[0])?.id || '';
+        return '';
       });
     } catch (err) {
       if (isCurrentRequest()) {
@@ -1770,9 +1814,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   const loadReusableTask = useCallback(async (
     taskId: string,
-    options: { clearUrl?: boolean; scrollToComposer?: boolean; resume?: boolean } = {},
+    options: { clearUrl?: boolean; scrollToComposer?: boolean; resume?: boolean; confirmed?: { record: TaskReuseClientRecord; body: Record<string, unknown>; status: number } } = {},
   ) => {
-    if (reuseInFlightRef.current || reuseIntentRef.current?.phase === 'unknown' || reuseIntentRef.current?.phase === 'applying') return;
+    if (reuseInFlightRef.current || !options.confirmed && (reuseIntentRef.current?.phase === 'unknown' || reuseIntentRef.current?.phase === 'applying')) return;
     const accountId = currentUser?.id || null;
     if (loadingUser || !accountId) {
       setReuseMessage('登录状态尚未确认，未发送复用请求。');
@@ -1798,6 +1842,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       ...(options.resume && previousIntent?.taskId === taskId ? { ...previousIntent, phase: 'confirming' as const } : {}),
     };
     updateReuseIntent(intent);
+    activeReuseRecord.current = options.confirmed?.record || null;
     parameterOnlyReuseRef.current = null;
     setReuseParameterOnlyAvailable(false);
     if (!capturedContext.tabId) {
@@ -1809,7 +1854,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     try {
       const unresolvedSource = new URL(window.location.href).searchParams.get('reuse_unconfirmed_task_id')
         || (sessionStorage.getItem(receiptKey) ? taskId : unresolvedTaskReuseSource(accountId, capturedContext.tabId));
-      if (unresolvedSource) {
+      if (unresolvedSource && !options.confirmed) {
         transitionReuseSourceUrl(taskId, 'consumed');
         transitionReuseSourceUrl(unresolvedSource, 'unconfirmed');
         intent = { ...intent, taskId: unresolvedSource, fromUrl: true };
@@ -1861,6 +1906,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     };
     const markOutcomeUnknown = (message: string) => {
       if (!isCurrentAccountRequest()) return;
+      if (activeReuseRecord.current?.serverStatus === 'applied') { retainIntent('failed', message); setReuseServerApplied(true); setReuseOutcomeUnknown(false); return; }
       retainIntent('unknown', message);
       setReuseOutcomeUnknown(true);
       setReuseRefreshRequested(false);
@@ -1885,7 +1931,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         return;
       }
       const recovery = inputRecoveryRef.current;
-      if (recovery?.key !== capturedContext.workspaceBridgeKey || !recovery.capture()) {
+      const backup = options.confirmed?.record.backup || (recovery?.key === capturedContext.workspaceBridgeKey ? recovery.capture() : false);
+      if (!backup) {
         retainIntent('failed', '当前输入尚未能保留，未发送复用请求；请处理参考区状态后重试。');
         return;
       }
@@ -1900,7 +1947,16 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setReuseMessage('正在读取旧任务并恢复参考素材...');
       let res: Response;
       try {
-        try { sessionStorage.setItem(receiptKey, 'unconfirmed'); }
+        const read = await workspaceRefreshRef.current?.refresh();
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (!read?.applied || !read.workspace || !contextStillMatches()) { retainIntent('failed', read?.error || '工作区尚未确认，未发送复用。'); return; }
+        const operation = options.confirmed?.record.operation || await buildTaskReuseOperationRequest(accountId, taskId, { surface: isIpSurface ? 'ip' : 'normal', tabId: capturedTabId, workspaceId: read.workspace.id,
+          expectedWorkspaceAssets: read.workspace.assets.map(({ id, assetId, referenceImageId, role, sortOrder }) => ({ id, assetId, referenceImageId: referenceImageId || null, role: role || null, sortOrder })) });
+        const retained: TaskReuseClientRecord = options.confirmed?.record || { version: 2, accountId, sourceTaskId: taskId, operation, context: capturedContext, backup: { ...backup,
+          workspace: { ...backup.workspace, workspaceId: read.workspace.id, items: read.workspace.assets.map(({ assetId, referenceImageId, role, sortOrder }) => ({ assetId, referenceImageId, role, sortOrder })) },
+          fields: { ...backup.fields, projectId: capturedContext.projectId, videoCardId: capturedContext.videoCardId, videoBranchId: capturedContext.videoBranchId } } };
+        activeReuseRecord.current = retained;
+        try { if (!options.confirmed) saveTaskReuseClientRecord(retained); }
         catch {
           retainIntent('failed', '当前浏览器无法保留复用记录，未发送请求；请检查浏览器存储设置后重试。');
           return;
@@ -1915,13 +1971,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         intent = { ...intent, fromUrl: true };
         updateReuseIntent({ ...intent, phase: 'sending' });
         postMayHaveWritten = true;
-        res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/reuse`, {
+        res = options.confirmed ? new Response(JSON.stringify(options.confirmed.body), { status: options.confirmed.status, headers: { 'Content-Type': 'application/json' } }) : await fetch(`/api/tasks/${encodeURIComponent(taskId)}/reuse`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'x-tab-id': capturedTabId,
           },
-          body: JSON.stringify({ surface: isIpSurface ? 'ip' : 'normal' }),
+          body: JSON.stringify(operation),
         });
       } catch {
         markOutcomeUnknown('复用请求未收到服务器确认。当前参数未替换，但参考区可能已变化；请重新读取并核对，不会自动重试。');
@@ -1965,6 +2021,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         skipped_references?: number;
         restored_references?: number;
         inputWarnings?: string[];
+        reuse?: TaskReuseOperationStatus; workspace_id?: string; workspace_assets?: unknown[];
         error?: string;
         message?: string;
         code?: string;
@@ -1981,6 +2038,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         // This protected response never writes the ordinary workspace. Hand it to
         // the owning 3D module only after the explicit reuse action is confirmed.
         postMayHaveWritten = false;
+        if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'read-only');
         if (!contextStillMatches()) {
           try { sessionStorage.removeItem(receiptKey); } catch { /* A known read-only response needs no replay fence. */ }
           transitionReuseSourceUrl(taskId, 'retryable');
@@ -2003,13 +2061,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         return;
       }
       const parameterOnly = res.status === 409 && data.code === 'REUSE_ASSETS_UNAVAILABLE';
-      if (!res.ok && res.status < 500) {
+      if (!res.ok && res.status < 500 && (data.reuse?.status === 'rejected' || data.reuse?.status === 'closed' || parameterOnly)) {
+        if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, data.reuse?.status === 'closed' ? 'closed' : 'rejected');
         postMayHaveWritten = false;
         try { sessionStorage.removeItem(receiptKey); } catch { /* A retained fence fails safe on refresh. */ }
         if (res.status !== 403 && res.status !== 404) transitionReuseSourceUrl(taskId, 'retryable');
       }
       if (!res.ok && !parameterOnly) {
-        if (res.status >= 500) {
+        if (res.status >= 500 || !data.reuse || !['rejected', 'closed'].includes(data.reuse.status)) {
           markOutcomeUnknown('服务器处理结果未确认。当前参数未替换，但参考区可能已变化；请重新读取并核对，不会自动重试。');
           return;
         }
@@ -2017,6 +2076,19 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         retainIntent(unrecoverable ? 'done' : 'failed', data.message || data.error || '复用请求未完成；旧任务来源已保留，可安全重试。');
         if (unrecoverable) consumeQuery('unrecoverable');
         return;
+      }
+      const retained = activeReuseRecord.current;
+      if (!parameterOnly && res.ok) {
+        const outcome = data.reuse;
+        if (!retained || !outcome || outcome.status !== 'applied' || outcome.requestId !== retained.operation.requestId || outcome.requestHash !== retained.operation.requestHash
+          || outcome.nonce !== retained.operation.nonce || data.workspace_id !== retained.operation.workspaceId) { markOutcomeUnknown('服务器回执身份未能核对，请查询原操作；不会重复复用。'); return; }
+        activeReuseRecord.current = { ...retained, serverStatus: 'applied' }; setReuseServerApplied(true); setReuseOutcomeUnknown(false);
+        const read = await workspaceRefreshRef.current?.refresh();
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        if (!isCurrentAccountRequest()) return;
+        if (!read?.applied || read.workspace?.id !== retained.operation.workspaceId || !sameTaskReuseResultItems(data.workspace_assets, read.workspace.assets)) {
+          retainIntent('failed', read?.error || '服务器已完成复用，当前参考区已变化或暂未读全；当前参数未替换，可查询同一结果。'); return;
+        }
       }
       const draft = data.draft;
       if (draft?.task_id !== taskId || typeof draft.prompt !== 'string'
@@ -2040,6 +2112,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         return;
       }
       if (!contextStillMatches()) {
+        if (activeReuseRecord.current?.serverStatus === 'applied') { finishTaskReuseClientRecord(activeReuseRecord.current, 'applied'); setReuseServerApplied(false); retainIntent('done', '服务器已完成复用，当前草稿已有新编辑，未继续覆盖。'); return; }
         if (parameterOnly) retainIntent('failed', '旧任务素材无法恢复；读取期间当前输入或保存位置已变化，参数未替换，来源已保留。');
         else markOutcomeUnknown('请求期间账号、工作台标签或项目选择发生变化。复用结果未应用；请重新读取当前参考区并核对。');
         return;
@@ -2127,7 +2200,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       applyResponse();
     } catch (err) {
       if (isCurrentAccountRequest()) {
-        if (postMayHaveWritten) markOutcomeUnknown('复用请求已发送，但当前输入未完成恢复；请重新读取并核对参考区，不会自动重试。');
+        if (postMayHaveWritten && activeReuseRecord.current?.serverStatus !== 'applied') markOutcomeUnknown('复用请求已发送，但当前输入未完成恢复；请查询原复用，不会自动重试。');
+        else if (activeReuseRecord.current?.serverStatus === 'applied') { setReuseServerApplied(true); retainIntent('failed', '服务器已完成复用，页面恢复暂未完成；可重新读取同一结果。'); }
         else retainIntent('failed', err instanceof Error ? err.message : '复用任务未完成；旧任务来源已保留，可安全重试。');
       }
     } finally {
@@ -2139,6 +2213,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
     }
   }, [currentUser, isIpSurface, loadingUser, projects, projectCreate.busy, projectCreate.pending, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
+
+  confirmedReuseHandler.current = (record, body, status) => loadReusableTask(record.sourceTaskId, { clearUrl: true, confirmed: { record, body, status } });
 
   const cancelReuseIntent = useCallback(() => {
     const intent = reuseIntentRef.current;
@@ -2152,12 +2228,18 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setReuseMessage('已结束本次复用，当前输入与参考素材保留。');
   }, [updateReuseIntent, transitionReuseSourceUrl]);
 
-  const completeReuseDraftApplication = useCallback((taskId: string, reuseKey: number) => {
+  const completeReuseDraftApplication = useCallback((taskId: string, reuseKey: number, outcome: 'applied' | 'read_failed' | 'context_changed' | 'unsupported', message?: string) => {
     const pending = pendingReuseApplicationRef.current;
     if (!pending || pending.taskId !== taskId || pending.reuseKey !== reuseKey) return;
+    if (outcome !== 'applied') {
+      pendingReuseApplicationRef.current = null; setReuseOutcomeUnknown(false); setReuseServerApplied(outcome === 'read_failed');
+      const intent = reuseIntentRef.current; if (intent) updateReuseIntent({ ...intent, phase: 'failed' });
+      if (outcome !== 'read_failed' && activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied');
+      setReuseMessage(message || '服务器已完成，页面未继续覆盖当前输入。'); return;
+    }
     pending.formApplied = true;
     setReuseApplicationTick((value) => value + 1);
-  }, []);
+  }, [updateReuseIntent]);
 
   useEffect(() => {
     const pending = pendingReuseApplicationRef.current;
@@ -2167,8 +2249,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     if (current.accountId !== pending.accountId || current.workspaceBridgeKey !== pending.bridgeKey
       || current.tabId !== pending.tabId || current.editEpoch !== pending.editEpoch) {
       pendingReuseApplicationRef.current = null;
-      updateReuseIntent({ ...activeIntent, phase: 'unknown' });
-      setReuseOutcomeUnknown(true);
+      updateReuseIntent({ ...activeIntent, phase: 'failed' });
+      setReuseOutcomeUnknown(false); setReuseServerApplied(false);
+      if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied');
       setReuseRefreshRequested(false);
       setReuseMessage('恢复期间账号或工作现场已变化，结果未继续写入；请重新读取并核对当前参考区。');
       return;
@@ -2176,24 +2259,21 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     if (loadingProjects || loadingVideoCards || loadingVideoBranches
       || (selectedProjectId && videoCardsLoadedProjectId !== selectedProjectId)
       || (selectedVideoCardId && videoBranchesLoadedCardId !== selectedVideoCardId)) return;
-    if (selectedProjectId !== pending.projectId) return;
+    if (selectedProjectId !== pending.projectId) { pendingReuseApplicationRef.current = null; updateReuseIntent({ ...activeIntent, phase: 'failed' }); setReuseOutcomeUnknown(false); setReuseServerApplied(false); if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied'); setReuseMessage('服务器已完成，保存位置已变化，当前草稿未继续替换。'); return; }
     let message = pending.message;
     if (pending.videoCardId && !videoCards.some((card) => card.id === pending.videoCardId && card.project_id === pending.projectId
       && card.status !== 'sealed' && card.status !== 'archived')) {
-      setSelectedVideoCardId('');
-      setSelectedVideoBranchId('');
-      message += '原视频卡当前不可用，未另选视频卡，请生成前重新选择。';
+      message += '原视频卡当前不可用，已保留原来路，请生成前处理该归属。';
     } else if (pending.videoBranchId && !videoBranches.some((branch) => branch.id === pending.videoBranchId)) {
-      setSelectedVideoBranchId('');
-      message += '原方向当前不可用，未另选方向，请生成前重新确认。';
+      message += '原方向当前不可用，已保留原来路，请生成前重新确认。';
     }
     const intent = reuseIntentRef.current;
-    try { sessionStorage.removeItem(taskReuseReceiptKey(pending.accountId, pending.tabId, pending.taskId)); }
+    try { if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied'); else sessionStorage.removeItem(taskReuseReceiptKey(pending.accountId, pending.tabId, pending.taskId)); }
     catch { /* The applied form still completes, but a retained fence fails safe later. */ }
     if (shouldConsumeTaskReuseQuery('applied')) transitionReuseSourceUrl(pending.taskId, 'consumed');
     pendingReuseApplicationRef.current = null;
     if (intent) updateReuseIntent({ ...intent, phase: 'done' });
-    setReuseMessage(message);
+    setReuseOutcomeUnknown(false); setReuseServerApplied(false); setReuseMessage(message);
   }, [reuseApplicationTick, reuseDraft, loadingProjects, loadingVideoCards, loadingVideoBranches,
     selectedProjectId, selectedVideoCardId, videoCardsLoadedProjectId, videoBranchesLoadedCardId,
     videoCards, videoBranches, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
@@ -2685,11 +2765,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setSubmitting(false);
       return;
     }
-    if (!selectedVideoCard && !isExternalIpUser) {
-      setError('请先选择项目和视频卡');
-      setSubmitting(false);
-      return;
-    }
     const selectedH3Model = !isIpSurface && params.model === H3_INLINE_MODEL_ID;
     const requestedProvider: GenerationProvider = selectedH3Model ? 'h3' : 'seedance';
     const requestedModel = selectedH3Model
@@ -2719,40 +2794,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     }
 
     try {
-      if (!selectedVideoCard && isExternalIpUser) {
-        const cardResponse = await fetch(`/api/projects/${selectedProjectId}/video-cards`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: 'IP生成默认视频卡',
-            objective: '外部用户 IP 生成默认归档',
-            platform: 'ip',
-            ratio: params.ratio,
-            duration: params.duration,
-            target_resolution: params.resolution,
-            confirm_duplicate: true,
-          }),
-        });
-        const cardData = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(cardResponse);
-        if (!cardResponse.ok || !cardData.video_card) {
-          throw new Error(cardData.message || cardData.error || '默认视频卡创建失败，请刷新后重试');
-        }
-        selectedVideoCard = cardData.video_card;
-        setVideoCards((current) => (
-          current.some((card) => card.id === cardData.video_card?.id)
-            ? current
-            : [cardData.video_card as VideoCardOption, ...current]
-        ));
-        userChangedVideoCardRef.current = true;
-        setSelectedVideoCardId(cardData.video_card.id);
-      }
-
-      if (!selectedVideoCard) {
-        throw new Error('请先选择项目和视频卡');
-      }
-      if (selectedVideoCard.status === 'sealed' || selectedVideoCard.status === 'archived') {
-        throw new Error('当前视频卡已封板或归档，不能继续生成');
-      }
+      if (selectedVideoCardId && !selectedVideoCard) throw new Error('原视频卡暂不可用，输入已保留');
+      if (selectedVideoCard && !['draft', 'active', 'reviewing'].includes(selectedVideoCard.status)) throw new Error('原视频卡已锁定，请处理原状态后继续');
       const readyVideoCard = selectedVideoCard;
 
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
@@ -2771,8 +2814,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         watermark: params.watermark,
         resolution_approval_confirmed: params.resolutionApprovalConfirmed,
         project_id: selectedProjectId,
-        video_card_id: readyVideoCard.id,
-        video_branch_id: selectedVideoBranchId || undefined,
+        video_card_id: readyVideoCard?.id || null,
+        video_branch_id: selectedVideoBranchId || null,
+        creation_contract_version: 2, entry: isIpSurface ? 'ip' : params.templateStudioRunId ? 'template' : 'ordinary',
+        continuation: new URLSearchParams(window.location.search).get('continuation_task_id')
+          ? { mode: 'continue', parent_task_id: new URLSearchParams(window.location.search).get('continuation_task_id') } : { mode: 'new' }, baseline_task_id: creationBaselineId || null,
         reference_image_ids: params.referenceImageIds || [],
         reference_video_urls: params.referenceVideoUrls || [],
         reference_audio_urls: params.referenceAudioUrls || [],
@@ -2782,7 +2828,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         agent_prompt_snapshot: params.agentPromptSnapshot || null,
         final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
         prompt_user_edited: params.promptUserEdited === true,
-        provider: isIpSurface ? undefined : requestedProvider,
+        provider: isIpSurface ? 'volcengine_ip' : requestedProvider,
         model: requestedModel || undefined,
         draft: !isIpSurface && requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true,
         lora_id: selectedH3Model ? requestedH3LoraId : undefined,
@@ -2794,9 +2840,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       };
       const requestFingerprint = stableGenerationPayloadJson(videoPricingBusinessInput(requestBody));
       if (activeAccountIdRef.current !== currentUser?.id || selectedProjectIdRef.current !== selectedProjectId
-        || (selectedVideoCardId ? selectedVideoCardIdRef.current !== readyVideoCard.id
-          : selectedVideoCardIdRef.current && selectedVideoCardIdRef.current !== readyVideoCard.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
-      const idempotencyKey = window.crypto.randomUUID();
+        || (selectedVideoCardId ? selectedVideoCardIdRef.current !== readyVideoCard?.id
+          : selectedVideoCardIdRef.current && selectedVideoCardIdRef.current !== readyVideoCard?.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+      if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
+      const previous = creation.intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(creation.intent.state) ? creation.intent : null;
+      let idempotencyKey = previous?.request_id || window.crypto.randomUUID();
+      creationDraftBodyRef.current = requestBody;
+      const prepared = await creation.prepare(requestBody, idempotencyKey, previous);
+      idempotencyKey = prepared.request_id;
+      if (!prepared.availability?.canSubmit) { setError('请完成下方本次创作条件，输入已保留'); return; }
+      const acceptedBody = { ...requestBody, idempotency_key: idempotencyKey, intent_id: prepared.id, intent_revision: prepared.revision,
+        resolution_approval_id: prepared.approval_id || null, ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
       sessionStorage.setItem(requestStorageKey, JSON.stringify({ key: idempotencyKey, fingerprint: requestFingerprint, fingerprintVersion: 2 }));
 
       let res: Response;
@@ -2808,7 +2862,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             ...(currentUser?.id ? { 'x-app-session-user': currentUser.id } : {}),
             'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
           },
-          body: JSON.stringify({ ...requestBody, idempotency_key: idempotencyKey }),
+          body: JSON.stringify(acceptedBody),
         });
       } catch {
         try {
@@ -2825,6 +2879,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
 
       const data = await readJsonResponse<CreateTaskResponse>(res);
+      if (res.ok && data.id) creation.setIntent({ ...prepared, state: 'accepted', accepted_task_id: data.id });
       if (activeAccountIdRef.current !== currentUser?.id) return;
 
       if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
@@ -3097,7 +3152,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const videoCardSummaryHelp = selectedVideoCard
     ? selectedVideoCard.objective || '已绑定本次生成归属'
     : selectedProjectId && videoCards.length === 0 && !loadingVideoCards
-      ? '当前项目还没有视频卡，展开后创建'
+      ? '直接保存到项目，视频卡可选'
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
 
@@ -3111,9 +3166,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       {/* ===== 顶部导航栏 ===== */}
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
 
-      {reuseOutcomeUnknown && (
+      {(reuseOutcomeUnknown || reuseServerApplied) && (
         <section className="composer-prefill-notice" role="alert" aria-live="polite">
-          <p>旧任务复用结果尚未完全确认，参考区可能已变化；只核对原结果，不会再次发送复用请求。</p>
+          <p>{reuseServerApplied ? '服务器已完成复用，页面恢复尚未完成；可重新读取同一结果。' : '旧任务复用结果尚未确认；查询原结果后再继续，输入和替换前备份均保留。'}</p>
           <p>
             {reuseRefreshInProgress
               ? '正在重新读取参考区...'
@@ -3129,8 +3184,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             disabled={reuseRefreshInProgress || workspaceRefreshReadyKey !== workspaceBridgeKey || !workspaceRefreshRef.current || workspaceRefreshRef.current.key !== workspaceBridgeKey}
             onClick={() => void requestWorkspaceReadAfterUnknownReuse()}
           >
-            {reuseRefreshInProgress ? '正在读取...' : '重新读取参考区'}
+            {reuseRefreshInProgress ? '正在查询...' : '查询原复用结果'}
           </button>
+          {reuseCanClose && <button type="button" className="btn btn-secondary" disabled={reuseRefreshInProgress} onClick={() => void requestWorkspaceReadAfterUnknownReuse(true)}>结束本次复用</button>}
           {reuseIntent && <Link href={taskDetailHref(reuseIntent.taskId, projectReturnTo)}>查看原任务</Link>}
         </section>
       )}
@@ -3527,9 +3583,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 	            )}
 
 	            {selectedProjectId && videoCards.length === 0 && !loadingVideoCards && (
-              <div className="composer-video-card-empty">当前项目还没有视频卡。创建后才能提交生成。</div>
+              <div className="composer-video-card-empty">可直接保存到当前项目，也可以选用已有视频卡。</div>
             )}
 
+            {!selectedVideoCardId && <span className="composer-project-help">新作直接保存到当前项目</span>}
+            {selectedVideoCardId && <button type="button" className="btn btn-secondary" disabled={reuseUiLocked || submitting} onClick={() => { userChangedVideoCardRef.current = true; setSelectedVideoCardId(''); setSelectedVideoBranchId(''); }}>新作直接保存到项目</button>}
             <form className="composer-video-card-create" onSubmit={handleCreateVideoCard}>
               <input
                 className="composer-project-input"
@@ -3655,7 +3713,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           selectedVideoCardId={selectedVideoCardId}
           pricingProjectId={selectedProjectId}
           canManageTemplates={currentUser?.role === 'admin'}
-          require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
+          require1080pApproval={false}
+          creationContextKey={creation.contextKey}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
           onCollectionNew={handleCollectionNew}
@@ -3678,7 +3737,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onReset={handleReset}
           resultReturnTo={generationReturnTo}
           studioReturnTo={studioReturnTo}
-          submitDisabledReason={studioRunId && (studioHandoffLoading || !studioHandoff)
+          submitDisabledReason={creation.loading || creation.error ? creation.error || '正在确认保存位置' : studioRunId && (studioHandoffLoading || !studioHandoff)
             ? studioHandoffLoading ? '模板运行记录加载中，请稍候' : studioHandoffError || '模板运行记录尚未通过授权校验'
             : surfaceConfig.submitDisabledReason}
           providerLabel={activeProviderLabel}
@@ -3701,6 +3760,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             message: seedanceDraftCapability.message,
           }}
         />}
+
+        <CreationAvailability controller={creation} onBaselineChange={(id) => {
+          setCreationBaselineId(id);
+          if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
+        }} />
 
         {/* 最近任务 */}
         {showRecentTaskSurface && (
@@ -3828,21 +3892,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         ><RefreshCw size={14} aria-hidden="true" /> {retryingDeliveryId === task.id ? '正在提交' : '重试保存'}</button>
                       )}
                       {task.is_draft ? (
-                        <button
-                          type="button"
-                          className="composer-task-card-reuse"
-                          disabled={task.local_status !== 'succeeded' || !seedanceDraftCapability.upgrade_enabled || draftUpgradeTaskId !== null}
-                          onClick={() => void upgradeDraftTask(task)}
-                          title={seedanceDraftCapability.upgrade_enabled ? '沿用样片内容生成 1080p' : seedanceDraftCapability.message}
-                        >
-                          {draftUpgradeTaskId === task.id
-                            ? '提交中...'
-                            : task.local_status !== 'succeeded'
-                              ? '等待样片完成'
-                              : seedanceDraftCapability.upgrade_enabled
-                                ? '沿用样片内容生成 1080p'
-                                : '1080p 升级待确认'}
-                        </button>
+                        <DraftUpgradeAction task={task} ownerId={currentUser?.id} enabled={seedanceDraftCapability.upgrade_enabled} onAccepted={id => { setActivePollingTaskIds(current => [id, ...current.filter(item => item !== id)].slice(0, MAX_ACTIVE_POLLING_TASKS)); void loadRecentTasksPage(1, 'merge-head'); }} />
                       ) : enhanceTask ? (
                         <Link
                           href={taskDetailHref(task.id, generationReturnTo)}

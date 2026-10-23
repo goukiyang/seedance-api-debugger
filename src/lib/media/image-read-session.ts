@@ -2,9 +2,9 @@
 
 import { invalidateHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner } from './hd-source-session';
 
-export type ImageReadProgress = { phase: 'reading' | 'decoding' | 'unavailable' | 'unsupported'; loadedBytes: number; totalBytes?: number; percent?: number; message?: string };
-export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number; width?: number; height?: number };
-export type ImageReadBorrowProof = { sourceVersion: string; bytes: number; mime: string; variant: 'hd'; policy: 'hd-f-v1' };
+export type ImageReadProgress = { phase: 'reading' | 'confirming' | 'decoding' | 'unavailable' | 'unsupported'; loadedBytes: number; totalBytes?: number; percent?: number; message?: string; transferId?: string; bodyComplete?: boolean };
+export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number; width?: number; height?: number; authorizationVersion?: string; representationVersion?: string };
+export type ImageReadBorrowProof = { sourceVersion: string; representationVersion?: string; bytes: number; mime: string; variant: 'hd'; policy: 'hd-f-v1' };
 export type ImageReadBorrow = { blob: Blob; bytes: number; mime: string; sourceVersion: string; isValid: () => boolean; release: () => void };
 type Listener = (value: ImageReadResult) => void;
 type Consumer = { listener: Listener; approval: number; expectedVersion: string };
@@ -16,6 +16,7 @@ type Entry = {
   reusableAllowed: boolean; reusable: boolean; stale: boolean; decoded: boolean; complete: boolean; image?: HTMLImageElement; borrow?: BodyBorrow;
   checking?: Promise<void>; transfer?: Promise<void>; transferController?: AbortController; decoding?: Promise<void>;
   transferExpectedVersion?: string;
+  representationVersion?: string; transferId?: string;
 };
 type Transfer = { entry: Entry; controller: AbortController; run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void };
 const entries = new Map<string, Entry>();
@@ -24,7 +25,7 @@ const MAX_ENTRIES = 32, MAX_BYTES = 64 * 1024 * 1024, IDLE_TTL = 10 * 60_000;
 const REVALIDATE_AFTER = 60_000, MAX_DECODED_IMAGES = 3, MAX_DECODED_BYTES = 96 * 1024 * 1024;
 let owner = '', epoch = 0, foregroundPreparations = 0, detachedBorrowBytes = 0;
 const reading = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 'reading', loadedBytes: 0 } });
-const decoding = (entry: Entry): ImageReadResult => ({ imageSrc: null, progress: { phase: 'decoding', loadedBytes: entry.bytes }, bytes: entry.bytes });
+const decoding = (entry: Entry): ImageReadResult => ({ imageSrc: null, progress: { phase: 'decoding', loadedBytes: entry.bytes, bodyComplete: entry.complete, transferId: entry.transferId }, bytes: entry.bytes });
 const mimeOf = (response: Response) => response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() || '';
 const weakTag = (tag: string) => tag.trim().replace(/^W\//, '');
 const versionsMatch = (expected: string, actual: string) => Boolean(expected && actual && weakTag(expected) === weakTag(actual));
@@ -46,7 +47,7 @@ export function canonicalImageReadSource(source: string) {
 function sourceFamily(source: string) {
   const url = new URL(source, location.href);
   url.hash = '';
-  for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'variant']) url.searchParams.delete(name);
+  for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation', 'variant']) url.searchParams.delete(name);
   url.searchParams.sort();
   return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
 }
@@ -59,6 +60,8 @@ function responseVersion(response: Response) {
   return response.headers.get('X-Image-Source-Version')?.trim() || response.headers.get('etag')?.trim() || '';
 }
 function representationChanged(entry: Entry, response: Response): boolean | null {
+  const representation = response.headers.get('X-Image-Representation-Version')?.trim();
+  if (representation && entry.representationVersion && representation !== entry.representationVersion) return true;
   const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || '';
   const etag = response.headers.get('etag')?.trim() || '';
   if (sourceVersion && entry.sourceVersion) return !versionsMatch(entry.sourceVersion, sourceVersion) || Boolean(etag && entry.etag && !versionsMatch(entry.etag, etag));
@@ -116,6 +119,7 @@ function dropBody(entry: Entry) {
   if (entry.image) entry.image.src = '';
   entry.blob = undefined; entry.url = undefined; entry.image = undefined; entry.etag = undefined; entry.sourceVersion = undefined; entry.actualVersion = undefined;
   entry.headTag = undefined; entry.width = undefined; entry.height = undefined;
+  entry.representationVersion = undefined; entry.transferId = undefined;
   entry.bytes = 0; entry.decoded = false; entry.complete = false; entry.decoding = undefined; entry.reusable = false; entry.stale = false; entry.retryAfter = 0;
   entry.result = reading(); entry.blocked = undefined;
 }
@@ -195,7 +199,8 @@ async function decode(entry: Entry) {
       if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) throw new Error('invalid_dimensions');
       entry.decoded = true; entry.width = width; entry.height = height;
       entry.result = { imageSrc: entry.url, decoded: true, mime: entry.blob.type, bytes: entry.bytes, width, height,
-        progress: { phase: 'decoding', loadedBytes: entry.bytes, percent: 100 } };
+        authorizationVersion: entry.actualVersion, representationVersion: entry.representationVersion,
+        progress: { phase: 'decoding', loadedBytes: entry.bytes, bodyComplete: entry.complete, transferId: entry.transferId } };
       entry.blocked = undefined; touch(entry); pruneDecoded();
       if (entry.decoded && entry.consumers.size) emit(entry);
     } catch {
@@ -224,7 +229,9 @@ async function transfer(entry: Entry, expectedVersion = '') {
       if (!response.ok) { fail(entry, '图片未能读取，请重试', [401, 403, 404].includes(response.status), response.status === 409); return; }
       const mime = mimeOf(response);
       if (!mime.startsWith('image/') || !response.body) throw new Error('当前来源不是可读取的图片');
-      const length = response.headers.get('content-length'), encoded = response.headers.get('content-encoding');
+      if (response.status !== 200 || response.headers.has('content-range')) { void response.body.cancel().catch(() => {}); throw new Error('图片响应不完整，请重试'); }
+      entry.transferId = crypto.randomUUID();
+      const length = response.headers.get('content-length'), encoded = response.headers.get('content-encoding')?.trim().toLowerCase();
       let total = length && /^\d+$/.test(length) && (!encoded || encoded === 'identity') ? Number(length) : undefined;
       if (total !== undefined && (!Number.isSafeInteger(total) || total <= 0)) total = undefined;
       if (total && total > MAX_BYTES) throw new Error('图片过大，请使用原图下载');
@@ -239,9 +246,10 @@ async function transfer(entry: Entry, expectedVersion = '') {
           bytes += chunk.value.byteLength; entry.bytes = bytes;
           chunks.push(chunk.value.slice().buffer as ArrayBuffer);
           if (total && bytes > total) { lengthMatches = false; total = undefined; }
-          if (Date.now() - notified >= 60) {
+          if (Date.now() - notified >= 60 || total && bytes >= total) {
             notified = Date.now();
-            publish(entry, { imageSrc: null, progress: { phase: 'reading', loadedBytes: bytes, ...(total ? { totalBytes: total, percent: Math.min(99, Math.floor(bytes / total * 100)) } : {}) } });
+            publish(entry, { imageSrc: null, progress: { phase: total && bytes >= total ? 'confirming' : 'reading', loadedBytes: bytes, transferId: entry.transferId,
+              ...(total ? { totalBytes: total, ...(bytes < total ? { percent: Math.floor(bytes / total * 100) } : {}) } : {}) } });
           }
         }
         if (!active()) return;
@@ -251,10 +259,11 @@ async function transfer(entry: Entry, expectedVersion = '') {
         const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || undefined;
         const actualVersion = sourceVersion || etag || '';
         entry.blob = blob; entry.etag = etag; entry.sourceVersion = sourceVersion; entry.actualVersion = actualVersion || undefined;
+        entry.representationVersion = response.headers.get('X-Image-Representation-Version')?.trim() || undefined;
         entry.complete = response.status === 200 && !response.headers.has('content-range') && lengthMatches;
-        entry.reusable = entry.reusableAllowed && Boolean(actualVersion); entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false;
+        entry.reusable = entry.complete && entry.reusableAllowed && Boolean(actualVersion); entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false;
         touch(entry); await decode(entry);
-      } finally { await reader.cancel().catch(() => {}); }
+      } finally { void reader.cancel().catch(() => {}); }
     } catch (error) {
       if (!active()) return;
       fail(entry, error instanceof Error && error.message !== 'Failed to fetch' ? error.message : '图片读取失败，请重试');
@@ -428,7 +437,8 @@ export function borrowImageRead(account: string, source: string, version: string
   const valid = () => owner === account && epoch === expected && entries.get(entry.key) === entry && entry.revision === revision
     && !entry.controller.signal.aborted && entry.complete && entry.blob === blob && entry.reusable && !entry.blocked && !entry.stale
     && !entry.result.denied && !entry.result.unconfirmed && !entry.result.refreshSource
-    && entry.sourceVersion === version && entry.actualVersion === version && blob.size === bytes && entry.bytes === bytes && blob.type === mime;
+    && entry.sourceVersion === version && entry.actualVersion === version && blob.size === bytes && entry.bytes === bytes && blob.type === mime
+    && (!proof.representationVersion || entry.representationVersion === proof.representationVersion);
   if (!valid()) return null;
   const reference = entry.borrow || { blob, references: 0, detached: false };
   entry.borrow = reference; reference.references++; touch(entry);

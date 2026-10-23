@@ -1,3 +1,4 @@
+import { settleVideoCreationBatch } from '@/lib/creation/settlement';
 import { createHash, createHmac } from 'node:crypto';
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -211,8 +212,10 @@ export async function sealCanvasVideoPreparedChildren(db: CanvasBatchDb, input: 
     await db.canvasVideoBatchChild.updateMany({ where: { batch_id: batch.id, state: 'prepared', task_id: null },
       data: { state: 'cancelled', rejection_receipt: receipt, revision: { increment: 1 } } });
     const allUnstarted = batch.children.every(child => !child.task_id);
-    await db.canvasVideoBatch.update({ where: { id: batch.id }, data: { state: 'stopped', revision: { increment: 1 },
+    const stopped = await db.canvasVideoBatch.updateMany({ where: { id: batch.id, revision: batch.revision }, data: { state: 'stopped', revision: { increment: 1 },
       ...(allUnstarted ? { active_node_key: null } : {}) } });
+    if (stopped.count !== 1) throw new CanvasVideoBatchError('原批次同时变化，未覆盖原受理状态');
+    await settleVideoCreationBatch(db, { batchId: batch.id });
   }
 }
 

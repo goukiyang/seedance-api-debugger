@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_CONTROL_PROTOCOL, HD_RETRY_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
-import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, type HdIntegrity } from './hd-encoder';
+import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
 import { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
 import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity, type HdChildClose, type HdGroupExit } from './hd-image-processor';
 export type { HdControl, HdResourceSample } from './hd-resource-state';
@@ -26,6 +26,7 @@ type HdEncoder = {
 type HdAttempt = {
   attempt: number; startedAt: string; finishedAt?: string; sourceVersion: string;
   encoder?: HdEncoder; status: HdJob['status']; reason?: string; integrity?: HdIntegrity;
+  encoderStrategy?: HdEncoderStrategy; parameters?: HdEncoderParameters;
   executionId?: string; processor?: HdProcessorIdentity; childClose?: HdChildClose; groupExit?: HdGroupExit;
 };
 type HdVerification = {
@@ -59,7 +60,12 @@ export type HdJob = {
   errorKind?: string; lastProgressAt?: string; executionExitedAt?: string;
   processor?: HdProcessorIdentity; diagnostic?: { stage: string; code?: string; message?: string };
   publicationPending?: boolean; // Read-only queue projection, never a new status.
+  encoderStrategy?: HdEncoderStrategy; parameters?: HdEncoderParameters;
 };
+// Server-only facts supplied after the original object permission checks. View
+// tokens identify a page lease, never the user, owner or an execution strategy.
+export type HdRequestContext = { requesterId?: string; viewToken?: string;
+  owner?: { kind: 'asset' | 'reference'; id: string; ownerId: string } };
 export type HdQueueRole = 'viewer' | 'new' | 'historical';
 export type HdJobStage = 'queued' | 'reading' | 'encoding' | 'validating' | 'publishing';
 export const HD_PRIORITY = Object.freeze({ new: 0, viewer: 1, recent: 2, historical: 3 });
@@ -132,6 +138,11 @@ export async function readHdJob(key: string): Promise<HdJob | null> {
       || (job.executionExitedAt !== undefined && !Number.isFinite(Date.parse(job.executionExitedAt)))
       || (job.processor !== undefined && (!/^[a-f0-9-]{36}$/.test(job.processor.executionId) || !Number.isSafeInteger(job.processor.pid)
         || job.processor.pid <= 1 || job.processor.groupId !== job.processor.pid || typeof job.processor.host !== 'string' || !/^\d+$/.test(job.processor.startTicks)))) throw new Error('invalid_hd_manifest');
+    hdEncoderStrategy(job.encoderStrategy);
+    for (const value of [job, ...(job.attemptHistory || [])]) {
+      if (value.encoderStrategy !== undefined) hdEncoderStrategy(value.encoderStrategy);
+      if (value.parameters && JSON.stringify(value.parameters) !== JSON.stringify(hdEncoderParameters(value.parameters.format, value.encoderStrategy || job.encoderStrategy))) throw new Error('invalid_hd_encoder_parameters');
+    }
     const executions = [...(job.attemptHistory || []), ...(job.verificationHistory || [])].map(value => value.executionId).filter(Boolean);
     if (new Set(executions).size !== executions.length) throw new Error('invalid_hd_manifest');
     return job;
@@ -140,7 +151,7 @@ export async function readHdJob(key: string): Promise<HdJob | null> {
 }
 // Short manifest lease, shared by web, inventory and the dedicated worker.
 export async function withHdLease<T>(key: string, action: () => Promise<T>): Promise<T | null> {
-  if (!/^(?:[a-f0-9]{64}|control|discovery)$/.test(key)) throw new Error('invalid_hd_lease');
+  if (!/^(?:[a-f0-9]{64}|control|discovery|scheduler)$/.test(key)) throw new Error('invalid_hd_lease');
   const lock = path.join(hdDirectory(), `${key}.lock`);
   if (process.env.NODE_ENV === 'production') await assertHdStorageRoot();
   await fs.mkdir(hdDirectory(), { recursive: true, mode: 0o700 });
@@ -183,7 +194,8 @@ async function withControlLease<T>(action: () => Promise<T>): Promise<T | null> 
   }
   return null;
 }
-export async function hdRequestIdentity(source: string, preserveText?: boolean) {
+export async function hdRequestIdentity(source: string, preserveText?: boolean, strategy: HdEncoderStrategy = 'hd-legacy-e6-v1') {
+  const encoderStrategy = hdEncoderStrategy(strategy);
   const current = await hdSource(source);
   if (!current) return null; // Unknown remote versions never become permanent derivative keys.
   if (preserveText === undefined) {
@@ -192,16 +204,26 @@ export async function hdRequestIdentity(source: string, preserveText?: boolean) 
     preserveText = assets.some(asset => { try { return JSON.parse(asset.metadata_json || '{}').preserveText === true; } catch { return false; } });
   }
   const key = createHash('sha256').update(JSON.stringify({ file: current.file, version: current.version,
-    policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: 95, chroma: '4:4:4', effort: 6, orientation: 'auto', color: '8bit-srgb',
-    library: sharp.versions, preserveText })).digest('hex');
-  return { current, key, preserveText: Boolean(preserveText) };
+    policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: 95, chroma: '4:4:4', effort: encoderStrategy === 'hd-avif-e4-v1' ? 4 : 6, orientation: 'auto', color: '8bit-srgb',
+    library: sharp.versions, preserveText, ...(encoderStrategy === 'hd-avif-e4-v1' ? { encoderStrategy } : {}) })).digest('hex');
+  return { current, key, preserveText: Boolean(preserveText), encoderStrategy };
 }
-
+async function registeredHd(source: string, preserveText?: boolean) {
+  const legacy = await hdRequestIdentity(source, preserveText);
+  if (!legacy) return null;
+  const candidate = await hdRequestIdentity(source, legacy.preserveText, 'hd-avif-e4-v1');
+  const identities = [legacy, candidate!];
+  const records = await Promise.all(identities.map(async identity => ({ identity, job: await readHdJob(identity.key) })));
+  for (const row of records) if (row.job && (row.job.version !== row.identity.current.version
+    || row.job.preserveText !== row.identity.preserveText || hdEncoderStrategy(row.job.encoderStrategy) !== row.identity.encoderStrategy)) throw new Error('invalid_hd_manifest');
+  return records.find(row => row.job?.status === 'ready') || records.find(row => row.job && ['queued', 'running'].includes(row.job.status))
+    || records.find(row => row.job) || { identity: defaultHdEncoderStrategy() === 'hd-avif-e4-v1' ? candidate! : legacy, job: null };
+}
 export async function lookupHd(source: string) {
-  const identity = await hdRequestIdentity(source);
-  if (!identity) return null;
+  const registered = await registeredHd(source);
+  if (!registered) return null;
+  const { identity, job } = registered;
   const { current, key, preserveText } = identity;
-  const job = await readHdJob(key);
   if (!job) return null;
   if (job.version !== current.version || job.preserveText !== preserveText) throw new Error('invalid_hd_manifest');
   if (job.status !== 'ready') return job;
@@ -219,14 +241,24 @@ export async function lookupHd(source: string) {
   }
   return valid ? job : { ...job, status: 'failed' as const, reason: 'published_integrity' };
 }
-
-export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string) {
+export async function hdRepresentationVersion(source: string, job: HdJob) {
+  if (job.status !== 'ready' || !job.bytes || !job.format) return undefined;
+  const file = job.format === 'original' ? (await hdSource(source))?.file : path.join(hdDirectory(), job.file || '');
+  if (!file) throw new Error('invalid_hd_file');
+  const stat = await fs.stat(file);
+  if (!stat.isFile() || stat.size !== job.bytes) throw new Error('invalid_hd_file');
+  return 'hd-representation-v1:' + createHash('sha256').update(JSON.stringify({ version: job.version,
+    strategy: hdEncoderStrategy(job.encoderStrategy), format: job.format, bytes: job.bytes,
+    identity: [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs] })).digest('hex');
+}
+export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string, context?: HdRequestContext) {
   if (!Number.isSafeInteger(priority) || priority < 0 || priority > 3) throw new Error('invalid_hd_priority');
-  const identity = await hdRequestIdentity(source, preserveText);
-  if (!identity) return null;
+  const registered = await registeredHd(source, preserveText);
+  if (!registered) return null;
+  const { identity } = registered;
   const { current, key } = identity;
   preserveText = identity.preserveText;
-  let existing = await readHdJob(key);
+  let existing = registered.job;
   if (existing?.status === 'ready' && existing.format !== 'original') {
     const valid = existing.file && /^[a-f0-9]{64}\.(avif|webp)$/.test(existing.file)
       && await fs.stat(path.join(hdDirectory(), existing.file)).then(stat => stat.isFile() && stat.size === existing!.bytes).catch(() => false);
@@ -240,12 +272,16 @@ export async function requestHd(source: string, priority = 1, preserveText?: boo
     }
   }
   const requestedRole = hdQueueRole({ priority });
-  if (existing && (existing.status === 'ready' || roleRank[hdQueueRole(existing)] <= roleRank[requestedRole])) return existing;
+  if (existing) {
+    await (await import('./hd-scheduler')).registerHdScheduling(existing, context);
+    return existing;
+  }
   const result = await withLease(key, async () => {
     const found = await readHdJob(key);
     const queueRole = found && roleRank[hdQueueRole(found)] <= roleRank[requestedRole] ? hdQueueRole(found) : requestedRole;
     const job: HdJob = found ? { ...found, priority: Math.min(priority, found.priority), protocol: 'hd-job-v2', queueRole } : {
       key, source, version: current.version, policy: HD_POLICY, priority, preserveText: Boolean(preserveText),
+      encoderStrategy: identity.encoderStrategy,
       attempts: 0, status: 'queued', protocol: 'hd-job-v2', queueRole, stage: 'queued', updatedAt: now(), ...(batch ? { batch } : {}),
     };
     await atomicHdJson(jobPath(key), job);
@@ -253,7 +289,9 @@ export async function requestHd(source: string, priority = 1, preserveText?: boo
   });
   // A claim held by another process is not a durable registration receipt.
   if (!result && !existing) throw new Error('hd_registration_pending');
-  return result || existing!;
+  const job = result || existing!;
+  await (await import('./hd-scheduler')).registerHdScheduling(job, context);
+  return job;
 }
 export async function listHdJobs() {
   if (process.env.NODE_ENV === 'production') await assertHdStorageRoot();
@@ -505,6 +543,8 @@ export type HdProcessDependencies = {
   capacity?: typeof hdCapacity; clock?: () => number; validate?: typeof validateHdOutput;
   assertWorkerLock?: () => Promise<void>; beforePublish?: () => Promise<void>;
   processor?: typeof runHdImageProcessor;
+  /** Scheduler recovery releases the consumed turn before another encode. */
+  recoverInterrupted?: boolean;
 };
 const retryDelay = (attempt: number) => HD_RETRY_POLICY.delaysMs[Math.min(Math.max(attempt - 1, 0), HD_RETRY_POLICY.delaysMs.length - 1)];
 export function isHdRetryableFailure(job: HdJob) {
@@ -535,7 +575,8 @@ async function assertHdProcessorOutput(result: HdImageResult, job: HdJob, input:
     || JSON.stringify(result.libraries) !== JSON.stringify(sharp.versions)) throw new Error('hd_child_protocol');
   if (result.skipped || result.originalVerified) return;
   const format = result.metadata.hasAlpha || job.preserveText ? 'webp' : 'avif';
-  if (result.format !== format || JSON.stringify(result.parameters) !== JSON.stringify(hdEncoderParameters(format))
+  if ((result.encoderStrategy || 'hd-legacy-e6-v1') !== hdEncoderStrategy(job.encoderStrategy)
+    || result.format !== format || JSON.stringify(result.parameters) !== JSON.stringify(hdEncoderParameters(format, job.encoderStrategy))
     || result.outputFile !== 'output.' + format) throw new Error('hd_child_protocol');
   const file = path.join(directory, result.outputFile);
   if (await fs.realpath(file) !== file) throw new Error('hd_output_boundary');
@@ -616,6 +657,15 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       }
       catch (error) { await setHdControl(true, 'hd_child_exit_unknown'); throw error; }
     }
+    if (!receipt && dependencies.recoverInterrupted && job.status === 'running') {
+      const previous = job.attemptHistory?.find(value => value.executionId === job.executionId && value.sourceVersion === job.version);
+      if (!previous || !job.executionId || previous.processor && !previous.groupExit) throw new Error('hd_child_exit_unknown');
+      Object.assign(previous, { finishedAt: timestamp(), status: 'queued', reason: 'hd_shutdown' });
+      Object.assign(job, { status: 'queued', stage: 'queued', reason: 'hd_shutdown', errorKind: 'hd_shutdown',
+        retryAt: new Date(clock() + retryDelay(job.attempts)).toISOString(), updatedAt: timestamp() });
+      await atomicHdJson(jobPath(key), job);
+      return;
+    }
     if (receipt) {
       let verificationDirectory = '';
       let verificationExited = true;
@@ -623,6 +673,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       try {
         if (!receipt.job || receipt.job.key !== key || receipt.job.version !== job.version || receipt.job.status !== 'ready'
           || receipt.job.policy !== HD_POLICY || receipt.job.source !== job.source || receipt.job.preserveText !== job.preserveText
+          || hdEncoderStrategy(receipt.job.encoderStrategy) !== hdEncoderStrategy(job.encoderStrategy)
           || receipt.job.integrity?.version !== HD_VALIDATION_VERSION || receipt.job.integrity.failedChecks.length
           || receipt.protocol !== undefined && (receipt.protocol !== 'hd-publish-v2' || receipt.executionId !== job.executionId
             || receipt.job.executionId !== job.executionId || receipt.sourceVersion !== job.version)) throw new Error('hd_publish_receipt_invalid');
@@ -653,6 +704,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
         }
         const verified = await processor({ protocol: HD_IMAGE_PROTOCOL, key, executionId: verificationId, sourceVersion: job.version,
           inputFile: input.file, workDirectory: verificationDirectory, preserveText: job.preserveText,
+          encoderStrategy: hdEncoderStrategy(job.encoderStrategy),
           operation: receipt.job.format === 'original' ? 'verify-original' : 'validate', candidateFormat: receipt.job.format === 'original' ? undefined : receipt.job.format as 'avif' | 'webp' },
         { onSpawn: async identity => {
           // Receipt generation remains the original publication identity; this
@@ -731,15 +783,17 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       job.stage = 'reading'; job.executionId = randomUUID(); job.lastProgressAt = timestamp();
       job.processor = undefined; job.executionExitedAt = undefined; job.errorKind = undefined; job.diagnostic = undefined;
       job.reason = undefined; job.integrity = undefined; job.retryAt = undefined; job.isolatedReason = undefined;
-      attempt = { attempt: job.attempts, startedAt: job.updatedAt, sourceVersion: job.version, status: 'running', executionId: job.executionId };
+      attempt = { attempt: job.attempts, startedAt: job.updatedAt, sourceVersion: job.version, status: 'running', executionId: job.executionId,
+        encoderStrategy: hdEncoderStrategy(job.encoderStrategy) };
       job.attemptHistory = [...(job.attemptHistory || []), attempt];
       await atomicHdJson(jobPath(key), job);
+      await (await import('./hd-scheduler')).markHdScheduledAttempt(job);
       const input = await hdSource(job.source);
       if (!input || input.version !== job.version) { job.status = 'skipped'; job.reason = 'source_changed'; return; }
       directory = await privateHdRun(key, job.executionId);
       const executionId = job.executionId, attemptNumber = attempt.attempt, sourceVersion = attempt.sourceVersion;
       const result = await processor({ protocol: HD_IMAGE_PROTOCOL, key, executionId, sourceVersion: job.version,
-        inputFile: input.file, workDirectory: directory, preserveText: job.preserveText, operation: 'encode' }, {
+        inputFile: input.file, workDirectory: directory, preserveText: job.preserveText, operation: 'encode', encoderStrategy: hdEncoderStrategy(job.encoderStrategy) }, {
         onSpawn: async identity => {
           executionExited = false;
           if (identity.executionId !== executionId) throw new Error('hd_execution_changed');
@@ -758,6 +812,9 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
           await atomicHdJson(jobPath(key), job);
         },
         onPrepared: async metadata => {
+          const format = metadata.hasAlpha || job.preserveText ? 'webp' : 'avif';
+          job.parameters = hdEncoderParameters(format, job.encoderStrategy); attempt!.parameters = job.parameters;
+          await atomicHdJson(jobPath(key), job);
           const safe = (await capacity(input.size * 3 + metadata.width * metadata.height * 8)).safe;
           if (!safe && pausedSourceVersion === undefined) await setHdControl(true, 'capacity_guard');
           return safe;
@@ -777,7 +834,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       job.integrity = result.integrity; attempt.integrity = result.integrity;
       attempt.encoder = { policy: HD_POLICY, validation: HD_VALIDATION_VERSION,
         sourceSha256: createHash('sha256').update(await fs.readFile(path.join(process.cwd(), 'src/lib/media/hd-encoder.ts'))).digest('hex'),
-        libraries: { ...sharp.versions }, parameters: hdEncoderParameters(format) };
+        libraries: { ...sharp.versions }, parameters: result.parameters! };
       const width = [5, 6, 7, 8].includes(result.metadata.orientation) ? result.metadata.height : result.metadata.width;
       const height = [5, 6, 7, 8].includes(result.metadata.orientation) ? result.metadata.width : result.metadata.height;
       if ((await hdSource(job.source))?.version !== job.version) { job.status = 'skipped'; job.reason = 'source_changed'; return; }

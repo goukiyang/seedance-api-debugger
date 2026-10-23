@@ -7,6 +7,8 @@ import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ModuleCoverError } from '@/lib/image-studio/module-cover';
+import { listAdminStudioDefinitionDirectory, readStudioTemplateAuthorContact, readStudioTemplateDefinition,
+  StudioDefinitionReadError } from '@/lib/image-studio/definition-read';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -17,8 +19,21 @@ export async function GET(request: NextRequest) {
   try {
     const moduleId = request.nextUrl.searchParams.get('moduleId') ?? undefined;
     const presetId = request.nextUrl.searchParams.get('presetId') ?? undefined;
-    if (presetId && presetId.length > 160) return NextResponse.json({ error: '模板读取参数无效' }, { status: 400, headers: privateHeaders });
+    if (presetId && presetId.length > 160 || moduleId && moduleId.length > 160) return NextResponse.json({ error: '模板读取参数无效' }, { status: 400, headers: privateHeaders });
     const mode = request.nextUrl.searchParams.get('mode');
+    if (mode === 'definition') {
+      if (Boolean(presetId) === Boolean(moduleId)) return NextResponse.json({ error: '模板定义读取参数无效' }, { status: 400, headers: privateHeaders });
+      return NextResponse.json(await readStudioTemplateDefinition(user, { presetId, moduleId }), { headers: privateHeaders });
+    }
+    if (mode === 'admin-directory') {
+      return NextResponse.json(await listAdminStudioDefinitionDirectory(user, { cursor: request.nextUrl.searchParams.get('cursor') ?? undefined,
+        q: request.nextUrl.searchParams.get('q') ?? undefined,
+        limit: request.nextUrl.searchParams.has('limit') ? Number(request.nextUrl.searchParams.get('limit')) : undefined }), { headers: privateHeaders });
+    }
+    if (mode === 'author-contact') {
+      if (Boolean(presetId) === Boolean(moduleId)) return NextResponse.json({ error: '作者读取参数无效' }, { status: 400, headers: privateHeaders });
+      return NextResponse.json(await readStudioTemplateAuthorContact(user, { presetId, moduleId }), { headers: privateHeaders });
+    }
     if (mode === 'delete-status') {
       if (!presetId) return NextResponse.json({ error: '删除查询参数无效' }, { status: 400, headers: privateHeaders });
       return NextResponse.json(await studioPresetDeletionStatus(user, presetId, request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
@@ -31,7 +46,7 @@ export async function GET(request: NextRequest) {
     if (mode) return NextResponse.json({ error: '模板读取方式无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ presets: await listStudioPresets(user, moduleId, presetId) }, { headers: privateHeaders });
   } catch (error) {
-    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError ? error.reasonCode : 'state-conflict',
+    if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError || error instanceof StudioDefinitionReadError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError || error instanceof StudioDefinitionReadError ? error.reasonCode : 'state-conflict',
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }

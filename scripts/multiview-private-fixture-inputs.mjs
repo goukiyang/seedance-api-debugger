@@ -18,6 +18,7 @@ export const MULTIVIEW_PRIVATE_FIXTURE_SOURCES = Object.freeze([
 
   'src/lib/video/multiview-task-privacy.ts',
   'src/lib/video/multiview-private-create.server.ts',
+  'src/lib/video/multiview-build-mode.ts',
   'src/lib/video/multiview-generation-contract.ts',
   'src/lib/video/multiview-preset.server.ts',
   'src/lib/video/multiview-recipe-storage.server.ts',

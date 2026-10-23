@@ -1,3 +1,4 @@
+import { settleVideoCreationBatch } from '@/lib/creation/settlement';
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from '../provider/error-message';
@@ -685,6 +686,7 @@ export async function finalizeVideoTaskStatus(
       && isH3InternalOutputUrl(statusResult.result_video_url);
 
     if (!hasVideoTaskUpdateChanges(task, updateData)) {
+      if (isTerminal && !shouldDeferH3Settlement) await prisma.$transaction(tx => settleVideoCreationBatch(tx, taskId));
       if (task.provider === 'volcengine_ark' && isTerminalLocalStatus(task.local_status)) {
         if (shouldSettleTerminalCosts(task)) {
           await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, task.local_status);
@@ -730,16 +732,18 @@ export async function finalizeVideoTaskStatus(
     }
 
     if (task.provider === 'volcengine_ark') {
-      const changed = await prisma.videoTask.updateMany({
-        where: { id: taskId, local_status: task.local_status, updated_at: task.updated_at },
-        data: updateData,
+      const changed = await prisma.$transaction(async tx => {
+        const result = await tx.videoTask.updateMany({ where: { id: taskId, local_status: task.local_status, updated_at: task.updated_at }, data: updateData });
+        if (result.count && isTerminal && !shouldDeferH3Settlement) await settleVideoCreationBatch(tx, taskId);
+        return result;
       });
       if (!changed.count) {
         const current = await prisma.videoTask.findUnique({ where: { id: taskId } });
         return { task: current, statusRefreshed: false, terminal: isTerminalLocalStatus(current?.local_status || null), skippedReason: 'concurrent_status_change' };
       }
     } else {
-      await prisma.videoTask.update({ where: { id: taskId }, data: updateData });
+      await prisma.$transaction(async tx => { await tx.videoTask.update({ where: { id: taskId }, data: updateData });
+        if (isTerminal && !shouldDeferH3Settlement) await settleVideoCreationBatch(tx, taskId); });
     }
 
     if (isTerminal && !shouldDeferH3Settlement && shouldSettleTerminalCosts(task)) {

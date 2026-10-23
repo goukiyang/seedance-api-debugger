@@ -1804,7 +1804,7 @@ export default function CutoutPage() {
 
 </div></div>, document.body)}
       {zoom && <ZoomableImagePreview src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}
-      <ResourceLibraryPicker open={imagePickerOpen} imageOnly target="workspace" title="选择抠图原图" confirmLabel="使用所选图片" purpose="cutout-source" maxSelection={1} currentCount={0} currentAssetIds={[]}
+      <ResourceLibraryPicker open={imagePickerOpen} imageOnly target="workspace" title="选择抠图原图" confirmLabel="使用所选图片" purpose="cutout-source" contextKey="cutout-current-draft:source" maxSelection={1} currentCount={0} currentAssetIds={[]}
         onClose={() => { sourceSelection.current++; setImagePickerOpen(false); }}
         onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
         onConfirm={async () => false} onConfirmSelection={selectLibraryImage} />

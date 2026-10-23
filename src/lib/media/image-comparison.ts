@@ -10,7 +10,7 @@ export type ImageComparisonSource = {
   contentKey?: ContentKey; pickerKey?: string; id?: string; version?: string;
   width?: number; height?: number; fileSize?: number;
 };
-export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode };
+export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode; original?: boolean };
 export type ComparisonPreferences = { linked: boolean; axis: 'horizontal' | 'vertical' };
 export type ComparisonResolveFailureKind = 'permission' | 'deleted' | 'identity-version-change' | 'transient' | 'cancelled';
 export class ComparisonResolveError extends Error {
@@ -32,12 +32,13 @@ export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 
       for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download']) url.searchParams.delete(variant);
       url.searchParams.delete('variant');
       url.searchParams.delete('hd-version');
+      url.searchParams.delete('hd-representation');
       if (mode !== 'original') url.searchParams.set(mode, '1');
     } else if (/^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname)) {
-      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version']) url.searchParams.delete(variant);
+      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
     } else if (url.pathname === '/api/content-reactions/media') {
-      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version']) url.searchParams.delete(variant);
+      for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
     } else return src;
     return url.pathname + url.search;
@@ -114,14 +115,18 @@ export function readImageView(user: string, identity: string, pair: string, axis
   if (![v.scale, v.x, v.y].every(n => typeof n === 'number' && Number.isFinite(n))
     || (v.scale as number) < 0.5 || (v.scale as number) > 1_000_000 || Math.abs(v.x as number) > 10_000 || Math.abs(v.y as number) > 10_000
     || !['fit', 'width', 'actual', 'custom'].includes(String(v.mode))) return;
-  return { scale: v.scale as number, x: v.x as number, y: v.y as number, mode: v.mode as MediaPreviewZoomMode };
+  return { scale: v.scale as number, x: v.x as number, y: v.y as number, mode: v.mode as MediaPreviewZoomMode,
+    ...(typeof v.original === 'boolean' ? { original: v.original } : {}) };
 }
 export function saveImageView(user: string, identity: string, pair: string, axis: string, view: ImageView) {
   if (identity.startsWith('blob:') || identity.startsWith('data:')) return;
   const value = read(`${prefix}:${encodeURIComponent(user)}:views`);
+  const previous = readImageView(user, identity, pair, axis);
+  const persisted = { scale: view.scale, x: view.x, y: view.y, mode: view.mode,
+    ...(typeof view.original === 'boolean' ? { original: view.original } : typeof previous?.original === 'boolean' ? { original: previous.original } : {}) };
   delete value[identity]; delete value[`${pair}:${axis}:${identity}`];
   const entries = Object.entries(value).slice(-78);
-  write(`${prefix}:${encodeURIComponent(user)}:views`, { ...Object.fromEntries(entries), [identity]: view, [`${pair}:${axis}:${identity}`]: view });
+  write(`${prefix}:${encodeURIComponent(user)}:views`, { ...Object.fromEntries(entries), [identity]: persisted, [`${pair}:${axis}:${identity}`]: persisted });
 }
 export type ComparisonSelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string }; storageSnapshot?: string; invalid?: boolean };
 function selectionKey(user: string, anchor: string) { return `${prefix}:${encodeURIComponent(user)}:selection:${encodeURIComponent(anchor)}`; }

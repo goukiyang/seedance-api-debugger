@@ -1,3 +1,4 @@
+import { prepareEngineeringRunDirectory } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -321,7 +322,7 @@ const R17_INSTALLED = Object.freeze({
 });
 export function assertInstalledMultiviewRecipeAdoption(m, records, observed) {
   const { input, plan, verification, applied, preopen } = records;
-  for (const [key, expected] of Object.entries(R17_INSTALLED)) assert.equal(m.recoveredGuardBaseline?.[key], expected);
+  for (const [key, expected] of Object.entries(R17_INSTALLED)) assert.equal((m.fullRelease?.privateRecipeOrigin || m.recoveredGuardBaseline)?.[key], expected);
   assert.equal(m.privateMultiviewInstall, true); assert.notEqual(m.runId, R17_INSTALLED.runId);
   assert.equal(plan.schema, 'multiview-private-recipe-plan.v1');
   assert.equal(verification.schema, 'multiview-private-recipe-verification.v1');
@@ -374,8 +375,8 @@ export function assertInstalledMultiviewRecipeAdoption(m, records, observed) {
 }
 
 export function inspectInstalledMultiviewRecipeAdoption(m) {
-  if (m.recoveredGuardBaseline?.schema !== R17_INSTALLED.schema) return null;
-  for (const [key, expected] of Object.entries(R17_INSTALLED)) assert.equal(m.recoveredGuardBaseline[key], expected);
+  if ((m.fullRelease?.privateRecipeOrigin || m.recoveredGuardBaseline)?.schema !== R17_INSTALLED.schema) return null;
+  for (const [key, expected] of Object.entries(R17_INSTALLED)) assert.equal((m.fullRelease?.privateRecipeOrigin || m.recoveredGuardBaseline)[key], expected);
   const stage = '/data/video-api-debugger/release-staging/' + R17_INSTALLED.runId;
   assert.equal(fs.realpathSync(stage), stage); const stat = fs.lstatSync(stage);
   assert.ok(stat.isDirectory() && stat.uid === 0 && stat.gid === 0 && !(stat.mode & 0o077));
@@ -494,6 +495,7 @@ function writeAdmission(m, preOpen, worksReady) {
   const file = m.stage + '/private-recipe/admission.json'; writeJsonExclusive(file, value); return file;
 }
 export function createMultiviewIsolatedBackupCopy(m, backup) {
+  prepareEngineeringRunDirectory(m);
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   assert.match(m.runId, /^[a-f0-9-]{36}$/); assert.match(m.mainSource, /^[a-f0-9]{40}$/);
   assert.equal(backup, '/data/video-api-debugger/backups/multiview-private-' + m.runId);

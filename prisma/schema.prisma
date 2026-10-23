@@ -102,6 +102,11 @@ model VideoTask {
   project_id      String?
   video_card_id   String?
   video_branch_id String?
+  creation_intent_id String?
+  creation_contract_version Int?
+  derived_from_task_id String?
+  derivation_kind String?
+  lineage_root_task_id String?
   template_id     String?
   agent_run_id    String?
   template_studio_run_id String?
@@ -172,6 +177,16 @@ model VideoTask {
   cost_allocations       CostAllocation[]
   approval_records       ApprovalRecord[]
   approval_usages        ApprovalUsage[]
+  creation_intent        VideoCreationIntent? @relation("VideoIntentTasks", fields: [creation_intent_id], references: [id], onDelete: Restrict)
+  derived_from           VideoTask? @relation("VideoTaskLineageParent", fields: [derived_from_task_id], references: [id], onDelete: Restrict)
+  derived_tasks          VideoTask[] @relation("VideoTaskLineageParent")
+  lineage_root           VideoTask? @relation("VideoTaskLineageRoot", fields: [lineage_root_task_id], references: [id], onDelete: Restrict)
+  lineage_tasks          VideoTask[] @relation("VideoTaskLineageRoot")
+  parent_intents         VideoCreationIntent[] @relation("VideoIntentParent")
+  baseline_intents       VideoCreationIntent[] @relation("VideoIntentBaseline")
+  accepted_intents       VideoCreationIntent[] @relation("VideoIntentAccepted")
+  delivery_roots         VideoDeliverySelection[] @relation("VideoDeliveryRoot")
+  delivery_selections    VideoDeliverySelection[] @relation("VideoDeliverySelected")
 
   created_at   DateTime  @default(now())
   updated_at   DateTime  @updatedAt
@@ -201,6 +216,69 @@ model VideoTask {
   @@index([provider_cost_status])
   @@index([retention_status])
   @@index([user_deleted_at])
+  @@index([creation_intent_id])
+  @@index([lineage_root_task_id, created_at, id])
+  @@index([derived_from_task_id])
+}
+
+// v2 is additive. Legacy tasks and their frozen billing/card contracts remain v1.
+model VideoCreationIntent {
+  id String @id @default(cuid())
+  owner_id String
+  request_id String
+  contract_version Int @default(2)
+  revision Int @default(1)
+  action String
+  entry String
+  project_id String
+  legacy_card_id String?
+  parent_task_id String?
+  baseline_task_id String?
+  batch_id String? @unique
+  count Int @default(1)
+  payer_kind String
+  payer_account_id String
+  input_hash String
+  spec_json String
+  pricing_revision String?
+  quote_business_hash String
+  state String @default("prepared")
+  accepted_task_id String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  owner User @relation("VideoIntentOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  legacy_card VideoCard? @relation(fields: [legacy_card_id], references: [id], onDelete: Restrict)
+  parent_task VideoTask? @relation("VideoIntentParent", fields: [parent_task_id], references: [id], onDelete: Restrict)
+  baseline_task VideoTask? @relation("VideoIntentBaseline", fields: [baseline_task_id], references: [id], onDelete: Restrict)
+  accepted_task VideoTask? @relation("VideoIntentAccepted", fields: [accepted_task_id], references: [id], onDelete: Restrict)
+  tasks VideoTask[] @relation("VideoIntentTasks")
+  batches CanvasVideoBatch[]
+  approvals ApprovalRecord[]
+  usages ApprovalUsage[]
+  @@unique([owner_id, request_id])
+  @@index([project_id, state, created_at])
+}
+
+model VideoDeliverySelection {
+  id String @id @default(cuid())
+  project_id String
+  lineage_root_task_id String
+  owner_id String
+  selected_task_id String?
+  state String @default("open")
+  revision Int @default(0)
+  selected_by String?
+  locked_by String?
+  locked_at DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  project Project @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  owner User @relation("VideoDeliveryOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  root VideoTask @relation("VideoDeliveryRoot", fields: [lineage_root_task_id], references: [id], onDelete: Restrict)
+  selected VideoTask? @relation("VideoDeliverySelected", fields: [selected_task_id], references: [id], onDelete: Restrict)
+  @@unique([project_id, lineage_root_task_id])
+  @@index([owner_id, updated_at])
 }
 
 model VideoDeliveryJob {
@@ -289,6 +367,8 @@ model User {
   approval_requests       ApprovalRecord[]     @relation("ApprovalRequester")
   approval_decisions      ApprovalRecord[]     @relation("ApprovalApprover")
   approval_usages         ApprovalUsage[]      @relation("ApprovalUsageUser")
+  video_creation_intents  VideoCreationIntent[] @relation("VideoIntentOwner")
+  video_delivery_selections VideoDeliverySelection[] @relation("VideoDeliveryOwner")
   notification_targets    Notification[]       @relation("NotificationTarget")
   notification_actors     Notification[]       @relation("NotificationActor")
   generated_review_cards  ReviewCard[]         @relation("ReviewCardGenerator")
@@ -866,6 +946,8 @@ model Project {
   review_cards          ReviewCard[]
   notifications         Notification[]
   tool_flows            ToolFlow[]
+  video_creation_intents VideoCreationIntent[]
+  video_delivery_selections VideoDeliverySelection[]
 
   @@index([workspace_id])
   @@index([owner_user_id])
@@ -914,6 +996,7 @@ model VideoCard {
   approval_records  ApprovalRecord[]
   branches          VideoBranch[]
   notifications     Notification[]
+  video_creation_intents VideoCreationIntent[]
 
   @@index([project_id])
   @@index([status])
@@ -990,6 +1073,8 @@ model CanvasVideoBatch {
   request_hash          String
   count                 Int
   contract_version      Int      @default(1)
+  creation_intent_id    String?
+  authorization_round  Int      @default(1)
   frozen_input_json     String
   authorized_total      Int
   admitted_total        Int      @default(0)
@@ -1000,6 +1085,7 @@ model CanvasVideoBatch {
   created_at            DateTime @default(now())
   updated_at            DateTime @updatedAt
   children              CanvasVideoBatchChild[]
+  creation_intent       VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
 
   @@unique([owner_user_id, client_request_id])
   @@index([owner_user_id, document_id, node_id, created_at, id])
@@ -1027,6 +1113,10 @@ model CanvasVideoBatchChild {
   created_at            DateTime @default(now())
   updated_at            DateTime @updatedAt
   batch CanvasVideoBatch @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+  intent_spec_revision Int?
+  authorization_revision Int?
+  approval_record_id String?
+  approval_scope_hash String?
 
   @@unique([batch_id, ordinal])
   @@index([batch_id, state])
@@ -1689,6 +1779,14 @@ model ApprovalRecord {
   approver_user_id       String?
   usage_limit            Int?
   used_count             Int       @default(0)
+  creation_intent_id     String?
+  intent_revision       Int?
+  scope_hash            String?
+  billing_scope         String?
+  billing_account_id    String?
+  revision              Int @default(1)
+  authorized_cost_cents Int @default(0)
+  used_cost_cents       Int @default(0)
   effect_status          String    @default("pending") // pending | applied | failed | skipped
   effect_error           String?
   reason                 String?
@@ -1708,6 +1806,7 @@ model ApprovalRecord {
   approver      User?           @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
   usages        ApprovalUsage[]
   notifications Notification[]
+  creation_intent VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
 
   @@index([type])
   @@index([status])
@@ -1718,6 +1817,7 @@ model ApprovalRecord {
   @@index([approver_user_id])
   @@index([expires_at])
   @@index([created_at])
+  @@index([creation_intent_id, intent_revision])
 }
 
 model ApprovalUsage {
@@ -1727,13 +1827,20 @@ model ApprovalUsage {
   user_id       String
   amount        Int      @default(1)
   metadata_json String?
+  creation_intent_id String?
+  intent_revision Int?
+  authorization_revision Int?
+  child_key String?
+  authorized_cost_cents Int @default(0)
   created_at    DateTime @default(now())
 
   approval ApprovalRecord @relation(fields: [approval_id], references: [id], onDelete: Cascade)
   task     VideoTask?     @relation(fields: [task_id], references: [id], onDelete: SetNull)
   user     User           @relation("ApprovalUsageUser", fields: [user_id], references: [id], onDelete: Cascade)
+  creation_intent VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
 
   @@unique([approval_id, task_id])
+  @@unique([approval_id, creation_intent_id, child_key])
   @@index([approval_id])
   @@index([task_id])
   @@index([user_id])

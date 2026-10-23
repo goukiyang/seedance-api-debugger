@@ -6,7 +6,35 @@ export type SharedStudioReasonCode = 'login-required' | 'access-revoked' | 'sour
   | 'source-missing' | 'dependency-invalid' | 'state-conflict' | 'read-unavailable';
 export type SharedStudioCapability = { allowed: boolean; reasonCode: SharedStudioReasonCode | null; reason: string | null };
 export type SharedStudioCapabilities = Record<'viewOwnHistory' | 'editPersonalDraft' | 'editDefinition' | 'saveDefinition'
-  | 'changeSharing' | 'deleteSource' | 'generate', SharedStudioCapability>;
+  | 'viewDefinition' | 'changeSharing' | 'deleteSource' | 'generate', SharedStudioCapability>;
+export type StudioTemplateAuthor = {
+  state: 'known' | 'unknown';
+  displayName: string | null;
+  avatarUrl: string | null;
+  isSelf: boolean;
+};
+export type StudioTemplateRead = {
+  sourceKind: 'preset' | 'local-module' | 'unknown';
+  sourceId: string;
+  sourceRevision: string | null;
+  author: StudioTemplateAuthor;
+  canViewTemplateContext: boolean;
+};
+export type StudioTemplateDefinitionRead = {
+  templateRead: StudioTemplateRead;
+  definition: {
+    name: string;
+    templatePrompt: string;
+    context: string;
+    sourceRevision: string;
+    contextVersion: { code: string; state: string } | null;
+    limits: { count: number; referenceLimit: number; aspectRatio: string };
+    referenceNotes: string[];
+  };
+  lifecycle: 'active' | 'archived';
+  generation: { available: boolean | null; reasonCode: SharedStudioReasonCode | null };
+  readAt: string;
+};
 export type SharedStudioStateProjection = {
   objectKind: 'publisher' | 'live' | 'legacy-copy' | 'local';
   lifecycle: 'active' | 'archived' | 'missing';
@@ -116,6 +144,7 @@ export type SharedStudioDefinitionPersonalInput = {
   personalReferencePolicy?: StudioReferencePolicy;
 };
 export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioStateProjection> & {
+  templateRead?: StudioTemplateRead;
   intent: SharedStudioIntent;
   mode: 'publisher' | 'live';
   available: boolean;
@@ -150,6 +179,7 @@ export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> 
   styleGroupIds: string[];
   styleGroups: Array<{ id: string; name: string; revision: number; referenceCount: number; coverUrl: string; canManage: boolean }>;
   reproductionConfigured: boolean;
+  templateRead?: StudioTemplateRead;
 };
 export type SharedStudioCatalogItem = Partial<SharedStudioStateProjection> & {
   deletion?: StudioDeletionCapability;
@@ -163,6 +193,7 @@ export type SharedStudioCatalogItem = Partial<SharedStudioStateProjection> & {
   revision: string;
   available: boolean;
   unavailableReason?: string;
+  templateRead?: StudioTemplateRead;
 };
 export type SharedStudioCatalog = { items: SharedStudioCatalogItem[]; nextCursor: string | null; catalogRevision: string };
 export type SharedStudioRevision = {

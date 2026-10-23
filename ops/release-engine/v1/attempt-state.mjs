@@ -14,7 +14,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const TASK = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const PHASE = /^[a-z][a-z0-9_-]{0,63}$/;
 const TERMINAL = new Set(['succeeded', 'failed', 'rolled_back', 'stopped']);
-const RESERVED_EVENTS = new Set(['attempt_started', 'window_refreshed', 'owner_takeover', 'phase_intent', 'phase_result', 'attempt_finished']);
+const RESERVED_EVENTS = new Set(['attempt_started', 'window_refreshed', 'owner_takeover', 'phase_intent', 'phase_result', 'attempt_finished', 'failure_continued']);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function fail(category, code, kind, id, reason, nextStep, options) {
@@ -273,6 +273,15 @@ function applyEvent(state, event, hash) {
     assert.equal(state.status, 'running'); assert.equal(state.activePhase, null); assert.ok(ownerEqual(event.owner, state.owner));
     assert.ok(TERMINAL.has(event.outcome)); validateScene(event.after, 'attempt after summary');
     state.status = event.outcome; state.terminal = { outcome: event.outcome, eventSha256: hash };
+  } else if (event.kind === 'failure_continued') {
+    exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
+      'previousTerminalSha256', 'failureReceiptSha256', 'window', 'before'], 'failed attempt continuation');
+    assert.equal(state.status, 'failed'); assert.equal(state.activePhase, null);
+    assert.equal(state.terminal.eventSha256, event.previousTerminalSha256);
+    assert.equal(state.lastEventSha256, event.previousTerminalSha256); assert.match(event.failureReceiptSha256, HASH);
+    validateWindow(event.window, state.attemptId, state.runId, event.at, false); validateScene(event.before, 'continuation before summary');
+    assert.equal(event.before.facts.effectsStarted, false); assert.equal(event.before.facts.switchComplete, false);
+    state.status = 'running'; state.terminal = null; state.owner = event.owner; state.currentWindow = event.window;
   } else if (event.kind === 'observation') {
     exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
       'name', 'value'], 'observation event');
@@ -518,6 +527,37 @@ export function takeoverAttempt({ root, taskId, attemptId, owner, priorLeaseSha2
   const next = applyEvent(structuredClone(current.derivedState), event, eventSha256);
   writeCasJson(path.join(current.place.attempt, 'state.json'), next, current.stateSha256);
   return { event, eventSha256, state: next, archivedLease: archived };
+}
+
+export function continueFailedAttempt({ root, taskId, attemptId, owner, engine, manifest, artifacts, window,
+  terminalEventSha256, failureReceiptSha256, before, now = Date.now(), inspectOwner = inspectControllerOwner }) {
+  const loaded = validateAttempt({ root, taskId, attemptId }); validateOwner(owner);
+  assertAttemptBindings(loaded, { engine, manifest, artifacts });
+  assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
+  assert.equal(loaded.derivedState.lastEventSha256, terminalEventSha256);
+  assert.equal(loaded.derivedState.terminal.eventSha256, terminalEventSha256);
+  validateWindow(window, attemptId, attemptId, now, true); validateScene(before, 'continuation before summary');
+  assert.equal(before.facts.effectsStarted, false); assert.equal(before.facts.switchComplete, false);
+  assert.match(failureReceiptSha256, HASH);
+  const task = readJson(path.join(loaded.place.task, 'task.json'));
+  assert.equal(task.latestAttemptId, attemptId, 'A superseded attempt cannot be continued');
+  assert.equal(fs.existsSync(ownerLeaseFile(loaded.place)), false);
+  const priorOwner = loaded.derivedState.owner;
+  assert.equal(inspectOwner(priorOwner), 'dead', 'Original failed controller must be proven dead');
+  const priorLease = fs.readdirSync(loaded.place.attempt).filter(name => /^owner-final-[a-f0-9]{64}\.json$/.test(name))
+    .map(name => ({ name, bytes: readBytes(path.join(loaded.place.attempt, name), 16384) }))
+    .find(item => ownerEqual(validateLease(JSON.parse(item.bytes), taskId, attemptId).owner, priorOwner));
+  assert.ok(priorLease, 'Original terminal owner lease is missing');
+  assert.equal(priorLease.name, 'owner-final-' + digest(priorLease.bytes) + '.json');
+  writeExclusiveJson(ownerLeaseFile(loaded.place), { schema: 'sd2-release-attempt-owner.v1', taskId, attemptId, owner });
+  const sequence = loaded.derivedState.lastSequence + 1; assert.ok(sequence <= 999999);
+  const event = { schema: ATTEMPT_EVENT_SCHEMA, taskId, attemptId, runId: attemptId, sequence,
+    previousSha256: terminalEventSha256, at: now, atIso: iso(now), owner, kind: 'failure_continued',
+    previousTerminalSha256: terminalEventSha256, failureReceiptSha256, window, before };
+  const eventSha256 = writeExclusiveJson(path.join(loaded.place.events, String(sequence).padStart(6, '0') + '.json'), event);
+  const next = applyEvent(structuredClone(loaded.derivedState), event, eventSha256);
+  writeCasJson(path.join(loaded.place.attempt, 'state.json'), next, loaded.stateSha256);
+  return { event, eventSha256, state: next };
 }
 
 export function assertAttemptBindings(loaded, { engine, manifest, artifacts }) {

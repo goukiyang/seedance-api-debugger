@@ -1,3 +1,4 @@
+import { assertFullLiveRoles, readFullLiveSourceFiles, prepareEngineeringRunDirectory } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +44,8 @@ function liveInfo(name) {
     execMainStartTimestampMonotonic: value.ExecMainStartTimestampMonotonic };
 }
 export function assertCapturedLive(live) {
-  for (const role of ['web', 'image', 'hd']) {
+  if (MV_DIRECT.fullRelease) assertFullLiveRoles(MV_DIRECT.fullRelease, live);
+  else for (const role of ['web', 'image', 'hd']) {
     assert.equal(live[role].source, MV_DIRECT.baselineSource);
     assert.equal(live[role].version, MV_DIRECT.baselineVersion); assert.equal(live[role].build, MV_DIRECT.baselineBuild);
   }
@@ -93,6 +95,12 @@ export async function capture(seedFile) {
       };
     }
   }
+  if (MV_DIRECT.fullRelease) {
+    const provisional = { fullRelease: MV_DIRECT.fullRelease };
+    for (const role of ['web', 'image', 'hd', 'works', 'role', 'template']) readFullLiveSourceFiles(provisional, ['package.json'], role);
+    const hd = MV_DIRECT.fullRelease.liveRoles.hd;
+    live.hd.sourceProof = { sourceManifest: hd.sourceManifest, archive: hd.archive, compiledCapsule: MV_DIRECT.fullRelease.dependencyCapsule };
+  }
   const candidate = kind => {
     const c = JSON.parse(rootFile(stage + '/' + kind + '/source-manifest.json'));
     assert.equal(c.source, seed[kind + 'Source']); assert.equal(c.kind, kind);
@@ -131,6 +139,7 @@ export async function capture(seedFile) {
     ...(MV_DIRECT.normalContinuation ? { normalContinuation: MV_DIRECT.normalContinuation } : {}),
     ...(MV_DIRECT.deployedUsageSchema ? { deployedUsageSchema: MV_DIRECT.deployedUsageSchema } : {}),
     ...(MV_DIRECT.recoveredGuardBaseline ? { recoveredGuardBaseline: MV_DIRECT.recoveredGuardBaseline } : {}),
+    ...(MV_DIRECT.fullRelease ? { fullRelease: MV_DIRECT.fullRelease } : {}),
     ...(MV_DIRECT.protectedIncrement ? { protectedIncrement: MV_DIRECT.protectedIncrement } : {}),
     ...(MV_DIRECT.canvasVideoBatchSchema ? { canvasVideoBatchSchema: MV_DIRECT.canvasVideoBatchSchema } : {}),
     ...(MV_DIRECT.deployedCanvasBatchSchema ? { deployedCanvasBatchSchema: MV_DIRECT.deployedCanvasBatchSchema } : {}),
@@ -143,12 +152,13 @@ export async function capture(seedFile) {
   const captured = control.capturePricingStartControl();
   assert.equal(seed.expectedAllowedSha256, MV_DIRECT.expectedAllowedSha256);
   assert.equal(captured.allowed.sha256, seed.expectedAllowedSha256, 'Actual startup pair changed since packaging');
-  if (m.recoveredGuardBaseline) await (await import('./deployed-usage-schema.mjs')).assertCurrentPublishedBaseline(m);
+  if (m.recoveredGuardBaseline || m.fullRelease) await (await import('./deployed-usage-schema.mjs')).assertCurrentPublishedBaseline(m);
   const { legacy, hdLegacy } = captureRuntimeSourceContracts(m);
   const uploadDirectory = prepareUploadPrivateDirectory(m); verifyUploadPrivateDirectory(m);
   writeJsonExclusive(stage + '/manifest.json', m);
+  prepareEngineeringRunDirectory(m);
   if (m.privateMultiviewInstall) captureMultiviewBackupProtection(m);
-  if (m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
+  if (m.fullRelease || m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
   const before = readProtection(m);
   assert.equal(before.pricingRevision, MV_DIRECT.pricingRevision, 'Saved pricing changed; never restore an old revision');
   writeJsonExclusive(stage + '/capture.json', {
@@ -171,7 +181,7 @@ export async function execute(mode, manifestFile, kind) {
   if (mode === 'adopt') {
     if (m.deployedUsageSchema) {
       const { adoptDeployedUsageSchema } = await import('./deployed-usage-schema.mjs');
-      return adoptDeployedUsageSchema(m);
+      return adoptDeployedUsageSchema(m, { candidates: !m.fullRelease });
     }
     const { captureSwitchBefore } = await import('./switch.mjs');
     const { verifyNormalContinuation, adoptOriginalMigration } = await import('./normal-continuation.mjs');

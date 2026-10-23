@@ -37,7 +37,8 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
     }
     const row = byModule.get(id), source = row?.source_preset_id ? byId.get(row.source_preset_id) || null : null;
     return row && canViewStudioModule(user, row, source) ? [{ key, title: row.name, href: `/template-studio?type=image&moduleId=${encodeURIComponent(id)}`,
-      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id, fixedTarget: { kind: 'module', id: row.id } }] : [];
+      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: source ? null : row.banner_asset_id,
+      fixedTarget: source ? { kind: 'preset', id: source.id } : { kind: 'module', id: row.id } }] : [];
   });
 }
 

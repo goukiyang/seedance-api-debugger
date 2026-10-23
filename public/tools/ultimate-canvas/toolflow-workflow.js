@@ -959,7 +959,7 @@
         const node = nodeById(nodeId);
         if (!node || node.type !== 'flow-input' || !file) return Promise.resolve();
         if (!String(file.type || '').startsWith('image/')) { notice('输入节点只接受图片文件。', 'warn'); return Promise.resolve(); }
-        if (!runtime().selectedProjectId || !runtime().selectedVideoCardId) { notice('请先选择项目和视频卡，再上传输入图片。', 'warn'); return Promise.resolve(); }
+        if (!runtime().selectedProjectId) { notice('请先选择项目，再上传输入图片。', 'warn'); return Promise.resolve(); }
         const current = Array.isArray(node.data?.assetPreviews) ? node.data.assetPreviews : [];
         if (current.length >= 10) { notice('输入图片最多保留 10 张，请先移除一张。', 'warn'); return Promise.resolve(); }
         return fileFingerprint(file).then(fingerprint => {
@@ -972,7 +972,8 @@
                 const form = new FormData();
                 form.set('file', file);
                 form.set('project_id', runtime().selectedProjectId);
-                form.set('video_card_id', runtime().selectedVideoCardId);
+                form.set('video_card_id', runtime().selectedVideoCardId || '');
+                form.set('creation_contract_version', '2');
                 if (runtime().documentId) form.set('canvas_document_id', runtime().documentId);
                 form.set('canvas_node_id', nodeId);
                 xhr.open('POST', '/api/tools/ultimate-canvas/upload');
@@ -1024,11 +1025,12 @@
         if (!file) return;
         const project = projectId();
         const card = runtime().selectedVideoCardId;
-        if (!project || !card) { notice('请先选择项目和视频卡，再上传素材。', 'warn'); return; }
+        if (!project) { notice('请先选择项目，再上传素材。', 'warn'); return; }
         const form = new FormData();
         form.set('file', file);
         form.set('project_id', project);
-        form.set('video_card_id', card);
+        form.set('video_card_id', card || '');
+        form.set('creation_contract_version', '2');
         if (runtime().documentId) form.set('canvas_document_id', runtime().documentId);
         notice('正在上传图片...', 'info');
         request('/api/tools/ultimate-canvas/upload', { method: 'POST', body: form }).then(result => {

@@ -156,7 +156,9 @@ function MultiviewPageContent() {
   const video = useRef<HTMLVideoElement>(null);
   const generationArea = useRef<HTMLDivElement>(null);
   const collageViewport = useRef<HTMLDivElement>(null);
-  const resultArea = useRef<HTMLElement>(null);
+  const resultArea = useRef<HTMLElement | null>(null);
+  const [resultAreaNode, setResultAreaNode] = useState<HTMLElement | null>(null);
+  const bindResultArea = useCallback((node: HTMLElement | null) => { resultArea.current = node; setResultAreaNode(node); }, []);
   const toolsArea = useRef<HTMLElement>(null);
   const exportBar = useRef<HTMLElement>(null);
   const requests = useRef(new Map<number, Promise<boolean>>());
@@ -586,16 +588,23 @@ function MultiviewPageContent() {
   const frameSignature = draft?.slots.map(item => item.frame).join(',') || '';
   const slotIds = draft?.slots.map(item => item.id).join(',') || '';
   useEffect(() => {
-    if (!visible || !resultArea.current) return;
-    const showing = new Set<string>();
+    setOnscreenSlots([]);
+    if (!visible || !resultAreaNode || resultArea.current !== resultAreaNode) return;
+    let active = true;
+    const showing = new Set<string>(), epoch = context.current;
     const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) { const id = (entry.target as HTMLElement).dataset.mvSlot!;
-        if (entry.isIntersecting) showing.add(id); else showing.delete(id); }
+      if (!active || epoch !== context.current || resultArea.current !== resultAreaNode) return;
+      for (const entry of entries) {
+        if (!resultAreaNode.contains(entry.target)) continue;
+        const id = (entry.target as HTMLElement).dataset.mvSlot;
+        if (!id) continue;
+        if (entry.isIntersecting) showing.add(id); else showing.delete(id);
+      }
       setOnscreenSlots(Array.from(showing));
     }, { rootMargin: '80px' });
-    resultArea.current.querySelectorAll('[data-mv-slot]').forEach(element => observer.observe(element));
-    return () => observer.disconnect();
-  }, [slotIds, visible, view.tab, pageView]);
+    resultAreaNode.querySelectorAll('[data-mv-slot]').forEach(element => observer.observe(element));
+    return () => { active = false; observer.disconnect(); };
+  }, [resultAreaNode, slotIds, visible, view.tab, pageView]);
   const originalSignature = JSON.stringify([frameSignature, draft?.editing, editorFrame, view.selected, onscreenSlots, quickPreview, preferredOriginalSlot.current]);
   useEffect(() => {
     if (!visible || !info || !draft || pageView !== 'editor') { originalTargets.current.clear(); originalQueue.current.background([], true); return; }
@@ -1043,7 +1052,7 @@ function MultiviewPageContent() {
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
     {editingWorkId && !workState.work && <div className={styles.notice} role="status">{workState.loading ? '正在读取指定作品…' : workState.message || '指定作品尚未读取，当前生成设置保留。'}{!workState.loading && <button type="button" onClick={workState.retry}>重新读取作品</button>}</div>}
-    {visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={resultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
+    {visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={bindResultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><h2>{workState.work ? workState.title || '未命名作品' : '3D多视图作品'}</h2>
         {workState.work && <button type="button" title="修改作品名称" aria-label="修改作品名称" disabled={workState.busy || workState.pending || Boolean(quickFrame)} onClick={event => {
           const epoch = context.current; const id = workState.work!.id;

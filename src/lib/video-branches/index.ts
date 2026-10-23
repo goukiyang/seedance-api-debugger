@@ -74,7 +74,7 @@ export async function createVideoBranch(
   const shouldBePrimary = input.isPrimary || activeCount === 0;
   if (shouldBePrimary) {
     await tx.videoBranch.updateMany({
-      where: { video_card_id: input.videoCardId },
+      where: { video_card_id: input.videoCardId, status: { in: ACTIVE_BRANCH_STATUSES } },
       data: { is_primary: false, status: 'candidate' },
     });
   }
@@ -107,7 +107,7 @@ export async function setPrimaryBranch(
   if (!isActiveBranchStatus(branch.status)) throw new Error('只有活跃方向可以设为主方向');
 
   await tx.videoBranch.updateMany({
-    where: { video_card_id: input.videoCardId },
+    where: { video_card_id: input.videoCardId, status: { in: ACTIVE_BRANCH_STATUSES } },
     data: { is_primary: false, status: 'candidate' },
   });
   const updated = await tx.videoBranch.update({

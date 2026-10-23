@@ -1,3 +1,4 @@
+import { verifyFullCandidateSources, fullSchemaBefore } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import { assertProtectedIncrementCandidate } from './release-contract.mjs';
 import fs from 'node:fs';
@@ -84,7 +85,7 @@ export function readOriginalCanvasBatchMigration(m) {
     assert.equal(sha(sourceBytes(original[kind].root, CANVAS_BATCH_MIGRATOR)), m.canvasVideoBatchSchema.migrationModuleSha256);
   }
   const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE,
-    JSON.stringify({ ...receipt, backup, database: m.database })], { timeout: 120000 }));
+    JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) })], { timeout: 120000 }));
   assert.deepEqual(observed.databaseIdentity, receipt.databaseIdentity); assert.equal(observed.databaseWrites, 0);
   return { original, publication, receipt, proof, observed, backup };
 }
@@ -110,6 +111,7 @@ function readAdoption(m, value, required) {
   return receipt;
 }
 export function verifyCanvasBatchCandidates(m) {
+  if (m.fullRelease) { verifyFullCandidateSources(m); return assertCanvasBatchSchemaInput(m.canvasVideoBatchSchema); }
   if (!m.canvasVideoBatchSchema) return null;
   const input = assertCanvasBatchSchemaInput(m.canvasVideoBatchSchema);
   const previous = fs.readFileSync(m.live.web.root + '/prisma/schema.prisma');
@@ -149,7 +151,7 @@ with ro(d['backup']) as b:
  assert digest(original)==d['originalSchemaSha256']
  assert not set(d['newObjects']).intersection(original)
 with ro(d['database']) as c:
- current=schema(c)
+ current=d.get('fullSchemaBefore') or schema(c)
  assert set(current)-set(original)==set(d['newObjects'])
  assert all(current.get(k)==v for k,v in original.items())
  added={n:current[n] for n in sorted(d['newObjects'])}
@@ -181,7 +183,7 @@ export function readCanvasBatchMigration(m, { required = false, candidates = tru
   for (const key of ['runId', 'source', 'guardSource', 'manifestSha256', 'sqlSha256', 'backupSha256', 'originalSchemaSha256'])
     assert.equal(proof[key], receipt[key]);
   assert.equal(proof.integrity, 'ok'); assert.equal(proof.consistent, true);
-  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify({ ...receipt, backup, database: m.database })], { timeout: 120000 }));
+  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) })], { timeout: 120000 }));
   assert.deepEqual(observed.databaseIdentity, receipt.databaseIdentity); assert.equal(observed.databaseWrites, 0);
   return { receipt, observed };
 }

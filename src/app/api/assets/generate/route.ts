@@ -279,7 +279,7 @@ async function writeGenerationAttemptLog(params: {
   action: string;
   status: string;
   projectId: string;
-  videoCardId: string;
+  videoCardId: string | null;
   canvasDocumentId: string | null;
   canvasNodeId: string | null;
   provider: string;
@@ -333,7 +333,7 @@ async function assertCanAttachCanvasContext(user: SessionUser, canvasDocumentId:
       id: true,
       owner_user_id: true,
       project_id: true,
-      status: true,
+      status: true, document_json: true,
     },
   });
 
@@ -370,23 +370,22 @@ export async function POST(request: NextRequest) {
     const action = normalizeAction(body.action);
     if (!action) return NextResponse.json({ error: '图形生成 action 无效' }, { status: 400 });
 
-    const videoCardId = cleanString(body.video_card_id || body.videoCardId);
-    if (!videoCardId) return NextResponse.json({ error: '必须先选择视频卡，图形生成结果才能进入统一项目资产链路' }, { status: 400 });
-
-    const videoCard = await prisma.videoCard.findUnique({
-      where: { id: videoCardId },
-      select: { id: true, project_id: true },
-    });
-    if (!videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
-
-    const requestedProjectId = cleanString(body.project_id) || videoCard.project_id;
+    const videoCardId = cleanString(body.video_card_id || body.videoCardId) || null;
+    const v2 = body.creation_contract_version === 2;
+    if (!videoCardId && !v2) return NextResponse.json({ error: '原图形请求需要视频卡，新作请刷新后按项目保存' }, { status: 400 });
+    const videoCard = videoCardId ? await prisma.videoCard.findUnique({ where: { id: videoCardId }, select: { id: true, project_id: true } }) : null;
+    if (videoCardId && !videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
+    const requestedProjectId = cleanString(body.project_id) || videoCard?.project_id;
+    if (!requestedProjectId || videoCard && requestedProjectId !== videoCard.project_id) throw new AuthError('请选择正确的保存项目', 400);
     const project = await getProjectForGeneration(user, requestedProjectId);
-    await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
+    if (videoCard) await assertCanGenerateInVideoCard(user, project.id, videoCardId);
 
     const canvasDocumentId = cleanString(body.canvas_document_id || body.canvasDocumentId) || null;
     const canvasNodeId = cleanString(body.canvas_node_id || body.canvasNodeId) || null;
     if (canvasDocumentId) {
       const canvas = await assertCanAttachCanvasContext(user, canvasDocumentId);
+      const saved = JSON.parse(canvas.document_json).context || {};
+      if ((saved.video_card_id || saved.videoCardId) && (saved.video_card_id || saved.videoCardId) !== videoCardId) throw new AuthError('原画布仍绑定原视频卡，未改变原归属', 409);
       if (canvas.project_id && canvas.project_id !== project.id) {
         return NextResponse.json({ error: '画布不属于当前项目' }, { status: 400 });
       }
@@ -442,7 +441,7 @@ export async function POST(request: NextRequest) {
         action,
         status: 'failed',
         projectId: project.id,
-        videoCardId: videoCard.id,
+        videoCardId: videoCardId,
         canvasDocumentId,
         canvasNodeId,
         provider: settings.provider,
@@ -514,7 +513,7 @@ export async function POST(request: NextRequest) {
       const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding);
       return NextResponse.json({ success: true, pending: true, batchId, requestId, count,
         resultsEndpoint: '/api/tools/ultimate-canvas/styles/results',
-        resultsInput: { projectId: project.id, cardId: videoCard.id, documentId: canvasDocumentId, nodeId: canvasNodeId,
+        resultsInput: { projectId: project.id, cardId: videoCardId, documentId: canvasDocumentId, nodeId: canvasNodeId,
           moduleId: defaultStudioModuleId(user.id), requestId, batchId, count } }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
     }
 
@@ -528,12 +527,12 @@ export async function POST(request: NextRequest) {
       if (!workspace) return NextResponse.json({ error: '当前工作区不存在或无权使用' }, { status: 404 });
     } else {
       const tabId = cleanString(body.tab_id || body.tabId || request.headers.get('x-tab-id'), 'default');
-      workspaceId = (await getOrCreateWorkspace(tabId, user.id)).id;
+      workspaceId = (await getOrCreateWorkspace(v2 ? `asset-generation:v2:${user.id}:${project.id}:${canvasDocumentId || tabId}` : tabId, user.id)).id;
     }
     // A maintenance freeze must also cover the compatible synchronous path.
     assertImageStudioAdmissionOpen();
     const scope = createHash('sha256').update(JSON.stringify([settings.provider, settings.base_url, settings.api_key])).digest('hex');
-    const fingerprint = createHash('sha256').update(JSON.stringify({ action, projectId: project.id, videoCardId: videoCard.id,
+    const fingerprint = createHash('sha256').update(JSON.stringify({ action, projectId: project.id, videoCardId: videoCardId,
       canvasDocumentId, canvasNodeId, prompt, referenceImageIds, model: settings.default_model, ratio, size: imageSize,
       quality: cleanString(input.quality || body.quality), count, scope })).digest('hex');
     synchronousAdmission = await prisma.$transaction(async tx => {
@@ -579,7 +578,7 @@ export async function POST(request: NextRequest) {
           user,
           workspaceId,
           projectId: project.id,
-          sourceRequestId: `${action}:${videoCard.id}:${Date.now()}:${index + 1}`,
+          sourceRequestId: `${action}:${videoCardId || project.id}:${Date.now()}:${index + 1}`,
           sourceLabel: `图形生成 API / ${modelLabel}`,
           role,
           albumName: '图形生成结果',
@@ -607,7 +606,7 @@ export async function POST(request: NextRequest) {
       action,
       status: 'succeeded',
       projectId: project.id,
-      videoCardId: videoCard.id,
+      videoCardId: videoCardId,
       canvasDocumentId,
       canvasNodeId,
       provider: settings.provider,

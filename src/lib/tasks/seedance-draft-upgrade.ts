@@ -1,3 +1,7 @@
+import { isCreationV2 } from '@/lib/creation/contract';
+import { assertVideoCreationReady } from '@/lib/creation/context';
+import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
@@ -41,6 +45,7 @@ export class DraftUpgradeError extends Error {
 
 export type DraftUpgradeInput = {
   user: SessionUser;
+  creationBody?: Record<string, unknown>;
   draftTaskId: string;
   resolutionApprovalConfirmed: boolean;
   resolutionApprovalId?: string | null;
@@ -159,11 +164,11 @@ async function settleDraftUpgradeFailure(input: {
     if (existingSettlement) return;
 
     const consumedApprovals = await tx.approvalUsage.findMany({
-      where: { task_id: input.taskId },
+      where: { task_id: input.taskId, creation_intent_id: null },
       select: { approval_id: true },
     });
     if (consumedApprovals.length > 0) {
-      await tx.approvalUsage.deleteMany({ where: { task_id: input.taskId } });
+      await tx.approvalUsage.deleteMany({ where: { task_id: input.taskId, creation_intent_id: null } });
       for (const usage of consumedApprovals) {
         await tx.approvalRecord.updateMany({
           where: { id: usage.approval_id, used_count: { gt: 0 } },
@@ -298,28 +303,19 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   if (!draft.provider_draft_task_id) {
     throw new DraftUpgradeError('样片缺少供应商 Draft ID，不能安全升级', 409, 'DRAFT_PROVIDER_ID_MISSING');
   }
-  if (!draft.project_id || !draft.video_card_id) {
-    throw new DraftUpgradeError('Draft 未绑定项目视频卡，不能生成正式结果', 400, 'DRAFT_SCOPE_MISSING');
-  }
-
-  await assertCanGenerateInVideoCard(input.user, draft.project_id, draft.video_card_id);
-  const project = await getProjectForGeneration(input.user, draft.project_id);
-  const videoCard = await prisma.videoCard.findUnique({
-    where: { id: draft.video_card_id },
-    select: { id: true, project_id: true, status: true },
-  });
-  if (!videoCard || videoCard.project_id !== project.id) {
-    throw new DraftUpgradeError('视频卡不存在或不属于当前项目', 404, 'VIDEO_CARD_NOT_FOUND');
-  }
-
-  const approval = project.type !== 'personal'
-    ? await findApprovalForUpgrade({
-        projectId: project.id,
-        videoCardId: videoCard.id,
-        draft,
-        approvalId: input.resolutionApprovalId,
-      })
-    : null;
+  const creationBody = input.creationBody || {};
+  const creationV2 = isCreationV2(creationBody);
+  if (creationV2) await assertVideoCreationReady();
+  const projectId = draft.project_id || (creationV2 && typeof creationBody.project_id === 'string' ? creationBody.project_id : null);
+  if (!projectId || !creationV2 && !draft.video_card_id) throw new DraftUpgradeError('请明确原样片的生成目的地', 400, 'DRAFT_SCOPE_MISSING');
+  if (draft.project_id && creationV2 && creationBody.project_id !== draft.project_id) throw new DraftUpgradeError('升级必须保持原项目', 409, 'DRAFT_SCOPE_CHANGED');
+  if (draft.video_card_id) await assertCanGenerateInVideoCard(input.user, projectId, draft.video_card_id);
+  const project = await getProjectForGeneration(input.user, projectId);
+  const videoCard = draft.video_card_id ? await prisma.videoCard.findUnique({ where: { id: draft.video_card_id }, select: { id: true, project_id: true, status: true } }) : null;
+  if (draft.video_card_id && (!videoCard || videoCard.project_id !== project.id)) throw new DraftUpgradeError('视频卡不存在或不属于当前项目', 404, 'VIDEO_CARD_NOT_FOUND');
+  const videoCardId = videoCard?.id || null;
+  const approval = !creationV2 && project.type !== 'personal' && videoCardId
+    ? await findApprovalForUpgrade({ projectId: project.id, videoCardId, draft, approvalId: input.resolutionApprovalId }) : null;
 
   const duration = draft.duration ?? 5;
   if (!isSeedanceVideoDuration(duration, draft.model)) {
@@ -328,7 +324,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : input.user.id;
 
-  const pricingContext = await resolveVideoPricingContext(input.user, savedVideoPricingContextInput(draft, true), 'draft_upgrade');
+  const pricingContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(draft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade');
   const priceQuote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration, context: pricingContext });
   requireVideoPricingRevision(priceQuote, input.pricingRevision);
   const needsPricingCredential = Boolean(input.pricingQuoteToken) || await videoPricingRequiresContext(draft.model, 'seedance');
@@ -357,11 +353,12 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   let task = await prisma.$transaction(async (tx) => {
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
     await assertProjectActiveInTransaction(tx, input.user, project.id);
+    await assertLegacyCreationSourceLocks(tx, input.user, { ...creationBody, source_draft_task_id: draft.id }, project.id);
     await assertVideoPricingAcceptance(priceQuote, input.pricingRevision, tx);
     if (needsPricingCredential) {
       const freshDraft = await tx.videoTask.findUnique({ where: { id: draft.id } });
       if (!freshDraft || ['admin_hidden', 'user_deleted'].includes(freshDraft.retention_status)) throw new DraftUpgradeError('原样片暂不可用，未提交升级', 409, 'pricing_quote_changed');
-      const freshContext = await resolveVideoPricingContext(input.user, savedVideoPricingContextInput(freshDraft, true), 'draft_upgrade');
+      const freshContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(freshDraft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade');
       verifyVideoPricingCredential(input.pricingQuoteToken, freshContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
     }
     const created = await tx.videoTask.create({
@@ -396,7 +393,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
         user_id: input.user.id,
         owner_user_id: input.user.id,
         project_id: project.id,
-        video_card_id: videoCard.id,
+        video_card_id: videoCardId!,
         visibility: project.type === 'personal' ? 'private' : 'project',
         estimated_cost: estimatedCost,
         frozen_cost: estimatedCost,
@@ -416,6 +413,9 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       },
     });
 
+    await acceptVideoCreationIntent(tx, input.user, { ...creationBody, project_id: project.id, video_card_id: videoCardId,
+      action: 'draft_upgrade', entry: 'draft_upgrade', source_draft_task_id: draft.id, continuation: { mode: 'continue', parent_task_id: draft.id },
+      provider: 'seedance', model: draft.model, duration, resolution: '1080p', ratio: draft.ratio || '16:9' }, { taskId: created.id, cost: estimatedCost, pricingRevision: priceQuote.revision });
     await recordUsageAttribution(tx, { sourceKind: 'video_task', sourceId: created.id,
       actorUserId: input.user.id, ownerUserId: created.owner_user_id || created.user_id,
       billingSubjectType: created.billing_scope, billingSubjectId: created.billing_account_id,
@@ -431,14 +431,14 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
         where: { id: freshApproval.task_id },
         select: { id: true, video_card_id: true, version_role: true },
       });
-      if (!baseTask || !isValidApprovalBase(baseTask, draft, videoCard.id)) {
+      if (!baseTask || !isValidApprovalBase(baseTask, draft, videoCardId!)) {
         throw new DraftUpgradeError('1080p 审批基准任务已变化，请重新申请审批', 409, 'RESOLUTION_APPROVAL_BASE_CHANGED');
       }
       await consumeApprovalForTask(tx, {
         approvalId: freshApproval.id,
         taskId: created.id,
         userId: input.user.id,
-        metadata: { project_id: project.id, video_card_id: videoCard.id, baseline_task_id: freshApproval.task_id, resolution: '1080p', draft_task_id: draft.id },
+        metadata: { project_id: project.id, video_card_id: videoCardId!, baseline_task_id: freshApproval.task_id, resolution: '1080p', draft_task_id: draft.id },
       });
     }
 

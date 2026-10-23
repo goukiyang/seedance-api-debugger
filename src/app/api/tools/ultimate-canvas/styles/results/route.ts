@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     const outputErrors: string[] = [];
 
     if (assets.length) {
-      const workspaceId = (await getOrCreateWorkspace(`ultimate-canvas:${context.projectId}:${context.cardId}`, user.id)).id;
+      const workspaceId = (await getOrCreateWorkspace(context.cardId ? `ultimate-canvas:${context.projectId}:${context.cardId}` : `ultimate-canvas:v2:${user.id}:${context.projectId}:${context.documentId}`, user.id)).id;
       for (const task of succeeded) {
         const assetId = task.asset_id!;
         const asset = assetById.get(assetId);

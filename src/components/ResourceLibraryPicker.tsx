@@ -23,6 +23,7 @@ import { isNavItemVisible } from '@/lib/navigation';
 import { imageDisplaySource } from '@/lib/media/image-comparison';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
+export type PickerFocusIntent = { id: string; scopeKey: string; revision: number; identities: string[] };
 export interface ResourceLibraryPickerProps {
   open: boolean;
   imageOnly?: boolean;
@@ -30,6 +31,9 @@ export interface ResourceLibraryPickerProps {
   title?: string;
   confirmLabel?: string;
   purpose?: string;
+  contextKey?: string;
+  focusIntent?: PickerFocusIntent | null;
+  onFocusIntentConsumed?: (id: string) => void;
   initialSource?: 'all' | 'template-image' | 'random-person';
   maxSelection?: number;
   typeLimits?: Partial<Record<AssetType, number>>;
@@ -79,17 +83,18 @@ function Thumbnail({ item }: { item: PickerItem }) {
   return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', contextKey, focusIntent, onFocusIntentConsumed, initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user, loadingUser, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const pickerId = useId();
   const { confirm: askConfirm, productDialog } = useProductDialog();
+  const [removedInSession, setRemovedInSession] = useState(false);
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
   const avatarWindow = useRef<Window|null>(null), avatarTicket = useRef('');
   const returnKey=user&&avatarTarget?`sd2:avatar-return:v1:${user.id}:${avatarTarget.kind}:${avatarTarget.id}:${purpose}`:'';
   const [returnAvailable,setReturnAvailable]=useState(false);
   const avatarCurrent = useRef({avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds}); avatarCurrent.current={avatarTarget,onAvatarApplied,onAvatarConfirm,returnKey,currentAssetIds};
   useEffect(()=>{avatarTicket.current='';setReturnAvailable(false);if(returnKey){const ticket=stored<string>(returnKey,'');if(typeof ticket==='string'&&/^[a-zA-Z0-9-]{1,100}$/.test(ticket)){avatarTicket.current=ticket;setReturnAvailable(true);}}},[returnKey]);
-  useEffect(()=>{setRemovedItem(null);if(!user)return;const saved=stored<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>|null>(`sd2:library-undo:${user.id}`,null);if(saved&&typeof saved.fileName==='string'){const identity=saved.identity??(saved.assetId?`asset:${saved.assetId}`:'');if(typeof identity==='string'&&/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(identity))setRemovedItem({...saved,identity,canRemoveFromLibrary:true});}},[user?.id]);
+  useEffect(()=>{setRemovedItem(null);setRemovedInSession(false);if(!user)return;const saved=stored<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>|null>(`sd2:library-undo:${user.id}`,null);if(saved&&typeof saved.fileName==='string'){const identity=saved.identity??(saved.assetId?`asset:${saved.assetId}`:'');if(typeof identity==='string'&&/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(identity))setRemovedItem({...saved,identity,canRemoveFromLibrary:true});}},[user?.id]);
   useEffect(()=>{
     const receive=async(event:MessageEvent)=>{
       if(event.origin!==location.origin||avatarWindow.current&&event.source!==avatarWindow.current||event.data?.type!=='sd2:avatar-return'||event.data.ticketId!==avatarTicket.current||locked.current||!active.current)return;
@@ -130,6 +135,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const types = useMemo(() => typesKey.split(',') as AssetType[], [typesKey]);
   const sessionReady = Boolean(hasLoadedUser && !loadingUser && !userLoadError && !sessionChanged && !isClientSessionBlocked() && user);
   const prefsKey = user ? `sd2:resource-picker:v1:${user.id}:${target}:${purpose}` : '';
+  const positionScope = `${prefsKey}:${contextKey || 'legacy'}`;
   const recentKey = user ? `sd2:resource-recent:v1:${user.id}:${target}` : '';
   const [prefs, setPrefs] = useState<Preferences>(defaults), [ready, setReady] = useState(false), [query, setQuery] = useState('');
   const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
@@ -145,6 +151,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0), initializedKey = useRef('');
   const failedUploadIds = useRef(new WeakMap<File, string>());
   const readingMore = useRef(false);
+  const lastVisiblePage = useRef<string | null>(null);
+  const browseRevision = useRef(0), consumedFocus = useRef(new Set<string>());
+  const [navigation, setNavigation] = useState<{ id: string; revision: number; targetId: string; filterKey: string } | null>(null);
   const filterKey = pickerFilterKey(typesKey, prefs);
   const [loadedFilter, setLoadedFilter] = useState('');
   const active = useRef(open && sessionReady); active.current = open && sessionReady;
@@ -182,7 +191,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
 
   useEffect(() => {
     if (!open || !sessionReady || !user || !prefsKey) return;
-    const ownerKey = `${prefsKey}:${typesKey}:${initialSource}`;
+    const ownerKey = `${positionScope}:${typesKey}:${initialSource}`;
     if (initializedKey.current === ownerKey && ready && sessionOwner === prefsKey) return;
     if (importOwner.current !== recentKey) { imports.current.clear(); uploadReceipts.current.clear(); importOwner.current = recentKey; }
     const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
@@ -193,16 +202,19 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (typeof raw.query === 'string') next.query = raw.query.slice(0, 160);
     if (raw.sort === 'name') next.sort = 'name';
     for (const field of ['album', 'project', 'template'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
-    if (typeof raw.scroll === 'number' && Number.isFinite(raw.scroll)) next.scroll = Math.max(0, raw.scroll);
-    if (typeof raw.pages === 'number') next.pages = Math.min(5, Math.max(1, Math.floor(raw.pages) || 1));
+    // Old v1 positions have no target identity; retain their filter preferences only.
+    const position = stored<{ scroll?: unknown; pages?: unknown }>(`${positionScope}:position:v2:${pickerFilterKey(typesKey, next)}`, {});
+    if (typeof position.scroll === 'number' && Number.isFinite(position.scroll)) next.scroll = Math.max(0, position.scroll);
+    if (typeof position.pages === 'number') next.pages = Math.min(20, Math.max(1, Math.floor(position.pages) || 1));
     for (const field of ['filtersOpen', 'selectionOpen'] as const) if (typeof raw[field] === 'boolean') next[field] = raw[field]!;
-    restoration.current = next.scroll; restoring.current = true;
+    browseRevision.current++; setNavigation(null); setRemovedInSession(false);
+    restoration.current = next.scroll; restoring.current = true; lastVisiblePage.current = null;
     locked.current = false; setBusy(false);
     setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
     initializedKey.current = ownerKey;
     setReady(true);
     return () => { sequence.current++; session.current++; };
-  }, [open, prefsKey, ready, recentKey, sessionOwner, sessionReady, types, typesKey, user?.id, initialSource]);
+  }, [open, prefsKey, ready, recentKey, sessionOwner, sessionReady, types, typesKey, user?.id, initialSource, positionScope]);
   useEffect(() => {
     if (!open || !ready) return;
     const viewport = window.visualViewport;
@@ -241,7 +253,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     return () => observer.disconnect();
   }, [open, ready, sessionOwner, prefs.source, prefs.view, typesKey]);
   useEffect(() => { if (!sessionReady || !ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey, sessionReady]);
-  useEffect(() => { if (sessionReady && ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify(prefs)); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner, sessionReady]);
+  useEffect(() => { if (sessionReady && ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify({ ...prefs, scroll: 0, pages: 1 })); localStorage.setItem(`${positionScope}:position:v2:${filterKey}`, JSON.stringify({ scroll: prefs.scroll, pages: prefs.pages })); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner, sessionReady, positionScope, filterKey]);
   const readCursor = useRef<string | null>(null);
   const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
     const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
@@ -276,7 +288,6 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     })();
     return () => { sequence.current++; };
   }, [open, sessionReady, ready, sessionOwner, prefsKey, fetchPage, epoch]);
-  useEffect(() => { if (loading || !items.length || !restoring.current) return; browseSurface()?.scrollTo({ top: restoration.current }); restoring.current = false; }, [items, loading, browseSurface]);
 
   const currentIds = new Set(currentAssetIds), currentRefs = new Set(currentReferenceImageIds);
   const existing = (item: PickerItem) => Boolean(item.assetId && currentIds.has(item.assetId) || item.referenceImageId && currentRefs.has(item.referenceImageId) || imports.current.get(item.identity)?.assetId && currentIds.has(imports.current.get(item.identity)!.assetId!));
@@ -290,7 +301,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const next = selected.some(s => s.identity === item.identity) ? selected.filter(s => s.identity !== item.identity) : [...selected, item];
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
-  const change = (patch: Partial<Preferences>) => { restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
+  const change = (patch: Partial<Preferences>) => { browseRevision.current++; setNavigation(null); sequence.current++; readingMore.current = false; restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const changeSource = (source: string) => { if (prefs.source !== source) change({ source, template: '' }); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
     if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
@@ -304,7 +315,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       if (!active.current || removalSession !== session.current) return;
       if (!response.ok) throw new Error(data.error || '操作未确认');
       if (!restore) { setItems(old => old.filter(i => i.identity !== item.identity)); setSelected(old => old.filter(i => i.identity !== item.identity)); imports.current.delete(item.identity); }
-      setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
+      setRemovedInSession(!restore); setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
     } catch (e) { if (active.current && removalSession === session.current) setError(e instanceof Error ? e.message : '操作失败'); }
     finally { locked.current = false; setBusy(false); }
   };
@@ -312,25 +323,60 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setDirectoryError('');
     try { const data = await fetchPage(page + 1, readCursor.current); if (token !== sequence.current) return; readCursor.current = data.nextCursor || null; setItems(old => Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values())); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
     catch (e) { if (token === sequence.current) { setDirectoryError(e instanceof Error ? e.message : '读取失败'); throw e; } }
-    finally { readingMore.current = false; if (token === sequence.current) setLoading(false); }
+    finally { if (token === sequence.current) { readingMore.current = false; setLoading(false); } }
   };
+  const pageStorageKey = `${positionScope}:page:v2:${filterKey}`;
   const resultPages = useResultPages({
     items: loadedFilter === filterKey && sessionOwner === prefsKey ? items.map(item => ({ id: item.identity, item })) : [],
-    storageKey: `${prefsKey}:page:v1:${filterKey}`, visible: open && ready && sessionOwner === prefsKey,
+    storageKey: pageStorageKey, visible: open && ready && sessionOwner === prefsKey,
     busy: loading || loadedFilter !== filterKey, error: Boolean(directoryError), hasMore: loadedFilter === filterKey && hasMore,
     total: loadedFilter === filterKey ? total : null,
     loadMore, currentId: null,
+    navigationIntent: navigation?.filterKey === filterKey ? { ...navigation, scopeKey: pageStorageKey } : null,
   });
   useEffect(() => {
     if (resultPages.restoring || loading) return;
+    if (!resultPages.pageItems.length) return;
+    const pageKey = `${pageStorageKey}:${resultPages.start}`;
+    if (restoring.current) {
+      browseSurface()?.scrollTo({ top: restoration.current }); restoring.current = false; lastVisiblePage.current = pageKey; return;
+    }
+    if (lastVisiblePage.current === pageKey) return;
+    lastVisiblePage.current = pageKey;
     browseSurface()?.scrollTo({ top: 0 });
-  }, [resultPages.start, resultPages.restoring, browseSurface]);
+  }, [pageStorageKey, resultPages.start, resultPages.restoring, resultPages.pageItems.length, loading, browseSurface]);
+  useEffect(() => {
+    if (!open || !ready || !sessionReady || sessionOwner !== prefsKey || !focusIntent || focusIntent.scopeKey !== contextKey) return;
+    const key = JSON.stringify([positionScope, focusIntent.id, focusIntent.revision]);
+    if (consumedFocus.current.has(key)) return;
+    consumedFocus.current.add(key); onFocusIntentConsumed?.(focusIntent.id);
+    const identities = validKeys(focusIntent.identities);
+    if (!identities.length) return;
+    const token = session.current, revision = ++browseRevision.current;
+    sequence.current++; readingMore.current = false; restoring.current = false; setNavigation(null);
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ target, scope: 'mine', source: 'all', types: typesKey, keys: identities.join(',') });
+        const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
+        const data = await readJsonResponse<PickerResponse>(response);
+        if (!active.current || token !== session.current || revision !== browseRevision.current) return;
+        const targetItem = data.items?.find(item => identities.includes(item.identity));
+        if (!response.ok || !targetItem) { setNotice('素材已上传，列表信息待核对；原素材和当前选择已保留。'); setEpoch(value => value + 1); return; }
+        const next = { ...defaults, filtersOpen: prefs.filtersOpen, selectionOpen: prefs.selectionOpen };
+        setPrefs(next); setQuery(''); setPage(1); setItems([]); setLoadedFilter(''); setHasMore(false);
+        setNavigation({ id: focusIntent.id, revision, targetId: targetItem.identity, filterKey: pickerFilterKey(typesKey, next) });
+        setEpoch(value => value + 1);
+      } catch {
+        if (active.current && token === session.current && revision === browseRevision.current) { setNotice('素材已上传，列表信息待核对；原素材和当前选择已保留。'); setEpoch(value => value + 1); }
+      }
+    })();
+  }, [open, ready, sessionReady, sessionOwner, prefsKey, positionScope, contextKey, focusIntent?.id, focusIntent?.revision, target, typesKey]);
   const refreshDirectory = (next: Preferences = { ...prefs, query }) => {
     if (locked.current) return;
     // Invalidate in-flight reads before changing the complete filter snapshot.
     sequence.current++; readCursor.current = null;
     resultPages.reset();
-    try { localStorage.removeItem(`${prefsKey}:page:v1:${pickerFilterKey(typesKey, next)}`); } catch { /* Optional browse position. */ }
+    try { localStorage.removeItem(`${positionScope}:page:v2:${pickerFilterKey(typesKey, next)}`); } catch { /* Optional browse position. */ }
     setQuery(next.query); change(next);
     setPage(1); setTotal(0); setHasMore(false); setLoadedFilter(''); setLoading(true);
     setEpoch(value => value + 1);
@@ -341,15 +387,16 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (!sessionReady || locked.current || !files.length) return;
     if (files.some(file => !types.includes(file.type.split('/')[0] as AssetType))) { setError(`请选择${types.map(t => labels[t]).join('、')}文件`); return; }
     locked.current = true; setBusy(true); setError(''); setNotice(''); const token = session.current;
+    const operationRevision = ++browseRevision.current; sequence.current++; readingMore.current = false; restoring.current = false; setNavigation(null);
     let duplicates = 0;
     try {
       const unique = await uniqueUploadFiles(files); files = unique.files; duplicates = unique.duplicates;
       if (token !== session.current || !active.current) { if (token === session.current) locked.current = false; return; }
       const issue = canSelect([...selected, ...files.map((file, index) => ({ type: file.type.split('/')[0] as AssetType, identity: `upload:${index}` } as PickerItem))]);
       if (issue) throw new Error(issue);
-    } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); locked.current = false; } return; }
+    } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); locked.current = false; setEpoch(value => value + 1); } return; }
     const kinds = files.map(file => file.type.split('/')[0] as AssetType);
-    const uploaded: PickerItem[] = [], failed: FailedUploadItem[] = []; let uploadWarning = '';
+    const uploaded: PickerItem[] = [], failed: FailedUploadItem[] = [], verified = new Set<string>(); let uploadWarning = '';
     for (let index = 0; index < files.length; index++) {
       if (token !== session.current || !active.current) break;
       const file = files[index]; setUploadLabel(`${index + 1}/${files.length} ${file.name}`); setProgress(null);
@@ -366,7 +413,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         const response = await fetch(`/api/assets/picker?target=${target}&keys=${encodeURIComponent(`asset:${id}`)}&types=${typesKey}`, { cache: 'no-store' });
         const data = await readJsonResponse<PickerResponse>(response, { invalidJsonMessage: '文件已上传，素材信息读取失败；请重新读取，不必重传' });
         const item = response.ok ? data.items.find(i => i.assetId === id) : undefined;
-        if (item) uploaded[uploaded.length - 1] = item; else uploadWarning = '文件已上传，素材信息暂时不可用；添加时会重新核对';
+        if (item) { uploaded[uploaded.length - 1] = item; verified.add(item.identity); } else uploadWarning = '文件已上传，素材信息暂时不可用；添加时会重新核对';
       } catch (cause) {
         if (token !== session.current || !active.current) break;
         if (uploadedId) uploadWarning = cause instanceof Error ? cause.message : '文件已上传，素材信息暂时不可用；添加时会重新核对';
@@ -379,7 +426,13 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     }
     if (token === session.current) {
       setSelected(old => [...old, ...uploaded.filter(i => !existing(i) && !old.some(o => o.identity === i.identity))]);
-      change({ view: 'library', scope: 'mine', source: 'all', type: 'all', album: '', project: '', query: '' }); setQuery(''); setEpoch(e => e + 1);
+      const targetItem = uploaded.find(item => verified.has(item.identity));
+      if (operationRevision === browseRevision.current && targetItem) {
+        const next = { ...defaults, filtersOpen: prefs.filtersOpen, selectionOpen: prefs.selectionOpen };
+        setPrefs(next); setQuery(''); setPage(1); setLoadedFilter('');
+        setNavigation({ id: crypto.randomUUID(), revision: operationRevision, targetId: targetItem.identity, filterKey: pickerFilterKey(typesKey, next) });
+      }
+      setEpoch(e => e + 1);
       setFailedUploads(old => reconcileUploadFailures(old, files, failed)); setError(uploadWarning); setProgress(null); setUploadLabel(''); setBusy(false);
       setNotice(uploaded.length ? `已上传或复用 ${uploaded.length} 个素材${duplicates ? `，本批 ${duplicates} 个相同文件已合并选择` : ''}；点击“${confirmLabel}”后才会加入。` : '');
       locked.current = false;
@@ -508,7 +561,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <button type="button" aria-label="关闭素材库" title="关闭素材库" onClick={close}><X size={20} /></button>
       </div></header>
       <input hidden ref={input} type="file" accept={types.map(t => `${t}/*`).join(',')} multiple={maxSelection !== 1} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void upload(files); }} />
-      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => setQuery(e.target.value)} /></label><button type="button" className={styles.filterToggle} aria-expanded={prefs.filtersOpen} aria-controls={`${pickerId}-filters`} onClick={() => { if (!prefs.filtersOpen) browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, filtersOpen: !p.filtersOpen })); }}><SlidersHorizontal size={17} /><span>筛选{activeFilterCount ? ` ${activeFilterCount}` : ''}</span></button></div>
+      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => { browseRevision.current++; setNavigation(null); setQuery(e.target.value); }} /></label><button type="button" className={styles.filterToggle} aria-expanded={prefs.filtersOpen} aria-controls={`${pickerId}-filters`} onClick={() => { if (!prefs.filtersOpen) browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, filtersOpen: !p.filtersOpen })); }}><SlidersHorizontal size={17} /><span>筛选{activeFilterCount ? ` ${activeFilterCount}` : ''}</span></button></div>
       <div className={styles.layout}><aside className={styles.sidebar} aria-label="图集和项目">
         <label className={`${styles.scopeControl} ${styles.sidebarScope}`}><span>素材范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
         <button type="button" className={!prefs.album && !prefs.project ? styles.active : ''} onClick={() => change({ album: '', project: '' })}><Grid2X2 size={18} />全部素材</button>
@@ -551,7 +604,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
         {directoryNotice && <div role="status" className={styles.notice}>{directoryNotice}</div>}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
-        {removedItem && <div role="status" className={styles.notice}>已从我的素材库删除，文件和已有引用保留。<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>撤销删除</button></div>}
+        {removedItem && <div role={removedInSession ? 'status' : undefined} className={styles.notice}>{removedInSession ? '已从我的素材库移出，文件和已有引用保留。' : `上次移出：${removedItem.fileName}`}<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>{removedInSession ? '撤销移出' : '撤销上次移出素材库'}</button></div>}
         {error && <div role="alert" className={styles.error}>{error}</div>}
         {(directoryError || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{directoryError || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setDirectoryError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!directoryError && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && directoryError && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
         {!!failedUploads.length && <div role="alert" className={styles.uploadFailures}>{failedUploads.map(failure => <div key={failure.id} className={styles.uploadFailure}>
@@ -573,7 +626,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             </div>
           </article>; })}</div>
           {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !directoryError && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
-          <div className={styles.more}><span>{loadedFilter === filterKey ? `${total} 个素材` : loading ? '正在读取目录' : '目录尚未读取成功'}</span><nav className={styles.pagination} aria-label="素材分页">
+          <div className={styles.more}><span>{loadedFilter === filterKey ? `${total} 个素材` : loading ? '正在读取目录' : '目录尚未读取成功'}</span><nav className={styles.pagination} aria-label="素材分页" onPointerDown={() => { browseRevision.current++; }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") browseRevision.current++; }}>
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
             <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !directoryError && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
             <span role="status">第 {resultPages.page}{resultPages.pages === null ? ' 页，仍有更多' : ` / ${resultPages.pages} 页`}{resultPages.restoring && !resultPages.navigationIssue && !directoryError ? '，正在读取目标页' : ''}</span>

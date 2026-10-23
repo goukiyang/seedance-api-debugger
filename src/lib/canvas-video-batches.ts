@@ -1,3 +1,8 @@
+import { CreationError } from '@/lib/creation/contract';
+import { assertVideoCreationReady, readCreationContext } from '@/lib/creation/context';
+import { creationSpecHash, creationSubmissionSpec } from '@/lib/creation/intents';
+import { validateCreationBatchApproval } from '@/lib/creation/approval';
+import { creationParent, assertCreationLineageUnlocked } from '@/lib/creation/lineage';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Prisma, type CanvasVideoBatch, type CanvasVideoBatchChild } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -36,7 +41,8 @@ const inputFields = new Set(['prompt', 'promptMentions', 'model', 'provider', 'g
   'reference_image_ids', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url',
   'first_frame_image_id', 'last_frame_image_id', 'final_prompt_snapshot', 'prompt_user_edited', 'client_name', 'source_metadata',
   'canvas_document_id', 'canvas_node_id', 'idempotency_key', 'source_request_id', 'resolution_approval_id',
-  'pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost', 'count', 'required_capabilities']);
+  'pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost', 'count', 'required_capabilities',
+  'creation_contract_version', 'intent_id', 'intent_revision', 'continuation', 'baseline_task_id', 'input_source_task_ids']);
 
 function assertActor(user: SessionUser) {
   assertInternalOnly(user, '外部账号无权使用无限画布。');
@@ -65,14 +71,15 @@ function normalizeInput(raw: unknown, documentId: string, nodeId: string): Body 
   if (typeof raw.prompt !== 'string' || !raw.prompt.trim() || typeof raw.model !== 'string' || !raw.model.trim()) throw new CanvasVideoBatchError('请保留明确的提示词和视频型号', 400);
   if (!['seedance', 'volcengine_ip', 'h3'].includes(String(raw.provider))) throw new CanvasVideoBatchError('请保留原视频通道，不能自动换商', 400);
   checkedId(raw.project_id, '项目编号');
-  checkedId(raw.video_card_id, '视频卡编号');
+  if (raw.creation_contract_version !== 2 || raw.video_card_id) checkedId(raw.video_card_id, '视频卡编号');
+  if (raw.creation_contract_version === 2 && !raw.video_card_id && raw.video_branch_id) throw new CanvasVideoBatchError('无卡新作不能指定旧方向', 400);
   const branch = optionalId(raw.video_branch_id);
   if (raw.canvas_document_id && raw.canvas_document_id !== documentId || raw.canvas_node_id && raw.canvas_node_id !== nodeId) throw new CanvasVideoBatchError('画布归属与输入不同', 400);
   const metadata = canvasBatchObject(raw.source_metadata) ? raw.source_metadata : {};
   if (metadata.canvas_document_id && metadata.canvas_document_id !== documentId || metadata.canvas_node_id && metadata.canvas_node_id !== nodeId) throw new CanvasVideoBatchError('画布来源与输入不同', 400);
   const { pricing_quote_token: _token, pricing_revision: _revision, pricing_fingerprint_version: _fp,
     max_estimated_cost: _max, idempotency_key: _key, source_request_id: _source, count: _count, required_capabilities: _cap, ...input } = raw;
-  return { ...input, provider: raw.provider, model: raw.model.trim(), video_branch_id: branch,
+  return { ...input, provider: raw.provider, model: raw.model.trim(), video_card_id: optionalId(raw.video_card_id), video_branch_id: branch,
     client_name: 'ultimate_canvas', canvas_document_id: documentId, canvas_node_id: nodeId,
     source_metadata: { ...metadata, source: 'ultimate_canvas', provider: raw.provider, canvas_document_id: documentId, canvas_node_id: nodeId },
     required_capabilities: [CANVAS_VIDEO_BATCH_CAPABILITY] };
@@ -81,20 +88,24 @@ async function assertScope(db: CanvasBatchDb, user: SessionUser, input: Body, do
   const doc = await db.canvasDocument.findUnique({ where: { id: documentId } });
   if (!doc || doc.owner_user_id !== user.id || doc.status !== 'active' || doc.project_id !== input.project_id) throw new CanvasVideoBatchError('原画布已关闭或归属变化', 409);
   await assertProjectActiveInTransaction(db, user, String(input.project_id));
+  if (input.creation_contract_version === 2) {
+    await assertVideoCreationReady(db);
+    await readCreationContext(user, String(input.project_id), optionalId(input.video_card_id), db);
+  }
   const nodes = JSON.parse(doc.document_json).canvas?.nodes;
   if (!Array.isArray(nodes) || !nodes.some((node: { id: string }) => node.id === nodeId)) throw new CanvasVideoBatchError('请先保存当前视频节点', 409);
-  const card = await db.videoCard.findUnique({ where: { id: String(input.video_card_id) } });
-  if (!card || card.project_id !== doc.project_id || !canGenerateInVideoCardStatus(card.status)) throw new CanvasVideoBatchError('视频卡已关闭或不属于当前项目', 403);
+  const card = input.video_card_id ? await db.videoCard.findUnique({ where: { id: String(input.video_card_id) } }) : null;
+  if (input.video_card_id && (!card || card.project_id !== doc.project_id || !canGenerateInVideoCardStatus(card.status))) throw new CanvasVideoBatchError('视频卡已关闭或不属于当前项目', 403);
   if (input.video_branch_id) {
     const branch = await db.videoBranch.findUnique({ where: { id: String(input.video_branch_id) } });
-    if (!branch || branch.video_card_id !== card.id || ['closed', 'merged', 'promoted'].includes(branch.status)) throw new CanvasVideoBatchError('视频分支已关闭或归属不同', 403);
+    if (!branch || branch.video_card_id !== card?.id || ['closed', 'merged', 'promoted'].includes(branch.status)) throw new CanvasVideoBatchError('视频分支已关闭或归属不同', 403);
   }
   return doc;
 }
 async function preflightResources(db: CanvasBatchDb, user: SessionUser, input: Body, count: number, total: number, verifyFunds = true) {
   const project = await db.project.findUnique({ where: { id: String(input.project_id) } });
   if (!project) throw new AuthError('项目不存在', 404);
-  if (project.type !== 'personal' && input.resolution === '1080p') {
+  if (input.creation_contract_version !== 2 && project.type !== 'personal' && input.resolution === '1080p') {
     const approval = input.resolution_approval_id ? await db.approvalRecord.findFirst({ where: { id: String(input.resolution_approval_id),
       type: 'resolution_1080p', status: 'approved', project_id: project.id, video_card_id: String(input.video_card_id) } })
       : await findUsableApproval(db, { type: 'resolution_1080p', projectId: project.id, videoCardId: String(input.video_card_id) });
@@ -179,7 +190,7 @@ async function statesFor(batch: Batch, user: SessionUser, db: CanvasBatchDb = pr
 }
 export async function projectCanvasVideoBatch(user: SessionUser, batch: Batch) {
   const states = await statesFor(batch, user);
-  return { id: batch.id, contract_version: 1, request_id: batch.client_request_id, document_id: batch.document_id,
+  return { id: batch.id, contract_version: batch.contract_version, creation_intent_id: batch.creation_intent_id, authorization_round: batch.authorization_round, request_id: batch.client_request_id, document_id: batch.document_id,
     dispatch_limit: 1,
     node_id: batch.node_id, project_id: batch.project_id, video_card_id: batch.video_card_id, video_branch_id: batch.video_branch_id,
     count: batch.count, state: canvasVideoBatchState(states), revision: batch.revision,
@@ -208,13 +219,14 @@ export async function quoteCanvasVideoBatch(user: SessionUser, body: Body) {
     count = batch.children.filter(child => child.state === 'prepared' && !child.task_id).length;
     if (!count || !batch.active_node_key) throw new CanvasVideoBatchError('本批次没有可重新报价的未开始子项');
   } else {
-    if (body.contract_version !== 1) throw new CanvasVideoBatchError('批次协议无效', 400);
+    if (![1, 2].includes(Number(body.contract_version))) throw new CanvasVideoBatchError('批次协议无效', 400);
     requestId = checkedId(body.request_id, '原请求编号');
     const documentId = checkedId(body.document_id, '画布编号'), nodeId = checkedId(body.node_id, '节点编号');
     let parsedCount;
     try { parsedCount = canvasVideoCount(body.count); } catch (error) { throw new CanvasVideoBatchError((error as Error).message, 400); }
     if (parsedCount === 1) throw new CanvasVideoBatchError('单视频沿原生成协议，无需建立批次', 400);
     count = parsedCount; input = normalizeInput(body.input, documentId, nodeId);
+    if ((body.contract_version === 2) !== (input.creation_contract_version === 2)) throw new CanvasVideoBatchError('父批与视频创作协议不一致，未生成', 400);
     requestHash = canvasBatchHash({ documentId, nodeId, count, input });
   }
   const documentId = batch?.document_id || String(body.document_id), nodeId = batch?.node_id || String(body.node_id);
@@ -248,12 +260,13 @@ export async function quoteCanvasVideoBatch(user: SessionUser, body: Body) {
 
 export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
   assertActor(user);
-  if (body.contract_version !== 1) throw new CanvasVideoBatchError('批次协议无效', 400);
+  if (![1, 2].includes(Number(body.contract_version))) throw new CanvasVideoBatchError('批次协议无效', 400);
   const requestId = checkedId(body.request_id, '原请求编号'), documentId = checkedId(body.document_id, '画布编号'), nodeId = checkedId(body.node_id, '节点编号');
   let count;
   try { count = canvasVideoCount(body.count); } catch (error) { throw new CanvasVideoBatchError((error as Error).message, 400); }
   if (count === 1) throw new CanvasVideoBatchError('单视频沿原协议', 400);
   const input = normalizeInput(body.input, documentId, nodeId), requestHash = canvasBatchHash({ documentId, nodeId, count, input });
+  if ((body.contract_version === 2) !== (input.creation_contract_version === 2)) throw new CanvasVideoBatchError('父批与视频创作协议不一致，未生成', 400);
   const prior = await prisma.canvasVideoBatch.findUnique({ where: { owner_user_id_client_request_id: { owner_user_id: user.id, client_request_id: requestId } }, include: { children: true } });
   if (prior) {
     if (prior.request_hash !== requestHash) throw new CanvasVideoBatchError('原请求编号已绑定其他内容，请查询原批次', 409, 'canvas_video_batch_payload_mismatch');
@@ -280,6 +293,17 @@ export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
       if (singles.some(task => { const meta = JSON.parse(task.source_metadata_json || '{}'); return meta.canvas_document_id === documentId && meta.canvas_node_id === nodeId; })) throw new CanvasVideoBatchError('本节点仍有原视频任务，请先核对原任务');
       await preflightResources(db, user, input, count, quote.total);
       const batchId = `cvb-${canvasBatchHash([user.id, requestId])}`;
+      const creationIntent = input.creation_contract_version === 2 ? await db.videoCreationIntent.findUnique({ where: { id: checkedId(input.intent_id, '创作意图') } }) : null;
+      if (input.creation_contract_version === 2 && (!creationIntent || creationIntent.owner_id !== user.id || creationIntent.revision !== input.intent_revision
+        || creationIntent.request_id !== requestId || creationIntent.count !== count || creationIntent.batch_id || creationIntent.accepted_task_id
+        || !['ready', 'awaiting_approval', 'prepared'].includes(creationIntent.state)
+        || creationSpecHash(creationSubmissionSpec(input, creationIntent)) !== creationIntent.input_hash)) throw new CreationError('原创作意图已变化，请核对原请求');
+      if (creationIntent) {
+        const parent = creationParent(JSON.parse(creationIntent.spec_json));
+        if (parent) await assertCreationLineageUnlocked(db, user, parent, creationIntent.project_id);
+      }
+      const authorization = creationIntent ? await validateCreationBatchApproval(db, user, creationIntent, { approvalId: input.resolution_approval_id, round: 1,
+        children: quote.children.map(child => ({ key: `intent:${creationIntent.id}:${child.ordinal}`, business_hash: creationIntent.input_hash, maximum: child.amount, pricing_revision: child.pricing_revision })) }) : null;
       const children = [];
       for (const child of quote.children) {
         const childInput = { ...input, idempotency_key: child.idempotency_key,
@@ -292,11 +316,16 @@ export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
         children.push({ id: child.id, ordinal: child.ordinal, request_id: child.request_id, idempotency_key: child.idempotency_key,
           business_fingerprint: child.fingerprint, route_fingerprint: child.route_fingerprint,
           frozen_input_json: JSON.stringify(childInput), authorized_maximum: child.amount,
-          quote_revision: child.pricing_revision, quote_token: child.pricing_token, quote_expires_at: new Date(quote.expires) });
+          quote_revision: child.pricing_revision, quote_token: child.pricing_token, quote_expires_at: new Date(quote.expires),
+          ...(creationIntent ? { intent_spec_revision: creationIntent.revision, authorization_revision: 1, approval_record_id: authorization?.approvalId, approval_scope_hash: authorization?.scopeHash } : {}) });
+      }
+      if (creationIntent) {
+        const accepted = await db.videoCreationIntent.updateMany({ where: { id: creationIntent.id, revision: creationIntent.revision, state: creationIntent.state, batch_id: null, accepted_task_id: null }, data: { state: 'batch_active', batch_id: batchId } });
+        if (accepted.count !== 1) throw new CreationError('原请求已被另一操作处理，请查询原批次');
       }
       return db.canvasVideoBatch.create({ data: { id: batchId, owner_user_id: user.id, document_id: documentId, node_id: nodeId,
-        project_id: String(input.project_id), video_card_id: String(input.video_card_id), video_branch_id: optionalId(input.video_branch_id),
-        client_request_id: requestId, request_hash: requestHash, count, contract_version: 1, frozen_input_json: JSON.stringify(input),
+        project_id: String(input.project_id), video_card_id: optionalId(input.video_card_id), video_branch_id: optionalId(input.video_branch_id),
+        client_request_id: requestId, request_hash: requestHash, count, contract_version: body.contract_version === 2 ? 2 : 1, creation_intent_id: creationIntent?.id || null, frozen_input_json: JSON.stringify(input),
         authorized_total: quote.total, active_node_key: key, children: { create: children } }, include: { children: { orderBy: { ordinal: 'asc' } } } });
     }, { timeout: 15000 });
     return { batch: await projectCanvasVideoBatch(user, batch) };
@@ -367,6 +396,11 @@ export async function mutateCanvasVideoBatch(user: SessionUser, batchId: string,
       const input = JSON.parse(batch.frozen_input_json) as Body;
       await assertScope(db, user, input, batch.document_id, batch.node_id);
       await preflightResources(db, user, input, pending.length, quote.total);
+      const creationIntent = batch.creation_intent_id ? await db.videoCreationIntent.findUniqueOrThrow({ where: { id: batch.creation_intent_id } }) : null;
+      if (creationIntent && (creationIntent.batch_id !== batch.id || creationIntent.state !== 'batch_active')) throw new CreationError('原批次意图已变化');
+      const round = batch.authorization_round + 1;
+      const authorization = creationIntent ? await validateCreationBatchApproval(db, user, creationIntent, { approvalId: body.resolution_approval_id, round, batchRevision: batch.revision,
+        children: quote.children.map(child => ({ key: `intent:${creationIntent.id}:${child.ordinal}`, business_hash: child.fingerprint, maximum: child.amount, pricing_revision: child.pricing_revision })) }) : null;
       for (const child of pending) {
         const revised = quote.children.find(item => item.id === child.id);
         if (!revised || revised.fingerprint !== child.business_fingerprint) throw new CanvasVideoBatchError('原子项输入已变化，未重新生成');
@@ -375,11 +409,15 @@ export async function mutateCanvasVideoBatch(user: SessionUser, batchId: string,
         if (await canvasVideoRouteFingerprint(input.provider, db) !== revised.route_fingerprint) throw new CanvasVideoBatchError('视频通道再次变化，请重新确认报价');
         await assertVideoPricingAcceptance(fresh.quote, revised.pricing_revision, db);
         if (creditCents(fresh.quote.pricing.estimatedCost) !== revised.amount) throw new CanvasVideoBatchError('价格再次变化，请重新确认');
-        await db.canvasVideoBatchChild.update({ where: { id: child.id }, data: { authorized_maximum: revised.amount,
+        if (creationIntent && await db.approvalUsage.count({ where: { creation_intent_id: creationIntent.id, child_key: `intent:${creationIntent.id}:${child.ordinal}` } })) throw new CreationError('此子项已存在原受理证据，请查询原任务');
+        const revisedChild = await db.canvasVideoBatchChild.updateMany({ where: { id: child.id, revision: child.revision, state: 'prepared', task_id: null }, data: { authorized_maximum: revised.amount,
           route_fingerprint: revised.route_fingerprint, quote_revision: revised.pricing_revision,
-          quote_token: revised.pricing_token, quote_expires_at: new Date(quote.expires), revision: { increment: 1 } } });
+          quote_token: revised.pricing_token, quote_expires_at: new Date(quote.expires), revision: { increment: 1 },
+          ...(creationIntent ? { authorization_revision: round, approval_record_id: authorization?.approvalId, approval_scope_hash: authorization?.scopeHash } : {}) } });
+        if (revisedChild.count !== 1) throw new CreationError('子项已被受理，未覆盖原授权');
       }
-      await db.canvasVideoBatch.update({ where: { id: batch.id }, data: { authorized_total: batch.admitted_total + quote.total, revision: { increment: 1 } } });
+      const authorizedBatch = await db.canvasVideoBatch.updateMany({ where: { id: batch.id, revision: batch.revision, active_node_key: batch.active_node_key }, data: { authorized_total: batch.admitted_total + quote.total, revision: { increment: 1 }, ...(creationIntent ? { authorization_round: round } : {}) } });
+      if (authorizedBatch.count !== 1) throw new CreationError('原批次已被并发受理，未覆盖原授权');
     }
     const updated = await db.canvasVideoBatch.findUniqueOrThrow({ where: { id: batch.id }, select: { revision: true } });
     operations[operationId] = { hash: operationHash, action: String(body.action), revision: updated.revision, applied_at: new Date().toISOString() };

@@ -129,6 +129,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(true);
   const [error, setError] = useState('');
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [pending, setPending] = useState<ModuleCoverSaveInput | null>(null);
@@ -149,7 +150,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     try {
       const value = await json<ModuleCoverEditorState>(await fetch(endpoint, { cache: 'no-store' }));
       if (!current()) return;
-      setState(value); setLayout(value.recipe?.layout || 'single');
+      setState(value); setLayout(value.recipe?.layout || 'single'); setEditing(value.recipe?.version !== 3);
       const restored = value.recipe?.sources.map(item => {
         const source = value.sources.find(source => source.assetId === item.assetId && source.version === item.version);
         // A legacy 4:3 percentage crop is not a square crop. Reframe the same
@@ -158,13 +159,12 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       }) || [];
       setSlots([restored[0] || null, restored[1] || null]);
       setDirty(false); setError(value.sourceError || '');
-      if (!value.fixedCover) {
+      if (!value.fixedCover && value.target.kind === 'module') {
         try {
           const data = await json<{ modules: PreviewModule[] }>(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, { cache: 'no-store' }));
           if (!current()) return;
           const previewModule = data.modules?.find(item => item.id === moduleId);
-          if (!previewModule || (value.target.kind === 'preset' ? previewModule.sharedLive?.intent.presetId !== value.target.id || previewModule.sharedLive.available === false
-            : value.target.id !== moduleId || Boolean(previewModule.sharedLive))) throw new Error('当前封面归属或权限未能确认，请重新读取。');
+          if (!previewModule || value.target.id !== moduleId || Boolean(previewModule.sharedLive)) throw new Error('当前封面归属或权限未能确认，请重新读取。');
           if (previewModule.fixedCover) throw new Error('固定封面刚有变化，请重新读取当前封面。');
           const imageUrl = previewModule.cover?.thumbnailUrl || previewModule.banner?.thumbnailUrl || previewModule.images?.[0]?.thumbnailUrl;
           setPreview(imageUrl ? { imageUrl, referenceUrl: previewModule.cover?.referenceUrl } : null);
@@ -257,7 +257,8 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
       {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
       <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
-      <div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
+      {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
+      {editing && <><div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
         {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
       </div>
       <p className={styles.hint}>分别选图，拖动或缩放选择局部。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
@@ -267,14 +268,14 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
         <div className={styles.cellActions}><button type="button" disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} />{slot ? '换图' : '选择图片'}</button>
           {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
       </div>)}</div>
-      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : legacyDraft ? '（保存后生效）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div>
+      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : legacyDraft ? '（保存后生效）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div></>}
       {error && <p className={styles.error} role="alert">{error}</p>}
       <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
         {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
-          : <button type="button" className={styles.primary} disabled={disabled || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
+          : editing && <button type="button" className={styles.primary} disabled={disabled || !editing || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
       </footer>
     </>}
-    {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片" confirmLabel="使用这张图片" purpose="module-cover" maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
+    {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片" confirmLabel="使用这张图片" purpose="module-cover" contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
       onClose={() => setPickerSlot(null)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
       onConfirm={async ids => { if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false; setPickerSlot(null); return true; }} />}
   </dialog></>, document.body);

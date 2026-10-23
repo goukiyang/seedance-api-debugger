@@ -1,3 +1,5 @@
+import { assertCanViewTask } from '@/lib/projects/permissions';
+import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import { NextRequest, NextResponse } from 'next/server';
 import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
@@ -373,6 +375,20 @@ export async function PATCH(
     }
 
     await prisma.$transaction(async (tx) => {
+      const changesSelection = candidateTaskId !== undefined || currentBestTaskId !== undefined || finalTaskId !== undefined;
+      const freshCard = await tx.videoCard.findUnique({ where: { id: params.id } });
+      if (!freshCard) throw new AuthError('视频卡不存在', 404);
+      if (changesSelection) {
+        const expected = body.expected_updated_at ?? body.expectedUpdatedAt;
+        if (typeof expected !== 'string' || new Date(expected).getTime() !== freshCard.updated_at.getTime()) throw new AuthError('视频卡已变化，请刷新后再选择版本', 409);
+        for (const taskId of [candidateTaskId, currentBestTaskId, finalTaskId]) {
+          if (!taskId) continue;
+          const task = await tx.videoTask.findUnique({ where: { id: taskId } });
+          if (!task || task.video_card_id !== params.id || task.project_id !== freshCard.project_id || ['admin_hidden', 'user_deleted'].includes(task.retention_status)) throw new AuthError('所选结果已不可用', 409);
+          await assertCanViewTask(user, task);
+          if (task.local_status !== 'succeeded' || !videoDeliveryStageForTask(task).stableDownloadReady) throw new AuthError('请等待完整成品就绪后再设为候选、最佳或最终版', 409);
+        }
+      }
       if (candidateTaskId !== undefined && candidateTaskId) {
         await tx.videoTask.update({
           where: { id: candidateTaskId },
@@ -403,10 +419,8 @@ export async function PATCH(
         }
       }
 
-      await tx.videoCard.update({
-        where: { id: params.id },
-        data,
-      });
+      const changed = await tx.videoCard.updateMany({ where: { id: params.id, updated_at: freshCard.updated_at }, data });
+      if (changed.count !== 1) throw new AuthError('视频卡已变化，未覆盖他人操作', 409);
     });
 
     await logProjectAction(user.id, 'video_card_update', 'video_card', params.id, {

@@ -176,7 +176,7 @@
             const expectedModel = style?.model || settings.model;
             const expectedCount = style?.count ?? settings.count;
             if (!node || node.type !== 'image' || !context.userId || !generationPayload || !context.writable || !context.projectId
-                || !context.documentId || !context.cardId || !(safeQuote?.actualQuoteRequired === true || safeQuote?.pricingQuoteRequired === true)
+                || !context.documentId  || !(safeQuote?.actualQuoteRequired === true || safeQuote?.pricingQuoteRequired === true)
                 || safeQuote.kind !== 'image' || safeQuote.projectId !== context.projectId
                 || safeQuote.model !== expectedModel || safeQuote.count !== expectedCount
                 || safeQuote.status !== 'estimate' || !Number.isSafeInteger(safeQuote.revision)
@@ -241,7 +241,7 @@
             const node = hooks.getNode(nodeId);
             const context = hooks.context();
             if (!node || node.type !== 'image') return;
-            if (!context.writable || !context.projectId || !context.documentId || !context.cardId) {
+            if (!context.writable || !context.projectId || !context.documentId ) {
                 hooks.notice('请先打开可编辑画布，并选择项目和视频卡。', 'warn');
                 return;
             }
@@ -552,7 +552,7 @@
                 return { ...await waitForResult(node, job), canvasStylePayload: job.payload };
             }
             if (payload.referenceImageIds?.length) {
-                const params = new URLSearchParams({ projectId: context.projectId, cardId: context.cardId, documentId: context.documentId, nodeId: node.id });
+                const params = new URLSearchParams({ projectId: context.projectId, cardId: context.cardId || '', documentId: context.documentId, nodeId: node.id });
                 payload.referenceImageIds.forEach(id => params.append('referenceImageId', id));
                 const eligibility = await json(`/api/tools/ultimate-canvas/images/generate?${params}`);
                 if (!current(node, context)) throw contextError();

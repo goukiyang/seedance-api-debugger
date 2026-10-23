@@ -426,6 +426,8 @@ export async function recordTaskCostSettlement(
   terminalStatus: string,
   createdBy?: string | null,
 ) {
+  const { settleVideoCreationBatch } = await import('@/lib/creation/settlement');
+  await settleVideoCreationBatch(tx, task.id);
   const succeeded = terminalStatus === 'succeeded';
   const duration = task.duration || null;
   const idempotencyKey = `task:${task.id}:cost_${terminalStatus}:v1`;

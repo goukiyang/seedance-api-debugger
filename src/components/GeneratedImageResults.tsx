@@ -22,6 +22,9 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { prepareImagePreview, type ImagePreviewPreparation, type ImagePreviewPreparationOptions } from '@/lib/media/image-preview-session';
 import { TaskNotice } from './TaskNotice';
 import type { ContentKey } from '@/lib/content-reactions/types';
+import type { StudioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
+import type { StudioInputMainPreview } from '@/lib/image-studio/input-main';
+import { ImageResultOperationFeedback, type ImageResultOperation } from './ImageResultOperationFeedback';
 
 export type GeneratedImageResult = {
   id: string;
@@ -42,9 +45,13 @@ export type GeneratedImageResult = {
   error?: string | null;
   notice?: string | null;
   billing?: ImageBillingView | null;
+  outputIssue?: StudioOutputIssue | null;
+  inputMainPreview?: StudioInputMainPreview;
 };
 
 const noMore = async () => undefined;
+type ResultFeedback = ImageResultOperation & { id: string; busy: boolean; anchor?: HTMLElement };
+
 type PreviewPreparation = { scope: string; itemId: string; handle: ImagePreviewPreparation };
 
 function previewPreparationOptions(item: GeneratedImageResult, account: string): ImagePreviewPreparationOptions | null {
@@ -61,6 +68,9 @@ type ResultRenderers<T> = {
   renderPrimaryActions?: (item: T, waitDisplay?: ImageGenerationWaitDisplay) => ReactNode; renderDelete?: (item: T) => ReactNode;
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
   renderReactionAction?: (item: T) => ReactNode;
+  /** Opt in only for image-studio and its batch result cards. */
+  compactInformation?: boolean;
+  onPreviewInputMain?: (item: T) => void | Promise<unknown>;
   contextActionsEnabled?: boolean;
   coverDeleteWithContextActions?: boolean;
   contextActions?: (item: T) => ResultImageContextMenuItem[];
@@ -75,15 +85,19 @@ function WaitingImage({ src }: { src?: string }) {
   return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
+function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, dismissFeedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
   item: T; scope: string; visible: boolean; currentSelection: string | null | undefined; supportsNextActions: boolean; nextSourceSet: Set<ContentKey>;
   previewAccount: string;
   select: (item: T) => void; changePreview: (item: T | null, alreadySelected?: boolean, prepared?: ImagePreviewPreparation) => void;
   operate: (item: T, kind: 'copy' | 'download') => Promise<void>;
-  feedback: { id: string; message: string; busy: boolean } | null;
+  feedback: ResultFeedback | null;
+  dismissFeedback: (operationId: string) => void;
   onSelect?: (item: T) => void; onQuickUse?: (item: T) => void;
 }) {
   const { user, sessionChanged } = useAppSession();
+  const cardRef = useRef<HTMLElement>(null);
+  const feedbackAnchor = useRef<HTMLElement | null>(null);
+  feedbackAnchor.current = feedback?.id === item.id && feedback.anchor?.isConnected ? feedback.anchor : cardRef.current;
   const downloadableResult = Boolean(item.generationWait?.resultReady && item.media?.src && item.download && !item.viewOnly
     && (!item.downloadDisabled || item.downloadTemporarilyBusy) && !item.media?.previewOnly && !sessionChanged && !isClientSessionBlocked());
   const waitDisplay = useImageGenerationWaitDisplay(item.generationWait ? { ...item.generationWait, resultReady: downloadableResult } : undefined,
@@ -118,6 +132,12 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     );
     menuItems.push(...pageActions.filter(action => action.group !== 'continue'));
   }
+  const input = compactInformation && !item.media ? item.inputMainPreview : undefined;
+  if (input && onQuickUse && !menuItems.some(action => action.label === '取回本次输入主图')) {
+    menuItems.push({ id: 'input-main', label: '取回本次输入主图', group: 'continue', icon: <ImagePlus size={15} />,
+      disabled: input.state !== 'ready', description: input.state === 'none' ? '本次为文生图，没有输入主图' : input.state === 'unknown' ? '本次输入主图尚无法确认' : input.state === 'unavailable' ? '本次输入主图已不可用或无权读取' : undefined,
+      onSelect: () => onQuickUse(item) });
+  }
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
   const primaryActions = renderPrimaryActions?.(item, waitDisplay);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
@@ -126,14 +146,14 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
     secondaryAction={renderReactionAction ? null : undefined} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
   const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={prepared => changePreview(item, true, prepared)} previewSource={previewAccount ? previewPreparationOptions(item, previewAccount) || undefined : undefined} onViewed={item.onViewed} active={visible && Boolean(previewAccount)} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
-    contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} cancelPreviewRef={cancelPreviewRef} />
+    contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} recoverFromThumbnailError={compactInformation} cancelPreviewRef={cancelPreviewRef} />
     : <div className={`${styles.pending}${item.generationWait && item.pending ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
       data-result-choice={onSelect ? '' : undefined} role={onSelect || contextActionsEnabled ? 'button' : undefined} tabIndex={onSelect || contextActionsEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : contextActionsEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
       onClick={onSelect ? event => { if (!event.defaultPrevented) select(item); } : undefined}
       onKeyDown={onSelect ? event => { if (!event.defaultPrevented && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } } : undefined}>
-      <WaitingImage src={item.waitingThumbnail} />{waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
+      <WaitingImage src={compactInformation && item.inputMainPreview ? undefined : item.waitingThumbnail} />{waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
     </div>;
-  return <article id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
+  return <article ref={cardRef} id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
     <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
       {contextActionsEnabled ? <ResultImageContextMenu identity={identity} active={menuActive} items={menuItems} onOpenChange={open => {
         if (open) cancelPreviewRef.current?.();
@@ -155,17 +175,31 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
       </div>}
     </div>
+    {input && <div className={styles.inputMain}>
+      {input.thumbnailUrl && input.state === 'ready' && <div className={styles.inputMainThumb}>
+        <ResultImageContextMenu identity={`${identity}:input-main`} active={menuActive} items={[
+          { id: 'view-input-main', label: '查看本次输入主图', group: 'view', icon: <Eye size={15} />, onSelect: () => { void onPreviewInputMain?.(item); } },
+          ...(onQuickUse ? [{ id: 'use-input-main', label: '取回本次输入主图', group: 'continue' as const, icon: <ImagePlus size={15} />, onSelect: () => onQuickUse(item) }] : []),
+        ]} onOpenChange={open => { if (open) cancelPreviewRef.current?.(); setMenuOpen(open); }}>
+          <ResultImageCover src={input.thumbnailUrl} alt="本次输入主图" selected={false} applied={false} recoverFromThumbnailError active={menuActive} onSelect={() => {}}
+            onPreview={() => { void onPreviewInputMain?.(item); }} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined}
+            contextMenuEnabled menuOpen={menuOpen && menuActive} cancelPreviewRef={cancelPreviewRef} />
+        </ResultImageContextMenu>
+      </div>}
+      <span>{input.state === 'ready' ? `输入主图${input.count && input.count > 1 ? ` · ${input.count}张` : ''}` : input.state === 'none' ? '本次为文生图，无输入主图' : input.state === 'unknown' ? '本次输入主图尚无法确认' : '输入主图已不可用或无权读取'}</span>
+    </div>}
     {contextActionsEnabled ? <ImageResultNextActionFeedback controller={controller} className={`${styles.feedback} ${styles.nextFeedback}`} /> : item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
     {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
-    {feedback?.id === item.id && <p className={styles.feedback} role="status">{feedback.message}</p>}
-    {item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
+    {feedback?.id === item.id && (compactInformation ? <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
+      onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} /> : <p className={styles.feedback} role="status">{feedback.message}</p>)}
+    {item.notice && !(compactInformation && item.outputIssue) && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
     {resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
     {renderSupplement?.(item)}
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, contextActions }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
@@ -185,7 +219,9 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const [previewPreparation, setPreviewPreparation] = useState<PreviewPreparation | null>(null);
   const previewPreparationRef = useRef<PreviewPreparation | null>(null);
   const [localSelection, setLocalSelection] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ id: string; message: string; busy: boolean } | null>(null);
+  const [feedback, setFeedback] = useState<ResultFeedback | null>(null);
+  const currentOperation = useRef('');
+  const dismissFeedback = useCallback((operationId: string) => setFeedback(value => value?.operationId === operationId ? null : value), []);
   const [readState, setReadState] = useState({ scope, busy: false, error: '' });
   const readLock = useRef(false);
   const requestedPreview = previewId === undefined ? localPreview : previewId;
@@ -230,6 +266,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
     onLatestPageRequestHandled?.(latestPageRequest);
   }, [latestPageRequest, onLatestPageRequestHandled, pages]);
   useEffect(() => { setLocalPreview(null); setLocalSelection(null); setFeedback(null); }, [scope]);
+  useEffect(() => { currentOperation.current = ''; setFeedback(null); }, [scope, previewAccount, visible, previewSessionAllowed]);
   const previewable = items.filter(item => item.media?.src);
   const preview = previewable.find(item => item.id === activePreview);
   const previewIndex = previewable.findIndex(item => item.id === activePreview);
@@ -274,6 +311,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       // The card's first-click lease is transferred intact. Menu and navigation
       // entry points acquire their current-image lease before changing the view.
       nextPreparation = { scope, itemId: item.id, handle: prepared || prepareImagePreview(options) };
+      nextPreparation.handle.confirmOpen();
     } else prepared?.release();
     const previous = previewPreparationRef.current;
     previewPreparationRef.current = nextPreparation;
@@ -315,16 +353,25 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   }
   function select(item: T) { pages.goToId(item.id); setLocalSelection(item.id); onSelect?.(item); }
   async function operate(item: T, kind: 'copy' | 'download') {
-    if (pendingOperation.current) return;
+    if (pendingOperation.current || !previewContext.current.allowed || isClientSessionBlocked()) return;
     pendingOperation.current = true;
-    const identity = scope;
-    setFeedback({ id: item.id, busy: true, message: kind === 'copy' ? '复制中' : '准备下载' });
+    const account = previewContext.current.account, operationId = crypto.randomUUID();
+    const media = item.media?.src;
+    const current = () => alive.current && currentScope.current === scope && previewContext.current.account === account
+      && previewContext.current.allowed && !isClientSessionBlocked() && currentOperation.current === operationId
+      && previewContext.current.items.some(value => value.id === item.id && value.media?.src === media);
+    currentOperation.current = operationId;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const anchor = focused?.closest('[data-result-id]')?.getAttribute('data-result-id') === item.id ? focused : undefined;
+    const base = { id: item.id, itemId: item.id, operationId, scope, anchor, action: kind === 'copy' ? '复制' : '下载' };
+    setFeedback({ ...base, phase: 'busy', busy: true, message: kind === 'copy' ? '复制中' : '准备下载' });
     try {
-      if (kind === 'copy' && item.media) await copyImage(item.media.src);
-      else await item.download?.();
-      if (alive.current && identity === currentScope.current) setFeedback({ id: item.id, busy: false, message: kind === 'copy' ? '图片已复制' : item.downloadMessage || '已交给浏览器下载' });
+      if (kind === 'copy' && item.media) await copyImage(item.media.src, { isCurrent: current });
+      else if (item.download) await item.download();
+      else throw new Error('当前图片暂不可下载');
+      if (current()) setFeedback({ ...base, phase: 'success', busy: false, message: kind === 'copy' ? '图片已复制' : item.downloadMessage || '已交给浏览器下载' });
     } catch (cause) {
-      if (alive.current && identity === currentScope.current) setFeedback({ id: item.id, busy: false, message: cause instanceof Error ? cause.message : '操作未完成，请重试' });
+      if (current()) setFeedback({ ...base, phase: 'error', busy: false, message: cause instanceof Error && cause.message ? cause.message : '操作未完成，请重试' });
     } finally { pendingOperation.current = false; }
   }
   const pageLabel = `第 ${pages.page}${pages.pages === null ? ' 页，仍有更多' : ` / ${pages.pages} 页`}${pages.restoring && !pages.navigationIssue && !readError ? '，正在读取目标页' : ''}`;
@@ -353,10 +400,10 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       requestAnimationFrame(() => { const card = Array.from(pages.gridRef.current?.querySelectorAll<HTMLElement>('[data-result-id]') || []).find(element => element.dataset.resultId === next.id); card?.querySelector<HTMLElement>('[data-result-cover], [data-result-choice]')?.focus(); });
     }}>
       {pages.pageItems.map(item => <GeneratedImageResultCard key={`${scope}:${item.id}`} item={item} scope={scope} visible={visible} previewAccount={previewSessionAllowed ? previewAccount : ''} currentSelection={currentSelection}
-        supportsNextActions={supportsNextActions} nextSourceSet={nextSourceSet} select={select} changePreview={changePreview} operate={operate} feedback={feedback}
+        supportsNextActions={supportsNextActions} nextSourceSet={nextSourceSet} select={select} changePreview={changePreview} operate={operate} feedback={feedback} dismissFeedback={dismissFeedback}
         onSelect={onSelect} onQuickUse={onQuickUse} renderMetadata={renderMetadata} renderActions={renderActions} renderPrimaryActions={renderPrimaryActions}
         renderDelete={renderDelete} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
-        contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} contextActions={contextActions} />)}
+        contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} compactInformation={compactInformation} onPreviewInputMain={onPreviewInputMain} contextActions={contextActions} />)}
     </div>
     {pagination('bottom')}
     {visible && previewSessionAllowed && preview?.media && <ZoomableImagePreview {...preview.media} preparation={currentPreparation} previewOnly={Boolean(preview.viewOnly || preview.media.previewOnly)} nextActionSources={nextSources as ContentKey[]} nextActionResultId={preview.id} imageNeighbors={imageNeighbors} resolveDownload={src => items.find(item => item.media?.src === src)?.download} previewKey={preview.media.previewKey || `${scope}:${preview.id}`} hasNavigation={previewable.length > 1} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => changePreview(null)} />}

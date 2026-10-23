@@ -37,7 +37,7 @@ export function assertSharedBuildSources(m, prior) {
   assert.equal(prior.reuseBuilds || null, null, 'Only a direct original complete build may be reused');
   assert.equal(prior.normalContinuation || null, null);
   if (isSharedEngine(prior)) engineDirectory(prior);
-  for (const key of ['mainSource', 'guardSource', 'protectedIncrement', 'recoveredGuardBaseline', 'privateMultiviewInstall',
+  for (const key of ['mainSource', 'guardSource', 'fullRelease', 'protectedIncrement', 'recoveredGuardBaseline', 'privateMultiviewInstall',
     'deployedUsageSchema', 'deployedCanvasBatchSchema', 'canvasVideoBatchSchema', 'database', 'envFile',
     'expectedProtectedFileSha256', 'protectedFiles', 'protectedTaskIds', 'protectedVideoTaskIds', 'retiredPricingRoots',
     'storageRoot', 'hdRoot', 'hdForkRoot', 'hdWorkerLockPath', 'hdLegacyReady', 'hdHistoricalVersions',
@@ -46,7 +46,10 @@ export function assertSharedBuildSources(m, prior) {
   for (const kind of ['main', 'guard']) for (const key of ['source', 'root', 'version', 'buildDist'])
     assert.equal(prior[kind][key], m[kind][key], 'Original complete build pair changed: ' + kind + '.' + key);
   const live = structuredClone(m.live);
-  if (live.hd?.sourceProof) {
+  if (m.fullRelease) {
+    assert.deepEqual(live.hd?.sourceProof, { sourceManifest: m.fullRelease.liveRoles.hd.sourceManifest,
+      archive: m.fullRelease.liveRoles.hd.archive, compiledCapsule: m.fullRelease.dependencyCapsule });
+  } else if (live.hd?.sourceProof) {
     const input = m.recoveredGuardBaseline; assert.ok(input);
     const bytes = rootFile(stageFor(input.runId) + '/manifest.json'); assert.equal(sha(bytes), input.manifestSha256);
     const recovered = JSON.parse(bytes); assert.equal(recovered.guard.source, live.hd.source);

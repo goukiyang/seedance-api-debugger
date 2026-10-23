@@ -21,7 +21,7 @@ const MAX_JSON_BYTES = 128 * 1024;
 
 export type CanvasStyleContext = {
   projectId: string;
-  cardId: string;
+  cardId: string | null;
   documentId: string | null;
   nodeId: string | null;
 };
@@ -31,7 +31,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function contextId(value: unknown, label: string, optional: boolean) {
-  if (optional && value === null) return null;
+  if (optional && (value === null || value === undefined || value === '')) return null;
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(value)) {
     throw new AuthError(`${label}无效`, 400);
   }
@@ -87,21 +87,21 @@ export function parseCanvasStyleContext(body: Record<string, unknown>): CanvasSt
   }
   return {
     projectId: contextId(value.projectId, '项目编号', false)!,
-    cardId: contextId(value.cardId, '视频卡编号', false)!,
+    cardId: contextId(value.cardId, '视频卡编号', true),
     documentId: contextId(value.documentId, '画布编号', true),
     nodeId: contextId(value.nodeId, '节点编号', true),
   };
 }
 
 export async function assertCanvasStyleContext(user: SessionUser, context: CanvasStyleContext) {
-  const card = await prisma.videoCard.findUnique({
+  const card = context.cardId ? await prisma.videoCard.findUnique({
     where: { id: context.cardId },
     select: { id: true, project_id: true },
-  });
-  if (!card) throw new AuthError('视频卡不存在', 404);
-  if (card.project_id !== context.projectId) throw new AuthError('视频卡不属于当前项目', 400);
-  const project = await getProjectForGeneration(user, card.project_id);
-  await assertCanGenerateInVideoCard(user, project.id, card.id);
+  }) : null;
+  if (context.cardId && !card) throw new AuthError('视频卡不存在', 404);
+  if (card && card.project_id !== context.projectId) throw new AuthError('视频卡不属于当前项目', 400);
+  const project = await getProjectForGeneration(user, context.projectId);
+  if (card) await assertCanGenerateInVideoCard(user, project.id, card.id);
 
   if (context.nodeId && !context.documentId) {
     throw new AuthError('节点必须属于已选择的画布', 400);
@@ -120,7 +120,7 @@ export async function assertCanvasStyleContext(user: SessionUser, context: Canva
   const savedCardId = typeof savedContext.video_card_id === 'string'
     ? savedContext.video_card_id
     : typeof savedContext.videoCardId === 'string' ? savedContext.videoCardId : '';
-  if (savedCardId && savedCardId !== card.id) throw new AuthError('画布不属于当前视频卡', 400);
+  if (savedCardId && savedCardId !== context.cardId) throw new AuthError('画布不属于当前视频卡', 400);
   if (context.nodeId) {
     const canvas = isRecord(snapshot.canvas) ? snapshot.canvas : {};
     const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];

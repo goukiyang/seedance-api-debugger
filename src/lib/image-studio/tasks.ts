@@ -53,7 +53,8 @@ import type { SharedStudioIntent } from './shared-types';
 import { assertRestoredStudioDraft, assertRestoredStudioSourceRelation, assertRestoredStudioStyleVersions,
   hasSharedStudioPrompt, historicalStudioTemplateReferences, parseRestoredStudioSettings, restoredStudioTemplatePrompt, studioPersonalPromptProjection,
   RestoredStudioSettingsError } from './restored-settings';
-import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
+import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputIssue, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
+import { studioInputMainPreview } from './input-main';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -1282,6 +1283,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
   return items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     const mismatch = studioDimensionMismatch(task);
+    const readableIds = new Set(assetById.keys());
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
@@ -1291,6 +1293,8 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
       billing: imageBillingView(task, ownerId, isAdmin),
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
       resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' : 'dimensions_mismatch' : task.status === 'succeeded' ? 'accepted' : null,
+      outputIssue: studioOutputIssue(task),
+      inputMainPreview: studioInputMainPreview({ kind: 'task', taskId: task.id }, task.snapshot_json, task.reference_ids, readableIds),
       createdAt: task.created_at, finishedAt: task.finished_at, referenceIds: snapshot.transientReferenceImages.map(image => image.id),
       snapshot: { ...snapshot, moduleContextVersion: contextVersions.get(task.id)?.code ?? null, moduleContextVersionState: contextVersions.get(task.id)?.state ?? 'missing' },
       asset: studioTaskHasViewableOutput(task) && assetById.get(task.asset_id || '') ? { ...assetById.get(task.asset_id || '')!, original_url: studioAssetUrl(task.asset_id!), thumbnail_url: studioAssetUrl(task.asset_id!, true) } : null,
@@ -1424,12 +1428,11 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     ...(sharedLive ? { sharedLive } : {}),
     ...personalPromptProjection,
     ...(restoredSettings ? { restoredSettings } : {}),
-    ...(sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),
+    ...(isAdmin && sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),
-    prompt: sharedLive && typeof parsed.personalPrompt === 'string' ? parsed.personalPrompt
-      : typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt,
+    prompt: personalPromptProjection.personalPrompt ?? (hasSharedStudioPrompt(parsed) ? '' : typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt),
     skills: Array.isArray(parsed.skills) ? parsed.skills.filter(skill => skill && typeof skill === 'object'
       && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string') : [],
     evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))

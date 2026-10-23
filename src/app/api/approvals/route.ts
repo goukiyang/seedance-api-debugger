@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
+import { assertCanViewProject, getProjectAccess, logProjectAction } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { createApprovalRequest, normalizeApprovalType, validateApprovalPayload } from '@/lib/approvals';
 import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
@@ -48,9 +48,13 @@ export async function GET(request: NextRequest) {
       take: 100,
     });
 
-    return NextResponse.json({ approvals: approvals.map(approval => ({ ...approval,
-      task: approval.task ? projectSelectedMultiviewTask(approval.task) : null,
-    })) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    const items = [];
+    for (const approval of approvals) {
+      const access = approval.project_id ? await getProjectAccess(user, approval.project_id) : null;
+      const canManage = user.role === 'admin' || access?.canManageProject === true;
+      items.push({ ...approval, can_manage: canManage, task: approval.task ? projectSelectedMultiviewTask(approval.task) : null });
+    }
+    return NextResponse.json({ actor_id: user.id, approvals: items }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     console.error('[Approvals] List error:', error);
     return NextResponse.json(
@@ -68,6 +72,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const type = normalizeApprovalType(body.type);
     if (!type) return NextResponse.json({ error: '审批类型无效' }, { status: 400 });
+    if (type === 'video_creation_1080p' || type === 'video_delivery_reopen') {
+      return NextResponse.json({ error: '请从原创作请求或交付对象申请，不能手填新的批准范围', code: 'creation_approval_source_required' }, { status: 400 });
+    }
 
     const projectId = optionalString(body.project_id ?? body.projectId);
     const videoCardId = optionalString(body.video_card_id ?? body.videoCardId);

@@ -1,4 +1,6 @@
 'use client';
+import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
+import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -2202,6 +2204,8 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 </div>
               )}
 
+              {task.is_draft && <DraftUpgradeAction task={task} ownerId={ownerId} />}
+              <VideoCreationHistory taskId={task.id} ownerId={ownerId} projectId={task.project_id} videoCardId={task.video_card_id} reuseHref={!isEnhanceTask ? taskActionHref : null} />
               {isAdmin && <EnhanceVideoAction task={task} />}
             </section>
 

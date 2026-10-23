@@ -332,6 +332,8 @@ export async function prepareReusedCandidate(m, kind) {
   assert.equal(m.reuseBuilds[kind].file, originalFile(m, kind)); assert.equal(m.reuseBuilds[kind].sha256, sha(rootFile(originalFile(m, kind), 128 * 1024 * 1024)));
   assert.equal(m[kind].source, original.source); assert.equal(m[kind].version, original.version);
   const source = json(m[kind].sourceManifest), old = json(originalStage + '/manifest.json');
+  assert.equal(sha(rootFile(m[kind].sourceManifest)), capsule.originalSourceManifestSha256,
+    'Reuse must retain the original source manifest bytes, including its original packaging time');
   assert.deepEqual(source.files, json(old[kind].sourceManifest).files);
   assert.deepEqual(source.fileDetails, json(old[kind].sourceManifest).fileDetails);
   assert.equal(m[kind].root, old[kind].root); assert.equal(m.envFile, old.envFile);

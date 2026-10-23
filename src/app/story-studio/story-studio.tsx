@@ -1044,7 +1044,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
         })}
       </div>
     </section></>}
-    <ResourceLibraryPicker open={Boolean(picker)} imageOnly target="workspace" title="选择镜头原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(null)}
+    <ResourceLibraryPicker open={Boolean(picker)} imageOnly target="workspace" title="选择镜头原图" contextKey={`${userId}:story:${documentId}:${nodeId}:${picker || ""}`} maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(null)}
       onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })} onConfirm={async () => false} onConfirmSelection={async items => {
         if (!picker || items.length !== 1 || busy || lock.current) return { success: false, message: '当前操作尚未结束，请稍后重试' };
         const item = items[0]; if (!item.assetId && !item.referenceImageId) return { success: false, message: '图片没有可用的原件编号' };

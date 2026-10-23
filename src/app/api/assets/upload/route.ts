@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { assertUploadOwner, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, rawUploadRecoveryToken, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
@@ -245,7 +246,11 @@ export async function POST(request: NextRequest) {
     receiving = null;
     const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId);
     await transitionRawUpload(identity, writing.nonce, 'writing', 'completed').catch(() => {});
-    if (mimeType.startsWith('image/')) void requestHd(uploadResult.originalUrl, 0).catch(() => {});
+    if (mimeType.startsWith('image/')) void prisma.asset.findFirst({
+      where: { id: uploadResult.assetId, owner_id: user.id, status: 'active', type: 'image' },
+      select: { id: true, owner_id: true, original_url: true },
+    }).then(asset => asset && requestHd(asset.original_url, 0, undefined, undefined,
+      { owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } })).catch(() => {});
 
     await recordAssetUploadLog({
       operatorId: user.id,

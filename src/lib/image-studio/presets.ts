@@ -26,6 +26,7 @@ import { projectSharedStudioCapabilities, studioStateReason } from './shared-cap
 import { assertStudioDeletionIdle, parseStudioDeletionReceipt, recordStudioSourceReselection, studioSourceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionReceipt } from './shared-types';
 import type { SharedStudioSharingCurrent, SharedStudioSharingReceipt, SharedStudioCommandStatus, SharedStudioLifecycleHistory } from './shared-types';
+import { resolveStudioTemplateAuthor } from './template-author';
 
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
@@ -103,7 +104,8 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   user = await assertStudioActor(user.id);
   if (presetId !== undefined) {
     const { publicDTO } = await resolveSharedStudioDefinition(user, presetId);
-    return [{ id: publicDTO.presetId, ...publicDTO, ...publicDTO.defaults, prompt: publicDTO.templatePrompt, sourcePresetId: publicDTO.presetId,
+    const templateRead = (await resolveStudioTemplateAuthor(user, { presetId })).templateRead;
+    return [{ id: publicDTO.presetId, ...publicDTO, templateRead, ...publicDTO.defaults, prompt: publicDTO.templatePrompt, sourcePresetId: publicDTO.presetId,
       scope: (await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId }, select: { scope: true } })).scope,
       referencesAvailable: true, fixedReferencesEditable: user.role === 'admin' && publicDTO.ownedByViewer,
       skillIds: [], moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null) }];
@@ -143,9 +145,10 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   return Promise.all(visibleRows.map(async row => {
     const deletion = studioSourceDeletionCapability(user, row);
     if (row.is_shared) {
+      const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
       try {
         const { publicDTO } = await resolveSharedStudioDefinition(user, row.id);
-        return { id: row.id, scope: row.scope, ...publicDTO, ...publicDTO.defaults, prompt: publicDTO.templatePrompt,
+        return { id: row.id, scope: row.scope, ...publicDTO, templateRead, ...publicDTO.defaults, prompt: publicDTO.templatePrompt,
           sourcePresetId: row.id, referencesAvailable: true, skillIds: [],
           moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null), createdAt: row.created_at, updatedAt: row.updated_at };
       } catch (error) {
@@ -153,10 +156,10 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
         const state = projectSharedStudioCapabilities({ objectKind: row.owner_id === user.id ? 'publisher' : 'live', lifecycle: 'active', sharing: 'shared',
           dependency: error.reasonCode === 'dependency-invalid' ? 'invalid' : 'unknown', sourceRevision: row.updated_at.toISOString(), moduleRevision: null,
           definitionToken: error.intent?.definitionToken ?? null, actorAllowed: true, ownsWorkspace: false, canViewSource: true,
-          canManageSource: canManageStudioPreset(user, row), reasonCode: error.reasonCode });
+          canManageSource: canManageStudioPreset(user, row), canViewDefinition: templateRead.canViewTemplateContext, reasonCode: error.reasonCode });
         state.capabilities.editDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
         state.capabilities.saveDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
-        return { ...state, deletion, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
+        return { ...state, deletion, templateRead, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
           isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
           unavailable: true, unavailableReason: studioStateReason[error.reasonCode], prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
           fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
@@ -172,15 +175,15 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
     const referencePolicy = storedPolicy
       ? { ...storedPolicy, primaryIds: [] }
       : undefined;
-    const canSeeContext = user.role === 'admin' || row.owner_id === user.id;
     const toPayload = (id: string) => {
       const asset = byId.get(id);
       if (!asset || asset.owner_id !== row.owner_id) return null;
       return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
     };
     const personal = personalByPreset.get(row.id);
+    const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
     return {
-      deletion, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
+      deletion, templateRead, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: templateRead.canViewTemplateContext ? row.prompt : '', context: templateRead.canViewTemplateContext ? row.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
       ...(personal ? { saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides,
         personalImages: personal.referenceIds.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),

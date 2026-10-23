@@ -7,7 +7,7 @@ import {
   canUseAlbumImage,
 } from '@/lib/reference-albums/permissions';
 import { mediaPreviewResponse } from '@/lib/media/preview-response';
-import { authorizedImageResponse, type ImageVariant } from '@/lib/media/authorized-image-response';
+import { authorizedImageResponse, discardHdViewingInterest, type ImageVariant } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
 
 export const dynamic = 'force-dynamic';
@@ -18,9 +18,11 @@ async function content(
   { params }: { params: { id: string } },
 ) {
   const started = performance.now();
+  let requesterId: string | undefined;
   try {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
+    requesterId = user.id;
 
     const image = await assertCanViewReferenceImage(user, params.id);
     if (image.asset && image.asset.status !== 'active') throw new AuthError('素材已不可用', 404);
@@ -51,10 +53,13 @@ async function content(
       ? (image.thumbnail_url || image.url)
       : image.url;
     const contentType = useThumbnail && image.thumbnail_url ? 'image/jpeg' : image.asset?.mime_type || 'image/jpeg';
-    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, variant as ImageVariant, contentType, image.asset?.file_name || 'reference-image', started);
+    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, variant as ImageVariant, contentType, image.asset?.file_name || 'reference-image', started,
+      { requesterId: user.id, owner: image.asset ? { kind: 'asset', id: image.asset.id, ownerId: image.asset.owner_id }
+        : { kind: 'reference', id: image.id, ownerId: image.owner_user_id } });
     return await mediaPreviewResponse(request, sourceUrl, contentType);
   } catch (error) {
     if (error instanceof AuthError) {
+      if (requesterId && [401, 403, 404].includes(error.status)) await discardHdViewingInterest(request, requesterId);
       return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
     return NextResponse.json(

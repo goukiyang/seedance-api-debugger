@@ -18,6 +18,14 @@ async function main() {
   const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-hd-backend-'));
   await fs.chmod(evidenceRoot, 0o700);
   process.env.DATABASE_URL = 'file:' + path.join(evidenceRoot, 'unused-private.db');
+// Complete authoritative lookup fixture: scheduler ownership is exercised
+// without opening the application's SQL database.
+let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }> = [];
+(globalThis as unknown as { hdReadonlyDb?: unknown }).hdReadonlyDb = {
+  asset: { findMany: async () => ownerBindings, findFirst: async () => null },
+  referenceImage: { findMany: async () => [] }, imageStudioTask: { findFirst: async () => null },
+  $disconnect: async () => {},
+};
   const core = await import('../src/lib/media/hd-derivatives');
   const storage = await import('../src/lib/media/hd-storage-root');
   const results: Array<{ name: string; passed: boolean; error?: string }> = [];
@@ -32,6 +40,7 @@ async function main() {
     finally { process.chdir(applicationRoot); delete process.env.HD_DERIVATIVES_ROOT; }
   };
   const fixture = async () => {
+    ownerBindings = [];
     const directory = await fs.mkdtemp(path.join(evidenceRoot, 'case-'));
     await fs.chmod(directory, 0o700);
     await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
@@ -65,6 +74,12 @@ async function main() {
     const first = await fixture(); const original = await image('same');
     const fixedRoot = path.join(first, 'storage/hd-derivatives'); process.env.HD_DERIVATIVES_ROOT = fixedRoot;
     const identity = (await core.hdRequestIdentity(original.source, false))!;
+    const encoder = await import('../src/lib/media/hd-encoder');
+    assert.equal(encoder.hdEncoderParameters('avif').effort, 6);
+    assert.equal(encoder.hdEncoderParameters('avif', 'hd-avif-e4-v1').effort, 4);
+    assert.equal(encoder.hdEncoderParameters('webp', 'hd-avif-e4-v1').effort, 6);
+    assert.throws(() => encoder.hdEncoderStrategy('unknown'), /invalid_hd_encoder_strategy/);
+    assert.notEqual((await core.hdRequestIdentity(original.source, false, 'hd-avif-e4-v1'))!.key, identity.key);
     const job = (await core.requestHd(original.source, core.HD_PRIORITY.new, false))!;
     await processJob(job.key);
     const ready = (await core.readHdJob(job.key))!; assert.equal(ready.status, 'ready');
@@ -83,17 +98,45 @@ async function main() {
     await assert.rejects(storage.assertHdStorageRoot(), /hd_storage_owner/);
     await fs.chmod(fixedRoot, 0o700);
   });
-  await check('E04 viewer upgrades legacy new priority without changing key or numeric semantics', async () => {
+  await check('E04 temporary viewing preserves the job role and durable scheduler identity', async () => {
     await fixture(); const original = await image('priority');
     const initial = (await core.requestHd(original.source, 0, false))!;
-    const viewer = (await core.requestHd(original.source, 1, false))!;
-    assert.equal(viewer.key, initial.key); assert.equal(viewer.priority, 0); assert.equal(viewer.queueRole, 'viewer');
-    assert.equal((await core.requestHd(original.source, 0, false))!.queueRole, 'viewer');
+    const token = randomUUID();
+    const viewer = (await core.requestHd(original.source, 1, false, undefined, { requesterId: 'viewer-a', viewToken: token }))!;
+    assert.equal(viewer.key, initial.key); assert.equal(viewer.priority, 0); assert.equal(viewer.queueRole, 'new');
+    assert.equal((await core.requestHd(original.source, 0, false))!.queueRole, 'new');
+    const scheduling = await import('../src/lib/media/hd-scheduler');
+    const state = await scheduling.readHdScheduler();
+    assert.equal(state.entries[viewer.key].homeBucket, 'system:legacy');
+    assert.equal(state.entries[viewer.key].interests.length, 1);
+    assert.equal(state.entries[viewer.key].interests[0].token, token);
+    assert.equal(state.entries[viewer.key].interests[0].expiresAt - state.entries[viewer.key].interests[0].writtenAt, 45000);
+    assert.equal((await scheduling.claimHdScheduledJob(await core.listHdJobs()))?.key, viewer.key);
+    await scheduling.finishHdScheduledClaim(viewer, viewer.key);
+    assert.equal((await scheduling.readHdScheduler()).globalTurn, 0, 'unstarted claim does not consume a turn');
     const legacy = { ...viewer, queueRole: undefined, priority: 0 };
     assert.equal(core.hdQueueRole(legacy), 'new');
     assert.equal(core.hdQueueRole({ ...legacy, priority: 1 }), 'viewer');
     assert.equal(core.hdQueueRole({ ...legacy, priority: 2 }), 'historical');
     assert.equal(core.hdQueueRole({ ...legacy, priority: 3 }), 'historical');
+    await fixture();
+    const a1 = await image('owner-a-1'), a2 = await image('owner-a-2'), b1 = await image('owner-b-1');
+    ownerBindings = [a1, a2, b1].map((value, index) => ({ id: String(index), owner_id: index < 2 ? 'owner-a' : 'owner-b', original_url: value.source }));
+    const queued = await Promise.all([a1, a2, b1].map(value => core.requestHd(value.source, 0, false)));
+    const first = (await scheduling.claimHdScheduledJob(await core.listHdJobs()))!;
+    const firstState = await scheduling.readHdScheduler(), firstBucket = firstState.entries[first.key].homeBucket;
+    const started = { ...first, status: 'running' as const, attempts: first.attempts + 1, executionId: randomUUID() };
+    await core.atomicHdJson(path.join(core.hdDirectory(), first.key + '.json'), started);
+    await scheduling.markHdScheduledAttempt(started);
+    const completed = { ...started, status: 'skipped' as const, reason: 'source_incompatible' };
+    await core.atomicHdJson(path.join(core.hdDirectory(), first.key + '.json'), completed);
+    await scheduling.finishHdScheduledClaim(completed, first.key);
+    const second = (await scheduling.claimHdScheduledJob(await core.listHdJobs()))!;
+    const secondState = await scheduling.readHdScheduler();
+    assert.notEqual(secondState.entries[second.key].homeBucket, firstBucket, 'another ready owner gets the next turn');
+    assert.equal(secondState.globalTurn, 1); assert.equal(queued.filter(Boolean).length, 3);
+    await scheduling.finishHdScheduledClaim(second, second.key);
+
   });
   await check('E02 unexplained final file is preserved and blocks a second publication', async () => {
     await fixture(); const original = await image('conflict'), job = (await core.requestHd(original.source, 0, false))!;

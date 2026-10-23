@@ -227,7 +227,7 @@ export default function VideoCardDetailPage() {
       const res = await fetch(`/api/video-cards/${videoCardId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, expected_updated_at: videoCard?.updated_at }),
       });
       const data = await res.json();
       if (!res.ok) {

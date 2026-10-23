@@ -1,3 +1,4 @@
+import { CreationError } from '@/lib/creation/contract';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -30,9 +31,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     if (existing) return NextResponse.json({ accepted: existing }, { headers: { 'Cache-Control': 'private, no-store' } });
     if (!draft.is_draft || draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || draft.local_status !== 'succeeded'
       || !draft.provider_draft_task_id) throw new DraftUpgradeError('当前样片还不能升级，请保留原任务', 409, 'DRAFT_NOT_READY');
-    const context = await resolveVideoPricingContext(user, savedVideoPricingContextInput(draft, true), 'draft_upgrade');
+    const destination = draft.project_id || request.nextUrl.searchParams.get('project_id');
+    if (!destination) throw new DraftUpgradeError('请先明确本次结果保存到的项目', 400, 'DRAFT_SCOPE_REQUIRED');
+    if (draft.project_id && request.nextUrl.searchParams.get('project_id') && request.nextUrl.searchParams.get('project_id') !== draft.project_id) throw new DraftUpgradeError('升级须保留原项目', 409, 'DRAFT_SCOPE_CHANGED');
+    const creationInput = { ...savedVideoPricingContextInput(draft, true), project_id: destination, action: 'draft_upgrade', entry: 'draft_upgrade',
+      continuation: { mode: 'continue', parent_task_id: draft.id }, baseline_task_id: draft.id, source_draft_task_id: draft.id };
+    const context = await resolveVideoPricingContext(user, creationInput, 'draft_upgrade');
     const quote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration: draft.duration ?? 5, context });
-    return NextResponse.json({ ...publicVideoPricing(quote), pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json({ creation_input: creationInput, ...publicVideoPricing(quote), pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const pricingFailure = videoPricingError(error);
     const status = pricingFailure?.status || (error instanceof AuthError || error instanceof DraftUpgradeError || error instanceof CodexApiAuthError ? error.status : 503);
@@ -71,6 +77,7 @@ export async function POST(
     }
     const result = await createSeedanceDraftUpgrade({
       user,
+      creationBody: body,
       draftTaskId: params.id,
       resolutionApprovalConfirmed: body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true,
       resolutionApprovalId: typeof body.resolution_approval_id === 'string'
@@ -88,6 +95,7 @@ export async function POST(
   } catch (error) {
     const pricingFailure = videoPricingError(error);
     if (pricingFailure) return NextResponse.json({ error: pricingFailure.code, code: pricingFailure.code, message: pricingFailure.message }, { status: pricingFailure.status });
+    if (error instanceof CreationError) return NextResponse.json({ error: error.code, code: error.code, message: error.message }, { status: error.status });
     if (error instanceof DraftUpgradeError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }

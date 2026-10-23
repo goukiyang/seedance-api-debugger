@@ -2041,7 +2041,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
         </main>
       </div>
 
-      {pickerOpen && activeDraft && <UploadedImagePicker key={`${userId}:${activeDraft.id}:${pickerSlotKey}:${pickerTypes?.join(',')}`} open target="assets" title={pickerTypes?.length === 1 && pickerTypes[0] === 'image' ? '添加视频参考图' : '添加视频或音频'} confirmLabel="添加到当前模块" purpose={`video-template-${pickerSlotKey || 'all'}-${pickerTypes?.join('-') || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerTypes || pickerSlot?.types}
+      {pickerOpen && activeDraft && <UploadedImagePicker contextKey={`${userId}:video-template:${activeDraft.id}:${pickerSlotKey || "all"}`} key={`${userId}:${activeDraft.id}:${pickerSlotKey}:${pickerTypes?.join(',')}`} open target="assets" title={pickerTypes?.length === 1 && pickerTypes[0] === 'image' ? '添加视频参考图' : '添加视频或音频'} confirmLabel="添加到当前模块" purpose={`video-template-${pickerSlotKey || 'all'}-${pickerTypes?.join('-') || 'all'}`} currentCount={activeDraft.assets.length} currentAssetIds={assetIds} maxSelection={pickerSelectionCapacity} acceptedTypes={pickerTypes || pickerSlot?.types}
         avatarTarget={{kind:'video-draft',id:activeDraft.id,revision:activeDraft.revision,slotKey:pickerSlotKey,capacity:pickerSelectionCapacity,currentAssetIds:assetIds,sourceSignature:JSON.stringify([activeDraft,pickerSlotKey])}}
         onAvatarApplied={async()=>{
           const before=draftRef.current;if(!before)throw new Error('原模块已关闭，图片仍保留');

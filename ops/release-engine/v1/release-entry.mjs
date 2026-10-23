@@ -10,6 +10,7 @@ import { readTypedJson } from './typed-files.mjs';
 import { classifyReleaseError, ReleaseEngineError } from './release-errors.mjs';
 import {
   assertAttemptBindings,
+  continueFailedAttempt,
   createControllerOwner,
   finishAttempt,
   finishPhase,
@@ -90,8 +91,14 @@ function localDocument(file, maximumBytes) {
 }
 
 export function validatePackageRequest(value) {
-  exactKeys(value, ['schema', 'repoRoot', 'mainSource', 'guardSource', 'outputRoot'], 'release package request');
-  assert.equal(value.schema, 'sd2-release-package-request.v1');
+  const reused = value?.schema === 'sd2-release-package-request.v2';
+  exactKeys(value, ['schema', 'repoRoot', 'mainSource', 'guardSource', 'outputRoot', ...(reused ? ['originalBuilds'] : [])], 'release package request');
+  assert.ok(reused || value.schema === 'sd2-release-package-request.v1');
+  if (reused) {
+    exactKeys(value.originalBuilds, ['directory', 'sourceRun', 'manifestSha256', 'mainSha256', 'guardSha256'], 'original full-build package');
+    safeAbsolute(value.originalBuilds.directory, 'original build package directory'); assert.match(value.originalBuilds.sourceRun, UUID);
+    for (const key of ['manifestSha256', 'mainSha256', 'guardSha256']) assert.match(value.originalBuilds[key], HASH);
+  }
   for (const key of ['repoRoot', 'outputRoot']) safeAbsolute(value[key], key);
   assert.match(value.mainSource, /^[a-f0-9]{40}$/); assert.match(value.guardSource, /^[a-f0-9]{40}$/);
   assert.notEqual(value.mainSource, value.guardSource); return value;
@@ -115,7 +122,7 @@ function installedControllerHashes(directory = here) {
 }
 
 export function validateNativeFixture(name) {
-  assert.ok(NATIVE_FIXTURES.includes(name), 'Native bootstrap fixture is not in the reviewed 19-file allowlist');
+  assert.ok(NATIVE_FIXTURES.includes(name) || name === 'full-release-engineering.mjs', 'Native bootstrap fixture is not in the reviewed 19-file allowlist');
   assert.equal(path.basename(name), name); return name;
 }
 
@@ -739,8 +746,12 @@ export function createReleaseController(overrides = {}) {
   async function execute(batchFile, acquired, phase) {
     const { batch, owner } = acquired;
     const common = { root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner };
-    if (phase === 'guard-build') recordAttemptEvent({ ...common, name: 'build_input_identity',
-      value: verifyBuildInputIdentity(batch), now: deps.now() });
+    if (phase === 'guard-build') {
+      let identity;
+      try { identity = verifyBuildInputIdentity(batch); }
+      catch (error) { error.preChildFailure = 'build_input_identity'; throw error; }
+      recordAttemptEvent({ ...common, name: 'build_input_identity', value: identity, now: deps.now() });
+    }
     const loaded = load(batchFile, batch), before = deps.scene(batch, deps.now());
     const kernel = {
       startPhase: input => startPhase({ ...common, ...input }),
@@ -773,6 +784,17 @@ export function createReleaseController(overrides = {}) {
     catch (error) {
       const current = load(batchFile, acquired.batch), scene = deps.scene(acquired.batch, deps.now());
       const boundary = switchBoundaryFacts(current);
+      if (error.preChildFailure === 'build_input_identity' && phase === 'guard-build'
+        && current.derivedState.activePhase === null && !scene.facts.effectsStarted && !boundary.effectsStarted) {
+        const value = { schema: 'sd2-release-pre-child-failure.v1', phase, gate: 'build_input_identity',
+          taskId: acquired.batch.taskId, attemptId: acquired.batch.attemptId,
+          batchSha256: kernelBindings(batchFile, acquired.batch).manifest.sha256,
+          eventHead: current.derivedState.lastEventSha256, noChildStarted: true, effectsStarted: false,
+          originalError: String(error), observedAt: new Date(deps.now()).toISOString() };
+        const saved = writeJsonExclusive(path.join(current.place.attempt, 'pre-child-' + value.eventHead + '.json'), value);
+        recordAttemptEvent({ root: taskRoot(acquired.batch), taskId: acquired.batch.taskId, attemptId: acquired.batch.attemptId,
+          owner: acquired.owner, name: 'pre_child_failure', value: { file: saved.file, sha256: saved.sha256 }, now: deps.now() });
+      }
       if (current.derivedState.activePhase === null && !(phase === 'switch' && (scene.facts.effectsStarted || boundary.effectsStarted)))
         finishAttempt({ root: taskRoot(acquired.batch), taskId: acquired.batch.taskId, attemptId: acquired.batch.attemptId,
           owner: acquired.owner, outcome: 'failed', after: scene, now: deps.now() });
@@ -780,12 +802,41 @@ export function createReleaseController(overrides = {}) {
     }
   }
 
+  function continueFailed(batchFile, windowFile, failureFile) {
+    const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); assertManifest(batch);
+    const loaded = load(batchFile, batch), request = rootJson(failureFile, 16384);
+    exactKeys(request, ['schema', 'terminalEventSha256', 'failureReceiptSha256'], 'pre-child failure continuation');
+    assert.equal(request.schema, 'sd2-release-failed-continuation.v1');
+    assert.equal(loaded.derivedState.status, 'failed'); assert.equal(nextReleasePhase(loaded), 'guard-build');
+    assert.equal(loaded.derivedState.lastPhase?.phase, 'prepare'); assert.equal(loaded.derivedState.lastPhase?.outcome, 'succeeded');
+    const terminal = loaded.events.at(-1), failure = loaded.events.at(-2);
+    assert.equal(terminal.value.kind, 'attempt_finished'); assert.equal(terminal.value.outcome, 'failed');
+    assert.equal(terminal.sha256, request.terminalEventSha256);
+    assert.equal(failure.value.kind, 'observation'); assert.equal(failure.value.name, 'pre_child_failure');
+    const receipt = rootDocument(failure.value.value.file, 32768);
+    assert.equal(digest(receipt.bytes), request.failureReceiptSha256); assert.equal(failure.value.value.sha256, request.failureReceiptSha256);
+    assert.equal(receipt.value.schema, 'sd2-release-pre-child-failure.v1');
+    assert.equal(receipt.value.taskId, batch.taskId); assert.equal(receipt.value.attemptId, batch.attemptId);
+    assert.equal(receipt.value.phase, 'guard-build'); assert.equal(receipt.value.gate, 'build_input_identity');
+    assert.equal(receipt.value.noChildStarted, true); assert.equal(receipt.value.effectsStarted, false);
+    const bindings = kernelBindings(batchFile, batch); assert.equal(receipt.value.batchSha256, bindings.manifest.sha256);
+    assert.equal(failure.value.previousSha256, receipt.value.eventHead);
+    assert.equal(receipt.value.file, undefined);
+    const scene = deps.scene(batch, deps.now()); assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+    assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+    verifyBuildInputIdentity(batch); // Exact original raw source-manifest digest, never a new createdAt projection.
+    const owner = deps.createOwner(), now = deps.now(), window = releaseWindowReference(batch, windowFile, now);
+    return continueFailedAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId,
+      owner, ...bindings, window, terminalEventSha256: request.terminalEventSha256,
+      failureReceiptSha256: request.failureReceiptSha256, before: scene, now, inspectOwner: deps.inspectOwner });
+  }
+
   async function resume(batchFile, windowFile) {
     const acquired = acquire(batchFile, windowFile);
     return reconcileActive(batchFile, acquired);
   }
 
-  return { start, run, resume, status, inspect };
+  return { start, run, resume, continueFailed, status, inspect };
 }
 
 export function validateEngineInstall(value) {
@@ -847,10 +898,11 @@ export async function releaseEntryCli(argv = process.argv.slice(2)) {
   if (command === 'start' && args.length === 2) return print(controller.start(args[0], args[1]).derivedState);
   if (command === 'status' && args.length === 1) return print(controller.status(args[0]));
   if (command === 'inspect' && args.length === 1) return print(controller.inspect(args[0]));
+  if (command === 'continue-failed' && args.length === 3) return print(controller.continueFailed(args[0], args[1], args[2]));
   if (command === 'resume' && args.length === 2) return print(await controller.resume(args[0], args[1]));
   if (command === 'run' && args.length >= 2 && args.length <= 4)
     return print(await controller.run(args[0], args[1], args[2] || null, args[3] || null));
-  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

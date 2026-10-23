@@ -9,7 +9,9 @@ import { resolveStudioModuleGenerationConfig } from './modules';
 import { submitStudioBatch, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse,
   assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError } from './tasks';
 import { STUDIO_BATCH_LIMITS, studioBatchBudgetPrecision, type StudioBatchView } from './batch-contract';
-import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputIssue, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { frozenStudioInputMainIds, getStudioTaskInputMain, readFrozenStudioInputMain, studioInputMainPreview,
+  type StudioInputMainResponse } from './input-main';
 import { studioAssetUrl } from './media';
 import { studioDeliveryStatus } from './delivery';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -93,6 +95,32 @@ async function readOwned(owner: string, id: unknown, tx: Pick<Prisma.Transaction
   const batch = parse(row.value_json);
   if (batch.ownerId !== owner || batch.id !== id) throw new StudioError('批次不存在或无权访问', 404);
   return { row, batch };
+}
+
+export async function getStudioBatchItemInputMain(user: Parameters<typeof getStudioTaskInputMain>[0], id: string,
+  ordinal: number): Promise<StudioInputMainResponse> {
+  const { batch } = await readOwned(user.id, id);
+  if (!Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > batch.items.length) throw new StudioError('批次条目无效');
+  const item = batch.items[ordinal - 1];
+  if (!item || item.ordinal !== ordinal || !Number.isSafeInteger(item.attempt) || item.attempt < 0) {
+    throw new StudioError('批次条目身份无法确认', 409);
+  }
+  if (item.taskId) return getStudioTaskInputMain(user, item.taskId);
+  const row = await prisma.platformSetting.findUnique({ where: { key: itemKey(batch, ordinal) }, select: { value_json: true } });
+  if (!row) return {
+    source: { kind: 'batch-item', batchId: batch.id, ordinal, attempt: item.attempt }, state: item.prepared ? 'unknown' : 'unavailable',
+    images: [], snapshotToken: createHash('sha256').update(JSON.stringify(['studio-batch-input-missing-v1', batch.id, ordinal, item.attempt])).digest('hex'),
+  };
+  let frozen: Prisma.ImageStudioTaskUncheckedCreateInput;
+  try { frozen = JSON.parse(row.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput; }
+  catch { throw new StudioError('批次输入记录无法确认', 409); }
+  if (frozen.owner_id !== user.id || frozen.batch_id !== batch.id || frozen.ordinal !== ordinal
+    || frozen.id !== childId(batch, item) || typeof frozen.snapshot_json !== 'string' || typeof frozen.reference_ids !== 'string') {
+    throw new StudioError('批次输入记录与原条目不匹配', 409);
+  }
+  return readFrozenStudioInputMain(user, { kind: 'batch-item', batchId: batch.id, ordinal, attempt: item.attempt }, {
+    ownerId: String(frozen.owner_id), snapshotJson: frozen.snapshot_json, referenceIdsJson: frozen.reference_ids,
+  });
 }
 async function writeBatch(tx: Pick<Prisma.TransactionClient, 'platformSetting'>, row: { id: string; value_json: string }, batch: BatchRecord) {
   const changed = await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { value_json: JSON.stringify(batch) } });
@@ -422,7 +450,28 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, usage_json: true, asset_id: true, deleted_at: true,
-    owner_id: true, snapshot_json: includeItems, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
+    owner_id: true, snapshot_json: includeItems, reference_ids: true, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
+  const preparedRows = includeItems ? await prisma.platformSetting.findMany({ where: { key: { in: batch.items
+    .filter(item => !item.taskId && item.prepared).map(item => itemKey(batch, item.ordinal)) } }, select: { key: true, value_json: true } }) : [];
+  const frozenByOrdinal = new Map<number, Prisma.ImageStudioTaskUncheckedCreateInput>();
+  for (const row of preparedRows) {
+    try {
+      const frozen = JSON.parse(row.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput;
+      const ordinal = Number(frozen.ordinal);
+      const item = batch.items[ordinal - 1];
+      if (item && row.key === itemKey(batch, ordinal) && frozen.owner_id === owner && frozen.batch_id === batch.id
+        && frozen.id === childId(batch, item) && typeof frozen.snapshot_json === 'string' && typeof frozen.reference_ids === 'string') {
+        frozenByOrdinal.set(ordinal, frozen);
+      }
+    } catch { /* Corrupt frozen input remains unknown and is never guessed from the current batch draft. */ }
+  }
+  const inputIds = Array.from(new Set([
+    ...tasks.flatMap(task => frozenStudioInputMainIds(task.snapshot_json, task.reference_ids) || []),
+    ...Array.from(frozenByOrdinal.values()).flatMap(frozen => frozenStudioInputMainIds(String(frozen.snapshot_json), String(frozen.reference_ids)) || []),
+  ]));
+  const inputAssets = includeItems && inputIds.length ? await prisma.asset.findMany({ where: { id: { in: inputIds }, owner_id: owner,
+    status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true } }) : [];
+  const readableInputIds = new Set(inputAssets.map(asset => asset.id));
   // 仅当前活跃项读取回执；批次目录不取快照，已完成历史不读逐图文件。
   const deliveryByTask = new Map(includeItems ? await Promise.all(tasks.filter(task => ['running', 'channel_running'].includes(publicPricingTaskState(task.status)))
     .map(async task => { const delivery = await studioDeliveryStatus(task); return [task.id, { phase: delivery.phase, acceptedAt: delivery.acceptedAt, waitingStatus: delivery.waitingStatus,
@@ -445,9 +494,17 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
       const task = tasks.find(task => task.id === item.taskId);
       const asset = assets.find(asset => asset.id === task?.asset_id);
       const mismatch = task && studioDimensionMismatch(task);
+      const frozen = task || frozenByOrdinal.get(item.ordinal);
+      const inputMainPreview = frozen && typeof frozen.snapshot_json === 'string' && typeof frozen.reference_ids === 'string'
+        ? studioInputMainPreview(task ? { kind: 'task', taskId: task.id }
+          : { kind: 'batch-item', batchId: batch.id, ordinal: item.ordinal, attempt: item.attempt },
+        frozen.snapshot_json, frozen.reference_ids, readableInputIds)
+        : { source: { kind: 'batch-item' as const, batchId: batch.id, ordinal: item.ordinal, attempt: item.attempt },
+          state: item.prepared ? 'unknown' as const : 'unavailable' as const };
       return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index],
         error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation) : task?.error,
         resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' as const : 'dimensions_mismatch' as const : null,
+        outputIssue: task ? studioOutputIssue(task) : null, inputMainPreview,
         ...(task && deliveryByTask.has(task.id) ? { delivery: deliveryByTask.get(task.id) } : {}),
         billing: task ? imageBillingView(task, owner, false) : null, image: asset ? { id: asset.id, url: studioAssetUrl(asset.id), thumbnail: studioAssetUrl(asset.id, true), fileSize: asset.file_size || 0, fileName: asset.file_name, mimeType: asset.mime_type || 'image/png' } : null };
     }) } : {}) };

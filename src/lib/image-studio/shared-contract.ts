@@ -14,7 +14,8 @@ import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
-import { moduleCoverKey, promoteModuleCover, copyModuleCover, studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
+import { assertPresetCoverShareable, commitPreparedModuleCoverSnapshot, copyModuleCover, moduleCoverKey,
+  prepareModuleCoverSnapshot, promoteModuleCover, studioFixedCoverDTO, type PreparedModuleCoverSnapshot } from './module-cover';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
 import { StudioSharingError, readOwnedReceipt, readReceipt, writeReceipt } from './shared-command-storage';
 import { projectSharedStudioCapabilities, studioStateReason } from './shared-capabilities';
@@ -155,6 +156,15 @@ export async function studioPublisherModule(ownerId: string, presetId: string, c
   if (!workspace || workspace.source_preset_id !== presetId) throw new StudioSharingError('模板创建者工作区无法确认', 409);
   return value.moduleId;
 }
+// Text-view permission and author attribution share the same source proof.
+// The source owner's current login status does not erase a historical identity.
+export async function readStudioTemplateSourceIdentity(ownerId: string, presetId: string, client: SharedStudioClient = prisma) {
+  let bindingConfirmed = true;
+  try { await studioPublisherModule(ownerId, presetId, client); } catch { bindingConfirmed = false; }
+  const owner = await client.user.findUnique({ where: { id: ownerId }, select: { id: true, name: true, username: true,
+    avatar_url: true, account_type: true, status: true, feishu_open_id: true, feishu_tenant_key: true } });
+  return { owner, bindingConfirmed, known: bindingConfirmed && owner?.account_type === 'internal' };
+}
 async function reproductionForPreset(client: SharedStudioClient, ownerId: string, presetId: string): Promise<SharedStudioReproduction | undefined> {
   const row = await client.platformSetting.findUnique({ where: { key: studioSharedReproductionKey(presetId) }, select: { value_json: true } });
   if (!row) return undefined;
@@ -230,14 +240,15 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
     const asset = byId.get(id)!;
     return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
   };
-  const canSeeContext = actor.role === 'admin' || source.owner_id === actor.id;
+  const sourceIdentity = await readStudioTemplateSourceIdentity(source.owner_id, source.id, client);
+  const canSeeContext = sourceIdentity.known && (actor.role === 'admin' || source.owner_id === actor.id);
   const sourceState = projectSharedStudioCapabilities({ objectKind: source.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active',
     sharing: source.is_shared ? 'shared' : 'private', dependency: 'ready', sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
-    actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: canManageStudioPreset(actor, source) });
+    actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: canManageStudioPreset(actor, source), canViewDefinition: canSeeContext });
   const publicDTO: SharedStudioPublicDefinition = { ...sourceState, deletion: studioSourceDeletionCapability(actor, source), intent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
     banner: source.banner_asset_id && readableIds.has(source.banner_asset_id) ? image(source.banner_asset_id) : null,
     fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: presetId }, client), coverEditable: canManageStudioPreset(actor, source),
-    templatePrompt: source.prompt, context: canSeeContext ? context : '', contextConfigured: Boolean(context.trim()),
+    templatePrompt: canSeeContext ? source.prompt : '', context: canSeeContext ? context : '', contextConfigured: Boolean(context.trim()),
     contextEditable: canManageStudioPreset(actor, source), canManageSharing: canManageStudioPreset(actor, source),
     ownedByViewer: source.owner_id === actor.id, isShared: source.is_shared, defaults: generationDefaults,
     templateReferenceIds, images: templateReferenceIds.map(image), fixedReferenceCount: fixedReferences.length,
@@ -644,10 +655,29 @@ async function writeSharedStudioPersonalState(actor: ImageStudioIdentity,
   return changes;
 }
 
+// A racing duplicate may observe no receipt just before the first command
+// commits. Re-read its original receipt before surfacing a preparation conflict.
+async function prepareSharedCoverForCommand(user: ImageStudioIdentity, moduleId: string, preparationRequestId: string,
+  targetPresetId: string, operationFingerprint: string, receiptRequestId: unknown = preparationRequestId) {
+  const actor = await assertStudioActor(user.id);
+  if (await readReceipt(prisma, actor.id, receiptRequestId, operationFingerprint)) return null;
+  try { return await prepareModuleCoverSnapshot(actor, moduleId, preparationRequestId, targetPresetId, operationFingerprint); }
+  catch (error) {
+    if (await readReceipt(prisma, actor.id, receiptRequestId, operationFingerprint)) return null;
+    throw error;
+  }
+}
+
 export type PublishSharedStudioModuleInput = Record<string, unknown> & { requestId: unknown; expectedRevision: unknown }
   & { [Field in keyof SharedStudioDefinitionPersonalInput]?: unknown };
 export async function publishSharedStudioModule(user: ImageStudioIdentity, moduleId: string, input: PublishSharedStudioModuleInput, client?: SharedStudioClient,
-  lifecycle?: { firstPublication?: boolean; requestId?: unknown }) {
+  lifecycle?: { firstPublication?: boolean; requestId?: unknown; preparedCover?: PreparedModuleCoverSnapshot | null; coverOperationFingerprint?: string }) {
+  const operationFingerprint = digest(['publish-shared', moduleId, input]);
+  const outerFingerprint = lifecycle?.coverOperationFingerprint || operationFingerprint;
+  const prior = !client ? await readReceipt(prisma, (await assertStudioActor(user.id)).id, input.requestId, operationFingerprint) : null;
+  const coverRequestId = String(lifecycle?.requestId ?? input.requestId ?? '');
+  const preparedCover = lifecycle?.preparedCover !== undefined ? lifecycle.preparedCover
+    : !client && !prior && input.isShared === true && coverRequestId ? await prepareSharedCoverForCommand(user, moduleId, coverRequestId, `module-source:${moduleId}`, outerFingerprint, input.requestId) : null;
   return inTransaction(client, async tx => {
     const actor = await assertStudioActor(user.id, tx);
     const fingerprint = digest(['publish-shared', moduleId, input]);
@@ -782,6 +812,12 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       data: { ...personalChanges, source_preset_id: presetId, revision: workspace.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('工作区版本在保存时发生变化，本次未保存；当前草稿保留', 409, 'state-conflict', 'workspace');
     await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
+    if (preparedCover) {
+      if (preparedCover.targetPresetId !== presetId) throw new StudioSharingError('自动封面目标与模板不一致，本次未保存', 409);
+      await commitPreparedModuleCoverSnapshot(actor, preparedCover, tx, { moduleId, targetPresetId: presetId,
+        sourceModuleId: preparedCover.moduleId, sourceBeforeRevision: preparedCover.moduleRevision,
+        beforeRevision: workspace.revision, afterRevision: workspace.revision + 1, operationFingerprint: outerFingerprint });
+    }
     await restoreStudioDefaultGroup(actor.id, groupName, tx);
     const { definition } = await resolveSharedStudioDefinition(actor, presetId, tx);
     const result = { moduleId, presetId, beforeRevision: workspace.revision, revision: workspace.revision + 1,
@@ -802,6 +838,11 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
 }
 
 export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input: Record<string, unknown>): Promise<ImageStudioPreset & { publisherModuleId: string }> {
+  const outerActor = await assertStudioActor(user.id), outerFingerprint = digest(['save-as-shared-preset', input]);
+  const originalReceipt = await readReceipt(prisma, outerActor.id, input.requestId, outerFingerprint);
+  const sourceModuleForCover = typeof input.sourceModuleId === 'string' ? input.sourceModuleId : null;
+  const preparedCover = !originalReceipt && input.isShared === true && sourceModuleForCover && typeof input.requestId === 'string'
+    ? await prepareSharedCoverForCommand(outerActor, sourceModuleForCover, input.requestId, `module-source:${sourceModuleForCover}`, outerFingerprint) : null;
   return inTransaction(undefined, async tx => {
     const actor = await assertStudioActor(user.id, tx);
     const fingerprint = digest(['save-as-shared-preset', input]);
@@ -871,13 +912,22 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
     }
     const published = await publishSharedStudioModule(actor, publisherModuleId, { ...input,
       requestId: `save-as-definition:${digest([input.requestId, publisherModuleId])}`, expectedRevision, expectedDefinitionToken }, tx,
-      { firstPublication: true, requestId: input.requestId });
+      { firstPublication: true, requestId: input.requestId, preparedCover, coverOperationFingerprint: outerFingerprint });
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
     return { ...await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: published.presetId } }), publisherModuleId };
   });
 }
 
 export async function replaceSharedStudioPreset(user: ImageStudioIdentity, presetId: string, input: Record<string, unknown>) {
+  const outerActor = await assertStudioActor(user.id), outerFingerprint = digest(['replace-preset', presetId, input]);
+  const originalReceipt = await readReceipt(prisma, outerActor.id, input.requestId, outerFingerprint);
+  let preparedCover: PreparedModuleCoverSnapshot | null = null;
+  if (!originalReceipt && typeof input.sourceModuleId === 'string' && typeof input.requestId === 'string') {
+    const target = await prisma.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: outerActor.id } });
+    const publisher = target ? await studioPublisherModule(outerActor.id, presetId) : null;
+    if (target && (input.isShared === undefined ? target.is_shared : input.isShared === true) && publisher && publisher !== input.sourceModuleId)
+      preparedCover = await prepareSharedCoverForCommand(outerActor, input.sourceModuleId, input.requestId, presetId, outerFingerprint);
+  }
   return inTransaction(undefined, async tx => {
     const actor = await assertStudioActor(user.id, tx);
     const fingerprint = digest(['replace-preset', presetId, input]);
@@ -911,8 +961,16 @@ export async function replaceSharedStudioPreset(user: ImageStudioIdentity, prese
     await assertStudioWorkspaceNotDeleted(actor.id, input.sourceModuleId, tx);
     if (sourceWorkspace.revision !== input.moduleRevision) throw new StudioSharingError('保存来源已在其他页面更新，请重新读取后核对', 409);
     const workspace = await openSharedStudioModule(actor, presetId, `replace-open:${digest([input.requestId, presetId])}`, tx);
+    if (input.sourceModuleId !== workspace.id) {
+      const originBinding = await studioSharedBinding(actor.id, input.sourceModuleId, tx);
+      if (originBinding?.mode === 'publisher') await copyModuleCover(actor, { kind: 'preset', id: originBinding.presetId }, { kind: 'preset', id: presetId }, tx);
+      else if (!originBinding) await promoteModuleCover(actor, input.sourceModuleId, presetId, tx);
+    }
     const published = await publishSharedStudioModule(actor, workspace.id, { ...input, requestId: `replace-definition:${digest([input.requestId, presetId])}`,
-      expectedRevision: workspace.revision, expectedDefinitionToken: definitionToken }, tx, { requestId: input.requestId });
+      // The caller token was checked above; copy/promote may only add the
+      // known cover dependency inside this same transaction.
+      expectedRevision: workspace.revision, expectedDefinitionToken: await sharedDefinitionToken(source, tx) }, tx,
+      { requestId: input.requestId, preparedCover, coverOperationFingerprint: outerFingerprint });
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, published.receipt);
     return tx.imageStudioPreset.findUniqueOrThrow({ where: { id: presetId } });
   });

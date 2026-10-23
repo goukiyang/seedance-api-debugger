@@ -31,7 +31,8 @@ export function parseContentKey(input: unknown): ContentKey {
 
 export type ResolvedContent = {
   summary: ContentSummary;
-  source?: { url: string; thumbnail: string | null; referenceId?: string; canPreviewOriginal?: boolean; mimeType?: string; fileName?: string };
+  source?: { url: string; thumbnail: string | null; referenceId?: string; canPreviewOriginal?: boolean; mimeType?: string; fileName?: string;
+    hdOwner?: { kind: 'asset' | 'reference'; id: string; ownerId: string } };
   prompt?: string;
 };
 const mediaUrl = (key: ContentKey, variant: string) => `/api/content-reactions/media?key=${encodeURIComponent(key)}&variant=${variant}`;
@@ -70,7 +71,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       const item = summary(input, 'image', '参考图片', `/collections/${access.ref.album_id}`);
       item.owner = await owner(access.ref.owner_user_id);
       if (access.permissions.use && user.account_type === 'internal') item.reuse = { referenceImageId: id };
-      return { summary: withMedia(item, access.permissions.download), source: { url: access.ref.url, thumbnail: access.ref.thumbnail_url, referenceId: id } };
+      return { summary: withMedia(item, access.permissions.download), source: { url: access.ref.url, thumbnail: access.ref.thumbnail_url,
+        referenceId: id, hdOwner: { kind: 'reference', id, ownerId: access.ref.owner_user_id } } };
     }
     if (type === 'asset') {
       const asset = await prisma.asset.findUnique({ where: { id } });
@@ -103,7 +105,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
         // Only the output image is shared. Never expose its filename, generation origin,
         // private task route, inputs, prompt, reuse or download permissions.
         return { summary: withMedia(item, false), source: { url: asset.original_url, thumbnail: asset.thumbnail_url,
-          canPreviewOriginal: false, mimeType: asset.mime_type || undefined, fileName: 'template-pinned-image' } };
+          canPreviewOriginal: false, mimeType: asset.mime_type || undefined, fileName: 'template-pinned-image',
+          hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } } };
       }
       const item = summary(input, asset.type as ContentCategory, asset.file_name || '素材', `/assets?content=${encodeURIComponent(input)}`);
       if (asset.type === 'image') item.generationOrigin = assetGenerationOrigin(asset, await generationOrigins(user, [asset]));
@@ -116,7 +119,10 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       const canPreviewOriginal = download || Boolean(reusableReferenceId);
       if (asset.type !== 'image' && !canPreviewOriginal) media.previewUrl = null;
       if (asset.type === 'video' && !asset.thumbnail_url) media.thumbnailUrl = null;
-      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url, referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal, mimeType: asset.mime_type || undefined, fileName: asset.file_name } };
+      return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url,
+        referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal,
+        mimeType: asset.mime_type || undefined, fileName: asset.file_name,
+        hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } } };
     }
     if (type === 'video_task') {
       const task = await prisma.videoTask.findUnique({ where: { id } });
@@ -155,7 +161,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       item.templateKind = 'workpage'; item.templateMedium = 'image';
       item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await owner(row.owner_id);
       const binding = await studioSharedBinding(user.id, row.id);
-      const fixedCover = await studioFixedCoverDTO(user, binding ? { kind: 'preset', id: binding.presetId } : { kind: 'module', id: row.id });
+      const fixedCover = await studioFixedCoverDTO(user, source ? { kind: 'preset', id: source.id }
+        : binding ? { kind: 'preset', id: binding.presetId } : { kind: 'module', id: row.id });
       if (fixedCover) { item.thumbnailUrl = fixedCover.thumbnailUrl; item.previewUrl = fixedCover.imageUrl; }
       return { summary: item };
     }

@@ -64,7 +64,6 @@
     function contextErrors(input) {
         const errors = [];
         if (!clean(input?.projectId)) errors.push('请先选择可生成的项目。');
-        if (!clean(input?.cardId)) errors.push('请先选择可生成的视频卡。');
         return errors;
     }
 
@@ -120,8 +119,9 @@
             url: '/api/assets/generate',
             method: 'POST',
             payload: {
+                creation_contract_version: 2,
                 project_id: clean(input.projectId),
-                video_card_id: clean(input.cardId),
+                video_card_id: clean(input.cardId) || null,
                 canvas_document_id: clean(input.documentId),
                 canvas_node_id: clean(input.nodeId),
                 tab_id: clean(input.workspaceKey),
@@ -161,10 +161,12 @@
             url: settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create',
             method: 'POST',
             payload: {
+                creation_contract_version: 2, entry: 'canvas', continuation: { mode: 'new' },
+                canvas_document_id: clean(input.documentId), canvas_node_id: nodeId,
                 prompt,
                 ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                 model: clean(settings.model),
-                ...(settings.provider === 'volcengine_ip' ? {} : { provider: settings.provider || 'seedance' }),
+                provider: settings.provider || 'seedance',
                 ...(typeof settings.pricingRevision === 'string' ? { pricing_revision: settings.pricingRevision } : {}),
                 ...(settings.provider !== 'volcengine_ip' && clean(settings.pricingQuoteToken)
                     ? { pricing_quote_token: settings.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
@@ -179,8 +181,8 @@
                 watermark: settings.watermark === true,
                 draft: (settings.provider || 'seedance') === 'seedance' && settings.draft === true,
                 project_id: clean(input.projectId),
-                video_card_id: clean(input.cardId),
-                video_branch_id: clean(input.branchId),
+                video_card_id: clean(input.cardId) || null,
+                video_branch_id: clean(input.branchId) || null,
                 reference_image_ids: requestReferenceIds(input, mode.maximumReferences),
                 reference_video_urls: videoReferenceUrls(input.referenceVideoUrls),
                 idempotency_key: `${nodeId}:${requestId}`,
@@ -193,7 +195,7 @@
                     provider: settings.provider || 'seedance',
                     canvas_document_id: clean(input.documentId),
                     canvas_node_id: nodeId,
-                    video_branch_id: clean(input.branchId),
+                    video_branch_id: clean(input.branchId) || null,
                     mode: modeName,
                     workspace_key: clean(input.workspaceKey)
                 }

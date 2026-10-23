@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
-import { createStudioBatch, listStudioBatches, studioBatchView, updateStudioBatch, quoteStudioBatchContinuation } from '@/lib/image-studio/batches';
+import { createStudioBatch, getStudioBatchItemInputMain, listStudioBatches, studioBatchView, updateStudioBatch, quoteStudioBatchContinuation } from '@/lib/image-studio/batches';
 import { StudioError, studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
 import { quoteStudioBatch } from '@/lib/image-studio/batch-billing-quote';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
@@ -9,6 +9,7 @@ import { ImageGenerationChannelError } from '@/lib/integrations/image-generation
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
+const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 async function handle(request: NextRequest, write = false) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
@@ -37,13 +38,20 @@ async function handle(request: NextRequest, write = false) {
       return NextResponse.json({ batch: await studioBatchView(user.id, id) }, { status: 202 });
     }
     const id = request.nextUrl.searchParams.get('id');
+    const mode = request.nextUrl.searchParams.get('mode');
+    if (mode === 'input-main') {
+      if (!id) throw new StudioError('批次编号无效');
+      const ordinal = Number(request.nextUrl.searchParams.get('ordinal'));
+      return NextResponse.json(await getStudioBatchItemInputMain(user, id, ordinal), { headers: privateHeaders });
+    }
+    if (mode) throw new StudioError('批次读取方式无效');
     const requestId = request.nextUrl.searchParams.get('requestId');
     if (requestId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
     if (id || requestId) {
       const { createHash } = await import('node:crypto');
-      return NextResponse.json({ batch: await studioBatchView(user.id, id || createHash('sha256').update(`${user.id}:${requestId}`).digest('hex')) }, { headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json({ batch: await studioBatchView(user.id, id || createHash('sha256').update(`${user.id}:${requestId}`).digest('hex')) }, { headers: privateHeaders });
     }
-    return NextResponse.json(await listStudioBatches(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(await listStudioBatches(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: privateHeaders });
   } catch (error) {
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });

@@ -59,14 +59,18 @@ export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
     const module = await import(pathToFileURL(path.join(here, 'release-engine/v1/release-entry.mjs')).href);
     process.stdout.write(JSON.stringify(module.installReleaseEngine(args[0])) + '\n'); return;
   }
+  if (command === 'capture-full' && args.length === 1) {
+    const { captureFullReleaseLive } = await import('./release-engine/v1/full-release-contract.mjs');
+    console.log(JSON.stringify(captureFullReleaseLive(rootJson(args[0])))); return;
+  }
   if (command === 'package' && args.length === 2) {
     const module = await import(pathToFileURL(path.join(here, 'release-engine/v1/release-entry.mjs')).href);
     process.stdout.write(JSON.stringify(await module.packageReleaseCandidates(args[0], args[1])) + '\n'); return;
   }
-  const counts = { start: 2, status: 1, inspect: 1, resume: 2 };
+  const counts = { start: 2, status: 1, inspect: 1, resume: 2, 'continue-failed': 3 };
   if (Object.hasOwn(counts, command) && args.length === counts[command]) return forward(installedEntry(args[0]), [command, ...args]);
   if (command === 'run' && args.length >= 2 && args.length <= 4) return forward(installedEntry(args[0]), [command, ...args]);
-  throw new Error('Usage: sd2-release.mjs new-identity [TASK_UUID] | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Usage: sd2-release.mjs new-identity [TASK_UUID] | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

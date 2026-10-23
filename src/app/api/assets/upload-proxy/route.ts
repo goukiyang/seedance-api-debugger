@@ -1,13 +1,14 @@
 /**
  * POST /api/assets/upload-proxy
- * 浏览器直传 R2 被 CORS 拦截时，使用本站后端按同一上传票据中转写入 R2。
+ * 使用本站后端按同一上传票据中转写入 R2。
  */
 
 import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { assertUploadOwner, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
-import { proxyDirectUploadToStorage } from '@/lib/assets/direct-upload';
+import { directUploadRequestId, proxyDirectUploadToStorage } from '@/lib/assets/direct-upload';
+import { directUploadFailure } from '@/lib/assets/direct-upload-error';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
@@ -31,6 +32,7 @@ function readOptionalNumberHeader(request: NextRequest, name: string) {
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
+  let originalRequestId: string | null = null;
   const mimeType = request.headers.get('content-type') || null;
   const fileSize = readOptionalNumberHeader(request, 'content-length');
   try {
@@ -39,10 +41,12 @@ export async function POST(request: NextRequest) {
     userId = user.id;
     assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     if (!request.body) return NextResponse.json({ error: '缺少上传文件内容，请重新上传。' }, { status: 400 });
+    const uploadToken = readRequiredHeader(request, 'x-upload-token', '上传票据');
+    originalRequestId = directUploadRequestId(uploadToken, user.id);
 
     const uploadResult = await proxyDirectUploadToStorage({
       ownerId: user.id,
-      uploadToken: readRequiredHeader(request, 'x-upload-token', '上传票据'),
+      uploadToken,
       hash: readRequiredHeader(request, 'x-file-hash', '文件校验信息'),
       width: readOptionalNumberHeader(request, 'x-media-width') ?? readOptionalNumberHeader(request, 'x-image-width'),
       height: readOptionalNumberHeader(request, 'x-media-height') ?? readOptionalNumberHeader(request, 'x-image-height'),
@@ -66,6 +70,7 @@ export async function POST(request: NextRequest) {
       fallbackPath: 'proxy',
       skippedProxy: false,
       fileKind: getSiteUploadKind(uploadResult.mimeType),
+      requestId: originalRequestId,
     });
     return NextResponse.json({
       success: true,
@@ -89,8 +94,8 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
-    const message = error instanceof Error ? error.message : '服务端中转上传失败';
+    const diagnostic = directUploadFailure(error, 'proxy');
+    const verified = error instanceof VerifiedUploadError ? verifiedUploadFailure(error) : null;
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
@@ -99,14 +104,17 @@ export async function POST(request: NextRequest) {
         mimeType,
         fileSize,
         durationMs: Date.now() - startedAt,
-        errorCode: 'proxy_failed',
-        errorMessage: message,
+        errorCode: verified?.code || diagnostic.code,
+        errorMessage: verified?.error || diagnostic.error,
+        errorName: diagnostic.errorName, causeCode: diagnostic.causeCode,
+        errorStage: 'proxy', recovery: diagnostic.recovery, requestId: originalRequestId,
         uploadMode: 'proxy',
         fallbackPath: 'proxy',
         skippedProxy: false,
         fileKind: mimeType ? getSiteUploadKind(mimeType) : null,
       });
     }
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json(verified ? { ...verified, errorStage: 'proxy', recovery: 'query' } : diagnostic,
+      { status: error instanceof VerifiedUploadError ? error.status : 503 });
   }
 }

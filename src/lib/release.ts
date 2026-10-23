@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 export const release = { version: packageInfo.version, channel: 'production',
-  summary: '修正细比例图片的尺寸计算，管理员可按任务查看安全错误详情。3D多视图新生成和新视频批次仍暂停，已有任务与作品保留。' };
+  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看、上传与3D多视图拼图。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

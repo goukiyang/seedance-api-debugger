@@ -26,7 +26,7 @@ const NATIVE_FILES = ['release-protection-engineering.mjs', 'guard-recovery-engi
   'multiview-works-engineering.mjs'];
 const NATIVE_TIMEOUT_MS = 180000;
 const SHARED_NATIVE_FILES = [...NATIVE_FILES, 'attempt-state-engineering.mjs', 'release-entry-engineering.mjs'];
-const MANIFEST_NATIVE_FILES = ['runtime-source-engineering.mjs', 'canvas-batch-schema-engineering.mjs'];
+const MANIFEST_NATIVE_FILES = ['runtime-source-engineering.mjs', 'canvas-batch-schema-engineering.mjs', 'full-release-engineering.mjs'];
 const SIZE_LOG_ORIGINAL = Object.freeze({
   runId: '10cf6c09-d7b4-4986-b3b8-0868dd8ca1cf',
   manifestSha256: '251e9697976e349f3b004c3c429cbeecac2a957f04e85fb1841dcda353c5becb',
@@ -491,7 +491,8 @@ function sharedNativeTasks(m, reference) {
   return [...nativeTasks(m, reference).map(([file, args]) => [file,
     file === 'certificate-engineering.mjs' ? [engineDirectory(m)]
       : file === 'candidate-reuse-engineering.mjs' && original ? ['--immutable-original-manifest', original] : args]),
-  ['attempt-state-engineering.mjs', []], ['release-entry-engineering.mjs', []]];
+  ['attempt-state-engineering.mjs', []], ['release-entry-engineering.mjs', []],
+  ...(m.fullRelease ? [['full-release-engineering.mjs', [m.stage + '/manifest.json']]] : [])];
 }
 function sharedNativeContext(m, equivalentEngine = null) {
   const file = m.stage + '/context.json', bytes = rootFile(file, 256 * 1024), value = JSON.parse(bytes);
@@ -571,7 +572,8 @@ function sealedDependencyTrust(m, root, uid) {
     assert.equal(original.runId, runId); assert.equal(original.stage, stage);
     const kind = compiled?.kind || (recovered ? 'guard' : ['main', 'guard'].find(label => original[label].root + '/node_modules' === root));
     assert.ok(['main', 'guard'].includes(kind)); const candidate = original[kind];
-    assert.equal(candidate.root + '/node_modules', root); assert.equal(candidate.source, m.live.web.source);
+    assert.equal(candidate.root + '/node_modules', root);
+    assert.equal(candidate.source, m.fullRelease ? m.live.hd.source : m.live.web.source);
     assert.equal(candidate.source, m.live.hd.source); assert.equal(original.appUser, m.appUser);
     const file = stage + '/' + kind + '-immutable-success.json', bytes = rootFile(file, 128 * 1024 * 1024), capsule = JSON.parse(bytes);
     if (compiled) { assert.equal(compiled.file, file); assert.equal(sha(bytes), compiled.sha256); assert.ok(capsule.originalReceipt.hdCompiledCache); }
@@ -693,17 +695,21 @@ function sharedControlDependencies(m, cutoff) {
     return { binary, sqliteVersion: value.sqliteVersion, files: [value.python, value.wrapper, value.extension, ...value.libraries]
       .map(file => sizeLogRuntimeFile(file, cutoff, [0], true)) };
   });
-  const dependencyRoot = m.live.web.root + '/node_modules', dependencyTrust = sealedDependencyTrust(m, dependencyRoot, applicationUid);
+  const dependencyRoot = (m.fullRelease ? m.live.hd.root : m.live.web.root) + '/node_modules', dependencyTrust = sealedDependencyTrust(m, dependencyRoot, applicationUid);
   const sourceProof = m.live.hd.sourceProof || dependencyTrust.sourceProof;
   const sourceBytes = rootFile(sourceProof.sourceManifest), source = JSON.parse(sourceBytes);
-  assert.equal(source.source, m.live.hd.source); assert.equal(source.source, m.live.web.source);
+  assert.equal(source.source, m.live.hd.source);
+  if (!m.fullRelease) assert.equal(source.source, m.live.web.source);
   const sourceFiles = {};
   for (const root of [...new Set([m.live.web.root, m.live.hd.root])]) {
-    assert.equal(root, m.projectRoot + '/managed-releases/' + source.source);
-    sourceFiles[root] = Object.fromEntries(Object.keys(source.files).sort().map(file => {
+    const roleSource = m.fullRelease ? Object.values(m.fullRelease.liveRoles).find(role => role.root === root) : null;
+    const roleManifest = roleSource ? JSON.parse(rootFile(roleSource.sourceManifest)) : source;
+    if (roleSource) { assert.equal(sha(rootFile(roleSource.sourceManifest)), roleSource.sourceManifestSha256); assert.equal(roleManifest.source, roleSource.source); }
+    assert.equal(root, m.projectRoot + '/managed-releases/' + roleManifest.source);
+    sourceFiles[root] = Object.fromEntries(Object.keys(roleManifest.files).sort().map(file => {
       assert.equal(path.resolve(root, file), root + '/' + file);
       const digest = sha(sizeLogApplicationFile(root + '/' + file, root, applicationUid, 32 * 1024 * 1024, true));
-      assert.equal(digest, source.files[file], 'Live baseline source changed: ' + file);
+      assert.equal(digest, roleManifest.files[file], 'Live baseline source changed: ' + file);
       const stat = fs.lstatSync(root + '/' + file);
       return [file, { sha256: digest, ...Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]])) }];
     }));
@@ -741,7 +747,7 @@ function sharedControlDependencies(m, cutoff) {
   return result;
 }
 function sharedNativeInput(m, file, args, dependencies, cutoff) {
-  assert.ok(SHARED_NATIVE_FILES.includes(file)); const directory = engineDirectory(m), context = sharedNativeContext(m);
+  assert.ok([...SHARED_NATIVE_FILES, ...(m.fullRelease ? ['full-release-engineering.mjs'] : [])].includes(file)); const directory = engineDirectory(m), context = sharedNativeContext(m);
   const argv = [directory + '/release-entry.mjs', 'native', context.file, file, ...args];
   const argumentFiles = {};
   if (file === 'hd-closed-cache-engineering.mjs') {
@@ -764,7 +770,7 @@ function sharedControlReferences(m) {
   const leaves = new Map();
   for (const item of value.leaves) {
     assert.deepEqual(Object.keys(item).sort(), ['file', 'manifest', 'manifestSha256', 'receipt', 'receiptSha256', 'log', 'logSha256'].sort());
-    assert.ok(SHARED_NATIVE_FILES.includes(item.file) && !MANIFEST_NATIVE_FILES.includes(item.file) && !leaves.has(item.file),
+    assert.ok([...SHARED_NATIVE_FILES, ...(m.fullRelease ? ['full-release-engineering.mjs'] : [])].includes(item.file) && !MANIFEST_NATIVE_FILES.includes(item.file) && !leaves.has(item.file),
       'Only a unique, non-manifest-dependent direct native leaf may be reused');
     for (const key of ['manifestSha256', 'receiptSha256', 'logSha256']) assert.match(item[key], /^[a-f0-9]{64}$/);
     leaves.set(item.file, item);
@@ -863,7 +869,7 @@ function assertSharedNativeBatch(m, value, observedDependencies = null) {
   assert.equal(value.servicesChanged, false); assert.equal(value.productionWrites, 0);
   const started = Date.parse(value.startedAt), finished = Date.parse(value.finishedAt);
   assert.ok(Number.isFinite(started) && started <= finished && finished <= Date.now());
-  assert.deepEqual(value.outcomes.map(item => item.file), SHARED_NATIVE_FILES);
+  assert.deepEqual(value.outcomes.map(item => item.file), [...SHARED_NATIVE_FILES, ...(m.fullRelease ? ['full-release-engineering.mjs'] : [])]);
   const references = sharedControlReferences(m), dependencies = observedDependencies || sharedControlDependencies(m, started);
   const admission = inspectRetiredHdCaches(m, 'admission'), reference = m.hdRoot + '/.runs/' + admission.entries[0].run + '/tsx-1004';
   const tasks = new Map(sharedNativeTasks(m, reference));
@@ -888,7 +894,7 @@ function assertSharedNativeBatch(m, value, observedDependencies = null) {
   return value;
 }
 function atomicReceiptFile(m, file) {
-  assert.ok((isSharedEngine(m) ? SHARED_NATIVE_FILES : NATIVE_FILES).includes(file), 'Unknown native control file');
+  assert.ok((isSharedEngine(m) ? [...SHARED_NATIVE_FILES, ...(m.fullRelease ? ['full-release-engineering.mjs'] : [])] : NATIVE_FILES).includes(file), 'Unknown native control file');
   return m.stage + '/native-control-preflight/' + file + '.receipt.json';
 }
 
@@ -998,8 +1004,8 @@ function assertControlPreflightObserved(m, dependencies = null) {
 
 export async function controlPreflight(m) {
   validateManifest(m); if (!isSharedEngine(m)) assertReleaseWindow(m);
-  if (m.recoveredGuardBaseline) assertCurrentPublishedBaseline(m);
-  if (m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
+  if (m.recoveredGuardBaseline || m.fullRelease) assertCurrentPublishedBaseline(m);
+  if (m.fullRelease || m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   for (const [file, digest] of Object.entries(m.privateSha256))
     assert.equal(sha(rootFile(engineDirectory(m) + '/' + file)), digest);
@@ -1089,8 +1095,8 @@ export async function controlPreflight(m) {
 export async function controlAdmission(m) {
   validateManifest(m); assert.equal(isSharedEngine(m), true); engineDirectory(m); assertReleaseWindow(m);
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
-  if (m.recoveredGuardBaseline) assertCurrentPublishedBaseline(m);
-  if (m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
+  if (m.recoveredGuardBaseline || m.fullRelease) assertCurrentPublishedBaseline(m);
+  if (m.fullRelease || m.recoveredGuardBaseline?.schema === 'sd2-multiview-r17-recovered-guard.v1') inspectInstalledMultiviewRecipeAdoption(m);
   const batchFile = m.stage + '/native-control-preflight/batch.json', parsed = JSON.parse(rootFile(batchFile));
   assert.equal(fs.existsSync(m.stage + '/native-control-preflight/receipt.json'), false, 'A completed preflight cannot be reissued with a new time');
   const dependencies = sharedControlDependencies(m, Date.parse(parsed.startedAt));

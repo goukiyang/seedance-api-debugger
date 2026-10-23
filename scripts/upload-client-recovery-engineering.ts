@@ -418,7 +418,34 @@ assert.equal(late.state.selected.length, 0);
 assert.equal(late.state.failed.length, 0);
 assert.equal(late.state.notice, '');
 
+// Empty/nested connection errors keep a safe explanation and original-query
+// action through the actual server diagnostic and client proxy boundary.
+const diagnosticModule = evaluate(fs.readFileSync(path.join(repository, 'src/lib/assets/direct-upload-error.ts'), 'utf8'), {}, {}, 'direct-upload-error.engineering.ts');
+const networkCause = Object.assign(new Error(''), { code: 'ENETUNREACH' });
+const aggregate = Object.assign(new AggregateError([networkCause], ''), { code: 'ETIMEDOUT' });
+const diagnostic = diagnosticModule.directUploadFailure(aggregate, 'proxy');
+assert.ok(diagnostic.error.trim()); assert.equal(diagnostic.code, 'UPLOAD_RESULT_UNKNOWN');
+assert.equal(diagnostic.causeCode, 'ETIMEDOUT'); assert.equal(diagnostic.recovery, 'query');
+const proxyModule = evaluate(`${fs.readFileSync(clientPath, 'utf8')}\nexport const engineering = { uploadWithServerProxy };`, {}, {
+  './json-response': { readJsonResponse: async (response: Response) => response.json() },
+  './upload-session': { uploadSession: () => ({ ownerId: 'owner-proxy', epoch: 3 }) },
+  './upload-progress': { calculateUploadTimeoutMs: () => 1000, notifyUploadProgress: () => {},
+    requestJsonWithUploadProgress: async (options: { url: string; headers: Record<string, string> }) => {
+      assert.equal(options.url, '/api/assets/upload-proxy');
+      assert.equal(options.headers['X-Upload-Token'], 'original-proxy-token');
+      assert.equal(options.headers['X-Upload-Owner-Id'], 'owner-proxy');
+      return { ok: false, status: 503, data: diagnostic };
+    } },
+}, 'proxy-client.engineering.ts');
+const proxyFailure = await captureFailure(proxyModule.engineering.uploadWithServerProxy({ uploadToken: 'original-proxy-token' },
+  new File([Buffer.from('proxy')], 'video.mp4', { type: 'video/mp4' }),
+  { ownerId: 'owner-proxy', requestId: 'original-proxy-request', hash: 'a'.repeat(64) }, 'invalid'));
+assert.equal(proxyFailure instanceof proxyModule.UploadFileError, true);
+assert.equal(proxyFailure.causeCode, 'ETIMEDOUT'); assert.equal(proxyFailure.stage, 'proxy'); assert.equal(proxyFailure.recovery, 'query');
+assert.match(proxyFailure.message, /核对原上传/); assert.doesNotMatch(proxyFailure.message, /CORS|重新选择/);
+
 const checks = [
+  'empty AggregateError survives proxy mapping with original query recovery and finite cause code',
   'writing unknown exports query and performs one GET with zero POST',
   'notAccepted proof requires a second explicit action and rotates the original nonce',
   'invalid prepared proof remains query-only and preserves the original marker',

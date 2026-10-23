@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 type Position = { id: string | null; index: number };
 type PageRequest = Position & { restore?: boolean; last?: boolean };
+export type ResultNavigationIntent = { id: string; scopeKey: string; revision: number; targetId: string | null };
 
 const MIN_PAGE_ITEMS = 12;
 const MAX_PAGE_ITEMS = 24;
@@ -19,10 +20,11 @@ export function gridPageCapacity(grid: HTMLElement) {
   return rows * rowSize;
 }
 
-export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total }: {
+export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent }: {
   items: T[]; storageKey: string; visible: boolean; busy: boolean; error: boolean;
   hasMore: boolean; loadMore: () => Promise<unknown>; currentId: string | null;
   total?: number | null;
+  navigationIntent?: ResultNavigationIntent | null;
 }) {
   const items = useMemo(() => Array.from(new Map(inputItems.map(item => [item.id, item])).values()), [inputItems]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -36,6 +38,10 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   const reading = useRef(false);
   const generation = useRef(0);
   const retryRequested = useRef(false);
+  const consumedIntent = useRef('');
+  const initializedStorageKey = useRef('');
+  const intentKey = navigationIntent?.scopeKey === storageKey
+    ? JSON.stringify([navigationIntent.id, navigationIntent.scopeKey, navigationIntent.revision]) : '';
   const suppliedTotal = typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? total : null;
   const knownTotal = suppliedTotal ?? (!hasMore && !busy ? items.length : null);
   const anchorIndex = position.id ? items.findIndex(item => item.id === position.id) : -1;
@@ -46,10 +52,21 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   latest.current = { items, currentId, start, capacity, position };
 
   useEffect(() => {
+    // Consuming a one-shot intent must not restore the older saved page again.
+    if (initializedStorageKey.current === storageKey && (!intentKey || consumedIntent.current === intentKey)) return;
+    initializedStorageKey.current = storageKey;
     generation.current++;
     reading.current = false;
     retryRequested.current = false;
     setNavigationIssue('');
+    if (intentKey && consumedIntent.current !== intentKey) {
+      consumedIntent.current = intentKey;
+      readsLeft.current = 20;
+      setPosition({ id: null, index: 0 });
+      setRequested(navigationIntent!.targetId ? { id: navigationIntent!.targetId, index: 0 } : null);
+      setRestoredKey(storageKey);
+      return;
+    }
     let saved: { id?: unknown; index?: unknown; version?: unknown } | null = null;
     try { saved = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { /* Optional preferences. */ }
     const valid = saved?.version === 1 && typeof saved.index === 'number' && Number.isSafeInteger(saved.index) && saved.index >= 0
@@ -58,8 +75,9 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     setPosition({ id: null, index: 0 });
     setRequested(valid ? { id: saved!.id as string, index: saved!.index as number, restore: true } : null);
     setRestoredKey(storageKey);
-    return () => { generation.current++; };
-  }, [storageKey]);
+  }, [storageKey, intentKey]);
+
+  useEffect(() => () => { generation.current++; }, []);
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -90,7 +108,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const complete = target >= 0 && target < items.length && items.length >= Math.min(pageEnd, knownTotal ?? pageEnd);
     const needsMore = hasMore && (!complete || Boolean(requested?.last));
     if (!hasMore && knownTotal === 0 && !items.length) {
-      if (requested) { setPosition({ id: null, index: 0 }); setRequested(null); }
+      if (requested) { if (!requested.restore) setNavigationIssue('目标素材暂不可用，当前选择和上传记录已保留。'); setPosition({ id: null, index: 0 }); setRequested(null); }
       return;
     }
     if (!needsMore && complete) {
@@ -128,6 +146,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   }, [index, items, position, requested, restoredKey, storageKey]);
 
   function goToIndex(target: number, last = false) {
+    generation.current++; reading.current = false;
     const next = Math.max(0, Math.min(target, knownTotal === null ? target : Math.max(0, knownTotal - 1)));
     readsLeft.current = 20;
     setNavigationIssue('');

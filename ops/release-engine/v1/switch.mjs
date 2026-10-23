@@ -1,3 +1,4 @@
+import { applyFullSchema, publishLegacyReuseWriterProof, readFullLiveSourceFiles } from './full-release-contract.mjs';
 import { inspectRecoveryCertificate } from './certificate.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -193,13 +194,18 @@ function policy(m, role) {
 export function cwdBytes(m, before, role, root) {
   const original = before.policies[role].dropins.find(file => file.file === CWD_FILES[role]); assert.ok(original);
   let count = 0;
-  const text = Buffer.from(original.bytesBase64, 'base64').toString('utf8').split('\n').map(line => {
+  let text = Buffer.from(original.bytesBase64, 'base64').toString('utf8').split('\n').map(line => {
     if (line === 'WorkingDirectory=' + m.live[role].root) { count++; return 'WorkingDirectory=' + root; }
     return line;
   }).join('\n');
   assert.equal(count, 1, 'Only the existing dedicated WorkingDirectory line may change');
   if (root === m.live[role].root) return Buffer.from(text);
   assert.ok([m.main.root, m.guard.root].includes(root));
+  if (m.fullRelease) {
+    const kind = root === m.main.root ? 'main' : 'guard';
+    text = text.split('\n').filter(line => !/^Environment=VIDEO_CREATION_FLOW_V2_ENABLED=/.test(line)).join('\n');
+    text = text.trimEnd() + '\nEnvironment=VIDEO_CREATION_FLOW_V2_ENABLED=' + (m.fullRelease.capabilities[kind].videoCreationV2 ? '1' : '0') + '\n';
+  }
   assert.ok(!text.includes('HD_DERIVATIVES_DIR='), 'Unexpected legacy HD root override');
   const lines = text.split('\n');
   const roots = lines.filter(line => line.includes('HD_DERIVATIVES_ROOT='));
@@ -242,6 +248,10 @@ function assertPolicy(m, before, temporary = null) {
     const expected = own ? { ...original.values, Restart: 'no', KillSignal: '15', SendSIGKILL: 'no', TimeoutStopUSec: 'infinity' } : { ...original.values };
     const expectedEnvironment = environmentMap(original.values.Environment);
     if (candidateMode) expectedEnvironment.HD_DERIVATIVES_ROOT = m.hdRoot;
+    if (candidateMode && m.fullRelease) {
+      const kind = sha(cwdBytes(m, before, role, m.main.root)) === cwdFile.sha256 ? 'main' : 'guard';
+      expectedEnvironment.VIDEO_CREATION_FLOW_V2_ENABLED = m.fullRelease.capabilities[kind].videoCreationV2 ? '1' : '0';
+    }
     assert.deepEqual(environmentMap(current.values.Environment), Object.fromEntries(Object.entries(expectedEnvironment).sort(([a], [b]) => a.localeCompare(b))));
     assert.deepEqual({ ...current.values, Environment: '' }, { ...expected, Environment: '' });
   }
@@ -399,7 +409,7 @@ async function stopNaturally(m, before, temporary, role, mode, original, check =
     return true;
   }, 300000, check, check === assertReleaseWindow ? null : 'NATURAL_STOP_PENDING');
   save(m, 'natural-stop-' + mode + '-' + role, { manifestSha256: before.manifestSha256, before: initial, after: result,
-    originalCgroup: initial.ControlGroup, forcedKill: false });
+    originalCgroup: initial.ControlGroup, forcedKill: false, completedAt: new Date().toISOString() });
   return result;
 }
 function assertOriginalStopped(m, before) {
@@ -422,9 +432,9 @@ function captureHdMetadata(m) {
     }))]));
 }
 export function captureHdLegacyContract(m) {
-  assert.equal(m.live.hd.source, MV_DIRECT.baselineSource);
+  assert.equal(m.live.hd.source, m.fullRelease ? m.fullRelease.liveRoles.hd.source : MV_DIRECT.baselineSource);
   assert.deepEqual(m.deployedUsageSchema || null, MV_DIRECT.deployedUsageSchema || null);
-  const published = m.deployedUsageSchema ? readPublishedBaselineSourceFiles(m, Object.keys(HD_LEGACY_FILES)) : null;
+  const published = m.deployedUsageSchema ? readPublishedBaselineSourceFiles(m, Object.keys(HD_LEGACY_FILES), 'hd') : null;
   if (published) {
     assert.equal(published.source, m.live.hd.source); assert.equal(published.root, m.live.hd.root);
   }
@@ -1016,6 +1026,7 @@ export async function recoverFailedSwitch(m, input = {}) {
       }
       assert.equal(verifyGuardRecovery(m, before).originalPair, false);
       applyCanvasBatchMigration(m, allGone, check);
+      applyFullSchema(m, allGone, check);
     },
     configureGuard: async () => configure(m, before, temporary, 'guard', check),
     actualGuardPrestart: async () => {
@@ -1262,6 +1273,14 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         save(m, 'pricing-pair-published', { manifestSha256, published });
         const batchSchema = applyCanvasBatchMigration(m, () => { assertOriginalStopped(m, before); assertUsageRoleStopped(m); });
         if (batchSchema) save(m, 'canvas-batch-schema-ready', { manifestSha256, ...batchSchema, oldWritersStopped: true });
+        if (m.fullRelease) {
+          await stopMultiviewWorksForGuardRecovery(m, () => assertReleaseWindow(m));
+          const stopped = () => { assertOriginalStopped(m, before); assertUsageRoleStopped(m); };
+          const schema = applyFullSchema(m, stopped, assertReleaseWindow);
+          save(m, 'full-schema-ready', { manifestSha256, ...schema, oldWritersStopped: true });
+          const reuseProof = publishLegacyReuseWriterProof(m, stopped);
+          if (reuseProof) save(m, 'task-reuse-legacy-writer-proof-published', { manifestSha256, ...reuseProof });
+        }
         const prestart = actualPrestart(m, before, temporary, builds);
         save(m, 'actual-prestart', { manifestSha256, ...prestart });
         assertOriginalStopped(m, before);

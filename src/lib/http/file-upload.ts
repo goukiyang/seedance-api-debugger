@@ -59,7 +59,6 @@ export function describeUploadFileError(error: unknown): UploadFileFailure {
 const DEFAULT_UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
 const IMAGE_RAW_FALLBACK_MAX_SIZE_BYTES = 30 * 1024 * 1024;
 const AUDIO_RAW_FALLBACK_MAX_SIZE_BYTES = 15 * 1024 * 1024;
-const R2_CORS_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
 const MULTIPART_UPLOAD_MIN_SIZE_BYTES = 50 * 1024 * 1024;
 const MULTIPART_UPLOAD_CONCURRENCY = 3;
 const MULTIPART_RESUME_STORAGE_PREFIX = 'sd2_multipart_upload:';
@@ -478,10 +477,7 @@ function shouldUseRawFallback(file: File, fallbackToRaw: boolean) {
 }
 
 function rawFallbackUnavailableMessage(reason: string, file?: File) {
-  if (file?.type.startsWith('video/')) {
-    return `${reason.replace(/[。；;,.，]+$/, '')}。当前视频不能自动改用普通上传；请联系管理员确认 R2 CORS 已允许 ${R2_CORS_PRODUCTION_ORIGIN} 使用 PUT、Content-Type 和 ETag，或启用视频分块上传验收路径。`;
-  }
-  return `${reason.replace(/[。；;,.，]+$/, '')}。当前文件不能自动改用普通上传（仅支持 30MB 以内图片或 15MB 以内音频自动回退），请刷新页面或重新登录后重试；如果仍出现，请联系管理员确认 R2 CORS 已允许 ${R2_CORS_PRODUCTION_ORIGIN} 使用 PUT 和 Content-Type。`;
+  return `${reason.replace(/[。；;,.，]+$/, '')}。${file?.type.startsWith('video/') ? '此视频' : '此文件'}暂不能改用普通上传，请保留本次文件及上传记录。`;
 }
 
 async function uploadWithRawFallbackOrThrow(
@@ -505,12 +501,13 @@ async function uploadWithServerProxy(
   invalidJsonMessage: string,
   onProgress?: UploadProgressHandler,
 ) {
-  if (!ticket.uploadToken) throw new Error('缺少上传票据，请重新上传。');
+  if (!ticket.uploadToken) throw new UploadFileError('原上传票据不完整，请核对原上传。', { stage: 'proxy', recovery: 'query' });
   const headers: Record<string, string> = {
     'Content-Type': file.type || 'application/octet-stream',
     'X-Upload-Token': ticket.uploadToken,
     'X-File-Hash': context.hash,
   };
+  if (context.ownerId) headers['X-Upload-Owner-Id'] = context.ownerId;
   if (context.width != null) {
     headers['X-Media-Width'] = String(context.width);
     headers['X-Image-Width'] = String(context.width);
@@ -538,13 +535,16 @@ async function uploadWithServerProxy(
       },
       onProgress,
     });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('系统没有拿到有效上传结果')) throw error;
-    throw new Error(uploadStageConnectionMessage('服务端中转上传', error));
+  } catch (cause) {
+    if (cause instanceof UploadFileError) throw cause;
+    throw new UploadFileError('上传结果待确认，请核对原上传；本次文件及原票据已保留。', {
+      code: 'UPLOAD_RESULT_UNKNOWN', stage: 'proxy', recovery: 'query', cause,
+    });
   }
   const data = result.data;
-  if (!result.ok) throw new Error(data.error || data.message || '服务端中转上传失败，请重新选择后重试');
-  if (!data.asset?.id) throw new Error('服务端中转上传成功，但没有返回素材 ID');
+  if (!result.ok) throw responseUploadError(data, '上传结果待确认，请核对原上传。', 'query', 'proxy');
+  if (!data.asset?.id || data.asset.upload?.verified !== true || !data.asset.upload.sourceVersion)
+    throw new UploadFileError('上传登记尚未确认，请核对原上传。', { code: 'UPLOAD_RESULT_UNKNOWN', stage: 'proxy', recovery: 'query' });
   notifyUploadProgress(onProgress, {
     phase: 'done',
     label: data.asset.reused ? '已复用相同素材' : '上传完成',
@@ -1119,7 +1119,7 @@ async function uploadFileToHistoryInternal(
     notifyUploadProgress(onProgress, { phase: 'complete', label: '正在核对原上传结果' });
     let response: Response;
     try { response = await fetch('/api/assets/upload-complete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uploadToken: ticket.uploadToken, hash, width, height, durationSeconds }), signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
+      body: JSON.stringify({ uploadToken: ticket.uploadToken, hash, width, height, durationSeconds, ownerId: options.ownerId, requestId: options.requestId }), signal: AbortSignal.timeout(calculateUploadTimeoutMs(file.size)) }); }
     catch (cause) { throw new UploadFileError('原上传登记结果待确认；再次点击上传只核对原凭据，不会重传文件。', { stage: 'direct-complete', recovery: 'query', cause }); }
     let result: UploadAssetResponse;
     try { result = await readUploadJsonResponse<UploadAssetResponse>(response, '原上传登记', invalidJsonMessage); }
@@ -1131,15 +1131,17 @@ async function uploadFileToHistoryInternal(
         stage: safeUploadDiagnostic(result.errorStage) || 'direct-complete',
       });
     }
-    if (!response.ok || !result.asset?.id) throw responseUploadError(result, '原上传结果尚未确认，未重传文件。', 'query', 'direct-complete');
+    if (!response.ok || !result.asset?.id || result.asset.upload?.verified !== true || !result.asset.upload.sourceVersion)
+      throw responseUploadError(result, '原上传结果尚未确认，请核对原上传。', 'query', 'direct-complete');
     directReceipts.delete(file);
     if (receiptKey) sessionStorage.removeItem(receiptKey);
     notifyUploadProgress(onProgress, { phase: 'done', label: result.asset.reused ? '已复用相同素材' : '上传完成', loadedBytes: file.size, totalBytes: file.size });
     return result.asset;
   };
   if (pendingTicket) {
-    try { return await finishTicket(pendingTicket); }
-    catch (cause) { if (!(cause instanceof UploadNotAcceptedError)) throw cause; }
+    // The query action may prove non-acceptance, but never also sends bytes.
+    // Clearing the proved ticket permits the user's next explicit retry.
+    return finishTicket(pendingTicket);
   }
   const multipartAsset = await uploadWithMultipart(file, uploadContext, invalidJsonMessage, onProgress, true);
   if (multipartAsset?.id) return multipartAsset;
@@ -1205,8 +1207,10 @@ async function uploadFileToHistoryInternal(
         directReceipts.delete(file); if (receiptKey) sessionStorage.removeItem(receiptKey);
         return asset;
       } catch (proxyError) {
-        const proxyMessage = proxyError instanceof Error ? proxyError.message : '服务端中转上传失败';
-        throw new Error(rawFallbackUnavailableMessage(`${ticket.reason || '直传暂不可用'}；服务端中转也失败：${proxyMessage}`, file));
+        if (proxyError instanceof UploadFileError) throw proxyError;
+        throw new UploadFileError('上传结果待确认，请核对原上传；本次文件及原票据已保留。', {
+          code: 'UPLOAD_RESULT_UNKNOWN', stage: 'proxy', recovery: 'query', cause: proxyError,
+        });
       }
     }
     return uploadWithRawFallbackOrThrow(file, invalidJsonMessage, fallbackToRaw, ticket.reason || '直传暂不可用', onProgress, uploadContext);

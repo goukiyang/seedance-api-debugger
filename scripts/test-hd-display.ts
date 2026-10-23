@@ -22,7 +22,7 @@ assert.equal(hdDisplayPolicy({ ...option, error: true }).kind, 'preview');
 assert.equal(hdDisplayPolicy({ ...option, description: { ...ready, status: 'skipped', reason: 'existing_webp' } }).kind, 'original');
 assert.equal(hdDisplayPolicy({ ...option, description: { ...ready, status: 'skipped', reason: 'source_changed' } }).kind, 'preview');
 for (const status of ['queued', 'running'] as const) {
-  assert.equal(hdAvailabilityLabel({ ...ready, status }), '高清准备中');
+  assert.equal(hdAvailabilityLabel({ ...ready, status }), status === 'queued' ? '压缩排队中' : '正在准备压缩图');
   assert.doesNotMatch(hdAvailabilityLabel({ ...ready, status }), /不可用|失败/);
 }
 for (const description of [{ ...ready, original: true }, { ...ready, format: 'original' }]) {
@@ -61,7 +61,7 @@ try {
   globalThis.setTimeout = ((callback: () => void, delay = 0) => { const id = ++nextTimer; timers.set(id, { at: now + delay, run: callback }); return id; }) as unknown as typeof setTimeout;
   globalThis.clearTimeout = ((id: number) => { timers.delete(id); }) as unknown as typeof clearTimeout;
   globalThis.fetch = async (input, init) => {
-    requests.push({ url: String(input), readonly: new Headers(init?.headers).get('X-Image-Read-Intent') === 'prefetch' });
+    requests.push({ url: String(input), readonly: ['prefetch', 'status'].includes(new Headers(init?.headers).get('X-Image-Read-Intent') || '') });
     const next = replies.shift(); assert.ok(next, 'unexpected request'); return next();
   };
   setHdImageSessionOwner('owner-a');
@@ -117,14 +117,14 @@ try {
   assert.equal(requests.at(-1)?.readonly, true);
   replies.push(response(ready));
   release = acquireHdImageSource('owner-b', source, '', value => states.push(value)); await drain();
-  assert.equal(requests.at(-1)?.readonly, false, 'actual viewer does not inherit a speculative 409 wait');
+  assert.equal(requests.at(-1)?.readonly, true, 'legacy subscriber is read-only without a confirmed view token');
   assert.equal(states.at(-1)?.description?.status, 'ready');
   release(); release = undefined;
   invalidateHdImageSource(source, 'owner-b', { propagateToImageReads: false });
   assert.equal(hdImageHint('owner-b', source), undefined);
   assert.equal(replies.length, 0);
   const checks = ['display_selection', 'transient_status_recovery', 'ready_readonly_recheck', 'visibility', 'source_version_change',
-    'revocation_clears_family', 'account_boundary', 'readonly_prefetch', 'pending_is_preview_not_original', 'known_incompatibility_only_original',
+    'revocation_clears_family', 'account_boundary', 'readonly_prefetch', 'unopened_policy_stays_preview' , 'known_incompatibility_only_original',
     ...await runHdDisplayEngineering()];
   console.log(JSON.stringify({ completed: true, passed: checks.length, groups: checks.length, total: checks.length, checks, browser: false, network: 'mocked-only' }));
 } finally {

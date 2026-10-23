@@ -1,3 +1,6 @@
+import { FULL_SQL, assertFullReleaseContext, assertFullReleaseInput } from './release-engine/v1/full-release-contract.mjs';
+import { LEGACY_CONTRACT } from './release-engine/v1/release-contract.mjs';
+import { ENGINE_VERSION } from './release-engine/v1/engine-version.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertCanvasBatchSchemaInput, assertCanvasBatchPrismaExtension, CANVAS_BATCH_SQL, CANVAS_BATCH_MIGRATOR, CANVAS_BATCH_MODE } from './canvas-video-batch-schema-extension.mjs';
 
 const require = createRequire(import.meta.url);
-const ts = require('typescript');
+// Full JSON preparation needs no installed application dependencies. Legacy AST
+// template operations resolve their existing TypeScript runtime only when used.
+const ts = new Proxy({}, { get(_target, key) { return require('typescript')[key]; } });
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const profile = JSON.parse(fs.readFileSync(path.join(here, 'sd2-release-profile.json')));
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -250,8 +255,11 @@ export function validatePlan(plan, original, now = Date.now()) {
   assert.equal(plan.schema, 'sd2-release-plan.v1');
   for (const field of ['repoRoot', 'outputRoot']) assert.ok(path.isAbsolute(plan[field]));
   const c = plan.contract, live = plan.liveCapture;
-  keys(c, [...Object.keys(original).filter(key => key !== 'protectedIncrement'),
-    ...(Object.hasOwn(c, 'protectedIncrement') ? ['protectedIncrement'] : [])]);
+  keys(c, [...Object.keys(original).filter(key => !['protectedIncrement', 'fullRelease'].includes(key)),
+    ...(Object.hasOwn(c, 'protectedIncrement') ? ['protectedIncrement'] : []),
+    ...(Object.hasOwn(c, 'fullRelease') ? ['fullRelease'] : [])]);
+  const full = c.fullRelease ? assertFullReleaseContext(c) : null;
+  if (full) assertRecoveredGuardInput(full.privateRecipeOrigin);
   if (c.protectedIncrement) {
     assertProtectedIncrement(c.protectedIncrement, { ...c, reuseBuilds: plan.reuseBuilds });
     assert.equal(plan.reuseBuilds, null);
@@ -274,21 +282,21 @@ export function validatePlan(plan, original, now = Date.now()) {
   if (c.canvasVideoBatchSchema) {
     assertCanvasBatchSchemaInput(c.canvasVideoBatchSchema);
     assert.ok(c.deployedUsageSchema, 'Additive canvas migration retains the deployed usage schema proof');
-    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
+    if (!full && !continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new schema pair requires two complete fresh builds');
   }
   if (c.deployedCanvasBatchSchema) {
     assertDeployedCanvasInput(c.deployedCanvasBatchSchema);
     assert.ok(c.canvasVideoBatchSchema && c.deployedUsageSchema);
     if (!continuationV2) assert.equal(c.normalContinuation, null);
     assert.notEqual(c.deployedCanvasBatchSchema.migrationRun, c.recoveryRunId);
-    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
+    if (!full && !continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'Deployed canvas adoption requires complete fresh main and guard builds');
   }
   if (c.deployedUsageSchema !== null && c.deployedUsageSchema !== undefined) {
     const value = c.deployedUsageSchema;
     keys(value, DEPLOYED_FIELDS); assert.equal(value.schema, DEPLOYED_SCHEMA);
     for (const key of ['publicationRun', 'migrationRun']) { assert.match(value[key], uuid); assert.notEqual(value[key], c.recoveryRunId); }
     for (const key of DEPLOYED_FIELDS.filter(key => key.endsWith('Sha256'))) assert.match(value[key], sha256);
-    if (!continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
+    if (!full && !continuationV2 && !exactUnpublished) assert.equal(plan.reuseBuilds, null, 'A new deployed-schema pair requires complete fresh main and guard builds');
     keys(plan.deployedUsageProof, ['stdoutFile', 'commandReceiptFile']);
     for (const file of Object.values(plan.deployedUsageProof)) assert.ok(typeof file === 'string' && path.isAbsolute(file));
   } else {
@@ -388,7 +396,8 @@ export function checkSources(repo, c) {
         const next = Buffer.from(execFileSync('git', ['-C', repo, 'show', source + ':' + file]));
         if (c.deployedCanvasBatchSchema) {
           assert.equal(digest(previous), c.canvasVideoBatchSchema.newPrismaSha256, 'Published canvas schema changed');
-          assert.equal(digest(next), c.canvasVideoBatchSchema.newPrismaSha256, 'Adopted canvas schema changed');
+          assert.equal(digest(next), c.fullRelease ? c.fullRelease.schemaChange.newPrismaSha256 : c.canvasVideoBatchSchema.newPrismaSha256, 'Adopted canvas schema changed');
+          if (c.fullRelease) assert.equal(digest(previous), c.fullRelease.schemaChange.previousPrismaSha256);
         } else assertCanvasBatchPrismaExtension(previous, next, c.canvasVideoBatchSchema);
       }
       continue;
@@ -397,11 +406,18 @@ export function checkSources(repo, c) {
     for (const source of [c.mainSource, c.recoveryGuardSource])
       assert.equal(git(repo, ['rev-parse', source + ':' + file]), expected, 'New pair changed deployed usage schema/start input: ' + file);
   }
+  if (c.fullRelease) for (const [kind, source] of [['main', c.mainSource], ['guard', c.recoveryGuardSource]]) {
+    assert.equal(digest(execFileSync('git', ['-C', repo, 'show', source + ':' + FULL_SQL])), c.fullRelease.schemaChange.sqlSha256);
+    assert.equal(git(repo, ['show', source + ':src/lib/pricing/build-mode.ts']),
+      `export const PRICING_ADMIN_WRITES_ENABLED: boolean = ${c.fullRelease.capabilities[kind].pricingWrites};`);
+    assert.equal(git(repo, ['show', source + ':src/lib/video/multiview-build-mode.ts']),
+      `export const MULTIVIEW_GENERATION_WRITES_ENABLED: boolean = ${c.fullRelease.capabilities[kind].multiviewGeneration};`);
+  }
   if (c.canvasVideoBatchSchema) for (const [kind, source] of [['main', c.mainSource], ['guard', c.recoveryGuardSource]]) {
     for (const [file, expected] of [[CANVAS_BATCH_SQL, c.canvasVideoBatchSchema.sqlSha256], [CANVAS_BATCH_MIGRATOR, c.canvasVideoBatchSchema.migrationModuleSha256]])
       assert.equal(digest(execFileSync('git', ['-C', repo, 'show', source + ':' + file])), expected);
     assert.equal(git(repo, ['show', source + ':' + CANVAS_BATCH_MODE]),
-      `export const CANVAS_VIDEO_BATCH_WRITES_ENABLED: boolean = ${!c.protectedIncrement && kind === 'main' ? 'true' : 'false'};`);
+      `export const CANVAS_VIDEO_BATCH_WRITES_ENABLED: boolean = ${c.fullRelease ? c.fullRelease.capabilities[kind].canvasVideoBatchWrites : !c.protectedIncrement && kind === 'main'};`);
   }
 }
 
@@ -539,14 +555,82 @@ export async function prepare(plan, materialsRoot) {
   return { output, receipt };
 }
 
+export function prepareFull(plan) {
+  keys(plan, ['schema', 'taskId', 'repoRoot', 'outputRoot', 'liveCapture', 'contract', 'reuseBuilds', 'deployedUsageProof',
+    ...(Object.hasOwn(plan, 'controlEvidence') ? ['controlEvidence'] : [])]);
+  assert.equal(plan.schema, 'sd2-full-release-plan.v1'); assert.match(plan.taskId, uuid);
+  const validation = { schema: 'sd2-release-plan.v1', repoRoot: plan.repoRoot, outputRoot: plan.outputRoot,
+    liveCapture: plan.liveCapture, contract: plan.contract, reuseBuilds: plan.reuseBuilds, deployedUsageProof: plan.deployedUsageProof };
+  const c = validatePlan(validation, LEGACY_CONTRACT); assert.ok(assertFullReleaseInput(c.fullRelease));
+  checkSources(plan.repoRoot, c);
+  const output = path.join(fs.realpathSync(path.dirname(plan.outputRoot)), path.basename(plan.outputRoot));
+  assert.equal(fs.existsSync(output), false, 'Never overwrite a prepared, failed or published attempt');
+  const engineSource = path.join(here, 'release-engine/v1'), privateSha256 = hashes(moduleFiles(engineSource));
+  const controllerSetSha256 = digest(JSON.stringify(privateSha256)), projectRoot = '/data/video-api-debugger';
+  const engine = { schema: 'sd2-release-engine.v1', version: ENGINE_VERSION, controllerSetSha256,
+    root: projectRoot + '/release-engines/' + ENGINE_VERSION + '-' + controllerSetSha256 };
+  const stage = projectRoot + '/release-staging/' + c.recoveryRunId;
+  const operation = { schema: 'sd2-release-operation.v1', taskId: plan.taskId, attemptId: c.recoveryRunId,
+    taskRoot: projectRoot + '/release-tasks/' + plan.taskId };
+  const reuse = reuseInput(validation), historical = deployedProofInput(validation);
+  const context = { schema: 'sd2-release-context.v1', contract: { ...c, engine, operation,
+    ...(reuse ? { immutableOriginalManifest: projectRoot + '/release-staging/' + reuse.sourceRun + '/manifest.json' } : {}) } };
+  const request = { schema: reuse ? 'sd2-release-package-request.v2' : 'sd2-release-package-request.v1', repoRoot: plan.repoRoot,
+    mainSource: c.mainSource, guardSource: c.recoveryGuardSource, outputRoot: output + '/packages',
+    ...(reuse ? { originalBuilds: { directory: plan.reuseBuilds.directory, sourceRun: reuse.sourceRun,
+      manifestSha256: digest(read(path.join(plan.reuseBuilds.directory, 'manifest.json'))),
+      mainSha256: reuse.main.sha256, guardSha256: reuse.guard.sha256 } } : {}) };
+  const seed = { runId: c.recoveryRunId, mainSource: c.mainSource, guardSource: c.recoveryGuardSource,
+    expectedAllowedSha256: c.expectedAllowedSha256, engine, operation, ...(reuse ? { reuseBuilds: reuse } : {}),
+    ...(plan.controlEvidence ? { controlEvidence: plan.controlEvidence } : {}) };
+  const install = { schema: 'sd2-release-engine-install.v1', projectRoot, sourceRoot: stage + '/engine-source', engine, privateSha256 };
+  fs.mkdirSync(output, { mode: 0o700 }); fs.mkdirSync(output + '/engine-source', { mode: 0o700 });
+  const save = (file, value) => fs.writeFileSync(output + '/' + file, JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  for (const file of Object.keys(privateSha256)) fs.writeFileSync(output + '/engine-source/' + file, read(engineSource + '/' + file), { flag: 'wx', mode: 0o600 });
+  save('context.json', context); save('seed.json', seed); save('package-request.json', request); save('engine-install.json', install);
+  if (historical) {
+    fs.writeFileSync(output + '/deployed-usage-prior-proof.stdout', historical.stdout, { flag: 'wx', mode: 0o600 });
+    fs.writeFileSync(output + '/deployed-usage-prior-proof-command.json', historical.command, { flag: 'wx', mode: 0o600 });
+  }
+  const receipt = { schema: 'sd2-full-release-preparation.v1', runId: c.recoveryRunId, taskId: plan.taskId, output, stage,
+    engine, privateSha256, localPreparationOnly: true, serverAdmissionVerified: false, servicesChanged: false,
+    productionWrites: 0, functionalAcceptance: false, planSha256: digest(JSON.stringify(plan)), createdAt: new Date().toISOString() };
+  save('preparation.json', receipt); return receipt;
+}
+
+export function bindFullPackage(preparationFile, packageReceiptFile) {
+  const preparation = json(preparationFile); assert.equal(preparation.schema, 'sd2-full-release-preparation.v1');
+  const output = fs.realpathSync(preparation.output), receipt = json(packageReceiptFile);
+  assert.equal(receipt.schema, 'rate-impl2-package-candidates.v1'); assert.equal(receipt.outputRoot, output + '/packages');
+  const seed = json(output + '/seed.json'), context = json(output + '/context.json');
+  const artifacts = Object.fromEntries(['main', 'guard'].map(kind => {
+    const file = receipt[kind].sourceManifest, bytes = read(file), value = JSON.parse(bytes);
+    assert.equal(file, output + '/packages/' + kind + '/source-manifest.json'); assert.equal(value.kind, kind);
+    assert.equal(digest(bytes), receipt[kind].manifestSha256); assert.equal(value.source, seed[kind + 'Source']);
+    assert.equal(value.version, context.contract.versions[kind]);
+    return [kind, { schema: 'sd2-release-artifact-input.v1', kind, source: value.source, version: value.version,
+      sourceManifestSha256: digest(bytes), buildInputsSha256: digest(JSON.stringify({ sourceManifestSha256: digest(bytes),
+        packageLockSha256: value.files['package-lock.json'], engine: preparation.engine })) }];
+  }));
+  const batch = { schema: 'sd2-release-batch.v1', project: 'video-api-debugger', projectRoot: '/data/video-api-debugger',
+    taskId: preparation.taskId, attemptId: preparation.runId, runId: preparation.runId, engine: preparation.engine,
+    contextFile: preparation.stage + '/context.json', seedFile: preparation.stage + '/seed.json', manifestFile: preparation.stage + '/manifest.json',
+    artifacts, phases: ['capture', 'preflight', 'admission', 'adopt', 'prepare', 'guard-build', 'main-build', 'verify', 'arm', 'switch', 'proof'] };
+  fs.writeFileSync(output + '/release-batch.json', JSON.stringify(batch, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+  return { batchFile: output + '/release-batch.json', serverBatchFile: preparation.stage + '/release-batch.json',
+    originalSourceManifestBytesBound: true, localPreparationOnly: true, productionWrites: 0 };
+}
+
 // No SSH, reservation, upload, service action or production import occurs in this entry point.
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const [mode, materialsRoot, planFile] = process.argv.slice(2);
   assert.ok(path.isAbsolute(materialsRoot || ''));
-  if (mode === 'check-template' && !planFile) {
+  if (mode === 'prepare-full' && !planFile) console.log(JSON.stringify(prepareFull(json(materialsRoot))));
+  else if (mode === 'bind-package' && planFile) console.log(JSON.stringify(bindFullPackage(materialsRoot, planFile)));
+  else if (mode === 'check-template' && !planFile) {
     verifyTemplate(materialsRoot); console.log(JSON.stringify({ templateVerified: true, productionWrites: 0 }));
   } else if (mode === 'prepare' && planFile) {
     const result = await prepare(json(planFile), materialsRoot);
     console.log(JSON.stringify({ output: result.output, localPreparationOnly: true, serverAdmissionVerified: false }));
-  } else throw new Error('Usage: node ops/sd2-release-prepare.mjs check-template MATERIALS_ROOT | prepare MATERIALS_ROOT PRIVATE_PLAN_JSON');
+  } else throw new Error('Usage: node ops/sd2-release-prepare.mjs prepare-full FULL_PLAN.json | bind-package PREPARATION.json PACKAGE_RECEIPT.json | check-template MATERIALS_ROOT | prepare MATERIALS_ROOT PRIVATE_PLAN_JSON');
 }

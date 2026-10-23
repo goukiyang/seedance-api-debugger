@@ -6,7 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
-import { completeDirectUpload } from '@/lib/assets/direct-upload';
+import { completeDirectUpload, directUploadRequestId } from '@/lib/assets/direct-upload';
+import { directUploadFailure } from '@/lib/assets/direct-upload-error';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 
@@ -35,13 +36,14 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json() as UploadCompleteBody;
     assertUploadOwner(body.ownerId, user.id);
-    originalRequestId = uploadRequestId(body.requestId) || null;
+    uploadRequestId(body.requestId);
     if (typeof body.uploadToken !== 'string' || !body.uploadToken.trim()) {
       return NextResponse.json({ error: '缺少上传票据，请重新上传。' }, { status: 400 });
     }
     if (typeof body.hash !== 'string' || !body.hash.trim()) {
       return NextResponse.json({ error: '缺少文件校验信息，请重新上传。' }, { status: 400 });
     }
+    originalRequestId = directUploadRequestId(body.uploadToken, user.id);
 
     const uploadResult = await completeDirectUpload({
       ownerId: user.id,
@@ -67,6 +69,7 @@ export async function POST(request: NextRequest) {
       fallbackPath: 'browser-put',
       skippedProxy: true,
       fileKind: getSiteUploadKind(uploadResult.mimeType),
+      requestId: originalRequestId,
     });
     return NextResponse.json({
       success: true,
@@ -96,15 +99,16 @@ export async function POST(request: NextRequest) {
         errorStage: 'complete', requestId: originalRequestId, uploadMode: 'single', fallbackPath: 'browser-put', skippedProxy: true });
       return NextResponse.json({ ...verifiedUploadFailure(error), errorStage: 'complete' }, { status: error.status });
     }
-    const message = error instanceof Error ? error.message : '上传完成登记失败';
+    const diagnostic = directUploadFailure(error, 'complete');
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
         stage: 'complete',
         status: 'failed',
         durationMs: Date.now() - startedAt,
-        errorCode: 'complete_failed',
-        errorMessage: message,
+        errorCode: diagnostic.code,
+        errorMessage: diagnostic.error,
+        errorName: diagnostic.errorName, causeCode: diagnostic.causeCode, recovery: diagnostic.recovery,
         errorStage: 'complete',
         requestId: originalRequestId,
         uploadMode: 'single',
@@ -112,6 +116,6 @@ export async function POST(request: NextRequest) {
         skippedProxy: true,
       });
     }
-    return NextResponse.json({ error: '上传登记暂不可用，原上传结果待确认；请核对原上传', code: 'UPLOAD_RESULT_UNKNOWN', errorStage: 'complete' }, { status: 400 });
+    return NextResponse.json(diagnostic, { status: 503 });
   }
 }

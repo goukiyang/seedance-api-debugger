@@ -226,7 +226,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
       </>}
       {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}
     </dialog>
-    {picker && draft && <UploadedImagePicker open imageOnly portalContainer={editor.current} title="添加风格参考图" confirmLabel="添加到风格组" purpose="style-group"
+    {picker && draft && <UploadedImagePicker open imageOnly portalContainer={editor.current} title="添加风格参考图" confirmLabel="添加到风格组" purpose="style-group" contextKey={`${userId}:style-group:${draft.id || noteFieldId}`}
       currentCount={draft.references.length} currentAssetIds={draft.references.flatMap(ref => ref.id ? [ref.id] : [])} maxSelection={MAX_REFERENCE_IMAGES - draft.references.length}
       onClose={() => setPicker(false)} onUploadFile={async (file, onProgress) => {
         if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) throw new Error('请使用 20MB 以内的 PNG、JPG 或 WebP 图片');

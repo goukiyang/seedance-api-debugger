@@ -1,9 +1,11 @@
 'use client';
 
-export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean; stage?: string; retryAt?: string; errorKind?: string };
+export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean; stage?: string; retryAt?: string; errorKind?: string;
+  encodingStrategy?: 'hd-legacy-e6-v1' | 'hd-avif-e4-v1'; representationVersion?: string;
+  processingAvailability?: 'active' | 'resource_wait' | 'manual_pause' | 'hard_pause' | 'unknown' };
 export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean; httpStatus?: number };
 type Listener = (state: HdSourceState) => void;
-type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
+type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; viewTokens: Map<Listener, string>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
 type ImageReadFamilyInvalidator = (source: string, account: string) => void;
 const descriptors = new Map<string, Descriptor>();
 const READY_TTL = 60_000, IDLE_TTL = 10 * 60_000;
@@ -15,7 +17,7 @@ function canonical(source: string) {
 }
 function sourceFamily(source: string) {
   const url = new URL(source, location.href); url.hash = '';
-  for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'variant']) url.searchParams.delete(name);
+  for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation', 'variant']) url.searchParams.delete(name);
   url.searchParams.sort();
   return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
 }
@@ -49,7 +51,7 @@ function getEntry(account: string, source: string, version: string) {
   if (!entry) {
     for (const [id, value] of Array.from(descriptors)) if (!value.listeners.size && !value.prefetches && (descriptors.size >= 32 || Date.now() - value.at >= IDLE_TTL)) { stop(value); descriptors.delete(id); }
     if (descriptors.size >= 32) return null;
-    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, generation: 0, listeners: new Set(), prefetches: 0 };
+    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, generation: 0, listeners: new Set(), viewTokens: new Map(), prefetches: 0 };
     descriptors.set(key, entry);
   }
   return entry;
@@ -59,6 +61,11 @@ function parseDescription(value: unknown): HdDescription {
   const data = value as HdDescription;
   if (data.policy !== 'hd-f-v1' || !['queued', 'running', 'ready', 'failed', 'skipped'].includes(data.status) || !(data.sourceVersion === null || typeof data.sourceVersion === 'string' && data.sourceVersion.length <= 256)) throw new Error('invalid_descriptor');
   if (data.status === 'ready' && (!data.sourceVersion || ![data.bytes, data.width, data.height].every(number => Number.isSafeInteger(number) && number! > 0) || !data.mime?.startsWith('image/'))) throw new Error('invalid_descriptor');
+  if (data.representationVersion !== undefined && !/^hd-representation-v1:[a-f0-9]{64}$/.test(data.representationVersion)) throw new Error('invalid_descriptor');
+  if (data.encodingStrategy !== undefined && !['hd-legacy-e6-v1', 'hd-avif-e4-v1'].includes(data.encodingStrategy)
+    || data.retryAt !== undefined && (typeof data.retryAt !== 'string' || !Number.isFinite(Date.parse(data.retryAt)))) throw new Error('invalid_descriptor');
+  if (data.stage !== undefined && !['queued', 'reading', 'encoding', 'validating', 'publishing'].includes(data.stage)
+    || data.processingAvailability !== undefined && !['active', 'resource_wait', 'manual_pause', 'hard_pause', 'unknown'].includes(data.processingAvailability)) throw new Error('invalid_descriptor');
   return data;
 }
 function poll(entry: Descriptor) {
@@ -72,7 +79,8 @@ function poll(entry: Descriptor) {
   const delay = entry.state.error ? Math.max(1000, entry.retryAfter - Date.now())
     : ready ? Math.max(1000, READY_TTL - (Date.now() - entry.at))
       : Math.min(30_000, 5000 * 2 ** Math.min(entry.unchangedPolls, 3));
-  entry.timer = setTimeout(() => { void read(entry, ready); }, delay);
+  entry.timer = setTimeout(() => { void read(entry, ready || !entry.viewTokens.size); },
+    pending && entry.viewTokens.size && !entry.state.error ? Math.min(15000, delay) : delay);
 }
 async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState> {
   if (entry.pending) return entry.pending;
@@ -80,7 +88,9 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
   const pending = (async () => {
     let state: HdSourceState, status = 0;
     try {
-      const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers: readonly ? { 'X-Image-Read-Intent': 'prefetch' } : {}, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+      const token = !readonly && !document.hidden ? entry.viewTokens.values().next().value as string | undefined : undefined;
+      const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers: token
+        ? { 'X-Image-View-Token': token } : { 'X-Image-Read-Intent': 'status' }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
       status = response.status;
       state = response.ok ? { description: parseDescription(await response.json()), httpStatus: status } : { denied: [401, 403, 404].includes(status), error: true, httpStatus: status };
     } catch { state = { error: true, ...(status ? { httpStatus: status } : {}) }; }
@@ -111,7 +121,8 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
 }
 export function hdImageHint(account: string, source: string, version = '', allowExpired = false) {
   const entry = account === owner ? descriptors.get(JSON.stringify([account, canonical(source), version])) : undefined;
-  return entry && (allowExpired || Date.now() - entry.at < READY_TTL) && entry.state.description?.status === 'ready' ? entry.state.description : undefined;
+  return entry && !entry.state.error && !entry.state.denied && (allowExpired || Date.now() - entry.at < READY_TTL)
+    && entry.state.description?.status === 'ready' ? entry.state.description : undefined;
 }
 // A current HD byte 409 can request one new descriptor lookup. Coalesce callers
 // on that descriptor, but do not mistake an older pending read for a fresh check
@@ -134,10 +145,11 @@ export async function refreshHdImageSource(account: string, source: string, vers
   if (entry.refreshing === pending) entry.refreshing = undefined;
   return state;
 }
-export function acquireHdImageSource(account: string, source: string, version: string, listener: Listener) {
+export function acquireHdImageSource(account: string, source: string, version: string, listener: Listener, options: { intent?: 'status' | 'open'; viewToken?: string } = {}) {
   const entry = getEntry(account, source, version);
   if (!entry) { listener({ error: true }); return () => {}; }
   entry.listeners.add(listener);
+  if (options.intent === 'open' && /^[a-f0-9-]{36}$/.test(options.viewToken || '')) entry.viewTokens.set(listener, options.viewToken!);
   const ready = entry.state.description?.status === 'ready';
   if (entry.at && ready) listener(entry.state);
   if (!entry.pending) {
@@ -158,7 +170,7 @@ export function acquireHdImageSource(account: string, source: string, version: s
   };
   document.addEventListener('visibilitychange', foreground);
   return () => {
-    document.removeEventListener('visibilitychange', foreground); entry.listeners.delete(listener);
+    document.removeEventListener('visibilitychange', foreground); entry.listeners.delete(listener); entry.viewTokens.delete(listener);
     if (!entry.listeners.size) { clearTimeout(entry.timer); entry.timer = undefined; if (!entry.prefetches) { stop(entry); entry.pending = undefined; } }
   };
 }

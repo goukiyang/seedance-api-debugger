@@ -1,3 +1,4 @@
+import { readFullLiveSourceFiles } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,7 +49,7 @@ assert.deepEqual(adoptionImports[0].importClause.namedBindings.elements.map(node
   assert.equal(node.propertyName, undefined); return node.name.text;
 }), ['inspectInstalledMultiviewRecipeAdoption']);
 const captureText = declaration('capture');
-assert.match(captureText, /if \(m\.recoveredGuardBaseline\?\.schema === 'sd2-multiview-r17-recovered-guard\.v1'\) inspectInstalledMultiviewRecipeAdoption\(m\);/);
+assert.match(captureText, /if \((?:m\.fullRelease \|\| )?m\.recoveredGuardBaseline\?\.schema === 'sd2-multiview-r17-recovered-guard\.v1'\) inspectInstalledMultiviewRecipeAdoption\(m\);/);
 assert.ok(captureText.indexOf('inspectInstalledMultiviewRecipeAdoption(m)') > captureText.indexOf("writeJsonExclusive(stage + '/manifest.json', m)"));
 assert.ok(captureText.indexOf('inspectInstalledMultiviewRecipeAdoption(m)') < captureText.indexOf('const before = readProtection(m)'));
 checks.push('r17_capture_real_import_and_readonly_adoption_call_are_wired_before_protection_capture');
@@ -111,12 +112,18 @@ if (m.deployedUsageSchema) {
   const differences = files.filter(file => published.sourceFiles[file] !== LEGACY_SOURCE_FILES[file]);
   if (m.live.web.source === '9c39aeb7de06c3c9e676477febf214c089cb9727') assert.equal(differences.length, 5);
   for (const file of files) assert.equal(sha(fs.readFileSync(m.live.web.root + '/' + file)), published.sourceFiles[file]);
-  assert.equal(actual.legacy[0].publishedBaseline.publicationRun, m.deployedUsageSchema.publicationRun);
+  if (m.fullRelease) assert.equal(actual.legacy[0].publishedBaseline.sourceManifestSha256, m.fullRelease.liveRoles.web.sourceManifestSha256);
+  else assert.equal(actual.legacy[0].publishedBaseline.publicationRun, m.deployedUsageSchema.publicationRun);
   checks.push('legitimate_changed_baseline_uses_pinned_published_pair_not_fresh_hash_trust');
   assert.throws(() => readPublishedBaselineSourceFiles(m, ['src/not-in-published-source.ts']));
   assert.throws(() => readPublishedBaselineSourceFiles(m, ['../escape']));
-  for (const key of ['publicationManifestSha256', 'switchCompleteSha256', 'finalProofSha256', 'finalProofCommandSha256']) {
+  for (const key of m.fullRelease ? [] : ['publicationManifestSha256', 'switchCompleteSha256', 'finalProofSha256', 'finalProofCommandSha256']) {
     const bad = clone(m); bad.deployedUsageSchema[key] = '0'.repeat(64);
+    assert.throws(() => readPublishedBaselineSourceFiles(bad, files));
+    assert.throws(() => captureLegacySourceContract({ legacyRoot: m.live.web.root, manifest: bad }));
+  }
+  if (m.fullRelease) {
+    const bad = clone(m); bad.fullRelease.liveRoles.web.sourceManifestSha256 = '0'.repeat(64);
     assert.throws(() => readPublishedBaselineSourceFiles(bad, files));
     assert.throws(() => captureLegacySourceContract({ legacyRoot: m.live.web.root, manifest: bad }));
   }
@@ -161,7 +168,7 @@ async function stageCapture(sourceCapture, expectSourceFailure = false) {
     assertMvDirectReady: () => assert.equal(MV_DIRECT.sourceReady, true),
     rootFile: fixtureRootFile, sha, call: () => '/data', protectedDirectory: () => {},
     liveInfo: name => m.live[Object.keys(m.live).find(role => m.live[role].unit === name)],
-    assertCapturedLive, validateManifest: value => {
+    assertCapturedLive, readFullLiveSourceFiles, validateManifest: value => {
       assert.equal(value.runId, m.runId); assert.deepEqual(clone(value.live), clone(m.live)); return m;
     },
     APPROVED_HD_LEGACY_READY: m.hdLegacyReady, APPROVED_HD_HISTORICAL_VERSIONS: m.hdHistoricalVersions,
@@ -200,8 +207,8 @@ async function stageCapture(sourceCapture, expectSourceFailure = false) {
   await assert.rejects(context.run(seedFile), error => expectSourceFailure ? error !== stop : error === stop);
   assert.equal(counters.compiledProofs, 1); assert.equal(counters.sources, 1);
   assert.equal(counters.uploads, expectSourceFailure ? 0 : 1); assert.equal(counters.writes, 0);
-  assert.equal(counters.recoveredAdmission, m.recoveredGuardBaseline ? 1 : 0);
-  assert.deepEqual(imports, ['./pricing-start-pair.mjs', ...(m.recoveredGuardBaseline ? ['./deployed-usage-schema.mjs'] : [])]);
+  assert.equal(counters.recoveredAdmission, m.recoveredGuardBaseline || m.fullRelease ? 1 : 0);
+  assert.deepEqual(imports, ['./pricing-start-pair.mjs', ...(m.recoveredGuardBaseline || m.fullRelease ? ['./deployed-usage-schema.mjs'] : [])]);
   await assert.rejects(context.fixtureImport('./unknown-source-fixture.mjs'));
 }
 await stageCapture(captureRuntimeSourceContracts);

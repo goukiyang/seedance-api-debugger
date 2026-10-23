@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { assertFullReleaseContext } from './full-release-contract.mjs';
 import { currentReleaseContext, isSharedEngine, assertSharedEngineContext } from './engine-context.mjs';
 
 // Preparation only. Reconcile the HD release and lock the reviewed source before enabling.
-const LEGACY_CONTRACT = Object.freeze({
+export const LEGACY_CONTRACT = Object.freeze({
   sourceReady: true,
   baselineReconciled: true,
   privateMultiviewInstall: true,
@@ -46,6 +47,7 @@ const LEGACY_CONTRACT = Object.freeze({
 export const MV_DIRECT = currentReleaseContext()?.contract || LEGACY_CONTRACT;
 
 export function assertMvDirectReady() {
+  if (MV_DIRECT.fullRelease) assertFullReleaseContext(MV_DIRECT);
   assert.equal(MV_DIRECT.sourceReady, true, 'MV-DIRECT source is not ready; no packaging, reservation or release is permitted');
   assert.equal(MV_DIRECT.baselineReconciled, true, 'Reconcile the active HD release before freezing the MV-DIRECT baseline');
   assert.match(MV_DIRECT.mainSource, /^[a-f0-9]{40}$/);

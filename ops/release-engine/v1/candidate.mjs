@@ -1,3 +1,4 @@
+import { assertFullDependencyAdoption, verifyFullCandidateSources } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -378,9 +379,12 @@ export async function prepareCandidate(m, kind) {
   finally { process.umask(previousUmask); }
   sourceCheck(c, source, true);
   assertProtectedIncrementCandidate(m, kind, fs.readFileSync);
-  assert.deepEqual(lockView(c.root + '/package-lock.json'), lockView(m.live.web.root + '/package-lock.json'), 'Dependencies differ from the actual online 2a lock');
-  assert.ok(fs.lstatSync(m.live.web.root + '/node_modules').isDirectory());
-  call('cp', ['-a', m.live.web.root + '/node_modules', c.root + '/node_modules'], { timeout: 300000 });
+  const dependencyRoot = m.fullRelease ? m.live.hd.root : m.live.web.root;
+  const nextLock = lockView(c.root + '/package-lock.json'), liveLock = lockView(dependencyRoot + '/package-lock.json');
+  if (m.fullRelease?.dependencyAdoption) assertFullDependencyAdoption(m, nextLock, liveLock, dependencyRoot);
+  else assert.deepEqual(nextLock, liveLock, 'Dependencies differ from the actual online 2a lock');
+  assert.ok(fs.lstatSync(dependencyRoot + '/node_modules').isDirectory());
+  call('cp', ['-a', dependencyRoot + '/node_modules', c.root + '/node_modules'], { timeout: 300000 });
   fs.symlinkSync(m.envFile, c.root + '/.env'); fs.symlinkSync(m.storageRoot, c.root + '/storage');
   fs.mkdirSync(c.root + '/public', { recursive: true });
   for (const [name, target] of Object.entries({ uploads: m.uploadsRoot, videos: m.videosRoot })) {
@@ -467,6 +471,7 @@ export async function buildCandidate(m, kind) {
 export async function verifyCandidate(m, kind) {
   if (m.reuseBuilds) { validateManifest(m); verifyUploadPrivateDirectory(m); return verifyReusedCandidate(m, kind); }
   const info = context(m, kind), { c, source } = info;
+  if (m.fullRelease) verifyFullCandidateSources(m);
   sourceCheck(c, source); assertProtectedIncrementCandidate(m, kind, fs.readFileSync);
   const { prepared, preparedSha256 } = inputs(m, kind, source);
   const value = JSON.parse(rootFile(m.stage + '/' + kind + '-build.json'));

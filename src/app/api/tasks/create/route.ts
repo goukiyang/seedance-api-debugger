@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { CreationError, isCreationV2 } from '@/lib/creation/contract';
+import { assertVideoCreationReady } from '@/lib/creation/context';
+import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
+import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { MULTIVIEW_GENERATION_WRITES_ENABLED } from '@/lib/video/multiview-build-mode';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
   assertCanvasVideoBatchDedupe, recordCanvasVideoBatchRejection, canvasVideoBatchTaskResponse,
@@ -702,6 +707,18 @@ export async function POST(request: NextRequest) {
     generate_audio: boolean; return_last_frame: boolean; watermark: boolean; reference_image_ids: string | null;
   } | null = null;
   let receivedBody = await request.json();
+  if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
+    const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: {
+      user_id: user.id, idempotency_key: receivedBody.idempotency_key,
+    } } });
+    if (original) {
+      await assertCanViewTask(user, original);
+      if (original.request_fingerprint?.startsWith('pricing-v2:') && original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      return isPrivateMultiviewTask(original)
+        ? NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true }), { headers: privateNoStore() })
+        : NextResponse.json(canvasVideoBatchTaskResponse(original));
+    }
+  }
   if (trustedMultiviewRetry) {
     const original = await prisma.videoTask.findUnique({ where: { id: trustedMultiviewRetry.originalTaskId }, select: {
       id: true, source_metadata_json: true, params_json: true, project_id: true, video_card_id: true, video_branch_id: true,
@@ -756,10 +773,19 @@ export async function POST(request: NextRequest) {
   if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
   // Existing validators deliberately normalize this local input after server restoration.
   const body = restoredBatch.body as typeof receivedBody;
+  // Freeze the user's v2 spec BEFORE existing provider normalization/private prompt composition.
+  const creationBody = structuredClone(body);
+  let creationV2 = false;
+  try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
+  catch (error) {
+    if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, stage: 'validation', attemptedSend: false }, { status: error.status });
+    throw error;
+  }
   const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
   let response: NextResponse;
   try { response = await runCanvasAdmission(); }
   catch (error) {
+    if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
     response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
   }
@@ -787,6 +813,10 @@ export async function POST(request: NextRequest) {
         ? NextResponse.json(protectedMultiviewTaskPayload(existing, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
         : NextResponse.json(payload);
     }
+  }
+  if (body.multiview_generation !== undefined && !MULTIVIEW_GENERATION_WRITES_ENABLED) {
+    return NextResponse.json({ error: 'MULTIVIEW_GENERATION_GUARD', message: '3D多视图新生成暂不可用，原任务、作品和当前输入保留；请查询原结果。' },
+      { status: 503, headers: privateNoStore() });
   }
   let requestClaim: MultiviewRequestClaim | null = null;
   let committedTaskId: string | null = null;
@@ -1051,7 +1081,7 @@ export async function POST(request: NextRequest) {
     finalPromptSnapshot = composed.prompt;
   }
 
-  if (!requestedVideoCardId && !multiviewGeneration) {
+  if (!requestedVideoCardId && !multiviewGeneration && !creationV2) {
     return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
   }
 
@@ -1113,7 +1143,7 @@ export async function POST(request: NextRequest) {
   }
 
   const videoCardId = videoCard?.id || null;
-  if (studioHandoff && !videoCard) return errorJson('模板生成必须明确关联视频卡', 400);
+  if (studioHandoff && !videoCard && !creationV2) return errorJson('模板生成必须明确关联视频卡', 400);
 
   let generationTemplate: { id: string; status: string } | null = null;
   if (requestedTemplateId) {
@@ -1149,7 +1179,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (project.type !== 'personal' && resolution === '1080p') {
+  if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
     if (!videoCard) return errorJson('非个人项目的 1080p 生成必须选择视频卡，并通过该视频卡的基准任务审批', 403);
     if (!resolutionApprovalConfirmed) {
       return errorJson('1080p 生成需要先确认审批通过', 403);
@@ -2077,7 +2107,7 @@ export async function POST(request: NextRequest) {
     draft: draftRequested,
     h3LoraId: selectedH3Lora?.id || null,
   };
-  const templateStudioSnapshotJson = studioHandoff && studioSubmission && videoCard
+  const templateStudioSnapshotJson = studioHandoff && studioSubmission
     ? JSON.stringify(buildStudioTaskSnapshot(studioHandoff, {
         prompt: body.prompt,
         parameters: actualStudioParameters,
@@ -2093,7 +2123,7 @@ export async function POST(request: NextRequest) {
         watermark,
         draft: draftRequested,
         projectId: project.id,
-        videoCardId: videoCard.id,
+        videoCardId,
         videoBranchId: videoBranch?.id || null,
         referenceImageIds: generationReferenceImageIds,
         referenceVideoUrls,
@@ -2130,6 +2160,7 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
       await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
         videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
@@ -2230,6 +2261,10 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost,
+        pricingRevision: priceQuote.revision,
+        ...(canvasAdmission ? { batchChildId: canvasAdmission.reference.child_id } : {}) });
+
       const usageAttribution = { sourceKind: 'video_task' as const, sourceId: task.id,
         actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
         billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
@@ -2239,7 +2274,7 @@ export async function POST(request: NextRequest) {
         await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
       } else await recordUsageAttribution(tx, usageAttribution);
 
-      if (project.type !== 'personal' && resolution === '1080p') {
+      if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
         if (!videoCard) throw new Error('非个人项目的 1080p 生成必须选择视频卡');
         const approval = requestedResolutionApprovalId
           ? await tx.approvalRecord.findFirst({
@@ -2472,6 +2507,7 @@ export async function POST(request: NextRequest) {
           : NextResponse.json(payload);
       }
     }
+    if (err instanceof CreationError) return NextResponse.json({ error: err.message, code: err.code, stage: 'validation', attemptedSend: false }, { status: err.status });
     if (err instanceof MultiviewPresetError || err instanceof MultiviewSettingsError) return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     const pricingFailure = videoPricingError(err);
     if (pricingFailure) return NextResponse.json({ error: pricingFailure.message, code: pricingFailure.code }, { status: pricingFailure.status });
@@ -2819,11 +2855,11 @@ async function handleProviderFailure(
     if (!taskBeforeSettlement) return;
 
     const consumedApprovals = await tx.approvalUsage.findMany({
-      where: { task_id: taskId },
+      where: { task_id: taskId, creation_intent_id: null },
       select: { approval_id: true },
     });
     if (consumedApprovals.length > 0) {
-      await tx.approvalUsage.deleteMany({ where: { task_id: taskId } });
+      await tx.approvalUsage.deleteMany({ where: { task_id: taskId, creation_intent_id: null } });
       for (const usage of consumedApprovals) {
         await tx.approvalRecord.updateMany({
           where: { id: usage.approval_id, used_count: { gt: 0 } },

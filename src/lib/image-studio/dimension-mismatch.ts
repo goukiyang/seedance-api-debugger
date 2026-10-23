@@ -20,6 +20,13 @@ export type StudioDimensionMismatch = {
   };
 };
 
+export type StudioOutputIssue = {
+  kind: 'dimensions_mismatch' | 'format_mismatch' | 'specification_mismatch';
+  actual: { format: string | null; width: number | null; height: number | null };
+  requested: { format: string | null; width: number | null; height: number | null };
+  originalRetained: boolean;
+};
+
 export function studioOutputMismatch(task: DimensionMismatchTask): StudioDimensionMismatch | null {
   if (!['failed', 'uncertain'].includes(publicPricingTaskState(task.status))) return null;
   try {
@@ -43,6 +50,23 @@ export function studioOutputMismatch(task: DimensionMismatchTask): StudioDimensi
 export function studioDimensionMismatch(task: DimensionMismatchTask) {
   const mismatch = studioOutputMismatch(task);
   return mismatch?.code === 'generated_dimensions_mismatch' ? mismatch : null;
+}
+
+export function studioOutputIssue(task: DimensionMismatchTask): StudioOutputIssue | null {
+  const mismatch = studioOutputMismatch(task);
+  if (!mismatch || !task.asset_id) return null;
+  const requested = mismatch.validation.requestedSize.split('x').map(Number);
+  const dimensionsMismatch = requested.length === 2
+    && (requested[0] !== mismatch.validation.width || requested[1] !== mismatch.validation.height);
+  const formatMismatch = mismatch.validation.originalFormat !== 'png';
+  return {
+    kind: dimensionsMismatch && formatMismatch ? 'specification_mismatch'
+      : formatMismatch ? 'format_mismatch' : 'dimensions_mismatch',
+    actual: { format: mismatch.validation.originalFormat || null, width: mismatch.validation.width, height: mismatch.validation.height },
+    requested: { format: 'png', width: Number.isSafeInteger(requested[0]) ? requested[0] : null,
+      height: Number.isSafeInteger(requested[1]) ? requested[1] : null },
+    originalRetained: true,
+  };
 }
 
 export function studioOutputFormat(format: string) {

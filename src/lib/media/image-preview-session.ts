@@ -2,16 +2,17 @@
 
 import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult } from './image-read-session';
 import { acquireHdImageSource, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
-import { hdDescriptionUsesOriginal, hdDisplayPolicy, type HdDisplayKind } from './hd-display-policy';
+import { hdDescriptionUsesOriginal, type HdDisplayKind } from './hd-display-policy';
 import { imageDisplaySource } from './image-comparison';
 import { versionedHdSource } from '@/lib/hooks/use-hd-image-source';
 
-export type ImagePreviewPreparationOptions = { account: string; source: string; sourceVersion?: string; previewOnly?: boolean; original?: boolean };
+export type ImagePreviewPreparationOptions = { account: string; source: string; sourceVersion?: string; previewOnly?: boolean; original?: boolean; intent?: 'prepare' | 'open' };
 export type PreparedImagePreviewState = {
   readSource: string; version: string; displayKind: HdDisplayKind; fullSize: boolean;
   description?: HdDescription; descriptorPending: boolean; denied?: boolean; error?: boolean; fallback: boolean; result: ImageReadResult;
   /** An already displayed same-object representation, never another source. */
   retained?: { result: ImageReadResult; displayKind: HdDisplayKind; fullSize: boolean; description?: HdDescription; version: string };
+  displayedVariant?: 'original' | 'hd' | 'preview';
 };
 export type ImagePreviewPreparation = {
   readonly account: string; readonly source: string; readonly sourceVersion: string; readonly previewOnly: boolean; readonly original: boolean;
@@ -19,6 +20,7 @@ export type ImagePreviewPreparation = {
   subscribe: (listener: (state: PreparedImagePreviewState) => void) => () => void;
   isCurrent: () => boolean;
   markDisplayed: () => void;
+  confirmOpen: () => void;
   /** Relinquish only the initiating click's lease, after the viewer subscribes. */
   release: () => void;
 };
@@ -29,7 +31,10 @@ const waiting = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 're
 export function prepareImagePreview(options: ImagePreviewPreparationOptions): ImagePreviewPreparation {
   const { account, source } = options, sourceVersion = options.sourceVersion || '', previewOnly = Boolean(options.previewOnly), original = Boolean(options.original);
   const listeners = new Set<(state: PreparedImagePreviewState) => void>();
-  let initialLease = true, disposed = false, readSequence = 0, readKey = '', recovering = false, recovered409 = false, stoppedAutomatic = false;
+  let initialLease = true, disposed = false, readSequence = 0, readKey = '', recovering = false, recovered409 = false;
+  let confirmed = options.intent !== 'prepare', originalRoute = false, retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  const viewToken = crypto.randomUUID();
   let releaseRead: (() => void) | undefined, releaseHd: (() => void) | undefined, releasePriority: (() => void) | undefined;
   let displayedReadKey = '', displayedImage = '';
   let retainedRead: { release: () => void; sequence: number; descriptorVersion: string } | undefined;
@@ -45,6 +50,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const dispose = () => {
     if (disposed) return;
     disposed = true; initialLease = false; readSequence++;
+    clearTimeout(retryTimer);
     releaseRead?.(); releaseRead = undefined; releaseHd?.(); releaseHd = undefined;
     dropRetained();
     endPriority(); listeners.clear();
@@ -61,13 +67,14 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   };
   const unconfirmed = () => {
     if (!active()) return;
-    stoppedAutomatic = true;
-    load('preview', state.description, true, true);
+    load(confirmed && !previewOnly ? 'original' : 'preview', state.description, true, true);
   };
   const load = (kind: HdDisplayKind, description?: HdDescription, fallback = false, descriptorError = false) => {
     if (!active() || kind === 'pending') return;
+    if (!confirmed && kind !== 'preview' || originalRoute && kind === 'hd') return;
+    if (kind === 'original') originalRoute = true;
     const preview = imageDisplaySource(source, 'preview');
-    const readSource = kind === 'hd' ? versionedHdSource(source, 'hd', description?.sourceVersion)
+    const readSource = kind === 'hd' ? versionedHdSource(source, 'hd', description?.sourceVersion, description?.representationVersion)
       : kind === 'preview' ? previewOnly || hasCachedImagePreview(account, preview) ? preview : imageDisplaySource(source, 'thumbnail')
         : imageDisplaySource(source, 'original');
     // Preview validators belong to their own representation. They must never
@@ -121,19 +128,27 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
           // it is not permission to serve cached or unrelated original bytes.
           if (fresh.httpStatus === 409) { unconfirmed(); return; }
           if (fresh.description && fresh.description.status !== 'ready') {
-            const display = hdDisplayPolicy({ original: false, previewOnly: false, supported: true, description: fresh.description, error: fresh.error });
-            load(display.kind, fresh.description, !display.pending, Boolean(fresh.error)); return;
+            load('original', fresh.description, true, Boolean(fresh.error)); return;
           }
           if (!fresh.description) { unconfirmed(); return; }
-          const nextKind = hdDescriptionUsesOriginal(fresh.description) ? 'original' : 'hd';
-          if (nextKind === 'hd') resetImageReadForRetry(versionedHdSource(source, 'hd', fresh.description.sourceVersion), account);
-          readKey = ''; load(nextKind, fresh.description, nextKind === 'original', Boolean(fresh.error));
+          // The displayed representation changed. Do not quietly substitute a
+          // second compressed body under the old selection; use the authorized
+          // original once, after the one fresh object/descriptor check.
+          resetImageReadForRetry(readSource, account);
+          load('original', fresh.description, true, Boolean(fresh.error));
         }).catch(() => { if (active() && sequence === readSequence) { recovering = false; unconfirmed(); } });
         return;
       }
-      if (kind === 'hd' && (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable')) {
-        stoppedAutomatic = true;
-        load('preview', description, true, true); endPriority(); return;
+      if (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable') {
+        if (kind === 'hd' && result.progress.phase === 'unsupported') { load('original', description, true); return; }
+        if (result.progress.phase !== 'unsupported' && confirmed && !document.hidden && kind !== 'preview' && retries < 2 && !retryTimer) {
+          const delay = [1000, 3000][retries++];
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            if (!active() || document.hidden || sequence !== readSequence || !initialLease && !listeners.size) return;
+            resetImageReadForRetry(readSource, account); readKey = ''; load(kind, state.description, fallback, descriptorError);
+          }, delay);
+        } else endPriority();
       }
       if (kind === 'preview' && (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable')) endPriority();
     });
@@ -145,15 +160,18 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const descriptionChanged = (value: HdSourceState) => {
     if (!active() || recovering) return;
     if (value.denied) { deny(); return; }
-    if (stoppedAutomatic) return;
     const description = value.description;
+    if (!confirmed || originalRoute) {
+      state = { ...state, description, descriptorPending: ['queued', 'running'].includes(description?.status || ''), error: Boolean(value.error) };
+      notify(); return;
+    }
     if (description) {
-      const display = hdDisplayPolicy({ original: false, previewOnly: false, supported: true, description, error: value.error });
-      load(display.kind, description, !display.pending && description.status !== 'ready', Boolean(value.error));
+      const kind = description.status === 'ready' && !hdDescriptionUsesOriginal(description) ? 'hd' : 'original';
+      load(kind, description, kind === 'original', Boolean(value.error));
     }
     else if (value.error) {
       if (value.httpStatus === 409) unconfirmed();
-      else load('preview', undefined, true, true);
+      else load('original', undefined, true, true);
     }
   };
   const handle: ImagePreviewPreparation = {
@@ -170,7 +188,17 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     markDisplayed: () => {
       if (!active() || !state.result.decoded || !state.result.imageSrc) return;
       displayedReadKey = readKey; displayedImage = state.result.imageSrc;
+      state = { ...state, displayedVariant: state.displayKind === 'pending' ? undefined : state.displayKind };
       dropRetained(); endPriority(); notify();
+    },
+    confirmOpen: () => {
+      if (!active() || confirmed) return;
+      confirmed = true; releaseHd?.(); releaseHd = undefined;
+      const descriptionSource = imageDisplaySource(source, 'hd-description');
+      const hint = !previewOnly && !original ? hdImageHint(account, descriptionSource, sourceVersion) : undefined;
+      load(previewOnly ? 'preview' : hint && !hdDescriptionUsesOriginal(hint) ? 'hd' : 'original', hint);
+      if (!previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source))
+        releaseHd = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, { intent: 'open', viewToken });
     },
     release: () => { if (!initialLease) return; initialLease = false; if (!listeners.size) dispose(); },
   };
@@ -180,11 +208,13 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   if (previewOnly) invalidateImageReadSource(source, account);
   releasePriority = beginImageForegroundPreparation(account);
   const descriptionSource = imageDisplaySource(source, 'hd-description');
-  const supported = !previewOnly && !original && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
-  if (previewOnly || original || !supported) {
-    load(previewOnly ? 'preview' : 'original', !previewOnly ? hdImageHint(account, descriptionSource, sourceVersion, true) : undefined);
+  const supported = !previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
+  if (previewOnly || !supported) {
+    load(previewOnly || !confirmed ? 'preview' : 'original', !previewOnly ? hdImageHint(account, descriptionSource, sourceVersion) : undefined);
   } else {
-    const release = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged);
+    const hint = hdImageHint(account, descriptionSource, sourceVersion);
+    load(!confirmed ? 'preview' : !original && hint && !hdDescriptionUsesOriginal(hint) ? 'hd' : 'original', hint);
+    const release = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, confirmed ? { intent: 'open', viewToken } : { intent: 'status' });
     releaseHd = release; if (disposed) release();
   }
   return handle;

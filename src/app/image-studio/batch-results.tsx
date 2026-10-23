@@ -5,6 +5,9 @@ import { validVideoPricingAmount } from '@/lib/pricing-client';
 import { formatImageUiCredits, validImageUiQuote, parseImageUiBudget, imageUiBudgetPrecision, type ImageUiQuote } from './use-studio-batch';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FolderOpen, Pause, Play, RefreshCw, RotateCcw, Save, X } from 'lucide-react';
+import { StudioInputMainViewer } from '@/components/StudioInputMainViewer';
+import type { StudioInputMainSource } from '@/lib/image-studio/input-main';
+import { ImageResultIssueDetails } from '@/components/ImageResultIssueDetails';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { RelativeTime } from '@/components/RelativeTime';
 import { TaskNotice } from '@/components/TaskNotice';
@@ -51,11 +54,11 @@ function deliveryFor(key: string, directory?: BatchDirectoryHandle | null) {
   return deliveries.get(key)!;
 }
 
-type BatchResultsProps = { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (taskId: string) => void; visible?: boolean; onSourceChanged?: () => void };
+type BatchResultsProps = { id: string; userId: string; outputDirectory?: BatchDirectoryHandle | null; compact?: boolean; deliveryOnly?: boolean; autoPack?: boolean; onQuickUse?: (taskId: string) => void; onInputMainSource?: (source: StudioInputMainSource) => void; visible?: boolean; onSourceChanged?: () => void };
 export function BatchResults(props: BatchResultsProps) {
   return <BatchResultsWorkspace key={`${props.userId}:${props.id}`} {...props} />;
 }
-function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = false, autoPack = false, onQuickUse, visible = true, onSourceChanged }: BatchResultsProps) {
+function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = false, autoPack = false, onQuickUse, onInputMainSource, visible = true, onSourceChanged }: BatchResultsProps) {
   const { confirm, prompt: askBudget, productDialog } = useProductDialog();
   const delivery = deliveryFor(`${userId}:${id}`, outputDirectory);
   const [batch, setBatch] = useState<SharedBatchView | null>(null);
@@ -287,6 +290,8 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   // The terminal result set determines packages; exporting never creates image tasks.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPack, batch?.state, batch?.generated, batch?.active, batch?.pending, batch?.uncertain]);
+  const [inputPreviewSource, setInputPreviewSource] = useState<StudioInputMainSource | null>(null);
+  useEffect(() => setInputPreviewSource(null), [id, userId, visible]);
   const statusLabel = (state: string, phase?: string, disposition?: string | null) => studioOutputMismatchDisposition(disposition) ? '图片已返回 · 规格不符' : state === 'running' && phase && ({ download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中' } as Record<string, string>)[phase]
     || ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
@@ -299,14 +304,15 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       detail: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? undefined : item.error,
       generationDetailSuperseded: item.delivery?.generationDetailSuperseded,
     },
-    notice: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? item.error : undefined,
+    outputIssue: item.outputIssue, inputMainPreview: item.inputMainPreview,
+    outputNotice: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? item.error : undefined,
     error: item.image && studioOutputMismatchDisposition(item.resultDisposition) ? undefined : item.error,
     media: item.image ? { src: item.image.url, thumbnailSrc: item.image.thumbnail, alt: `第 ${item.ordinal} 张结果`, fileName: item.image.fileName || 'batch-image.png',
       contentKey: `asset:${item.image.id}` as const,
       comparisonCandidates: (batch?.items || []).flatMap(other => other.image ? [{ src: other.image.url, thumbnailSrc: other.image.thumbnail, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.image.id}` as const }] : []),
     } : undefined,
     download: item.image && item.taskId ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(item.taskId!)}`, item.image?.fileName || 'batch-image.png', () => scope.current === `${userId}:${id}`) : undefined,
-  } satisfies GeneratedImageResult & { generationStatus: string })), [batch?.items, error, id, userId]);
+  } satisfies GeneratedImageResult & { generationStatus: string; outputNotice?: string | null })), [batch?.items, error, id, userId]);
   return <div className={styles.results} aria-label="批次结果">
     <div className={styles.actions}><strong>{batch?.moduleName || '本批结果'}</strong><button type="button" title="刷新批次" aria-label="刷新批次" disabled={reading} onClick={() => void load()}><RefreshCw size={16} /></button>{deliveryOnly && <a href={`/assets?imageBatchId=${encodeURIComponent(id)}`}>本批资产</a>}</div>
     {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
@@ -335,14 +341,17 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
         {saveError && <TaskNotice kind="recoverable">{saveError}，只补保存，不重新生成。</TaskNotice>}
       </div>}
       {!deliveryOnly && batch.failed > 0 && <div className={styles.retry}><span>选中失败项 {selected.length} 张，按原批报价预计 {formatImageUiCredits(sumCredits(selected.map(() => batch.unitCredits)))} 点；每项最多重试 3 次</span><button type="button" disabled={busy || !selected.length} onClick={() => void action('retry')}><RotateCcw size={16} />重试选中失败项</button></div>}
-      {!deliveryOnly && <GeneratedImageResults items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
-        visible={visible} onQuickUse={onQuickUse ? item => { if (item.taskId && item.image) onQuickUse(item.taskId); } : undefined}
+      {!deliveryOnly && <GeneratedImageResults compactInformation items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
+        visible={visible} onPreviewInputMain={item => { if (item.inputMainPreview) setInputPreviewSource(item.inputMainPreview.source); }}
+        onQuickUse={onQuickUse || onInputMainSource ? item => { if (item.taskId) onQuickUse?.(item.taskId); else if (item.inputMainPreview) onInputMainSource?.(item.inputMainPreview.source); } : undefined}
         renderPrimaryActions={(item, waitDisplay) => item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}
         busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
+          {(item.outputIssue || item.outputNotice) && <ImageResultIssueDetails issue={item.outputIssue} notice={item.outputNotice} />}
           {saved[item.ordinal] && <p>已保存并核对大小</p>}
           {item.generationStatus === 'failed' && <label><input type="checkbox" disabled={busy} aria-label={`重试第 ${item.ordinal} 项`} checked={selected.includes(item.ordinal)} onChange={event => setSelected(previous => event.target.checked ? [...previous, item.ordinal] : previous.filter(value => value !== item.ordinal))} />重试此项</label>}
         </>} />}
     </>}
+    {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${userId}:${id}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
     {productDialog}
   </div>;
 }

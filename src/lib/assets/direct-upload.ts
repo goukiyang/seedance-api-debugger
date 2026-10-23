@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import path from 'path';
 import { Transform } from 'stream';
+import { Agent } from 'node:https';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -343,6 +345,13 @@ function verifySingleUploadToken(token: string, ownerId: string, allowExpired = 
   return payload;
 }
 
+// Log correlation is derived only after signature/owner validation, never from
+// a browser-supplied requestId or the signed token itself.
+export function directUploadRequestId(token: string, ownerId: string) {
+  const payload = verifySingleUploadToken(token, ownerId, true);
+  return payload.requestId || payload.key;
+}
+
 function verifyMultipartUploadToken(token: string, ownerId: string, allowExpired = false) {
   const payload = verifyToken(token, ownerId, allowExpired);
   if (payload.uploadMode !== 'multipart' || !payload.uploadId || !payload.partSize) {
@@ -386,10 +395,15 @@ function publicUrlForAssetUrl(url: string) {
 }
 
 
+const r2DirectUploadAgent = new Agent({ family: 4, keepAlive: true });
 function createR2Client(config: R2DirectUploadConfig) {
   return new S3Client({
     region: 'auto',
     endpoint: `https://${config.endpointHostname}`,
+    requestHandler: new NodeHttpHandler({
+      httpsAgent: r2DirectUploadAgent,
+      connectionTimeout: 10000,
+    }),
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,

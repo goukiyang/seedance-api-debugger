@@ -13,11 +13,12 @@ type ResultImageCoverProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'chil
   loadingOverlay?: ReactNode;
   contextMenuEnabled?: boolean;
   menuOpen?: boolean;
+  recoverFromThumbnailError?: boolean;
   cancelPreviewRef?: MutableRefObject<(() => void) | null>;
 };
 
 export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverProps>(function ResultImageCover({
-  src, alt, selected, applied, onSelect, onPreview, previewSource, onViewed, onQuickUse, active = true, loadingOverlay, contextMenuEnabled = false, menuOpen = false, cancelPreviewRef,
+  src, alt, selected, applied, onSelect, onPreview, previewSource, onViewed, onQuickUse, active = true, loadingOverlay, contextMenuEnabled = false, menuOpen = false, recoverFromThumbnailError = false, cancelPreviewRef,
   className, onClick, onDoubleClick, onContextMenu, onKeyDown, onPointerDown, onPointerMove, onPointerUp, onPointerCancel,
   onPointerDownCapture, onPointerMoveCapture, onPointerUpCapture, onPointerCancelCapture, onClickCapture, onDoubleClickCapture, ...domProps
 }, forwardedRef) {
@@ -29,8 +30,8 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
   const preparationIdentity = JSON.stringify([previewSource?.account, previewSource?.source, previewSource?.sourceVersion || '', Boolean(previewSource?.previewOnly)]);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preparation = useRef<ImagePreviewPreparation | null>(null);
-  const latest = useRef({ onPreview, onQuickUse, active, menuOpen, failedRead, identity, preparationIdentity });
-  latest.current = { onPreview, onQuickUse, active, menuOpen, failedRead, identity, preparationIdentity };
+  const latest = useRef({ onPreview, onQuickUse, active, menuOpen, failedRead, identity, preparationIdentity, recoverFromThumbnailError });
+  latest.current = { onPreview, onQuickUse, active, menuOpen, failedRead, identity, preparationIdentity, recoverFromThumbnailError };
   const cancelPreview = useCallback(() => {
     if (previewTimer.current) clearTimeout(previewTimer.current);
     previewTimer.current = null;
@@ -39,6 +40,7 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
   const handOffPreview = () => {
     const prepared = preparation.current;
     preparation.current = null;
+    prepared?.confirmOpen();
     try { latest.current.onPreview(prepared || undefined); }
     catch (cause) { prepared?.release(); throw cause; }
   };
@@ -49,7 +51,7 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
     if (event.defaultPrevented || event.button === 2 || event.ctrlKey || contextMenuEnabled && (menuOpen || event.pointerType !== 'mouse')) cancelPreview();
   }
   return <button {...domProps} ref={forwardedRef} type="button" className={`${styles.cover}${className ? ` ${className}` : ''}`} data-result-cover data-selected={selected || undefined}
-    aria-label={domProps['aria-label'] || (failedRead ? `重试读取${alt}` : `查看${alt}`)} aria-pressed={domProps['aria-pressed'] ?? selected}
+    aria-label={domProps['aria-label'] || (failedRead && !recoverFromThumbnailError ? `重试读取${alt}` : `查看${alt}`)} aria-pressed={domProps['aria-pressed'] ?? selected}
     title={domProps.title ?? (onQuickUse ? '单击查看图片，双击取回本次输入主图' : undefined)}
     onContextMenu={event => { cancelPreview(); onContextMenu?.(event); }}
     onKeyDown={event => {
@@ -73,12 +75,14 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
     onClick={event => {
       onClick?.(event);
       if (event.defaultPrevented || menuOpen || event.ctrlKey || event.button !== 0) { cancelPreview(); return; }
-      if (failedRead) { setFailed(''); setAttempt(value => value + 1); return; }
+      // A thumbnail error is not evidence that the separately authorized
+      // original is unavailable. Keep preview and direct-input recovery live.
+      if (failedRead && !recoverFromThumbnailError) { setFailed(''); setAttempt(value => value + 1); return; }
       event.stopPropagation();
       if (!active || isClientSessionBlocked()) { cancelPreview(); return; }
       if (event.detail > 1) { cancelPreview(); return; }
       cancelPreview();
-      if (previewSource) preparation.current = prepareImagePreview(previewSource);
+      if (previewSource) preparation.current = prepareImagePreview({ ...previewSource, intent: 'prepare' });
       try {
         onSelect();
         const image = event.currentTarget.querySelector('img');
@@ -87,18 +91,18 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
       if (!onQuickUse || event.detail === 0) handOffPreview();
       else previewTimer.current = setTimeout(() => {
         previewTimer.current = null;
-        if (latest.current.active && !latest.current.menuOpen && !latest.current.failedRead && latest.current.identity === identity
+        if (latest.current.active && !latest.current.menuOpen && (!latest.current.failedRead || latest.current.recoverFromThumbnailError) && latest.current.identity === identity
           && latest.current.preparationIdentity === preparationIdentity && !isClientSessionBlocked()) handOffPreview();
         else cancelPreview();
       }, 500);
     }}
     onDoubleClick={event => {
       onDoubleClick?.(event);
-      if (failedRead || event.defaultPrevented || menuOpen || isClientSessionBlocked()) { cancelPreview(); return; }
+      if (failedRead && !recoverFromThumbnailError || event.defaultPrevented || menuOpen || isClientSessionBlocked()) { cancelPreview(); return; }
       event.preventDefault(); event.stopPropagation(); cancelPreview();
       if (latest.current.active) latest.current.onQuickUse?.();
     }}>
-    {failedRead ? <span className={styles.readState}><RefreshCw size={18} />图片未能读取，点击重试</span> : <>
+    {failedRead ? <span className={styles.readState}><RefreshCw size={18} />{recoverFromThumbnailError ? '缩略图暂不可用，仍可查看或取回原图' : '图片未能读取，点击重试'}</span> : <>
     {/* eslint-disable-next-line @next/next/no-img-element */}
     <img key={identity} decoding="async" src={src} alt={alt} loading="lazy" onError={() => { cancelPreview(); setFailed(identity); }} onLoad={event => { setLoaded(identity); if (selected && event.currentTarget.naturalWidth > 0) onViewed?.(); }} />
     {loaded !== identity && (loadingOverlay || <span className={styles.readState} role="status">正在读取图片</span>)}

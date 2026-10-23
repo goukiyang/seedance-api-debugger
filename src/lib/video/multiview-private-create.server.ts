@@ -6,6 +6,7 @@ import {
   PAID_GENERATION_INTENT_HEADER,
   PAID_GENERATION_INTENT_USER_AUTHORIZED,
   PAID_GENERATION_REASON_HEADER,
+  userRetryGenerationReason,
 } from '@/lib/tasks/paid-generation-guard';
 import {
   isMultiviewGenerationSeed,
@@ -123,7 +124,7 @@ export async function createPrivateMultiviewRetry(request: NextRequest, input: T
   headers.delete('content-length');
   headers.set('Content-Type', 'application/json');
   headers.set(PAID_GENERATION_INTENT_HEADER, PAID_GENERATION_INTENT_USER_AUTHORIZED);
-  headers.set(PAID_GENERATION_REASON_HEADER, `用户主动重试3D多视图任务 ${input.originalTaskId}`);
+  headers.set(PAID_GENERATION_REASON_HEADER, userRetryGenerationReason('multiview', input.originalTaskId));
   const trustedRequest = new NextRequest(new URL('/api/tasks/create', request.url), {
     method: 'POST', headers, cache: 'no-store', body: JSON.stringify({}),
   });

@@ -305,6 +305,43 @@ export async function verifyRateSourceArchive({ archive, manifest }) {
   return { source: manifest.source, archiveSha256: manifest.archiveSha256, fileCount: files.size, verifiedCommittedBlobs: true };
 }
 
+async function copyOriginalSourcePackage(output, kind, selected, original) {
+  const read = (file, maximum = MAX_SOURCE_BYTES) => {
+    assert.equal(fs.realpathSync(file), file); const stat = fs.lstatSync(file);
+    assert.ok(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && !(stat.mode & 0o022)
+      && stat.size > 0 && stat.size <= maximum);
+    const bytes = fs.readFileSync(file), after = fs.lstatSync(file);
+    for (const key of ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'mode', 'uid', 'gid', 'nlink']) assert.equal(after[key], stat[key]);
+    return bytes;
+  };
+  const directory = fs.realpathSync(original.directory); assert.equal(directory, original.directory);
+  const originBytes = read(directory + '/manifest.json', MAX_TREE_BYTES), origin = JSON.parse(originBytes);
+  assert.equal(hash(originBytes), original.manifestSha256); assert.equal(origin.runId, original.sourceRun);
+  const capsuleBytes = read(directory + '/' + kind + '-immutable-success.json', 128 * 1024 * 1024), capsule = JSON.parse(capsuleBytes);
+  assert.equal(hash(capsuleBytes), original[kind + 'Sha256']); assert.equal(capsule.schema, 'sd2-immutable-successful-build.v1');
+  assert.equal(capsule.kind, kind); assert.equal(capsule.sourceRun, original.sourceRun);
+  assert.equal(capsule.originalManifestSha256, original.manifestSha256);
+  assert.equal(capsule.originalReceipt.source, selected.source); assert.equal(capsule.originalReceipt.exitCode, 0);
+  assert.equal(capsule.originalTimesChanged, false); assert.equal(capsule.newCompilationClaimed, false);
+  const bytes = read(directory + '/' + kind + '/source-manifest.json', MAX_TREE_BYTES), manifest = JSON.parse(bytes);
+  assert.equal(hash(bytes), capsule.originalSourceManifestSha256);
+  assert.equal(hash(bytes), capsule.originalReceipt.sourceManifestSha256);
+  assert.equal(manifest.source, selected.source); assert.equal(manifest.tree, selected.tree);
+  assert.deepEqual(manifest.fileDetails, Object.fromEntries([...selected.files].sort(([a], [b]) => a.localeCompare(b))
+    .map(([file, entry]) => [file, { gitBlob: entry.gitBlob, mode: entry.mode, bytes: entry.bytes }])));
+  const archiveBytes = read(directory + '/' + kind + '/source.tar.gz'); assert.equal(hash(archiveBytes), manifest.archiveSha256);
+  await verifyRateSourceArchive({ archive: directory + '/' + kind + '/source.tar.gz', manifest });
+  const destination = path.join(output, kind); fs.mkdirSync(destination, { mode: 0o700 });
+  const sourceManifest = destination + '/source-manifest.json', archive = destination + '/source.tar.gz';
+  // Preserve the original byte identity and its real createdAt. A packaging time
+  // belongs only to the new package receipt, never to the sealed build input.
+  fs.writeFileSync(sourceManifest, bytes, { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(archive, archiveBytes, { flag: 'wx', mode: 0o600 });
+  return { source: selected.source, tree: selected.tree, version: manifest.version, archive, sourceManifest,
+    archiveSha256: manifest.archiveSha256, manifestSha256: hash(bytes), fileCount: manifest.fileCount,
+    exclusions: manifest.exclusions, originalSourceManifestPreserved: true, originalCreatedAt: manifest.createdAt };
+}
+
 export async function packageRateCandidates(input) {
   assertMvDirectReady();
   assert.ok(input && typeof input.repoRoot === 'string' && path.isAbsolute(input.repoRoot), 'repoRoot must be explicit and absolute');
@@ -329,8 +366,10 @@ export async function packageRateCandidates(input) {
   fs.chmodSync(output, 0o700);
   assert.equal(fs.realpathSync(output), output);
   try {
-    const main = await archiveCandidate(repo, output, 'main', sources.main);
-    const guard = await archiveCandidate(repo, output, 'guard', sources.guard);
+    const pack = (kind) => input.originalBuilds ? copyOriginalSourcePackage(output, kind, sources[kind], input.originalBuilds)
+      : archiveCandidate(repo, output, kind, sources[kind]);
+    const main = await pack('main');
+    const guard = await pack('guard');
     const receipt = { schema: 'rate-impl2-package-candidates.v1', project: 'video-api-debugger', repoRoot: repo,
       outputRoot: output, main, guard, createdAt: new Date().toISOString(),
       protections: { exactCommittedBlobs: true, workingTreeRead: false, networkUsed: false, runtimeDataRead: false, oldFilesDeleted: false } };

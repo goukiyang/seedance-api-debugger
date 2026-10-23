@@ -5,7 +5,8 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { getOrCreateWorkspace } from '@/lib/assets/workspace';
+import { finishTaskReuseOperation, readTaskReuseOperation, taskReuseRequest, taskReuseSourceStamp,
+  taskReusePrivateHeaders, TaskReuseOperationError } from '@/lib/navigation/task-reuse-operation.server';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage, canUseDirectAsset, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
@@ -323,6 +324,9 @@ export async function POST(
     }
 
     const requestBody = await request.json().catch(() => ({}));
+    const operationRequest = taskReuseRequest(requestBody, user.id, params.id, request.headers.get('x-tab-id'));
+    const previous = await readTaskReuseOperation(user, params.id, operationRequest);
+    if (previous.body.reuse.status !== 'unknown') return NextResponse.json(previous.body, { status: previous.status, headers: taskReusePrivateHeaders });
     const requestedSurface = requestBody && typeof requestBody === 'object' && !Array.isArray(requestBody)
       ? (requestBody as { surface?: unknown }).surface
       : undefined;
@@ -690,41 +694,26 @@ export async function POST(
       video_card: task.video_card,
     };
     if (hasSourceMaterials && (preparedItems.length === 0 || skippedReferences > 0)) {
-      return NextResponse.json({
-        error: '原任务部分或全部素材无法安全恢复，当前工作区未更改。',
-        code: 'REUSE_ASSETS_UNAVAILABLE',
-        restored_references: 0,
-        skipped_references: skippedReferences,
-        inputWarnings: Array.from(warnings),
-        draft,
-      }, { status: 409 });
+      const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, { sourceStamp: taskReuseSourceStamp(task), items: [], payload: {},
+        rejection: { code: 'REUSE_ASSETS_UNAVAILABLE', message: '原任务部分或全部素材无法安全恢复，当前工作区未更改。', status: 409 } });
+      return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
     }
-
-    const tabId = request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
-    await prisma.$transaction(async (tx) => {
-      await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
-      if (preparedItems.length > 0) {
-        await tx.workspaceAsset.createMany({
-          data: preparedItems.map((item, index) => ({
-            workspace_id: workspaceId,
-            asset_id: item.assetId,
-            reference_image_id: item.referenceImageId,
-            sort_order: index,
-            role: item.role,
-          })),
-        });
-      }
-    });
-
-    return NextResponse.json({
+    const unsupported = !provider || !model || !VALID_GENERATION_MODES.has(generationMode)
+      || !VALID_RATIOS.has(ratio) || !VALID_RESOLUTIONS.has(resolution)
+      || !Number.isInteger(duration) || duration < 4 || duration > 30;
+    const outcome = await finishTaskReuseOperation(user, params.id, operationRequest, {
+      sourceStamp: taskReuseSourceStamp(task), items: preparedItems,
+      ...(unsupported ? { rejection: { code: 'REUSE_FIELDS_UNSUPPORTED', message: '原任务部分生成参数无法安全恢复，当前工作区未更改。', status: 409 } } : {}),
+      payload: {
       draft,
-      workspace_id: workspaceId,
       restored_references: preparedItems.length,
       skipped_references: skippedReferences,
       inputWarnings: Array.from(warnings),
+      },
     });
+    return NextResponse.json(outcome.body, { status: outcome.status, headers: taskReusePrivateHeaders });
   } catch (error) {
+    if (error instanceof TaskReuseOperationError) return NextResponse.json({ error: error.message, message: error.message, code: error.code }, { status: error.status, headers: taskReusePrivateHeaders });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
     }

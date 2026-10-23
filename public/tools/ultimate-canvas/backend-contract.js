@@ -26,6 +26,8 @@
         /^\/api\/video-cards\/[^/]+(?:\/branches(?:\/[^/]+)?|\/tasks|\/split|\/merge)?$/,
         /^\/api\/approvals$/,
         /^\/api\/video\/retry\/[^/]+$/,
+        /^\/api\/creation\/(?:context|baselines)$/,
+        /^\/api\/video\/creation-intents(?:\/[A-Za-z0-9_.:-]+(?:\/(?:approval|close))?)?$/,
         /^\/api\/tasks\/estimate$/
     ];
 

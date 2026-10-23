@@ -1,3 +1,4 @@
+import { readFullLiveSourceFiles, verifyFullCandidateSources, fullSchemaBefore } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -93,7 +94,7 @@ export function assertPriorPublication(m, prior, complete, final, original, rece
     const live = m.live[role], current = role === 'role' ? final.role.current : final.units[role];
     assert.equal(current.ActiveState, 'active'); assert.equal(current.SubState, 'running'); assert.equal(current.ControlPID, '0');
     assert.equal(current.WorkingDirectory, prior.main.root);
-    if (!m.recoveredGuardBaseline) {
+    if (!m.recoveredGuardBaseline && !m.fullRelease) {
       assert.equal(live.root, prior.main.root); assert.equal(live.source, prior.mainSource);
       assert.equal(live.version, prior.main.version); assert.equal(live.build, complete.healthy.build);
     }
@@ -163,13 +164,16 @@ function verifiedRuntimeAuthority(value) {
   return authority;
 }
 export function assertCurrentPublishedBaseline(m) {
+  if (m.fullRelease) return Object.fromEntries(['web', 'image', 'hd', 'works', 'role', 'template'].map(role =>
+    [role, readFullLiveSourceFiles(m, ['package.json'], role)]));
   if (!m.recoveredGuardBaseline) return null;
   const value = history(m), authority = verifiedRuntimeAuthority(value);
   const result = assertRecoveredGuardLive(m, authority);
   assertPriorUsageRoleControl(m);
   return result;
 }
-export function readPublishedBaselineSourceFiles(m, files) {
+export function readPublishedBaselineSourceFiles(m, files, role = 'web') {
+  if (m.fullRelease) return readFullLiveSourceFiles(m, files, role);
   assert.ok(m.deployedUsageSchema, 'Published baseline requires pinned successful publication history');
   const value = history(m), entry = verifiedRuntimeAuthority(value).entry;
   assert.equal(entry.source, m.live.web.source);
@@ -215,7 +219,7 @@ export function unchangedSchemaInputs(m, value, { candidates = true, batchMigrat
       for (const root of new Set([value.original.main.root, value.original.guard.root, canvasOriginal.live.web.root]))
         assert.equal(sha(candidateBytes(m, root, file)), m.canvasVideoBatchSchema.previousPrismaSha256);
       for (const root of new Set([canvasOriginal.main.root, canvasOriginal.guard.root, value.prior.main.root, value.prior.guard.root,
-        ...(candidates ? [m.main.root, m.guard.root] : [])]))
+        ...(candidates && !m.fullRelease ? [m.main.root, m.guard.root] : [])]))
         assert.equal(sha(candidateBytes(m, root, file)), m.canvasVideoBatchSchema.newPrismaSha256);
       continue;
     }
@@ -228,7 +232,9 @@ export function unchangedSchemaInputs(m, value, { candidates = true, batchMigrat
   assert.equal(reference[SCHEMA_FILES[0]], value.receipt.sqlSha256);
   if (m.canvasVideoBatchSchema) {
     assert.equal(reference['prisma/schema.prisma'], adoptedCanvas ? m.canvasVideoBatchSchema.newPrismaSha256 : m.canvasVideoBatchSchema.previousPrismaSha256);
-    if (candidates) verifyCanvasBatchCandidates(m);
+    if (candidates) {
+      if (m.fullRelease) verifyFullCandidateSources(m); else verifyCanvasBatchCandidates(m);
+    }
   }
   return reference;
 }
@@ -253,7 +259,7 @@ with ro(backup) as b:
  counts={n:b.execute('SELECT COUNT(*) FROM "'+n.replace('"','""')+'"').fetchone()[0] for n,v in old.items() if v[0]=='table'}
  assert counts==d['backupCounts']
 with ro(db) as c:
- current=schema(c); extra=d.get('canvasBatchObjects',{}); assert set(current)-set(old)==set(names)|set(extra)
+ current=d.get('fullSchemaBefore') or schema(c); extra=d.get('canvasBatchObjects',{}); assert set(current)-set(old)==set(names)|set(extra)
  assert all(current.get(k)==v for k,v in extra.items())
  assert all(current.get(k)==v for k,v in old.items())
  new={n:current[n] for n in sorted(names)}
@@ -272,7 +278,7 @@ export function verifyDeployedUsageSchema(m, { candidates = true } = {}) {
   assert.equal(call('findmnt', ['-n', '-o', 'TARGET', '-T', m.database]), '/data');
   const observed = JSON.parse(call('python3', ['-I', '-c', DEPLOYED_PROBE, JSON.stringify({ database: m.database,
     backup: value.backup, identity: value.identity, schemaSha256: value.receipt.newSchemaSha256,
-    backupCounts: value.proof.originalTableCounts, canvasBatchObjects: batchMigration?.observed.objects || {} })], { timeout: 120000 }));
+    backupCounts: value.proof.originalTableCounts, fullSchemaBefore: fullSchemaBefore(m), canvasBatchObjects: batchMigration?.observed.objects || {} })], { timeout: 120000 }));
   assert.deepEqual(observed.databaseIdentity, value.identity); assert.equal(observed.newSchemaSha256, value.receipt.newSchemaSha256);
   assert.equal(observed.databaseWrites, 0); assert.equal(observed.ddlExecuted, false);
   return { ...value, sourceSha256, observed };
@@ -289,10 +295,10 @@ function references(m, value) {
     receiptSha256: m.deployedUsageSchema.migrationReceiptSha256, backupProofSha256: m.deployedUsageSchema.backupProofSha256,
     beforeSha256: m.deployedUsageSchema.migrationBeforeSha256, sqlSha256: value.receipt.sqlSha256, backupSha256: value.receipt.backupSha256 } };
 }
-export function adoptDeployedUsageSchema(m) {
+export function adoptDeployedUsageSchema(m, { candidates = true } = {}) {
   assertReleaseWindow(m);
   if (fs.existsSync(receiptFile(m))) return readDeployedUsageEvidence(m);
-  const value = verifyDeployedUsageSchema(m);
+  const value = verifyDeployedUsageSchema(m, { candidates });
   const receipt = { schema: 'sd2-deployed-usage-schema-adopt.v1', operation: 'VERIFY-DEPLOYED-SCHEMA', runId: m.runId,
     manifestSha256: sha(rootFile(m.stage + '/manifest.json')), source: m.mainSource, guardSource: m.guardSource,
     verifiedAt: new Date().toISOString(), completed: true, ddlExecuted: false, databaseWrites: 0, businessRowsWritten: 0,
@@ -315,6 +321,18 @@ export function readDeployedUsageEvidence(m) {
   return receipt;
 }
 export function priorUsageRoleControl(m) {
+  if (m.fullRelease) {
+    const allowed = rootFile(ROLE_ROOT + '/allowed.json'), contract = JSON.parse(allowed);
+    assert.equal(contract.schema, 'sd2-usage-role-start.v1'); assert.equal(contract.appUid, Number(call('id', ['-u', m.appUser])));
+    const role = m.fullRelease.liveRoles.role, entry = contract.releases.find(v => v.source === role.source);
+    assert.ok(entry); for (const key of ['root', 'source', 'version', 'build']) assert.equal(entry[key], role[key]);
+    const proof = readFullLiveSourceFiles(m, ['ops/sd2-usage-role-start.mjs'], 'role');
+    const moduleSha256 = proof.sourceFiles['ops/sd2-usage-role-start.mjs'];
+    assert.equal(entry.sourceSha256['ops/sd2-usage-role-start.mjs'], moduleSha256);
+    const source = Buffer.from('# Usage origin writer ' + contract.runId + '\n[Service]\nWorkingDirectory=' + role.root
+      + '\nExecStartPre=/usr/bin/node ' + ROLE_ROOT + '/start.mjs\n');
+    return { allowed, source, moduleSha256, root: ROLE_ROOT, sourceFile: ROLE_SOURCE };
+  }
   const value = history(m), { prior, final, roleKind, manifestSha256 } = verifiedRuntimeAuthority(value), { receipt } = value;
   const starts = final.role.transitions.filter(entry => entry.phase === 'start-intent' && entry.kind === roleKind);
   assert.equal(starts.length, 1);

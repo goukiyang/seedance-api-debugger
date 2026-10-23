@@ -24,6 +24,7 @@ import { assertStudioDeletionIdle, assertStudioWorkspaceNotDeleted, listStudioDe
   recordStudioWorkspaceDeletion, studioWorkspaceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionNotApplied, StudioDeletionReceipt } from './shared-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { resolveStudioTemplateAuthor } from './template-author';
 
 export { deleteStudioGroup };
 
@@ -73,6 +74,11 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const protectedSource = !isAdmin && Boolean(row.source_preset_id) && sourcePreset?.owner_id !== ownerId;
   const fixedReferences = await getStudioModuleFixedReferences(ownerId, row.id);
   const user = identity || await prisma.user.findUniqueOrThrow({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  const templateRead = saved ? (await resolveStudioTemplateAuthor(user, row.source_preset_id
+    ? { presetId: row.source_preset_id } : { moduleId: row.id })).templateRead : {
+      sourceKind: 'local-module' as const, sourceId: row.id, sourceRevision: String(row.revision),
+      author: { state: 'known' as const, displayName: null, avatarUrl: null, isSelf: true }, canViewTemplateContext: true,
+    };
   const styleGroupIds = await getStudioModuleStyleIds(ownerId, row.id);
   const skillIds = await getSkillSelection(ownerId, row.id);
   const skills = await Promise.all(skillIds.map(async id => {
@@ -140,14 +146,19 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourceRevision: sourcePreset && canViewStudioPreset(user, sourcePreset) ? sourcePreset.updated_at?.toISOString() ?? null : null,
     moduleRevision: row.revision, definitionToken: null, actorAllowed: true, ownsWorkspace: true,
     canViewSource: !row.source_preset_id || Boolean(sourcePreset && canViewStudioPreset(user, sourcePreset)),
-    canManageSource: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset)) });
+    canManageSource: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset)),
+    canViewDefinition: templateRead.canViewTemplateContext });
   // A local definition is owned through its workspace; source management remains
   // separate for legacy copies and is never inferred from administrator status.
   if (!row.source_preset_id) {
     state.capabilities.editDefinition = state.capabilities.editPersonalDraft;
     state.capabilities.saveDefinition = state.capabilities.editPersonalDraft;
   }
-  return { ...state, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name, prompt: row.prompt, count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
+  return { ...state, templateRead, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name,
+    // An unmarked legacy copy cannot prove that its copied prompt is personal input.
+    // Keep the stored definition for execution; never expose it as the viewer's description.
+    prompt: row.source_preset_id && !templateRead.canViewTemplateContext ? '' : row.prompt,
+    count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
     fixedCover, coverEditable: saved,
     cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: representativeReference } : null,
@@ -158,12 +169,12 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourcePresetCanManageSharing: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !(await studioPresetArchived(sourcePreset.id))),
     sharingPreference: saved ? await readStudioModuleSharingPreference(ownerId, row.id) : null,
     canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !sourceArchived)),
-    contextEditable: !protectedSource,
+    contextEditable: !protectedSource && templateRead.canViewTemplateContext,
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
     fixedReferenceCount: fixedReferences.length,
     styleGroupIds, styleGroups, skillIds, skills, reproductionState,
-    contextConfigured: Boolean(row.context.trim()), context: protectedSource ? '' : row.context,
+    contextConfigured: Boolean(row.context.trim()), context: protectedSource || !templateRead.canViewTemplateContext ? '' : row.context,
     moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
     createdAt: row.created_at, updatedAt: row.updated_at,
     images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }),
@@ -197,19 +208,20 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const resolution = normalizeImageResolution(model, overrides.resolution ?? defaults?.resolution);
   const personalPolicy = await getStudioModuleReferencePolicy(ownerId, row.id, ids, defaults?.referenceLimit ?? row.reference_limit);
   const referencePolicy = defaults ? { ...defaults.referencePolicy, primaryIds: personalPolicy.primaryIds } : personalPolicy;
-  const latestTask = await prisma.imageStudioTask.findFirst({ where: { module_id: row.id, owner_id: ownerId, AND: [studioOutputTaskWhere], deleted_at: null, asset_id: { not: null } }, orderBy: { finished_at: 'desc' }, select: { asset_id: true, status: true, usage_json: true } });
-  const latestResult = latestTask?.asset_id && studioTaskHasViewableOutput(latestTask) ? await prisma.asset.findFirst({ where: { id: latestTask.asset_id, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true } }) : null;
+  const templateRead = (await resolveStudioTemplateAuthor(actor, { presetId: binding.presetId })).templateRead;
   const intent = resolved?.definition.intent || unavailableIntent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
   const state = sharedRead.state ?? projectSharedStudioCapabilities({ objectKind: binding.mode, lifecycle: dto || repairDefinition ? 'active' : 'missing',
     sharing: dto ? dto.isShared ? 'shared' : 'private' : 'unknown', dependency: resolved ? 'ready' : canRepair ? 'invalid' : 'unknown',
     sourceRevision: dto?.revision ?? repairDefinition?.sourceRevision ?? null, moduleRevision: row.revision, definitionToken: intent.definitionToken || null,
     actorAllowed: true, ownsWorkspace: true, canViewSource: Boolean(resolved || canRepair), canManageSource: binding.mode === 'publisher' && Boolean(dto?.canManageSharing || canRepair),
+    canViewDefinition: templateRead.canViewTemplateContext,
     reasonCode: resolved ? null : sharedRead.unavailable?.reasonCode });
-  const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available: Boolean(resolved),
+  const viewState = { ...state, capabilities: { ...state.capabilities, viewDefinition: { allowed: templateRead.canViewTemplateContext, reasonCode: templateRead.canViewTemplateContext ? null : 'access-revoked' as const, reason: templateRead.canViewTemplateContext ? null : '无权读取模板上下文' } } };
+  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, mode: binding.mode, available: Boolean(resolved),
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
-  return { ...state, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
+  return { ...viewState, templateRead, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
     name: dto?.name || repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`,
     groupName: dto?.groupName || repairDefinition?.groupName || row.group_name?.trim() || '未分组',
     prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? repairDefinition?.templatePrompt ?? '',
@@ -222,7 +234,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     revision: row.revision, saved: true, banner: dto?.banner || null,
     fixedCover,
     coverEditable: binding.mode === 'publisher' && (Boolean(dto?.coverEditable) || canRepair),
-    cover: !fixedCover && latestResult ? { resultUrl: studioAssetUrl(latestResult.id), thumbnailUrl: studioAssetUrl(latestResult.id, true), referenceUrl: null } : null,
+    cover: null,
     prices: settings.prices, unitCredits: settings.prices[model], images, templateImages: dto?.images || [],
     templateReferenceIds: dto?.templateReferenceIds || [], fixedReferences: dto?.fixedReferences || [], fixedReferenceCount: dto?.fixedReferenceCount || 0,
     styleGroupIds: dto?.styleGroupIds || [], styleGroups: dto?.styleGroups || [], skillIds: [], skills: [],

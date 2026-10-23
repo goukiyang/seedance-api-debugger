@@ -16,7 +16,18 @@ import { useModuleGalleryState } from './useModuleGalleryState';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { createUploadBatch, uniqueUploadFiles, uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { StudioInputMainViewer } from '@/components/StudioInputMainViewer';
+import { readReadyStudioInputMain } from '@/lib/image-studio/input-main-client';
+import type { StudioInputMainPreview, StudioInputMainResponse, StudioInputMainSource } from '@/lib/image-studio/input-main';
+import type { StudioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
+import { ImageResultIssueDetails } from '@/components/ImageResultIssueDetails';
+import { ImageResultOperationFeedback, type ImageResultOperation } from '@/components/ImageResultOperationFeedback';
+import { TemplateAuthorCard } from '@/components/TemplateAuthorCard';
+import { TemplateDefinitionRead } from '@/components/TemplateDefinitionRead';
+import { TemplateDefinitionDirectory } from '@/components/TemplateDefinitionDirectory';
+import type { StudioTemplateRead } from '@/lib/image-studio/shared-types';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import type { PickerFocusIntent } from '@/components/ResourceLibraryPicker';
 import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
@@ -100,7 +111,7 @@ import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChanne
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
+type StudioTask = { outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
 type StudioRecheckScope = { key: string; active: boolean };
 type RestoredTaskSettings = { sourceTaskId: string; snapshot: StudioSnapshot & {
   templateReferenceCount?: number; templateReferenceImages?: UploadedAssetPayload[]; templatePrompt?: string;
@@ -121,8 +132,8 @@ function studioTaskPhase(task: StudioTask) {
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasViewableImage(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-type StudioModule = { sharingPreference?: { enabled: boolean; revision: number; requestId?: string } | null; canChooseSharing?: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
-type StudioPreset = { id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
+type StudioModule = { templateRead?: StudioTemplateRead; sharingPreference?: { enabled: boolean; revision: number; requestId?: string } | null; canChooseSharing?: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
+type StudioPreset = { templateRead?: StudioTemplateRead; id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { prompt: string; context: string; personalOverrides?: PersonalStudioOverrides; personalImages?: UploadedAssetPayload[]; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[]; skillIds?: string[] };
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean; moduleDeletionBlocked?: string | null };
 type PresetSourceReader = () => PresetSource;
@@ -130,7 +141,7 @@ type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' |
 type StudioImageQuote = ImageUiQuote & { billingQuoteId: string | null };
 type CachedStudioImageQuote = { signature: string; requestId: string; quote: StudioImageQuote };
 type ImagePreviewState = { contentKey?: `asset:${string}`; sourceRole?: ImageComparisonSource['role']; taskId?: string; resultVersion?: string | null; src: string; thumbnailSrc?: string; alt: string; title?: string; fileName?: string; width?: number; height?: number; fileSize?: number; metadata?: ImagePreviewMetadata; comparison?: ImageComparisonSource };
-type ResultInputMain = { taskId: string; state: 'ready' | 'none' | 'unknown' | 'unavailable'; images: UploadedAssetPayload[]; snapshotToken: string };
+type ResultInputMain = StudioInputMainResponse;
 type ResultInputChoice = ResultInputMain & { scope: string; viewToken: number; generationSignature: string; sequence: number; selectedIds: string[] };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean; recordUse?: boolean; expansionRevision?: number };
@@ -317,6 +328,14 @@ async function copyStudioText(value: string) {
 
 type ImageStudioProps = { isAdmin: boolean; userId: string; templateWorkbench?: boolean; favoritesRequest?: number };
 export default function ImageStudio(props: ImageStudioProps) {
+  const params = useSearchParams();
+  const [closedDefinition, setClosedDefinition] = useState('');
+  const presetId = params?.get('presetId'), moduleId = params?.get('moduleId');
+  const definitionKey = `${props.userId}:${presetId || moduleId || ''}`;
+  if (params?.get('view') === 'definition' && (presetId || moduleId)) return <>
+    <a href="/template-studio?type=image&view=covers">返回模板工作台</a>
+    {closedDefinition !== definitionKey && <TemplateDefinitionRead key={definitionKey} target={presetId ? { presetId } : { moduleId: moduleId! }} scopeKey={definitionKey} onClose={() => setClosedDefinition(definitionKey)} />}
+  </>;
   return <ImageStudioWorkspace key={props.userId} {...props} />;
 }
 function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favoritesRequest = 0 }: ImageStudioProps) {
@@ -545,6 +564,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const imageChannel = useImageStudioChannel(userId, 'image-studio', settings?.imageChannels, Boolean(settings));
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
+  const [allDefinitions, setAllDefinitions] = useState(false);
+  const [definitionTarget, setDefinitionTarget] = useState<{ presetId?: string; moduleId?: string } | null>(null);
+  const [resolvedRoute, setResolvedRoute] = useState('');
+  useEffect(() => { setDefinitionTarget(null); setAllDefinitions(false); setResolvedRoute(''); }, [userId]);
   const [presets, setPresets] = useState<StudioPreset[]>([]);
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [presetsError, setPresetsError] = useState('');
@@ -758,6 +781,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     const params = new URLSearchParams(window.location.search);
     const moduleId = params.get('moduleId');
     const presetId = params.get('presetId');
+    if (params.get('view') === 'definition' && (presetId || moduleId)) {
+      routedContentHandled.current = routeKey;
+      setDefinitionTarget(presetId ? { presetId } : { moduleId: moduleId! });
+      setResolvedRoute(routeKey); return;
+    }
+    setResolvedRoute(routeKey);
     if (moduleId) {
       const target = directory.find(item => item.id === moduleId);
       if (target) {
@@ -1391,7 +1420,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
             {entry.banner?.thumbnailUrl ? <img decoding="async" src={entry.banner.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>暂无代表图</span>}</span>,
         canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry) };
     })} />}
-    <div hidden={coverView}>
+    <div hidden={coverView || !viewRestored || !directoryReady || Boolean(routeQuery && resolvedRoute !== `${userId}:${routeQuery.startsWith("?") ? routeQuery : `?${routeQuery}`}`)}>
     {orderedModules.map(module => <ImageStudioBlock key={`${userId}:${module.id}`} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onSharedRefresh={shared.refresh} onMetadataChange={updateModuleMetadata} groups={groups} protectedGroups={['未分组', ...groups.filter(group => !DEFAULT_GROUPS.includes(group) && !(groupedModules[group] || []).some(canManageStudioGroupEntry))]} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
       sharingPending={Boolean(module.sourcePresetId && sharing.pending[module.sourcePresetId])}
       sharingMessage={module.sourcePresetId ? sharing.pending[module.sourcePresetId]?.error : undefined}
@@ -1423,6 +1452,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       }} />}
     <dialog ref={presetDialog} className={styles.dialog}>
       <header className={styles.header}><h2>模板库</h2><button type="button" disabled={Boolean(quickLinkingId) || presetApplying || presetManaging} aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
+      {isAdmin && <div role="group" aria-label="模板范围"><button type="button" aria-pressed={!allDefinitions} onClick={() => setAllDefinitions(false)}>可用模板</button><button type="button" aria-pressed={allDefinitions} onClick={() => setAllDefinitions(true)}>全部模板</button></div>}
+      {allDefinitions && isAdmin ? <TemplateDefinitionDirectory ownerId={userId} /> : <>
       <label className={styles.presetSource}>更新设置取自<select aria-label="选择要写入模板的模块" value={presetSourceId} disabled={presetManaging || presetApplying} onChange={event => setPresetSourceId(event.target.value)}><option value="">选择模块</option>{modules.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <button type="button" title="重新读取模板库" aria-label="重新读取模板库" disabled={presetManaging || presetApplying || Boolean(quickLinkingId) || presetsLoading} onClick={() => void openPresetLibrary(presetSourceId)}><RefreshCw size={16} /></button>
       {presetsError && <p role="alert" className={styles.error}>{presetsError}</p>}
@@ -1437,7 +1468,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
           {preset.ownedByViewer && active && <button type="button" disabled={Boolean(quickLinkingId) || presetApplying || presetManaging} onClick={() => void addPresetShortcut(preset)}>{quickLinkingId === preset.id ? '添加中…' : '加入当前模块快捷'}</button>}
           <button type="button" disabled={presetApplying || sharedOpening || Boolean(quickLinkingId) || presetManaging} onClick={() => void applyPreset(preset)}>{preset.isShared ? '打开模板' : '新建并应用'}</button>
         </div>{sharing.pending[preset.id] && <p role="status" className={styles.muted}>{sharing.pending[preset.id].error || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}</article>)}</div>}
+      </>}
     </dialog>
+    {definitionTarget && <TemplateDefinitionRead target={definitionTarget} scopeKey={`${userId}:definition:${definitionTarget.presetId || definitionTarget.moduleId}`} onClose={() => setDefinitionTarget(null)} />}
     {lifecycleHistory && <StudioLifecycleHistory key={`${userId}:${lifecycleHistory.presetId}`} userId={userId} presetId={lifecycleHistory.presetId} name={lifecycleHistory.name} anchor={lifecycleHistory.anchor} onClose={() => setLifecycleHistory(null)} />}
     <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} ownerId={userId} canEdit={isAdmin}
       getExcluded={() => modules.filter(module => (module.saved || module.id === `default-${userId}`) && resolutionDirty.current.has(module.id)).map(module => module.id)} onDeltas={applyResolutionDeltas}
@@ -1472,6 +1505,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const styleSkillSelector = useRef<StudioStyleSkillSelectorHandle>(null);
   const { user: sessionUser, sessionChanged } = useAppSession();
   const sharedLive = module.sharedLive;
+  const canViewTemplateContext = module.templateRead?.canViewTemplateContext === true;
+  const [readingDefinition, setReadingDefinition] = useState(false);
+  const [personalSettingsOpen, setPersonalSettingsOpen] = useState(false);
   const sharedReady = !sharedLive || sharedLive.available && hasSharedDefaults(sharedLive.defaults) && sharedLive.capabilities?.generate.allowed !== false;
   const repairDefinition = sharedLive?.repairDefinition;
   const definitionEditable = !sharedLive || (sharedLive.capabilities ? sharedLive.capabilities.editDefinition.allowed : sharedLive.mode === 'publisher' && sharedReady);
@@ -1646,7 +1682,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ImagePreviewState | null>(null);
   const sharedReferencePreviewId = useRef<string | null>(null);
-  const [copyFeedback, setCopyFeedback] = useState<{ id: string; text: string } | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<(ImageResultOperation & { id: string; text: string }) | null>(null);
+  const copyFeedbackAnchor = useRef<HTMLElement | null>(null), copyOperationSequence = useRef(0);
+  useEffect(() => { copyOperationSequence.current++; setCopyFeedback(null); }, [taskReadScope, viewToken, active, hidden]);
   const [tasks, setTasks] = useState<StudioTask[]>([]);
   const [resultFeed, setResultFeed] = useState<StudioResultFeedExtras | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -1719,12 +1757,20 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [draftRestoring, setDraftRestoring] = useState(false);
+  const [inputPreviewSource, setInputPreviewSource] = useState<StudioInputMainSource | null>(null);
   const [inputMainChoice, setInputMainChoice] = useState<ResultInputChoice | null>(null);
   const [inputMainError, setInputMainError] = useState('');
   const [inputMainBusy, setInputMainBusy] = useState(false);
   const inputMainSequence = useRef(0);
   const inputMainDialog = useRef<HTMLDialogElement>(null);
   const draftRestoreSequence = useRef(0);
+  const currentInputRevision = useRef(0);
+  const [inputFocusIntents, setInputFocusIntents] = useState<Record<string, PickerFocusIntent>>({});
+  const inputScopeKey = (target: string) => `${userId}:image-module:${module.id}:${target}`;
+  const beginCurrentInput = useCallback(() => {
+    onActivate(); currentInputRevision.current++; draftRestoreSequence.current++;
+    setDraftRestoring(false); setDraftLoaded(true);
+  }, [onActivate]);
   const blockedDraftSignature = useRef<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [downloadMode, setDownloadMode] = useState(false);
@@ -1945,12 +1991,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   latestSettingsDraft.current = JSON.stringify({ moduleDraft, contextDialogSnapshot, personalOverrides, name, groupName, bannerAssetId: banner?.id || null });
   async function saveModuleSettings() {
     const submitted = latestSettingsDraft.current;
-    const result = await saveModule();
+    const result = await saveModule(reproduceSourceTaskId, revisionRef.current, true, undefined, personalSettingsOpen);
     if (result !== false && latestSettingsDraft.current === submitted) moduleDialog.current?.close();
   }
-  function openModuleDialog() {
+  function openModuleDialog(personal = false) {
     if (!draftLoaded || draftRestoring) return;
-    moduleDialog.current?.showModal();
+    setPersonalSettingsOpen(personal); moduleDialog.current?.showModal();
   }
   async function closeModuleDialog() {
     if (moduleSaving || uploading || bannerUploading) return;
@@ -1961,7 +2007,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const closeInputMainChoice = () => { inputMainSequence.current++; setInputMainChoice(null); setInputMainError(''); };
   useDialogDismiss({ open: Boolean(inputMainChoice), dialogRef: inputMainDialog, nativeDialog: true, onDismiss: closeInputMainChoice });
   useEffect(() => { if (inputMainChoice) inputMainDialog.current?.showModal(); else inputMainDialog.current?.close(); }, [Boolean(inputMainChoice)]);
-  useEffect(() => { inputMainSequence.current++; setInputMainChoice(null); setInputMainError(''); }, [taskReadScope, viewToken, active, hidden]);
+  useEffect(() => { inputMainSequence.current++; setInputMainChoice(null); setInputPreviewSource(null); setInputMainError(''); }, [taskReadScope, viewToken, active, hidden]);
   const activeStyles = styleGroups;
   const activeTemplateCount = restoredSnapshot ? generationTemplateCount : useFixedReferences ? (fixedEditable ? fixedReferences.length : reproduceSourceTaskId
     ? Math.max(0, reproductionFixedCount - reproductionStyles.reduce((total, group) => total + group.referenceCount, 0))
@@ -2128,9 +2174,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     return () => observer.disconnect();
   }, []);
 
-  async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[]) {
+  async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[], personalOnly = false) {
     if (isClientSessionBlocked()) return false;
-    if (manualSettings && definitionConflict) { setModuleSaveError('共享模板内容已更新，请先核对差异；当前草稿保留。'); return false; }
+    if (manualSettings && !personalOnly && definitionConflict) { setModuleSaveError('共享模板内容已更新，请先核对差异；当前草稿保留。'); return false; }
     // Re-read the original object's persistent lock even if repair instructions
     // were undone or the latest projection no longer offers repair capability.
     if (manualSettings) {
@@ -2140,15 +2186,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           setModuleSaveError('原修复保存结果待确认，请先核对原保存，不会换号重发'); return false; }
       } catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); return false; }
     }
-    if (manualSettings && definitionSaveBlocked) { setModuleSaveError(definitionSaveReason); return false; }
+    if (manualSettings && !personalOnly && definitionSaveBlocked) { setModuleSaveError(definitionSaveReason); return false; }
     if (!sharedReady && !(manualSettings && definitionReady && sharedLive?.capabilities?.saveDefinition.allowed)) { setModuleSaveError('模板暂不可用，本人草稿和历史保留'); return false; }
     if (moduleSaveLock.current || moduleDeleteLock.current || presetSaveLock.current || quickPresetLock.current || uploading || bannerUploading) return false;
     moduleSaveLock.current = true; setModuleSaving(true); setError(''); setModuleSaveError('');
-    const snapshot = { ...(manualSettings ? moduleDraft : JSON.parse(automaticSnapshot) as typeof moduleDraft), context: manualSettings ? moduleContext : savedModuleContext, reproduceFromTaskId: manualSettings ? reproduceTaskId || null : baseline.reproduceFromTaskId };
+    const snapshot = { ...(manualSettings ? moduleDraft : JSON.parse(automaticSnapshot) as typeof moduleDraft), context: manualSettings && !personalOnly ? moduleContext : savedModuleContext, reproduceFromTaskId: manualSettings ? reproduceTaskId || null : baseline.reproduceFromTaskId };
     const contextSnapshot = snapshot.context;
     const fixedSnapshot = fixedOverride || (manualSettings ? fixedReferences : savedFixedReferences);
-    const publishNew = Boolean(unpublishedSharing && manualSettings);
-    const saveDefinition = Boolean(sharedLive && definitionEditable && manualSettings) || publishNew;
+    const publishNew = Boolean(unpublishedSharing && manualSettings && !personalOnly);
+    const saveDefinition = Boolean(sharedLive && definitionEditable && manualSettings && !personalOnly) || publishNew;
     const submittedOverrides: PersonalStudioOverrides = publishNew
       ? { prompt, model: moduleModel, quality, resolution, count, aspectRatio }
       : { ...personalOverridesRef.current };
@@ -3250,17 +3296,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     return null;
   }
 
-  async function readResultInputMain(taskId: string): Promise<ResultInputMain> {
-    const result = await readResponse(await fetch(`/api/image-studio/tasks/${encodeURIComponent(taskId)}/input-main`,
-      { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
-    if (result.taskId !== taskId || !['ready', 'none', 'unknown', 'unavailable'].includes(result.state)
-      || !Array.isArray(result.images) || typeof result.snapshotToken !== 'string') throw new Error('这次生成的输入来源未能确认，当前主图保留');
-    if (result.state !== 'ready') throw new Error(result.state === 'none' ? '这次生成没有输入主图，当前主图保留'
-      : result.state === 'unavailable' ? '这次生成的输入主图已不可用或无权读取，当前主图保留'
-        : '旧记录未明确保存输入主图角色，不能猜测或改用生成图；当前主图保留');
-    if (!result.images.length || result.images.length > MAX_REFERENCE_IMAGES || result.images.some((image: UploadedAssetPayload) => !image?.id || !image.originalUrl)
-      || new Set(result.images.map((image: UploadedAssetPayload) => image.id)).size !== result.images.length) throw new Error('输入主图记录不完整，当前主图保留');
-    return result as ResultInputMain;
+  async function readResultInputMain(source: string | StudioInputMainSource): Promise<ResultInputMain> {
+    return readReadyStudioInputMain(typeof source === 'string' ? { kind: 'task', taskId: source } : source);
   }
   async function verifyAndApplyInputMain(inputs: UploadedAssetPayload[], current: () => boolean) {
     if (!inputs.length || inputs.length > currentReferenceCap) throw new Error(`当前最多可取回 ${currentReferenceCap} 张主图，请调整选择或参考数量；当前主图保留`);
@@ -3275,8 +3312,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setSaveStatus(`已取回这次生成的 ${inputs.length} 张输入主图，未生成图片`);
     return true;
   }
-  async function replaceMainFromResult(taskId: string | undefined) {
-    if (!taskId || !active || !draftLoaded || draftRestoring || submitting || pendingSubmission
+  async function replaceMainFromResult(source: string | StudioInputMainSource | undefined) {
+    if (!source || !active || !draftLoaded || draftRestoring || submitting || pendingSubmission
       || uploadLock.current || quickPresetLock.current || presetSaveLock.current || moduleSaving || moduleDeleting
       || uploading || bannerUploading || ratioEditing) return;
     if (currentReferenceCap < 1) { setError('辅助参考已占满可用数量，请先减少参考图，当前主图未替换。'); return; }
@@ -3286,7 +3323,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       && currentView.current.token === expectedView && liveGenerationSignature.current === signature && inputMainSequence.current === sequence;
     uploadLock.current = true; setUploading(true); setError(''); setInputMainError(''); setSaveStatus('正在核对这次生成的输入主图');
     try {
-      const result = await readResultInputMain(taskId);
+      const result = await readResultInputMain(source);
       if (!current()) return;
       if (result.images.length > 1) {
         setInputMainChoice({ ...result, scope: expectedScope, viewToken: expectedView, generationSignature: signature, sequence, selectedIds: [] });
@@ -3307,7 +3344,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (!current()) { setInputMainError('当前页面或输入已变化，请关闭后重新双击；当前主图保留'); return; }
     uploadLock.current = true; setInputMainBusy(true); setUploading(true); setInputMainError('');
     try {
-      const fresh = await readResultInputMain(choice.taskId);
+      const fresh = await readResultInputMain(choice.source);
       if (fresh.snapshotToken !== choice.snapshotToken || fresh.images.map(image => image.id).join(',') !== choice.images.map(image => image.id).join(',')) throw new Error('这次生成的输入来源已变化，请关闭后重新读取；当前主图保留');
       if (!current()) return;
       const selected = fresh.images.filter(image => choice.selectedIds.includes(image.id!));
@@ -3356,12 +3393,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     } catch (e) { setDeleteError(e instanceof Error ? e.message : '删除未确认，请重试'); }
     finally { deleteLock.current = false; setDeleting(false); }
   }
-  async function copyTaskContext(task: StudioTask) {
+  async function copyTaskContext(task: StudioTask, trigger?: HTMLElement) {
     if (!isAdmin || !task.snapshot?.sourceAvailable) return;
-    setCopyFeedback({ id: task.id, text: '复制中…' });
+    const sequence = ++copyOperationSequence.current, scope = taskReadScope, view = currentView.current.token;
+    const operation = { operationId: crypto.randomUUID(), scope, itemId: task.id, id: task.id, action: '复制' };
+    copyFeedbackAnchor.current = trigger || Array.from(section.current?.querySelectorAll<HTMLElement>('[data-result-id]') || []).find(item => item.dataset.resultId === task.id) || null;
+    setCopyFeedback({ ...operation, text: '复制中…', phase: 'busy', message: '正在复制' });
     const copied = await copyStudioText(copyStudioTaskText(task));
-    setCopyFeedback({ id: task.id, text: copied ? '已复制' : '复制失败，请重试' });
-    window.setTimeout(() => setCopyFeedback(current => current?.id === task.id ? null : current), copied ? 1800 : 2600);
+    if (sequence !== copyOperationSequence.current || taskReadScopeRef.current !== scope || currentView.current.token !== view || !currentView.current.active) return;
+    setCopyFeedback({ ...operation, text: copied ? '已复制' : '复制失败，请重试', phase: copied ? 'success' : 'error', message: copied ? '已复制文字上下文' : '复制失败，请重试' });
   }
   function requestResultDelete(task: StudioTask, trigger?: HTMLElement) {
     if (templateWorkbench) {
@@ -3551,7 +3591,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         generationDetailSuperseded: task.delivery?.generationDetailSuperseded, recoveryAvailable: task.delivery?.recoveryAvailable },
       waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
       applied: sourceApplied && appliedSource?.taskId === task.id,
-      notice: image && studioOutputMismatchDisposition(task.resultDisposition) ? task.error : undefined,
+      outputIssue: task.outputIssue, inputMainPreview: task.inputMainPreview,
+      notice: image && studioOutputMismatchDisposition(task.resultDisposition) && !templateWorkbench ? task.error : undefined,
       error: asyncRecovery || image && studioOutputMismatchDisposition(task.resultDisposition) ? undefined : task.error,
       onViewed: () => observeResultVersion(studioResultVersion(task)),
       download: image ? () => { setSelected([task.id]); setDownloadMode(true); } : undefined,
@@ -3631,10 +3672,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (files.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024)) {
       setError('请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
+    beginCurrentInput(); const inputRevision = currentInputRevision.current;
     const expectedScope = taskReadScope, expectedView = currentView.current.token, signature = liveGenerationSignature.current;
     const targetSignature = JSON.stringify(uploadTargets.current);
     const current = () => taskReadScopeRef.current === expectedScope && currentView.current.active && currentView.current.token === expectedView
-      && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
+      && currentInputRevision.current === inputRevision && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
     uploadLock.current = true; setUploading(true); setError('');
     const completed: UploadedAssetPayload[] = [];
     const cap = fixed ? MAX_REFERENCE_IMAGES : auxiliary ? currentAuxiliaryCap : currentReferenceCap;
@@ -3676,6 +3718,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             try { saveMainImageReminder(userId, true); }
             catch { uploadError = '主图已替换，但提醒设置未能确认保存；可从主图提醒设置重试。'; }
           }
+          const target = fixed ? 'fixed' : auxiliary ? 'auxiliary' : 'reference';
+          setInputFocusIntents(previous => ({ ...previous, [target]: { id: crypto.randomUUID(), scopeKey: inputScopeKey(target), revision: inputRevision, identities: completed.map(item => `asset:${item.id}`) } }));
           setUploadSummaryTarget(fixed ? 'fixed' : auxiliary ? 'auxiliary' : 'primary'); setUploadedSummary(completed);
           if (duplicates || !additions.length) setSaveStatus('相同文件已复用，当前参考区不会重复加入。');
         }
@@ -3684,7 +3728,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       uploadLock.current = false;
       if (taskReadScopeRef.current === expectedScope) { setUploading(false); setUploadProgress(null); }
     }
-  }, [userId, taskReadScope, confirm, images, auxiliaryImages, currentReferenceCap, currentAuxiliaryCap, fixedReferences, generationFixedCount, submitting, pendingSubmission, fixedEditable, generationReferencePolicy.primaryMax]);
+  }, [userId, taskReadScope, confirm, images, auxiliaryImages, currentReferenceCap, currentAuxiliaryCap, fixedReferences, generationFixedCount, submitting, pendingSubmission, fixedEditable, generationReferencePolicy.primaryMax, beginCurrentInput]);
 
   async function chooseSimilarExisting(candidate: UploadedAssetPayload, uploaded: UploadedAssetPayload) {
     if (!candidate.id || !uploaded.id || !active || uploadLock.current || uploading || bannerUploading || submitting || pendingSubmission
@@ -3723,16 +3767,18 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20 * 1024 * 1024) {
       setError('banner 请使用 20MB 以内的 PNG、JPG 或 WebP 图片'); return;
     }
+    beginCurrentInput(); const inputRevision = currentInputRevision.current;
     const expectedScope = taskReadScope, expectedView = currentView.current.token, signature = liveGenerationSignature.current;
     const targetSignature = JSON.stringify(uploadTargets.current);
     const current = () => taskReadScopeRef.current === expectedScope && currentView.current.active && currentView.current.token === expectedView
-      && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
+      && currentInputRevision.current === inputRevision && liveGenerationSignature.current === signature && JSON.stringify(uploadTargets.current) === targetSignature;
     setBannerUploading(true); setError('');
     try {
       const asset = await uploadFileAsAsset(file, { ownerId: userId, onProgress: progress => { if (current()) setBannerProgress(studioUploadProgress(file, 0, 1, progress)); } });
       if (!current()) return;
       if (!asset.id || !asset.originalUrl) throw new Error('banner 上传结果不完整，请重试');
       setBanner(asset);
+      setInputFocusIntents(previous => ({ ...previous, banner: { id: crypto.randomUUID(), scopeKey: inputScopeKey('banner'), revision: inputRevision, identities: [`asset:${asset.id}`] } }));
       setUploadSummaryTarget('banner'); setUploadedSummary([asset]);
     } catch (e) { if (current()) setError(e instanceof Error ? e.message : 'banner 上传失败'); }
     finally { if (taskReadScopeRef.current === expectedScope) { setBannerUploading(false); setBannerProgress(null); } }
@@ -3754,13 +3800,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   function activateDraft() {
     onActivate();
-    if (draftRestoring) { draftRestoreSequence.current += 1; setDraftRestoring(false); }
+    if (draftRestoring || !draftLoaded) beginCurrentInput();
   }
   return <>{productDialog}{(<section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
+    {!draftLoaded && <p role="status">正在恢复工作区…</p>}
+    <div hidden={!draftLoaded}>
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionReady ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
+        <TemplateAuthorCard templateRead={module.templateRead} name={name} scopeKey={`${userId}:${module.id}`} />
         {sharedLive && (!sharedLive.available || module.sourcePresetShared === true) && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
@@ -3773,7 +3822,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模块上下文，保存失败，打开查看并重试' : undefined} onClick={openModuleDialog}><Settings size={17} />模块上下文</button></span>
+        {canViewTemplateContext && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />模板上下文</button></span>}
+        <button type="button" disabled={!draftLoaded || draftRestoring} onClick={() => openModuleDialog(true)}>本次生成设置</button>
         {(module.coverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
           setCoverEditorOpen(true);
@@ -3952,13 +4002,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
                 onClick={() => void applyQuickPreset(preset)}>{preset.name}</button>)}
             </div>
           </div>
-          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>
+          <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={!personalSettingsOpen && definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>
           <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || (!recoverableDraft && (!contextEditable || !generationChanged && !authorDefinitionDirty || !authorDefinitionDirty && generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && (generationChanged || authorDefinitionDirty) && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
         </div>
         {quickPresetsLoading && <p role="status" className={styles.muted}>正在读取快捷模板…</p>}
         {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}
-        {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
+        {!personalSettingsOpen && definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
         {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
           onClick={() => void queryFixedReferenceSave()}>{checkingFixedSave ? '正在核对原保存' : '核对原保存'}</button></p>}
         {error && <TaskNotice kind="recoverable">{error}</TaskNotice>}
@@ -3974,9 +4024,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         </div></header>
         {batch.id && resultView === 'images' && <BatchResults key={`${userId}:${batch.id}:delivery`} id={batch.id} userId={userId} deliveryOnly autoPack={batch.pack} onSourceChanged={onSharedRefresh} />}
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
-        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
+        {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} onInputMainSource={source => void replaceMainFromResult(source)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
-        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults}
+        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench}
+          onPreviewInputMain={item => { if (item.task?.inputMainPreview) setInputPreviewSource(item.task.inputMainPreview.source); }}
           contextActionsEnabled={templateWorkbench}
           contextActions={item => {
             const task = item.task;
@@ -4027,7 +4078,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>
           <div className={styles.resultMeta}>
             <div className={styles.resultConfig}>
-            {studioOutputMismatchDisposition(task.resultDisposition) && <><span className={styles.resultMismatch}>规格不符</span><span>·</span></>}
+            {studioOutputMismatchDisposition(task.resultDisposition) && <><ImageResultIssueDetails issue={task.outputIssue} notice={task.error} /><span>·</span></>}
             <span title={IMAGE_STUDIO_MODEL_LABELS[task.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || task.model}>{studioModelShortLabel(task.model)}</span>
             {!templateWorkbench && <>
               {(() => { const source = [task.snapshot?.imageSupplierName, task.snapshot?.imageChannelLabel].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · '); return source ? <><span>·</span><span title="生成时供应商">{source}</span></> : null; })()}
@@ -4062,14 +4113,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
           })()}>取消未受理排队</button> : (waitDisplay?.showRecovery ?? task.delivery?.recoveryAvailable) ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null;
           }}
-          renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasViewableImage(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={() => void copyTaskContext(task)}><ClipboardList size={15} /></button>}
+          renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasViewableImage(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={event => { event.stopPropagation(); void copyTaskContext(task, event.currentTarget); }}><ClipboardList size={15} /></button>}
             {studioTaskHasViewableImage(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void restoreResultSettings(task);
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
-            {copyFeedback?.id === task.id && <span className={styles.copyFeedback} role="status">{copyFeedback.text}</span>}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {studioTaskAsyncRecovery(task) && <>
               {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}
@@ -4087,7 +4137,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         </>}
       </section>
     </div>
+    </div>
+    {copyFeedback && <ImageResultOperationFeedback feedback={copyFeedback} anchorRef={copyFeedbackAnchor} onDismiss={operationId => setCopyFeedback(current => current?.operationId === operationId ? null : current)} onRetry={copyFeedback.phase === 'error' ? () => { const task = tasks.find(item => item.id === copyFeedback.id); if (task) void copyTaskContext(task); } : undefined} />}
+    {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${taskReadScope}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
+    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} onClose={() => setReadingDefinition(false)} />}
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
+      contextKey={inputScopeKey(imageSourceTarget)} focusIntent={inputFocusIntents[imageSourceTarget]}
+      onFocusIntentConsumed={id => setInputFocusIntents(previous => { if (previous[imageSourceTarget]?.id !== id) return previous; const next = { ...previous }; delete next[imageSourceTarget]; return next; })}
       initialSource={templateWorkbench ? 'template-image' : 'all'}
       title={imageSourceTarget === 'fixed-repair' ? '替换失效固定参考' : imageSourceTarget === 'template' ? '添加共享参考图' : imageSourceTarget === 'banner' ? '替换横幅' : imageSourceTarget === 'fixed' ? '添加固定参考图' : imageSourceTarget === 'auxiliary' ? '添加参考图' : generationReferencePolicy.primaryMax === 1 && images.length ? '替换主图' : '添加主图'}
       confirmLabel={imageSourceTarget === 'fixed-repair' ? '用此图替换失效项' : imageSourceTarget === 'template' ? '加入共享模板' : imageSourceTarget === 'banner' ? '替换横幅' : imageSourceTarget === 'fixed' ? '添加到固定参考区' : imageSourceTarget === 'auxiliary' ? '添加到参考区' : generationReferencePolicy.primaryMax === 1 && images.length ? '替换主图' : '添加到主图'}
@@ -4119,7 +4175,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         if (imageSourceTarget === 'fixed' && !fixedEditable) throw new Error('当前不能编辑固定参考图');
         if (imageSourceTarget === 'fixed-repair' && !fixedRepairAllowed) throw new Error('失效固定参考修复权限已变化');
         if (imageSourceTarget === 'template' && !definitionReady) throw new Error('当前不能编辑共享参考图');
-        setUploading(true);
+        beginCurrentInput(); setUploading(true);
         try { return await uploadFileAsAsset(file, { ownerId: userId, onProgress }); }
         finally { setUploading(false); }
       }}
@@ -4182,19 +4238,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       <div className={templateWorkbench ? styles.resultDeleteActions : styles.resultActions}><button ref={deleteCancel} type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : templateWorkbench ? '删除' : '确认删除'}</button></div>
     </dialog>
     <dialog ref={moduleDialog} className={`${styles.dialog} ${styles.contextDialog}`} onPaste={event => {
-      if (!fixedEditable || assetPickerOpen) return;
+      if (personalSettingsOpen || !fixedEditable || assetPickerOpen) return;
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>
-      <header className={styles.header}><h2>{repairDefinition ? '修复模板' : '模块上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
-      <div className={styles.contextEditorTools}><span>模块上下文版本：<ContextVersionLabel {...contextVersion} /></span>
-        {module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}
+      <header className={styles.header}><h2>{personalSettingsOpen ? '本次生成设置' : repairDefinition ? '修复模板' : '模板上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
+      <div className={styles.contextEditorTools}>{!personalSettingsOpen && <span>模块上下文版本：<ContextVersionLabel {...contextVersion} /></span>}
+        {!personalSettingsOpen && module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}
         <button type="button" disabled={!settings?.templateDefaults || !draftLoaded || draftRestoring || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || ratioEditing}
           onClick={applyUnifiedDefaults}><RefreshCw size={16} />套用统一默认</button>
-        {contextEditable && <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />}
+        {!personalSettingsOpen && contextEditable && <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />}
       </div>
       {unifiedDefaultsError && <p role="alert" className={styles.error}>{unifiedDefaultsError}</p>}
-      {repairDefinition && definitionReady && <StudioRepairFields repair={repairDefinition} templatePrompt={templatePrompt} onTemplatePrompt={setTemplatePrompt}
+      {!personalSettingsOpen && repairDefinition && definitionReady && <StudioRepairFields repair={repairDefinition} templatePrompt={templatePrompt} onTemplatePrompt={setTemplatePrompt}
         templateImages={templateImages} onTemplateImages={setTemplateImages} fixedReferences={fixedReferences} onFixedReferences={changeFixedReferences}
         styleGroups={styleGroups} onStyleGroups={setStyleGroups} skills={skills} onSkills={setSkills} banner={banner} onBanner={setBanner}
         fixedEditable={fixedEditable} disabled={moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission)}
@@ -4202,10 +4258,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         onAddTemplate={() => openImageSource('template')} onReplaceBanner={() => openImageSource('banner')}
         onPreview={(image, number) => previewReference(image, number, true)} />}
       {/* 隐藏旧模板说明和共享参考编辑区，历史值及已保存生成合同继续保留。 */}
-      {contextEditable ? <>
+      {!personalSettingsOpen && (contextEditable ? <>
         <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onCompositionStart={() => setContextComposing(true)} onCompositionEnd={event => { setContextComposing(false); changeModuleContext(event.currentTarget.value); }} onChange={event => changeModuleContext(event.target.value)} />
-      </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
-      <fieldset className={styles.referenceLimits} disabled={!definitionReady}>
+      </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>)}
+      {!personalSettingsOpen && <fieldset className={styles.referenceLimits} disabled={!definitionReady}>
         <div className={styles.primaryRange} role="group" aria-label="主图张数范围"><span>主图</span><select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
           {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value}</option>)}
         </select><span aria-hidden="true">-</span><select aria-label="模板主图最多张数" value={referenceLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => {
@@ -4222,16 +4278,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <label>辅助总上限 <select aria-label="模板辅助参考总上限" value={auxiliaryLimit} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setAuxiliaryLimit(Number(event.target.value))}>
           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
         </select></label>
-      </fieldset>
+      </fieldset>}
       {templateWorkbench && <button type="button" title="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} />主图提醒</button>}
       <div className={styles.moduleSettingsActions}>
-        <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
+        <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : personalSettingsOpen ? '保存本次设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>
       </div>
       {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
       {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
         onClick={() => void queryFixedReferenceSave()}>{checkingFixedSave ? '正在核对原保存' : '核对原保存'}</button></p>}
       {moduleSaveError && <p role="alert" className={styles.muted}>{moduleSaveError}{fixedSaveUnknown ? null : moduleSaveRequest.current?.unknown && moduleSaveRequest.current.definitionSave ? <button type="button" disabled={checkingFixedSave || moduleSaving} onClick={() => void queryModuleSave()}>{checkingFixedSave ? '正在核对' : '核对原保存'}</button> : definitionConflict && definitionReady ? <button type="button" disabled={definitionReviewBusy || moduleSaving || uploading || bannerUploading} onClick={() => void reviewLatestDefinition()}>{definitionReviewBusy ? '正在读取' : '核对最新版本'}</button> : <button type="button" disabled={definitionSaveBlocked || moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button>}</p>}
-      {definitionReview && definitionReviewPlan && <section className={styles.definitionReview} aria-label="模板更新差异">
+      {!personalSettingsOpen && definitionReview && definitionReviewPlan && <section className={styles.definitionReview} aria-label="模板更新差异">
         <h3>模板更新差异</h3>
         {definitionReviewPlan.fields.length ? definitionReviewPlan.fields.map(field => <details key={field.key} open={field.conflict}>
           <summary>{field.label}{field.conflict ? '：两边都有修改' : '：可合并新版'}</summary>
@@ -4246,7 +4302,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           <button type="button" onClick={() => setDefinitionReview(null)}>收起</button>
         </div>
       </section>}
-      <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={!definitionReady || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
+      {!personalSettingsOpen && <><div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={!definitionReady || submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
       <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), true); }}>
@@ -4257,7 +4313,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </div>
       <input ref={fixedFileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => { void addImages(Array.from(event.target.files || []), true); event.target.value = ''; }} /></>}
       <button type="button" disabled={!definitionReady || uploading || submitting || Boolean(pendingSubmission)}
-        onClick={() => styleSkillSelector.current?.open('styles')}>选择风格与提示词</button>
+        onClick={() => styleSkillSelector.current?.open('styles')}>选择风格与提示词</button></>}
       {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
       {error && <p role="status" className={styles.error}>{error}</p>}
       <div className={styles.modelQualityRow}>

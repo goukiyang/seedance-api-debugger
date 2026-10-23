@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.103.1+image-size-log-guard.1",
+  "version": "0.104.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -52,7 +52,8 @@
     "recharts": "^3.10.1",
     "sharp": "^0.34.5",
     "uuid": "^14.0.0",
-    "yazl": "^3.3.1"
+    "yazl": "^3.3.1",
+    "@smithy/node-http-handler": "4.6.1"
   },
   "devDependencies": {
     "@types/node": "^20",

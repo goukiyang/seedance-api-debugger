@@ -6,7 +6,7 @@
 .nextFeedback a { margin-inline-start: 8px; color: #a5e5d7; text-decoration: underline; }
 .nextFeedback a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 14px; }
-.card { min-width: 0; }
+.card { min-width: 0; position: relative; }
 .coverReactions { position: absolute; top: 6px; left: 6px; z-index: 7; width: calc(100% - 12px); color: #e0e9e5; pointer-events: none; }
 .coverReactions > [data-content-reactions] { align-items: flex-start; max-width: calc(100% - 50px); }
 .coverPin { position: absolute; top: 0; right: 0; display: flex; justify-content: flex-end; max-width: calc(100% - 84px); }
@@ -111,3 +111,20 @@
 }
 .notice { font-size: 13px; overflow-wrap: anywhere; }
 .feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }
+.issueTrigger { display: inline; padding: 0; border: 0; background: transparent; color: #bdc9c5; font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
+.issueTrigger:focus-visible, .issueClose:focus-visible, .operationFeedback button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
+.issueLayer, .operationFeedback { z-index: 2147000200; max-width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 24px)); overflow: auto; padding: 12px; border: 1px solid #414b48; border-radius: 6px; background: #202725; color: #e0e9e5; box-shadow: 0 6px 24px #10171570; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.issueLayer strong { font-size: 14px; }
+.issueLayer dl { margin-block: 8px; }
+.issueLayer dl > div { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 8px; margin-block: 5px; }
+.issueLayer dt { color: #aab8b4; }
+.issueLayer dd { margin: 0; }
+.issueLayer p, .operationDetail p { margin: 6px 0; }
+.issueClose, .operationFeedback button { border: 0; padding: 3px 5px; background: transparent; color: #a5e5d7; font: inherit; cursor: pointer; }
+.operationFeedback { padding: 7px 10px; width: max-content; }
+.operationDetail { max-width: 280px; }
+.inputMain { display: flex; align-items: center; gap: 8px; margin-block: 8px; color: #aab8b4; font-size: 12px; }
+.inputMainThumb { width: 48px; height: 48px; position: relative; flex: 0 0 48px; border-radius: 4px; overflow: hidden; border: 1px solid #414b48; }
+.inputMainThumb [data-result-cover] { width: 100%; height: 100%; }
+.inputMainThumb img { object-fit: contain; }
+.inputMainThumb span { font-size: 10px; }

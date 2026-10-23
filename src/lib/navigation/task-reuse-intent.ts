@@ -2,6 +2,44 @@
 // In particular, an unconfirmed POST must not become an automatic retry.
 export type TaskReuseIntentPhase = 'waiting' | 'blocked' | 'confirming' | 'sending' | 'applying' | 'failed' | 'unknown' | 'done';
 
+export type TaskReuseWorkspaceItem = { id: string; assetId: string; referenceImageId: string | null; role: string | null; sortOrder: number };
+export type TaskReuseOperationRequest = { protocolVersion: 2; requestId: string; nonce: string; requestHash: string;
+  surface: 'normal' | 'ip'; tabId: string; workspaceId: string; expectedWorkspaceAssets: TaskReuseWorkspaceItem[] };
+export type TaskReuseOperationStatus = { protocolVersion: 2; requestId: string; nonce: string; requestHash: string;
+  sourceTaskId: string; surface: 'normal' | 'ip'; tabId: string; workspaceId: string;
+  status: 'applied' | 'rejected' | 'closed' | 'unknown'; canClose: boolean; code?: string; message?: string };
+export function parseTaskReuseOperationRequest(value: unknown): TaskReuseOperationRequest | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const body = value as TaskReuseOperationRequest;
+  const id = (item: unknown) => typeof item === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(item);
+  if (body.protocolVersion !== 2 || !id(body.requestId) || !id(body.nonce) || !/^[a-f0-9]{64}$/.test(body.requestHash || '')
+    || !['normal', 'ip'].includes(body.surface) || !id(body.tabId) || body.tabId.length > 96 || !id(body.workspaceId)
+    || !Array.isArray(body.expectedWorkspaceAssets) || body.expectedWorkspaceAssets.length > 80
+    || body.expectedWorkspaceAssets.some(item => !item || !id(item.id) || !id(item.assetId)
+      || item.referenceImageId !== null && !id(item.referenceImageId)
+      || item.role !== null && (typeof item.role !== 'string' || item.role.length > 64)
+      || !Number.isSafeInteger(item.sortOrder) || item.sortOrder < 0 || item.sortOrder > 1000000)
+    || new Set(body.expectedWorkspaceAssets.map(item => item.id)).size !== body.expectedWorkspaceAssets.length
+    || new Set(body.expectedWorkspaceAssets.map(item => item.assetId)).size !== body.expectedWorkspaceAssets.length) return null;
+  return { protocolVersion: 2, requestId: body.requestId, nonce: body.nonce, requestHash: body.requestHash,
+    surface: body.surface, tabId: body.tabId, workspaceId: body.workspaceId,
+    expectedWorkspaceAssets: body.expectedWorkspaceAssets.map(({ id, assetId, referenceImageId, role, sortOrder }) => ({ id, assetId, referenceImageId, role, sortOrder })) };
+}
+export function canonicalTaskReuseOperation(accountId: string, sourceTaskId: string, input: Omit<TaskReuseOperationRequest, 'requestHash'>) {
+  return JSON.stringify([2, accountId, sourceTaskId, input.requestId, input.nonce, input.surface, input.tabId, input.workspaceId,
+    [...input.expectedWorkspaceAssets].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+      .map(item => [item.id, item.assetId, item.referenceImageId, item.role, item.sortOrder])]);
+}
+export async function buildTaskReuseOperationRequest(accountId: string, sourceTaskId: string,
+  input: Pick<TaskReuseOperationRequest, 'surface' | 'tabId' | 'workspaceId' | 'expectedWorkspaceAssets'> & Partial<Pick<TaskReuseOperationRequest, 'requestId' | 'nonce'>>): Promise<TaskReuseOperationRequest> {
+  const body = { ...input, protocolVersion: 2 as const, requestId: input.requestId || crypto.randomUUID(), nonce: input.nonce || crypto.randomUUID() };
+  const bytes = new TextEncoder().encode(canonicalTaskReuseOperation(accountId, sourceTaskId, body));
+  const requestHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+  const parsed = parseTaskReuseOperationRequest({ ...body, requestHash });
+  if (!parsed) throw new Error('复用现场无法安全保存，当前输入未改变');
+  return parsed;
+}
+
 export interface TaskReuseIntent {
   taskId: string;
   accountId: string;
@@ -109,16 +147,16 @@ export function taskReuseReasonMessage(reason: ComposerReuseReason): string {
   }
 }
 
-// Only an unresolved result fence is stored, never the input or a replayable command.
+// Legacy fences and versioned receipts are discovery records; this helper never replays either.
 export function taskReuseReceiptKey(accountId: string, tabId: string, taskId: string): string {
   return `sd2:task-reuse-unconfirmed:v1:${JSON.stringify([accountId, tabId, taskId])}`;
 }
 
 export function unresolvedTaskReuseSource(accountId: string, tabId: string): string | null {
   const prefix = 'sd2:task-reuse-unconfirmed:v1:';
-  for (let index = 0; index < sessionStorage.length; index += 1) {
-    const key = sessionStorage.key(index);
-    if (!key?.startsWith(prefix) || !sessionStorage.getItem(key)) continue;
+  for (const storage of [sessionStorage, localStorage]) for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (!key?.startsWith(prefix) || !storage.getItem(key)) continue;
     try {
       const scope: unknown = JSON.parse(key.slice(prefix.length));
       if (Array.isArray(scope) && scope.length === 3 && scope[0] === accountId && scope[1] === tabId

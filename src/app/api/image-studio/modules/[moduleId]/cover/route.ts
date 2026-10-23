@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { ModuleCoverError, readModuleCoverEditor, readModuleCoverRequest, saveModuleCover } from '@/lib/image-studio/module-cover';
+import { ModuleCoverError, readModuleCoverEditor, readModuleCoverRequest, readModuleCoverSnapshotRequest, saveModuleCover } from '@/lib/image-studio/module-cover';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 
 export const runtime = 'nodejs';
@@ -15,6 +15,12 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {
     const requestId = request.nextUrl.searchParams.get('requestId');
+    const intent = request.nextUrl.searchParams.get('intent');
+    if (intent !== null && intent !== 'shared-snapshot') throw new ModuleCoverError('封面查询类型无效');
+    if (intent === 'shared-snapshot') {
+      if (!requestId) throw new ModuleCoverError('请保留原保存请求编号');
+      return NextResponse.json(await readModuleCoverSnapshotRequest(user, params.moduleId, requestId), { headers });
+    }
     if (requestId !== null) return NextResponse.json(await readModuleCoverRequest(user, params.moduleId, requestId), { headers });
     const sourceIds = request.nextUrl.searchParams.get('sourceAssetIds');
     return NextResponse.json(await readModuleCoverEditor(user, params.moduleId, sourceIds === null ? undefined : sourceIds.split(',')), { headers });

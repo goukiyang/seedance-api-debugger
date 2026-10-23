@@ -12,6 +12,7 @@ export const studioStateReason: Record<SharedStudioReasonCode, string> = {
 };
 type Input = Omit<SharedStudioStateProjection, 'capabilities' | 'reasonCode'> & {
   actorAllowed: boolean; ownsWorkspace: boolean; canViewSource: boolean; canManageSource: boolean;
+  canViewDefinition?: boolean;
   reasonCode?: SharedStudioReasonCode | null;
 };
 export function projectSharedStudioCapabilities(input: Input): SharedStudioStateProjection {
@@ -30,6 +31,7 @@ export function projectSharedStudioCapabilities(input: Input): SharedStudioState
     sourceRevision: input.sourceRevision, moduleRevision: input.moduleRevision, definitionToken: input.definitionToken,
     capabilities: {
       viewOwnHistory: capability(personal, 'access-revoked'), editPersonalDraft: capability(personal, 'access-revoked'),
+      viewDefinition: capability(input.actorAllowed && (input.canViewDefinition ?? input.canManageSource), 'access-revoked'),
       editDefinition: capability(manages && trusted), saveDefinition: capability(manages && trusted),
       changeSharing: capability(manages && trusted), deleteSource: capability(manages && trusted),
       generate: capability(input.actorAllowed && input.canViewSource && input.lifecycle === 'active' && input.dependency === 'ready' && reasonCode === null),

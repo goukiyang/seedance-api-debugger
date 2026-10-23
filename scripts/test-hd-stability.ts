@@ -17,6 +17,13 @@ const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-hd-stability-'
 await fs.chmod(evidenceRoot, 0o700);
 // Set before importing the readonly client. The suite does not execute any SQL.
 process.env.DATABASE_URL = `file:${path.join(evidenceRoot, 'unused-private.db')}`;
+// Complete authoritative lookup fixture: scheduler ownership is exercised
+// without opening the application's SQL database.
+(globalThis as unknown as { hdReadonlyDb?: unknown }).hdReadonlyDb = {
+  asset: { findMany: async () => [], findFirst: async () => null },
+  referenceImage: { findMany: async () => [] }, imageStudioTask: { findFirst: async () => null },
+  $disconnect: async () => {},
+};
 const moduleCore = await import('../src/lib/media/hd-derivatives');
 const core = { ...moduleCore, processHdJob: (...args: Parameters<typeof moduleCore.processHdJob>) => moduleCore.processHdJob(args[0], args[1], {
   ...args[2], processor: (request, options) => runner.runHdImageProcessor(request, { ...options, applicationRoot }),

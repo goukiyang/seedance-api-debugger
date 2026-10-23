@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
       if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
+    const v2 = field('creation_contract_version') === 2 || field('creation_contract_version') === '2';
     const projectId = cleanString(field('project_id'));
     const videoCardId = cleanString(field('video_card_id'));
     const canvasDocumentId = cleanString(field('canvas_document_id')) || null;
@@ -73,32 +74,37 @@ export async function POST(request: NextRequest) {
     const requestId = cleanString(field('request_id'));
     const assetId = cleanString(field('asset_id'));
     const validId = (id: string | null) => Boolean(id && /^[a-zA-Z0-9_-]{1,160}$/.test(id));
-    if (jsonAssociation && ![requestId, assetId, projectId, videoCardId, canvasDocumentId, canvasNodeId].every(validId)) {
+    if (jsonAssociation && ![requestId, assetId, projectId, canvasDocumentId, canvasNodeId].every(validId) || jsonAssociation && videoCardId && !validId(videoCardId)) {
       return NextResponse.json({ error: '关联目标或原素材编号无效，请重新打开画布' }, { status: 400 });
     }
 
-    if (!videoCardId) {
+    if (!videoCardId && !v2) {
       return NextResponse.json({ error: '必须先选择视频卡，上传素材才能进入统一项目链路' }, { status: 400 });
     }
-    const videoCard = await prisma.videoCard.findUnique({
+    const videoCard = videoCardId ? await prisma.videoCard.findUnique({
       where: { id: videoCardId },
       select: { id: true, project_id: true },
-    });
-    if (!videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
-    if (projectId && projectId !== videoCard.project_id) {
+    }) : null;
+    if (videoCardId && !videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
+    if (videoCard && projectId && projectId !== videoCard.project_id) {
       return NextResponse.json({ error: '视频卡不属于当前项目' }, { status: 400 });
     }
 
-    const project = await getProjectForGeneration(user, videoCard.project_id);
-    await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
+    const destination = videoCard?.project_id || projectId;
+    if (!destination) throw new AuthError('请选择保存到的项目', 400);
+    const project = await getProjectForGeneration(user, destination);
+    if (videoCard) await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
 
     if (canvasDocumentId) {
       await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
       const canvas = await prisma.canvasDocument.findUnique({
         where: { id: canvasDocumentId },
-        select: { id: true, owner_user_id: true, project_id: true, status: true },
+        select: { id: true, owner_user_id: true, project_id: true, status: true, document_json: true },
       });
       if (!canvas || canvas.status === 'deleted') return NextResponse.json({ error: '画布不存在' }, { status: 404 });
+      const saved = JSON.parse(canvas.document_json).context || {};
+      const savedCard = saved.video_card_id || saved.videoCardId || null;
+      if (savedCard && savedCard !== (videoCardId || null)) throw new AuthError('原画布仍绑定原视频卡，未清除旧归属或上传保护', 409);
       if (canvas.project_id && canvas.project_id !== project.id) {
         return NextResponse.json({ error: '画布不属于当前项目' }, { status: 400 });
       }
@@ -126,7 +132,7 @@ export async function POST(request: NextRequest) {
       if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
       uploadResult = await uploadSiteAsset(buffer, sourceFile.name, sourceFile.type, sourceFile.size, user.id);
     }
-    const workspaceId = (await getOrCreateWorkspace(`ultimate-canvas:${project.id}:${videoCard.id}`, user.id)).id;
+    const workspaceId = (await getOrCreateWorkspace(v2 ? `ultimate-canvas:v2:${user.id}:${project.id}:${canvasDocumentId}` : `ultimate-canvas:${project.id}:${videoCardId}`, user.id)).id;
     const role = roleForMimeType(uploadResult.mimeType, jsonAssociation ? '' : requestedRole);
 
     const associate = async (db: Prisma.TransactionClient) => {
@@ -138,7 +144,7 @@ export async function POST(request: NextRequest) {
       if (prior) {
         const detail = JSON.parse(prior.detail || '{}');
         if (prior.target_id !== assetId || detail.request_id !== requestId || detail.project_id !== project.id
-          || detail.video_card_id !== videoCard.id || detail.canvas_document_id !== canvasDocumentId || detail.canvas_node_id !== canvasNodeId) {
+          || (detail.video_card_id || null) !== (videoCardId || null) || detail.canvas_document_id !== canvasDocumentId || detail.canvas_node_id !== canvasNodeId) {
           throw new AuthError('关联编号已用于其它目标，未修改原素材', 409);
         }
         return { success: true, workspace_id: detail.workspace_id, workspace_asset_id: detail.workspace_asset_id,
@@ -182,7 +188,7 @@ export async function POST(request: NextRequest) {
         target_id: uploadResult.assetId,
         detail: JSON.stringify({
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId || null,
           canvas_document_id: canvasDocumentId,
           canvas_node_id: canvasNodeId,
           request_id: requestId || null,
@@ -246,12 +252,13 @@ export async function GET(request: NextRequest) {
     const hash = query.get('hash') || '';
     const mimeType = query.get('mime_type') || '';
     const fileSize = Number(query.get('file_size'));
-    if (![documentId, projectId, cardId].every(id => /^[a-zA-Z0-9_-]{1,160}$/.test(id)) || !/^[a-f0-9]{64}$/.test(hash)
+    const v2 = query.get('creation_contract_version') === '2';
+    if (![(v2 && !cardId ? documentId : cardId), documentId, projectId].every(id => /^[a-zA-Z0-9_-]{1,160}$/.test(id)) || !/^[a-f0-9]{64}$/.test(hash)
       || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^(image|video|audio)\//.test(mimeType)) {
       return NextResponse.json({ error: '恢复目标或文件身份无效' }, { status: 400 });
     }
     await getProjectForGeneration(user, projectId);
-    await assertCanGenerateInVideoCard(user, projectId, cardId);
+    if (cardId) await assertCanGenerateInVideoCard(user, projectId, cardId);
     await assertCanEditCanvasDocument(user, documentId, projectId);
     const asset = await prisma.asset.findFirst({ where: { owner_id: user.id, hash, file_size: fileSize, mime_type: mimeType, status: 'active' } });
     return NextResponse.json({ found: Boolean(asset), asset: asset ? { id: asset.id, originalUrl: asset.original_url,

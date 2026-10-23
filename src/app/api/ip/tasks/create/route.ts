@@ -1,3 +1,8 @@
+import { CreationError, isCreationV2 } from '@/lib/creation/contract';
+import { assertVideoCreationReady } from '@/lib/creation/context';
+import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
+import { isActiveBranchStatus } from '@/lib/video-branches';
 import { NextRequest, NextResponse } from 'next/server';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
@@ -307,7 +312,7 @@ function isPrismaUniqueConstraintError(error: unknown) {
 function ipIdempotencyDecision(
   existing: IpIdempotentTask,
   requestFingerprint: string,
-  videoCardId: string,
+  videoCardId: string | null,
 ): 'deduplicated' | 'provider_mismatch' | 'video_card_mismatch' | 'legacy_unverifiable' | 'payload_mismatch' {
   if (existing.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) return 'provider_mismatch';
   if (existing.video_card_id && existing.video_card_id !== videoCardId) return 'video_card_mismatch';
@@ -446,12 +451,17 @@ export async function POST(request: NextRequest) {
     return errorJson('账号已被禁用，无法生成', 403);
   }
 
-  const volcengineSettings = await getVolcengineIpApiSettings();
-  if (!isVolcengineIpApiReady(volcengineSettings)) {
-    return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
-  }
-
   const receivedBody = await request.json();
+  if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
+    const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
+    if (original) {
+      await assertCanViewTask(user, original);
+      if (original.request_fingerprint?.startsWith('pricing-v2:') && original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      return NextResponse.json(canvasVideoBatchTaskResponse(original));
+    }
+  }
+  const volcengineSettings = await getVolcengineIpApiSettings();
+  if (!isVolcengineIpApiReady(volcengineSettings)) return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
   let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
   try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip'); }
   catch (error) {
@@ -460,10 +470,15 @@ export async function POST(request: NextRequest) {
   }
   if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
   const body = restoredBatch.body as typeof receivedBody;
+  const creationBody = structuredClone(body);
+  let creationV2 = false;
+  try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
+  catch (error) { if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status }); throw error; }
   const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
   let response: NextResponse;
   try { response = await runCanvasAdmission(); }
   catch (error) {
+    if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
     response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
   }
@@ -564,27 +579,28 @@ export async function POST(request: NextRequest) {
       ? body.videoBranchId.trim()
       : null;
 
-  if (!requestedVideoCardId) {
+  if (!requestedVideoCardId && !creationV2) {
     return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
   }
 
-  const requestedVideoCard = await prisma.videoCard.findUnique({
+  const requestedVideoCard = requestedVideoCardId ? await prisma.videoCard.findUnique({
     where: { id: requestedVideoCardId },
     select: { id: true, project_id: true },
-  });
-  if (!requestedVideoCard) {
+  }) : null;
+  if (requestedVideoCardId && !requestedVideoCard) {
     return errorJson('视频卡不存在', 404);
   }
-  if (requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
+  if (requestedVideoCard && requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
     return errorJson('视频卡不属于当前项目', 400);
   }
 
   let project;
-  let videoCard;
+  let videoCard: NonNullable<Awaited<ReturnType<typeof assertCanGenerateInVideoCard>>['videoCard']> | null = null;
   try {
-    project = await getProjectForGeneration(user, requestedVideoCard.project_id);
-    const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
-    videoCard = videoCardAccess.videoCard;
+    const projectId = requestedVideoCard?.project_id || requestedProjectId;
+    if (!projectId) throw new AuthError('请选择保存到的项目', 400);
+    project = await getProjectForGeneration(user, projectId);
+    if (requestedVideoCard) videoCard = (await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id)).videoCard;
     const canvasDocumentIds = new Set([
       body.canvas_document_id,
       cleanSourceMetadata(body.source_metadata).canvas_document_id,
@@ -618,6 +634,9 @@ export async function POST(request: NextRequest) {
     throw error;
   }
 
+  const videoCardId = videoCard?.id || null;
+  if (!videoCardId && requestedVideoBranchId) return errorJson('没有原视频卡时不能指定方向', 400);
+
   let generationTemplate: { id: string; status: string } | null = null;
   if (requestedTemplateId) {
     generationTemplate = await prisma.generationTemplate.findFirst({
@@ -639,20 +658,21 @@ export async function POST(request: NextRequest) {
     if (!agentRun) return errorJson('Agent 执行链路不存在', 404);
     if (agentRun.user_id !== user.id && user.role !== 'admin') return errorJson('Agent 执行链路不属于当前用户', 403);
     if (generationTemplate && agentRun.template_id !== generationTemplate.id) return errorJson('Agent 执行链路与当前模板不一致', 400);
-    if (agentRun.video_card_id && agentRun.video_card_id !== videoCard.id) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
+    if (agentRun.video_card_id && agentRun.video_card_id !== videoCardId) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
     if (!generationTemplate) {
       generationTemplate = { id: agentRun.template_id, status: 'active' };
     }
   }
 
-  if (project.type !== 'personal' && resolution === '1080p') {
+  if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
+    if (!videoCard) return errorJson('原高清创作需要视频卡', 403);
     if (!resolutionApprovalConfirmed) {
       return errorJson('1080p 生成需要先确认审批通过', 403);
     }
     const baselineTaskId = videoCard.final_task_id || videoCard.current_best_task_id;
     const candidateCount = await prisma.videoTask.count({
       where: {
-        video_card_id: videoCard.id,
+        video_card_id: videoCardId,
         version_role: { in: ['candidate', 'current_best', 'final'] },
       },
     });
@@ -666,13 +686,13 @@ export async function POST(request: NextRequest) {
             type: 'resolution_1080p',
             status: 'approved',
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
           },
         })
       : await prisma.$transaction((tx) => findUsableApproval(tx, {
           type: 'resolution_1080p',
           projectId: project.id,
-          videoCardId: videoCard.id,
+          videoCardId: videoCardId,
         }));
     if (!approval) {
       const rejectedApproval = await prisma.approvalRecord.findFirst({
@@ -680,7 +700,7 @@ export async function POST(request: NextRequest) {
           type: 'resolution_1080p',
           status: 'rejected',
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
         },
         orderBy: [{ rejected_at: 'desc' }, { created_at: 'desc' }],
         select: { decision_reason: true, reason: true },
@@ -691,7 +711,7 @@ export async function POST(request: NextRequest) {
       }
       return errorJson('未找到有效的 1080p 审批记录，请先在审批中心申请并通过审批', 403);
     }
-    if (approval.video_card_id !== videoCard.id) {
+    if (approval.video_card_id !== videoCardId) {
       return errorJson('1080p 审批必须绑定当前视频卡，不能跨视频卡或使用项目级通配审批', 403);
     }
     if (approval.usage_limit !== null && approval.used_count >= approval.usage_limit) {
@@ -709,14 +729,14 @@ export async function POST(request: NextRequest) {
     });
     if (
       !approvalBaseTask
-      || approvalBaseTask.video_card_id !== videoCard.id
+      || approvalBaseTask.video_card_id !== videoCardId
       || !['candidate', 'current_best', 'final'].includes(approvalBaseTask.version_role)
     ) {
       return errorJson('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版', 403);
     }
   }
 
-  if (videoCard.ratio_locked && videoCard.ratio && !ratioFollowsFirstFrame && requestedRatio !== videoCard.ratio) {
+  if (videoCard?.ratio_locked && videoCard.ratio && !ratioFollowsFirstFrame && requestedRatio !== videoCard.ratio) {
     return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
   }
 
@@ -726,10 +746,10 @@ export async function POST(request: NextRequest) {
       where: { id: requestedVideoBranchId },
       select: { id: true, video_card_id: true, title: true, status: true, is_primary: true },
     });
-    if (!branch || branch.video_card_id !== videoCard.id) {
+    if (!branch || branch.video_card_id !== videoCardId) {
       return errorJson('方向分支不属于当前视频卡', 400);
     }
-    if (['closed', 'merged', 'promoted'].includes(branch.status)) {
+    if (!isActiveBranchStatus(branch.status)) {
       return errorJson('方向分支已关闭、合并或升格，不能继续生成', 403);
     }
     videoBranch = branch;
@@ -851,7 +871,7 @@ export async function POST(request: NextRequest) {
     priceCeiling: body.max_estimated_cost ?? null,
     ...(typeof body.pricing_revision === 'string' ? { pricingRevision: body.pricing_revision } : {}),
     projectId: project.id,
-    videoCardId: videoCard.id,
+    videoCardId: videoCardId,
     videoBranchId: requestedVideoBranchId,
     referenceImageIds: requestedReferenceImageIds,
     referenceImageUrls: requestedReferenceImageUrls,
@@ -885,7 +905,7 @@ export async function POST(request: NextRequest) {
     });
     if (existing) await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
     if (existing) {
-      const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCard.id);
+      const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCardId);
       if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
       return ipDeduplicatedTaskResponse(existing);
     }
@@ -1092,7 +1112,7 @@ export async function POST(request: NextRequest) {
           400,
         );
       }
-      if (videoCard.ratio_locked && videoCard.ratio && ratioFollowsFirstFrame) {
+      if (videoCard?.ratio_locked && videoCard.ratio && ratioFollowsFirstFrame) {
         let firstFrameDimensions = preparedImages.find((image) => image.originalUrl === firstFrameUrl) || null;
         if (!firstFrameDimensions) {
           const firstFrameAsset = await prisma.asset.findFirst({
@@ -1277,7 +1297,7 @@ export async function POST(request: NextRequest) {
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
     referenceAlbumIds: generationReferenceAlbumIds,
     referenceImageIds: generationReferenceImageIds,
-    videoCardId: videoCard.id,
+    videoCardId: videoCardId,
     videoBranchId: videoBranch?.id || null,
     templateId: generationTemplate?.id || null,
     agentRunId: agentRun?.id || null,
@@ -1321,8 +1341,9 @@ export async function POST(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
       await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
-        videoCardId: videoCard.id, branchId: videoBranch?.id || null, amount: estimatedCost });
+        videoCardId: videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       const task = await tx.videoTask.create({
         data: {
@@ -1353,7 +1374,7 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
           video_branch_id: videoBranch?.id || null,
           template_id: generationTemplate?.id || null,
           agent_run_id: agentRun?.id || null,
@@ -1375,6 +1396,9 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost, pricingRevision: priceQuote.revision,
+        ...(canvasAdmission ? { batchChildId: canvasAdmission.reference.child_id } : {}) });
+
       const usageAttribution = { sourceKind: 'video_task' as const, sourceId: task.id,
         actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
         billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
@@ -1383,7 +1407,7 @@ export async function POST(request: NextRequest) {
         await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
       } else await recordUsageAttribution(tx, usageAttribution);
 
-      if (project.type !== 'personal' && resolution === '1080p') {
+      if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
         const approval = requestedResolutionApprovalId
           ? await tx.approvalRecord.findFirst({
               where: {
@@ -1391,16 +1415,16 @@ export async function POST(request: NextRequest) {
                 type: 'resolution_1080p',
                 status: 'approved',
                 project_id: project.id,
-                video_card_id: videoCard.id,
+                video_card_id: videoCardId,
               },
             })
           : await findUsableApproval(tx, {
               type: 'resolution_1080p',
               projectId: project.id,
-              videoCardId: videoCard.id,
+              videoCardId: videoCardId,
             });
         if (!approval) throw new Error('未找到可用的 1080p 审批额度');
-        if (approval.video_card_id !== videoCard.id) throw new Error('1080p 审批必须绑定当前视频卡');
+        if (approval.video_card_id !== videoCardId) throw new Error('1080p 审批必须绑定当前视频卡');
         if (!approval.task_id) throw new Error('1080p 审批缺少基准任务');
         const baseTask = await tx.videoTask.findUnique({
           where: { id: approval.task_id },
@@ -1408,7 +1432,7 @@ export async function POST(request: NextRequest) {
         });
         if (
           !baseTask
-          || baseTask.video_card_id !== videoCard.id
+          || baseTask.video_card_id !== videoCardId
           || !['candidate', 'current_best', 'final'].includes(baseTask.version_role)
         ) {
           throw new Error('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版');
@@ -1419,7 +1443,7 @@ export async function POST(request: NextRequest) {
           userId: user.id,
           metadata: {
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             baseline_task_id: approval.task_id,
             resolution,
             estimated_cost: estimatedCost,
@@ -1497,7 +1521,7 @@ export async function POST(request: NextRequest) {
           target_id: task.id,
           detail: JSON.stringify({
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             template_id: generationTemplate?.id || null,
             agent_run_id: agentRun?.id || null,
             selected_agent_plan_key: selectedAgentPlanKey,
@@ -1523,7 +1547,7 @@ export async function POST(request: NextRequest) {
           where: { id: agentRun.id },
           data: {
             video_task_id: task.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             status: 'submitted',
             selected_plan_key: selectedAgentPlanKey || undefined,
             final_prompt_snapshot: finalPromptSnapshot,
@@ -1566,7 +1590,7 @@ export async function POST(request: NextRequest) {
       });
       if (existing) {
         await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
-        const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCard.id);
+        const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCardId);
         if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
         return ipDeduplicatedTaskResponse(existing);
       }
@@ -1584,7 +1608,7 @@ export async function POST(request: NextRequest) {
           body: err.message,
           metadata: {
             attempted_cost: estimatedCost,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
           },
         })).catch((notificationError) => {
           console.error('[TasksCreate] Failed to notify project budget shortage:', notificationError);
@@ -1703,7 +1727,7 @@ export async function POST(request: NextRequest) {
       pricing: publicVideoPricing(priceQuote),
       workspace_id: workspaceId,
       project_id: project.id,
-      video_card_id: videoCard.id,
+      video_card_id: videoCardId,
       template_id: generationTemplate?.id || null,
       agent_run_id: agentRun?.id || null,
       selected_agent_plan_key: selectedAgentPlanKey,
@@ -1896,11 +1920,11 @@ async function handleProviderFailure(
     if (!taskBeforeSettlement) return;
 
     const consumedApprovals = await tx.approvalUsage.findMany({
-      where: { task_id: taskId },
+      where: { task_id: taskId, creation_intent_id: null },
       select: { approval_id: true },
     });
     if (consumedApprovals.length > 0) {
-      await tx.approvalUsage.deleteMany({ where: { task_id: taskId } });
+      await tx.approvalUsage.deleteMany({ where: { task_id: taskId, creation_intent_id: null } });
       for (const usage of consumedApprovals) {
         await tx.approvalRecord.updateMany({
           where: { id: usage.approval_id, used_count: { gt: 0 } },

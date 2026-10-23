@@ -26,6 +26,9 @@ type RecordAssetUploadLogParams = {
   fileSize?: number | null;
   durationMs?: number | null;
   errorCode?: string | null;
+  errorName?: string | null;
+  causeCode?: string | null;
+  recovery?: string | null;
   errorMessage?: string | null;
   errorStage?: string | null;
   requestId?: string | null;
@@ -76,6 +79,9 @@ export async function recordAssetUploadLog(params: RecordAssetUploadLogParams) {
       partNumber: normalizeNumber(params.partNumber),
       totalParts: normalizeNumber(params.totalParts),
       errorCode: cleanText(params.errorCode, 80),
+      errorName: cleanText(params.errorName, 40),
+      causeCode: cleanText(params.causeCode, 80),
+      recovery: cleanText(params.recovery, 16),
       errorMessage: cleanText(params.errorMessage),
       errorStage: cleanText(params.errorStage, 40),
       requestDigest: params.requestId ? createHash('sha256').update(params.requestId).digest('hex').slice(0, 16) : null,

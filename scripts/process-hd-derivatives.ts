@@ -4,7 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import { hdReadonlyDb as prisma } from '../src/lib/media/hd-readonly-db';
-import { assertHdDirectoryAccess, assertHdWorkerLock, atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, hdWorkerFailureSummary, listHdJobs, nextHdFairness, processHdJob, readHdJob, recordHdWorkerFailure, recheckHdResources, requestHd, retryFailedHd, retryHdKey, selectHdJob, setHdControl, type HdFairnessState } from '../src/lib/media/hd-derivatives';
+import { assertHdDirectoryAccess, assertHdWorkerLock, atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, hdWorkerFailureSummary, listHdJobs, processHdJob, readHdJob, recordHdWorkerFailure, recheckHdResources, requestHd, retryFailedHd, retryHdKey, setHdControl, type HdFairnessState, type HdRequestContext } from '../src/lib/media/hd-derivatives';
+import { claimHdScheduledJob, finishHdScheduledClaim, readHdScheduler, seedHdSchedulerFairness } from '../src/lib/media/hd-scheduler';
 import { stopHdImageProcessors } from '../src/lib/media/hd-image-processor';
 import { HD_RESOURCE_POLICY } from '../src/lib/media/hd-resource-state';
 import { discoverHdBatch, hdSourceIsolationReason, readHdDiscoveryCheckpoint } from '../src/lib/media/hd-discovery';
@@ -22,20 +23,20 @@ const textFlag = (json: string | null) => {
   try { return JSON.parse(json || '{}').preserveText === true; } catch { return false; }
 };
 async function inventory(enqueue: boolean) {
-  const sources = new Map<string, { source: string; preserveText: boolean }>();
+  const sources = new Map<string, { source: string; preserveText: boolean; context: HdRequestContext }>();
   const owners = await prisma.user.findMany({ where: { status: 'active' }, select: { id: true } });
   const activeImageAssets = await prisma.asset.count({ where: { status: 'active', type: 'image' } });
   const assets = await prisma.asset.findMany({ where: { status: 'active', type: 'image', owner_id: { in: owners.map(owner => owner.id) } },
-    select: { original_url: true, metadata_json: true } });
-  const refs = await prisma.referenceImage.findMany({ where: { status: 'active', asset_id: null, owner: { status: 'active' }, album: { status: 'active' } }, select: { url: true } });
+    orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_id: true, original_url: true, metadata_json: true } });
+  const refs = await prisma.referenceImage.findMany({ where: { status: 'active', asset_id: null, owner: { status: 'active' }, album: { status: 'active' } }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_user_id: true, url: true } });
   const remoteSources = new Set<string>();
   let unavailable = 0;
-  for (const item of [...assets.map(a => ({ source: a.original_url, preserveText: textFlag(a.metadata_json) })), ...refs.map(r => ({ source: r.url, preserveText: false }))]) {
+  for (const item of [...assets.map(a => ({ source: a.original_url, preserveText: textFlag(a.metadata_json), context: { owner: { kind: 'asset' as const, id: a.id, ownerId: a.owner_id } } })), ...refs.map(r => ({ source: r.url, preserveText: false, context: { owner: { kind: 'reference' as const, id: r.id, ownerId: r.owner_user_id } } }))]) {
     try {
       const local = await hdSource(item.source);
       if (!local) { remoteSources.add(item.source); continue; }
       const prior = sources.get(local.file);
-      sources.set(local.file, { ...item, preserveText: item.preserveText || Boolean(prior?.preserveText) });
+      sources.set(local.file, { ...item, context: prior?.context || item.context, preserveText: item.preserveText || Boolean(prior?.preserveText) });
     } catch (error) { if (!hdSourceIsolationReason(error)) throw error; unavailable++; }
   }
   const result = { batch, capturedAt: new Date().toISOString(), uniqueLocalOriginals: sources.size, totalBytes: 0,
@@ -54,7 +55,7 @@ async function inventory(enqueue: boolean) {
       else result.eligible++;
       const cached = existing.get(item.source);
       if (cached?.status === 'ready' && cached.version === input.version && cached.preserveText === item.preserveText) result.cacheHits++;
-      if (enqueue) { const job = await requestHd(item.source, 3, item.preserveText, batch); if (job) result.jobs.push(job.key); }
+      if (enqueue) { const job = await requestHd(item.source, 3, item.preserveText, batch, item.context); if (job) result.jobs.push(job.key); }
     } catch (error) { if (!hdSourceIsolationReason(error)) throw error; result.skipped++; result.reasons.unreadable = (result.reasons.unreadable || 0) + 1; }
   }
   if (enqueue) await atomicHdJson(path.join(hdDirectory(), `${batch}.inventory.json`), result);
@@ -117,6 +118,7 @@ async function main() {
     if (!Number.isInteger(state.consecutiveNew) || state.consecutiveNew < 0 || state.consecutiveNew > 4) throw new Error('invalid_hd_fairness_checkpoint');
     return { consecutiveViewer: 0, consecutiveForeground: state.consecutiveNew };
   }).catch(error => { if (error.code === 'ENOENT') return { consecutiveViewer: 0, consecutiveForeground: 0 }; throw error; });
+  await seedHdSchedulerFairness(fairness);
   await readHdDiscoveryCheckpoint();
   let lastDiscoveryAt = 0;
   const wait = () => new Promise(resolve => setTimeout(resolve, HD_RESOURCE_POLICY.minimumCheckMs));
@@ -146,20 +148,33 @@ async function main() {
   };
   const encode = async () => {
     const contentionUntil = new Map<string, number>();
+    let ownerRetryAt = 0, ownerFailures = 0;
     try {
       while (!stopping) {
         let control = await hdControl();
         if (control.state === 'active') {
           const clock = Date.now();
+          if (clock < ownerRetryAt) { await wait(); continue; }
           for (const [key, until] of Array.from(contentionUntil)) if (until <= clock) contentionUntil.delete(key);
-          const job = selectHdJob((await listHdJobs()).filter(job => !contentionUntil.has(job.key)), fairness, batch, clock);
+          let job: Awaited<ReturnType<typeof claimHdScheduledJob>>;
+          try {
+            job = await claimHdScheduledJob(await listHdJobs(), new Set(contentionUntil.keys()), clock);
+            ownerFailures = 0;
+          } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'hd_scheduler_owner_unavailable') throw error;
+            // A failed authoritative lookup cannot manufacture a legacy owner,
+            // consume a turn or lose a durable registration. Retry quietly.
+            ownerRetryAt = clock + Math.min(60000, 5000 * 2 ** Math.min(ownerFailures++, 4));
+            await wait(); continue;
+          }
           if (job) {
             // Empty queues never enter resource_wait. Only actual due work
             // takes the existing fresh resource-admission path.
             control = (await recheckHdResources({ expectedToken: control.token })).control;
             if (control.state !== 'active' || stopping) { if (!stopping) await wait(); continue; }
-            const previousAttempt = job.attemptHistory?.[job.attemptHistory.length - 1]?.startedAt;
-            const result = await processHdJob(job.key);
+            let result;
+            try { result = await processHdJob(job.key, undefined, { recoverInterrupted: job.status === 'running' }); }
+            finally { await finishHdScheduledClaim(await readHdJob(job.key), job.key); }
             if (result === null) {
               // A known live lease is contention. It neither consumes an
               // attempt nor pauses the queue; another due key may proceed.
@@ -168,10 +183,9 @@ async function main() {
             }
             const after = await readHdJob(job.key);
             const completed = after?.attemptHistory?.[after.attemptHistory.length - 1];
-            if (completed?.finishedAt && completed.startedAt !== previousAttempt) {
-              fairness = nextHdFairness(fairness, job);
-              await atomicHdJson(fairnessCheckpoint, { protocol: 'hd-fairness-v2', ...fairness, updatedAt: completed.finishedAt });
-            }
+            const scheduled = await readHdScheduler();
+            fairness = { consecutiveViewer: scheduled.consecutiveViewer, consecutiveForeground: scheduled.consecutiveForeground };
+            await atomicHdJson(fairnessCheckpoint, { protocol: 'hd-fairness-v2', ...fairness, updatedAt: completed?.finishedAt || new Date().toISOString() });
             continue;
           }
         }

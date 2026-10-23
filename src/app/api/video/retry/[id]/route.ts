@@ -1,3 +1,6 @@
+import { CreationError } from '@/lib/creation/contract';
+import { prepareVideoCreationIntent } from '@/lib/creation/intents';
+import { assertCreationLineageUnlocked } from '@/lib/creation/lineage';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession, AuthError } from '@/lib/auth/session';
@@ -16,6 +19,7 @@ import {
   PAID_GENERATION_INTENT_HEADER,
   PAID_GENERATION_INTENT_USER_AUTHORIZED,
   PAID_GENERATION_REASON_HEADER,
+  userRetryGenerationReason,
 } from '@/lib/tasks/paid-generation-guard';
 
 function parseJsonArray(value: string | null | undefined): string[] {
@@ -92,7 +96,7 @@ export async function POST(
         project_id: true,
         video_card_id: true,
         video_branch_id: true,
-        params_json: true,
+        params_json: true, creation_contract_version: true, creation_intent_id: true, lineage_root_task_id: true,
       },
     });
 
@@ -151,7 +155,7 @@ export async function POST(
     if (originalTask.provider && !['seedance', 'h3'].includes(originalTask.provider)) {
       return NextResponse.json({ error: 'RETRY_PROVIDER_UNSUPPORTED', message: '此任务不能转到普通生成重试，请从原生成入口重新获取报价；原任务未重发' }, { status: 409 });
     }
-    if (!originalTask.video_card_id) {
+    if (!originalTask.video_card_id && originalTask.creation_contract_version !== 2) {
       return NextResponse.json(
         { error: 'VIDEO_CARD_REQUIRED', message: '历史任务尚未归档到视频卡，不能直接重试' },
         { status: 400 },
@@ -215,7 +219,8 @@ export async function POST(
       }
     }
 
-    const retryBody = {
+    if (originalTask.lineage_root_task_id && originalTask.project_id) await assertCreationLineageUnlocked(prisma, user, originalTask.id, originalTask.project_id);
+    const retryBody: Record<string, unknown> = {
       provider: originalTask.provider === 'h3' ? 'h3' : 'seedance',
       model: originalTask.model,
       idempotency_key: `video-retry:${originalTask.id}`,
@@ -246,11 +251,21 @@ export async function POST(
       frame_image_urls: parseJsonArray(originalTask.frame_image_urls),
     };
 
+    if (originalTask.lineage_root_task_id) retryBody.continuation = { mode: 'continue', parent_task_id: originalTask.id };
+    if (originalTask.creation_contract_version === 2) {
+      const previousIntent = originalTask.creation_intent_id ? await prisma.videoCreationIntent.findUnique({ where: { id: originalTask.creation_intent_id } }) : null;
+      const oldSpec = previousIntent ? parseJsonObject(previousIntent.spec_json) : {};
+      Object.assign(retryBody, { creation_contract_version: 2, entry: 'ordinary', continuation: { mode: 'continue', parent_task_id: originalTask.id }, baseline_task_id: oldSpec.baseline_task_id || null });
+      const prepared = await prepareVideoCreationIntent(user, { ...retryBody, request_id: retryBody.idempotency_key });
+      if (!prepared.availability?.canSubmit) return NextResponse.json({ error: 'CREATION_APPROVAL_REQUIRED', message: '本次继续需要重新核对条件，请从原任务的继续调整入口处理', intent_id: prepared.id, reasons: prepared.availability?.reasons }, { status: 409 });
+      Object.assign(retryBody, { intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null });
+    }
+
     const headers = new Headers();
     headers.set('Content-Type', 'application/json');
     headers.set('x-tab-id', request.headers.get('x-tab-id') || 'default');
     headers.set(PAID_GENERATION_INTENT_HEADER, PAID_GENERATION_INTENT_USER_AUTHORIZED);
-    headers.set(PAID_GENERATION_REASON_HEADER, `用户通过后台重试任务 ${originalTask.id}`);
+    headers.set(PAID_GENERATION_REASON_HEADER, userRetryGenerationReason('video', originalTask.id));
 
     const cookie = request.headers.get('cookie');
     if (cookie) headers.set('cookie', cookie);
@@ -272,6 +287,7 @@ export async function POST(
 
     return NextResponse.json(data, { status: createResponse.status });
   } catch (error) {
+    if (error instanceof CreationError) return NextResponse.json({ error: error.code, code: error.code, message: error.message }, { status: error.status });
     const pricingError = videoPricingError(error);
     if (pricingError) return NextResponse.json({ error: pricingError.message, code: pricingError.code }, { status: pricingError.status });
     console.error('[RetryTask]', error);

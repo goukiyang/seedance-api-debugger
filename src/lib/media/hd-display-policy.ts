@@ -33,8 +33,14 @@ export function hdDisplayLabel(kind: HdDisplayKind, description?: HdDescription,
 }
 
 export function hdAvailabilityLabel(description?: HdDescription) {
-  if (!description) return '正在确认高清';
-  if (description.status === 'queued' || description.status === 'running') return '高清准备中';
+  if (!description) return '正在确认压缩状态';
+  if (description.processingAvailability === 'resource_wait') return '压缩等待资源';
+  if (description.processingAvailability === 'manual_pause' || description.processingAvailability === 'hard_pause') return '压缩已暂停';
+  if (description.errorKind === 'scheduling_unconfirmed') return '压缩调度状态暂无法确认';
+  if (description.status === 'queued') return '压缩排队中';
+  if (description.status === 'running') return ({ reading: '正在读取源图', encoding: '正在压缩', validating: '正在校验', publishing: '正在保存压缩图' } as Record<string, string>)[description.stage || ''] || '正在准备压缩图';
+  if (description.status === 'ready') return '压缩副本可用';
+  if (description.reason === 'not_registered') return '压缩副本尚未登记';
   if (description?.reason === 'remote_version_unknown') return '远端图片版本暂无法确认，可主动查看或下载原图';
   if (description?.status === 'failed') return '高清压缩未完成，可查看或下载完整原图';
   if (description?.status === 'skipped') return hdDescriptionNeedsOriginal(description) ? '此图使用完整原图，不另做高清压缩' : '高清状态暂无法确认，可主动查看或下载原图';

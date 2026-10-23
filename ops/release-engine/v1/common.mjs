@@ -1,3 +1,4 @@
+import { assertFullReleaseContext, assertFullLiveRoles } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -77,6 +78,8 @@ export function validateManifest(m) {
   if (shared) assertSharedEngineContext(m);
   assert.deepEqual(m.protectedIncrement || null, MV_DIRECT.protectedIncrement || null);
   assertProtectedIncrement(m.protectedIncrement, m);
+  assert.deepEqual(m.fullRelease || null, MV_DIRECT.fullRelease || null);
+  if (m.fullRelease) assertFullReleaseContext(m);
   assert.equal(m.privateMultiviewInstall === true, MV_DIRECT.privateMultiviewInstall === true);
   assert.equal(m.schema, 'rate-impl2-release.v1'); assert.equal(m.project, 'video-api-debugger');
   assert.match(m.runId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
@@ -148,8 +151,12 @@ export function validateManifest(m) {
     assert.ok(typeof v.build === 'string' && v.build && typeof v.version === 'string' && v.version);
     assert.ok(Number.isSafeInteger(v.pid) && v.pid > 1); assert.match(v.invocation, /^[a-f0-9]{32}$/);
   }
-  for (const role of ['web', 'image', 'hd']) assert.equal(m.live[role].source, MV_DIRECT.baselineSource);
-  assert.equal(m.live.web.root, m.live.image.root); assert.equal(m.protectedTaskIds.length, 9);
+  if (m.fullRelease) assertFullLiveRoles(m.fullRelease, m.live);
+  else {
+    for (const role of ['web', 'image', 'hd']) assert.equal(m.live[role].source, MV_DIRECT.baselineSource);
+    assert.equal(m.live.web.root, m.live.image.root);
+  }
+  assert.equal(m.protectedTaskIds.length, 9);
   assert.deepEqual(m.retiredPricingRoots, MV_DIRECT.retiredPricingSources.map(source => m.projectRoot + '/managed-releases/' + source));
   rejectedPricingRoots(m);
   assert.deepEqual(m.protectedVideoTaskIds, MV_DIRECT.protectedVideoTaskIds);

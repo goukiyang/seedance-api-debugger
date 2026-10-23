@@ -49,6 +49,21 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
 const fixtures = [
+  { file: 'ops/video-creation-contract-check.mjs', schema: 'video-creation-contract-engineering.v1',
+    marker: 'Video creation contract engineering receipt: ', checks: [
+      'v1_v2_and_unknown_contracts_fail_closed', 'project_only_specs_real_parent_and_child_identity',
+      'schema_capability_uses_actual_required_columns', 'delivery_selection_is_not_lock_and_independent_provenance_is_not_lineage',
+      'approval_actual_helper_expiry_revoke_scope_cost_cas_and_same_task_once',
+      'all_four_acceptors_bind_real_task_and_approval_in_original_transaction', 'reuse_original_identity_scope_and_unknown_never_replays',
+    ], sources: [
+      'ops/video-creation-contract-check.mjs', 'scripts/video-creation-contract-engineering.ts',
+      'src/lib/creation/contract.ts', 'src/lib/creation/context.ts', 'src/lib/creation/intents.ts', 'src/lib/creation/approval.ts',
+      'src/lib/creation/availability.ts', 'src/lib/creation/lineage.ts', 'src/lib/navigation/task-reuse-intent.ts',
+      'src/lib/navigation/task-reuse-client.ts', 'src/lib/navigation/task-reuse-operation.server.ts',
+      'src/lib/hooks/useWorkspace.ts', 'src/components/ResourceLibraryPicker.tsx', 'src/components/useResultPages.ts',
+      'src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts',
+      'src/app/api/tasks/enhance-video/create/route.ts', 'src/lib/tasks/seedance-draft-upgrade.ts',
+    ] },
   { file: 'scripts/image-quality-routing-engineering.ts', schema: 'image-quality-routing-engineering.v1',
     marker: 'Image quality routing engineering receipt: ', checks: ['strict_versioned_reader', 'two_quality_routes_reject_channel_override',
       'quote_route_revision_frozen', 'legacy_parent_source_contract_preserved', 'actual_total_reference_count_seven',
@@ -90,6 +105,7 @@ const fixtures = [
       'scripts/upload-raw-recovery-engineering.mjs', 'scripts/upload-root-cure-smoke.ts',
       'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts',
       'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/http/file-upload.ts',
+      'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts', 'src/app/api/assets/upload-proxy/route.ts',
       'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
       'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
       'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
@@ -139,6 +155,27 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/template-author-cover-contract-engineering.ts', schema: 'template-author-cover-contract-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', checks: [
+      'author_colleague_admin_and_fresh_identity_never_impersonate_each_other',
+      'missing_or_conflicting_sources_do_not_guess_authors_or_cross_workspace_owners',
+      'definition_read_is_separate_from_generation_and_never_projects_source_media_or_writes',
+      'author_contact_uses_only_fresh_server_identity_fixed_feishu_route_and_tenant',
+      'prepare_none_stays_frozen_after_new_private_result_and_cas_loser_does_not_overwrite',
+      'prepare_existing_preserves_old_recipe_and_binds_original_request_target_and_operation',
+      'failed_source_preparation_keeps_original_source_task_revision_without_new_latest',
+      'protected_output_is_not_published_or_replaced_by_input_fallback',
+      'cover_commit_requires_exact_owner_target_operation_source_and_before_after_revision',
+      'fixed_cover_public_dto_and_original_status_hide_source_and_recheck_revocation',
+    ], sources: [
+      'scripts/template-author-cover-contract-engineering.ts', 'src/lib/image-studio/template-author.ts',
+      'src/lib/image-studio/definition-read.ts', 'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
+      'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
+      'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
+      'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts', 'src/lib/image-studio/dimension-mismatch.ts',
+      'src/lib/image-studio/pricing-state.ts', 'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts',
+      'src/lib/users/profiles.ts', 'src/lib/users/display.ts',
+    ] },
   { file: 'scripts/image-provider-admin-engineering.ts', schema: 'image-provider-admin-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'scripts/image-provider-admin-engineering.ts', 'src/app/api/admin/image-studio/tasks/route.ts',
@@ -320,6 +357,7 @@ function validatePublicUsageFixture(fixture, recorded, runId, batchStart, batchE
   for (const key of ['forbiddenCalls', 'paidRequests', 'browserRuns']) assert.equal(value[key], 0);
   if (value.productionWrites !== undefined) assert.equal(value.productionWrites, 0);
   assert.ok(Array.isArray(value.checks) && value.checks.length > 0 && new Set(value.checks).size === value.checks.length);
+  if (fixture.checks) assert.deepEqual(value.checks, fixture.checks);
   if (fixture.schema === 'role-runtime-engineering.v1') {
     assert.equal(value.mode, 'verify'); assert.equal(value.maximumWrites, 1); assert.deepEqual(value.rejectedCodes, []);
     assert.deepEqual(value.checks, ['actual_runtime_writer_serializes_concurrent_atomic_publication',

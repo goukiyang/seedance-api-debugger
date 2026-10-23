@@ -141,7 +141,7 @@ export type StudioTaskSnapshotInput = {
   watermark: boolean;
   draft: boolean;
   projectId: string;
-  videoCardId: string;
+  videoCardId: string | null;
   videoBranchId: string | null;
   referenceImageIds: string[];
   referenceVideoUrls: string[];
