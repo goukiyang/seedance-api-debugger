@@ -12,6 +12,8 @@ export type HdImageLimits = { wallMs: number; readingMs: number; encodingMs: num
 export const HD_IMAGE_LIMITS: Readonly<HdImageLimits> = Object.freeze({ wallMs: 660_000, readingMs: 150_000, encodingMs: 180_000, validatingMs: 300_000, terminateMs: 5_000 });
 export type HdImageStage = 'reading' | 'encoding' | 'validating';
 export type HdProcessorIdentity = { pid: number; groupId: number; host: string; startTicks: string; executionId: string };
+export type HdChildClose = { executionId: string; code: number | null; signal: NodeJS.Signals | null; observedAt: string };
+export type HdGroupExit = { executionId: string; confirmedAt: string; evidenceKind: 'process-group-gone' };
 export type HdImageRequest = {
   protocol: typeof HD_IMAGE_PROTOCOL; key: string; executionId: string; sourceVersion: string;
   inputFile: string; workDirectory: string; preserveText: boolean;
@@ -106,6 +108,8 @@ export function validateHdImageResult(value: unknown, request: HdImageRequest): 
 }
 export async function runHdImageProcessor(request: HdImageRequest, options: {
   onSpawn?: (identity: HdProcessorIdentity) => Promise<void>;
+  onClose?: (observation: HdChildClose) => Promise<void>;
+  onGroupExit?: (observation: HdGroupExit) => Promise<void>;
   onStage?: (stage: HdImageStage) => Promise<void>;
   onPrepared?: (metadata: HdImageMetadata) => Promise<boolean>;
   // Only the offline engineering fixture supplies these dependency overrides.
@@ -129,6 +133,21 @@ export async function runHdImageProcessor(request: HdImageRequest, options: {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let processingMessages = Promise.resolve();
   let stopPromise: Promise<void> | undefined;
+  let closeObservation: HdChildClose | undefined, closeReported = false, groupReported = false, detachedLifecycle = false;
+  let lifecycleWrites = Promise.resolve();
+  const reportClose = () => {
+    if (!closeObservation || closeReported) return lifecycleWrites;
+    closeReported = true;
+    lifecycleWrites = lifecycleWrites.then(() => options.onClose?.(closeObservation!));
+    return lifecycleWrites;
+  };
+  const reportGroupExit = async () => {
+    await reportClose();
+    if (!groupReported && child.pid && !await groupRunning(child.pid)) {
+      groupReported = true;
+      await options.onGroupExit?.({ executionId: request.executionId, confirmedAt: new Date().toISOString(), evidenceKind: 'process-group-gone' });
+    }
+  };
   let notifyStopped!: () => void;
   const stopped = new Promise<void>(resolve => { notifyStopped = resolve; });
   const stop = (error: HdProcessorError) => {
@@ -145,7 +164,14 @@ export async function runHdImageProcessor(request: HdImageRequest, options: {
   arm();
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
     child.once('error', () => stop(new HdProcessorError('hd_child_spawn_failure', false)));
-    child.once('close', (code, signal) => { settled = true; resolve({ code, signal }); });
+    child.once('close', (code, signal) => {
+      settled = true;
+      closeObservation = { executionId: request.executionId, code, signal, observedAt: new Date().toISOString() };
+      resolve({ code, signal });
+      // A group-gone observation does not manufacture close. If Node delivers
+      // the real close later, the writer binds it to the original execution.
+      if (detachedLifecycle) void reportClose().catch(() => { console.warn('HD late close evidence could not be persisted'); });
+    });
   });
   child.on('message', raw => {
     processingMessages = processingMessages.then(async () => {
@@ -192,6 +218,7 @@ export async function runHdImageProcessor(request: HdImageRequest, options: {
       if (child.pid && !await groupRunning(child.pid)) {
         // Group exit itself is proof even if a broken IPC close callback has
         // not arrived. It is still a failed run, never a publishable result.
+        await reportGroupExit();
         throw new HdProcessorError(failure?.kind || 'hd_child_abnormal_exit', true, failure?.diagnostic, failure?.integrity);
       }
       throw new HdProcessorError('hd_child_exit_unknown', false);
@@ -201,17 +228,25 @@ export async function runHdImageProcessor(request: HdImageRequest, options: {
       await terminateGroup(child.pid, limits.terminateMs);
       if (await groupRunning(child.pid)) throw new HdProcessorError('hd_child_exit_unknown', false);
     }
+    await reportGroupExit();
     if (stopping) throw new HdProcessorError('hd_shutdown', true);
     if (failure) throw new HdProcessorError(failure.kind, failure.kind !== 'hd_child_exit_unknown', failure.diagnostic, failure.integrity);
     if (!exit || exit.code !== 0 || exit.signal || !result) throw new HdProcessorError('hd_child_abnormal_exit', true, { stage: phase, message: exit?.signal || `exit_${exit?.code}` });
     return result;
   } catch (error) {
-    if (!settled && child.pid && !(error instanceof HdProcessorError && (error.kind === 'hd_child_exit_unknown' || error.exited))) {
-      try { await terminateGroup(child.pid, limits.terminateMs); }
-      catch { throw new HdProcessorError('hd_child_exit_unknown', false); }
+    // In particular, a failed durable onSpawn must stop the actual fork before
+    // any work message. Preserve that original write failure even if cleanup or
+    // evidence persistence also fails; absence of group evidence stays unknown.
+    try {
+      if (child.pid && await groupRunning(child.pid)) await terminateGroup(child.pid, limits.terminateMs);
+      await reportGroupExit();
+    } catch (cleanupError) {
+      try { if (error && typeof error === 'object') Object.defineProperty(error, 'hdCleanupError', { value: cleanupError, configurable: true }); }
+      catch { /* A non-extensible original error is still the original error. */ }
     }
     throw error;
   } finally {
+    detachedLifecycle = true;
     clearTimeout(wall); clearTimeout(timeout); active.delete(child);
   }
 }

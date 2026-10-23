@@ -1,67 +1,11 @@
 {
-  "schema": "sd2-release-profile.v1",
-  "template": "release-r16",
-  "wrapper": "run-r16.mjs",
-  "successfulRun": "64295afe-13c2-46e0-b3f3-da32cb6c3bdb",
-  "controllerCount": 36,
-  "controllerSetSha256": "84d3bac3d6846f47eb998573b9130b1b6cc95af696a3468a72ff02a25476bb09",
-  "wrapperSha256": "0c86b553e41c42cb2a539a4a07a3f46669d71f7c1c4d0b2e5b12abb3a02d3907",
-  "promotion": {
-    "root": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-22-image-generation-failure-root-cause/implementation",
-    "template": "release-size-log-r01",
-    "wrapper": "run-size-log-r01.mjs",
-    "controllerCount": 54,
-    "controllerSetSha256": "1ab3f67a48eb93504b9844de3350690f7b997da069edcdd885ba99680639338b",
-    "wrapperSha256": "bab84582f98deec415fc7582ca62100869a5af48eef03cc36e0c9bf8b41efae1",
-    "changed": [
-      "candidate-inputs.mjs",
-      "candidate-reuse-engineering.mjs",
-      "candidate-reuse.mjs",
-      "candidate.mjs",
-      "common.mjs",
-      "control-preflight.mjs",
-      "cutover-driver.mjs",
-      "cutover-safety-engineering.mjs",
-      "cutover-safety.mjs",
-      "guard-recovery-engineering.mjs",
-      "guard-recovery.mjs",
-      "hd-closed-cache-engineering.mjs",
-      "hd-storage-preflight-engineering.mjs",
-      "hd-storage-preflight.mjs",
-      "legacy-maintenance.mjs",
-      "public-proof.mjs",
-      "release-contract.mjs",
-      "release-protection-engineering.mjs",
-      "release.mjs",
-      "retired-hd-cache-engineering.mjs",
-      "switch.mjs",
-      "writer-network-fence.mjs"
-    ],
-    "added": [
-      "candidate-lifecycle-engineering.mjs",
-      "canvas-batch-schema-contract.mjs",
-      "canvas-batch-schema-engineering.mjs",
-      "canvas-batch-schema.mjs",
-      "deployed-usage-schema-engineering.mjs",
-      "deployed-usage-schema.mjs",
-      "multiview-backup-control.mjs",
-      "multiview-backup-engineering.mjs",
-      "multiview-works-control.mjs",
-      "multiview-works-engineering.mjs",
-      "normal-continuation-engineering.mjs",
-      "normal-continuation.mjs",
-      "preflight-resume-engineering.mjs",
-      "recovered-guard-baseline.mjs",
-      "runtime-source-engineering.mjs",
-      "usage-role-control.mjs",
-      "usage-role-engineering.mjs",
-      "usage-role-start.mjs"
-    ]
+  "schema": "sd2-release-profile.v2",
+  "entry": "ops/sd2-release.mjs",
+  "engine": {
+    "directory": "ops/release-engine/v1",
+    "versionSource": "engine-version.mjs"
   },
-  "evidence": {
-    "control-freeze.json": "8da4ab03ce189a29d139ddc25ab7cd9daa1026765a900f0456eee84ff46b21f5",
-    "switch-complete.json": "9ab06baaa65892f3ba9162974b5ca3db5cdf38e251f14b796d305e12de524d78",
-    "final-proof.json": "a09e57490847e101d7ac6fe912d7934baecb73ae33f9235a91d48b6c95767cb7",
-    "native-control-preflight/receipt.json": "7f485c4c7f9b9ea25819e4b0d27bb831b0a176e89afe2ef28bd7ff74dd759f81"
-  }
+  "artifactPolicy": "immutable-original-full-build",
+  "attemptPolicy": "fresh-window-distinct-attempt",
+  "recoveryPolicy": "fixed-compatible-guard-no-business-data-restore"
 }

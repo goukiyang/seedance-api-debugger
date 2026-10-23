@@ -9,13 +9,14 @@ import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_CONTROL_PROTOCOL, HD_RETRY_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
 import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, type HdIntegrity } from './hd-encoder';
 import { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
-import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity } from './hd-image-processor';
+import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity, type HdChildClose, type HdGroupExit } from './hd-image-processor';
 export type { HdControl, HdResourceSample } from './hd-resource-state';
 export { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
 export { HD_VALIDATION_VERSION } from './hd-encoder';
 export type { HdIntegrity } from './hd-encoder';
 
 export const HD_POLICY = 'hd-f-v1';
+export const HD_EXECUTION_EVIDENCE_PROTOCOL = 'hd-execution-evidence-v1';
 const ROOT_RESERVE = 512000 * 1024;
 const DATA_RESERVE = 2 * 1024 * 1024 * 1024;
 type HdEncoder = {
@@ -25,7 +26,24 @@ type HdEncoder = {
 type HdAttempt = {
   attempt: number; startedAt: string; finishedAt?: string; sourceVersion: string;
   encoder?: HdEncoder; status: HdJob['status']; reason?: string; integrity?: HdIntegrity;
+  executionId?: string; processor?: HdProcessorIdentity; childClose?: HdChildClose; groupExit?: HdGroupExit;
 };
+type HdVerification = {
+  executionId: string; sourceVersion: string; operation: 'validate' | 'verify-original'; startedAt: string; finishedAt?: string;
+  processor?: HdProcessorIdentity; childClose?: HdChildClose; groupExit?: HdGroupExit;
+};
+function validHdExecutionEvidence(value: Pick<HdAttempt, 'executionId' | 'processor' | 'childClose' | 'groupExit'>) {
+  if (!value || typeof value !== 'object') return false;
+  const { executionId, processor, childClose, groupExit } = value;
+  return !(executionId !== undefined && !/^[a-f0-9-]{36}$/.test(executionId)
+    || processor !== undefined && (!processor || processor.executionId !== executionId || !Number.isSafeInteger(processor.pid)
+      || processor.pid <= 1 || processor.groupId !== processor.pid || typeof processor.host !== 'string' || !/^\d+$/.test(processor.startTicks))
+    || childClose !== undefined && (!childClose || childClose.executionId !== executionId || !Number.isFinite(Date.parse(childClose.observedAt))
+      || childClose.code !== null && !Number.isInteger(childClose.code)
+      || childClose.signal !== null && !/^SIG[A-Z0-9]+$/.test(childClose.signal))
+    || groupExit !== undefined && (!groupExit || groupExit.executionId !== executionId || groupExit.evidenceKind !== 'process-group-gone'
+      || !Number.isFinite(Date.parse(groupExit.confirmedAt))));
+}
 export type HdJob = {
   key: string; source: string; version: string; policy: string; priority: number;
   status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; reason?: string;
@@ -33,9 +51,11 @@ export type HdJob = {
   format?: 'avif' | 'webp' | 'original'; mime?: string; bytes?: number;
   width?: number; height?: number; file?: string; batch?: string;
   attemptLimit?: number; attemptHistory?: HdAttempt[]; integrity?: HdIntegrity;
+  verificationHistory?: HdVerification[];
   retryHistory?: Array<{ at: string; previousAttempts: number; reason?: string; manifest: string }>;
   retryAt?: string; isolatedReason?: 'source_missing' | 'source_unreadable';
   protocol?: 'hd-job-v2'; queueRole?: HdQueueRole; stage?: HdJobStage; executionId?: string;
+  executionEvidenceProtocol?: typeof HD_EXECUTION_EVIDENCE_PROTOCOL;
   errorKind?: string; lastProgressAt?: string; executionExitedAt?: string;
   processor?: HdProcessorIdentity; diagnostic?: { stage: string; code?: string; message?: string };
   publicationPending?: boolean; // Read-only queue projection, never a new status.
@@ -96,9 +116,14 @@ export async function readHdJob(key: string): Promise<HdJob | null> {
       || !['queued', 'running', 'ready', 'failed', 'skipped'].includes(job.status) || !Number.isInteger(job.attempts)
       || !Number.isInteger(job.priority) || typeof job.preserveText !== 'boolean'
       || (job.attemptLimit !== undefined && (!Number.isSafeInteger(job.attemptLimit) || job.attemptLimit < 3))
-      || (job.attemptHistory !== undefined && !Array.isArray(job.attemptHistory))
+      || (job.attemptHistory !== undefined && (!Array.isArray(job.attemptHistory) || job.attemptHistory.some(attempt => !validHdExecutionEvidence(attempt))))
+      || (job.verificationHistory !== undefined && (!Array.isArray(job.verificationHistory) || job.verificationHistory.some(value =>
+        !validHdExecutionEvidence(value) || !value.executionId || typeof value.sourceVersion !== 'string'
+        || !['validate', 'verify-original'].includes(value.operation) || !Number.isFinite(Date.parse(value.startedAt))
+        || value.finishedAt !== undefined && !Number.isFinite(Date.parse(value.finishedAt)))))
       || (job.retryHistory !== undefined && !Array.isArray(job.retryHistory))
       || (job.protocol !== undefined && job.protocol !== 'hd-job-v2')
+      || (job.executionEvidenceProtocol !== undefined && job.executionEvidenceProtocol !== HD_EXECUTION_EVIDENCE_PROTOCOL)
       || (job.queueRole !== undefined && !['viewer', 'new', 'historical'].includes(job.queueRole))
       || (job.stage !== undefined && !['queued', 'reading', 'encoding', 'validating', 'publishing'].includes(job.stage))
       || (job.executionId !== undefined && !/^[a-f0-9-]{36}$/.test(job.executionId))
@@ -107,6 +132,8 @@ export async function readHdJob(key: string): Promise<HdJob | null> {
       || (job.executionExitedAt !== undefined && !Number.isFinite(Date.parse(job.executionExitedAt)))
       || (job.processor !== undefined && (!/^[a-f0-9-]{36}$/.test(job.processor.executionId) || !Number.isSafeInteger(job.processor.pid)
         || job.processor.pid <= 1 || job.processor.groupId !== job.processor.pid || typeof job.processor.host !== 'string' || !/^\d+$/.test(job.processor.startTicks)))) throw new Error('invalid_hd_manifest');
+    const executions = [...(job.attemptHistory || []), ...(job.verificationHistory || [])].map(value => value.executionId).filter(Boolean);
+    if (new Set(executions).size !== executions.length) throw new Error('invalid_hd_manifest');
     return job;
   }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
@@ -526,8 +553,45 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
   const clock = dependencies.clock || Date.now;
   const timestamp = () => new Date(clock()).toISOString();
   if (pausedSourceVersion !== undefined) await (dependencies.assertWorkerLock || assertHdWorkerLock)();
+  let leaseHeld = false;
   return withLease(key, async () => {
+    leaseHeld = true;
+    let deferEvidence = false;
+    const lateEvidence: Array<{ save: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void }> = [];
+    try {
     const job = await readHdJob(key);
+    // Normal callbacks already own this key lease. A genuinely late close may
+    // reacquire it, but can only amend its exact historical execution record.
+    const observeAttempt = async (executionId: string, number: number | null, version: string, patch: Partial<HdAttempt>, top: Partial<HdJob> = {}) => {
+      if ([patch.processor, patch.childClose, patch.groupExit].some(value => value && value.executionId !== executionId)) throw new Error('hd_execution_changed');
+      const save = async () => {
+        const fresh = await readHdJob(key);
+        const history = number === null ? fresh?.verificationHistory : fresh?.attemptHistory;
+        const matches = history?.filter(value => value.executionId === executionId && (number === null || (value as HdAttempt).attempt === number) && value.sourceVersion === version) || [];
+        if (!fresh || matches.length !== 1) throw new Error('hd_execution_changed');
+        const target = matches[0];
+        if (patch.childClose && target.childClose && JSON.stringify(target.childClose) !== JSON.stringify(patch.childClose)) throw new Error('hd_execution_changed');
+        if (patch.groupExit && target.groupExit) patch = { ...patch, groupExit: target.groupExit };
+        Object.assign(target, patch);
+        const current = leaseHeld && fresh.version === version && (number === null
+          ? fresh.verificationHistory?.[fresh.verificationHistory.length - 1]?.executionId === executionId && fresh.executionId === job?.executionId
+          : fresh.executionId === executionId);
+        if (current) Object.assign(fresh, top);
+        await atomicHdJson(jobPath(key), fresh);
+        const localHistory = number === null ? job?.verificationHistory : job?.attemptHistory;
+        const local = localHistory?.find(value => value.executionId === executionId && (number === null || (value as HdAttempt).attempt === number) && value.sourceVersion === version);
+        if (leaseHeld && local) Object.assign(local, patch);
+        if (current && job) Object.assign(job, top);
+      };
+      if (leaseHeld) {
+        // A real close delivered after the processor returned must not race the
+        // caller's publication/final manifest write under this same lease.
+        if (deferEvidence) return new Promise<void>((resolve, reject) => { lateEvidence.push({ save, resolve, reject }); });
+        return save();
+      }
+      try { if (await withLease(key, async () => { await save(); return true; }) !== true) throw new Error('hd_lease_conflict'); }
+      catch (error) { await setHdControl(true, 'worker_integrity_failure'); throw error; }
+    };
     const control = await hdControl();
     const receiptFile = path.join(hdDirectory(), key + '.publish.json');
     const receipt = await fs.readFile(receiptFile, 'utf8').then(text => JSON.parse(text) as {
@@ -542,12 +606,20 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
     // Even a running manifest cannot authorize a new encoder until the recorded
     // prior process and its group have been proved gone.
     if (job.processor) {
-      try { await assertHdExecutionExited(job.processor); job.executionExitedAt = timestamp(); }
+      try {
+        await assertHdExecutionExited(job.processor); job.executionExitedAt = timestamp();
+        const previous = job.attemptHistory?.find(value => value.executionId === job.processor!.executionId && value.sourceVersion === job.version)
+          || job.verificationHistory?.find(value => value.executionId === job.processor!.executionId && value.sourceVersion === job.version);
+        if (previous) await observeAttempt(previous.executionId!, 'attempt' in previous ? previous.attempt : null, previous.sourceVersion,
+          { groupExit: { executionId: previous.executionId!, confirmedAt: job.executionExitedAt, evidenceKind: 'process-group-gone' } },
+          { executionExitedAt: job.executionExitedAt });
+      }
       catch (error) { await setHdControl(true, 'hd_child_exit_unknown'); throw error; }
     }
     if (receipt) {
       let verificationDirectory = '';
       let verificationExited = true;
+      let verification: HdVerification | undefined;
       try {
         if (!receipt.job || receipt.job.key !== key || receipt.job.version !== job.version || receipt.job.status !== 'ready'
           || receipt.job.policy !== HD_POLICY || receipt.job.source !== job.source || receipt.job.preserveText !== job.preserveText
@@ -557,6 +629,11 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
         const input = await hdSource(job.source);
         if (!input || input.version !== job.version) throw new Error('hd_publish_receipt_invalid');
         const verificationId = randomUUID();
+        job.executionEvidenceProtocol = HD_EXECUTION_EVIDENCE_PROTOCOL;
+        verification = { executionId: verificationId, sourceVersion: job.version,
+          operation: receipt.job.format === 'original' ? 'verify-original' : 'validate', startedAt: timestamp() };
+        job.verificationHistory = [...(job.verificationHistory || []), verification];
+        await atomicHdJson(jobPath(key), job);
         verificationDirectory = await privateHdRun(key, verificationId);
         let candidate = '';
         let candidateVersion = '';
@@ -581,11 +658,16 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
           // Receipt generation remains the original publication identity; this
           // independent verification process has its own durable PID/start ID.
           job.processor = identity; job.stage = 'validating'; job.lastProgressAt = timestamp(); verificationExited = false;
-          await atomicHdJson(jobPath(key), job);
+          verification!.processor = identity;
+          await observeAttempt(verificationId, null, job.version, { processor: identity }, { processor: identity, stage: job.stage, lastProgressAt: job.lastProgressAt });
+        }, onClose: observation => observeAttempt(verificationId, null, verification!.sourceVersion, { childClose: observation }),
+        onGroupExit: async observation => {
+          await observeAttempt(verificationId, null, verification!.sourceVersion, { groupExit: observation }); verificationExited = true;
         }, onStage: async stage => {
           job.stage = stage; job.lastProgressAt = timestamp(); await atomicHdJson(jobPath(key), job);
         } });
-        verificationExited = true;
+        deferEvidence = true; verificationExited = true;
+        verification.finishedAt = timestamp(); await atomicHdJson(jobPath(key), job);
         const width = [5, 6, 7, 8].includes(verified.metadata.orientation) ? verified.metadata.height : verified.metadata.width;
         const height = [5, 6, 7, 8].includes(verified.metadata.orientation) ? verified.metadata.width : verified.metadata.height;
         if (verified.metadata.bytes !== input.size || width !== receipt.job.width || height !== receipt.job.height
@@ -603,6 +685,15 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
             const info = await fs.stat(destination);
             if (!info.isFile() || info.size !== receipt.job.bytes) throw new Error('hd_publish_receipt_invalid');
           }
+          for (const publishedAttempt of receipt.job.attemptHistory || []) {
+            if (!publishedAttempt.executionId) continue;
+            const observed = job.attemptHistory?.find(value => value.executionId === publishedAttempt.executionId
+              && value.attempt === publishedAttempt.attempt && value.sourceVersion === publishedAttempt.sourceVersion);
+            if (observed) for (const field of ['processor', 'childClose', 'groupExit'] as const)
+              if (observed[field]) Object.assign(publishedAttempt, { [field]: observed[field] });
+          }
+          receipt.job.verificationHistory = job.verificationHistory;
+          receipt.job.executionEvidenceProtocol = HD_EXECUTION_EVIDENCE_PROTOCOL;
           await atomicHdJson(jobPath(key), receipt.job);
           await fs.unlink(receiptFile);
           return true;
@@ -610,10 +701,17 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
         if (!resumed) throw new Error('hd_publish_control_hold');
         return;
       } catch (error) {
+        deferEvidence = true;
         if (error instanceof HdProcessorError) verificationExited = error.exited;
         await setHdControl(true, error instanceof HdProcessorError && error.kind === 'output_integrity' ? 'output_integrity' : 'worker_integrity_failure');
         throw error;
       } finally {
+        if (verification && !verification.finishedAt) {
+          verification.finishedAt = timestamp();
+          // This is the caller's final write, not a child callback. It already
+          // owns the lease and must precede deferred late observations.
+          await atomicHdJson(jobPath(key), job);
+        }
         if (verificationDirectory && verificationExited) await cleanupHdRun(verificationDirectory);
       }
     }
@@ -629,20 +727,31 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       const interrupted = job.attemptHistory?.[job.attemptHistory.length - 1];
       if (interrupted?.status === 'running' && !interrupted.finishedAt) Object.assign(interrupted, { finishedAt: timestamp(), status: 'failed', reason: 'worker_interrupted' });
       job.status = 'running'; job.attempts++; job.updatedAt = timestamp(); job.protocol = 'hd-job-v2';
+      job.executionEvidenceProtocol = HD_EXECUTION_EVIDENCE_PROTOCOL;
       job.stage = 'reading'; job.executionId = randomUUID(); job.lastProgressAt = timestamp();
       job.processor = undefined; job.executionExitedAt = undefined; job.errorKind = undefined; job.diagnostic = undefined;
       job.reason = undefined; job.integrity = undefined; job.retryAt = undefined; job.isolatedReason = undefined;
-      attempt = { attempt: job.attempts, startedAt: job.updatedAt, sourceVersion: job.version, status: 'running' };
+      attempt = { attempt: job.attempts, startedAt: job.updatedAt, sourceVersion: job.version, status: 'running', executionId: job.executionId };
       job.attemptHistory = [...(job.attemptHistory || []), attempt];
       await atomicHdJson(jobPath(key), job);
       const input = await hdSource(job.source);
       if (!input || input.version !== job.version) { job.status = 'skipped'; job.reason = 'source_changed'; return; }
       directory = await privateHdRun(key, job.executionId);
-      const result = await processor({ protocol: HD_IMAGE_PROTOCOL, key, executionId: job.executionId, sourceVersion: job.version,
+      const executionId = job.executionId, attemptNumber = attempt.attempt, sourceVersion = attempt.sourceVersion;
+      const result = await processor({ protocol: HD_IMAGE_PROTOCOL, key, executionId, sourceVersion: job.version,
         inputFile: input.file, workDirectory: directory, preserveText: job.preserveText, operation: 'encode' }, {
         onSpawn: async identity => {
-          job.processor = identity; executionExited = false;
-          await atomicHdJson(jobPath(key), job);
+          executionExited = false;
+          if (identity.executionId !== executionId) throw new Error('hd_execution_changed');
+          // Retain the known fork identity for the failure manifest too, even
+          // when the first durable spawn write itself fails.
+          attempt!.processor = identity; job.processor = identity;
+          await observeAttempt(executionId, attemptNumber, sourceVersion, { processor: identity }, { processor: identity });
+        },
+        onClose: observation => observeAttempt(executionId, attemptNumber, sourceVersion, { childClose: observation }),
+        onGroupExit: async observation => {
+          await observeAttempt(executionId, attemptNumber, sourceVersion, { groupExit: observation }, { executionExitedAt: observation.confirmedAt });
+          if (leaseHeld && job.executionId === executionId) executionExited = true;
         },
         onStage: async stage => {
           job.stage = stage; job.lastProgressAt = timestamp(); job.updatedAt = timestamp();
@@ -654,7 +763,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
           return safe;
         },
       });
-      executionExited = true; job.executionExitedAt = timestamp();
+      deferEvidence = true; executionExited = true; job.executionExitedAt = timestamp();
       await assertHdProcessorOutput(result, job, input, directory);
       if (result.skipped) { job.status = 'skipped'; job.reason = result.skipped; return; }
       const format = result.format!;
@@ -711,6 +820,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       });
       if (!published) throw new Error('hd_publish_control_hold');
     } catch (error) {
+      deferEvidence = true;
       const processorError = error instanceof HdProcessorError ? error : null;
       if (processorError) {
         executionExited = processorError.exited;
@@ -766,6 +876,15 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
         else if (job.status !== 'running') job.stage = undefined;
         job.updatedAt = timestamp(); await atomicHdJson(jobPath(key), job);
       }
+    }
+    } finally {
+      try {
+        while (lateEvidence.length) {
+          const item = lateEvidence.shift()!;
+          try { await item.save(); item.resolve(); }
+          catch (error) { item.reject(error); await setHdControl(true, 'worker_integrity_failure'); throw error; }
+        }
+      } finally { leaseHeld = false; }
     }
   });
 }

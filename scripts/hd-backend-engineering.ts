@@ -144,6 +144,12 @@ async function main() {
       }) });
       const result = (await core.readHdJob(job.key))!;
       assert.equal(result.attempts, attempt); assert.equal(result.errorKind, 'encode_timeout'); assert.ok(result.executionExitedAt);
+      const recorded = result.attemptHistory![attempt - 1];
+      assert.equal(recorded.executionId, executions[attempt - 1].executionId);
+      assert.deepEqual(recorded.processor, executions[attempt - 1]);
+      assert.equal(recorded.groupExit?.executionId, recorded.executionId);
+      assert.equal(recorded.groupExit?.evidenceKind, 'process-group-gone');
+      if (recorded.childClose) { assert.equal(recorded.childClose.executionId, recorded.executionId); assert.ok(recorded.childClose.observedAt); }
       assert.equal(result.status, attempt < 3 ? 'queued' : 'failed'); assert.equal((await core.hdControl()).paused, false);
       if (attempt < 3) { assert.ok(result.retryAt); clock = Date.parse(result.retryAt!) + 1; }
     }
@@ -153,6 +159,71 @@ async function main() {
     await processJob(job.key); assert.equal((await core.readHdJob(job.key))!.attempts, 3);
     const next = (await core.requestHd(good.source, 0, false))!;
     await processJob(next.key); assert.equal((await core.readHdJob(next.key))!.status, 'ready');
+  });
+  await check('E06 spawn identity is durable before work; failed spawn write stops the actual group without dispatch', async () => {
+    await fixture(); const original = await image('spawn-write'), job = (await core.requestHd(original.source, 0, false))!;
+    const marker = path.join(evidenceRoot, 'spawn-work-' + randomUUID()), script = path.join(evidenceRoot, 'spawn-write-' + randomUUID() + '.cjs');
+    await fs.writeFile(script, `process.once('message',()=>{require('node:fs').writeFileSync(${JSON.stringify(marker)},'dispatched')});setInterval(()=>{},1000);`, { mode: 0o600 });
+    const rename = fs.rename, manifest = path.join(core.hdDirectory(), job.key + '.json'); let refused = false;
+    let actualIdentity: runner.HdProcessorIdentity | undefined;
+    fs.rename = async function (from, to) {
+      if (!refused && to === manifest) {
+        const value = JSON.parse(await fs.readFile(String(from), 'utf8'));
+        if (value.processor) { refused = true; throw Object.assign(new Error('synthetic_spawn_manifest_write_failed'), { code: 'ENOSPC' }); }
+      }
+      return rename(from, to);
+    };
+    try {
+      await processJob(job.key, { processor: (request, options) => runner.runHdImageProcessor(request, {
+        ...options, applicationRoot, script, limits: shortLimits,
+        onSpawn: async identity => { actualIdentity = identity; await options?.onSpawn?.(identity); },
+      }) });
+    } finally { fs.rename = rename; }
+    assert.equal(refused, true); assert.ok(actualIdentity); await runner.assertHdExecutionExited(actualIdentity!);
+    assert.equal(await exists(marker), false);
+    const failed = (await core.readHdJob(job.key))!;
+    assert.equal(failed.status, 'failed'); assert.equal(failed.diagnostic?.code, 'ENOSPC');
+    assert.deepEqual(failed.attemptHistory![0].processor, actualIdentity);
+    assert.equal(failed.attemptHistory![0].groupExit?.evidenceKind, 'process-group-gone');
+  });
+  await check('E06 real nonzero close and delayed original close never overwrite a later attempt', async () => {
+    await fixture(); const original = await image('late-close'), job = (await core.requestHd(original.source, 0, false))!;
+    let lateClose: runner.HdChildClose | undefined;
+    let lateWriter: NonNullable<Parameters<typeof runner.runHdImageProcessor>[1]>['onClose'];
+    await processJob(job.key, { processor: (request, options) => {
+      lateWriter = options?.onClose;
+      return runner.runHdImageProcessor(request, { ...options, applicationRoot, script: hangingScript, limits: shortLimits,
+        onSpawn: async identity => {
+          await options?.onSpawn?.(identity);
+          const durable = (await core.readHdJob(job.key))!;
+          assert.deepEqual(durable.attemptHistory![0].processor, identity); assert.equal(durable.attemptHistory![0].executionId, request.executionId);
+        }, onClose: async value => { lateClose = value; },
+      });
+    } });
+    const first = (await core.readHdJob(job.key))!;
+    assert.ok(first.attemptHistory![0].groupExit); assert.equal(first.attemptHistory![0].childClose, undefined);
+    await waitFor(async () => Boolean(lateClose));
+    assert.ok(lateClose!.signal || lateClose!.code !== 0);
+    await processJob(job.key, { clock: () => Date.parse(first.retryAt!) + 1 });
+    const latest = (await core.readHdJob(job.key))!; assert.equal(latest.status, 'ready'); assert.equal(latest.attempts, 2);
+    const latestAttempt = JSON.stringify(latest.attemptHistory![1]);
+    await lateWriter!(lateClose!);
+    const after = (await core.readHdJob(job.key))!;
+    assert.equal(after.executionId, latest.executionId); assert.deepEqual(after.processor, latest.processor);
+    assert.equal(after.executionExitedAt, latest.executionExitedAt); assert.equal(after.updatedAt, latest.updatedAt);
+    assert.equal(JSON.stringify(after.attemptHistory![1]), latestAttempt);
+    assert.deepEqual(after.attemptHistory![0].childClose, lateClose);
+    assert.equal(after.attemptHistory![0].executionId, first.executionId);
+    const script = path.join(evidenceRoot, 'nonzero-' + randomUUID() + '.cjs');
+    await fs.writeFile(script, "process.once('message',()=>process.exit(7));", { mode: 0o600 });
+    const work = path.join(evidenceRoot, 'nonzero-work-' + randomUUID()); await fs.mkdir(work, { mode: 0o700 });
+    let close: runner.HdChildClose | undefined, group: runner.HdGroupExit | undefined;
+    const executionId = randomUUID();
+    await assert.rejects(runner.runHdImageProcessor({ protocol: runner.HD_IMAGE_PROTOCOL, key: job.key, executionId,
+      sourceVersion: job.version, inputFile: original.file, workDirectory: work, preserveText: false },
+    { applicationRoot, script, limits: shortLimits, onClose: async value => { close = value; }, onGroupExit: async value => { group = value; } }), /hd_child_abnormal_exit/);
+    assert.equal(close?.code, 7); assert.equal(close?.signal, null); assert.equal(close?.executionId, executionId);
+    assert.equal(group?.evidenceKind, 'process-group-gone');
   });
   await check('E06 mismatched execution response is killed and hard protected', async () => {
     await fixture(); const original = await image('wrong-generation'), job = (await core.requestHd(original.source, 0, false))!;
@@ -205,23 +276,91 @@ async function main() {
     await fixture(); const original = await image('ready-receipt'), job = (await core.requestHd(original.source, 0, false))!;
     await processJob(job.key);
     const ready = (await core.readHdJob(job.key))!; assert.equal(ready.status, 'ready');
+    const originalAttempt = JSON.stringify(ready.attemptHistory);
     const file = path.join(core.hdDirectory(), ready.file!), bytes = await fs.readFile(file);
     const receipt = path.join(core.hdDirectory(), job.key + '.publish.json');
     await core.atomicHdJson(receipt, { protocol: 'hd-publish-v2', executionId: ready.executionId, sourceVersion: ready.version, job: ready, temporary: '' });
     const selected = core.selectHdJob(await core.listHdJobs(), 0, 'old')!;
     assert.equal(selected.key, ready.key); assert.equal(selected.publicationPending, true);
-    let observedVerification = false;
-    await processJob(job.key, { capacity: async () => { throw new Error('must-not-reencode'); }, processor: (request, options) => runner.runHdImageProcessor(request, {
+    let observedVerification = false, verificationClose: runner.HdChildClose | undefined;
+    let verificationWriter: NonNullable<Parameters<typeof runner.runHdImageProcessor>[1]>['onClose'];
+    await processJob(job.key, { capacity: async () => { throw new Error('must-not-reencode'); }, processor: (request, options) => {
+      verificationWriter = options?.onClose;
+      return runner.runHdImageProcessor(request, {
       ...options, applicationRoot, onSpawn: async identity => {
         await options?.onSpawn?.(identity);
         const durable = (await core.readHdJob(job.key))!;
         assert.equal(durable.processor?.pid, identity.pid); assert.equal(durable.processor?.startTicks, identity.startTicks);
         assert.equal(durable.processor?.executionId, request.executionId); assert.equal(durable.executionId, ready.executionId);
+        const verification = durable.verificationHistory![durable.verificationHistory!.length - 1];
+        assert.equal(verification.executionId, request.executionId); assert.equal(verification.sourceVersion, ready.version);
+        assert.equal(verification.operation, 'validate'); assert.deepEqual(verification.processor, identity);
         assert.notEqual(durable.processor?.executionId, durable.executionId); observedVerification = true;
       },
-    }) });
+      onClose: async value => { verificationClose = value; },
+    }); } });
     assert.equal(observedVerification, true); assert.equal((await core.readHdJob(job.key))!.attempts, ready.attempts);
+    await waitFor(async () => Boolean(verificationClose));
+    const beforeLate = (await core.readHdJob(job.key))!;
+    assert.equal(beforeLate.verificationHistory![0].childClose, undefined);
+    await verificationWriter!(verificationClose!);
+    const recovered = (await core.readHdJob(job.key))!, verification = recovered.verificationHistory![0];
+    assert.equal(JSON.stringify(recovered.attemptHistory), originalAttempt);
+    assert.ok(verification.finishedAt); assert.equal(verification.childClose?.code, 0); assert.equal(verification.childClose?.signal, null);
+    assert.equal(verification.groupExit?.executionId, verification.executionId); assert.equal(verification.groupExit?.evidenceKind, 'process-group-gone');
+    assert.equal(recovered.executionId, ready.executionId); assert.deepEqual(recovered.processor, ready.processor);
+    assert.equal(recovered.updatedAt, beforeLate.updatedAt); assert.equal(recovered.executionExitedAt, beforeLate.executionExitedAt);
     assert.equal(await exists(receipt), false); assert.deepEqual(await fs.readFile(file), bytes);
+    const duplicate = { ...recovered, verificationHistory: [...recovered.verificationHistory!, { ...verification }] };
+    await core.atomicHdJson(path.join(core.hdDirectory(), job.key + '.json'), duplicate);
+    await assert.rejects(core.readHdJob(job.key), /invalid_hd_manifest/);
+    await core.atomicHdJson(path.join(core.hdDirectory(), job.key + '.json'), recovered);
+    const originalOnlySource = '/uploads/verification-original.png', originalOnlyFile = path.join(process.cwd(), 'public' + originalOnlySource);
+    await sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 11, g: 32, b: 53 } } }).png().toFile(originalOnlyFile);
+    const originalOnly = (await core.requestHd(originalOnlySource, 0, false))!; await processJob(originalOnly.key);
+    const originalReady = (await core.readHdJob(originalOnly.key))!; assert.equal(originalReady.format, 'original');
+    const originalBytes = await fs.readFile(originalOnlyFile), originalAttempts = JSON.stringify(originalReady.attemptHistory);
+    const originalReceipt = path.join(core.hdDirectory(), originalOnly.key + '.publish.json');
+    await core.atomicHdJson(originalReceipt, { protocol: 'hd-publish-v2', executionId: originalReady.executionId,
+      sourceVersion: originalReady.version, job: originalReady, temporary: '' });
+    await processJob(originalOnly.key, { processor: (request, options) => {
+      assert.equal(request.operation, 'verify-original');
+      return runner.runHdImageProcessor(request, { ...options, applicationRoot, onSpawn: async identity => {
+        await options?.onSpawn?.(identity);
+        const durable = (await core.readHdJob(originalOnly.key))!;
+        assert.equal(durable.verificationHistory![0].operation, 'verify-original');
+        assert.deepEqual(durable.verificationHistory![0].processor, identity);
+      } });
+    } });
+    const originalRecovered = (await core.readHdJob(originalOnly.key))!, originalVerification = originalRecovered.verificationHistory![0];
+    assert.equal(originalRecovered.attempts, originalReady.attempts); assert.equal(JSON.stringify(originalRecovered.attemptHistory), originalAttempts);
+    assert.equal(originalVerification.childClose?.code, 0); assert.equal(originalVerification.childClose?.signal, null);
+    assert.equal(originalVerification.groupExit?.executionId, originalVerification.executionId); assert.ok(originalVerification.finishedAt);
+    assert.deepEqual(await fs.readFile(originalOnlyFile), originalBytes);
+    await core.atomicHdJson(receipt, { protocol: 'hd-publish-v2', executionId: recovered.executionId,
+      sourceVersion: recovered.version, job: recovered, temporary: '' });
+    const rename = fs.rename, manifest = path.join(core.hdDirectory(), job.key + '.json'); let refused = false;
+    let failedVerification: runner.HdProcessorIdentity | undefined;
+    fs.rename = async function (from, to) {
+      if (!refused && to === manifest) {
+        const value = JSON.parse(await fs.readFile(String(from), 'utf8'));
+        if (value.verificationHistory?.length === 2 && value.verificationHistory[1].processor) {
+          refused = true; throw Object.assign(new Error('synthetic_verification_spawn_write_failed'), { code: 'ENOSPC' });
+        }
+      }
+      return rename(from, to);
+    };
+    try {
+      await assert.rejects(processJob(job.key, { processor: (request, options) => runner.runHdImageProcessor(request, {
+        ...options, applicationRoot, onSpawn: async identity => { failedVerification = identity; await options?.onSpawn?.(identity); },
+      }) }), error => (error as NodeJS.ErrnoException).code === 'ENOSPC');
+    } finally { fs.rename = rename; }
+    assert.equal(refused, true); assert.ok(failedVerification); await runner.assertHdExecutionExited(failedVerification!);
+    const failed = (await core.readHdJob(job.key))!;
+    assert.equal(failed.attempts, recovered.attempts); assert.equal(JSON.stringify(failed.attemptHistory), originalAttempt);
+    assert.deepEqual(failed.verificationHistory![1].processor, failedVerification);
+    assert.equal(failed.verificationHistory![1].groupExit?.evidenceKind, 'process-group-gone');
+    assert.equal(await exists(receipt), true); assert.deepEqual(await fs.readFile(file), bytes);
   });
   await check('E08 unknown process identity never authorizes kill or another encoder', async () => {
     await assert.rejects(runner.assertHdExecutionExited({ pid: process.pid, groupId: process.pid, host: os.hostname(), startTicks: '0', executionId: randomUUID() }), /hd_child_exit_unknown/);
