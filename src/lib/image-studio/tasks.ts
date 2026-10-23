@@ -28,7 +28,7 @@ import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRout
 import { IMAGE_25_QUALITY_MODEL, parseImageQualityRouteSnapshot, assertImageQualityReferenceCount } from './quality-routing';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
-import { resolveStudioAspectRatio, normalizeStudioRatio } from './ratios';
+import { resolveStudioAspectRatio, normalizeStudioRatio, CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
 import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from './model-catalog';
@@ -390,7 +390,10 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+  // This version comes only from persisted server preparation, never from body.
+  const sizePolicyVersion = preparation?.sizePolicyVersion ?? CURRENT_STUDIO_SIZE_POLICY_VERSION;
+  if (sizePolicyVersion !== 1 && sizePolicyVersion !== 2) throw new StudioError('图片尺寸策略版本无效', 409);
   if (body.roleMediaContext !== undefined && !roleMedia) throw new StudioError('角色媒体来源只能由原画布确认入口提交', 403);
   if (roleMedia && (roleMedia.user.id !== ownerId || !canvasUse || avatar || preparation)) throw new StudioError('角色媒体必须沿原图片任务创建和扣点流程', 403);
   const roleContextFingerprint = roleMedia ? roleMediaFingerprint(roleMedia.context) : undefined;
@@ -933,7 +936,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ratioIssue = studioFourToOneIssue(resolvedAspectRatio, fourToOneSupported);
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
-    const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio);
+    const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio, sizePolicyVersion);
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
@@ -967,6 +970,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (preparation) throw new StudioError('批量准备不能沿用已确认的单次报价', 409);
       try {
         billingContract = await consumeImageQuote(tx, { owner: ownerId, id: billingQuoteId,
+          sizePolicyVersion,
           count: input.count, fingerprint: billingContract.specification, specification: billingContract.specification,
           scope: billingScope, model: generation.model, imageChannel: contractImageChannel,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}) });
@@ -1032,6 +1036,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       resolvedAspectRatio,
       aspectRatioSource,
       ratioContractVersion: 2,
+      sizePolicyVersion,
       resolution,
       outputSize: outputSize || null,
       resolvedOutputSize: outputSize || null,

@@ -33,13 +33,14 @@ import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
+import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
 const CHANNEL_PREFIX = 'studio_channel_batch_v1:';
 const CHANNEL_ITEM_PREFIX = 'studio_channel_batch_item_v1:';
 type BatchItem = { ordinal: number; sourceName: string; assetId?: string; taskId: string | null; attempt: number; prepared: boolean; cancelled: boolean };
-type BatchRecord = { version: 1 | 2; usageContext?: { version: 1; projectId: string | null }; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
+type BatchRecord = { version: 1 | 2; sizePolicyVersion?: StudioSizePolicyVersion; usageContext?: { version: 1; projectId: string | null }; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
 const key = (owner: string, id: string, channel = false, pricing = false) => `${pricing ? PRICING_BATCH_PREFIX : channel ? CHANNEL_PREFIX : PREFIX}${owner}:${id}`;
 const batchKeys = (owner: string, id: string) => [key(owner, id), key(owner, id, true), key(owner, id, false, true)];
 const itemKey = (batch: BatchRecord, ordinal: number) => `${batch.pricing ? PRICING_BATCH_ITEM_PREFIX : batch.input.imageChannel && (batch.input.imageChannel as ImageGenerationChannelSnapshot).channelId !== 'original' ? CHANNEL_ITEM_PREFIX : ITEM_PREFIX}${batch.id}:${ordinal}`;
@@ -49,7 +50,17 @@ const isChannelBatch = (batch: Pick<BatchRecord, 'input'>) => {
   return Boolean(snapshot?.channelId && snapshot.channelId !== 'original');
 };
 const idFor = (owner: string, requestId: string) => createHash('sha256').update(`${owner}:${requestId}`).digest('hex');
-const parse = (json: string) => JSON.parse(json) as BatchRecord;
+const parse = (json: string): BatchRecord => {
+  const value = JSON.parse(json) as BatchRecord;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 && value.version !== 2
+    || value.sizePolicyVersion !== undefined && value.sizePolicyVersion !== 1 && value.sizePolicyVersion !== 2) {
+    throw new StudioError('批次记录或图片尺寸策略版本无效，请核对原批次', 409);
+  }
+  // Do not materialize v1: a read or unrelated write must not migrate old parents.
+  return value;
+};
+const continuationBinding = (id: string, json: string) => ({ batchId: id,
+  recordDigest: createHash('sha256').update(json).digest('hex') });
 const boundedBudget = (value: unknown) => {
   try { return typeof value === 'number' && value >= 0 && value <= 10_000_000 && Number.isSafeInteger(creditCents(value)); }
   catch { return false; }
@@ -99,7 +110,9 @@ async function invalidateUnacceptedDefinition(tx: Prisma.TransactionClient, batc
     [`${ITEM_PREFIX}${batch.id}:${item.ordinal}`, `${CHANNEL_ITEM_PREFIX}${batch.id}:${item.ordinal}`, `${PRICING_BATCH_ITEM_PREFIX}${batch.id}:${item.ordinal}`]) } } });
   batch.prepared = batch.items.filter(item => item.prepared).length;
   batch.definitionConfirmationRequired = true;
-  batch.billingContracts = undefined;
+  // Only the inputs being invalidated lose their quote. Accepted/unknown task
+  // slots retain the parent's original frozen contract as well as the task's.
+  if (batch.billingContracts) for (const item of pending) batch.billingContracts[item.ordinal - 1] = null;
   batch.state = 'needs-confirmation';
   batch.note = message;
 }
@@ -146,7 +159,7 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
   const settings = await getImageStudioSettings();
   const generationSource = studioSharedGenerationSource(sharedUse, input);
   const generation = resolveStudioModuleGenerationConfig(generationSource, settings);
-  const quote = nextBody.batchQuoteId ? await consumeBatchQuote(tx, batch.ownerId, nextBody) : null;
+  const quote = nextBody.batchQuoteId ? await consumeBatchQuote(tx, batch.ownerId, nextBody, continuationBinding(batch.id, row.value_json)) : null;
   const explicitChannelId = typeof nextBody.channelId === 'string' ? nextBody.channelId : undefined;
   const suppliedChannel = quote?.imageChannel || input.imageChannel;
   const qualityRoute = generation.model === IMAGE_25_QUALITY_MODEL ? await resolveImageGenerationRequestRoute(generation.model, generation.quality, explicitChannelId, tx) : undefined;
@@ -185,13 +198,16 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
     throw new StudioError('新预算不足以覆盖已受理点数与未受理条目的当前报价', 409);
   }
   await invalidateUnacceptedDefinition(tx, batch, '');
+  batch.sizePolicyVersion = CURRENT_STUDIO_SIZE_POLICY_VERSION;
   batch.input = { ...input, moduleId: batch.moduleId, sharedLive: sharedUse.definition.intent, ...(imageChannel ? { imageChannel } : {}) };
   batch.moduleName = sharedUse.definition.name;
   batch.budget = Number(body.budget); batch.unitCredits = unitCredits;
   batch.billingMode = quote?.mode;
   if (quote?.contracts.some(contract => contract.pricing)) { batch.pricing = true; batch.version = 2; }
-  batch.billingContracts = quote ? batch.items.map(() => null) : undefined;
-  if (quote) pending.forEach((item, index) => { batch.billingContracts![item.ordinal - 1] = quote.contracts[index]; });
+  if (quote) {
+    batch.billingContracts ??= batch.items.map(() => null);
+    pending.forEach((item, index) => { batch.billingContracts![item.ordinal - 1] = quote.contracts[index]; });
+  }
   batch.state = 'preparing'; batch.note = '已确认当前模板与预算，正在重新准备未受理条目；原任务保持不变';
   const newKey = key(batch.ownerId, batch.id, isChannelBatch(batch), batch.pricing);
   if ((await tx.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json }, data: { key: newKey } })).count !== 1) {
@@ -200,13 +216,13 @@ async function reconfirmBatchDefinition(tx: Prisma.TransactionClient, batch: Bat
 }
 
 export async function quoteStudioBatchContinuation(owner: string, body: Record<string, unknown>) {
-  const input = await prisma.$transaction(async tx => {
-    const { batch } = await readOwned(owner, body.id, tx);
+  const prepared = await prisma.$transaction(async tx => {
+    const { row, batch } = await readOwned(owner, body.id, tx);
     if (batch.state === 'cancelled' || batch.state === 'preparing') throw new StudioError('本批不能重新报价，请先读取原批次', 409);
     await recoverAcceptedBatchItems(tx, batch);
-    return continuationInput(batch, body);
+    return { input: continuationInput(batch, body), continuation: continuationBinding(batch.id, row.value_json) };
   });
-  return quoteStudioBatch(owner, input);
+  return quoteStudioBatch(owner, prepared.input, prepared.continuation);
 }
 
 export async function createStudioBatch(ownerId: string, body: Record<string, unknown>) {
@@ -312,7 +328,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     const fingerprint = isChannelBatch({ input: shared })
       ? createHash('sha256').update(JSON.stringify({ requestFingerprint, imageChannel: shared.imageChannel })).digest('hex')
       : requestFingerprint;
-    const batch: BatchRecord = { version: 1, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
+    const batch: BatchRecord = { version: 1, sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
       usageContext: { version: 1, projectId: input.projectId ?? null },
       ...(billingQuote ? { billingMode: billingQuote.mode, billingContracts: billingQuote.contracts } : {}) };
     if (billingQuote?.contracts.some(contract => contract.pricing)) { batch.pricing = true; batch.version = 2; }
@@ -333,13 +349,19 @@ async function prepareBatch(owner: string, id: string) {
       const draft = initial.input.draft as Record<string, unknown> | undefined;
       const itemInput = { ...initial.input, requestId: `${id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
         ...(item.assetId && draft && policy ? { draft: { ...draft, referencePolicy: { ...policy, primaryIds: [item.assetId] } } } : {}) };
-      await submitStudioBatch(owner, itemInput, undefined, { batchItem: true, frozenContract: initial.billingContracts?.[item.ordinal - 1] || undefined, save: async (tx, task) => {
+      await submitStudioBatch(owner, itemInput, undefined, { batchItem: true, sizePolicyVersion: initial.sizePolicyVersion ?? 1,
+        frozenContract: initial.billingContracts?.[item.ordinal - 1] || undefined, save: async (tx, task) => {
         const { row, batch } = await readOwned(owner, id, tx);
         if (batch.state !== 'preparing') throw new StudioError('批次已停止准备');
+        if ((batch.sizePolicyVersion ?? 1) !== (initial.sizePolicyVersion ?? 1)
+          || JSON.stringify(batch.input) !== JSON.stringify(initial.input)
+          || JSON.stringify(batch.billingContracts?.[item.ordinal - 1]) !== JSON.stringify(initial.billingContracts?.[item.ordinal - 1])) {
+          throw new StudioError('本批已确认新输入或报价，旧准备结果未写入', 409);
+        }
         const current = batch.items[item.ordinal - 1];
         if (current.prepared) return;
         const actualContract = batch.billingContracts?.[item.ordinal - 1];
-        if (batch.billingContracts) {
+        if (batch.billingContracts && (actualContract || batch.billingMode !== undefined)) {
           const fixedContract = JSON.parse(String(task.billing_contract_json)) as ImageBillingContract;
           if (!actualContract || actualContract.specification !== fixedContract.specification || actualContract.scope !== fixedContract.scope)
             throw new StudioError('本批输入或通道与已确认报价不符，未派发生成');
@@ -371,6 +393,8 @@ async function prepareBatch(owner: string, id: string) {
     }
     await prisma.$transaction(async tx => {
       const { row, batch } = await readOwned(owner, id, tx);
+      if ((batch.sizePolicyVersion ?? 1) !== (initial.sizePolicyVersion ?? 1)
+        || JSON.stringify(batch.input) !== JSON.stringify(initial.input)) return;
       if (batch.state === 'preparing' && batch.items.every(item => item.prepared || item.taskId || item.cancelled)) {
         await resolveOwnedStudioTaskSharedUse(owner, batch.moduleId, parseSharedStudioIntent(batch.input.sharedLive), tx,
           batch.input.restoredSettings !== undefined ? parseStudioRequest(batch.input) : undefined);
@@ -380,6 +404,8 @@ async function prepareBatch(owner: string, id: string) {
   } catch (error) {
     await prisma.$transaction(async tx => {
       const { row, batch } = await readOwned(owner, id, tx);
+      if ((batch.sizePolicyVersion ?? 1) !== (initial.sizePolicyVersion ?? 1)
+        || JSON.stringify(batch.input) !== JSON.stringify(initial.input)) return;
       if (batch.state === 'preparing') {
         if (error instanceof SharedStudioDefinitionError || batch.input.sharedLive && sharedDefinitionError(error)) {
           await invalidateUnacceptedDefinition(tx, batch, error instanceof Error ? error.message : '模板已更新，请确认本次生成');

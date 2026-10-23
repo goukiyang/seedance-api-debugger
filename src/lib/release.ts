@@ -1,9 +1,6 @@
 import packageInfo from '../../package.json';
-import { PRICING_ADMIN_WRITES_ENABLED } from './pricing/build-mode';
-
-export const release = { version: packageInfo.version, channel: 'production', summary: PRICING_ADMIN_WRITES_ENABLED
-  ? '3D多视图使用统一生成配置，保留本人主图和补充要求；新增本人生成记录，保存作品后可直接在素材入口使用拼图和单张。'
-  : '3D多视图原任务和作品保留，暂不开始新生成。视频批次可查看和停止未开始项；API质量设置和费率暂时只读，已保存配置不会自动改价。' };
+export const release = { version: packageInfo.version, channel: 'production',
+  summary: '修正细比例图片的尺寸计算，管理员可按任务查看安全错误详情。3D多视图新生成和新视频批次仍暂停，已有任务与作品保留。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

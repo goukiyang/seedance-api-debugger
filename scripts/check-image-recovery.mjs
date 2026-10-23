@@ -102,6 +102,35 @@ fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema
     'same_work_identity_baseline_and_explicit_original_save', 'authorized_multiview_original_transport'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
 fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
   marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });
+fixtures.push({ file: 'scripts/image-size-policy-engineering.ts', schema: 'image-size-policy-engineering.v1',
+  marker: 'Image size policy engineering receipt: ', checks: [
+    'legacy_119_frozen_specifications_unchanged', 'standard_16_ratios_48_tiers_unchanged',
+    'fine_ratio_four_expected_dimensions', 'boundary_2403_same_candidates_area_band',
+    'auto_decimal_invalid_four_to_one_half_k_boundaries', 'shared_pixel_and_native_adapters_preserve_capabilities',
+    'server_only_preparation_version_no_fingerprint_migration', 'old_parent_partial_prepared_accepted_uncertain_frozen_v1',
+    'new_v2_parent_and_original_parent_receipt_before_quote_gate', 'accepted_original_request_receipt_precedes_old_quote_gate',
+    'old_quotes_and_stale_continuation_rejected_without_consumption_or_reservation',
+    'parent_parser_rejects_unknown_versions_without_read_backfill',
+    'explicit_reconfirmation_migrates_only_safe_unaccepted_items_in_cas_transaction',
+  ], sources: [
+    'src/lib/image-studio/ratios.ts', 'src/lib/image-generation/resolution.ts',
+    'src/lib/integrations/image-generation.ts', 'src/lib/image-studio/tasks.ts',
+    'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/billing-quote-store.ts',
+    'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/batches.ts',
+    'src/lib/tools/toolflow-runtime.ts', 'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/worker.ts',
+  ] });
+fixtures.push({ file: 'scripts/image-provider-error-engineering.ts', schema: 'image-provider-error-engineering.v1',
+  marker: 'Image provider error engineering receipt: ', checks: [
+    'post_errors_preserve_transport_and_safe_serialized_metadata', 'summary_failed_uncertain_and_original_identity',
+    'result_errors_and_resume_never_fabricate_post', 'bounded_error_body_cancellation_and_native_compatibility',
+    'large_success_download_and_callback_failures_preserve_business',
+    'positive_allowlist_rejects_private_echo_and_malicious_fields', 'aggregate_preserves_first_latest_counts_and_limits',
+    'sqlite_binding_lease_cas_and_read_projection', 'diagnostic_write_failure_isolated_from_original_business',
+    'three_worker_generate_paths_and_local_validation_bound',
+  ], sources: [
+    'src/lib/image-studio/provider-error-diagnostics.ts', 'src/lib/image-studio/provider-error-evidence.ts',
+    'src/lib/image-studio/provider.ts', 'src/lib/image-studio/worker.ts',
+  ] });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const usageGate = 'scripts/admin-usage-engineering.ts';
 const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py', 'src/lib/admin/usage-query.ts', 'src/lib/admin/usage-money.ts', 'src/lib/admin/usage-types.ts',
@@ -110,6 +139,13 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/image-provider-admin-engineering.ts', schema: 'image-provider-admin-engineering.v1',
+    databaseFlag: 'applicationDatabaseOpened', sources: [
+      'scripts/image-provider-admin-engineering.ts', 'src/app/api/admin/image-studio/tasks/route.ts',
+      'src/app/admin/image-studio/AdminImageStudioClient.tsx',
+      'src/app/admin/image-studio/ImageStudioDiagnostics.module.css',
+      'src/lib/image-studio/provider-error-diagnostics.ts', 'src/lib/image-studio/provider-error-evidence.ts',
+    ] },
   { file: 'scripts/multiview-private-batch-engineering.mjs', schema: 'multiview-private-batch-engineering.v1',
     timeoutMs: 540000, databaseFlag: 'applicationDatabaseOpened', sources: MULTIVIEW_PRIVATE_BATCH_SOURCES },
   { file: 'scripts/role-runtime-engineering.mjs', schema: 'role-runtime-engineering.v1',

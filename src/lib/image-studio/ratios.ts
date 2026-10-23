@@ -1,5 +1,7 @@
 export const STUDIO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '2:1', '1:2', '21:9', '9:21', '3:1', '1:3', '4:1'];
 export const DEFAULT_STUDIO_ASPECT_RATIO = '1:1';
+export type StudioSizePolicyVersion = 1 | 2;
+export const CURRENT_STUDIO_SIZE_POLICY_VERSION: StudioSizePolicyVersion = 2;
 
 export type StudioRatioReference = { width?: unknown; height?: unknown } | null | undefined;
 export type StudioAspectRatioSource = 'explicit' | 'reference' | 'model-default';
@@ -50,8 +52,8 @@ export function resolveStudioAspectRatio(value: unknown, reference?: StudioRatio
     : { requested, resolved: DEFAULT_STUDIO_ASPECT_RATIO, source: 'model-default' };
 }
 
-// Keep near the requested pixel budget; prefer exact ratios, otherwise disclose 16px rounding in the UI.
-export function studioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = true): string | undefined {
+// Frozen v1 parents must keep the original candidate ordering and tie handling.
+function legacyStudioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = true): string | undefined {
   const ratio = normalizeStudioRatio(value);
   if (ratio === 'auto') return undefined;
   if (ratio === '4:1' && !allowFourToOne) throw new Error('当前像素尺寸通道未确认支持4:1，请选择其他比例');
@@ -71,5 +73,38 @@ export function studioRatioSize(value: unknown, resolution: string = '1K', allow
     if (error < best.error - 1e-10 || Math.abs(error - best.error) < 1e-10 && areaDistance < best.areaDistance) best = { width, height, error, areaDistance };
   }
   if (!Number.isFinite(best.error)) throw new Error('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率');
+  return `${best.width}x${best.height}`;
+}
+
+// Standard compositions retain v1 dimensions. Fine ratios first retain at least
+// 95% of the same candidate set's achievable area, then minimize ratio error.
+export function studioRatioSize(value: unknown, resolution: string = '1K', allowFourToOne = true,
+  sizePolicyVersion: StudioSizePolicyVersion = CURRENT_STUDIO_SIZE_POLICY_VERSION): string | undefined {
+  if (sizePolicyVersion !== 1 && sizePolicyVersion !== 2) throw new Error('图片尺寸策略版本无效');
+  if (sizePolicyVersion === 1) return legacyStudioRatioSize(value, resolution, allowFourToOne);
+  const ratio = normalizeStudioRatio(value);
+  if (ratio === 'auto') return undefined;
+  if (STUDIO_RATIOS.includes(ratio)) return legacyStudioRatioSize(ratio, resolution, allowFourToOne);
+  const [w, h] = ratio.split(':').map(Number);
+  const targetArea = resolution === '4K' ? 8294400 : resolution === '2K' ? 4194304 : resolution === '0.5K' ? 262144 : 1048576;
+  const maxEdge = resolution === '4K' ? 3840 : resolution === '2K' ? 2880 : resolution === '0.5K' ? 1024 : 2048;
+  const minEdge = resolution === '0.5K' ? 256 : 512;
+  const candidates: Array<{ width: number; height: number; area: number; error: number }> = [];
+  for (let width = 16; width <= maxEdge; width += 16) {
+    const height = Math.round(width * h / w / 16) * 16;
+    const area = width * height;
+    if (height < minEdge || height > maxEdge || area < (resolution === '0.5K' ? 131072 : 655360) || area > targetArea
+      || width / height > 3 || height / width > 3) continue;
+    candidates.push({ width, height, area, error: Math.abs(width / height / (w / h) - 1) });
+  }
+  const maxArea = Math.max(0, ...candidates.map(candidate => candidate.area));
+  let best: typeof candidates[number] | undefined;
+  for (const candidate of candidates) {
+    if (candidate.area * 100 < maxArea * 95) continue;
+    if (!best || candidate.error < best.error - 1e-10
+      || Math.abs(candidate.error - best.error) < 1e-10 && (candidate.area > best.area
+        || candidate.area === best.area && candidate.width < best.width)) best = candidate;
+  }
+  if (!best) throw new Error('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率');
   return `${best.width}x${best.height}`;
 }

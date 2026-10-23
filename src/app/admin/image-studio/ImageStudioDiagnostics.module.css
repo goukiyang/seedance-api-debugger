@@ -1,0 +1,194 @@
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 132px;
+}
+
+.detailRow:hover {
+  background: transparent;
+}
+
+.detailCell {
+  padding: 0 12px 16px !important;
+}
+
+.panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(220px, 1fr);
+  gap: 18px;
+}
+
+.summaryGrid > div {
+  min-width: 0;
+}
+
+.summaryGrid span,
+.summaryGrid small,
+.muted {
+  color: var(--text-secondary);
+}
+
+.summaryGrid span,
+.summaryGrid strong,
+.summaryGrid small {
+  display: block;
+}
+
+.summaryGrid span {
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summaryGrid strong {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.summaryGrid small {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.observed,
+.actions,
+.eventHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.observed {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.actions span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.localError {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--tone-warning-border);
+  border-radius: 8px;
+  background: var(--tone-warning-bg);
+  color: var(--text-primary);
+}
+
+.localError p,
+.event p,
+.muted {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.section {
+  border-top: 1px solid var(--border-color);
+}
+
+.section summary {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section h4 {
+  margin: 12px 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fields,
+.ids {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.fields > div,
+.ids > div {
+  min-width: 0;
+}
+
+.fields dt,
+.ids dt {
+  margin-bottom: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.fields dd,
+.ids dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.ids code {
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.events {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.event:last-child {
+  border-bottom: 0;
+}
+
+.eventHead {
+  justify-content: space-between;
+}
+
+.eventHead span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .summaryGrid,
+  .fields,
+  .ids {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+}

@@ -10,7 +10,7 @@ import {
   type ImageStudioModel,
 } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
-import { STUDIO_RATIOS, isStandardStudioRatio, normalizeStudioRatio } from '@/lib/image-studio/ratios';
+import { STUDIO_RATIOS, isStandardStudioRatio, normalizeStudioRatio, CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from '@/lib/image-studio/ratios';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { requestStudioImages, StudioProviderError, type StudioImageInput } from '@/lib/image-studio/provider';
 import { readStudioImage, normalizeStudioImage } from '@/lib/image-studio/media';
@@ -452,7 +452,8 @@ export function imageGenerationSupportsStudioFourToOne(settings: ImageGeneration
 }
 
 /** Convert the existing local resolution/ratio to the explicitly chosen adapter. */
-export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string) {
+export function imageGenerationModelOutputSize(settings: ImageGenerationApiSettings, model: string, resolution: unknown, ratio: string,
+  sizePolicyVersion: StudioSizePolicyVersion = CURRENT_STUDIO_SIZE_POLICY_VERSION) {
   const resolved = settings as ImageGenerationResolvedSettings;
   const protocol = resolved.managedChannel || resolved.explicitModelApi ? resolved.modelCapabilities[model as ImageStudioModel]?.protocol : undefined;
   if (protocol === 'gemini_native') {
@@ -461,7 +462,7 @@ export function imageGenerationModelOutputSize(settings: ImageGenerationApiSetti
     return normalized;
   }
   const size = imageOutputSize(model, resolution, ratio, protocol === 'openai_images' ? 'ai_media_vip' : settings.provider,
-    imageGenerationSupportsStudioFourToOne(settings, model));
+    imageGenerationSupportsStudioFourToOne(settings, model), sizePolicyVersion);
   const pixelProtocol = protocol === 'openai_images' || !isGeminiImageModel(model) || settings.provider === 'ai_media_vip';
   if (pixelProtocol && !isValidImageDimension(size, true)) {
     throw new ImageGenerationChannelError('所选比例与分辨率无法在安全像素范围内表达，请调整分辨率；尚未向供应商提交', 400, 'image_generation_invalid_dimensions');

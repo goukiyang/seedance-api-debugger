@@ -13,6 +13,105 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import { buildStudioResponseDiagnostics, collectStudioResponseOutputCandidates, type StudioResponseDiagnostics,
   type StudioResponseOutputCandidate, type StudioResponseObservation } from './response-diagnostics';
+import { buildStudioProviderErrorEvent, providerErrorObject, sanitizeStudioProviderErrorRequest, studioProviderErrorEventKey,
+  type StudioProviderErrorObservation, type StudioProviderErrorRequest, type StudioProviderErrorPhase,
+  type StudioProviderErrorEvent } from './provider-error-diagnostics';
+
+type StudioProviderErrorRecorder = (observation: StudioProviderErrorObservation) => Promise<void>;
+/** Diagnostic body consumption is bounded independently; original HTTP/code/retry decisions remain with callers. */
+async function readProviderErrorBody(response: Response, originalSignal: AbortSignal) {
+  let value: unknown; let bodyRead: StudioProviderErrorEvent['bodyRead'] = 'not_read';
+  const hash = createHash('sha256'); let length = 0, complete = false;
+  const observation = (): StudioResponseObservation => ({ httpStatus: response.status, contentType: response.headers.get('content-type'),
+    responseBytes: length, responseSha256: hash.digest('hex'), bodyComplete: complete,
+    parseOutcome: bodyRead === 'timeout' || bodyRead === 'not_read' ? 'read_error' : bodyRead });
+  if (!response.body) { bodyRead = 'empty_body'; return { value, bodyRead, observation: observation(), hadBody: false }; }
+  const signal = AbortSignal.any([originalSignal, AbortSignal.timeout(1000)]);
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try { reader = response.body.getReader(); }
+  catch { bodyRead = 'read_error'; return { value, bodyRead, observation: observation(), hadBody: true }; }
+  const chunks: Uint8Array[] = [];
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', abort, { once: true });
+  try {
+    for (;;) {
+      if (signal.aborted) { bodyRead = 'timeout'; break; }
+      const next = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+        const fail = () => reject(new Error('diagnostic_read_aborted'));
+        signal.addEventListener('abort', fail, { once: true });
+        reader.read().then(resolve, reject).finally(() => signal.removeEventListener('abort', fail));
+        if (signal.aborted) fail();
+      });
+      if (signal.aborted) { bodyRead = 'timeout'; break; }
+      if (next.done) { complete = true; bodyRead = length ? 'valid_json' : 'empty_body'; break; }
+      const remaining = 64 * 1024 - length, oversize = next.value.byteLength > remaining;
+      const bounded = oversize ? next.value.subarray(0, remaining) : next.value;
+      length += bounded.byteLength; hash.update(bounded); chunks.push(bounded);
+      if (oversize) { bodyRead = 'oversize'; break; }
+    }
+    if (bodyRead === 'valid_json') {
+      try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      catch { bodyRead = 'invalid_json'; }
+    }
+  } catch { bodyRead = signal.aborted ? 'timeout' : 'read_error'; }
+  finally { signal.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); }
+  return { value, bodyRead, observation: observation(), hadBody: true };
+}
+function providerErrorCollector(model: string, resumed: boolean, callback?: StudioProviderErrorRecorder) {
+  let request = sanitizeStudioProviderErrorRequest({ dispatchObserved: false, model });
+  let phase: StudioProviderErrorPhase = resumed ? 'summary' : 'initial_request';
+  let status: number | undefined, payload: unknown, bodyRead: StudioProviderErrorEvent['bodyRead'] = 'not_read';
+  let identityEvidence: StudioProviderErrorEvent['identityEvidence'] = resumed ? 'not_independently_verified' : 'not_applicable';
+  let captured = false, omittedEvents = 0;
+  const events = new Map<string, StudioProviderErrorObservation>();
+  return {
+    request(value: StudioProviderErrorRequest) { request = value; },
+    phase(value: StudioProviderErrorPhase, httpStatus?: number) {
+      phase = value; status = httpStatus; payload = undefined; bodyRead = 'not_read'; captured = false;
+      identityEvidence = value === 'summary' || value === 'result' ? 'not_independently_verified' : 'not_applicable';
+    },
+    body(value: unknown, read: StudioProviderErrorEvent['bodyRead'], identity?: StudioProviderErrorEvent['identityEvidence']) {
+      payload = identity === 'conflict' ? undefined : value; bodyRead = read; if (identity) identityEvidence = identity;
+    },
+    capture(code?: string, onlyIfRecorded = false) {
+      if (!callback || code === 'async_pending') return;
+      const event = buildStudioProviderErrorEvent({ phase, dispatchObserved: request.dispatchObserved,
+        transportHttpStatus: status, payload, bodyRead, localCode: code, identityEvidence });
+      const key = studioProviderErrorEventKey(event), previous = events.get(key);
+      if (previous && onlyIfRecorded) return;
+      if (previous) { event.observedAt = previous.event.observedAt; event.occurrences = Math.min(1_000_000, previous.event.occurrences + 1); }
+      if (!previous && events.size >= 16) {
+        const values = Array.from(events.entries());
+        const firstSpecific = values.findIndex(([, observation]) => observation.event.providerReasonCode !== null);
+        const victim = values.find(([, _observation], index) => index > 0 && index !== firstSpecific);
+        if (victim) { omittedEvents = Math.min(1_000_000, omittedEvents + victim[1].event.occurrences); events.delete(victim[0]); }
+      }
+      events.set(key, { request, event, onlyIfRecorded }); captured = !onlyIfRecorded;
+    },
+    failure(error: unknown) {
+      if (captured) return;
+      if (error instanceof StudioProviderError) {
+        if (error.stage === 'download') { phase = 'download'; status = error.status; payload = undefined; }
+        this.capture(error.code);
+      } else this.capture();
+    },
+    async flush() {
+      if (!callback) return;
+      let first = true;
+      for (const observation of Array.from(events.values())) {
+        try { await callback({ ...observation, ...(first && omittedEvents ? { omittedEvents } : {}) }); }
+        catch { console.warn('[image-provider-error] capture_unavailable'); }
+        first = false;
+      }
+    },
+  };
+}
+type StudioProviderErrorCollector = ReturnType<typeof providerErrorCollector>;
+function observeOriginalProviderBody(diagnostics: StudioProviderErrorCollector, value: unknown,
+  bodyRead: StudioProviderErrorEvent['bodyRead'], taskId: string) {
+  const identity = providerErrorObject(value) ? value.task_id || value.id : undefined;
+  diagnostics.body(value, bodyRead, identity ? identity === taskId ? 'verified' : 'conflict' : 'not_independently_verified');
+}
 
 function unsafeAddress(value: string) {
   return isPrivateNetworkHost(value) || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(value);
@@ -128,7 +227,14 @@ export class StudioProviderError extends Error {
 }
 
 // Keep GPT image requests isolated from the existing Gemini/Seedream adapters.
-export async function requestStudioImages(params: {
+export async function requestStudioImages(params: Parameters<typeof requestStudioImagesImplementation>[0],
+  fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
+  const diagnostics = providerErrorCollector(params.model, Boolean(params.resumeAsync), params.onProviderErrorDiagnostics);
+  try { return await requestStudioImagesImplementation(params, fetcher, readImage, diagnostics); }
+  catch (error) { diagnostics.failure(error); throw error; }
+  finally { await diagnostics.flush(); }
+}
+async function requestStudioImagesImplementation(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   upstreamModel?: string;
   provider?: 'musk' | 'ai_media_vip';
@@ -144,10 +250,11 @@ export async function requestStudioImages(params: {
   persistBase64Image?: (value: string, usage: unknown) => Promise<void>;
   recordResponse?: (response: Response) => Promise<void>;
   recordResponseEvidence?: StudioResponseEvidenceRecorder;
+  onProviderErrorDiagnostics?: StudioProviderErrorRecorder;
   size?: string;
   allowFourToOne?: boolean;
   ratioContractVersion?: 2;
-}, fetcher: typeof fetch = fetch, readImage: typeof readStudioImage = readStudioImage): Promise<{ images: string[]; usage: unknown }> {
+}, fetcher: typeof fetch, readImage: typeof readStudioImage, diagnostics: StudioProviderErrorCollector): Promise<{ images: string[]; usage: unknown }> {
   if (params.asyncQueryMode === 'single' && !params.resumeAsync) throw new StudioProviderError('request', 'async_original_identity_required');
   if (!IMAGE_STUDIO_MODELS.includes(params.model as typeof IMAGE_STUDIO_MODELS[number])) throw new Error('不支持的图片模型');
   if (params.model === 'gemini-nano-banana-2.1') {
@@ -168,7 +275,7 @@ export async function requestStudioImages(params: {
   const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
   if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     if (params.resumeAsync) throw new StudioProviderError('request', 'gemini_async_not_supported');
-    return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport, readImage);
+    return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport, readImage, diagnostics);
   }
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1(?:\/images\/(?:generations|edits))?$/, '');
@@ -201,11 +308,20 @@ export async function requestStudioImages(params: {
   let response: Response | undefined;
   let asyncTask = params.resumeAsync;
   if (!asyncTask) {
+    const serialized = body instanceof FormData ? { model: body.get('model'), quality: body.get('quality') ?? 'omitted', size: body.get('size'),
+      ratio: body.get('ratio'), n: Number(body.get('n')) } : JSON.parse(body as string);
+    diagnostics.request(sanitizeStudioProviderErrorRequest({ dispatchObserved: true, endpointKind: params.images.length ? 'edits' : 'generations',
+      protocol: 'openai_images', model: params.model, sentModel: serialized.model, quality: serialized.quality ?? 'omitted',
+      size: serialized.size, ratio: serialized.ratio, n: serialized.n, referenceCount: params.images.length }));
+    diagnostics.phase('initial_request');
     try { response = await transport(url, { method: 'POST', headers, body, signal: params.signal, redirect: params.protocol ? 'error' : 'follow' }); }
     catch { throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
     await params.recordResponse?.(response);
-    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new StudioProviderError('request', 'http_error', response.status); }
-    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+    diagnostics.phase('initial_request', response.status);
+    if (!response.ok) { const observed = await readProviderErrorBody(response, params.signal);
+      diagnostics.body(observed.value, observed.bodyRead); throw new StudioProviderError('request', 'http_error', response.status); }
+    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+      async (body, observation) => { diagnostics.body(body, observation.parseOutcome); });
     if (response.status === 202) {
       const taskId = value.task_id || value.id;
       if (typeof taskId !== 'string' || !/^[a-zA-Z0-9_-]{1,180}$/.test(taskId)) throw new StudioProviderError('response', 'async_receipt_invalid', 202);
@@ -237,17 +353,27 @@ export async function requestStudioImages(params: {
         querySignal.throwIfAborted();
         readingQuery = true;
         phase('summary_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
+        diagnostics.phase('summary');
         const polled = await transport(pollUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
         poll.lastHttpStatus = polled.status;
+        diagnostics.phase('summary', polled.status);
         if (polled.status === 404) poll.summaryNotFound = true; else delete poll.summaryNotFound;
-        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false; await polled.body?.cancel().catch(() => {});
+        if (!polled.ok) { poll.lastErrorCategory = 'http_non_success'; lastObservation = 'interrupted'; readingQuery = false;
+          const observed = await readProviderErrorBody(polled, querySignal); observeOriginalProviderBody(diagnostics, observed.value, observed.bodyRead, asyncTask.taskId);
+          diagnostics.capture('async_query_interrupted');
           if (single) throw new StudioProviderError('response', 'async_query_interrupted', polled.status, undefined, true, { ...poll });
           pollDelay = Math.min(10000, Math.max(5000, pollDelay * 2)); continue; }
         phase('summary_body');
-        const task = await boundedJson(polled, 1024 * 1024);
+        const task = await boundedJson(polled, 1024 * 1024, async (_body, observation) => {
+          // Success JSON is considered only after independent task-id comparison below.
+          diagnostics.body(undefined, observation.parseOutcome);
+        });
         poll.lastErrorCategory = null;
         poll.lastProviderStatus = typeof task?.status === 'string' && POLL_STATUSES.has(task.status as StudioPollStatus) ? task.status as StudioPollStatus : null;
-        if ((task.task_id || task.id) && (task.task_id || task.id) !== asyncTask.taskId) throw new StudioProviderError('response', 'async_task_identity_conflict');
+        if ((task.task_id || task.id) && (task.task_id || task.id) !== asyncTask.taskId) {
+          diagnostics.body(undefined, 'valid_json', 'conflict'); throw new StudioProviderError('response', 'async_task_identity_conflict');
+        }
+        diagnostics.body(task, 'valid_json', (task.task_id || task.id) === asyncTask.taskId ? 'verified' : 'not_independently_verified');
         if (task.status === 'failed') throw new StudioProviderError('response', 'async_failed', polled.status);
         if (['uncertain', 'client_disconnected', 'paused', 'canceled'].includes(task.status)) throw new StudioProviderError('response', 'async_unconfirmed', polled.status);
         if (task.status !== 'success') {
@@ -255,6 +381,7 @@ export async function requestStudioImages(params: {
           if (single) throw new StudioProviderError('response', lastObservation === 'pending' ? 'async_pending' : 'async_query_unconfirmed', polled.status, undefined, true, { ...poll });
           readingQuery = false; pollDelay = boundedPollDelay(task.poll_after_ms); continue;
         }
+        diagnostics.capture(undefined, true);
         const assets = Array.isArray(task.assets) ? task.assets : [];
         if (assets.length) {
           value = { data: assets.map((asset: any) => {
@@ -268,15 +395,21 @@ export async function requestStudioImages(params: {
           // Only after success: the raw result is not a polling endpoint.
           const resultUrl = new URL(pollUrl); resultUrl.search = '';
           phase('result_request'); poll.getTransportCalls++; poll.lastErrorCategory = null;
+          diagnostics.phase('result');
           const result = await transport(resultUrl, { method: 'GET', headers: { Authorization: `Bearer ${params.apiKey}` }, signal: querySignal, redirect: 'error' });
           poll.lastHttpStatus = result.status;
-          if (!result.ok) { poll.lastErrorCategory = 'http_non_success'; await result.body?.cancel().catch(() => {}); throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
+          diagnostics.phase('result', result.status);
+          if (!result.ok) { poll.lastErrorCategory = 'http_non_success'; const observed = await readProviderErrorBody(result, querySignal);
+            observeOriginalProviderBody(diagnostics, observed.value, observed.bodyRead, asyncTask.taskId);
+            throw new StudioProviderError('response', 'async_query_interrupted', result.status, undefined, true); }
           phase('result_body');
-          value = await boundedJson(result, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024);
+          value = await boundedJson(result, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+            async (body, observation) => { observeOriginalProviderBody(diagnostics, body, observation.parseOutcome, asyncTask!.taskId); });
           poll.lastErrorCategory = null;
         }
         break;
       } catch (error) {
+        diagnostics.failure(error);
         if (error instanceof StudioProviderError && ['async_failed', 'async_unconfirmed', 'async_task_identity_conflict'].includes(error.code)) {
           poll.lastErrorCategory = error.code === 'async_task_identity_conflict' ? 'identity_conflict' : 'provider_terminal';
           error.poll = { ...poll }; throw error;
@@ -326,6 +459,7 @@ export async function requestStudioImages(params: {
       throw new StudioProviderError('response', 'unsupported_output', response?.status);
     }
   }
+  diagnostics.capture(undefined, true);
   return { images, usage };
 }
 
@@ -339,7 +473,7 @@ async function requestGeminiStudioImages(params: {
   deliverRemoteImage?: (url: string, usage: unknown) => Promise<Buffer>;
   downloadSignal?: AbortSignal;
   protocol?: ImageGenerationChannelProtocol;
-}, fetcher: typeof fetch, readImage: typeof readStudioImage): Promise<{ images: string[]; usage: unknown }> {
+}, fetcher: typeof fetch, readImage: typeof readStudioImage, diagnostics: StudioProviderErrorCollector): Promise<{ images: string[]; usage: unknown }> {
   const url = new URL(params.baseUrl);
   const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
   url.pathname = `${basePath}/v1beta/models/${encodeURIComponent(params.upstreamModel || params.model)}:generateContent`;
@@ -347,21 +481,20 @@ async function requestGeminiStudioImages(params: {
   for (const image of params.images) {
     parts.push({ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.bytes).toString('base64') } });
   }
+  const serialized = { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: {
+    ...(params.ratio ? { aspectRatio: params.ratio } : {}), ...(params.size ? { imageSize: params.size } : {}),
+  } } };
+  diagnostics.request(sanitizeStudioProviderErrorRequest({ dispatchObserved: true, endpointKind: 'generateContent', protocol: 'gemini_native',
+    model: params.model, sentModel: params.upstreamModel || params.model, quality: 'omitted',
+    size: serialized.generationConfig.imageConfig.imageSize, ratio: serialized.generationConfig.imageConfig.aspectRatio,
+    n: params.count, referenceCount: parts.length - 1 }));
+  diagnostics.phase('initial_request');
   let response: Response;
   try {
     response = await fetcher(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          responseModalities: ['IMAGE'],
-          imageConfig: {
-            ...(params.ratio ? { aspectRatio: params.ratio } : {}),
-            ...(params.size ? { imageSize: params.size } : {}),
-          },
-        },
-      }),
+      body: JSON.stringify(serialized),
       signal: params.signal,
       redirect: params.protocol ? 'error' : 'follow',
     });
@@ -369,6 +502,7 @@ async function requestGeminiStudioImages(params: {
     throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
   }
   await params.recordResponse?.(response);
+  diagnostics.phase('initial_request', response.status);
   let captured: { diagnostic: StudioResponseDiagnostics; candidates: StudioResponseOutputCandidate[] } | undefined;
   let evidenceUnavailable = false;
   const recordEvidence = async (trustedImage?: string) => {
@@ -378,12 +512,24 @@ async function requestGeminiStudioImages(params: {
     catch { evidenceUnavailable = true; } // The caller logs only a fixed safe code; valid delivery is not blocked.
   };
   let value: any;
+  if (!response.ok) {
+    const observed = await readProviderErrorBody(response, params.signal); diagnostics.body(observed.value, observed.bodyRead);
+    if (params.recordResponseEvidence) {
+      captured = { diagnostic: buildStudioResponseDiagnostics(observed.value, observed.observation), candidates: [] };
+      await recordEvidence();
+    }
+    // Preserve native parsing errors for empty/malformed replies while the HTTP status remains observable.
+    if (observed.bodyRead === 'empty_body') throw new StudioProviderError('response', observed.hadBody ? 'invalid_or_oversize_response' : 'empty_response', response.status);
+    if (observed.bodyRead === 'invalid_json' || observed.bodyRead === 'read_error') throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status);
+    throw new StudioProviderError('request', 'http_error', response.status);
+  }
   try {
     value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
-      params.recordResponseEvidence ? async (body, observation) => {
-        captured = { diagnostic: buildStudioResponseDiagnostics(body, observation),
+      async (body, observation) => {
+        diagnostics.body(body, observation.parseOutcome);
+        if (params.recordResponseEvidence) captured = { diagnostic: buildStudioResponseDiagnostics(body, observation),
           candidates: response.ok && observation.parseOutcome === 'valid_json' ? collectStudioResponseOutputCandidates(body) : [] };
-      } : undefined);
+      });
   } catch (error) { await recordEvidence(); throw error; }
   if (!response.ok) { await recordEvidence(); throw new StudioProviderError('request', 'http_error', response.status); }
   type NativeOutput = { kind: 'inline' | 'url'; value: string };
@@ -437,5 +583,6 @@ async function requestGeminiStudioImages(params: {
     catch (error) { await recordEvidence(); throw error; }
   }
   await recordEvidence(trustedImage);
+  diagnostics.capture(undefined, true);
   return { images, usage };
 }

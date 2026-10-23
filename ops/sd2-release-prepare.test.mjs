@@ -7,7 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyTemplate, contractData, validatePlan, checkSources, reuseInput, renderWrapper, prepare, REUSE_SCHEMA,
   DEPLOYED_SCHEMA, DEPLOYED_FIELDS, DEPLOYED_CANVAS_FIELDS, deployedProofInput,
-  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD } from './sd2-release-prepare.mjs';
+  CONTINUATION_V2, CONTINUATION_COMMON_FIELDS, assertContinuationInput, UNPUBLISHED_PAIR, profile, R08_RECOVERED_GUARD, R10_RECOVERED_GUARD, R14_RECOVERED_GUARD,
+  R17_RECOVERED_GUARD, PROTECTED_INCREMENT, PROTECTED_INCREMENT_SOURCE_FILES, assertProtectedIncrement } from './sd2-release-prepare.mjs';
 
 const materials = process.argv[2];
 assert.ok(materials && path.isAbsolute(materials), 'Pass the original private release materials directory');
@@ -107,6 +108,48 @@ const continuationPlan = () => {
     key === 'schema' ? 'sd2-deployed-canvas-video-batch-schema-input.v1' : key.endsWith('Sha256') ? 'a'.repeat(64) : randomUUID()]));
   return value;
 };
+const protectedPlan = () => {
+  const value = continuationPlan(); value.reuseBuilds = null; value.contract.normalContinuation = null;
+  const c = value.contract; c.protectedIncrement = structuredClone(PROTECTED_INCREMENT);
+  c.recoveredGuardBaseline = structuredClone(R17_RECOVERED_GUARD); c.privateMultiviewInstall = true;
+  c.baselineSource = c.sourceBase = PROTECTED_INCREMENT.baselineSource;
+  c.baselineVersion = '0.103.0+multiview-private-guard.1'; c.baselineBuild = 'j0osjBFM7wvoP8iAYEknx';
+  c.mainSource = 'a'.repeat(40); c.recoveryGuardSource = 'b'.repeat(40);
+  c.deployedUsageSchema.publicationRun = '6a041bed-c909-4370-972f-2299321d7f1f';
+  Object.assign(value.liveCapture, { source: c.baselineSource, version: c.baselineVersion, build: c.baselineBuild });
+  return value;
+};
+await test('Protected increment producer and every consumer use the same closed capability contract', async () => {
+  const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'release-contract.mjs')));
+  const recovery = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
+  assert.deepEqual(consumer.PROTECTED_INCREMENT, PROTECTED_INCREMENT);
+  assert.deepEqual(consumer.PROTECTED_INCREMENT_SOURCE_FILES, PROTECTED_INCREMENT_SOURCE_FILES);
+  assert.deepEqual(recovery.R17_RECOVERED_GUARD, R17_RECOVERED_GUARD);
+  const value = protectedPlan(); validatePlan(value, original, now);
+  assert.equal(assertProtectedIncrement(value.contract.protectedIncrement, value.contract), true);
+  assert.equal(consumer.assertProtectedIncrement(value.contract.protectedIncrement, value.contract), true);
+  for (const change of [v => { v.reuseBuilds = plan.reuseBuilds; },
+    v => { v.contract.normalContinuation = continuationPlan().contract.normalContinuation; },
+    v => { v.contract.protectedIncrement.pricingWrites = true; },
+    v => { v.contract.protectedIncrement.multiviewGeneration = true; },
+    v => { v.contract.protectedIncrement.canvasVideoBatchWrites = true; },
+    v => { v.contract.protectedIncrement.sizePolicyVersion = 1; },
+    v => { v.contract.protectedIncrement.diagnosticsSchema = 'image.provider-error.v2'; },
+    v => { v.contract.protectedIncrement.allowOldWriter = true; },
+    v => { v.contract.recoveredGuardBaseline = structuredClone(R14_RECOVERED_GUARD); },
+    v => { v.contract.baselineSource = v.contract.sourceBase = v.liveCapture.source = 'c'.repeat(40); },
+    v => { v.contract.privateMultiviewInstall = false; },
+    v => { v.contract.deployedUsageSchema = null; }, v => { v.contract.deployedCanvasBatchSchema = null; },
+    v => { v.contract.canvasVideoBatchSchema = null; }]) {
+    const bad = protectedPlan(); change(bad); assert.throws(() => validatePlan(bad, original, now));
+    assert.throws(() => consumer.assertProtectedIncrement(bad.contract.protectedIncrement,
+      { ...bad.contract, reuseBuilds: bad.reuseBuilds }));
+  }
+  for (const key of Object.keys(R17_RECOVERED_GUARD)) {
+    const bad = protectedPlan(); bad.contract.recoveredGuardBaseline[key] = 'changed';
+    assert.throws(() => validatePlan(bad, original, now));
+  }
+});
 await test('Recovered guard producer only admits the pinned R08/c9 source and two new full builds', async () => {
   const consumer = await import(pathToFileURL(path.join(activeTemplate.base, activeTemplate.templateName, 'recovered-guard-baseline.mjs')));
   assert.deepEqual(consumer.R08_RECOVERED_GUARD, R08_RECOVERED_GUARD);

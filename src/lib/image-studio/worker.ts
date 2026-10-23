@@ -24,6 +24,23 @@ import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillin
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { withImagePricing } from '@/lib/pricing/image';
 import { registerCommittedStudioHd } from '@/lib/media/hd-registration';
+import { createStudioProviderErrorRecorder } from './provider-error-evidence';
+import { buildStudioProviderErrorEvent, sanitizeStudioProviderErrorRequest, type StudioProviderErrorObservation } from './provider-error-diagnostics';
+
+function workerProviderErrorRecorder(task: ImageStudioTask) {
+  const record = createStudioProviderErrorRecorder(task);
+  let request = sanitizeStudioProviderErrorRequest({ dispatchObserved: false, model: task.model });
+  return {
+    observe: async (observation: StudioProviderErrorObservation) => {
+      if (observation.request.dispatchObserved) request = observation.request;
+      await record(observation);
+    },
+    local: async (phase: 'validation' | 'download', code: string, status?: number, validation?: { width: number; height: number }) => {
+      await record({ request, event: buildStudioProviderErrorEvent({ phase, dispatchObserved: false, localCode: code,
+        transportHttpStatus: status, expectedSize: task.output_size, actualWidth: validation?.width, actualHeight: validation?.height }) });
+    },
+  };
+}
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
@@ -53,6 +70,8 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
 }
 
 async function executeStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages, recovery?: StudioDelivery) {
+  const providerDiagnostics = workerProviderErrorRecorder(task);
+  let observedValidation: { width: number; height: number } | undefined;
   let providerStarted = Boolean(recovery);
   let delivery = recovery;
   let original: Buffer | undefined;
@@ -114,6 +133,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
         ...(snapshot.ratioContractVersion === 2 ? { ratioContractVersion: 2 as const } : {}),
         signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
         recordResponse: response => recordStudioResponse(task, response),
+        onProviderErrorDiagnostics: providerDiagnostics.observe,
         persistBase64Image: async (value, outputUsage) => { await assertLease(); delivery = await createStudioBase64Delivery(task, value, outputUsage); },
         deliverRemoteImage: async (url, outputUsage) => {
           await assertLease(); delivery = await createStudioDelivery(task, url, outputUsage);
@@ -128,7 +148,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     if (delivery) await updateStudioDelivery(delivery, { phase: 'validate' });
     const exactSize = task.output_size && /^\d+x\d+$/.test(task.output_size) ? task.output_size : undefined;
     const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined },
-      async value => { if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
+      async value => { observedValidation = value; if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
     stage = 'save'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'save', validation });
     const preparedAsset = await prepareStudioOutput(png, task, validation, assertLease);
@@ -149,6 +169,8 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     const downloadError = error instanceof StudioImageDownloadError ? error : null;
     const mediaError = error instanceof StudioImageDeliveryError ? error : null;
     const code = detail?.code || downloadError?.code || mediaError?.code || 'processing_failed';
+    if (mediaError) await providerDiagnostics.local('validation', mediaError.code, undefined, observedValidation);
+    else if (downloadError && code !== 'delivery_lease_lost') await providerDiagnostics.local('download', downloadError.code, downloadError.status);
     console.error('[image-studio]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code, poll: detail?.poll, imageBytes: mediaError?.bytes,
       model: task.model, outputSize: task.output_size, httpStatus: detail?.status || downloadError?.status,
       download: detail?.diagnostics || downloadError?.diagnostics, elapsedMs: Date.now() - started }));
@@ -207,6 +229,8 @@ async function retainDimensionMismatchOutput(task: ImageStudioTask, original: Bu
 
 async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages,
   recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt, recoveryDeadlineAt?: number, manualRecovery = false, localOnly = false) {
+  const providerDiagnostics = workerProviderErrorRecorder(task);
+  let observedValidation: { width: number; height: number } | undefined;
   const recovering = publicPricingTaskState(task.status) === 'uncertain';
   let providerStarted = Boolean(recovery || resumeReceipt);
   let delivery = recovery;
@@ -350,6 +374,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
           ...(standardRatioContract ? { ratioContractVersion: 2 as const } : {}),
           signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]), downloadSignal: taskSignal,
           recordResponse: response => recordStudioResponse(task, response),
+          onProviderErrorDiagnostics: providerDiagnostics.observe,
           recordResponseEvidence: capability.protocol === 'gemini_native' && ['gemini-nano-banana-2.1', 'gemini-3-pro-image-preview'].includes(task.model)
             ? async (diagnostic, candidates) => {
               try {
@@ -385,6 +410,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
           ...(recovering ? { asyncQueryMode: 'single' as const } : {}),
           prompt: '', count: 1, images: [], signal: AbortSignal.any([taskSignal, AbortSignal.timeout(300000)]),
           downloadSignal: taskSignal,
+          onProviderErrorDiagnostics: providerDiagnostics.observe,
           persistBase64Image: async (value, outputUsage) => { await assertLease(); delivery = await createStudioBase64Delivery(task, value, outputUsage); },
           deliverRemoteImage: async (url, outputUsage) => {
             await assertLease(); delivery = await createStudioDelivery(task, url, outputUsage);
@@ -401,7 +427,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     if (delivery) await updateStudioDelivery(delivery, { phase: 'validate' });
     const exactSize = task.output_size && /^\d+x\d+$/.test(task.output_size) ? task.output_size : undefined;
     const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined },
-      async value => { if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
+      async value => { observedValidation = value; if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
     stage = 'save'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'save', validation });
     const preparedAsset = await prepareStudioOutput(png, task, validation, assertLease);
@@ -428,6 +454,8 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     const downloadError = error instanceof StudioImageDownloadError ? error : null;
     const mediaError = error instanceof StudioImageDeliveryError ? error : null;
     const code = detail?.code || downloadError?.code || mediaError?.code || 'processing_failed';
+    if (mediaError) await providerDiagnostics.local('validation', mediaError.code, undefined, observedValidation);
+    else if (downloadError && code !== 'delivery_lease_lost') await providerDiagnostics.local('download', downloadError.code, downloadError.status);
     console.error('[image-studio-channel]', JSON.stringify({ taskId: task.id, stage: detail?.stage || stage, code, poll: detail?.poll,
       imageBytes: mediaError?.bytes, model: task.model, outputSize: task.output_size,
       httpStatus: detail?.status || downloadError?.status, download: detail?.diagnostics || downloadError?.diagnostics,

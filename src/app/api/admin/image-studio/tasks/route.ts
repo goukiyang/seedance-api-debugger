@@ -6,8 +6,85 @@ import { prisma } from '@/lib/prisma';
 import { publicImageTaskStatus } from '@/lib/image-studio/tasks';
 import { imageBillingView } from '@/lib/image-studio/billing-contract';
 import { studioTaskStates } from '@/lib/image-studio/pricing-state';
+import { readStudioProviderErrorDiagnostics } from '@/lib/image-studio/provider-error-evidence';
+import type { StudioProviderErrorDiagnostics } from '@/lib/image-studio/provider-error-diagnostics';
 
 export const dynamic = 'force-dynamic';
+
+const PRIVATE_HEADERS = { 'Cache-Control': 'private, no-store' } as const;
+
+function adminJson(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: PRIVATE_HEADERS });
+}
+
+function projectProviderErrorDiagnostics(diagnostics: StudioProviderErrorDiagnostics): StudioProviderErrorDiagnostics {
+  return {
+    schema: diagnostics.schema,
+    binding: {
+      taskId: diagnostics.binding.taskId,
+      ownerId: diagnostics.binding.ownerId,
+      fingerprint: diagnostics.binding.fingerprint,
+      channelId: diagnostics.binding.channelId,
+      configRevision: diagnostics.binding.configRevision,
+      localRequestId: diagnostics.binding.localRequestId,
+      providerTaskId: diagnostics.binding.providerTaskId,
+    },
+    frozen: {
+      model: diagnostics.frozen.model,
+      resolution: diagnostics.frozen.resolution,
+      requestedRatio: diagnostics.frozen.requestedRatio,
+      resolvedRatio: diagnostics.frozen.resolvedRatio,
+      expectedSize: diagnostics.frozen.expectedSize,
+    },
+    request: {
+      dispatchObserved: diagnostics.request.dispatchObserved,
+      endpointKind: diagnostics.request.endpointKind,
+      protocol: diagnostics.request.protocol,
+      model: diagnostics.request.model,
+      sentModel: diagnostics.request.sentModel,
+      quality: diagnostics.request.quality,
+      size: diagnostics.request.size,
+      ratio: diagnostics.request.ratio,
+      n: diagnostics.request.n,
+      referenceCount: diagnostics.request.referenceCount,
+    },
+    firstObservedAt: diagnostics.firstObservedAt,
+    lastObservedAt: diagnostics.lastObservedAt,
+    eventCount: diagnostics.eventCount,
+    omittedEvents: diagnostics.omittedEvents,
+    events: diagnostics.events.map(event => ({
+      phase: event.phase,
+      observedAt: event.observedAt,
+      lastObservedAt: event.lastObservedAt,
+      occurrences: event.occurrences,
+      dispatchObserved: event.dispatchObserved,
+      transportHttpStatus: event.transportHttpStatus,
+      providerStatus: event.providerStatus,
+      providerReasonCode: event.providerReasonCode,
+      providerCauseConfirmed: event.providerCauseConfirmed,
+      providerErrorStage: event.providerErrorStage,
+      attempt: event.attempt,
+      imageRetryCount: event.imageRetryCount,
+      recoveryCount: event.recoveryCount,
+      clientDropped: event.clientDropped,
+      localCode: event.localCode,
+      expectedSize: event.expectedSize,
+      actualWidth: event.actualWidth,
+      actualHeight: event.actualHeight,
+      identityEvidence: event.identityEvidence,
+      bodyRead: event.bodyRead,
+      unknownFields: event.unknownFields.map(field => ({
+        field: field.field,
+        present: field.present,
+        length: field.length,
+        recognition: field.recognition,
+        disposition: field.disposition,
+      })),
+      summarySource: event.summarySource,
+      summary: event.summary,
+    })),
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +95,25 @@ export async function GET(request: NextRequest) {
       if (value.length > 120) throw new AuthError(`筛选内容过长：${key}`, 400);
       return value;
     };
+    if (params.has('diagnostics')) {
+      if (params.getAll('diagnostics').length !== 1 || params.get('diagnostics') !== '1'
+        || params.getAll('task_id').length !== 1) throw new AuthError('错误详情读取条件无效', 400);
+      const diagnosticTaskId = text('task_id');
+      if (!diagnosticTaskId) throw new AuthError('请提供原图片任务编号', 400);
+      try {
+        const task = await prisma.imageStudioTask.findUnique({ where: { id: diagnosticTaskId }, select: { id: true } });
+        if (!task) return adminJson({ error: '原图片任务不存在' }, 404);
+        const result = await readStudioProviderErrorDiagnostics(task.id);
+        const recorded = result.state === 'recorded' && result.diagnostics !== null;
+        return adminJson({
+          taskId: task.id,
+          state: result.state === 'recorded' && !recorded ? 'unavailable' : result.state,
+          diagnostics: recorded ? projectProviderErrorDiagnostics(result.diagnostics!) : null,
+        });
+      } catch {
+        return adminJson({ error: '图片错误详情暂不可读，请重试' }, 503);
+      }
+    }
     const cursor = text('cursor'), moduleId = text('moduleId'), ownerId = text('owner_user_id', 'ownerId'), taskId = text('task_id');
     if (params.getAll('task_id').length > 1) throw new AuthError('原任务编号不能重复', 400);
     const status = text('status'), model = text('model'), costStatus = text('cost_status'), resultStatus = text('result_status');
@@ -90,10 +186,10 @@ export async function GET(request: NextRequest) {
       return { tasks, nextCursor: ids.length > pageSize ? rows[rows.length - 1]?.id || null : null,
         pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } };
     });
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+    return adminJson(result);
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error('[Admin/ImageStudioTasks] List failed:', error);
-    return NextResponse.json({ error: '图片任务审计读取失败，请重试' }, { status: 503 });
+    if (error instanceof AuthError) return adminJson({ error: error.message }, error.status);
+    console.error('[Admin/ImageStudioTasks] List failed');
+    return adminJson({ error: '图片任务审计读取失败，请重试' }, 503);
   }
 }

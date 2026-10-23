@@ -21,6 +21,7 @@ import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
 import { frozenPricingReservation } from '@/lib/pricing/charge';
 import { sumCredits } from '@/lib/credits/precision';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
+import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from './ratios';
 
 type PreparedImageQuoteResult = {
   billingMode: 'fixed' | 'actual';
@@ -153,6 +154,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     if (base.pricing) {
       billingQuoteId = randomUUID();
       const quote: StoredImageQuote = { owner, count: prepared.length, fingerprint: base.specification,
+        sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION,
         intentRevision: 0, contract: base, ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
       await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, billingQuoteId), value_json: JSON.stringify(quote), updated_by: owner } });
     }
@@ -249,6 +251,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     deadline: new Date(now + 48 * 3600000).toISOString(), estimateSource: selectedEstimate.source, estimateVersion: selectedEstimate.version };
   const id = randomUUID();
   const quote: StoredImageQuote & { imageChannel?: ImageGenerationChannelSnapshot } = {
+    sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION,
     owner, count: prepared.length, fingerprint: base.specification,
     intentRevision: state.intentRevision, contract, ...sharedResult, ...(imageChannel ? { imageChannel } : {}),
   };

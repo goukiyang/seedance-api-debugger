@@ -4,14 +4,19 @@ import { parseImageBillingContract, type ImageBillingContract } from './billing-
 import { imageBillingReady } from './billing-readiness';
 import type { SharedStudioIntent } from './shared-types';
 import { assertNewPricingCharge } from '@/lib/pricing/charge';
+import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
 
 export const imageQuoteKey = (owner: string, id: string) => `image_billing_quote_v1:${owner}:${id}`;
-export type StoredImageQuote = { owner: string; count: number; fingerprint: string; intentRevision: number; contract: ImageBillingContract; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent };
+export type StoredImageQuote = { owner: string; count: number; fingerprint: string; intentRevision: number; contract: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent };
 export async function consumeImageQuote(tx: Prisma.TransactionClient, input: { owner: string; id: string;
-  count: number; fingerprint: string; specification: string; scope: string; model: string; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent }) {
+  count: number; fingerprint: string; specification: string; scope: string; model: string; sizePolicyVersion?: StudioSizePolicyVersion; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent }) {
   const row = await tx.platformSetting.findUnique({ where: { key: imageQuoteKey(input.owner, input.id) } });
   if (!row) throw new Error('Image quote unavailable');
   const quote = JSON.parse(row.value_json) as StoredImageQuote;
+  if (quote.sizePolicyVersion !== CURRENT_STUDIO_SIZE_POLICY_VERSION
+    || quote.sizePolicyVersion !== (input.sizePolicyVersion ?? CURRENT_STUDIO_SIZE_POLICY_VERSION)) {
+    throw new Error('Image size policy changed; request a new quote');
+  }
   const contract = parseImageBillingContract(JSON.stringify(quote.contract));
   const state = await imageBillingReady(input.scope, input.model, tx);
   const savedChannel = quote.imageChannel;

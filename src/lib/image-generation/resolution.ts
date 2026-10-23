@@ -1,4 +1,4 @@
-import { studioRatioSize } from '@/lib/image-studio/ratios';
+import { studioRatioSize, CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from '@/lib/image-studio/ratios';
 
 export const IMAGE_RESOLUTION_OPTIONS = ['0.5K', '1K', '2K', '4K'] as const;
 export type ImageResolution = typeof IMAGE_RESOLUTION_OPTIONS[number];
@@ -50,14 +50,15 @@ export function assertImageResolutionSupported(model: string, value: unknown) {
   }
 }
 
-export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string, allowFourToOne = true): string {
+export function imageOutputSize(model: string, resolution: unknown, ratio: string, provider?: string, allowFourToOne = true,
+  sizePolicyVersion: StudioSizePolicyVersion = CURRENT_STUDIO_SIZE_POLICY_VERSION): string {
   const issue = studioFourToOneIssue(ratio, allowFourToOne || supportsStudioFourToOne(model, provider));
   if (issue) throw new Error(issue);
   const normalized = normalizeImageResolution(model, resolution, provider);
   assertImageResolutionSupported(model, normalized);
   return isGeminiImageModel(model) && provider !== 'ai_media_vip'
     ? normalized
-    : studioRatioSize(ratio, normalized, allowFourToOne) || studioRatioSize('1:1', normalized) || '1024x1024';
+    : studioRatioSize(ratio, normalized, allowFourToOne, sizePolicyVersion) || studioRatioSize('1:1', normalized, allowFourToOne, sizePolicyVersion) || '1024x1024';
 }
 
 export function isValidImageDimension(value: unknown, allowFourToOne = false): value is string {

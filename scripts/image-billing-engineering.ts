@@ -120,7 +120,7 @@ async function main() {
     assert.equal((await imageBillingReady('c'.repeat(64), model)).ready, false);
     const quoteId = randomUUID(), quoteContract = contract(5);
     await prisma.platformSetting.create({ data: { key: imageQuoteKey(successful.owner_id, quoteId), value_json: JSON.stringify({
-      owner: successful.owner_id, count: 1, fingerprint: specification, intentRevision: 1, contract: quoteContract }) } });
+      owner: successful.owner_id, count: 1, fingerprint: specification, intentRevision: 1, sizePolicyVersion: 2, contract: quoteContract }) } });
     const consume = { owner: successful.owner_id, id: quoteId, count: 1, fingerprint: specification, specification, scope, model };
     await assert.rejects(prisma.$transaction(tx => consumeImageQuote(tx, { ...consume, count: 2 })));
     await assert.rejects(prisma.$transaction(tx => consumeImageQuote(tx, { ...consume, owner: fixed.owner_id })));
