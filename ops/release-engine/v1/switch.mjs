@@ -21,7 +21,7 @@ import { inspectHdReconciliation, inspectHdBeforeMaintenance, readHdStorageProte
   probeHdCandidateResolver } from './hd-storage-preflight.mjs';
 import { armGuardRecovery, readGuardRecovery, inspectGuardRecoveryControl, verifyGuardRecovery, runGuardRecovery, markFixedGuardStart } from './guard-recovery.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { assertFreshCandidateEvidence, candidateEvidenceFile } from './candidate-evidence.mjs';
+import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
 import { originalPreparedFile, originalManifestForInputs, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 import { captureUsageRole, stopUsageRole, startUsageRole, assertUsageRoleStopped, inspectUsageRoleAdmission,
   restoreOriginalUsageRole, usageRoleProof } from './usage-role-control.mjs';
@@ -836,7 +836,8 @@ function assertNoEscapedRecoveryWriter(m) {
       const command = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').replaceAll('\0', ' ');
       const related = roots.has(cwd) && /node|next|tsx|esbuild|ffmpeg/.test(command)
         || /ffmpeg/.test(command) && (command.includes(m.hdRoot) || [...roots].some(root => command.includes(root)))
-        || command.includes(engineDirectory(m) + '/') || command.includes(m.stage + '/hd-release-safety-r03/');
+        || command.includes(engineDirectory(m) + '/') || command.includes(candidateCompatibilityDirectory(m) + '/')
+        || command.includes(m.stage + '/hd-release-safety-r03/');
       if (related) throw new Error('Related process remains outside the proven empty writer groups: ' + pid);
     } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error; }
   }
@@ -1157,7 +1158,7 @@ function sharedHdAdmissionBounds(m, builds, manifestSha256) {
     const proof = JSON.parse(bytes[kind]); assert.deepEqual(proof, builds[kind]);
     assertFreshCandidateEvidence(proof, m, kind, now);
     assert.equal(proof.manifestSha256, manifestSha256);
-    candidateExpiresAt[kind] = m.reuseBuilds ? proof.expiresAt : proof.startedAt + 1800000;
+    candidateExpiresAt[kind] = candidateEvidenceExpiresAt(proof, m, kind, now);
   }
   const scanDeadline = Math.min(windowIssuedAt + 300000, approvalExpiresAt, candidateExpiresAt.main, candidateExpiresAt.guard);
   const check = () => {

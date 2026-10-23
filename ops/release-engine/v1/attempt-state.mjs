@@ -256,6 +256,10 @@ function applyEvent(state, event, hash) {
       'phase', 'dependencyEventSha256', 'before'], 'phase intent event');
     assert.equal(state.status, 'running'); assert.equal(state.activePhase, null); assert.ok(ownerEqual(event.owner, state.owner));
     assert.match(event.phase, PHASE); assert.equal(event.dependencyEventSha256, state.lastEventSha256);
+    if (state.guardBuildTail) {
+      if (state.guardBuildTail.status === 'pending') assert.equal(event.phase, 'guard-build', 'The bound guard tail must finish before later phases');
+      else assert.notEqual(event.phase, 'guard-build', 'A completed or failed guard tail cannot be replayed');
+    }
     validateScene(event.before, 'phase before summary');
     state.activePhase = { phase: event.phase, intentSha256: hash, sequence: event.sequence };
   } else if (event.kind === 'phase_result') {
@@ -266,6 +270,10 @@ function applyEvent(state, event, hash) {
     assert.ok(['succeeded', 'failed', 'interrupted', 'not_applicable'].includes(event.outcome)); validateChild(event.child);
     validateScene(event.after, 'phase after summary');
     state.lastPhase = { phase: event.phase, outcome: event.outcome, intentSha256: event.intentSha256, resultSha256: hash };
+    if (state.guardBuildTail && event.phase === 'guard-build') {
+      assert.equal(state.guardBuildTail.status, 'pending');
+      state.guardBuildTail = { ...state.guardBuildTail, status: event.outcome === 'succeeded' ? 'completed' : 'failed', resultSha256: hash };
+    }
     state.activePhase = null;
   } else if (event.kind === 'attempt_finished') {
     exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
@@ -275,12 +283,19 @@ function applyEvent(state, event, hash) {
     state.status = event.outcome; state.terminal = { outcome: event.outcome, eventSha256: hash };
   } else if (event.kind === 'failure_continued') {
     exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
-      'previousTerminalSha256', 'failureReceiptSha256', 'window', 'before'], 'failed attempt continuation');
+      'previousTerminalSha256', 'failureReceiptSha256', 'window', 'before', ...(event.continuation === undefined ? [] : ['continuation'])], 'failed attempt continuation');
     assert.equal(state.status, 'failed'); assert.equal(state.activePhase, null);
     assert.equal(state.terminal.eventSha256, event.previousTerminalSha256);
     assert.equal(state.lastEventSha256, event.previousTerminalSha256); assert.match(event.failureReceiptSha256, HASH);
     validateWindow(event.window, state.attemptId, state.runId, event.at, false); validateScene(event.before, 'continuation before summary');
     assert.equal(event.before.facts.effectsStarted, false); assert.equal(event.before.facts.switchComplete, false);
+    if (event.continuation !== undefined) {
+      validateGuardBuildTailBinding(event.continuation);
+      assert.equal(state.guardBuildTail, undefined); assert.equal(state.lastPhase?.phase, 'guard-build');
+      assert.equal(state.lastPhase?.outcome, 'failed'); assert.equal(event.continuation.proofSha256, event.failureReceiptSha256);
+      state.guardBuildTail = { ...event.continuation, continuationEventSha256: hash,
+        originalTerminalEventSha256: event.previousTerminalSha256, status: 'pending', resultSha256: null };
+    }
     state.status = 'running'; state.terminal = null; state.owner = event.owner; state.currentWindow = event.window;
   } else if (event.kind === 'observation') {
     exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
@@ -438,6 +453,11 @@ export function refreshAttemptWindow({ root, taskId, attemptId, owner, window, n
 export function startPhase({ root, taskId, attemptId, owner, phase, dependencyEventSha256, before, now = Date.now() }) {
   assert.match(phase, PHASE); assert.match(dependencyEventSha256, HASH); validateScene(before, 'phase before summary');
   const loaded = validateAttempt({ root, taskId, attemptId });
+  // Reject an unauthorized tail transition before an immutable event is written.
+  if (loaded.derivedState.guardBuildTail) {
+    if (loaded.derivedState.guardBuildTail.status === 'pending') assert.equal(phase, 'guard-build');
+    else assert.notEqual(phase, 'guard-build');
+  }
   validateWindow(loaded.derivedState.currentWindow, attemptId, loaded.header.runId, now, true);
   if (loaded.derivedState.lastEventSha256 !== dependencyEventSha256) fail('evidence_missing', 'phase_dependency_changed', 'phase', phase,
     'The attempt advanced after this phase dependency was captured.', 'Reload the attempt and decide from the new durable state; do not append a late intent.');
@@ -529,8 +549,14 @@ export function takeoverAttempt({ root, taskId, attemptId, owner, priorLeaseSha2
   return { event, eventSha256, state: next, archivedLease: archived };
 }
 
+export function validateGuardBuildTailBinding(value) {
+  exactKeys(value, ['schema', 'phase', 'proofSha256', 'processorControllerSetSha256'], 'guard build-tail binding');
+  assert.equal(value.schema, 'sd2-release-guard-build-tail-binding.v1'); assert.equal(value.phase, 'guard-build');
+  assert.match(value.proofSha256, HASH); assert.match(value.processorControllerSetSha256, HASH); return value;
+}
+
 export function continueFailedAttempt({ root, taskId, attemptId, owner, engine, manifest, artifacts, window,
-  terminalEventSha256, failureReceiptSha256, before, now = Date.now(), inspectOwner = inspectControllerOwner }) {
+  terminalEventSha256, failureReceiptSha256, before, continuation, now = Date.now(), inspectOwner = inspectControllerOwner }) {
   const loaded = validateAttempt({ root, taskId, attemptId }); validateOwner(owner);
   assertAttemptBindings(loaded, { engine, manifest, artifacts });
   assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
@@ -539,6 +565,11 @@ export function continueFailedAttempt({ root, taskId, attemptId, owner, engine, 
   validateWindow(window, attemptId, attemptId, now, true); validateScene(before, 'continuation before summary');
   assert.equal(before.facts.effectsStarted, false); assert.equal(before.facts.switchComplete, false);
   assert.match(failureReceiptSha256, HASH);
+  if (continuation !== undefined) {
+    validateGuardBuildTailBinding(continuation); assert.equal(continuation.proofSha256, failureReceiptSha256);
+    assert.equal(loaded.derivedState.guardBuildTail, undefined); assert.equal(loaded.derivedState.lastPhase?.phase, 'guard-build');
+    assert.equal(loaded.derivedState.lastPhase?.outcome, 'failed'); assert.notEqual(continuation.processorControllerSetSha256, engine.sha256);
+  }
   const task = readJson(path.join(loaded.place.task, 'task.json'));
   assert.equal(task.latestAttemptId, attemptId, 'A superseded attempt cannot be continued');
   assert.equal(fs.existsSync(ownerLeaseFile(loaded.place)), false);
@@ -553,7 +584,8 @@ export function continueFailedAttempt({ root, taskId, attemptId, owner, engine, 
   const sequence = loaded.derivedState.lastSequence + 1; assert.ok(sequence <= 999999);
   const event = { schema: ATTEMPT_EVENT_SCHEMA, taskId, attemptId, runId: attemptId, sequence,
     previousSha256: terminalEventSha256, at: now, atIso: iso(now), owner, kind: 'failure_continued',
-    previousTerminalSha256: terminalEventSha256, failureReceiptSha256, window, before };
+    previousTerminalSha256: terminalEventSha256, failureReceiptSha256, window, before,
+    ...(continuation === undefined ? {} : { continuation }) };
   const eventSha256 = writeExclusiveJson(path.join(loaded.place.events, String(sequence).padStart(6, '0') + '.json'), event);
   const next = applyEvent(structuredClone(loaded.derivedState), event, eventSha256);
   writeCasJson(path.join(loaded.place.attempt, 'state.json'), next, loaded.stateSha256);

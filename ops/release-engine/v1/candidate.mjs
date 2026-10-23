@@ -13,6 +13,7 @@ import { prepareReusedCandidate, verifyReusedCandidate, sealOriginalSuccess } fr
 import { assertControlPreflight } from './control-preflight.mjs';
 import { assertProtectedIncrementCandidate } from './release-contract.mjs';
 import { captureHdCompiledCache, verifyHdCompiledCacheReceipt } from './hd-compiled-cache.mjs';
+import { GUARD_BUILD_TAIL_SCHEMA, guardBuildTailRuntime, assertFreshCandidateEvidence } from './candidate-evidence.mjs';
 
 const SOURCE_SCHEMA = 'rate-impl2-source-manifest.v1';
 const BUILD_SCHEMA = 'rate-impl2-candidate-build.v1';
@@ -583,6 +584,78 @@ export async function buildCandidate(m, kind) {
   return proof;
 }
 
+export async function completeSuccessfulGuardBuildTail(m, continuation) {
+  const runtime = guardBuildTailRuntime(m);
+  assert.ok(runtime && runtime.phase === 'guard-build'); assert.deepEqual(continuation, runtime);
+  assert.equal(m.reuseBuilds, undefined);
+  assertControlPreflight(m); assertReleaseWindow(m); requireOriginalLive(m);
+  const kind = 'guard', info = context(m, kind), { c, source } = info, request = runtime.proof.request;
+  sourceCheck(c, source); assertProtectedIncrementCandidate(m, kind, fs.readFileSync);
+  const { prepared, preparedSha256 } = inputs(m, kind, source);
+  assert.equal(preparedSha256, request.guardPreparedSha256);
+  assert.equal(sha(rootFile(m.stage + '/main-prepared.json')), request.mainPreparedSha256);
+  const commandFile = m.stage + '/guard-build-command.json', commandBytes = rootFile(commandFile), command = JSON.parse(commandBytes);
+  assert.equal(sha(commandBytes), request.buildCommandSha256);
+  assert.equal(command.schema, 'sd2-original-build-command.v1'); assert.equal(command.runId, m.runId);
+  assert.equal(command.label, kind); assert.equal(command.source, c.source); assert.equal(command.manifestSha256, info.manifestSha256);
+  assert.equal(command.status, 0); assert.equal(command.signal, null); assert.equal(command.error, null); assert.equal(command.errorCode, null);
+  assert.equal(command.originalExitRecordedBeforePostchecks, true);
+  assert.equal(command.buildEnvironmentSha256, sha(JSON.stringify(prepared.buildEnv)));
+  for (const name of ['guard-build.json', 'guard-immutable-success.json', 'main-build.json', 'main-build.log',
+    'main-build-command.json', 'switch-before.json', 'switch-complete.json', 'fixed-guard-recovery.json']) absent(m.stage + '/' + name);
+  const logFile = m.stage + '/guard-build.log', logBytes = rootFile(logFile), lines = logBytes.toString('utf8').split(/\r?\n/);
+  assert.equal(command.logFile, logFile); assert.equal(command.logSha256, sha(logBytes)); assert.equal(sha(logBytes), request.buildLogSha256);
+  const image = lines.filter(line => line.startsWith('IMAGE_RECOVERY_GATE_RECEIPT='));
+  const pricing = lines.filter(line => line.startsWith('PRICING_POLICY_GATE_RECEIPT='));
+  assert.equal(image.length, 1); assert.equal(pricing.length, 1);
+  const uid = Number(call('id', ['-u', m.appUser]));
+  assert.equal(appReceipt(image[0].slice('IMAGE_RECOVERY_GATE_RECEIPT='.length), c.root, uid).sha256, request.imageGateReceiptSha256);
+  assert.equal(appReceipt(pricing[0].slice('PRICING_POLICY_GATE_RECEIPT='.length), c.root, uid).sha256, request.pricingGateReceiptSha256);
+  assert.equal(sha(fs.readFileSync(c.root + '/package.json')), request.packageJsonSha256);
+  assert.equal(sha(fs.readFileSync(c.root + '/' + c.buildDist + '/BUILD_ID')), request.buildIdSha256);
+  const built = compiledTree(c);
+  assert.equal(built.sha256, request.observedCompiledTreeSha256);
+  assert.equal(built.build, runtime.proof.originalBuild.build);
+  assert.equal(command.startedAt, runtime.proof.originalBuild.startedAt); assert.equal(command.finishedAt, runtime.proof.originalBuild.finishedAt);
+  const emptyProbe = prepared.preparedRoot + '/hd-compile-probe', emptyStat = fs.lstatSync(emptyProbe);
+  assert.equal(fs.realpathSync(emptyProbe), emptyProbe);
+  assert.ok(emptyStat.isDirectory() && !emptyStat.isSymbolicLink() && emptyStat.uid === uid && (emptyStat.mode & 0o7777) === 0o700);
+  assert.deepEqual(fs.readdirSync(emptyProbe), [], 'Retain the original failed probe exactly as an empty directory');
+  const before = readProtection(m);
+  // These are the original prepared observations, freshly verified below.
+  // The lost prebuild-local objects are never reconstructed as historical facts.
+  const uploadHelperProbe = prepared.uploadHelperProbe, hdHelperProbe = prepared.hdHelperProbe;
+  verifyUploadHelperProbe(m, c, source, prepared, uploadHelperProbe, 'prepare');
+  verifyHdCandidateResolver(m, c, prepared, hdHelperProbe, { phase: 'prepare' });
+  const hdCompiledCache = captureHdCompiledCache(m, kind, prepared, {
+    probeDirectory: prepared.preparedRoot + '/hd-compile-probe-tail-' + runtime.continuationSha256.slice(0, 16),
+  });
+  const proof = { schema: GUARD_BUILD_TAIL_SCHEMA, label: kind, source: c.source, version: c.version, build: built.build,
+    runId: m.runId, engine: m.engine, operation: m.operation, manifestSha256: info.manifestSha256,
+    startedAt: command.startedAt, finishedAt: command.finishedAt, exitCode: 0,
+    gateReceipt: image[0].slice('IMAGE_RECOVERY_GATE_RECEIPT='.length), verifiedSourceAndGates: true,
+    sourceManifestSha256: info.sourceManifestSha256, preparedSha256, compiledTreeSha256: built.sha256,
+    uploadHelperProbe, hdHelperProbe, helperProbePhase: 'prepare', hdCompiledCache, logFile, logSha256: sha(logBytes) };
+  const gates = verifyGates(m, kind, source, prepared, proof);
+  assert.equal(gates.pricing.receipt, pricing[0].slice('PRICING_POLICY_GATE_RECEIPT='.length));
+  verifyPricingInputs({ candidateRoot: c.root, source: c.source, runId: m.runId, appUser: m.appUser, sourceFiles: source.files, prepared });
+  sourceCheck(c, source); assert.deepEqual(compiledTree(c), built); requireOriginalLive(m); assertProtection(before, readProtection(m));
+  assert.equal(sha(rootFile(commandFile)), request.buildCommandSha256); assert.equal(sha(rootFile(logFile)), request.buildLogSha256);
+  assert.deepEqual(fs.readdirSync(emptyProbe), []);
+  const emptyAfter = fs.lstatSync(emptyProbe);
+  for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'])
+    assert.equal(emptyAfter[key], emptyStat[key], 'Original empty HD probe directory changed during the retained-build tail');
+  assertReleaseWindow(m);
+  const observedAt = Date.now();
+  proof.tailPostchecks = { schema: 'sd2-guard-build-tail-seal.v1', continuationSha256: runtime.continuationSha256,
+    proofFile: runtime.proofFile, observedAt, expiresAt: observedAt + 1800000, retainedOriginalCommand: true,
+    originalCompiledSnapshotUnavailable: true, originalBuildCommandSha256: request.buildCommandSha256 };
+  assertFreshCandidateEvidence(proof, m, kind, observedAt);
+  writeJsonExclusive(m.stage + '/guard-build.json', proof);
+  await sealOriginalSuccess(m, kind);
+  return proof;
+}
+
 export async function verifyCandidate(m, kind) {
   if (m.reuseBuilds) { validateManifest(m); verifyUploadPrivateDirectory(m); return verifyReusedCandidate(m, kind); }
   const info = context(m, kind), { c, source } = info;
@@ -590,16 +663,19 @@ export async function verifyCandidate(m, kind) {
   sourceCheck(c, source); assertProtectedIncrementCandidate(m, kind, fs.readFileSync);
   const { prepared, preparedSha256 } = inputs(m, kind, source);
   const value = JSON.parse(rootFile(m.stage + '/' + kind + '-build.json'));
-  assert.equal(value.schema, BUILD_SCHEMA); assert.equal(value.label, kind); assert.equal(value.source, c.source);
+  const tail = kind === 'guard' && value.schema === GUARD_BUILD_TAIL_SCHEMA;
+  if (!tail) assert.equal(value.schema, BUILD_SCHEMA);
+  assert.equal(value.label, kind); assert.equal(value.source, c.source);
   assert.equal(value.version, c.version); assert.equal(value.runId, m.runId); assert.equal(value.manifestSha256, info.manifestSha256);
   assert.equal(value.sourceManifestSha256, info.sourceManifestSha256); assert.equal(value.preparedSha256, preparedSha256);
-  verifyUploadHelperProbe(m, c, source, prepared, value.uploadHelperProbe, 'prebuild');
-  verifyHdCandidateResolver(m, c, prepared, value.hdHelperProbe, { phase: 'prebuild' });
+  const helperPhase = tail ? 'prepare' : 'prebuild';
+  verifyUploadHelperProbe(m, c, source, prepared, value.uploadHelperProbe, helperPhase);
+  verifyHdCandidateResolver(m, c, prepared, value.hdHelperProbe, { phase: helperPhase });
   if (isSharedEngine(m)) verifyHdCompiledCacheReceipt(m, kind, value.hdCompiledCache);
   assert.equal(value.exitCode, 0); assert.equal(value.verifiedSourceAndGates, true);
   assert.ok(Number.isSafeInteger(value.startedAt) && value.startedAt > 0 && Number.isSafeInteger(value.finishedAt)
     && value.finishedAt >= value.startedAt && value.finishedAt <= Date.now() + 1000);
-  assert.ok(Date.now() - value.startedAt < 30 * 60_000, 'Full candidate build is stale');
+  assertFreshCandidateEvidence(value, m, kind);
   assert.equal(value.logFile, m.stage + '/' + kind + '-build.log'); assert.equal(sha(rootFile(value.logFile)), value.logSha256);
   const built = compiledTree(c); assert.equal(value.build, built.build); assert.equal(value.compiledTreeSha256, built.sha256);
   verifyGates(m, kind, source, prepared, value); sourceCheck(c, source);

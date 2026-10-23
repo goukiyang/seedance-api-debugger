@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import vm from 'node:vm';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,7 @@ import {
   NATIVE_FIXTURES, RELEASE_PHASES, captureReleaseScene, createReleaseController, nextReleasePhase,
   postcheckReleasePhase, releaseChildAction, releaseResumeDecision, runPhaseTransaction, validateNativeFixture,
   validatePackageRequest, validatePrepareTailContinuation, assertPrepareTailControllerDifference, assertPrepareTailChildRoute,
+  validateGuardBuildTailContinuation, assertGuardBuildTailControllerDifference, assertGuardBuildTailPhase, GUARD_BUILD_TAIL_PHASES,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -332,6 +334,56 @@ function scenarioPrepareTailContract() {
   return 'prepare_tail_has_exact_failure_hash_inputs_five_file_processor_boundary_and_no_later_phase_authority';
 }
 
+function scenarioGuardBuildTailContract() {
+  const request = { schema: 'sd2-release-guard-build-tail-continuation.v1', observedAt: new Date().toISOString() };
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256', 'processorControllerSetSha256',
+    'mainPreparedSha256', 'guardPreparedSha256', 'buildCommandSha256', 'buildLogSha256', 'packageJsonSha256',
+    'buildIdSha256', 'observedCompiledTreeSha256', 'imageGateReceiptSha256', 'pricingGateReceiptSha256']) request[key] = digest(key);
+  assert.deepEqual(validateGuardBuildTailContinuation(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateGuardBuildTailContinuation(missing));
+    assert.throws(() => validateGuardBuildTailContinuation({ ...request, [key]: 'unbound' }));
+  }
+  assert.throws(() => validateGuardBuildTailContinuation({ ...request, compiledTreeSha256: HASH }));
+  assert.throws(() => validatePrepareTailContinuation(request));
+  const names = ['release-entry.mjs', 'attempt-state.mjs', 'release.mjs', 'release-entry-engineering.mjs', 'attempt-state-engineering.mjs',
+    'candidate.mjs', 'candidate-evidence.mjs', 'candidate-reuse.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs',
+    'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs', 'hd-storage-preflight-engineering.mjs',
+    'engine-context.mjs', 'release-contract.mjs'];
+  const original = Object.fromEntries(names.map(name => [name, digest('old:' + name)]));
+  const processor = Object.fromEntries(names.map(name => [name, name.startsWith('engine-context') || name.startsWith('release-contract')
+    ? original[name] : digest('new:' + name)]));
+  assert.equal(Object.keys(assertGuardBuildTailControllerDifference(original, processor)).length, 14);
+  for (const name of ['engine-context.mjs', 'release-contract.mjs'])
+    assert.throws(() => assertGuardBuildTailControllerDifference(original, { ...processor, [name]: HASH }));
+  assert.throws(() => assertGuardBuildTailControllerDifference(original, { ...processor, 'new-compiler.mjs': HASH }));
+  assert.throws(() => assertGuardBuildTailControllerDifference(original, { ...processor, 'candidate.mjs': original['candidate.mjs'] }));
+  const omitted = { ...processor }; delete omitted['engine-context.mjs'];
+  assert.throws(() => assertGuardBuildTailControllerDifference(original, omitted));
+  assertGuardBuildTailPhase('guard-build', { status: 'pending' });
+  for (const phase of GUARD_BUILD_TAIL_PHASES.filter(value => value !== 'guard-build')) {
+    assertGuardBuildTailPhase(phase, { status: 'completed' });
+    assert.throws(() => assertGuardBuildTailPhase(phase, { status: 'pending' }));
+  }
+  for (const phase of ['capture', 'preflight', 'admission', 'adopt', 'prepare', 'rollback'])
+    assert.throws(() => assertGuardBuildTailPhase(phase, { status: 'completed' }));
+  assert.throws(() => assertGuardBuildTailPhase('guard-build', { status: 'completed' }));
+  // Exercise the actual pure action selector without importing/configuring a
+  // production release context or executing any native release consumer.
+  const releaseSource = fs.readFileSync(new URL('./release.mjs', import.meta.url), 'utf8');
+  const marker = 'export function guardBuildTailReleaseAction(';
+  assert.equal(releaseSource.split(marker).length, 2);
+  const start = releaseSource.indexOf(marker), end = releaseSource.indexOf('\n}', start) + 2;
+  assert.ok(end > start);
+  const action = vm.runInNewContext('(' + releaseSource.slice(start, end).replace(/^export /, '') + ')');
+  for (const [phase, mode, kind] of [['main-build', 'build', 'main'], ['verify', 'verify', 'guard'], ['verify', 'verify', 'main'],
+    ['arm', 'arm', undefined], ['switch', 'switch', undefined], ['proof', 'proof', undefined], ['proof', 'public', 'main'],
+    ['recovery', 'recovery', undefined]]) assert.equal(action(phase, mode, kind), true);
+  for (const [phase, mode, kind] of [['guard-build', 'build', 'guard'], ['main-build', 'build', 'guard'], ['verify', 'build', 'main'],
+    ['proof', 'public', 'guard'], ['prepare', 'prepare', 'guard'], ['switch', 'rollback', undefined]]) assert.equal(action(phase, mode, kind), false);
+  return 'guard_tail_binds_exact_original_and_observed_inputs_then_uses_only_reviewed_processor_readers_without_guard_recompile';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -339,7 +391,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

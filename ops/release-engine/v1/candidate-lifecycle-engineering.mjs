@@ -7,7 +7,8 @@ import vm from 'node:vm';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { candidateEvidenceFile, assertFreshCandidateEvidence, REUSE_SCHEMA } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateEvidenceExpiresAt, REUSE_SCHEMA,
+  GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
 import { parseReleaseTimestamp, isSharedEngine, engineDirectory } from './common.mjs';
 import { releaseBoundary } from './engine-context.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
@@ -409,7 +410,9 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     rootFile, sha, writeJsonExclusive: exclusive, call, execFileSync: nativeExec, unit,
     assertReleaseWindow: assertWindow, validateManifest: value => value, parseReleaseTimestamp,
     isSharedEngine, engineDirectory, loadHdCompiledCacheProofs, releaseBoundary,
-    candidateEvidenceFile, REUSE_SCHEMA, assertFreshCandidateEvidence: (value, m, kind, now = clock) => assertFreshCandidateEvidence(value, m, kind, now),
+    candidateEvidenceFile, REUSE_SCHEMA, GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory,
+    candidateEvidenceExpiresAt: (value, m, kind, now = clock) => candidateEvidenceExpiresAt(value, m, kind, now),
+    assertFreshCandidateEvidence: (value, m, kind, now = clock) => assertFreshCandidateEvidence(value, m, kind, now),
     pathToFileURL, setTimeout, clearTimeout, structuredClone, console,
     CONTINUATION_V2, assertContinuationInput, assertDeployedContinuationSources,
     verifyDeployedContinuationProvenance: () => { throw new Error('V2 requires an explicit isolated provenance fixture; native fallback is forbidden'); } };
@@ -1386,6 +1389,79 @@ for (const scenario of ['success', 'main-drift', 'guard-input-drift', 'consumed-
   }
   assert.equal(sha(originalMain), binding.mainPreparedSha256);
   add('prepare-tail_actual-body_' + scenario);
+}
+// Exercise the actual tail body without granting it a compiler or business work.
+// Original gate internals remain covered by the native receipts above.
+for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-drift', 'probe-used', 'main-started', 'protection-drift']) {
+  const now = 1792800000000, stage = '/isolated-guard-build-tail', root = stage + '/guard', preparedRoot = root + '/.role-tests/prepared';
+  const m = { stage, runId: '10000000-0000-4000-8000-000000000004', appUser: 'isolated',
+    engine: { schema: 'sd2-release-engine.v1' }, operation: { taskId: 'tail-task', attemptId: 'tail-attempt' },
+    guard: { root, source: 'b'.repeat(40), version: '0.104.0+guard', buildDist: '.next-prod-candidate' } };
+  const packageBytes = Buffer.from('{"version":"0.104.0+guard"}'), buildBytes = Buffer.from('retained-build\n');
+  const imageFile = preparedRoot + '/image.json', pricingFile = preparedRoot + '/pricing.json';
+  const log = Buffer.from('IMAGE_RECOVERY_GATE_RECEIPT=' + imageFile + '\nPRICING_POLICY_GATE_RECEIPT=' + pricingFile + '\n'
+    + (scenario === 'duplicate-gate' ? 'IMAGE_RECOVERY_GATE_RECEIPT=' + imageFile + '\n' : ''));
+  const prepared = { preparedRoot, buildEnv: { isolated: 'true' }, uploadHelperProbe: { originalPrepare: 'upload' }, hdHelperProbe: { originalPrepare: 'hd' } };
+  const preparedSha256 = sha(JSON.stringify(prepared)), manifestSha256 = 'a'.repeat(64);
+  const command = { schema: 'sd2-original-build-command.v1', runId: m.runId, label: 'guard', source: m.guard.source,
+    manifestSha256, status: scenario === 'npm-failed' ? 1 : 0, signal: null, error: null, errorCode: null,
+    originalExitRecordedBeforePostchecks: true, buildEnvironmentSha256: sha(JSON.stringify(prepared.buildEnv)),
+    logFile: stage + '/guard-build.log', logSha256: sha(log), startedAt: now - 7200000, finishedAt: now - 3600000 };
+  const documents = new Map([[stage + '/guard-build-command.json', Buffer.from(JSON.stringify(command))],
+    [stage + '/guard-build.log', log], [stage + '/main-prepared.json', Buffer.from('original main prepared')],
+    [imageFile, Buffer.from('original image gate')], [pricingFile, Buffer.from('original pricing gate')]]);
+  const built = { build: 'retained-build', sha256: sha('retained compiled output') }, events = [], writes = [];
+  const request = { guardPreparedSha256: preparedSha256, mainPreparedSha256: sha(documents.get(stage + '/main-prepared.json')),
+    buildCommandSha256: sha(documents.get(stage + '/guard-build-command.json')), buildLogSha256: sha(log),
+    packageJsonSha256: sha(packageBytes), buildIdSha256: sha(buildBytes), observedCompiledTreeSha256: built.sha256,
+    imageGateReceiptSha256: sha(documents.get(imageFile)), pricingGateReceiptSha256: sha(documents.get(pricingFile)), observedAt: now - 1 };
+  const runtime = { schema: 'sd2-release-guard-build-tail-runtime.v1', phase: 'guard-build', proofFile: stage + '/tail-proof.json',
+    continuationSha256: 'e'.repeat(64), proof: { request, originalBuild: { startedAt: command.startedAt, finishedAt: command.finishedAt, build: built.build } } };
+  class TailDate extends Date { static now() { return now; } }
+  const namespace = { assert: sameAssert, Buffer, JSON, Date: TailDate, sha, GUARD_BUILD_TAIL_SCHEMA,
+    guardBuildTailRuntime: () => runtime, isSharedEngine: () => true, engineDirectory: () => '/original-engine',
+    assertControlPreflight: () => {}, assertReleaseWindow: () => {}, requireOriginalLive: () => {},
+    context: () => ({ c: m.guard, source: { files: {} }, manifestSha256, sourceManifestSha256: 'c'.repeat(64) }),
+    sourceCheck: () => {}, assertProtectedIncrementCandidate: () => {}, inputs: () => ({ prepared, preparedSha256 }),
+    rootFile: file => { assert.ok(documents.has(file), 'Unknown isolated input: ' + file); return documents.get(file); },
+    call: (name, args) => { assert.equal(name, 'id'); assert.deepEqual([...args], ['-u', 'isolated']); return '1004'; },
+    absent: file => { if (scenario === 'main-started' && file === stage + '/main-build.log') throw Error('main already started');
+      assert.equal(documents.has(file), false); },
+    appReceipt: file => ({ sha256: sha(documents.get(file)) }),
+    compiledTree: () => scenario === 'artifact-drift' ? { ...built, sha256: sha('changed output') } : { ...built },
+    fs: { readFileSync: file => { if (file === root + '/package.json') return packageBytes;
+      assert.equal(file, root + '/.next-prod-candidate/BUILD_ID'); return buildBytes; },
+      lstatSync: file => { assert.equal(file, preparedRoot + '/hd-compile-probe'); return { isDirectory: () => true, isSymbolicLink: () => false, uid: 1004, mode: 0o700 }; },
+      realpathSync: file => file, readdirSync: () => scenario === 'probe-used' ? ['must retain'] : [] },
+    readProtection: () => ({ stable: !(scenario === 'protection-drift' && events.includes('probe')) }),
+    assertProtection: (a, b) => assert.deepEqual(copy(a), copy(b)),
+    verifyUploadHelperProbe: (_m, _c, _s, _p, probe, phase) => { assert.equal(probe, prepared.uploadHelperProbe); assert.equal(phase, 'prepare'); },
+    verifyHdCandidateResolver: (_m, _c, _p, probe, { phase }) => { assert.equal(probe, prepared.hdHelperProbe); assert.equal(phase, 'prepare'); },
+    captureHdCompiledCache: (_m, kind, p, { probeDirectory }) => { assert.equal(kind, 'guard'); assert.equal(p, prepared);
+      assert.equal(probeDirectory, preparedRoot + '/hd-compile-probe-tail-' + runtime.continuationSha256.slice(0, 16));
+      events.push('probe'); return { file: stage + '/guard-hd-compiled-cache.json' }; },
+    verifyGates: () => ({ pricing: { receipt: pricingFile } }), verifyPricingInputs: () => {},
+    writeJsonExclusive: (file, value) => { assert.equal(file, stage + '/guard-build.json'); assert.equal(documents.has(file), false);
+      writes.push(copy(value)); documents.set(file, Buffer.from(JSON.stringify(value))); },
+    sealOriginalSuccess: async (_m, kind) => { assert.equal(kind, 'guard'); assert.equal(writes.length, 1); events.push('first-seal'); },
+    spawnSync: () => assert.fail('Tail must never compile'), buildCandidate: () => assert.fail('Tail must never replay buildCandidate'),
+  };
+  const functions = ['assertGuardBuildTailObservation', 'assertFreshCandidateEvidence', 'candidateEvidenceExpiresAt'].map(name =>
+    functionNode('candidate-evidence.mjs', name).node.getText().replace(/^export /, '')).join('\n') + '\n'
+    + functionNode('candidate.mjs', 'completeSuccessfulGuardBuildTail').node.getText().replace(/^export /, '');
+  vm.runInNewContext(functions + '\nglobalThis.run=completeSuccessfulGuardBuildTail;globalThis.fresh=assertFreshCandidateEvidence;', namespace);
+  if (scenario === 'success') {
+    const result = await namespace.run(m, runtime);
+    assert.equal(result.startedAt, command.startedAt); assert.equal(result.finishedAt, command.finishedAt); assert.equal(result.build, built.build);
+    assert.equal(result.tailPostchecks.observedAt, now); assert.equal(result.tailPostchecks.expiresAt, now + 1800000);
+    assert.deepEqual(events, ['probe', 'first-seal']); assert.equal(writes.length, 1);
+    assert.throws(() => namespace.fresh({ ...copy(result), schema: 'rate-impl2-candidate-build.v1' }, m, 'guard', now), /stale/);
+    assert.throws(() => namespace.fresh(result, m, 'guard', now + 1800000), /expired/);
+  } else {
+    await assert.rejects(() => namespace.run(m, runtime)); assert.equal(writes.length, 0); assert.equal(events.includes('first-seal'), false);
+    assert.equal(events.includes('probe'), scenario === 'protection-drift');
+  }
+  add('guard-build-tail_actual-body_' + scenario);
 }
 for (const invalid of [NaN, Infinity, 1.5, '2026-02-30T00:00:00Z', '2026-10-21', '1792590000000'])
   assert.ok(Number.isNaN(parseReleaseTimestamp(invalid)));

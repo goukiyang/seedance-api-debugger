@@ -334,6 +334,143 @@ function readLegacyHdExecutionSource(m, uid) {
   LEGACY_EXECUTION_SOURCE_PROOFS.set(m, { identity, bindings, proof }); return proof;
 }
 
+// Read literals without evaluating application-owned JavaScript. Comments,
+// regexps and template text are not module references; template expressions are
+// tokenized normally. Generic literal JS-file calls include tsx's loader CJS
+// registration alias (r("./cjs/index.cjs")), not just a spelled "require".
+function compilerModuleReferences(source) {
+  const tokens = []; let offset = 0;
+  const identifier = /[A-Za-z0-9_$]/;
+  const scan = (expression = false) => {
+    let braces = 0;
+    while (offset < source.length) {
+      const character = source[offset], next = source[offset + 1];
+      if (/\s/.test(character)) { offset++; continue; }
+      if (character === '/' && next === '/') { offset += 2; while (offset < source.length && source[offset] !== '\n') offset++; continue; }
+      if (character === '/' && next === '*') { const end = source.indexOf('*/', offset + 2); assert.ok(end >= 0); offset = end + 2; continue; }
+      if (character === '"' || character === "'") {
+        const quote = character; let value = '', closed = false; offset++;
+        while (offset < source.length) {
+          let part = source[offset++];
+          if (part === quote) { closed = true; break; }
+          if (part === '\\') {
+            part = source[offset++];
+            if (part === '\n') continue;
+            if (part === '\r') { if (source[offset] === '\n') offset++; continue; }
+            if (part === 'x' || part === 'u') {
+              const count = part === 'x' ? 2 : 4;
+              if (part === 'u' && source[offset] === '{') {
+                const end = source.indexOf('}', ++offset); assert.ok(end >= offset);
+                const digits = source.slice(offset, end); assert.match(digits, /^[a-fA-F0-9]+$/);
+                value += String.fromCodePoint(parseInt(digits, 16)); offset = end + 1; continue;
+              }
+              const digits = source.slice(offset, offset + count); assert.match(digits, new RegExp('^[a-fA-F0-9]{' + count + '}$'));
+              value += String.fromCharCode(parseInt(digits, 16)); offset += count; continue;
+            }
+            part = ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v', '0': '\0' })[part] ?? part;
+          }
+          value += part;
+        }
+        assert.ok(closed, 'Unclosed compiler string'); tokens.push({ kind: 'string', value }); continue;
+      }
+      if (character === '`') {
+        offset++; let literal = '', interpolated = false, closed = false;
+        while (offset < source.length) {
+          const part = source[offset++];
+          if (part === '\\') { literal += part + source[offset++]; continue; }
+          if (part === '`') { closed = true; break; }
+          if (part === '$' && source[offset] === '{') { offset++; interpolated = true; scan(true); }
+          else literal += part;
+        }
+        assert.ok(closed, 'Unclosed compiler template');
+        // A plain template is also a literal dynamic-import argument. The
+        // resolver refuses escaped module names, not unrelated template text.
+        if (!interpolated) tokens.push({ kind: 'string', value: literal });
+        else tokens.push({ kind: 'template', value: '`' });
+        continue;
+      }
+      const previous = tokens[tokens.length - 1]?.value;
+      if (character === '/' && (!previous || ['(', '[', '{', '=', ':', ',', ';', '!', '?', '&', '|', '>', 'return', 'throw', 'case', 'yield', 'await', 'void', 'typeof', 'delete', 'in', 'instanceof', 'else', 'do'].includes(previous))) {
+        offset++; let characterClass = false, closed = false;
+        while (offset < source.length) {
+          const part = source[offset++];
+          if (part === '\\') { offset++; continue; }
+          if (part === '[') characterClass = true;
+          if (part === ']') characterClass = false;
+          if (part === '/' && !characterClass) { closed = true; break; }
+          assert.ok(part !== '\n' && part !== '\r', 'Unclosed compiler regexp');
+        }
+        assert.ok(closed, 'Unclosed compiler regexp'); while (/[A-Za-z]/.test(source[offset] || '') && offset < source.length) offset++;
+        tokens.push({ kind: 'regexp', value: '/regexp/' }); continue;
+      }
+      if (/[A-Za-z_$]/.test(character)) {
+        const start = offset++; while (offset < source.length && identifier.test(source[offset])) offset++;
+        tokens.push({ kind: 'identifier', value: source.slice(start, offset) }); continue;
+      }
+      if (expression && character === '}' && braces === 0) { offset++; return; }
+      if (character === '{') braces++;
+      if (character === '}') braces--;
+      tokens.push({ kind: 'punctuation', value: character }); offset++;
+    }
+    assert.equal(expression, false, 'Unclosed compiler template expression');
+  };
+  scan();
+  const references = new Set();
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token.kind !== 'string' || !/^\.\.?\//.test(token.value)) continue;
+    const previous = tokens[index - 1]?.value, callee = tokens[index - 2];
+    const direct = previous === 'import' || previous === 'from'
+      || previous === '(' && ['import', 'require'].includes(callee?.value);
+    const urlCall = previous === '(' && callee?.value === 'URL';
+    // tsx also walks runtime directories with new URL('../package.json', e).
+    // Only the module's own import.meta.url is a local compiler reference.
+    const moduleUrl = urlCall && tokens[index - 3]?.value === 'new'
+      && tokens.slice(index + 1, index + 7).map(value => value.value).join(' ') === ', import . meta . url'
+      && (tokens[index + 7]?.value === ')' || tokens[index + 7]?.value === ',' && tokens[index + 8]?.value === ')');
+    const localFileCall = !urlCall && previous === '(' && callee?.kind === 'identifier' && /\.(?:[cm]?js|json)$/.test(token.value);
+    if (direct || moduleUrl || localFileCall) references.add(token.value);
+  }
+  return [...references].sort();
+}
+
+// Both capture and the cache consumer use this exact closure traversal. readFile
+// is their existing guarded entity reader, never a module evaluator/resolver.
+export function readHdTsxCompilerClosure(root, readFile) {
+  assert.equal(typeof readFile, 'function');
+  const packageRoot = path.join(root, 'node_modules/tsx'), packageFile = packageRoot + '/package.json';
+  const files = new Map();
+  const read = file => {
+    if (files.has(file)) return files.get(file);
+    assert.ok(file.startsWith(packageRoot + '/') && path.normalize(file) === file);
+    assert.ok(files.size < 256, 'Compiler local module closure is unexpectedly large');
+    const value = readFile(file, 32 * 1024 * 1024);
+    assert.ok(Buffer.isBuffer(value.bytes)); assert.match(value.sha256 || '', HASH);
+    assert.equal(sha(value.bytes), value.sha256); assert.ok(value.identity && typeof value.identity === 'object');
+    files.set(file, value); return value;
+  };
+  const pkg = JSON.parse(read(packageFile).bytes);
+  assert.equal(pkg.name, 'tsx'); assert.match(pkg.version || '', /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/);
+  assert.ok(typeof pkg.exports?.['.'] === 'string' && pkg.exports['.'].startsWith('./'), 'The actual tsx loader export must be explicit');
+  const resolve = (from, specifier) => {
+    assert.ok(/^\.\.?\//.test(specifier) && !/[\\?#\0]/.test(specifier));
+    const file = path.resolve(path.dirname(from), specifier);
+    assert.ok(file.startsWith(packageRoot + '/'), 'Compiler local reference escaped its actual package');
+    if (path.extname(file)) { assert.match(file, /\.(?:[cm]?js|json)$/); return file; }
+    const choices = [file, file + '.js', file + '.json', file + '/index.js', file + '/index.json'].filter(value => fs.existsSync(value) && fs.lstatSync(value).isFile());
+    assert.ok(choices.length > 0, 'Compiler local module is missing: ' + file); return choices[0];
+  };
+  const entryFile = resolve(packageFile, pkg.exports['.']), pending = [entryFile], visited = new Set();
+  while (pending.length) {
+    pending.sort(); const file = pending.shift(); if (visited.has(file)) continue; visited.add(file);
+    const value = read(file);
+    if (!file.endsWith('.json')) for (const specifier of compilerModuleReferences(value.bytes.toString('utf8'))) pending.push(resolve(file, specifier));
+  }
+  return { schema: 'sd2-tsx-local-compiler-closure.v1', version: pkg.version, packageFile, entryFile,
+    files: [...files].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([file, value]) => ({ file, sha256: value.sha256, identity: value.identity })) };
+}
+
 // The release controller supplies its actual sealed-capsule verifier, not a
 // boolean or an assertion copied from manifest JSON. The capability is local to
 // this exact in-memory release manifest and never serializable/replayable.
@@ -368,8 +505,18 @@ export function readHdCompiledCacheProofs(m, references, verifyCapsule) {
       && [0, l.uid].includes(archive.uid) && !(archive.mode & 0o022));
     bindings.push({ file: reference.archive, stat: archive });
     assert.deepEqual(Object.keys(reference.compiler).sort(), ['esbuild', 'node', 'tsx']);
+    const version2 = reference.schema === 'sd2-hd-compiled-cache-descriptor.v2';
+    assert.ok(version2 || reference.schema === undefined, 'Unknown HD compiled-cache descriptor version');
     for (const [kind, compiler] of Object.entries(reference.compiler)) {
       assert.ok(typeof compiler.version === 'string' && /^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(compiler.version));
+      if (version2 && kind === 'tsx') {
+        const observed = readHdTsxCompilerClosure(reference.sourceRoot, (file, maximum) => {
+          const bytes = bind(file, maximum); return { bytes, sha256: sha(bytes), identity: admissionStat(fs.lstatSync(file)) };
+        });
+        assert.deepEqual(observed, compiler, 'Complete local tsx compiler closure changed');
+        continue;
+      }
+      // Version 1 retains its original single compiler-component contract.
       assert.match(compiler.sha256 || '', HASH);
       if (kind === 'node') {
         // System package managers may legitimately retain root-owned hardlink
@@ -402,7 +549,7 @@ export function readHdCompiledCacheProofs(m, references, verifyCapsule) {
       if (entries.has(item.cacheSha256)) assert.deepEqual(entries.get(item.cacheSha256), record);
       else entries.set(item.cacheSha256, record);
     }
-    descriptors.push({ source: reference.source, sourceRoot: reference.sourceRoot, sourceManifest: reference.sourceManifest,
+    descriptors.push({ ...(version2 ? { schema: reference.schema } : {}), source: reference.source, sourceRoot: reference.sourceRoot, sourceManifest: reference.sourceManifest,
       archive: reference.archive, compiler: structuredClone(reference.compiler), cacheSha256: reference.entries.map(item => item.cacheSha256).sort() });
   }
   const capability = Object.freeze({ schema: 'hd-compiled-cache-capability.v1', descriptorSha256: sha(stable(descriptors)), candidates: descriptors.length });

@@ -4,7 +4,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { rootFile, sha, writeJsonExclusive, isSharedEngine, engineDirectory } from './common.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence, REUSE_SCHEMA } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, REUSE_SCHEMA, GUARD_BUILD_TAIL_SCHEMA,
+  candidateCompatibilityDirectory, assertGuardBuildTailObservation } from './candidate-evidence.mjs';
 import { probeHdCandidateResolver } from './hd-storage-preflight.mjs';
 import { CONTINUATION_V2, SHARED_BUILD_PROVENANCE, assertContinuationInput, assertDeployedContinuationSources,
   verifyDeployedContinuationProvenance, assertSharedBuildSources, verifySharedBuildProvenance } from './normal-continuation.mjs';
@@ -78,16 +79,21 @@ export async function sealOriginalSuccess(m, kind) {
   const originalStage = sourceStage(m);
   assert.deepEqual(json(originalStage + '/manifest.json'), m);
   for (const [file, digest] of Object.entries(m.privateSha256)) assert.equal(sha(rootFile(engineDirectory(m) + '/' + file)), digest);
-  const { verifyCandidate } = await import(pathToFileURL(engineDirectory(m) + '/candidate.mjs').href);
+  const { verifyCandidate } = await import(pathToFileURL(candidateCompatibilityDirectory(m) + '/candidate.mjs').href);
   const receipt = await verifyCandidate(m, kind), prepared = json(originalStage + '/' + kind + '-prepared.json');
-  assert.ok(Date.now() - receipt.startedAt < 1800000);
-  const value = { schema: 'sd2-immutable-successful-build.v1', kind, sourceRun: m.runId,
-    sealedAt: new Date().toISOString(), originallyVerifiedWithinThirtyMinuteGate: true,
+  const tail = kind === 'guard' && receipt.schema === GUARD_BUILD_TAIL_SCHEMA;
+  if (tail) assertGuardBuildTailObservation(receipt, m);
+  else assert.ok(Date.now() - receipt.startedAt < 1800000);
+  const value = { schema: tail ? 'sd2-immutable-successful-build-tail.v1' : 'sd2-immutable-successful-build.v1', kind, sourceRun: m.runId,
+    sealedAt: new Date().toISOString(), originallyVerifiedWithinThirtyMinuteGate: !tail,
+    ...(tail ? { tailPostchecks: receipt.tailPostchecks } : {}),
     originalReceiptFile: originalStage + '/' + kind + '-build.json', originalReceiptSha256: sha(rootFile(originalStage + '/' + kind + '-build.json')),
     originalReceipt: receipt, originalManifestSha256: sha(rootFile(originalStage + '/manifest.json')),
     originalSourceManifestSha256: sha(rootFile(m[kind].sourceManifest)), originalPreparedSha256: sha(rootFile(originalStage + '/' + kind + '-prepared.json')),
     originalPrivateSha256: m.privateSha256, snapshot: capture(m, kind, receipt, prepared),
-    compatibility: 'Exact original application/source/lock/dependency/environment/compiled/check inputs; later runtime data and permission compatibility remain separate fresh release gates',
+    compatibility: tail
+      ? 'Original npm success and BUILD retained; present source, dependencies, environment, compiled artifact and original gates fully observed at tailPostchecks.observedAt. No original compiled-tree snapshot or continuous interval identity is claimed. Runtime data and permissions require separate fresh release gates.'
+      : 'Exact original application/source/lock/dependency/environment/compiled/check inputs; later runtime data and permission compatibility remain separate fresh release gates',
     originalTimesChanged: false, newCompilationClaimed: false };
   assert.deepEqual(await verifyCandidate(m, kind), receipt);
   writeJsonExclusive(originalFile(m, kind), value); execFileSync('chattr', ['+i', originalFile(m, kind)]);
@@ -97,11 +103,17 @@ export async function sealOriginalSuccess(m, kind) {
 export function readOriginalSuccess(m, kind) {
   if (m.normalContinuation) assertContinuationInput(m.normalContinuation);
   const originalStage = sourceStage(m), file = originalFile(m, kind), value = json(file);
-  assert.equal(value.schema, 'sd2-immutable-successful-build.v1'); assert.equal(value.kind, kind);
+  const tail = value.schema === 'sd2-immutable-successful-build-tail.v1';
+  if (tail) {
+    assert.equal(kind, 'guard'); assert.equal(value.originalReceipt.schema, GUARD_BUILD_TAIL_SCHEMA);
+    assert.deepEqual(value.tailPostchecks, value.originalReceipt.tailPostchecks);
+    assertGuardBuildTailObservation(value.originalReceipt, m, Date.now(), { requireFresh: false });
+  } else assert.equal(value.schema, 'sd2-immutable-successful-build.v1');
+  assert.equal(value.kind, kind);
   assert.equal(value.sourceRun, m.reuseBuilds?.sourceRun || m.runId);
   assert.equal(value.originalReceiptFile, originalStage + '/' + kind + '-build.json');
   assert.ok(execFileSync('lsattr', ['-d', '--', file], { encoding: 'utf8' }).split(/\s+/)[0].includes('i'));
-  assert.equal(value.originallyVerifiedWithinThirtyMinuteGate, true); assert.equal(value.originalTimesChanged, false);
+  assert.equal(value.originallyVerifiedWithinThirtyMinuteGate, !tail); assert.equal(value.originalTimesChanged, false);
   assert.equal(value.newCompilationClaimed, false);
   if (m.reuseBuilds) {
     assert.equal(m.reuseBuilds[kind].file, file);

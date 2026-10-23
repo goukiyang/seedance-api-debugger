@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import * as engineContext from './engine-context.mjs';
-import { readTypedJson } from './typed-files.mjs';
+import { readTypedJson, readTypedFile } from './typed-files.mjs';
 import { classifyReleaseError, ReleaseEngineError } from './release-errors.mjs';
 import {
   assertAttemptBindings,
@@ -45,6 +45,13 @@ const PREPARE_TAIL_SCHEMA = 'sd2-release-prepare-tail-continuation.v1';
 const PREPARE_TAIL_PROOF_SCHEMA = 'sd2-release-prepare-tail-proof.v1';
 const PREPARE_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate.mjs', 'candidate-inputs.mjs',
   'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs']);
+const GUARD_TAIL_SCHEMA = 'sd2-release-guard-build-tail-continuation.v1';
+const GUARD_TAIL_PROOF = 'sd2-release-guard-build-tail-proof.v1';
+export const GUARD_BUILD_TAIL_PHASES = Object.freeze(['guard-build', 'main-build', 'verify', 'arm', 'switch', 'proof', 'recovery']);
+const GUARD_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'attempt-state.mjs', 'release.mjs',
+  'release-entry-engineering.mjs', 'attempt-state-engineering.mjs', 'candidate.mjs', 'candidate-evidence.mjs',
+  'candidate-reuse.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs', 'hd-compiled-cache.mjs',
+  'hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs', 'hd-storage-preflight-engineering.mjs']);
 
 function exactKeys(value, expected, name) {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${name} must be an object`);
@@ -399,6 +406,182 @@ export function assertPrepareTailChildRoute(phase, originalRoot, processorRoot, 
   return true;
 }
 
+export function validateGuardBuildTailContinuation(value) {
+  exactKeys(value, ['schema', 'terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256',
+    'processorControllerSetSha256', 'mainPreparedSha256', 'guardPreparedSha256', 'buildCommandSha256', 'buildLogSha256',
+    'packageJsonSha256', 'buildIdSha256', 'observedCompiledTreeSha256', 'imageGateReceiptSha256', 'pricingGateReceiptSha256', 'observedAt'], 'guard-build tail continuation');
+  assert.equal(value.schema, GUARD_TAIL_SCHEMA);
+  for (const [key, hash] of Object.entries(value)) if (!['schema', 'observedAt'].includes(key)) assert.match(hash, HASH);
+  assert.equal(typeof value.observedAt, 'string'); parseTime(value.observedAt, 'retained build observation'); return value;
+}
+
+export function assertGuardBuildTailControllerDifference(original, processor) {
+  assert.deepEqual(Object.keys(original).sort(), Object.keys(processor).sort(), 'Guard-tail retains the original complete module set');
+  const changed = {};
+  for (const name of Object.keys(original).sort()) {
+    assert.equal(path.basename(name), name); assert.ok(name.endsWith('.mjs')); assert.match(original[name], HASH); assert.match(processor[name], HASH);
+    if (original[name] !== processor[name]) {
+      assert.ok(GUARD_TAIL_CONTROLLERS.includes(name), 'Unreviewed guard-tail processor difference: ' + name);
+      changed[name] = { originalSha256: original[name], processorSha256: processor[name] };
+    }
+  }
+  for (const name of ['release-entry.mjs', 'attempt-state.mjs', 'release.mjs', 'candidate.mjs', 'hd-compiled-cache.mjs'])
+    assert.ok(changed[name], 'Guard-tail requires its actual new handler/reader: ' + name);
+  return changed;
+}
+
+function guardBuildTailProcessor(batch, hash) {
+  assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
+  const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
+  validateEngine(processor, batch.projectRoot); assert.equal(here, processor.root); assert.notEqual(here, batch.engine.root);
+  const original = stableControllerHashes(batch.engine.root), processorControllers = stableControllerHashes(here);
+  assert.equal(digest(JSON.stringify(original)), batch.engine.controllerSetSha256);
+  assert.equal(digest(JSON.stringify(processorControllers)), hash);
+  return { processor, processorControllers, changedControllers: assertGuardBuildTailControllerDifference(original, processorControllers) };
+}
+
+function guardBuildTailFailure(batch, loaded, request, inspectOwner) {
+  validateGuardBuildTailContinuation(request);
+  const index = loaded.events.findIndex(item => item.sha256 === request.terminalEventSha256);
+  assert.ok(index >= 3); const terminal = loaded.events[index], result = loaded.events[index - 1], exit = loaded.events[index - 2];
+  assert.equal(terminal.value.kind, 'attempt_finished'); assert.equal(terminal.value.outcome, 'failed');
+  assert.equal(result.sha256, request.phaseResultEventSha256); assert.equal(result.value.kind, 'phase_result');
+  assert.equal(result.value.phase, 'guard-build'); assert.equal(result.value.outcome, 'failed');
+  assert.equal(terminal.value.previousSha256, result.sha256); assert.equal(result.value.previousSha256, exit.sha256);
+  assert.equal(exit.value.kind, 'observation'); assert.equal(exit.value.name, 'phase_child_exit'); assert.equal(exit.value.value.phase, 'guard-build');
+  assert.equal(exit.value.value.intentSha256, result.value.intentSha256);
+  assert.equal(exit.value.value.receiptFile, childReceiptFile(loaded, 'guard-build', result.value.intentSha256));
+  assert.equal(exit.value.value.receiptSha256, request.childReceiptSha256);
+  const original = { events: loaded.events.slice(0, index + 1) };
+  assert.equal(nextReleasePhase(original), 'guard-build'); assert.equal(switchBoundaryFacts(original).effectsStarted, false);
+  assert.equal(original.events.some(item => item.value.kind === 'phase_intent'
+    && RELEASE_PHASES.indexOf(item.value.phase) > RELEASE_PHASES.indexOf('guard-build')), false);
+  const child = readChildReceipt(exit.value.value.receiptFile, 'guard-build', result.value.intentSha256);
+  assert.equal(child.saved.sha256, request.childReceiptSha256); assert.deepEqual(child.child, result.value.child);
+  assert.deepEqual(child.child, exit.value.value.child);
+  assert.ok(Number.isSafeInteger(child.child.status) && child.child.status > 0); assert.equal(child.child.signal, null); assert.equal(child.child.error, null);
+  assert.deepEqual(exit.value.owner, terminal.value.owner); assert.deepEqual(result.value.owner, terminal.value.owner);
+  assert.equal(inspectOwner(terminal.value.owner), 'dead', 'Original failed guard controller must be dead');
+  const processFile = childProcessFile(loaded, 'guard-build', result.value.intentSha256), processDocument = rootDocument(processFile, 32768);
+  const processReceipt = processDocument.value, invocationFile = path.join(loaded.place.attempt, `guard-build-${result.value.intentSha256}.invocation.json`);
+  assert.equal(processReceipt.schema, 'sd2-release-child-process.v1'); assert.equal(processReceipt.invocationFile, invocationFile);
+  const invocationDocument = rootDocument(invocationFile, 256 * 1024), invocation = validateInvocation(invocationDocument.value, invocationFile);
+  assert.equal(processReceipt.invocationSha256, digest(invocationDocument.bytes)); assert.equal(invocation.processFile, processFile);
+  assert.equal(invocation.batchFile, loaded.header.manifest.file); assert.equal(invocation.phase, 'guard-build');
+  assert.equal(invocation.taskRoot, `${batch.projectRoot}/release-tasks`); assert.equal(invocation.taskId, batch.taskId); assert.equal(invocation.attemptId, batch.attemptId);
+  assert.deepEqual(invocation.owner, terminal.value.owner); assert.equal(processReceipt.owner.token, invocation.owner.token);
+  assert.equal(inspectOwner(processReceipt.owner), 'dead', 'Original guard child must be dead');
+  for (const name of ['main', 'guard']) assert.equal(result.value.after.facts.files[`${name}-prepared.json`]?.sha256, request[`${name}PreparedSha256`]);
+  return { terminal, result, processReceiptSha256: digest(processDocument.bytes), invocationSha256: digest(invocationDocument.bytes) };
+}
+
+function guardBuildTailSnapshot(batch, request, { initial = false } = {}) {
+  const m = assertManifest(batch), stage = path.dirname(batch.manifestFile);
+  assert.ok(m.fullRelease && !m.reuseBuilds); assert.equal(batch.artifacts.guard.schema, 'sd2-release-artifact-input.v1');
+  verifyBuildInputIdentity(batch);
+  if (initial) {
+    const scene = captureReleaseScene(batch); assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+    for (const name of ['guard-build.json', 'guard-immutable-success.json', 'guard-build-failed.json', 'main-build.json', 'main-build-command.json',
+      'main-build.log', 'main-immutable-success.json', 'fixed-guard-recovery.json', 'switch-before.json', 'switch-complete.json'])
+      assert.equal(fs.lstatSync(path.join(stage, name), { throwIfNoEntry: false }), undefined, 'Guard-tail cannot replace existing build/publication evidence: ' + name);
+    assert.equal(fs.lstatSync(path.join(m.main.root, m.main.buildDist), { throwIfNoEntry: false }), undefined, 'Main compilation already started');
+    assert.equal(fs.lstatSync(path.join(m.main.root, '.role-tests', `pricing-prepared-${batch.runId}`, '.pricing-gate-claim'),
+      { throwIfNoEntry: false }), undefined, 'Main gate inputs were already consumed');
+  }
+  const inputs = {}, read = (name, file, expected, category = 'root_control', expectedUid) => {
+    const value = readTypedFile({ file: safeAbsolute(file, name), category, expectedUid, maximumBytes: 64 * 1024 * 1024 });
+    assert.equal(digest(value.bytes), expected, 'Retained guard-tail input changed: ' + name);
+    inputs[name] = { file, sha256: expected, snapshot: value.snapshot }; return value.bytes;
+  };
+  const mainPrepared = JSON.parse(read('mainPrepared', stage + '/main-prepared.json', request.mainPreparedSha256));
+  const guardPrepared = JSON.parse(read('guardPrepared', stage + '/guard-prepared.json', request.guardPreparedSha256));
+  for (const [kind, value] of [['main', mainPrepared], ['guard', guardPrepared]]) {
+    assert.equal(value.runId, batch.runId); assert.equal(value.label, kind); assert.equal(value.candidateRoot, m[kind].root);
+    assert.equal(value.sourceManifestSha256, batch.artifacts[kind].sourceManifestSha256);
+    assert.equal(value.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  }
+  const inputFile = path.join(m.guard.root, '.role-tests', `pricing-prepared-${batch.runId}`, 'candidate-inputs.json');
+  const originalInput = rootJson(inputFile, 65536), uid = originalInput.uid;
+  assert.equal(originalInput.candidateRoot, m.guard.root); assert.equal(originalInput.source, batch.artifacts.guard.source);
+  assert.equal(originalInput.runId, batch.runId); assert.ok(Number.isSafeInteger(uid) && uid > 0);
+  const commandFile = stage + '/guard-build-command.json', command = JSON.parse(read('buildCommand', commandFile, request.buildCommandSha256));
+  assert.equal(command.schema, 'sd2-original-build-command.v1'); assert.equal(command.label, 'guard'); assert.equal(command.runId, batch.runId);
+  assert.equal(command.source, batch.artifacts.guard.source); assert.equal(command.manifestSha256, guardPrepared.manifestSha256);
+  assert.equal(command.status, 0); assert.equal(command.signal, null); assert.equal(command.error, null); assert.equal(command.errorCode, null);
+  assert.equal(command.originalExitRecordedBeforePostchecks, true);
+  assert.ok(Number.isSafeInteger(command.startedAt) && command.startedAt > 0 && Number.isSafeInteger(command.finishedAt)
+    && command.finishedAt >= command.startedAt && command.finishedAt <= parseTime(request.observedAt, 'build observation'));
+  assert.equal(command.buildEnvironmentSha256, digest(JSON.stringify(guardPrepared.buildEnv)));
+  const logFile = stage + '/guard-build.log'; assert.equal(command.logFile, logFile); assert.equal(command.logSha256, request.buildLogSha256);
+  const lines = read('buildLog', logFile, request.buildLogSha256).toString('utf8').split(/\r?\n/);
+  const gate = (prefix, name, hash, schema) => {
+    const matches = lines.filter(line => line.startsWith(prefix)); assert.equal(matches.length, 1, 'One original npm invocation must emit exactly one ' + name);
+    const file = safeAbsolute(matches[0].slice(prefix.length), name);
+    assert.ok(file.startsWith(m.guard.root + '/.role-tests/'));
+    const value = JSON.parse(read(name, file, hash, 'app', uid));
+    assert.equal(value.schema, schema); assert.equal(value.completed, true); assert.equal(value.runId, batch.runId); assert.equal(value.candidateRoot, m.guard.root);
+    return file;
+  };
+  const imageGateReceiptFile = gate('IMAGE_RECOVERY_GATE_RECEIPT=', 'imageGateReceipt', request.imageGateReceiptSha256, 'image-recovery-build-gate.v1');
+  const pricingGateReceiptFile = gate('PRICING_POLICY_GATE_RECEIPT=', 'pricingGateReceipt', request.pricingGateReceiptSha256, 'pricing-policy-build-gate.v1');
+  const pkg = JSON.parse(read('packageJson', m.guard.root + '/package.json', request.packageJsonSha256, 'app', uid));
+  assert.equal(pkg.version, batch.artifacts.guard.version);
+  const build = read('buildId', path.join(m.guard.root, m.guard.buildDist, 'BUILD_ID'), request.buildIdSha256, 'app', uid).toString('utf8').trim();
+  assert.ok(build.length > 0 && build.length <= 256);
+  const tree = {}, visit = relative => {
+    const file = path.join(m.guard.root, m.guard.buildDist, relative), stat = fs.lstatSync(file);
+    assert.equal(fs.realpathSync(file), file); assert.ok(!stat.isSymbolicLink());
+    if (stat.isDirectory()) for (const name of fs.readdirSync(file).sort()) visit(path.join(relative, name));
+    else tree[relative] = readTypedFile({ file, category: 'app', expectedUid: uid, maximumBytes: 512 * 1024 * 1024 }).snapshot.sha256;
+  };
+  visit('server'); visit('static');
+  for (const name of fs.readdirSync(path.join(m.guard.root, m.guard.buildDist)).filter(name => name === 'BUILD_ID' || name.endsWith('.json')).sort()) visit(name);
+  assert.equal(digest(JSON.stringify(Object.fromEntries(Object.entries(tree).sort(([a], [b]) => a.localeCompare(b))))), request.observedCompiledTreeSha256);
+  return { inputs, originalBuild: { startedAt: command.startedAt, finishedAt: command.finishedAt, build,
+    buildCommandFile: commandFile, buildLogFile: logFile, imageGateReceiptFile, pricingGateReceiptFile },
+    originalCompiledSnapshotUnavailable: true };
+}
+
+function guardBuildTailProofFile(loaded, hash) { assert.match(hash, HASH); return path.join(loaded.place.attempt, `guard-build-tail-${hash}.json`); }
+
+export function assertGuardBuildTailPhase(phase, state) {
+  assert.ok(GUARD_BUILD_TAIL_PHASES.includes(phase), 'Phase is outside the guard-tail processor reader contract');
+  if (phase === 'guard-build') assert.equal(state.status, 'pending', 'Guard compilation/tail cannot be replayed');
+  else assert.equal(state.status, 'completed', 'The guard tail must complete before later phases');
+}
+
+function readGuardBuildTailProof(batch, batchFile, loaded, phase) {
+  const binding = loaded.derivedState.guardBuildTail; assert.ok(binding); assertGuardBuildTailPhase(phase, binding);
+  const event = loaded.events.find(item => item.sha256 === binding.continuationEventSha256);
+  assert.equal(event?.value.kind, 'failure_continued'); assert.equal(event.value.failureReceiptSha256, binding.proofSha256);
+  const file = guardBuildTailProofFile(loaded, binding.proofSha256), doc = rootDocument(file, 1024 * 1024), proof = doc.value;
+  assert.equal(digest(doc.bytes), binding.proofSha256); assert.equal(proof.schema, GUARD_TAIL_PROOF);
+  validateGuardBuildTailContinuation(proof.request);
+  for (const name of ['taskId', 'attemptId', 'runId']) assert.equal(proof[name], batch[name]);
+  assert.equal(proof.batchFile, batchFile); assert.equal(proof.batchSha256, digest(rootDocument(batchFile).bytes));
+  assert.equal(proof.contextSha256, digest(rootDocument(batch.contextFile, 256 * 1024).bytes));
+  assert.equal(proof.seedSha256, digest(rootDocument(batch.seedFile).bytes));
+  assert.equal(proof.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  assert.equal(proof.artifactsSha256, digest(JSON.stringify(batch.artifacts))); assert.deepEqual(proof.engine, batch.engine);
+  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256);
+  for (const name of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[name], identity[name]);
+  assert.equal(proof.request.processorControllerSetSha256, binding.processorControllerSetSha256);
+  const failure = guardBuildTailFailure(batch, loaded, proof.request, inspectControllerOwner);
+  assert.equal(event.value.previousTerminalSha256, failure.terminal.sha256); assert.equal(event.value.previousSha256, failure.terminal.sha256);
+  assert.equal(proof.processReceiptSha256, failure.processReceiptSha256); assert.equal(proof.invocationSha256, failure.invocationSha256);
+  const retained = guardBuildTailSnapshot(batch, proof.request);
+  assert.deepEqual(proof.originalBuild, retained.originalBuild); assert.equal(proof.originalCompiledSnapshotUnavailable, true);
+  // Retained evidence is read afresh; observedAt describes first tail observation,
+  // never an unavailable successful-build-time compiled snapshot.
+  for (const name of Object.keys(retained.inputs)) {
+    assert.equal(proof.inputs[name].file, retained.inputs[name].file); assert.equal(proof.inputs[name].sha256, retained.inputs[name].sha256);
+    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'])
+      assert.equal(proof.inputs[name].snapshot.identity[key], retained.inputs[name].snapshot.identity[key]);
+  }
+  assertAttemptBindings(loaded, kernelBindings(batchFile, batch));
+  return { schema: 'sd2-release-guard-build-tail-runtime.v1', phase, proofFile: file, continuationSha256: binding.proofSha256, proof };
+}
+
 function parseTime(value, name) {
   const result = typeof value === 'number' ? value : Date.parse(value);
   assert.ok(Number.isSafeInteger(result) && result > 0, `${name} is invalid`); return result;
@@ -523,17 +706,25 @@ export async function invokeReleaseChild({ invocationFile }) {
   assert.ok(RELEASE_PHASES.includes(phase) || phase === 'recovery');
   const context = assertContext(batch, batchFile);
   if (phase === 'capture') assertSeed(batch); else assertManifest(batch);
-  let tail = null;
+  let tail = null, guardBuildTail = null;
   if (here !== batch.engine.root) {
-    assert.equal(phase, 'prepare', 'Changed entry may only execute the bound prepare tail');
     const loaded = readAttempt({ root: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId });
-    assert.equal(loaded.derivedState.activePhase?.phase, 'prepare');
-    assert.equal(invocationFile, path.join(loaded.place.attempt, `prepare-${loaded.derivedState.activePhase.intentSha256}.invocation.json`));
+    assert.equal(loaded.derivedState.activePhase?.phase, phase);
+    assert.equal(invocationFile, path.join(loaded.place.attempt, `${phase}-${loaded.derivedState.activePhase.intentSha256}.invocation.json`));
     assert.deepEqual(invocation.owner, loaded.derivedState.owner);
-    tail = readPrepareTailProof(batch, batchFile, loaded);
+    if (loaded.derivedState.guardBuildTail) guardBuildTail = readGuardBuildTailProof(batch, batchFile, loaded, phase);
+    else {
+      assert.equal(phase, 'prepare', 'Changed entry may only execute the bound prepare tail');
+      tail = readPrepareTailProof(batch, batchFile, loaded);
+    }
   }
-  assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
-  engineContext.configureReleaseContext(context);
+  if (!guardBuildTail) assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
+  engineContext.configureReleaseContext(guardBuildTail ? { ...context, guardBuildTail } : context);
+  if (guardBuildTail && phase === 'guard-build') {
+    const { completeSuccessfulGuardBuildTail } = await import('./candidate.mjs');
+    assert.equal(typeof completeSuccessfulGuardBuildTail, 'function');
+    return completeSuccessfulGuardBuildTail(assertManifest(batch), guardBuildTail);
+  }
   if (tail) {
     const { resumePrepareTail } = await import('./candidate.mjs');
     assert.equal(typeof resumePrepareTail, 'function');
@@ -579,10 +770,13 @@ function kernelStartTicks(pid) {
 async function defaultRunChild({ batchFile, phase, loaded, intentSha256, owner, batch }) {
   let tail = null;
   if (here !== batch.engine.root) {
-    assert.equal(phase, 'prepare', 'Changed entry may only start the bound prepare-tail child');
-    tail = readPrepareTailProof(batch, batchFile, loaded);
+    if (loaded.derivedState.guardBuildTail) readGuardBuildTailProof(batch, batchFile, loaded, phase);
+    else {
+      assert.equal(phase, 'prepare', 'Changed entry may only start the bound prepare-tail child');
+      tail = readPrepareTailProof(batch, batchFile, loaded);
+    }
   }
-  assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
+  if (!loaded.derivedState.guardBuildTail) assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
   const processFile = childProcessFile(loaded, phase, intentSha256);
   const invocation = { schema: 'sd2-release-phase-invocation.v1', batchFile, phase,
     taskRoot: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId, owner, processFile };
@@ -652,7 +846,27 @@ function candidateEvidence(batch, kind) {
   const manifest = assertManifest(batch), stage = path.dirname(batch.manifestFile);
   if (!manifest.reuseBuilds) {
     const file = path.join(stage, `${kind}-build.json`), document = rootDocument(file, 32 * 1024 * 1024), value = document.value;
-    assert.equal(value.schema, 'rate-impl2-candidate-build.v1'); assert.equal(value.label, kind);
+    if (value.schema === 'sd2-candidate-build-tail.v1') {
+      assert.equal(kind, 'guard');
+      const loaded = readAttempt({ root: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId });
+      const phase = loaded.derivedState.guardBuildTail?.status === 'pending' ? 'guard-build' : 'verify';
+      const runtime = readGuardBuildTailProof(batch, loaded.header.manifest.file, loaded, phase);
+      assert.equal(value.tailPostchecks.continuationSha256, runtime.continuationSha256);
+      assert.equal(value.tailPostchecks.proofFile, runtime.proofFile); assert.equal(value.helperProbePhase, 'prepare');
+      assert.equal(value.tailPostchecks.retainedOriginalCommand, true);
+      assert.equal(value.tailPostchecks.originalCompiledSnapshotUnavailable, true);
+      assert.equal(value.tailPostchecks.originalBuildCommandSha256, runtime.proof.request.buildCommandSha256);
+      assert.equal(value.startedAt, runtime.proof.originalBuild.startedAt); assert.equal(value.finishedAt, runtime.proof.originalBuild.finishedAt);
+      assert.equal(value.build, runtime.proof.originalBuild.build);
+      const capsule = rootJson(path.join(stage, 'guard-immutable-success.json'), 128 * 1024 * 1024);
+      assert.equal(capsule.schema, 'sd2-immutable-successful-build-tail.v1'); assert.equal(capsule.kind, 'guard');
+      assert.equal(capsule.sourceRun, batch.runId); assert.deepEqual(capsule.originalReceipt, value);
+      assert.equal(capsule.originalReceiptSha256, digest(document.bytes));
+      assert.equal(capsule.originallyVerifiedWithinThirtyMinuteGate, false);
+      assert.equal(capsule.originalTimesChanged, false); assert.equal(capsule.newCompilationClaimed, false);
+      assert.deepEqual(capsule.tailPostchecks, value.tailPostchecks);
+    } else assert.equal(value.schema, 'rate-impl2-candidate-build.v1');
+    assert.equal(value.label, kind);
     assert.equal(value.runId, batch.runId); assert.equal(value.source, batch.artifacts[kind].source);
     assert.equal(value.version, batch.artifacts[kind].version); assert.deepEqual(value.engine, batch.engine);
     const immutable = requireMarker(stage, `${kind}-immutable-success.json`); assertCandidateArtifact(batch, kind, value, immutable);
@@ -978,8 +1192,11 @@ export function createReleaseController(overrides = {}) {
       const batch = readReleaseBatch(batchFile);
       if (here !== batch.engine.root) {
         const loaded = load(batchFile, batch), phase = nextReleasePhase(loaded);
-        assert.equal(phase, 'prepare', 'Continue later phases using the original frozen release entry');
-        readPrepareTailProof(batch, batchFile, loaded);
+        if (loaded.derivedState.guardBuildTail) readGuardBuildTailProof(batch, batchFile, loaded, phase);
+        else {
+          assert.equal(phase, 'prepare', 'Continue later phases using the original frozen release entry');
+          readPrepareTailProof(batch, batchFile, loaded);
+        }
       }
     }
     const acquired = acquire(batchFile, windowFile);
@@ -1016,6 +1233,36 @@ export function createReleaseController(overrides = {}) {
   function continueFailed(batchFile, windowFile, failureFile) {
     const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); assertManifest(batch);
     const loaded = load(batchFile, batch), request = rootJson(failureFile, 16384);
+    if (request.schema === GUARD_TAIL_SCHEMA) {
+      validateGuardBuildTailContinuation(request);
+      assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
+      assert.equal(loaded.events.at(-1).sha256, request.terminalEventSha256); assert.equal(nextReleasePhase(loaded), 'guard-build');
+      assert.equal(loaded.derivedState.guardBuildTail, undefined);
+      assert.equal(loaded.events.some(item => item.value.name === 'artifact_capsule'), false);
+      const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+      const failure = guardBuildTailFailure(batch, loaded, request, deps.inspectOwner);
+      const identity = guardBuildTailProcessor(batch, request.processorControllerSetSha256), now = deps.now();
+      const observed = parseTime(request.observedAt, 'retained build observation');
+      assert.ok(observed <= now && now - observed < 300000, 'Retained compiled output needs a fresh observation');
+      const retained = guardBuildTailSnapshot(batch, request, { initial: true }), scene = deps.scene(batch, now);
+      assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+      assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+      const owner = deps.createOwner(), window = releaseWindowReference(batch, windowFile, now);
+      const proof = { schema: GUARD_TAIL_PROOF, taskId: batch.taskId, attemptId: batch.attemptId, runId: batch.runId,
+        batchFile, batchSha256: bindings.manifest.sha256, contextSha256: digest(rootDocument(batch.contextFile, 256 * 1024).bytes),
+        seedSha256: digest(rootDocument(batch.seedFile).bytes), manifestSha256: digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes),
+        artifactsSha256: digest(JSON.stringify(batch.artifacts)), engine: batch.engine, ...identity, request, ...retained,
+        processReceiptSha256: failure.processReceiptSha256, invocationSha256: failure.invocationSha256,
+        observedAt: new Date(now).toISOString() };
+      const hash = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+      const saved = writeJsonExclusive(guardBuildTailProofFile(loaded, hash), proof); assert.equal(saved.sha256, hash);
+      const result = continueFailedAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId,
+        owner, ...bindings, window, terminalEventSha256: request.terminalEventSha256, failureReceiptSha256: hash,
+        continuation: { schema: 'sd2-release-guard-build-tail-binding.v1', phase: 'guard-build', proofSha256: hash,
+          processorControllerSetSha256: identity.processor.controllerSetSha256 },
+        before: scene, now, inspectOwner: deps.inspectOwner });
+      return { ...result, continuation: saved, processor: identity.processor };
+    }
     if (request.schema === PREPARE_TAIL_SCHEMA) {
       validatePrepareTailContinuation(request);
       assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
@@ -1073,8 +1320,11 @@ export function createReleaseController(overrides = {}) {
       const batch = readReleaseBatch(batchFile);
       if (here !== batch.engine.root) {
         const loaded = load(batchFile, batch);
-        assert.equal(nextReleasePhase(loaded), 'prepare', 'Continue later phases using the original frozen release entry');
-        readPrepareTailProof(batch, batchFile, loaded);
+        if (loaded.derivedState.guardBuildTail) readGuardBuildTailProof(batch, batchFile, loaded, nextReleasePhase(loaded));
+        else {
+          assert.equal(nextReleasePhase(loaded), 'prepare', 'Continue later phases using the original frozen release entry');
+          readPrepareTailProof(batch, batchFile, loaded);
+        }
       }
     }
     const acquired = acquire(batchFile, windowFile);

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { rootFile, sha, writeJsonExclusive, call, isSharedEngine } from './common.mjs';
-import { readHdCompiledCacheProofs } from './hd-storage-preflight.mjs';
+import { readHdCompiledCacheProofs, readHdTsxCompilerClosure } from './hd-storage-preflight.mjs';
 import { readTypedFile, assertTypedFileUnchanged } from './typed-files.mjs';
 
 const SOURCE_FILES = ['scripts/process-hd-image.ts', 'src/lib/media/hd-image-processor.ts', 'src/lib/media/hd-encoder.ts'];
@@ -23,7 +23,7 @@ function applicationFile(file, uid, maximum = 8 * 1024 * 1024) {
     return { bytes, sha256: sha(bytes), identity: fileIdentity(before) };
   } finally { fs.closeSync(fd); }
 }
-function compiler(root, uid) {
+function legacyCompiler(root, uid) {
   const tsxPackage = applicationFile(root + '/node_modules/tsx/package.json', uid);
   const esbuildPackage = applicationFile(root + '/node_modules/esbuild/package.json', uid);
   const transforms = fs.readdirSync(root + '/node_modules/tsx/dist').filter(name => /^index-[A-Za-z0-9_-]+\.mjs$/.test(name));
@@ -37,17 +37,40 @@ function compiler(root, uid) {
   };
 }
 
+function compiler(root, uid) {
+  const esbuildPackage = applicationFile(root + '/node_modules/esbuild/package.json', uid);
+  const esbuildFile = root + '/node_modules/esbuild/lib/main.js';
+  const node = readTypedFile({ file: process.execPath, category: 'system' });
+  return {
+    node: { file: node.snapshot.realPath, version: process.versions.node, sha256: node.snapshot.sha256 },
+    tsx: readHdTsxCompilerClosure(root, (file, maximum) => applicationFile(file, uid, maximum)),
+    esbuild: { file: esbuildFile, version: JSON.parse(esbuildPackage.bytes).version,
+      sha256: applicationFile(esbuildFile, uid, 32 * 1024 * 1024).sha256 },
+  };
+}
+function probeDirectory(prepared, requested, uid, gid) {
+  const parent = prepared.preparedRoot;
+  assert.equal(fs.realpathSync(parent), parent);
+  const stat = fs.lstatSync(parent);
+  assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === uid && stat.gid === gid && !(stat.mode & 0o077));
+  const directory = requested ?? parent + '/hd-compile-probe';
+  assert.ok(path.isAbsolute(directory) && path.dirname(directory) === parent
+    && /^hd-compile-probe(?:-[a-z0-9-]+)?$/.test(path.basename(directory)),
+  'A compiler probe must be a new named direct child of the same prepared input');
+  assert.equal(fs.existsSync(directory), false, 'A compiler probe is never replayed or overwritten');
+  fs.mkdirSync(directory, { mode: 0o700 }); fs.chownSync(directory, uid, gid);
+  return directory;
+}
+
 // This invokes the real compiler with the same absolute source entry and loader
 // as the HD child. It has no IPC channel and receives no work message. The
 // entry's existing unused-child deadline exits 1; no image operation is run.
-export function captureHdCompiledCache(m, kind, prepared) {
+export function captureHdCompiledCache(m, kind, prepared, { probeDirectory: requestedProbeDirectory } = {}) {
   assert.equal(isSharedEngine(m), true);
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   const c = m[kind], uid = Number(call('id', ['-u', m.appUser])), gid = Number(call('id', ['-g', m.appUser]));
   const source = JSON.parse(rootFile(c.sourceManifest));
-  const directory = prepared.preparedRoot + '/hd-compile-probe';
-  assert.equal(fs.existsSync(directory), false, 'A compiler probe is never replayed or overwritten');
-  fs.mkdirSync(directory, { mode: 0o700 }); fs.chownSync(directory, uid, gid);
+  const directory = probeDirectory(prepared, requestedProbeDirectory, uid, gid);
   const input = Object.fromEntries([...SOURCE_FILES, 'tsconfig.json'].map(file => {
     const read = applicationFile(c.root + '/' + file, uid);
     assert.equal(read.sha256, source.files[file]); return [file, read.sha256];
@@ -87,9 +110,9 @@ export function captureHdCompiledCache(m, kind, prepared) {
   assert.deepEqual(compiler(c.root, uid), actualCompiler);
   assertTypedFileUnchanged(nodeSnapshot);
   for (const [file, digest] of Object.entries(input)) assert.equal(applicationFile(c.root + '/' + file, uid).sha256, digest);
-  const descriptor = { source: c.source, sourceRoot: c.root, sourceManifest: c.sourceManifest, archive: c.archive,
+  const descriptor = { schema: 'sd2-hd-compiled-cache-descriptor.v2', source: c.source, sourceRoot: c.root, sourceManifest: c.sourceManifest, archive: c.archive,
     compiler: actualCompiler, entries };
-  const receipt = { schema: 'sd2-hd-compiled-cache.v1', runId: m.runId, kind, descriptor,
+  const receipt = { schema: 'sd2-hd-compiled-cache.v2', runId: m.runId, kind, descriptor, probeDirectory: directory,
     sourceManifestSha256: sha(rootFile(c.sourceManifest)), input, command, nodeSnapshot,
     commandReceiptSha256: sha(rootFile(m.stage + '/' + kind + '-hd-compile-command.json')),
     noBusinessWorkDispatched: true };
@@ -100,7 +123,12 @@ export function captureHdCompiledCache(m, kind, prepared) {
 export function verifyHdCompiledCacheReceipt(m, kind, reference) {
   const c = m[kind]; assert.equal(reference.file, m.stage + '/' + kind + '-hd-compiled-cache.json');
   const bytes = rootFile(reference.file); assert.equal(sha(bytes), reference.sha256);
-  const value = JSON.parse(bytes); assert.equal(value.schema, 'sd2-hd-compiled-cache.v1');
+  const value = JSON.parse(bytes);
+  assert.ok(['sd2-hd-compiled-cache.v1', 'sd2-hd-compiled-cache.v2'].includes(value.schema));
+  if (reference.schema !== undefined) assert.equal(reference.schema, value.schema);
+  const version2 = value.schema === 'sd2-hd-compiled-cache.v2';
+  if (version2) assert.equal(value.descriptor.schema, 'sd2-hd-compiled-cache-descriptor.v2');
+  else assert.equal(value.descriptor.schema, undefined);
   assert.equal(value.runId, m.runId); assert.equal(value.kind, kind); assert.equal(value.noBusinessWorkDispatched, true);
   assert.equal(value.descriptor.source, c.source); assert.equal(value.descriptor.sourceRoot, c.root);
   assert.equal(value.descriptor.sourceManifest, c.sourceManifest); assert.equal(value.descriptor.archive, c.archive);
@@ -114,7 +142,20 @@ export function verifyHdCompiledCacheReceipt(m, kind, reference) {
   assert.equal(value.command.workMessagesSent, 0); assert.equal(value.command.ipcChannel, false);
   assert.equal(sha(fs.readFileSync(value.command.logFile)), value.command.logSha256);
   const uid = Number(call('id', ['-u', m.appUser]));
-  assert.deepEqual(compiler(c.root, uid), value.descriptor.compiler);
+  // Old receipts keep the original exact-one-transform compiler check. They
+  // must not be relabelled as a complete multi-module closure.
+  assert.deepEqual((version2 ? compiler : legacyCompiler)(c.root, uid), value.descriptor.compiler);
+  if (version2) {
+    assert.ok(typeof value.probeDirectory === 'string'
+      && /^hd-compile-probe(?:-[a-z0-9-]+)?$/.test(path.basename(value.probeDirectory)));
+    const preparedRoot = path.dirname(value.probeDirectory);
+    assert.equal(path.dirname(preparedRoot), c.root + '/.role-tests');
+    assert.equal(path.basename(preparedRoot), 'pricing-prepared-' + m.runId);
+    assert.equal(fs.realpathSync(value.probeDirectory), value.probeDirectory);
+    assert.ok(value.command.args.includes('TMPDIR=' + value.probeDirectory));
+    for (const entry of value.descriptor.entries)
+      assert.equal(path.dirname(entry.cacheFile), value.probeDirectory + '/tsx-' + uid);
+  }
   for (const [file, digest] of Object.entries(value.input))
     assert.equal(applicationFile(c.root + '/' + file, uid).sha256, digest);
   return value;

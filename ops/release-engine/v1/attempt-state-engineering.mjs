@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import {
   assertAttemptBindings,
   createAttemptIdentity,
+  continueFailedAttempt,
+  validateGuardBuildTailBinding,
   finishAttempt,
   finishPhase,
   readAttempt,
@@ -212,6 +214,51 @@ function runAttempts(root, checks) {
   const identity = createAttemptIdentity('identity-check');
   assert.equal(identity.attemptId, identity.runId); assert.notEqual(identity.attemptId, UUIDS.first);
   checks.push('B_new_attempt_identity_is_a_fresh_uuid_bound_one_to_one_with_run_id');
+
+  const tailId = '10000000-0000-4000-8000-000000000007', taskId = 'guard-build-tail';
+  const tailStart = start(root, taskId, tailId, firstOwner, ++now, inputBindings);
+  const guard = startPhase({ root, taskId, attemptId: tailId, owner: firstOwner, phase: 'guard-build',
+    dependencyEventSha256: tailStart.derivedState.lastEventSha256, before: scene(++now, 'original-guard'), now });
+  finishPhase({ root, taskId, attemptId: tailId, owner: firstOwner, phase: 'guard-build', intentSha256: guard.eventSha256,
+    outcome: 'failed', child: child(7), after: scene(++now, 'original-failed-guard'), now });
+  finishAttempt({ root, taskId, attemptId: tailId, owner: firstOwner, outcome: 'failed', after: scene(++now, 'original-terminal'), now });
+  const originalTail = readAttempt({ root, taskId, attemptId: tailId });
+  const oldHeader = fs.readFileSync(path.join(originalTail.place.attempt, 'attempt.json'));
+  const oldEvents = originalTail.events.map((_, index) => fs.readFileSync(path.join(originalTail.place.events, String(index + 1).padStart(6, '0') + '.json')));
+  const proof = sha('guard-tail-proof'), continuation = { schema: 'sd2-release-guard-build-tail-binding.v1', phase: 'guard-build',
+    proofSha256: proof, processorControllerSetSha256: sha('new-tail-processors') };
+  assert.deepEqual(validateGuardBuildTailBinding(continuation), continuation);
+  assert.throws(() => validateGuardBuildTailBinding({ ...continuation, phase: 'main-build' }));
+  const tailInput = { root, taskId, attemptId: tailId, owner: secondOwner, ...inputBindings,
+    terminalEventSha256: originalTail.derivedState.terminal.eventSha256, failureReceiptSha256: proof, continuation,
+    window: windowReference(root, tailId, ++now, now + 1000, 'tail-window'),
+    before: scene(now, 'tail-observation', { effectsStarted: false, switchComplete: false }), now };
+  for (const status of ['alive', 'unknown']) assert.throws(() => continueFailedAttempt({ ...tailInput, inspectOwner: () => status }));
+  assert.throws(() => continueFailedAttempt({ ...tailInput, failureReceiptSha256: sha('other-proof'), inspectOwner: () => 'dead' }));
+  assert.equal(readAttempt({ root, taskId, attemptId: tailId }).events.length, oldEvents.length);
+  const continuedTail = continueFailedAttempt({ ...tailInput, inspectOwner: () => 'dead' });
+  assert.equal(continuedTail.state.guardBuildTail.status, 'pending');
+  assert.equal(continuedTail.state.guardBuildTail.proofSha256, proof);
+  assert.throws(() => startPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'main-build',
+    dependencyEventSha256: continuedTail.eventSha256, before: scene(++now, 'forbidden-main'), now }));
+  assert.equal(readAttempt({ root, taskId, attemptId: tailId }).derivedState.lastEventSha256, continuedTail.eventSha256);
+  const tailIntent = startPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'guard-build',
+    dependencyEventSha256: continuedTail.eventSha256, before: scene(++now, 'tail-only'), now });
+  const tailDone = finishPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'guard-build',
+    intentSha256: tailIntent.eventSha256, outcome: 'succeeded', child: child(0), after: scene(++now, 'tail-complete'), now });
+  assert.equal(tailDone.state.guardBuildTail.status, 'completed');
+  assert.throws(() => startPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'guard-build',
+    dependencyEventSha256: tailDone.eventSha256, before: scene(++now, 'forbidden-replay'), now }));
+  const main = startPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'main-build',
+    dependencyEventSha256: tailDone.eventSha256, before: scene(++now, 'first-main'), now });
+  finishPhase({ root, taskId, attemptId: tailId, owner: secondOwner, phase: 'main-build', intentSha256: main.eventSha256,
+    outcome: 'succeeded', child: child(0), after: scene(++now, 'main-complete'), now });
+  finishAttempt({ root, taskId, attemptId: tailId, owner: secondOwner, outcome: 'succeeded', after: scene(++now, 'tail-final'), now });
+  assert.deepEqual(fs.readFileSync(path.join(originalTail.place.attempt, 'attempt.json')), oldHeader);
+  for (let index = 0; index < oldEvents.length; index++)
+    assert.deepEqual(fs.readFileSync(path.join(originalTail.place.events, String(index + 1).padStart(6, '0') + '.json')), oldEvents[index]);
+  assert.equal(readAttempt({ root, taskId, attemptId: tailId }).events.find(item => item.sha256 === guard.eventSha256).value.phase, 'guard-build');
+  checks.push('guard_tail_preserves_failed_journal_and_header_requires_dead_owner_then_finishes_once_before_main');
 }
 
 function runTypedFilesAndErrors(root, checks) {

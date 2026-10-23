@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readHdStorageProtection, assertHdStorageProtection, inspectHdReconciliation, inspectHdBeforeMaintenance,
-  createProtectedDiscoveryContinuation, readHdCompiledCacheProofs } from './hd-storage-preflight.mjs';
+  createProtectedDiscoveryContinuation, readHdCompiledCacheProofs, readHdTsxCompilerClosure } from './hd-storage-preflight.mjs';
 import { APPROVED_HD_LEGACY_READY, APPROVED_HD_HISTORICAL_VERSIONS } from './hd-legacy-ready-allowlist.mjs';
 
 // No supplied DB, production media, service, network, or release is used. The
@@ -475,6 +475,63 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
       entries: reference.entries.map((item, index) => index ? item : { ...item, cacheSha256: '0'.repeat(64) }) }], value => structuredClone(value)));
     assert.throws(() => readHdCompiledCacheProofs({ ...m, main: compiledManifest.main }, [{ ...reference,
       compiler: { ...compiler, node: { ...compiler.node, sha256: '0'.repeat(64) } } }], value => structuredClone(value)));
+    // New descriptors pin the real installed loader's complete local ESM/CJS
+    // closure, copied into this isolated consumer root. No compiler bytes run.
+    const readCompilerFile = file => {
+      assert.equal(fs.realpathSync(file), file); const before = fs.lstatSync(file);
+      assert.ok(before.isFile() && !before.isSymbolicLink() && before.nlink === 1 && !(before.mode & 0o022));
+      const bytes = fs.readFileSync(file), after = fs.lstatSync(file);
+      const identity = stat => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+      assert.deepEqual(identity(after), identity(before)); return { bytes, sha256: sha(bytes), identity: identity(before) };
+    };
+    const actualClosure = readHdTsxCompilerClosure(applicationRoot, readCompilerFile);
+    assert.equal(actualClosure.entryFile, path.resolve(path.dirname(actualClosure.packageFile),
+      JSON.parse(fs.readFileSync(actualClosure.packageFile)).exports['.']));
+    for (const item of actualClosure.files) {
+      const relative = path.relative(applicationRoot, item.file), file = path.join(compileRoot, relative);
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, fs.readFileSync(item.file), { flag: 'wx', mode: 0o600 });
+    }
+    const makeV2Reference = () => ({ ...reference, schema: 'sd2-hd-compiled-cache-descriptor.v2',
+      compiler: { ...compiler, tsx: readHdTsxCompilerClosure(compileRoot, readCompilerFile) } });
+    const readV2 = value => readHdCompiledCacheProofs({ ...m, main: compiledManifest.main }, [value], current => structuredClone(current));
+    let v2 = makeV2Reference(); readV2(v2);
+    assert.deepEqual(v2.compiler.tsx.files.map(item => item.file), [...v2.compiler.tsx.files.map(item => item.file)].sort());
+    if (actualClosure.version === '4.21.0') {
+      for (const filename of ['index-gbaejti9.mjs', 'index-7AaEi15b.mjs', 'cjs/index.cjs'])
+        assert.ok(v2.compiler.tsx.files.some(item => item.file.endsWith('/dist/' + filename)), 'Real loader closure omitted ' + filename);
+    }
+    for (const item of v2.compiler.tsx.files) {
+      assert.throws(() => readV2({ ...v2, compiler: { ...v2.compiler, tsx: { ...v2.compiler.tsx,
+        files: v2.compiler.tsx.files.filter(value => value.file !== item.file) } } }));
+      assert.throws(() => readV2({ ...v2, compiler: { ...v2.compiler, tsx: { ...v2.compiler.tsx,
+        files: v2.compiler.tsx.files.map(value => value === item ? { ...value, sha256: '0'.repeat(64) } : value) } } }));
+    }
+    const extra = path.dirname(v2.compiler.tsx.entryFile) + '/unreferenced-index.mjs';
+    fs.writeFileSync(extra, 'export const neverImported = true;', { mode: 0o600 });
+    assert.throws(() => readV2({ ...v2, compiler: { ...v2.compiler, tsx: { ...v2.compiler.tsx,
+      files: [...v2.compiler.tsx.files, { file: extra, sha256: sha(fs.readFileSync(extra)), identity: readCompilerFile(extra).identity }].sort((a, b) => a.file.localeCompare(b.file)) } } }));
+    fs.unlinkSync(extra);
+    const changedModule = v2.compiler.tsx.files.find(item => item.file !== v2.compiler.tsx.packageFile && item.file !== v2.compiler.tsx.entryFile);
+    assert.ok(changedModule); const originalModule = fs.readFileSync(changedModule.file);
+    fs.appendFileSync(changedModule.file, '\n/* changed after original closure */'); assert.throws(() => readV2(v2));
+    fs.writeFileSync(changedModule.file, originalModule); v2 = makeV2Reference(); readV2(v2);
+    const missingModule = changedModule.file + '.held'; fs.renameSync(changedModule.file, missingModule);
+    assert.throws(() => readV2(v2)); fs.renameSync(missingModule, changedModule.file); v2 = makeV2Reference();
+    fs.chmodSync(changedModule.file, 0o666); assert.throws(() => readV2(v2)); fs.chmodSync(changedModule.file, 0o600); v2 = makeV2Reference();
+    const wrongOwner = fs.lstatSync;
+    fs.lstatSync = function (file, ...args) {
+      const value = wrongOwner.call(this, file, ...args);
+      return file === changedModule.file ? Object.assign(Object.create(Object.getPrototypeOf(value)), value, { uid: 1 }) : value;
+    };
+    try { assert.throws(() => readV2(v2)); } finally { fs.lstatSync = wrongOwner; }
+    const changedPackage = fs.readFileSync(v2.compiler.tsx.packageFile), packageJson = JSON.parse(changedPackage);
+    fs.writeFileSync(v2.compiler.tsx.packageFile, JSON.stringify({ ...packageJson, exports: { ...packageJson.exports, '.': './dist/missing-loader.mjs' } }));
+    assert.throws(() => readV2(v2)); fs.writeFileSync(v2.compiler.tsx.packageFile, changedPackage); v2 = makeV2Reference(); readV2(v2);
+    assert.throws(() => readV2({ ...v2, schema: 'sd2-hd-compiled-cache-descriptor.v99' }));
+    assert.throws(() => readV2({ ...v2, schema: undefined }));
+    assert.throws(() => readV2({ ...reference, schema: 'sd2-hd-compiled-cache-descriptor.v2' }));
+    checks.push('v2_real_loader_complete_ordered_esm_cjs_closure_rejects_missing_extra_changed_owner_permission_and_version_downgrades');
     const compiledRun = createClosedCache(m.hdRoot), compiledDirectory = path.join(compiledRun.runPath, 'tsx-' + process.getuid());
     for (const name of fs.readdirSync(compiledDirectory)) fs.unlinkSync(path.join(compiledDirectory, name));
     for (const entry of compiledEntries) fs.copyFileSync(entry.cacheFile, path.join(compiledDirectory, path.basename(entry.cacheFile)));
@@ -1006,7 +1063,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 48 + protectedCases.length);
+    assert.equal(checks.length, 49 + protectedCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,

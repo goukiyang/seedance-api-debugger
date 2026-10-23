@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { inspectHdClosedExecutionCache, assertHdClosedProcessor, assertHdE01CacheSourceProof } from './hd-storage-preflight.mjs';
+import { inspectHdClosedExecutionCache, assertHdClosedProcessor, assertHdE01CacheSourceProof, readHdTsxCompilerClosure } from './hd-storage-preflight.mjs';
 
 assert.equal(process.platform, 'linux');
 if (process.argv.length > 3) {
@@ -64,6 +64,55 @@ try {
     const entries = originalProcReaddir.call(this, target, ...args);
     return target === '/proc' ? entries.filter(name => !/^\d+$/.test(name) || fixtureProcessIds.has(Number(name))) : entries;
   };
+  // Exercise the actual closure reader with module syntax, including the
+  // literal CJS registration used by tsx 4.21.0. These files are read, not run.
+  const closureRoot = path.join(directory, 'compiler-closure'), closurePackage = closureRoot + '/node_modules/tsx';
+  const closureSources = {
+    'package.json': JSON.stringify({ name: 'tsx', version: '4.21.0', exports: { '.': './dist/loader.mjs' } }),
+    'dist/loader.mjs': String.raw`import{r}from"./register.mjs";import"./index-gbaejti9.mjs";export{x}from"./index-7AaEi15b.mjs";
+r("./cjs/index.cjs");import("./dynamic.mjs");import(".\x2fescaped.mjs");new URL("./url.mjs",import.meta.url);
+const findPackageJson=async t=>{let e=new URL("package.json",t);e=new URL("../package.json",e);return e;};
+const runtimeModuleUrl=e=>new URL("./runtime-only.mjs",e);
+const derivedModuleUrl=new URL("./derived-only.mjs",import.meta.url+"/runtime/");
+const text="require('./ignored.cjs')";const regexp=/import\("\.\/ignored.mjs"\)/;
+// import "./comment.mjs";
+/* require("./comment.cjs"); */` + '\nconst template=' + '`text ${import("./expression.mjs")}`;',
+    'dist/register.mjs': 'export function r(file){}',
+    'dist/index-gbaejti9.mjs': 'export * from "./cycle.mjs";',
+    'dist/index-7AaEi15b.mjs': 'export const x=1;',
+    'dist/cycle.mjs': 'import "./index-gbaejti9.mjs";',
+    'dist/cjs/index.cjs': 'module.exports=require("../required.cjs");',
+    'dist/required.cjs': 'module.exports={};',
+    'dist/dynamic.mjs': 'export const dynamic=true;',
+    'dist/escaped.mjs': 'export const escaped=true;',
+    'dist/url.mjs': 'export const url=true;',
+    'dist/expression.mjs': 'export const expression=true;',
+  };
+  for (const [relative, bytes] of Object.entries(closureSources)) {
+    const file = closurePackage + '/' + relative; fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 });
+  }
+  const closureRead = file => {
+    assert.equal(fs.realpathSync(file), file); const before = fs.lstatSync(file);
+    assert.ok(before.isFile() && before.uid === uid && before.nlink === 1 && !(before.mode & 0o022));
+    const identity = stat => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, stat[key]]));
+    const bytes = fs.readFileSync(file); assert.deepEqual(identity(fs.lstatSync(file)), identity(before));
+    return { bytes, sha256: createHash('sha256').update(bytes).digest('hex'), identity: identity(before) };
+  };
+  const closure = () => readHdTsxCompilerClosure(closureRoot, closureRead), originalClosure = closure();
+  assert.deepEqual(originalClosure.files.map(item => path.relative(closurePackage, item.file)).sort(), Object.keys(closureSources).sort());
+  assert.deepEqual(closure(), originalClosure);
+  checks.push('compiler_loader_esm_cjs_registration_dynamic_require_exports_templates_cycles_and_decoys_have_exact_closure');
+  const registered = closurePackage + '/dist/cjs/index.cjs', heldRegistered = registered + '.held';
+  fs.renameSync(registered, heldRegistered); assert.throws(closure); fs.renameSync(heldRegistered, registered);
+  const beforeChange = closure(); fs.appendFileSync(registered, '\n/* changed compiler entity */');
+  assert.notDeepEqual(closure(), beforeChange); fs.writeFileSync(registered, closureSources['dist/cjs/index.cjs']);
+  fs.chmodSync(registered, 0o666); assert.throws(closure); fs.chmodSync(registered, 0o600);
+  fs.renameSync(registered, heldRegistered); fs.symlinkSync(heldRegistered, registered); assert.throws(closure);
+  fs.unlinkSync(registered); fs.renameSync(heldRegistered, registered);
+  const loader = closurePackage + '/dist/loader.mjs'; fs.appendFileSync(loader, '\nimport "../../../outside.mjs";');
+  assert.throws(closure); fs.writeFileSync(loader, closureSources['dist/loader.mjs']);
+  checks.push('compiler_entire_closure_changes_missing_cjs_alias_modes_and_package_escape_are_refused');
   assert.throws(() => assertHdE01CacheSourceProof({})); checks.push('unproven_published_source_refused');
   const e01 = '/data/video-api-debugger/managed-releases/e01fb18045e2950b45323b4d4ca7f6ce143a2019/';
   const sourceFiles = ['scripts/process-hd-image.ts', 'src/lib/media/hd-image-processor.ts', 'src/lib/media/hd-encoder.ts',

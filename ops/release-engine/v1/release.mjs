@@ -12,6 +12,8 @@ import { captureHdLegacyContract } from './switch.mjs';
 import { captureMultiviewBackupProtection } from './multiview-backup-control.mjs';
 import { inspectInstalledMultiviewRecipeAdoption } from './multiview-works-control.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
+import { currentReleaseContext } from './engine-context.mjs';
+import { readAttempt } from './attempt-state.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const protectedTaskIds = [
@@ -29,10 +31,42 @@ function protectedDirectory(file) {
   assert.equal(fs.realpathSync(file), file);
   const stat = fs.lstatSync(file); assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o022));
 }
-function trustedCode(m) {
-  for (const [file, expected] of Object.entries(m.privateSha256)) {
+function trustedCode(m, runtime = null) {
+  const hashes = runtime ? runtime.proof.processorControllers : m.privateSha256;
+  if (runtime) {
+    assert.equal(sha(JSON.stringify(hashes)), runtime.proof.processor.controllerSetSha256);
+    assert.deepEqual(fs.readdirSync(directory).filter(file => file.endsWith('.mjs')).sort(), Object.keys(hashes).sort());
+  }
+  for (const [file, expected] of Object.entries(hashes)) {
     assert.ok(path.basename(file) === file && file.endsWith('.mjs')); assert.equal(sha(rootFile(path.join(directory, file))), expected, 'Private release code changed: ' + file);
   }
+}
+
+export function guardBuildTailReleaseAction(phase, mode, kind) {
+  return phase === 'main-build' && mode === 'build' && kind === 'main'
+    || phase === 'verify' && mode === 'verify' && ['main', 'guard'].includes(kind)
+    || ['arm', 'switch', 'recovery'].includes(phase) && mode === phase && kind === undefined
+    || phase === 'proof' && (mode === 'proof' && kind === undefined || mode === 'public' && kind === 'main');
+}
+
+function guardBuildTailRuntime(m, mode, kind) {
+  const context = currentReleaseContext(), runtime = context?.guardBuildTail;
+  assert.equal(runtime?.schema, 'sd2-release-guard-build-tail-runtime.v1');
+  assert.equal(runtime.proof.schema, 'sd2-release-guard-build-tail-proof.v1');
+  assert.ok(guardBuildTailReleaseAction(runtime.phase, mode, kind), 'Guard-tail processor may not compile guard or enter an unbound phase');
+  assert.deepEqual(context.contract.engine, m.engine); assert.deepEqual(runtime.proof.engine, m.engine);
+  assert.equal(runtime.proof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
+  assert.equal(runtime.proof.runId, m.runId); assert.equal(runtime.proof.taskId, m.operation.taskId);
+  assert.equal(runtime.proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
+  const file = m.operation.taskRoot + '/attempts/' + m.runId + '/guard-build-tail-' + runtime.continuationSha256 + '.json';
+  assert.equal(runtime.proofFile, file); const bytes = rootFile(file);
+  assert.equal(sha(bytes), runtime.continuationSha256); assert.deepEqual(JSON.parse(bytes), runtime.proof);
+  const loaded = readAttempt({ root: m.projectRoot + '/release-tasks', taskId: m.operation.taskId, attemptId: m.runId });
+  assert.equal(loaded.derivedState.status, 'running'); assert.equal(loaded.derivedState.activePhase?.phase, runtime.phase);
+  assert.equal(loaded.derivedState.guardBuildTail?.status, 'completed');
+  assert.equal(loaded.derivedState.guardBuildTail.proofSha256, runtime.continuationSha256);
+  assert.equal(loaded.derivedState.guardBuildTail.processorControllerSetSha256, runtime.proof.processor.controllerSetSha256);
+  return runtime;
 }
 function liveInfo(name) {
   const value = unit(name); assert.equal(value.ActiveState, 'active'); assert.equal(value.SubState, 'running');
@@ -174,7 +208,9 @@ export async function capture(seedFile) {
 }
 export async function execute(mode, manifestFile, kind) {
   assert.equal(process.getuid(), 0); const m = validateManifest(JSON.parse(rootFile(manifestFile)));
-  assert.equal(manifestFile, m.stage + '/manifest.json'); assert.equal(directory, engineDirectory(m)); trustedCode(m);
+  assert.equal(manifestFile, m.stage + '/manifest.json');
+  const runtime = directory === engineDirectory(m) ? null : guardBuildTailRuntime(m, mode, kind);
+  trustedCode(m, runtime);
   await loadHdCompiledCacheProofs(m);
   if (mode === 'preflight') return (await import('./control-preflight.mjs')).controlPreflight(m);
   if (mode === 'admission') return (await import('./control-preflight.mjs')).controlAdmission(m);
