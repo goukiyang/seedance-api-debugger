@@ -11,7 +11,7 @@
     "template": "release-size-log-r01",
     "wrapper": "run-size-log-r01.mjs",
     "controllerCount": 54,
-    "controllerSetSha256": "ca953445a4d805a3db0d7d988e1716175fd3a4cbdfeb8aec7b0d7c9561afc21e",
+    "controllerSetSha256": "f72b73a9f38f02361d4bd8c0f076c36d885481eb96db14335c4c90801741ba92",
     "wrapperSha256": "bab84582f98deec415fc7582ca62100869a5af48eef03cc36e0c9bf8b41efae1",
     "changed": [
       "candidate-inputs.mjs",
