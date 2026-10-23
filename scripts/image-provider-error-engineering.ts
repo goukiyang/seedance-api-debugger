@@ -9,6 +9,7 @@ import https from 'node:https';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { mock } from 'node:test';
+import { StudioImageDownloadError } from '../src/lib/image-studio/media';
 
 const sourcePaths = ['src/lib/image-studio/provider.ts', 'src/lib/image-studio/worker.ts',
   'src/lib/image-studio/provider-error-diagnostics.ts', 'src/lib/image-studio/provider-error-evidence.ts'];
@@ -20,6 +21,10 @@ const expectedChecks = ['post_errors_preserve_transport_and_safe_serialized_meta
   'three_worker_generate_paths_and_local_validation_bound'];
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 process.exitCode = 1;
+let fixturePhase = 'setup', fixtureSettled = false;
+process.once('beforeExit', () => {
+  if (!fixtureSettled) console.error('[image-provider-error-fixture] incomplete_before_exit', fixturePhase);
+});
 
 async function main() {
   const root = realpathSync(process.cwd()), runId = process.env.IMAGE_RECOVERY_GATE_RUN_ID;
@@ -46,7 +51,6 @@ async function main() {
   try {
     const diagnostics = await import('../src/lib/image-studio/provider-error-diagnostics');
     const { requestStudioImages, StudioProviderError } = await import('../src/lib/image-studio/provider');
-    const { StudioImageDownloadError } = await import('../src/lib/image-studio/media');
     const evidence = await import('../src/lib/image-studio/provider-error-evidence');
     const delivery = await import('../src/lib/image-studio/delivery');
     type Observation = import('../src/lib/image-studio/provider-error-diagnostics').StudioProviderErrorObservation;
@@ -69,6 +73,19 @@ async function main() {
       } }, fetcher); } catch (value) { error = value; }
       assert.equal(cursor, replies.length); assert.ok(!JSON.stringify(observed).includes(secret));
       return { observed, calls, error, result };
+    };
+    const boundedErrorRun = async (label: string, params: Params, replies: Array<() => Response>) => {
+      fixturePhase = label;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([run(params, replies), new Promise<never>((_resolve, reject) => {
+          watchdog = setTimeout(() => {
+            console.error('[image-provider-error-fixture] read_watchdog', label);
+            reject(new Error('synthetic_error_read_exceeded_3000ms'));
+          }, 3000);
+          watchdog.ref();
+        })]);
+      } finally { if (watchdog) clearTimeout(watchdog); fixturePhase = 'assertions'; }
     };
     for (const status of [400, 429, 500, 503]) {
       const result = await run(initial, [() => Response.json({ status: 'failed', safe_error: safeError(`service_http_${status}`) }, { status })]);
@@ -118,8 +135,44 @@ async function main() {
     const huge = await run(initial, [() => new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(65537)); }, cancel() { canceled++; } }), { status: 503 })]);
     assert.equal(huge.observed[0].event.bodyRead, 'oversize'); assert.equal(canceled, 1);
     const began = Date.now();
-    const stalled = await run(initial, [() => new Response(new ReadableStream({ pull() { return new Promise<void>(() => {}); }, cancel() { canceled++; } }), { status: 503 })]);
+    const stalled = await boundedErrorRun('stalled_body', initial, [() => new Response(new ReadableStream({ pull() { return new Promise<void>(() => {}); }, cancel() { canceled++; } }), { status: 503 })]);
     assert.equal(stalled.observed[0].event.bodyRead, 'timeout'); assert.ok(Date.now() - began < 3000); assert.equal(canceled, 2);
+    let preAbortedCanceled = 0;
+    const preAborted = await boundedErrorRun('pre_aborted_body', { ...initial, signal: AbortSignal.abort() }, [() => new Response(new ReadableStream({
+      pull() { return new Promise<void>(() => {}); }, cancel() { preAbortedCanceled++; },
+    }), { status: 503 })]);
+    assert.ok(preAborted.error instanceof StudioProviderError); assert.equal(preAborted.error.code, 'http_error');
+    assert.equal(preAborted.error.status, 503); assert.equal(preAborted.error.retryable, false);
+    assert.equal(preAborted.observed[0].event.bodyRead, 'timeout'); assert.equal(preAbortedCanceled, 1);
+    const originalAbort = new AbortController(); let forwardedCanceled = 0;
+    const forwarded = await boundedErrorRun('original_abort_during_read', { ...initial, signal: originalAbort.signal }, [() => new Response(new ReadableStream({
+      pull() { originalAbort.abort(); return new Promise<void>(() => {}); }, cancel() { forwardedCanceled++; },
+    }, { highWaterMark: 0 }), { status: 503 })]);
+    assert.ok(forwarded.error instanceof StudioProviderError); assert.equal(forwarded.error.code, 'http_error');
+    assert.equal(forwarded.observed[0].event.bodyRead, 'timeout'); assert.equal(forwardedCanceled, 1);
+    let pendingCancelCalls = 0;
+    const pendingCancel = await boundedErrorRun('cancel_never_settles', initial, [() => new Response(new ReadableStream({
+      pull() { return new Promise<void>(() => {}); }, cancel() { pendingCancelCalls++; return new Promise<void>(() => {}); },
+    }), { status: 503 })]);
+    assert.ok(pendingCancel.error instanceof StudioProviderError); assert.equal(pendingCancel.error.code, 'http_error');
+    assert.equal(pendingCancel.error.status, 503); assert.equal(pendingCancel.error.retryable, false);
+    assert.equal(pendingCancel.observed[0].event.bodyRead, 'timeout'); assert.equal(pendingCancelCalls, 1);
+    let teeSourceCanceled = 0;
+    const [teeBody, unreadSibling] = new ReadableStream<Uint8Array>({
+      pull() { return new Promise<void>(() => {}); }, cancel() { teeSourceCanceled++; },
+    }).tee();
+    try {
+      const tee = await boundedErrorRun('tee_sibling_unfinished', initial, [() => new Response(teeBody, { status: 503 })]);
+      assert.ok(tee.error instanceof StudioProviderError); assert.equal(tee.error.code, 'http_error');
+      assert.equal(tee.error.status, 503); assert.equal(tee.error.retryable, false);
+      assert.equal(tee.observed[0].event.bodyRead, 'timeout'); assert.equal(teeSourceCanceled, 0);
+    } finally { void unreadSibling.cancel().catch(() => {}); }
+    const lockedResponse = new Response('synthetic', { status: 503 }), heldReader = lockedResponse.body!.getReader();
+    try {
+      const locked = await boundedErrorRun('body_reader_already_locked', initial, [() => lockedResponse]);
+      assert.ok(locked.error instanceof StudioProviderError); assert.equal(locked.error.code, 'http_error');
+      assert.equal(locked.observed[0].event.bodyRead, 'read_error');
+    } finally { void heldReader.cancel().catch(() => {}); }
     const native: Params = { ...initial, provider: 'musk', protocol: 'gemini_native', model: 'gemini-3-pro-image-preview', size: '2K', quality: 'auto' };
     const nativeError = await run(native, [() => Response.json({ error: { message: secret, code: 429 } }, { status: 429 })]);
     assert.ok(nativeError.error instanceof StudioProviderError); assert.equal(nativeError.error.code, 'http_error');
@@ -138,7 +191,7 @@ async function main() {
     let requests = 0;
     await assert.rejects(requestStudioImages(initial, (async () => { requests++; return Response.json({ data: [{ url: 'https://image.fixture.invalid/output.png' }] }); }) as typeof fetch,
       async () => { throw new StudioImageDownloadError('download_timeout', 503, true); }), (error: unknown) => {
-      assert.ok(error instanceof StudioProviderError); assert.equal(error.code, 'download_timeout'); assert.equal(error.retryable, true); return true;
+      assert.ok(error instanceof StudioProviderError); assert.equal(error.code, 'download_timeout'); assert.equal(error.status, 503); assert.equal(error.retryable, true); return true;
     });
     assert.equal(requests, 1);
     const durableFailure = new Error('synthetic original response durability failed');
@@ -261,12 +314,14 @@ async function main() {
       scope: 'Synthetic provider replies and isolated SQLite only; no real supplier or browser acceptance.' }, null, 2), { mode: 0o600 });
     console.log(`Image provider error engineering receipt: ${receipt}`);
   } finally {
+    fixturePhase = 'disconnect';
     await db.$disconnect(); mock.restoreAll(); process.chdir(root); process.umask(previousUmask);
     // Retain the private synthetic receipt for the build gate; no production files are removed.
     await fs.access(directory);
   }
 }
-void main().then(() => { process.exitCode = 0; }).catch(error => {
+void main().then(() => { fixtureSettled = true; process.exitCode = 0; }).catch(error => {
+  fixtureSettled = true;
   const locations = error instanceof Error ? (error.stack || '').split('\n').filter(line => /^\s+at\s/.test(line)).slice(0, 4) : [];
   console.error('Image provider error engineering failed', locations); process.exitCode = 1;
 });
