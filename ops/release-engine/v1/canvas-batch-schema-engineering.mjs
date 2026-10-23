@@ -357,7 +357,7 @@ print('actual-first-migration-produced')`;
       return execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(values)], { encoding: 'utf8' });
     };
     const adoptionContext = vm.createContext({ assert: normalizedAssert, fs: io, ...contract, assertProtectedIncrementCandidate, engineDirectory, isSharedEngine,
-      verifyDeployedContinuationProvenance, verifySharedBuildProvenance,
+      verifyDeployedContinuationProvenance, verifySharedBuildProvenance, fullSchemaBefore, verifyFullCandidateSources,
       rootFile: vbytes, sha: hash, call: vcall,
       writeJsonExclusive: (file, value) => { adoptionWrites++; fs.writeFileSync(physical(file), JSON.stringify(value, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); },
       assertReleaseWindow: value => assert.equal(value, next) });

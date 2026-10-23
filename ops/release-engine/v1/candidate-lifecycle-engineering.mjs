@@ -1,4 +1,4 @@
-import { releaseDependencyRoot } from './full-release-contract.mjs';
+import { releaseDependencyRoot, fullSchemaBefore } from './full-release-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -418,7 +418,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
       assertPrivateSwitchBindings(imports, historicalPrivateHooks);
       assertHdAdmissionBinding(imports, historicalHdAdmissionHook);
     }
-    const context = vm.createContext({ releaseDependencyRoot, createRequire, ...common, ...imports });
+    const context = vm.createContext({ releaseDependencyRoot, fullSchemaBefore, createRequire, ...common, ...imports });
     const code = scriptBody(transform(sources[name]));
     vm.runInContext(code + '\n' + suffix + '\nglobalThis.api={' + names.join(',') + '};', context, { filename: name });
     return context.api;

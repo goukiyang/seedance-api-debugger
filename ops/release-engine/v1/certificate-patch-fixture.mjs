@@ -18,5 +18,8 @@ export function patchSwitch(source) {
     assert.equal(result.split(from).length, 2, 'Patch must match exactly one reviewed original fragment');
     result = result.replace(from, to);
   }
-  return "import { inspectRecoveryCertificate } from './certificate.mjs';\n" + result;
+  const certificateImport = "import { inspectRecoveryCertificate } from './certificate.mjs';\n";
+  const fullReleaseImport = "import { applyFullSchema, publishLegacyReuseWriterProof, readFullLiveSourceFiles } from './full-release-contract.mjs';\n";
+  const boundary = result.startsWith(fullReleaseImport) ? fullReleaseImport.length : 0;
+  return result.slice(0, boundary) + certificateImport + result.slice(boundary);
 }

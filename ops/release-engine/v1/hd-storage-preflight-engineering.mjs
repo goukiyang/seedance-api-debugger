@@ -603,6 +603,27 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         while (!fs.existsSync(marker) && actualNow() < limit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         assert.ok(fs.existsSync(marker), 'Isolated owner did not acquire its lease at the requested boundary');
       };
+      const originalLstat = fs.lstatSync;
+      let cleanupRequested = false, cleanupStat = null, cleanupInjected = false;
+      if (name === 'natural-release-unlinked-stat') fs.lstatSync = function (target, ...args) {
+        if (cleanupStat && target === lock) {
+          const prior = cleanupStat; cleanupStat = null; cleanupInjected = true;
+          return Object.assign(Object.create(Object.getPrototypeOf(prior)), prior, { nlink: 0 });
+        }
+        if (cleanupRequested && target === lock + '/owner.json') {
+          cleanupRequested = false; const bound = originalLstat.call(fs, lock); child.send('release');
+          let absent = false;
+          while (actualNow() < invocationDeadline) {
+            try { originalLstat.call(fs, lock); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; absent = true; break; }
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+          }
+          assert.equal(absent, true, 'The original child must actually release its isolated directory');
+          cleanupStat = bound;
+          throw Object.assign(new Error('Original owner removed its record during observation'), { code: 'ENOENT' });
+        }
+        return originalLstat.call(fs, target, ...args);
+      };
       try {
         if (name === 'unknown-owner') fs.writeFileSync(lock + '/owner.json', JSON.stringify({ pid: 1, host: 'unknown', token: randomUUID() }), { mode: 0o600 });
         if (name === 'other-transient') fs.mkdirSync(m.hdRoot + '/unknown.lock');
@@ -617,6 +638,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
             records.push({ kind, value });
             if (kind.startsWith('boundary-') && value.phase === trigger && !triggered) { triggered = true; acquireAtBoundary(); }
             if (kind === 'known-busy') {
+              if (name === 'natural-release-unlinked-stat') cleanupRequested = true;
               const firstStrictAt = records.find(item => item.kind.startsWith('strict-start-')).value.at;
               assert.ok(value.deadline <= firstStrictAt + 15000); assert.ok(value.deadline <= invocationDeadline);
               if (mutate === 'task') save(m.hdRoot, { ...pending, priority: pending.priority + 1 });
@@ -624,7 +646,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
               if (mutate === 'owner') fs.writeFileSync(lock + '/owner.json', JSON.stringify({ pid: info.pid, host: os.hostname(), token: randomUUID() }));
               if (mutate === 'path') { moved = m.hdRoot + '.held'; const old = fs.statSync(m.hdRoot); fs.renameSync(m.hdRoot, moved); fs.mkdirSync(m.hdRoot, { mode: 0o700 }); assert.notEqual(fs.statSync(m.hdRoot).ino, old.ino); }
               if (clockJump) Date.now = () => actualNow() + 16000;
-              if (!['persistent', 'short-deadline', 'hard-cap'].includes(name) && !['path', 'owner'].includes(mutate)) child.send('release');
+              if (!['persistent', 'short-deadline', 'hard-cap', 'natural-release-unlinked-stat'].includes(name) && !['path', 'owner'].includes(mutate)) child.send('release');
             }
             if (kind === 'natural-release' && name === 'second-strict-collision') acquireAtBoundary();
           } });
@@ -634,6 +656,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         if (reject) await assert.rejects(action);
         else { const result = await action(); assert.equal(result.safe, true);
           assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, held || trigger ? 2 : 1); }
+        if (name === 'natural-release-unlinked-stat') assert.equal(cleanupInjected, true);
         assert.ok(records.filter(v => v.kind.startsWith('strict-start-')).length <= 2);
         if (name === 'unknown-owner') assert.equal(records.some(v => v.kind === 'known-busy'), false);
         if (name === 'second-strict-collision') assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, 2);
@@ -643,6 +666,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
           completedResults: records.filter(v => v.kind.startsWith('strict-result-')).length, fixtureFinalOnly: true });
         checks.push('bounded-discovery-' + name);
       } finally {
+        fs.lstatSync = originalLstat;
         Date.now = actualNow;
         if (moved) { fs.rmdirSync(m.hdRoot); fs.renameSync(moved, m.hdRoot); }
         child.send('exit'); assert.deepEqual(await exit, { code: 0, signal: null }); assert.equal(childError, '');
@@ -655,7 +679,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       }
     }
     for (const [name, options] of [
-      ['no-collision', { held: false }], ['natural-release', {}],
+      ['no-collision', { held: false }], ['natural-release', {}], ['natural-release-unlinked-stat', {}],
       ['retired-entry-collision', { held: false, trigger: 'retired-cache-entry' }],
       ['inventory-mid-collision', { held: false, trigger: 'inventory-complete' }],
       ['unknown-owner', { reject: true }], ['persistent', { reject: true, deadlineMs: 200 }],
@@ -937,7 +961,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 41 + protectedCases.length);
+    assert.equal(checks.length, 42 + protectedCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,

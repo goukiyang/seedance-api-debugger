@@ -175,17 +175,30 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
   catch (error) { if (!(error instanceof DiscoveryAdmissionBusy)) throw error; busy = error; }
   record('known-busy', { at: Date.now(), phase: busy.phase, proof: busy.proof, initialSnapshot, maximumMs: 15000, deadline });
   const originalRuntime = Object.fromEntries(['pid', 'host', 'startTicks', 'processGroup', 'cgroup', 'state', 'sources'].map(k => [k, busy.proof[k]]));
-  while (fs.existsSync(busy.proof.lock)) {
+  const lockEntry = () => {
+    try { return fs.lstatSync(busy.proof.lock); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+  };
+  while (lockEntry()) {
     check(); admission.remaining();
     try { assert.deepEqual(readDiscoveryOwner(m, l, admission), busy.proof, 'Discovery owner or file identity drifted while waiting'); }
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
-      if (!fs.existsSync(busy.proof.lock)) break;
+      const stat = lockEntry();
+      if (!stat) break;
       // The already-bound owner removes owner.json before rmdir. An empty,
       // identical directory is only pending cleanup, never an accepted lease.
-      const stat = fs.lstatSync(busy.proof.lock);
-      for (const k of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink']) assert.equal(stat[k], busy.proof.directory[k]);
-      assert.deepEqual(fs.readdirSync(busy.proof.lock), []);
+      for (const k of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(stat[k], busy.proof.directory[k]);
+      if (stat.nlink !== busy.proof.directory.nlink) {
+        // The original directory can become unlinked between owner.json and
+        // rmdir observations. Only a fresh absence of that same entry releases it.
+        assert.equal(stat.nlink, 0); assert.equal(lockEntry(), null); break;
+      }
+      try { assert.deepEqual(fs.readdirSync(busy.proof.lock), []); }
+      catch (cleanup) {
+        if (cleanup.code !== 'ENOENT') throw cleanup;
+        assert.equal(lockEntry(), null); break;
+      }
       assert.deepEqual(readDiscoveryRuntime(m, l, admission), originalRuntime);
     }
     assert.deepEqual(discoveryTreeSnapshot(m, admission), initialSnapshot, 'HD metadata changed while waiting');

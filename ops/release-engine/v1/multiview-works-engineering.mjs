@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(directory + '/multiview-works-control.mjs', 'utf8');
+const fullReleaseSource = fs.readFileSync(directory + '/full-release-contract.mjs', 'utf8');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const require = createRequire(releaseDependencyRoot(MV_DIRECT) + '/package.json');
 const ts = require('typescript');
@@ -423,7 +424,7 @@ try {
   const mapped = file => file === '/' ? copyTemporary : copyTemporary + file;
   const unmapped = file => file === copyTemporary ? '/' : file.slice(copyTemporary.length);
   const adjusted = (stat, root = false) => new Proxy(stat, { get(target, key) {
-    if (key === 'uid') return 0; if (key === 'dev') return root ? 0 : 1;
+    if (key === 'uid' || key === 'gid') return 0; if (key === 'dev') return root ? 0 : 1;
     return typeof target[key] === 'function' ? target[key].bind(target) : target[key];
   } });
   const virtualFs = { ...fs,
@@ -443,12 +444,26 @@ try {
   fs.mkdirSync(mapped(backup + '/recipes'), { mode: 0o700 });
   fs.writeFileSync(mapped(backup + '/recipes/guide.png'), 'synthetic-media', { mode: 0o600 });
   const copies = [];
-  const fn = vm.runInNewContext('(' + functionDeclarationSource(source, 'createMultiviewIsolatedBackupCopy', 'multiview-works-control.mjs') + ')', {
-    assert, fs: virtualFs, path, process: { platform: 'linux', getuid: () => 0 }, createHash,
+  // Execute directory preparation and its byte/identity checks inside the same
+  // private virtual /data tree; never call the native production-path helper.
+  const copyContext = vm.createContext({
+    assert, fs: virtualFs, path, process: { platform: 'linux', getuid: () => 0 }, createHash, hash,
+    SOURCE: /^[a-f0-9]{40}$/, invoke: (name, args) => {
+      assert.equal(name, 'findmnt'); assert.deepEqual(Array.from(args), ['-n', '-o', 'TARGET', '-T', '/data']); return '/data';
+    },
     exists: virtualFs.existsSync, manifestSha: () => 'synthetic-manifest',
     writeJsonExclusive: (_file, record) => copies.push(record), Buffer, Date,
   });
-  const m = { runId, mainSource: sourceId, stage: '/synthetic-stage' };
+  const preparationSource = ['input', 'rootInput', 'write', 'prepareEngineeringRunDirectory']
+    .map(name => functionDeclarationSource(fullReleaseSource, name, 'full-release-contract.mjs')).join('\n');
+  const fn = vm.runInContext(preparationSource + '\n('
+    + functionDeclarationSource(source, 'createMultiviewIsolatedBackupCopy', 'multiview-works-control.mjs') + ')', copyContext);
+  const fixtureManifest = value => {
+    fs.mkdirSync(mapped(value.stage), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(mapped(value.stage + '/manifest.json'), JSON.stringify(value), { flag: 'wx', mode: 0o600 });
+    return value;
+  };
+  const m = fixtureManifest({ runId, mainSource: sourceId, guardSource: 'b'.repeat(40), stage: '/synthetic-stage/' + runId });
   fs.symlinkSync('missing', mapped(backup + '/blocked-link'));
   assert.throws(() => fn(m, backup)); assert.equal(copies.length, 0);
   fs.unlinkSync(mapped(backup + '/blocked-link'));
@@ -457,11 +472,12 @@ try {
   const nextRun = runId.replace(/^a/, 'b'), nextBackup = backup.replace(runId, nextRun);
   fs.mkdirSync(mapped(base.replace(runId, nextRun)), { recursive: true, mode: 0o700 });
   fs.cpSync(mapped(backup), mapped(nextBackup), { recursive: true });
-  const complete = fn({ ...m, runId: nextRun }, nextBackup);
+  const next = fixtureManifest({ ...m, runId: nextRun, stage: '/synthetic-stage/' + nextRun });
+  const complete = fn(next, nextBackup);
   assert.equal(complete.productionDatabaseRestored, false); assert.equal(copies.length, 1);
   assert.notEqual(complete.directory, nextBackup);
   assert.deepEqual(fs.readFileSync(mapped(complete.directory + '/recipes/guide.png')), Buffer.from('synthetic-media'));
-  assert.throws(() => fn({ ...m, runId: nextRun }, nextBackup));
+  assert.throws(() => fn(next, nextBackup));
   assert.throws(() => fn(m, destination));
 } finally { fs.rmSync(copyTemporary, { recursive: true, force: true }); }
 

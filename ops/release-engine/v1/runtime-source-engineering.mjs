@@ -168,7 +168,8 @@ async function stageCapture(sourceCapture, expectSourceFailure = false) {
     assertMvDirectReady: () => assert.equal(MV_DIRECT.sourceReady, true),
     rootFile: fixtureRootFile, sha, call: () => '/data', protectedDirectory: () => {},
     liveInfo: name => m.live[Object.keys(m.live).find(role => m.live[role].unit === name)],
-    assertCapturedLive, readFullLiveSourceFiles, validateManifest: value => {
+    // Keep the real reader's strict array assertion; marshal only the VM boundary.
+    assertCapturedLive, readFullLiveSourceFiles: (value, files, role) => readFullLiveSourceFiles(value, Array.from(files), role), validateManifest: value => {
       assert.equal(value.runId, m.runId); assert.deepEqual(clone(value.live), clone(m.live)); return m;
     },
     APPROVED_HD_LEGACY_READY: m.hdLegacyReady, APPROVED_HD_HISTORICAL_VERSIONS: m.hdHistoricalVersions,

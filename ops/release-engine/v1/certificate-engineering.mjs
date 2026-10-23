@@ -105,10 +105,14 @@ for (const [name, observed, expected] of routes) {
   } else assert.equal(calls.includes('startGuard'), false);
   add('actual-orchestrator-retained-certificate-' + name);
 }
-assert.equal(patched, "import { inspectRecoveryCertificate } from './certificate.mjs';\n" + original
+const expectedPatchedBody = original
   .replace(oldEarly, newEarly).replace(oldObserve, newObserve)
   .replace('return { certificate: exists(certificateFile), startIntent: intent, originalPair: verified.originalPair,',
-    'return { certificate: certificateState.createdByThisRun, startIntent: intent, originalPair: verified.originalPair,'));
+    'return { certificate: certificateState.createdByThisRun, startIntent: intent, originalPair: verified.originalPair,');
+const fullReleaseImport = "import { applyFullSchema, publishLegacyReuseWriterProof, readFullLiveSourceFiles } from './full-release-contract.mjs';\n";
+const importBoundary = expectedPatchedBody.startsWith(fullReleaseImport) ? fullReleaseImport.length : 0;
+assert.equal(patched, expectedPatchedBody.slice(0, importBoundary)
+  + "import { inspectRecoveryCertificate } from './certificate.mjs';\n" + expectedPatchedBody.slice(importBoundary));
 add('exact-two-certificate-sites-and-derived-route-bit-only');
 const sha = b => createHash('sha256').update(b).digest('hex');
 console.log(JSON.stringify({ schema: 'recovery-certificate-engineering.v1', completed: true, cases, count: cases.length,
