@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { rootFile, sha, assertReleaseWindow, validateManifest, parseReleaseTimestamp, engineDirectory } from './common.mjs';
 import { createHdReleaseSafety, prepareOperationFenceModule } from './cutover-safety.mjs';
 import { readGuardRecovery } from './guard-recovery.mjs';
-import { candidateEvidenceFile, REUSE_SCHEMA } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, candidateCompatibilityDirectory, REUSE_SCHEMA } from './candidate-evidence.mjs';
 
 export const HD_MAINTENANCE_APPROVAL_SCHEMA = 'hd-release-maintenance-approval.v1';
 export const privateFreezeSha256 = m => sha(Buffer.from(JSON.stringify(m.privateSha256)));
@@ -43,11 +43,12 @@ export async function loadHdReleaseSafety(m, mode) {
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   assert.equal(process.umask(), 0o022, 'Use the original prepared-input/probe directory umask022 contract');
   const directory = path.dirname(fileURLToPath(import.meta.url));
-  assert.equal(directory, engineDirectory(m));
-  assert.deepEqual(fs.readdirSync(directory).filter(file => file.endsWith('.mjs')).sort(), Object.keys(m.privateSha256).sort());
+  assert.equal(directory, candidateCompatibilityDirectory(m));
+  const originalDirectory = engineDirectory(m);
+  assert.deepEqual(fs.readdirSync(originalDirectory).filter(file => file.endsWith('.mjs')).sort(), Object.keys(m.privateSha256).sort());
   for (const [file, expected] of Object.entries(m.privateSha256)) {
     assert.equal(path.basename(file), file); assert.match(expected, /^[a-f0-9]{64}$/);
-    assert.equal(sha(rootFile(path.join(directory, file))), expected, 'Frozen private release source changed: ' + file);
+    assert.equal(sha(rootFile(path.join(originalDirectory, file))), expected, 'Frozen private release source changed: ' + file);
   }
   const manifestSha256 = sha(rootFile(m.stage + '/manifest.json'));
   const approvalFile = m.stage + '/hd-release-safety-approval.json';

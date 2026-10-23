@@ -49,6 +49,14 @@ const GUARD_TAIL_SCHEMA = 'sd2-release-guard-build-tail-continuation.v1';
 const GUARD_TAIL_PROOF = 'sd2-release-guard-build-tail-proof.v1';
 const GUARD_TAIL_RETRY_SCHEMA = 'sd2-release-guard-build-tail-retry.v1';
 const GUARD_TAIL_RETRY_PROOF = 'sd2-release-guard-build-tail-retry-proof.v1';
+const READER_SUCCESSOR_SCHEMA = 'sd2-release-reader-successor.v1';
+const READER_SUCCESSOR_PROOF = 'sd2-release-reader-successor-proof.v1';
+export const READER_SUCCESSOR_PHASES = Object.freeze(['verify', 'arm', 'switch', 'proof', 'recovery']);
+const READER_SUCCESSOR_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs',
+  'candidate.mjs', 'candidate-inputs.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'release-entry-engineering.mjs',
+  'candidate-lifecycle-engineering.mjs', 'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs', 'hd-release-safety-engineering.mjs']);
+const OBSERVATION_PROTECTION_FIELDS = Object.freeze(['databaseIdentity', 'files', 'marker', 'otherServices',
+  'settingsSha256', 'protectedTasks', 'protectedFailedVideo']);
 export const GUARD_BUILD_TAIL_PHASES = Object.freeze(['guard-build', 'main-build', 'verify', 'arm', 'switch', 'proof', 'recovery']);
 const GUARD_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'attempt-state.mjs', 'release.mjs',
   'release-entry-engineering.mjs', 'attempt-state-engineering.mjs', 'candidate.mjs', 'candidate-evidence.mjs',
@@ -658,9 +666,13 @@ export function assertGuardBuildTailPhase(phase, state) {
   else assert.equal(state.status, 'completed', 'The guard tail must complete before later phases');
 }
 
-function readGuardBuildTailProof(batch, batchFile, loaded, phase, { retryAdmission = false } = {}) {
+function readGuardBuildTailProof(batch, batchFile, loaded, phase, { retryAdmission = false, readerAdmission = false } = {}) {
   const binding = loaded.derivedState.guardBuildTail; assert.ok(binding);
   const retryBinding = loaded.derivedState.guardBuildTailRetry;
+  const readerEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'reader_successor');
+  assert.ok(readerEvents.length <= 1, 'A reader successor cannot recursively authorize another successor');
+  if (readerAdmission) assert.equal(readerEvents.length, 0);
+  if (readerEvents.length) assertReaderSuccessorPhase(phase);
   if (retryAdmission) { assert.equal(binding.status, 'failed'); assert.equal(retryBinding, undefined); }
   else assertGuardBuildTailPhase(phase, retryBinding || binding);
   const event = loaded.events.find(item => item.sha256 === binding.continuationEventSha256);
@@ -692,11 +704,16 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase, { retryAdmissi
   }
   assertAttemptBindings(loaded, kernelBindings(batchFile, batch));
   const runtime = { schema: 'sd2-release-guard-build-tail-runtime.v1', phase, proofFile: file, continuationSha256: binding.proofSha256, proof };
-  if (retryBinding) runtime.retry = readGuardBuildTailRetryProof(batch, batchFile, loaded, runtime);
+  if (retryBinding) runtime.retry = readGuardBuildTailRetryProof(batch, batchFile, loaded, runtime,
+    { predecessorRead: readerAdmission || readerEvents.length === 1 });
+  if (readerEvents.length) {
+    runtime.reader = readReaderSuccessorProof(batch, batchFile, loaded, runtime, readerEvents[0]);
+    runtime.candidateObservation = readCandidateObservationProof(batch, loaded, runtime, readerEvents[0]);
+  }
   return runtime;
 }
 
-function readGuardBuildTailRetryProof(batch, batchFile, loaded, original) {
+function readGuardBuildTailRetryProof(batch, batchFile, loaded, original, { predecessorRead = false } = {}) {
   const binding = loaded.derivedState.guardBuildTailRetry, file = guardBuildTailRetryProofFile(loaded, binding.proofSha256);
   const doc = rootDocument(file, 1024 * 1024), proof = doc.value; assert.equal(digest(doc.bytes), binding.proofSha256);
   assert.equal(proof.schema, GUARD_TAIL_RETRY_PROOF); validateGuardBuildTailRetry(proof.request);
@@ -705,7 +722,8 @@ function readGuardBuildTailRetryProof(batch, batchFile, loaded, original) {
   for (const key of ['taskId', 'attemptId', 'runId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256'])
     assert.equal(proof[key], original.proof[key]);
   assert.deepEqual(proof.engine, batch.engine);
-  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256);
+  const identity = guardBuildTailProcessor(batch, binding.processorControllerSetSha256,
+    { directory: proof.processor.root, requireHere: !predecessorRead });
   for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
   assert.deepEqual(proof.retryControllerChanges, assertGuardBuildTailRetryControllerDifference(original.proof.processorControllers, identity.processorControllers));
   assert.equal(proof.request.originalContinuationSha256, original.continuationSha256);
@@ -723,6 +741,224 @@ function readGuardBuildTailRetryProof(batch, batchFile, loaded, original) {
   const snapshot = guardBuildTailRetrySnapshot(batch, proof.request);
   for (const key of ['hdCompiledCache', 'hdInputs', 'probeSnapshot']) assert.deepEqual(proof[key], snapshot[key]);
   return { schema: 'sd2-release-guard-build-tail-retry-runtime.v1', proofFile: file, proofSha256: binding.proofSha256, proof };
+}
+
+export function validateReaderSuccessor(value) {
+  exactKeys(value, ['schema', 'predecessorControllerSetSha256', 'originalContinuationSha256', 'retryProofSha256',
+    'eventHeadSha256', 'processorControllerSetSha256', 'observedAt'], 'successful-build reader successor');
+  assert.equal(value.schema, READER_SUCCESSOR_SCHEMA);
+  for (const key of ['predecessorControllerSetSha256', 'originalContinuationSha256', 'retryProofSha256', 'eventHeadSha256',
+    'processorControllerSetSha256']) assert.match(value[key], HASH);
+  assert.notEqual(value.predecessorControllerSetSha256, value.processorControllerSetSha256);
+  assert.equal(typeof value.observedAt, 'string'); parseTime(value.observedAt, 'reader observation'); return value;
+}
+
+export function assertReaderSuccessorControllerDifference(predecessor, processor) {
+  assert.deepEqual(Object.keys(predecessor).sort(), Object.keys(processor).sort()); const changed = {};
+  for (const name of Object.keys(predecessor).sort()) {
+    assert.equal(path.basename(name), name); assert.ok(name.endsWith('.mjs'));
+    assert.match(predecessor[name], HASH); assert.match(processor[name], HASH);
+    if (predecessor[name] !== processor[name]) {
+      assert.ok(READER_SUCCESSOR_CONTROLLERS.includes(name), 'Unreviewed successful-build reader difference: ' + name);
+      changed[name] = { predecessorSha256: predecessor[name], processorSha256: processor[name] };
+    }
+  }
+  for (const name of ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs']) assert.ok(changed[name]);
+  return changed;
+}
+
+export function assertReaderSuccessorPhase(phase) {
+  assert.ok(READER_SUCCESSOR_PHASES.includes(phase), 'A reader successor has no preparation or compilation authority');
+}
+
+export function assertReaderSuccessorAdmission(loaded, request, scene) {
+  validateReaderSuccessor(request); const state = loaded.derivedState;
+  assert.equal(state.status, 'running'); assert.equal(state.activePhase, null);
+  assert.equal(state.lastEventSha256, request.eventHeadSha256);
+  const next = nextReleasePhase(loaded); assert.ok(['verify', 'arm'].includes(next));
+  const completedBoundary = next === 'arm' ? 'verify' : 'main-build';
+  assert.equal(state.lastPhase?.phase, completedBoundary); assert.equal(state.lastPhase.outcome, 'succeeded');
+  assert.equal(state.guardBuildTail?.proofSha256, request.originalContinuationSha256);
+  assert.equal(state.guardBuildTailRetry?.proofSha256, request.retryProofSha256); assert.equal(state.guardBuildTailRetry.status, 'completed');
+  assert.equal(state.guardBuildTailRetry.processorControllerSetSha256, request.predecessorControllerSetSha256);
+  assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+  for (const name of ['fixed-guard-recovery.json', 'switch-before.json', 'switch-complete.json', 'ingress-503-switch.json',
+    'pricing-pair-published.json', 'guard-recovery-complete.json']) assert.equal(Boolean(scene.facts.files?.[name]), false);
+  assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+  assert.equal(loaded.events.some(item => item.value.kind === 'observation'
+    && ['reader_successor', 'candidate_observation'].includes(item.value.name)), false);
+  assert.equal(loaded.events.some(item => item.value.kind === 'phase_intent'
+    && RELEASE_PHASES.indexOf(item.value.phase) > RELEASE_PHASES.indexOf(completedBoundary)), false);
+  for (const phase of ['guard-build', 'main-build', ...(next === 'arm' ? ['verify'] : [])]) {
+    const successes = loaded.events.filter(item => item.value.kind === 'phase_result' && item.value.phase === phase && item.value.outcome === 'succeeded');
+    assert.equal(successes.length, 1); assert.deepEqual(successes[0].value.child, { status: 0, signal: null, error: null });
+  }
+  assert.equal(loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'artifact_capsule').length, 1);
+}
+
+function readerSuccessorProcessor(batch, predecessor, hash) {
+  assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
+  const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
+  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, here); assert.notEqual(processor.root, predecessor.processor.root);
+  const processorControllers = stableControllerHashes(here);
+  assert.equal(digest(JSON.stringify(processorControllers)), hash);
+  return { processor, processorControllers,
+    changedControllers: assertReaderSuccessorControllerDifference(predecessor.processorControllers, processorControllers) };
+}
+
+function readerSuccessorProofFile(loaded, hash) {
+  assert.match(hash, HASH); return path.join(loaded.place.attempt, `reader-successor-${hash}.json`);
+}
+
+function readerSuccessorBuildSnapshot(batch, kind, runtime) {
+  const m = assertManifest(batch), c = m[kind], stage = path.dirname(batch.manifestFile), inputs = {};
+  const read = (name, file, category = 'root_control', expectedUid) => {
+    const result = readTypedFile({ file: safeAbsolute(file, name), category, expectedUid, maximumBytes: 128 * 1024 * 1024 });
+    inputs[name] = { file, sha256: result.snapshot.sha256, snapshot: result.snapshot }; return result.bytes;
+  };
+  const receiptFile = stage + '/' + kind + '-build.json', receipt = JSON.parse(read('build', receiptFile));
+  const capsule = JSON.parse(read('capsule', stage + '/' + kind + '-immutable-success.json'));
+  const prepared = JSON.parse(read('prepared', stage + '/' + kind + '-prepared.json'));
+  const input = JSON.parse(read('candidateInputs', prepared.receipt)); const uid = input.uid;
+  assert.ok(Number.isSafeInteger(uid) && uid > 0); assert.equal(input.runId, batch.runId);
+  assert.equal(input.source, c.source); assert.equal(input.candidateRoot, c.root);
+  assert.equal(prepared.candidateRoot, c.root); assert.equal(prepared.source, c.source); assert.equal(prepared.runId, batch.runId);
+  assert.equal(receipt.schema, kind === 'guard' ? 'sd2-candidate-build-tail.v1' : 'rate-impl2-candidate-build.v1');
+  assert.equal(capsule.schema, kind === 'guard' ? 'sd2-immutable-successful-build-tail.v1' : 'sd2-immutable-successful-build.v1');
+  assert.equal(capsule.kind, kind); assert.equal(capsule.sourceRun, batch.runId);
+  assert.equal(capsule.originalReceiptFile, receiptFile); assert.equal(capsule.originalReceiptSha256, inputs.build.sha256);
+  assert.deepEqual(capsule.originalReceipt, receipt); assert.equal(capsule.originalPreparedSha256, inputs.prepared.sha256);
+  assert.equal(capsule.originalManifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  assert.deepEqual(capsule.originalPrivateSha256, m.privateSha256);
+  assert.equal(capsule.originalTimesChanged, false); assert.equal(capsule.newCompilationClaimed, false);
+  assert.equal(capsule.originallyVerifiedWithinThirtyMinuteGate, kind !== 'guard');
+  for (const key of ['source', 'version', 'runId']) assert.equal(receipt[key], key === 'runId' ? batch.runId : batch.artifacts[kind][key]);
+  assert.equal(receipt.label, kind); assert.equal(receipt.exitCode, 0); assert.equal(receipt.verifiedSourceAndGates, true);
+  assert.deepEqual(receipt.engine, batch.engine); assert.deepEqual(receipt.operation, operation(batch));
+  assert.equal(receipt.preparedSha256, inputs.prepared.sha256);
+  assert.equal(receipt.sourceManifestSha256, batch.artifacts[kind].sourceManifestSha256);
+  assert.equal(digest(read('sourceManifest', c.sourceManifest)), receipt.sourceManifestSha256);
+  assert.equal(capsule.originalSourceManifestSha256, receipt.sourceManifestSha256);
+  const command = JSON.parse(read('command', stage + '/' + kind + '-build-command.json'));
+  assert.equal(command.schema, 'sd2-original-build-command.v1'); assert.equal(command.label, kind); assert.equal(command.runId, batch.runId);
+  assert.equal(command.source, c.source); assert.equal(command.manifestSha256, receipt.manifestSha256);
+  assert.equal(command.status, 0); assert.equal(command.signal, null); assert.equal(command.error, null); assert.equal(command.errorCode, null);
+  assert.equal(command.originalExitRecordedBeforePostchecks, true);
+  assert.equal(command.startedAt, receipt.startedAt); assert.equal(command.finishedAt, receipt.finishedAt);
+  assert.equal(command.buildEnvironmentSha256, digest(JSON.stringify(prepared.buildEnv)));
+  const logFile = stage + '/' + kind + '-build.log'; assert.equal(receipt.logFile, logFile); assert.equal(command.logFile, logFile);
+  const lines = read('log', logFile).toString('utf8').split(/\r?\n/);
+  assert.equal(inputs.log.sha256, command.logSha256); assert.equal(inputs.log.sha256, receipt.logSha256);
+  for (const [name, prefix] of [['imageGate', 'IMAGE_RECOVERY_GATE_RECEIPT='], ['pricingGate', 'PRICING_POLICY_GATE_RECEIPT=']]) {
+    const matches = lines.filter(line => line.startsWith(prefix)); assert.equal(matches.length, 1);
+    const file = safeAbsolute(matches[0].slice(prefix.length), name); assert.ok(file.startsWith(c.root + '/.role-tests/'));
+    const gate = JSON.parse(read(name, file, 'app', uid)); assert.equal(gate.completed, true); assert.equal(gate.runId, batch.runId);
+    assert.equal(gate.candidateRoot, c.root); if (name === 'imageGate') assert.equal(file, receipt.gateReceipt);
+  }
+  const pkg = JSON.parse(read('package', c.root + '/package.json', 'app', uid)); assert.equal(pkg.version, receipt.version);
+  assert.equal(read('buildId', path.join(c.root, c.buildDist, 'BUILD_ID'), 'app', uid).toString('utf8').trim(), receipt.build);
+  if (kind === 'guard') {
+    assert.deepEqual(capsule.tailPostchecks, receipt.tailPostchecks);
+    assert.equal(receipt.tailPostchecks.continuationSha256, runtime.continuationSha256);
+    assert.equal(receipt.tailPostchecks.retryProofSha256, runtime.retry.proofSha256);
+    assert.equal(receipt.tailPostchecks.retryProofFile, runtime.retry.proofFile);
+    assert.equal(inputs.command.sha256, runtime.proof.request.buildCommandSha256);
+  }
+  return { inputs, build: receipt.build, source: receipt.source, version: receipt.version, startedAt: receipt.startedAt,
+    finishedAt: receipt.finishedAt, compiledTreeSha256: receipt.compiledTreeSha256, originalTimesChanged: false };
+}
+
+function readerSuccessorChildSnapshot(batch, loaded, kind, inspectOwner) {
+  const phase = kind + '-build', result = loaded.events.find(item => item.value.kind === 'phase_result'
+    && item.value.phase === phase && item.value.outcome === 'succeeded'); assert.ok(result);
+  const intent = result.value.intentSha256, file = childReceiptFile(loaded, phase, intent);
+  const child = readChildReceipt(file, phase, intent); assert.deepEqual(child.child, { status: 0, signal: null, error: null });
+  assert.deepEqual(child.child, result.value.child);
+  assert.deepEqual(parseChildOutput(child.receipt), rootJson(path.dirname(batch.manifestFile) + '/' + kind + '-build.json', 32 * 1024 * 1024));
+  const exited = loaded.events.find(item => item.value.kind === 'observation' && item.value.name === 'phase_child_exit'
+    && item.value.value.intentSha256 === intent); assert.ok(exited);
+  assert.equal(exited.value.value.phase, phase); assert.equal(result.value.previousSha256, exited.sha256);
+  assert.equal(exited.value.value.receiptFile, file); assert.equal(exited.value.value.receiptSha256, child.saved.sha256);
+  assert.deepEqual(exited.value.value.child, child.child);
+  const processFile = childProcessFile(loaded, phase, intent), processDocument = rootDocument(processFile, 32768);
+  const invocationFile = path.join(loaded.place.attempt, `${phase}-${intent}.invocation.json`), invocationDocument = rootDocument(invocationFile, 256 * 1024);
+  const invocation = validateInvocation(invocationDocument.value, invocationFile);
+  assert.equal(processDocument.value.schema, 'sd2-release-child-process.v1'); assert.equal(processDocument.value.invocationFile, invocationFile);
+  assert.equal(processDocument.value.invocationSha256, invocationDocument.snapshot.sha256);
+  assert.equal(invocation.batchFile, loaded.header.manifest.file); assert.equal(invocation.phase, phase);
+  assert.equal(invocation.taskRoot, `${batch.projectRoot}/release-tasks`);
+  assert.equal(invocation.taskId, batch.taskId); assert.equal(invocation.attemptId, batch.attemptId);
+  assert.equal(invocation.processFile, processFile); assert.deepEqual(invocation.owner, result.value.owner);
+  assert.equal(processDocument.value.owner.token, invocation.owner.token);
+  assert.equal(inspectOwner(processDocument.value.owner), 'dead', 'A reader cannot take over a live or unknown build child');
+  return { resultSha256: result.sha256, child: { file, sha256: child.saved.sha256, snapshot: rootDocument(file, 64 * 1024 * 1024).snapshot },
+    process: { file: processFile, sha256: processDocument.snapshot.sha256, snapshot: processDocument.snapshot },
+    invocation: { file: invocationFile, sha256: invocationDocument.snapshot.sha256, snapshot: invocationDocument.snapshot } };
+}
+
+function readReaderSuccessorProof(batch, batchFile, loaded, runtime, event) {
+  const reference = event.value.value; exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'reader authorization reference');
+  assert.equal(reference.schema, 'sd2-release-reader-successor-reference.v1');
+  assert.equal(reference.proofFile, readerSuccessorProofFile(loaded, reference.proofSha256));
+  const document = rootDocument(reference.proofFile, 4 * 1024 * 1024), proof = document.value;
+  assert.equal(document.snapshot.sha256, reference.proofSha256); assert.equal(proof.schema, READER_SUCCESSOR_PROOF);
+  validateReaderSuccessor(proof.request); assert.equal(proof.originalContinuationSha256, runtime.continuationSha256);
+  assert.equal(proof.retryProofSha256, runtime.retry.proofSha256); assert.equal(proof.originalProofFile, runtime.proofFile);
+  assert.equal(proof.retryProofFile, runtime.retry.proofFile);
+  for (const key of ['runId', 'taskId', 'attemptId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256'])
+    assert.equal(proof[key], runtime.retry.proof[key]);
+  assert.deepEqual(proof.engine, batch.engine); assert.deepEqual(proof.predecessorProcessor, runtime.retry.proof.processor);
+  assert.equal(proof.buildAuthority, false);
+  assert.equal(proof.request.predecessorControllerSetSha256, proof.predecessorProcessor.controllerSetSha256);
+  assert.equal(proof.request.originalContinuationSha256, runtime.continuationSha256); assert.equal(proof.request.retryProofSha256, runtime.retry.proofSha256);
+  const identity = readerSuccessorProcessor(batch, runtime.retry.proof, proof.request.processorControllerSetSha256);
+  for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
+  const eventIndex = loaded.events.findIndex(item => item.sha256 === event.sha256), takeover = loaded.events[eventIndex - 1];
+  assert.equal(takeover?.value.kind, 'owner_takeover'); assert.equal(takeover.value.previousSha256, proof.request.eventHeadSha256);
+  assert.equal(proof.eventHeadSha256, takeover.sha256);
+  assert.equal(takeover.value.previousLeaseSha256, proof.previousLeaseSha256); assert.deepEqual(takeover.value.previousOwner, proof.previousOwner);
+  assert.equal(event.value.previousSha256, takeover.sha256); assert.deepEqual(event.value.owner, takeover.value.owner);
+  for (const kind of ['main', 'guard']) {
+    assert.deepEqual(proof.successfulArtifacts[kind], readerSuccessorBuildSnapshot(batch, kind, runtime));
+    assert.deepEqual(proof.completedChildren[kind], readerSuccessorChildSnapshot(batch, loaded, kind, inspectControllerOwner));
+  }
+  return { schema: 'sd2-release-reader-successor-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
+}
+
+function candidateObservationProofFile(loaded, hash) {
+  assert.match(hash, HASH); return path.join(loaded.place.attempt, `candidate-observation-${hash}.json`);
+}
+
+function readCandidateObservationProof(batch, loaded, runtime, readerEvent) {
+  const events = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_observation');
+  assert.equal(events.length, 1, 'The reader requires its separate complete candidate observation');
+  const event = events[0], reference = event.value.value;
+  exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'candidate observation reference');
+  assert.equal(reference.schema, 'sd2-release-candidate-observation-reference.v1');
+  assert.equal(reference.proofFile, candidateObservationProofFile(loaded, reference.proofSha256));
+  const document = rootDocument(reference.proofFile, 1024 * 1024), proof = document.value;
+  assert.equal(document.snapshot.sha256, reference.proofSha256); assert.equal(proof.schema, 'sd2-release-candidate-observation-proof.v1');
+  assert.equal(event.value.previousSha256, readerEvent.sha256); assert.deepEqual(event.value.owner, readerEvent.value.owner);
+  for (const key of ['runId', 'taskId', 'attemptId', 'manifestSha256', 'originalContinuationSha256', 'retryProofSha256', 'eventHeadSha256'])
+    assert.equal(proof[key], runtime.reader.proof[key]);
+  assert.deepEqual(proof.engine, batch.engine); assert.equal(proof.readerProofSha256, runtime.reader.proofSha256);
+  assert.equal(proof.verifier.file, path.join(runtime.reader.proof.predecessorProcessor.root, 'candidate-reuse.mjs'));
+  assert.equal(proof.verifier.sha256, runtime.retry.proof.processorControllers['candidate-reuse.mjs']);
+  assert.equal(proof.verifier.method, 'verifyOriginalSuccess');
+  assert.ok(Number.isSafeInteger(proof.verifier.startedAt) && proof.verifier.startedAt > 0
+    && Number.isSafeInteger(proof.verifier.finishedAt) && proof.verifier.finishedAt >= proof.verifier.startedAt);
+  assert.equal(proof.observedAt, proof.verifier.finishedAt); assert.equal(proof.expiresAt, proof.observedAt + 1800000);
+  assert.equal(proof.protectionComparison, 'assertProtection'); assert.deepEqual(proof.protectionFields, OBSERVATION_PROTECTION_FIELDS);
+  assert.match(proof.protectionSha256, HASH);
+  for (const name of ['readOnly', 'newCompilationClaimed', 'originalTimesChanged', 'continuousUnchangedIntervalClaimed'])
+    assert.equal(proof[name], name === 'readOnly');
+  for (const kind of ['main', 'guard']) {
+    const artifact = runtime.reader.proof.successfulArtifacts[kind], value = proof.candidates[kind];
+    assert.equal(value.capsuleFile, artifact.inputs.capsule.file); assert.equal(value.capsuleSha256, artifact.inputs.capsule.sha256);
+    assert.equal(value.receiptFile, artifact.inputs.build.file); assert.equal(value.receiptSha256, artifact.inputs.build.sha256);
+    assert.equal(value.snapshotSha256, digest(JSON.stringify(rootJson(value.capsuleFile, 128 * 1024 * 1024).snapshot)));
+  }
+  return { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
 }
 
 function parseTime(value, name) {
@@ -1378,6 +1614,87 @@ export function createReleaseController(overrides = {}) {
     }
   }
 
+  async function authorizeReaderSuccessor(batchFile, windowFile, requestFile) {
+    const batch = readReleaseBatch(batchFile), context = assertContext(batch, batchFile);
+    assertSeed(batch); const manifest = assertManifest(batch), loaded = load(batchFile, batch);
+    const request = validateReaderSuccessor(rootJson(requestFile, 16384)), now = deps.now(), scene = deps.scene(batch, now);
+    assertReaderSuccessorAdmission(loaded, request, scene);
+    const observed = parseTime(request.observedAt, 'reader request observation');
+    assert.ok(observed <= now && now - observed < 300000, 'Reader request must bind the current completed attempt');
+    const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+    const lease = ownerLease(loaded); assert.ok(lease); assert.equal(deps.inspectOwner(lease.value.owner), 'dead');
+    const runtime = readGuardBuildTailProof(batch, batchFile, loaded, 'verify', { readerAdmission: true });
+    assert.ok(runtime.retry); const predecessor = runtime.retry.proof;
+    assert.equal(predecessor.processor.controllerSetSha256, request.predecessorControllerSetSha256);
+    const identity = readerSuccessorProcessor(batch, predecessor, request.processorControllerSetSha256);
+    const completedChildren = Object.fromEntries(['main', 'guard'].map(kind => [kind, readerSuccessorChildSnapshot(batch, loaded, kind, deps.inspectOwner)]));
+    const successfulArtifacts = Object.fromEntries(['main', 'guard'].map(kind => [kind, readerSuccessorBuildSnapshot(batch, kind, runtime)]));
+    const capsuleEvent = loaded.events.find(item => item.value.kind === 'observation' && item.value.name === 'artifact_capsule');
+    for (const kind of ['main', 'guard']) {
+      const value = successfulArtifacts[kind], capsule = capsuleEvent.value.value[kind];
+      assert.equal(capsule.build, value.build); assert.equal(capsule.compiledTreeSha256, value.compiledTreeSha256);
+      assert.equal(capsule.immutableSuccessSha256, value.inputs.capsule.sha256);
+    }
+    const verifierFile = path.join(predecessor.processor.root, 'candidate-reuse.mjs');
+    const verifierRead = readTypedFile({ file: verifierFile, category: 'root_control' });
+    assert.equal(verifierRead.snapshot.sha256, predecessor.processorControllers['candidate-reuse.mjs']);
+    // This command only observes retained builds. The predecessor's complete
+    // snapshot verifier is used with its original, already validated runtime.
+    engineContext.configureReleaseContext({ ...context, guardBuildTail: runtime });
+    const { verifyOriginalSuccess } = await import(pathToFileURL(verifierFile).href);
+    const { readProtection, assertProtection } = await import(pathToFileURL(path.join(predecessor.processor.root, 'common.mjs')).href);
+    assert.equal(typeof verifyOriginalSuccess, 'function'); assert.equal(typeof readProtection, 'function'); assert.equal(typeof assertProtection, 'function');
+    const startedAt = deps.now(), before = readProtection(manifest), verified = {};
+    for (const kind of ['main', 'guard']) {
+      verified[kind] = verifyOriginalSuccess(manifest, kind);
+      assert.deepEqual(verified[kind], rootJson(successfulArtifacts[kind].inputs.capsule.file, 128 * 1024 * 1024));
+      assert.deepEqual(successfulArtifacts[kind], readerSuccessorBuildSnapshot(batch, kind, runtime));
+    }
+    const after = readProtection(manifest); assertProtection(before, after);
+    const projection = value => Object.fromEntries(OBSERVATION_PROTECTION_FIELDS.map(key => [key, value[key]]));
+    assert.deepEqual(projection(before), projection(after));
+    const protectionSha256 = digest(JSON.stringify(projection(before))), finishedAt = deps.now();
+    const current = load(batchFile, batch); assert.equal(current.derivedState.lastEventSha256, request.eventHeadSha256);
+    assertReaderSuccessorAdmission(current, request, deps.scene(batch, finishedAt));
+    assert.equal(deps.inspectOwner(lease.value.owner), 'dead');
+    for (const kind of ['main', 'guard']) assert.deepEqual(completedChildren[kind], readerSuccessorChildSnapshot(batch, current, kind, deps.inspectOwner));
+    const owner = deps.createOwner(), window = releaseWindowReference(batch, windowFile, finishedAt);
+    const takeover = takeoverAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner,
+      priorLeaseSha256: lease.sha256, ...bindings, window, now: finishedAt, inspectOwner: deps.inspectOwner });
+    assert.equal(takeover.event.previousSha256, request.eventHeadSha256);
+    const proof = { schema: READER_SUCCESSOR_PROOF, request, eventHeadSha256: takeover.eventSha256,
+      originalContinuationSha256: runtime.continuationSha256, originalProofFile: runtime.proofFile,
+      retryProofSha256: runtime.retry.proofSha256, retryProofFile: runtime.retry.proofFile,
+      predecessorProcessor: predecessor.processor, previousOwner: lease.value.owner, previousLeaseSha256: lease.sha256,
+      ...Object.fromEntries(['runId', 'taskId', 'attemptId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256']
+        .map(key => [key, predecessor[key]])), engine: batch.engine, ...identity, successfulArtifacts, completedChildren,
+      observedAt: new Date(deps.now()).toISOString(), buildAuthority: false };
+    const proofSha256 = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+    const saved = writeJsonExclusive(readerSuccessorProofFile(loaded, proofSha256), proof); assert.equal(saved.sha256, proofSha256);
+    const observation = { schema: 'sd2-release-candidate-observation-proof.v1', engine: batch.engine,
+      runId: batch.runId, taskId: batch.taskId, attemptId: batch.attemptId, manifestSha256: proof.manifestSha256,
+      originalContinuationSha256: runtime.continuationSha256, retryProofSha256: runtime.retry.proofSha256,
+      readerProofSha256: proofSha256, eventHeadSha256: proof.eventHeadSha256,
+      observedAt: finishedAt, expiresAt: finishedAt + 1800000,
+      verifier: { file: verifierFile, sha256: verifierRead.snapshot.sha256, method: 'verifyOriginalSuccess', startedAt, finishedAt },
+      protectionComparison: 'assertProtection', protectionFields: OBSERVATION_PROTECTION_FIELDS, protectionSha256,
+      candidates: Object.fromEntries(['main', 'guard'].map(kind => [kind, {
+        capsuleFile: successfulArtifacts[kind].inputs.capsule.file, capsuleSha256: successfulArtifacts[kind].inputs.capsule.sha256,
+        receiptFile: successfulArtifacts[kind].inputs.build.file, receiptSha256: successfulArtifacts[kind].inputs.build.sha256,
+        snapshotSha256: digest(JSON.stringify(verified[kind].snapshot)) }])),
+      readOnly: true, newCompilationClaimed: false, originalTimesChanged: false, continuousUnchangedIntervalClaimed: false };
+    const observationSha256 = digest(Buffer.from(JSON.stringify(observation, null, 2) + '\n'));
+    const observedFile = writeJsonExclusive(candidateObservationProofFile(loaded, observationSha256), observation);
+    assert.equal(observedFile.sha256, observationSha256);
+    const common = { root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner };
+    const recorded = recordAttemptEvent({ ...common, name: 'reader_successor', value: {
+      schema: 'sd2-release-reader-successor-reference.v1', proofFile: saved.file, proofSha256 }, now: deps.now() });
+    assert.equal(recorded.event.previousSha256, proof.eventHeadSha256);
+    const candidateRecorded = recordAttemptEvent({ ...common, name: 'candidate_observation', value: {
+      schema: 'sd2-release-candidate-observation-reference.v1', proofFile: observedFile.file, proofSha256: observationSha256 }, now: deps.now() });
+    return { reader: saved, candidateObservation: observedFile, processor: identity.processor, eventHead: candidateRecorded.eventSha256 };
+  }
+
   function continueFailed(batchFile, windowFile, failureFile) {
     const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); assertManifest(batch);
     const loaded = load(batchFile, batch), request = rootJson(failureFile, 16384);
@@ -1519,7 +1836,7 @@ export function createReleaseController(overrides = {}) {
     return reconcileActive(batchFile, acquired);
   }
 
-  return { start, run, resume, continueFailed, status, inspect };
+  return { start, run, resume, continueFailed, authorizeReaderSuccessor, status, inspect };
 }
 
 export function validateEngineInstall(value) {
@@ -1582,10 +1899,12 @@ export async function releaseEntryCli(argv = process.argv.slice(2)) {
   if (command === 'status' && args.length === 1) return print(controller.status(args[0]));
   if (command === 'inspect' && args.length === 1) return print(controller.inspect(args[0]));
   if (command === 'continue-failed' && args.length === 3) return print(controller.continueFailed(args[0], args[1], args[2]));
+  if (command === 'authorize-reader-successor' && args.length === 3)
+    return print(await controller.authorizeReaderSuccessor(args[0], args[1], args[2]));
   if (command === 'resume' && args.length === 2) return print(await controller.resume(args[0], args[1]));
   if (command === 'run' && args.length >= 2 && args.length <= 4)
     return print(await controller.run(args[0], args[1], args[2] || null, args[3] || null));
-  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | authorize-reader-successor BATCH.json WINDOW.json REQUEST.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

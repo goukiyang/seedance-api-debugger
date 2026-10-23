@@ -11,6 +11,8 @@ import {
   validatePackageRequest, validatePrepareTailContinuation, assertPrepareTailControllerDifference, assertPrepareTailChildRoute,
   validateGuardBuildTailContinuation, assertGuardBuildTailControllerDifference, assertGuardBuildTailPhase, GUARD_BUILD_TAIL_PHASES,
   validateGuardBuildTailRetry, assertGuardBuildTailRetryControllerDifference, assertGuardBuildTailRetryFailure,
+  validateReaderSuccessor, assertReaderSuccessorControllerDifference, assertReaderSuccessorPhase,
+  assertReaderSuccessorAdmission, READER_SUCCESSOR_PHASES,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -433,6 +435,72 @@ function scenarioGuardBuildTailRetry() {
   return 'single_guard_postcheck_retry_keeps_original_proof_and_successful_HD_implementation_while_refusing_unrelated_failures';
 }
 
+function scenarioReaderSuccessor() {
+  const request = { schema: 'sd2-release-reader-successor.v1', predecessorControllerSetSha256: digest('cf98-predecessor'),
+    originalContinuationSha256: digest('retained-guard-tail'), retryProofSha256: digest('completed-single-retry'),
+    eventHeadSha256: digest('main-success-capsule-head'), processorControllerSetSha256: digest('successor-readers'),
+    observedAt: new Date().toISOString() };
+  assert.deepEqual(validateReaderSuccessor(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateReaderSuccessor(missing));
+    assert.throws(() => validateReaderSuccessor({ ...request, [key]: 'unbound' }));
+  }
+  assert.throws(() => validateReaderSuccessor({ ...request, processorControllerSetSha256: request.predecessorControllerSetSha256 }));
+  assert.throws(() => validateReaderSuccessor({ ...request, failureReceiptSha256: HASH }));
+  const names = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'candidate.mjs', 'candidate-inputs.mjs',
+    'cutover-driver.mjs', 'cutover-safety.mjs', 'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs',
+    'cutover-driver-engineering.mjs', 'cutover-safety-engineering.mjs', 'hd-release-safety-engineering.mjs', 'attempt-state.mjs', 'switch.mjs',
+    'guard-recovery.mjs', 'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'hd-closed-cache-engineering.mjs',
+    'hd-storage-preflight-engineering.mjs', 'common.mjs', 'candidate-reuse.mjs'];
+  const predecessor = Object.fromEntries(names.map(name => [name, digest('predecessor:' + name)]));
+  const processor = { ...predecessor };
+  for (const name of names.slice(0, 12)) processor[name] = digest('reader-successor:' + name);
+  assert.equal(Object.keys(assertReaderSuccessorControllerDifference(predecessor, processor)).length, 12);
+  for (const name of names.slice(12))
+    assert.throws(() => assertReaderSuccessorControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertReaderSuccessorControllerDifference(predecessor, { ...processor, 'new-runtime.mjs': HASH }));
+  assert.throws(() => assertReaderSuccessorControllerDifference(predecessor, predecessor));
+  for (const phase of READER_SUCCESSOR_PHASES) assertReaderSuccessorPhase(phase);
+  for (const phase of RELEASE_PHASES.filter(value => !READER_SUCCESSOR_PHASES.includes(value)))
+    assert.throws(() => assertReaderSuccessorPhase(phase));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('verify')).map(phase => ({ value: {
+    kind: 'phase_result', phase, outcome: 'succeeded', child: { status: 0, signal: null, error: null } }, sha256: digest(phase) }));
+  events.push({ value: { kind: 'observation', name: 'artifact_capsule' }, sha256: request.eventHeadSha256 });
+  const ready = { events, derivedState: { status: 'running', activePhase: null, lastEventSha256: request.eventHeadSha256,
+    lastPhase: { phase: 'main-build', outcome: 'succeeded' }, guardBuildTail: { proofSha256: request.originalContinuationSha256 },
+    guardBuildTailRetry: { proofSha256: request.retryProofSha256, status: 'completed',
+      processorControllerSetSha256: request.predecessorControllerSetSha256 } } };
+  const before = { facts: { effectsStarted: false, switchComplete: false, files: {} } };
+  assertReaderSuccessorAdmission(ready, request, before);
+  const verified = structuredClone(ready), verifiedRequest = { ...request, eventHeadSha256: digest('completed-verify-head') };
+  verified.events.push({ value: { kind: 'phase_intent', phase: 'verify' }, sha256: digest('verify-intent') },
+    { value: { kind: 'phase_result', phase: 'verify', outcome: 'succeeded', child: { status: 0, signal: null, error: null } },
+      sha256: verifiedRequest.eventHeadSha256 });
+  verified.derivedState.lastPhase = { phase: 'verify', outcome: 'succeeded' };
+  verified.derivedState.lastEventSha256 = verifiedRequest.eventHeadSha256;
+  assertReaderSuccessorAdmission(verified, verifiedRequest, before);
+  const armed = structuredClone(verified); armed.events.push({ value: { kind: 'phase_intent', phase: 'arm' } });
+  assert.throws(() => assertReaderSuccessorAdmission(armed, verifiedRequest, before));
+  const altered = change => { const value = structuredClone(ready); change(value); return value; };
+  for (const value of [
+    altered(value => { value.derivedState.status = 'failed'; }),
+    altered(value => { value.derivedState.activePhase = { phase: 'main-build', intentSha256: HASH }; }),
+    altered(value => { value.derivedState.lastPhase.outcome = 'failed'; }),
+    altered(value => { value.derivedState.lastEventSha256 = HASH; }),
+    altered(value => { value.derivedState.guardBuildTailRetry.processorControllerSetSha256 = HASH; }),
+    altered(value => { value.derivedState.guardBuildTailRetry.status = 'pending'; }),
+    altered(value => { value.events = value.events.filter(item => item.value.phase !== 'main-build'); }),
+    altered(value => { value.events.push({ value: { kind: 'phase_intent', phase: 'verify' } }); }),
+    altered(value => { value.events.push({ value: { kind: 'observation', name: 'reader_successor' } }); }),
+    altered(value => { value.events.push({ value: { kind: 'observation', name: 'candidate_observation' } }); }),
+  ]) assert.throws(() => assertReaderSuccessorAdmission(value, request, before));
+  for (const facts of [{ ...before.facts, effectsStarted: true }, { ...before.facts, switchComplete: true },
+    { ...before.facts, files: { 'fixed-guard-recovery.json': { sha256: HASH } } },
+    { ...before.facts, files: { 'switch-before.json': { sha256: HASH } } }])
+    assert.throws(() => assertReaderSuccessorAdmission(ready, request, { facts }));
+  return 'reader_successor_requires_both_original_successes_once_and_cannot_build_change_HD_or_invent_failed_continuation';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -440,7 +508,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

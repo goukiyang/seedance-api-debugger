@@ -54,7 +54,7 @@ function memory({ reuse = false } = {}) {
   m.expectedProtectedFileSha256[configFile] = sha(bytes(configFile));
   const manifestBytes = Buffer.from(JSON.stringify(m)); put(m.stage + '/manifest.json', manifestBytes); const manifestSha256 = sha(manifestBytes);
   const builds = Object.fromEntries(['main', 'guard'].map(kind => {
-    const value = { source: m[kind].source, version: m[kind].version, build: kind + '-fixture-build',
+    const value = { schema: 'rate-impl2-candidate-build.v1', label: kind, source: m[kind].source, version: m[kind].version, build: kind + '-fixture-build',
       runId, manifestSha256, startedAt: now - 10000, finishedAt: now - 1000, exitCode: 0, verifiedSourceAndGates: true };
     if (reuse) {
       Object.assign(value, { label: kind, schema: REUSE_SCHEMA, startedAt: now - 7200000, finishedAt: now - 6600000,

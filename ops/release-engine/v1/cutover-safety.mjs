@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { rootFile, sha, call, assertReleaseWindow, liveArtifactSource, rejectedPricingRoots, engineDirectory } from './common.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
 import { cwdBytes, assertNaturalExitEvidence, protectedFileSnapshot } from './switch.mjs';
 import { captureNginxUpstreamSockets } from './nginx-maintenance.mjs';
 import { fileIdentity } from './legacy-maintenance.mjs';
@@ -174,6 +174,17 @@ export async function prepareOperationFenceModule(m) {
   assert.match(m.runId, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
   assert.equal(m.stage, '/data/video-api-debugger/release-staging/' + m.runId);
   const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
+  if (sourceDirectory !== engineDirectory(m)) {
+    assert.equal(sourceDirectory, candidateCompatibilityDirectory(m), 'Only the journal-bound compatible reader may delegate the original fence preparation');
+    const originalDirectory = engineDirectory(m);
+    for (const [name, expected] of Object.entries(m.privateSha256)) {
+      assert.equal(path.basename(name), name); assert.match(expected, HASH);
+      assert.equal(sha(rootFile(path.join(originalDirectory, name))), expected, 'Original release control changed before fence delegation: ' + name);
+    }
+    const original = await import(pathToFileURL(path.join(originalDirectory, 'cutover-safety.mjs')).href);
+    assert.equal(typeof original.prepareOperationFenceModule, 'function');
+    return original.prepareOperationFenceModule(m);
+  }
   assert.equal(sourceDirectory, engineDirectory(m));
   assert.equal(fs.realpathSync(sourceDirectory), sourceDirectory);
   for (let directory = sourceDirectory; directory !== '/'; directory = path.dirname(directory)) {
@@ -415,9 +426,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
       assert.equal(savedBuild.source, m[kind].source); assert.equal(savedBuild.version, m[kind].version);
       assert.equal(savedBuild.runId, m.runId); assert.equal(savedBuild.manifestSha256, manifestSha256);
       assert.equal(savedBuild.exitCode, 0); assert.equal(savedBuild.verifiedSourceAndGates, true);
-      if (m.reuseBuilds) assertFreshCandidateEvidence(savedBuild, m, kind, d.now());
-      else assert.ok(Number.isSafeInteger(savedBuild.startedAt) && savedBuild.startedAt <= savedBuild.finishedAt
-        && savedBuild.finishedAt <= d.now() && d.now() - savedBuild.startedAt < 30 * 60_000);
+      assertFreshCandidateEvidence(savedBuild, m, kind, d.now());
       if (builds) assert.deepEqual(savedBuild, builds[kind]);
     }
   }

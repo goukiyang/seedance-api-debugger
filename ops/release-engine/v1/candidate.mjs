@@ -14,7 +14,7 @@ import { prepareReusedCandidate, verifyReusedCandidate, sealOriginalSuccess } fr
 import { assertControlPreflight } from './control-preflight.mjs';
 import { assertProtectedIncrementCandidate } from './release-contract.mjs';
 import { captureHdCompiledCache, verifyHdCompiledCacheReceipt } from './hd-compiled-cache.mjs';
-import { GUARD_BUILD_TAIL_SCHEMA, guardBuildTailRuntime, assertFreshCandidateEvidence } from './candidate-evidence.mjs';
+import { GUARD_BUILD_TAIL_SCHEMA, guardBuildTailRuntime, assertFreshCandidateEvidence, candidateGateObservation } from './candidate-evidence.mjs';
 
 const SOURCE_SCHEMA = 'rate-impl2-source-manifest.v1';
 const BUILD_SCHEMA = 'rate-impl2-candidate-build.v1';
@@ -266,15 +266,15 @@ function compiledTree(c) {
 }
 function verifyGates(m, kind, source, prepared, receipt) {
   const c = m[kind], uid = Number(call('id', ['-u', m.appUser]));
-  const tailContext = kind === 'guard' && receipt.schema === GUARD_BUILD_TAIL_SCHEMA
-    ? { manifest: m, runtime: guardBuildTailRuntime(m), observedAt: receipt.tailPostchecks?.observedAt ?? Date.now() }
-    : undefined;
+  const tailContext = candidateGateObservation(receipt, m, kind);
   if (tailContext) {
     assert.ok(tailContext.runtime);
-    assert.equal(receipt.startedAt, tailContext.runtime.proof.originalBuild.startedAt);
-    assert.equal(receipt.finishedAt, tailContext.runtime.proof.originalBuild.finishedAt);
-    assert.equal(receipt.logSha256, tailContext.runtime.proof.request.buildLogSha256);
-    assert.equal(receipt.gateReceipt, tailContext.runtime.proof.originalBuild.imageGateReceiptFile);
+    if (kind === 'guard' && receipt.schema === GUARD_BUILD_TAIL_SCHEMA) {
+      assert.equal(receipt.startedAt, tailContext.runtime.proof.originalBuild.startedAt);
+      assert.equal(receipt.finishedAt, tailContext.runtime.proof.originalBuild.finishedAt);
+      assert.equal(receipt.logSha256, tailContext.runtime.proof.request.buildLogSha256);
+      assert.equal(receipt.gateReceipt, tailContext.runtime.proof.originalBuild.imageGateReceiptFile);
+    } else assert.ok(tailContext.candidateObservation, 'Ordinary candidates need their separately bound current observation');
     assert.ok(Number.isSafeInteger(tailContext.observedAt) && tailContext.observedAt <= Date.now()
       && Date.now() - tailContext.observedAt < 1800000, 'The bound guard-tail observation is stale');
   }

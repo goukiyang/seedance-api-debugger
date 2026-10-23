@@ -14,6 +14,7 @@ import { inspectInstalledMultiviewRecipeAdoption } from './multiview-works-contr
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
 import { currentReleaseContext } from './engine-context.mjs';
 import { readAttempt } from './attempt-state.mjs';
+import { guardBuildTailRuntime as verifiedGuardBuildTailRuntime } from './candidate-evidence.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const protectedTaskIds = [
@@ -32,7 +33,7 @@ function protectedDirectory(file) {
   const stat = fs.lstatSync(file); assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o022));
 }
 function trustedCode(m, runtime = null) {
-  const processorProof = runtime?.retry?.proof || runtime?.proof;
+  const processorProof = runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof;
   const hashes = processorProof ? processorProof.processorControllers : m.privateSha256;
   if (runtime) {
     assert.equal(sha(JSON.stringify(hashes)), processorProof.processor.controllerSetSha256);
@@ -53,10 +54,11 @@ export function guardBuildTailReleaseAction(phase, mode, kind) {
 function guardBuildTailRuntime(m, mode, kind) {
   const context = currentReleaseContext(), runtime = context?.guardBuildTail;
   assert.equal(runtime?.schema, 'sd2-release-guard-build-tail-runtime.v1');
+  assert.deepEqual(verifiedGuardBuildTailRuntime(m), runtime);
   assert.equal(runtime.proof.schema, 'sd2-release-guard-build-tail-proof.v1');
   assert.ok(guardBuildTailReleaseAction(runtime.phase, mode, kind), 'Guard-tail processor may not compile guard or enter an unbound phase');
   assert.deepEqual(context.contract.engine, m.engine); assert.deepEqual(runtime.proof.engine, m.engine);
-  const processorProof = runtime.retry?.proof || runtime.proof;
+  const processorProof = runtime.reader?.proof || runtime.retry?.proof || runtime.proof;
   assert.equal(processorProof.processor.root, directory); assert.notEqual(directory, engineDirectory(m));
   assert.equal(runtime.proof.runId, m.runId); assert.equal(runtime.proof.taskId, m.operation.taskId);
   assert.equal(runtime.proof.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
@@ -80,6 +82,12 @@ function guardBuildTailRuntime(m, mode, kind) {
     assert.equal(loaded.derivedState.guardBuildTailRetry.proofSha256, retry.proofSha256);
     assert.equal(loaded.derivedState.guardBuildTailRetry.processorControllerSetSha256, proof.processor.controllerSetSha256);
   } else assert.equal(loaded.derivedState.guardBuildTailRetry, undefined);
+  if (runtime.reader) {
+    assert.ok(['verify', 'arm', 'switch', 'proof', 'recovery'].includes(runtime.phase), 'The successor reader cannot compile or prepare candidates');
+    assert.ok(loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'reader_successor'
+      && item.value.value.proofFile === runtime.reader.proofFile && item.value.value.proofSha256 === runtime.reader.proofSha256),
+    'Successor reader is missing its actual journal authorization');
+  }
   return runtime;
 }
 function liveInfo(name) {

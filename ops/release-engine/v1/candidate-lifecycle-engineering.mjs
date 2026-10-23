@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateEvidenceExpiresAt, REUSE_SCHEMA,
-  GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory } from './candidate-evidence.mjs';
+  GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory, candidateGateObservation } from './candidate-evidence.mjs';
 import { parseReleaseTimestamp, isSharedEngine, engineDirectory } from './common.mjs';
 import { releaseBoundary } from './engine-context.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
@@ -412,6 +412,7 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
     assertReleaseWindow: assertWindow, validateManifest: value => value, parseReleaseTimestamp,
     isSharedEngine, engineDirectory, loadHdCompiledCacheProofs, releaseBoundary,
     candidateEvidenceFile, REUSE_SCHEMA, GUARD_BUILD_TAIL_SCHEMA, candidateCompatibilityDirectory,
+    candidateGateObservation: (value, m, kind, now = clock) => candidateGateObservation(value, m, kind, now),
     candidateEvidenceExpiresAt: (value, m, kind, now = clock) => candidateEvidenceExpiresAt(value, m, kind, now),
     assertFreshCandidateEvidence: (value, m, kind, now = clock) => assertFreshCandidateEvidence(value, m, kind, now),
     pathToFileURL, setTimeout, clearTimeout, structuredClone, console,
@@ -1421,7 +1422,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     continuationSha256: 'e'.repeat(64), proof: { request, originalBuild: { startedAt: command.startedAt, finishedAt: command.finishedAt, build: built.build } } };
   class TailDate extends Date { static now() { return now; } }
   const namespace = { assert: sameAssert, Buffer, JSON, Date: TailDate, sha, GUARD_BUILD_TAIL_SCHEMA,
-    guardBuildTailRuntime: () => runtime, isSharedEngine: () => true, engineDirectory: () => '/original-engine',
+    guardBuildTailRuntime: () => runtime, assertCandidateObservation: () => null, isSharedEngine: () => true, engineDirectory: () => '/original-engine',
     assertControlPreflight: () => {}, assertReleaseWindow: () => {}, requireOriginalLive: () => {},
     context: () => ({ c: m.guard, source: { files: {} }, manifestSha256, sourceManifestSha256: 'c'.repeat(64) }),
     sourceCheck: () => {}, assertProtectedIncrementCandidate: () => {}, inputs: () => ({ prepared, preparedSha256 }),
@@ -1468,6 +1469,135 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // Native Node loader/TTL transport only. Minimal verifier modules retain each
 // exact age assertion from the real frozen script and its original nested
 // pricing spawn. This does not rerun or claim all original business fixtures.
+// Execute the production reader/freshness consumers with isolated root-document
+// and journal observations. The root authorizer's full disk/DB observation is
+// covered at its own boundary; this fixture does not manufacture that claim.
+{
+  const now = Date.now(), start = now - 7200000, stage = '/isolated-reader/stage', taskRoot = '/isolated-reader/task';
+  const runId = randomUUID(), owner = { token: 'synthetic-new-owner' }, previousOwner = { token: 'synthetic-old-owner' };
+  const documents = new Map(), put = (file, value) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(typeof value === 'string' ? value : JSON.stringify(value));
+    documents.set(file, bytes); return sha(bytes);
+  };
+  const m = { runId, stage, projectRoot: '/isolated-reader', engine: { root: '/isolated-reader/engine' },
+    operation: { taskRoot, taskId: 'reader-task', attemptId: runId }, privateSha256: { 'candidate-evidence.mjs': '0'.repeat(64), 'candidate-reuse.mjs': '0'.repeat(64) },
+    main: { root: '/isolated-reader/main', source: 'a'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/main-source.json' },
+    guard: { root: '/isolated-reader/guard', source: 'b'.repeat(40), version: '0.104.0', sourceManifest: '/isolated-reader/guard-source.json' } };
+  const manifestSha256 = put(stage + '/manifest.json', m);
+  const controllerNames = Object.keys(m.privateSha256), controllerSets = new Map();
+  const processor = root => {
+    const controllers = Object.fromEntries(controllerNames.map(name => [name, put(root + '/' + name, root + ':' + name)]));
+    controllerSets.set(root, controllers);
+    return { processor: { root, controllerSetSha256: sha(JSON.stringify(controllers)) }, processorControllers: controllers };
+  };
+  const request = { observedAt: start + 20000, buildCommandSha256: 'c'.repeat(64), buildLogSha256: 'd'.repeat(64),
+    observedCompiledTreeSha256: 'e'.repeat(64) };
+  const original = { schema: 'sd2-release-guard-build-tail-proof.v1', engine: m.engine, runId,
+    taskId: m.operation.taskId, attemptId: runId, manifestSha256, originalCompiledSnapshotUnavailable: true,
+    ...processor('/isolated-reader/tail'), request, originalBuild: { startedAt: start, finishedAt: start + 10000, build: 'original-build' } };
+  const originalFile = stage + '/original-tail.json', continuationSha256 = put(originalFile, original);
+  const retry = { ...original, schema: 'sd2-release-guard-build-tail-retry-proof.v1',
+    ...processor('/isolated-reader/predecessor'), originalContinuationSha256: continuationSha256,
+    originalProofFile: originalFile, observedAt: new Date(start + 20000).toISOString() };
+  const retryFile = stage + '/retry-tail.json', retrySha256 = put(retryFile, retry);
+  const runtime = { schema: 'sd2-release-guard-build-tail-runtime.v1', phase: 'verify', proofFile: originalFile,
+    continuationSha256, proof: original, retry: { schema: 'sd2-release-guard-build-tail-retry-runtime.v1', proofFile: retryFile, proofSha256: retrySha256, proof: retry } };
+  const receipts = {}, candidateRecords = {}, successfulArtifacts = {};
+  for (const role of ['main', 'guard']) {
+    const receipt = { schema: role === 'guard' ? GUARD_BUILD_TAIL_SCHEMA : 'rate-impl2-candidate-build.v1',
+      engine: m.engine, operation: m.operation, runId, label: role, source: m[role].source, version: m[role].version,
+      exitCode: 0, verifiedSourceAndGates: true, startedAt: start, finishedAt: start + 10000, build: 'original-build' };
+    if (role === 'guard') Object.assign(receipt, { helperProbePhase: 'prepare', logSha256: request.buildLogSha256,
+      compiledTreeSha256: request.observedCompiledTreeSha256, tailPostchecks: { schema: 'sd2-guard-build-tail-seal.v1',
+        continuationSha256, proofFile: originalFile, retryProofSha256: retrySha256, retryProofFile: retryFile,
+        retainedOriginalCommand: true, originalCompiledSnapshotUnavailable: true, originalBuildCommandSha256: request.buildCommandSha256,
+        observedAt: start + 20000, expiresAt: start + 20000 + 1800000 } });
+    const receiptFile = stage + '/' + role + '-build.json', receiptSha256 = put(receiptFile, receipt);
+    const snapshot = Object.fromEntries(['sourceFiles', 'lock', 'dependencies', 'build', 'checks', 'buildEnvironment', 'node', 'env', 'bindings'].map(name => [name, { synthetic: name }]));
+    const capsule = { kind: role, sourceRun: runId, originalManifestSha256: manifestSha256, originalReceiptFile: receiptFile,
+      originalReceiptSha256: receiptSha256, originalReceipt: receipt, originalTimesChanged: false, newCompilationClaimed: false,
+      originalSourceManifestSha256: put(m[role].sourceManifest, 'source:' + role),
+      originalPreparedSha256: put(stage + '/' + role + '-prepared.json', 'prepared:' + role), snapshot };
+    const capsuleFile = stage + '/' + role + '-immutable-success.json', capsuleSha256 = put(capsuleFile, capsule);
+    candidateRecords[role] = { capsuleFile, capsuleSha256, receiptFile, receiptSha256, snapshotSha256: sha(JSON.stringify(snapshot)) };
+    successfulArtifacts[role] = { inputs: { capsule: { file: capsuleFile, sha256: capsuleSha256 }, build: { file: receiptFile, sha256: receiptSha256 } } };
+    receipts[role] = receipt;
+  }
+  const mainHead = '1'.repeat(64), takeoverHead = '2'.repeat(64), readerHead = '3'.repeat(64);
+  const readerIdentity = processor('/isolated-reader/reader');
+  const reader = { ...readerIdentity, schema: 'sd2-release-reader-successor-proof.v1', engine: m.engine, runId,
+    taskId: m.operation.taskId, attemptId: runId, manifestSha256, originalContinuationSha256: continuationSha256,
+    originalProofFile: originalFile, retryProofSha256: retrySha256, retryProofFile: retryFile,
+    predecessorProcessor: retry.processor, buildAuthority: false, observedAt: new Date(now).toISOString(), eventHeadSha256: takeoverHead,
+    previousOwner, previousLeaseSha256: '4'.repeat(64), successfulArtifacts,
+    request: { eventHeadSha256: mainHead, predecessorControllerSetSha256: retry.processor.controllerSetSha256,
+      processorControllerSetSha256: readerIdentity.processor.controllerSetSha256, originalContinuationSha256: continuationSha256, retryProofSha256: retrySha256 } };
+  const readerBytes = Buffer.from(JSON.stringify(reader)), readerSha256 = sha(readerBytes);
+  const readerFile = taskRoot + '/attempts/' + runId + '/reader-successor-' + readerSha256 + '.json'; put(readerFile, readerBytes);
+  runtime.reader = { schema: 'sd2-release-reader-successor-runtime.v1', proofFile: readerFile, proofSha256: readerSha256, proof: reader };
+  const observation = { schema: 'sd2-release-candidate-observation-proof.v1', engine: m.engine, runId,
+    taskId: m.operation.taskId, attemptId: runId, manifestSha256, originalContinuationSha256: continuationSha256,
+    retryProofSha256: retrySha256, readerProofSha256: readerSha256, eventHeadSha256: takeoverHead, observedAt: now - 1, expiresAt: now - 1 + 1800000,
+    verifier: { file: retry.processor.root + '/candidate-reuse.mjs', sha256: retry.processorControllers['candidate-reuse.mjs'],
+      method: 'verifyOriginalSuccess', startedAt: now - 10, finishedAt: now - 1 },
+    protectionComparison: 'assertProtection', protectionFields: ['databaseIdentity', 'files', 'marker', 'otherServices', 'settingsSha256', 'protectedTasks', 'protectedFailedVideo'],
+    protectionSha256: '5'.repeat(64), candidates: candidateRecords, readOnly: true, newCompilationClaimed: false,
+    originalTimesChanged: false, continuousUnchangedIntervalClaimed: false };
+  const observationBytes = Buffer.from(JSON.stringify(observation)), observationSha256 = sha(observationBytes);
+  const observationFile = taskRoot + '/attempts/' + runId + '/candidate-observation-' + observationSha256 + '.json'; put(observationFile, observationBytes);
+  runtime.candidateObservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: observationFile, proofSha256: observationSha256, proof: observation };
+  const events = [
+    { sha256: mainHead, value: { kind: 'phase_result', phase: 'main-build', outcome: 'succeeded', sequence: 1 } },
+    { sha256: takeoverHead, value: { kind: 'owner_takeover', sequence: 2, previousSha256: mainHead, owner, previousOwner, previousLeaseSha256: reader.previousLeaseSha256 } },
+    { sha256: readerHead, value: { kind: 'observation', name: 'reader_successor', sequence: 3, previousSha256: takeoverHead, owner,
+      value: { schema: 'sd2-release-reader-successor-reference.v1', proofFile: readerFile, proofSha256: readerSha256 } } },
+    { sha256: '6'.repeat(64), value: { kind: 'observation', name: 'candidate_observation', sequence: 4, previousSha256: readerHead, owner,
+      value: { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: observationFile, proofSha256: observationSha256 } } },
+  ];
+  const namespace = { assert: sameAssert, path, Buffer, JSON, Date, sha,
+    fs: { readdirSync: root => { assert.ok(controllerSets.has(root)); return controllerNames; } },
+    isSharedEngine: () => true, engineDirectory: value => { assert.equal(value, m); return m.engine.root; },
+    rootFile: file => { assert.ok(documents.has(file), 'Unknown isolated root document: ' + file); return documents.get(file); },
+    currentReleaseContext: () => ({ contract: { engine: m.engine, operation: m.operation }, guardBuildTail: runtime }),
+    readAttempt: options => { assert.deepEqual(copy(options), { root: m.projectRoot + '/release-tasks', taskId: m.operation.taskId, attemptId: runId });
+      return { headCurrent: true, derivedState: { status: 'running', activePhase: null, guardBuildTailRetry: { status: 'completed' } }, events }; },
+    fixtureHere: reader.processor.root };
+  const here = 'path.dirname(fileURLToPath(import.meta.url))';
+  assert.equal(sources['candidate-evidence.mjs'].split(here).length, 2);
+  vm.runInNewContext(scriptBody(sources['candidate-evidence.mjs']).replace(here, 'fixtureHere')
+    + '\nglobalThis.api={guardBuildTailRuntime,assertCandidateObservation,assertFreshCandidateEvidence,candidateEvidenceExpiresAt,candidateGateObservation};', namespace);
+  const api = namespace.api;
+  for (const kind of ['main', 'guard']) {
+    assert.deepEqual(copy(api.assertFreshCandidateEvidence(receipts[kind], m, kind, now)), receipts[kind]);
+    assert.equal(api.candidateEvidenceExpiresAt(receipts[kind], m, kind, now), observation.expiresAt);
+    const bound = api.candidateGateObservation(receipts[kind], m, kind, now);
+    assert.equal(bound.observedAt, observation.observedAt); assert.equal(bound.candidateObservation.proofSha256, observationSha256);
+    assert.equal(receipts[kind].startedAt, start); assert.equal(receipts[kind].finishedAt, start + 10000);
+  }
+  add('reader_independent_observation_admits_exact_old_main_and_guard_without_changing_original_times');
+  const rejects = (name, change, restore, action = () => api.assertFreshCandidateEvidence(receipts.main, m, 'main', now)) => {
+    change(); try { assert.throws(action); } finally { restore(); } add('reader_observation_refuses_' + name);
+  };
+  rejects('reader_authorization_alone_does_not_extend_old_validity', () => { delete runtime.candidateObservation; },
+    () => { runtime.candidateObservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: observationFile, proofSha256: observationSha256, proof: observation }; });
+  assert.throws(() => api.assertFreshCandidateEvidence(receipts.main, m, 'main', observation.expiresAt), /expired/);
+  add('reader_independent_observation_expires_at_its_own_fixed_thirty_minute_boundary');
+  rejects('reader_build_authority', () => { runtime.phase = 'main-build'; }, () => { runtime.phase = 'verify'; });
+  rejects('unbound_current_reader', () => { namespace.fixtureHere = retry.processor.root; }, () => { namespace.fixtureHere = reader.processor.root; });
+  const originalController = documents.get(reader.processor.root + '/candidate-evidence.mjs');
+  rejects('reader_controller_drift', () => put(reader.processor.root + '/candidate-evidence.mjs', 'changed'),
+    () => documents.set(reader.processor.root + '/candidate-evidence.mjs', originalController));
+  const originalReceipt = documents.get(candidateRecords.main.receiptFile);
+  rejects('receipt_or_original_time_drift', () => put(candidateRecords.main.receiptFile, { ...receipts.main, startedAt: start + 1 }),
+    () => documents.set(candidateRecords.main.receiptFile, originalReceipt));
+  const originalCapsule = documents.get(candidateRecords.guard.capsuleFile);
+  rejects('snapshot_or_source_drift', () => put(candidateRecords.guard.capsuleFile, 'changed snapshot'),
+    () => documents.set(candidateRecords.guard.capsuleFile, originalCapsule));
+  rejects('unbound_observation_journal', () => { events[3].value.previousSha256 = mainHead; }, () => { events[3].value.previousSha256 = readerHead; });
+  traces.push({ successorReaderConsumers: true, productionAuthorizerRerun: false, originalBuildTimesRetained: true,
+    observations: ['isolated protected root documents', 'isolated validated journal projection'], applicationDatabaseOpened: false });
+}
+
 const nativeTailBase = '/data/video-api-debugger-engineering';
 assert.equal(fs.realpathSync('/data'), '/data');
 const nativeTailData = fs.lstatSync('/data');
@@ -1581,6 +1711,40 @@ console.log(${JSON.stringify(image ? 'Image recovery build gate verified (native
   fs.writeFileSync(stage + '/guard-build.json', JSON.stringify(seal), { mode: 0o600 });
   assert.throws(() => namespace.nativeVerify({ ...options, tailContext }));
   add('native_tail_sealed_observation_cannot_be_refreshed_on_later_verification');
+  // The separately exercised production observation consumer supplies the root
+  // authority here; these real Node calls prove transport into BOTH unchanged
+  // native age checks, including the image verifier's pricing subprocess.
+  const observation = { observedAt: now - 1, expiresAt: now - 1 + 1800000, candidates: {} };
+  runtime.candidateObservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofSha256: 'c'.repeat(64), proof: observation };
+  namespace.assertCandidateObservation = (value, manifest, kind, at) => {
+    assert.equal(manifest, m); assert.deepEqual(value, JSON.parse(fs.readFileSync(stage + '/' + kind + '-build.json')));
+    assert.ok(at < observation.expiresAt); return observation;
+  };
+  const observedContext = { manifest: m, runtime, observedAt: observation.observedAt, candidateObservation: runtime.candidateObservation };
+  for (const kind of ['main', 'guard']) {
+    if (kind === 'main') { m.main = { root, source: sourceId }; m.guard.root = nativeTailDirectory + '/unused-guard'; }
+    else { delete m.main; m.guard.root = root; }
+    const original = { schema: kind === 'guard' ? GUARD_BUILD_TAIL_SCHEMA : 'rate-impl2-candidate-build.v1',
+      startedAt: since, finishedAt: since + 10000, gateReceipt: imageFile, tailPostchecks: { observedAt: since + 10000 } };
+    fs.writeFileSync(stage + '/' + kind + '-build.json', JSON.stringify(original), { mode: 0o600 });
+    const capsuleFile = stage + '/' + kind + '-immutable-success.json';
+    const capsule = { snapshot: { checks: Object.fromEntries([imageFile, pricingFile].map(file =>
+      [path.relative(root + '/.role-tests', file), { sha256: sha(fs.readFileSync(file)) }])) } };
+    fs.writeFileSync(capsuleFile, JSON.stringify(capsule), { mode: 0o600 });
+    observation.candidates[kind] = { capsuleFile };
+    const verified = namespace.nativeVerify({ ...options, tailContext: observedContext });
+    assert.match(verified, /Image recovery build gate verified/); assert.match(verified, /Pricing policy build gate verified/);
+    assert.equal(JSON.parse(fs.readFileSync(stage + '/' + kind + '-build.json')).startedAt, since);
+    add('native_independent_observation_' + kind + '_retains_original_receipt_and_nested_pricing');
+    delete capsule.snapshot.checks[path.relative(root + '/.role-tests', pricingFile)];
+    fs.writeFileSync(capsuleFile, JSON.stringify(capsule));
+    assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }), /complete check snapshot/);
+    add('native_independent_observation_' + kind + '_requires_exact_bound_pricing_check_hash');
+  }
+  assert.throws(() => namespace.nativeVerify({ ...options, tailContext: { ...observedContext, observedAt: now } }));
+  const savedExpiry = observation.expiresAt; observation.expiresAt = now - 1;
+  assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext })); observation.expiresAt = savedExpiry;
+  add('native_independent_observation_cannot_refresh_bound_time_or_use_expired_authority');
   traces.push({ nativeTailVerifierOnly: true, frozenVerifierSourceSha256: frozenSources, exactNativeAgeStatements: ages,
     nativeSubprocesses: nativeCalls, completeOriginalBusinessGatesRerun: false, applicationDatabaseOpened: false });
 } finally { fs.rmSync(nativeTailDirectory, { recursive: true, force: true }); }

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { guardBuildTailRuntime, assertGuardBuildTailObservation } from './candidate-evidence.mjs';
+import { guardBuildTailRuntime, assertGuardBuildTailObservation, assertCandidateObservation } from './candidate-evidence.mjs';
 
 // Preparation and native receipt verification only. No service, production DB,
 // build, release switch, upload, or guard process is controlled by this module.
@@ -303,26 +303,58 @@ function nativeTailBinding({ candidateRoot, source, runId, uid, receipt, since, 
   const m = tailContext.manifest, runtime = guardBuildTailRuntime(m);
   assert.ok(runtime, 'Native tail verification requires its current journal-bound runtime');
   assert.deepEqual(tailContext.runtime, runtime);
-  assert.equal(m.reuseBuilds, undefined); assert.equal(m.guard.root, candidateRoot); assert.equal(m.guard.source, source);
+  assert.equal(m.reuseBuilds, undefined);
   assert.equal(m.runId, runId); assert.equal(runtime.proof.runId, runId);
-  const original = runtime.proof.originalBuild, request = runtime.proof.request, now = Date.now();
+  const now = Date.now(), observedAt = tailContext.observedAt;
+  let original, definitions, observationProofSha256 = null;
+  if (runtime.candidateObservation) {
+    const kind = ['main', 'guard'].find(role => m[role]?.root === candidateRoot);
+    assert.ok(kind, 'Independent observation must bind an original candidate');
+    assert.equal(m[kind].source, source);
+    assert.deepEqual(tailContext.candidateObservation, runtime.candidateObservation);
+    const originalFile = m.stage + '/' + kind + '-build.json', stat = regular(originalFile);
+    assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o022, 0);
+    original = json(originalFile);
+    const observation = assertCandidateObservation(original, m, kind, now);
+    assert.ok(observation, 'Independent native verification requires the root candidate observation');
+    assert.equal(observedAt, observation.observedAt);
+    observationProofSha256 = runtime.candidateObservation.proofSha256;
+    const capsule = json(observation.candidates[kind].capsuleFile);
+    const imageFile = original.gateReceipt;
+    assert.ok(typeof imageFile === 'string' && imageFile.startsWith(candidateRoot + '/.role-tests/'));
+    const pricingFile = json(imageFile).pricingReceipt;
+    definitions = [
+      ['scripts/check-image-recovery.mjs', imageFile, 'image-recovery-build-gate.v1'],
+      ['scripts/check-pricing-policy.mjs', pricingFile, 'pricing-policy-build-gate.v1'],
+    ].map(([entry, file, schema]) => {
+      assert.ok(typeof file === 'string' && file.startsWith(candidateRoot + '/.role-tests/'));
+      const expected = capsule.snapshot.checks[path.relative(candidateRoot + '/.role-tests', file)]?.sha256;
+      assert.match(expected || '', /^[a-f0-9]{64}$/, 'Native receipt must belong to the freshly verified complete check snapshot');
+      return [entry, file, expected, schema];
+    });
+  } else {
+    assert.equal(tailContext.candidateObservation, undefined);
+    assert.equal(m.guard.root, candidateRoot); assert.equal(m.guard.source, source);
+    original = runtime.proof.originalBuild;
+    const request = runtime.proof.request;
+    const parse = value => typeof value === 'number' ? value : Date.parse(value);
+    const requestObservedAt = parse(runtime.retry ? runtime.retry.proof.observedAt : request.observedAt);
+    assert.ok(Number.isSafeInteger(requestObservedAt) && requestObservedAt > 0);
+    assert.ok(Number.isSafeInteger(observedAt) && observedAt >= requestObservedAt && observedAt >= original.finishedAt
+      && observedAt <= now && now < observedAt + 1800000, 'Fresh tail observation is missing or expired');
+    const sealedFile = m.stage + '/guard-build.json';
+    if (fs.existsSync(sealedFile)) {
+      const stat = regular(sealedFile); assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o022, 0);
+      const sealed = json(sealedFile); assertGuardBuildTailObservation(sealed, m, now);
+      assert.equal(observedAt, sealed.tailPostchecks.observedAt, 'A sealed tail observation cannot be refreshed during verification');
+    } else assert.ok(now < requestObservedAt + 1800000, 'The root tail proof needs its own fresh real observation');
+    definitions = [
+      ['scripts/check-image-recovery.mjs', original.imageGateReceiptFile, request.imageGateReceiptSha256, 'image-recovery-build-gate.v1'],
+      ['scripts/check-pricing-policy.mjs', original.pricingGateReceiptFile, request.pricingGateReceiptSha256, 'pricing-policy-build-gate.v1'],
+    ];
+  }
   assert.equal(since, original.startedAt);
-  const observedAt = tailContext.observedAt;
-  const parse = value => typeof value === 'number' ? value : Date.parse(value);
-  const requestObservedAt = parse(runtime.retry ? runtime.retry.proof.observedAt : request.observedAt);
-  assert.ok(Number.isSafeInteger(requestObservedAt) && requestObservedAt > 0);
-  assert.ok(Number.isSafeInteger(observedAt) && observedAt >= requestObservedAt && observedAt >= original.finishedAt
-    && observedAt <= now && now < observedAt + 1800000, 'Fresh tail observation is missing or expired');
-  const sealedFile = m.stage + '/guard-build.json';
-  if (fs.existsSync(sealedFile)) {
-    const stat = regular(sealedFile); assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o022, 0);
-    const sealed = json(sealedFile); assertGuardBuildTailObservation(sealed, m, now);
-    assert.equal(observedAt, sealed.tailPostchecks.observedAt, 'A sealed tail observation cannot be refreshed during verification');
-  } else assert.ok(now < requestObservedAt + 1800000, 'The root tail proof needs its own fresh real observation');
-  const entries = [
-    ['scripts/check-image-recovery.mjs', original.imageGateReceiptFile, request.imageGateReceiptSha256, 'image-recovery-build-gate.v1'],
-    ['scripts/check-pricing-policy.mjs', original.pricingGateReceiptFile, request.pricingGateReceiptSha256, 'pricing-policy-build-gate.v1'],
-  ].map(([entry, file, expected, schema]) => {
+  const entries = definitions.map(([entry, file, expected, schema]) => {
     assert.ok(typeof file === 'string' && file.startsWith(candidateRoot + '/.role-tests/'));
     const read = __sd2ReadTailEntity(file, uid, true), value = JSON.parse(read.bytes);
     assert.equal(read.sha256, expected); assert.equal(value.schema, schema); assert.equal(value.completed, true);
@@ -336,7 +368,7 @@ function nativeTailBinding({ candidateRoot, source, runId, uid, receipt, since, 
   assert.equal(json(entries[0].gate.file).pricingReceipt, entries[1].gate.file, 'The original image verifier must retain its bound pricing child');
   return { candidateRoot, source, runId, uid, since, originalFinishedAt: original.finishedAt,
     continuationSha256: runtime.continuationSha256, retryProofSha256: runtime.retry?.proofSha256 || null,
-    observedAt, expiresAt: observedAt + 1800000, entries };
+    candidateObservationProofSha256: observationProofSha256, observedAt, expiresAt: observedAt + 1800000, entries };
 }
 function nativeTailNodeOptions(binding) {
   // Only these two locked modules are transformed, and only their unique age
