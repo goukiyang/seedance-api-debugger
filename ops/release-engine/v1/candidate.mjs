@@ -16,7 +16,7 @@ import { captureHdCompiledCache, verifyHdCompiledCacheReceipt } from './hd-compi
 
 const SOURCE_SCHEMA = 'rate-impl2-source-manifest.v1';
 const BUILD_SCHEMA = 'rate-impl2-candidate-build.v1';
-const IMAGE_FIXTURES = ['scripts/image-quality-routing-engineering.ts', 'scripts/image-studio-recovery-fairness-engineering.ts',
+const IMAGE_FIXTURES = ['ops/video-creation-contract-check.mjs', 'scripts/image-quality-routing-engineering.ts', 'scripts/image-studio-recovery-fairness-engineering.ts',
   'scripts/image-dispatch-fairness-engineering.ts', 'scripts/image-async-recovery-engineering.ts',
   'scripts/image-dimension-mismatch-engineering.ts', 'scripts/upload-recovery-engineering.mjs',
   'scripts/multiview-settings-batch-engineering.mjs', 'scripts/hd-chain-engineering.mjs',
@@ -81,10 +81,10 @@ const UPLOAD_HELPER = 'src/lib/assets/verified-upload.ts';
 const UPLOAD_FIXTURE_SOURCES = ['scripts/upload-recovery-engineering.mjs',
   'scripts/upload-private-directory-engineering.ts', 'scripts/upload-client-recovery-engineering.ts',
   'scripts/upload-raw-recovery-engineering.mjs', 'scripts/upload-root-cure-smoke.ts',
-  'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts',
+  'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts', 'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts',
   'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/http/file-upload.ts',
   'src/lib/http/upload-session.ts', 'src/components/ResourceLibraryPicker.tsx',
-  'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',
+  'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts', 'src/app/api/assets/upload-proxy/route.ts',
   'src/app/api/assets/upload-complete/route.ts', 'src/app/api/assets/multipart/complete/route.ts',
   'src/lib/assets/raw-upload-recovery-proof.ts', 'src/app/api/assets/upload/recover/route.ts'];
 const timestamp = value => typeof value === 'number' ? value : Date.parse(value);
