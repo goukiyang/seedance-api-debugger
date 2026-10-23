@@ -232,6 +232,21 @@ export function preparePricingInputs({ candidateRoot, source, runId, appUser, so
     bootstrapReceiptSha256: sha(fs.readFileSync(manifest)) };
 }
 
+export function readPreparedPricingInputs({ candidateRoot, source, runId, appUser, sourceFiles }) {
+  const root = canonicalCandidate(candidateRoot, source);
+  const preparedRoot = path.join(root, '.role-tests', `pricing-prepared-${runId}`);
+  const receipt = path.join(preparedRoot, 'candidate-inputs.json'), stat = regular(receipt, 65536);
+  assert.equal(stat.uid, 0); assert.equal(stat.mode & 0o777, 0o444);
+  const value = json(receipt);
+  assert.equal(value.buildsRun, false, 'Prepared input must not have been consumed');
+  const prepared = { candidateRoot: root, source, runId, appUser, preparedRoot,
+    runtimeRoot: path.join(preparedRoot, 'pricing-legacy-fixture-runtime'),
+    buildEnv: cleanBuildEnv({ preparedRoot, source, runId }), receipt,
+    sourceSha256: value.sourceSha256, bootstrapReceiptSha256: value.bootstrapReceiptSha256 };
+  verifyPricingInputs({ candidateRoot: root, source, runId, appUser, sourceFiles, prepared });
+  return prepared;
+}
+
 export function verifyPricingGateReceipt({ candidateRoot, source, runId, appUser, sourceFiles, receipt, since }) {
   const root = canonicalCandidate(candidateRoot, source), { uid } = identity(appUser);
   assert.match(runId, /^[a-f0-9-]{36}$/);

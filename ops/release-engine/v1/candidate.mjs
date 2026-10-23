@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validateManifest, assertReleaseWindow, readProtection, assertProtection,
   writeJsonExclusive, call, unit, rootFile, sha, liveArtifactSource, isSharedEngine, sharedReadOnlyHdBounds } from './common.mjs';
-import { preparePricingInputs, verifyPricingInputs, verifyPricingGateReceipt } from './candidate-inputs.mjs';
+import { preparePricingInputs, readPreparedPricingInputs, verifyPricingInputs, verifyPricingGateReceipt } from './candidate-inputs.mjs';
 import { verifyRateSourceArchive } from './package-candidates.mjs';
 import { verifyUploadPrivateDirectory } from './upload-directory-preflight.mjs';
 import { probeHdCandidateResolver, verifyHdCandidateResolver, inspectHdReconciliation } from './hd-storage-preflight.mjs';
@@ -409,6 +409,121 @@ export async function prepareCandidate(m, kind) {
     manifestSha256: info.manifestSha256, sourceManifestSha256: info.sourceManifestSha256,
     preparedAt: new Date().toISOString(), productionDatabaseCopied: false, servicesChanged: false };
   writeJsonExclusive(m.stage + '/' + kind + '-prepared.json', result); return result;
+}
+
+function assertPrepareTailUnused(m) {
+  for (const kind of ['main', 'guard']) {
+    const c = m[kind], preparedRoot = c.root + '/.role-tests/pricing-prepared-' + m.runId;
+    for (const file of [m.stage + '/' + kind + '-build.json', m.stage + '/' + kind + '-build-command.json',
+      m.stage + '/' + kind + '-build.log', m.stage + '/' + kind + '-immutable-success.json',
+      c.root + '/' + c.buildDist, c.root + '/.next-prod', preparedRoot + '/.pricing-gate-claim']) absent(file);
+  }
+  for (const file of ['fixed-guard-recovery.json', 'switch-before.json', 'ingress-503-switch.json',
+    'pricing-pair-published.json', 'switch-complete.json', 'guard-recovery-complete.json']) absent(m.stage + '/' + file);
+}
+function verifyPrepareTailDependencies(m, c) {
+  const original = m.fullRelease ? m.live.hd.root : m.live.web.root;
+  const next = lockView(c.root + '/package-lock.json'), previous = lockView(original + '/package-lock.json');
+  if (m.fullRelease?.dependencyAdoption) assertFullDependencyAdoption(m, next, previous, original);
+  else assert.deepEqual(next, previous);
+  const uid = Number(call('id', ['-u', m.appUser])), gid = Number(call('id', ['-g', m.appUser]));
+  const installed = c.root + '/node_modules', stat = fs.lstatSync(installed);
+  assert.equal(fs.realpathSync(installed), installed);
+  assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === uid && stat.gid === gid && !(stat.mode & 0o022));
+  assert.equal(sha(fs.readFileSync(installed + '/.package-lock.json')),
+    sha(fs.readFileSync(original + '/node_modules/.package-lock.json')), 'Prepared installed lock differs from original dependency copy');
+  for (const [relative, entry] of Object.entries(next.packages)) {
+    if (!relative || !entry.version) continue;
+    assert.ok(relative.startsWith('node_modules/') && !relative.split('/').some(part => !part || part === '.' || part === '..'));
+    const file = c.root + '/' + relative + '/package.json', originalFile = original + '/' + relative + '/package.json';
+    if (!fs.existsSync(originalFile)) { absent(file); continue; } // Preserve the actual platform's optional dependency set.
+    assert.equal(fs.realpathSync(file), file);
+    const observed = fs.lstatSync(file);
+    assert.ok(observed.isFile() && !observed.isSymbolicLink() && observed.nlink === 1 && observed.uid === uid && !(observed.mode & 0o022));
+    const bytes = fs.readFileSync(file);
+    assert.equal(JSON.parse(bytes).version, entry.version, 'Prepared package version differs from locked input: ' + relative);
+    assert.equal(sha(bytes), sha(fs.readFileSync(originalFile)), 'Prepared package identity differs from original dependency copy: ' + relative);
+  }
+}
+function verifyPrepareTailSchema(c, prepared) {
+  const sourceFile = c.root + '/prisma/schema.prisma', formattedFile = prepared.preparedRoot + '/candidate-client-schema.prisma';
+  const clientFile = c.root + '/node_modules/.prisma/client/schema.prisma';
+  const uid = Number(call('id', ['-u', prepared.appUser]));
+  const read = file => {
+    assert.equal(fs.realpathSync(file), file); const before = fs.lstatSync(file);
+    assert.ok(before.isFile() && !before.isSymbolicLink() && before.nlink === 1 && before.uid === uid && !(before.mode & 0o022));
+    const bytes = fs.readFileSync(file), after = fs.lstatSync(file);
+    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(after[key], before[key]);
+    return bytes;
+  };
+  const schemaBytes = read(sourceFile), formattedBytes = read(formattedFile), clientBytes = read(clientFile);
+  const schema = schemaBytes.toString('utf8'), formatted = formattedBytes.toString('utf8');
+  const tokens = text => (text.match(/"(?:\\.|[^"\\])*"|\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|\S/g) || [])
+    .filter(token => !token.startsWith('//') && !token.startsWith('/*'));
+  assert.deepEqual(tokens(schema), tokens(formatted), 'Prepared formatted schema differs from original source');
+  assert.equal(sha(clientBytes), sha(formattedBytes), 'Prepared Prisma client schema is not ready');
+  const tables = [...schema.matchAll(/^\s*model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)]
+    .map(match => /@@map\s*\(\s*"([^"]+)"\s*\)/.exec(match[2])?.[1] || match[1]);
+  assert.ok(tables.length > 0);
+  const database = prepared.buildEnv.DATABASE_URL.slice('file:'.length);
+  const output = call('python3', ['-I', '-c',
+    "import sqlite3,json,sys,pathlib\np=pathlib.Path(sys.argv[1]);c=sqlite3.connect(p.as_uri()+'?mode=ro',uri=True);c.execute('PRAGMA query_only=ON');assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok';names={r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")};required=json.loads(sys.argv[2]);assert set(required).issubset(names);print(json.dumps({'integrity':'ok','requiredTables':len(required)}))",
+    database, JSON.stringify(tables)]);
+  return { sourceSchemaSha256: sha(schemaBytes), clientSchemaSha256: sha(clientBytes),
+    formattedSchemaSha256: sha(formattedBytes), database, ...JSON.parse(output), readOnly: true };
+}
+
+export function inspectPrepareTailInputs(m, { mainPreparedSha256, guardInputSha256 }) {
+  for (const value of [mainPreparedSha256, guardInputSha256]) assert.match(value, /^[a-f0-9]{64}$/);
+  assertControlPreflight(m); assert.ok(!m.reuseBuilds);
+  assertReleaseWindow(m); requireOriginalLive(m); assertPrepareTailUnused(m);
+  const main = context(m, 'main'), guard = context(m, 'guard'), before = readProtection(m);
+  const mainFile = m.stage + '/main-prepared.json', mainBytes = rootFile(mainFile);
+  assert.equal(sha(mainBytes), mainPreparedSha256, 'Original successful main preparation changed');
+  sourceCheck(main.c, main.source); runtimeBindings(m, main.c);
+  const mainPrepared = inputs(m, 'main', main.source).prepared;
+  verifyHdCandidateResolver(m, main.c, mainPrepared, mainPrepared.hdHelperProbe, { phase: 'prepare' });
+  verifyPrepareTailDependencies(m, main.c); verifyPrepareTailSchema(main.c, mainPrepared);
+  const guardInputFile = guard.c.root + '/.role-tests/pricing-prepared-' + m.runId + '/candidate-inputs.json';
+  assert.equal(sha(rootFile(guardInputFile, 65536)), guardInputSha256, 'Original guard isolated input changed');
+  absent(m.stage + '/guard-prepared.json'); sourceCheck(guard.c, guard.source); runtimeBindings(m, guard.c);
+  const prepared = readPreparedPricingInputs({ candidateRoot: guard.c.root, source: guard.c.source,
+    runId: m.runId, appUser: m.appUser, sourceFiles: guard.source.files });
+  verifyPrepareTailDependencies(m, guard.c);
+  const schemaReadiness = verifyPrepareTailSchema(guard.c, prepared);
+  return { main, guard, before, mainFile, mainBytes, mainPrepared, guardInputFile, prepared, schemaReadiness };
+}
+
+// Appended prepare-only handler. Normal preparation keeps its exclusive absent
+// guards; this function never extracts, copies, chowns, bootstraps or pushes DBs.
+export async function resumePrepareTail(m, { mainPreparedSha256, guardInputSha256, continuationSha256 }) {
+  assert.match(continuationSha256, /^[a-f0-9]{64}$/);
+  const { main, guard, before, mainFile, mainBytes, guardInputFile, prepared, schemaReadiness }
+    = inspectPrepareTailInputs(m, { mainPreparedSha256, guardInputSha256 });
+  const uploadHelperProbe = probeUploadHelper(m, guard.c, guard.source, prepared, 'prepare');
+  const hdHelperProbe = await probeHdCandidateResolver(m, guard.c, prepared, { phase: 'prepare' });
+  const observedAt = new Date().toISOString();
+  const hdReconciliation = await inspectHdReconciliation(m, { sourceRoot: guard.c.root,
+    ...(isSharedEngine(m) ? sharedReadOnlyHdBounds(m) : {}) });
+  const hdFile = m.stage + '/prepare-tail-hd-' + continuationSha256 + '.json';
+  writeJsonExclusive(hdFile, { schema: 'sd2-prepare-tail-hd-observation.v1', runId: m.runId,
+    continuationSha256, source: guard.c.source, manifestSha256: guard.manifestSha256,
+    observedAt, finishedAt: new Date().toISOString(), hdReconciliation, productionWrites: 0, servicesChanged: false });
+  assert.equal(hdReconciliation.issues.length, 0, 'HD roots contain an unexplained identity/receipt conflict; exact issues retained in ' + hdFile);
+  sourceCheck(guard.c, guard.source); runtimeBindings(m, guard.c); assertPrepareTailUnused(m);
+  verifyPricingInputs({ candidateRoot: guard.c.root, source: guard.c.source, runId: m.runId,
+    appUser: m.appUser, sourceFiles: guard.source.files, prepared });
+  assert.equal(sha(rootFile(guardInputFile, 65536)), guardInputSha256);
+  assert.equal(sha(rootFile(mainFile)), mainPreparedSha256, 'Main preparation must remain byte-identical');
+  requireOriginalLive(m); assertProtection(before, readProtection(m)); assertReleaseWindow(m);
+  const result = { schema: 'rate-impl2-candidate-prepared.v1', label: 'guard', version: guard.c.version,
+    ...prepared, uploadHelperProbe, hdHelperProbe, hdReconciliation, manifestSha256: guard.manifestSha256,
+    sourceManifestSha256: guard.sourceManifestSha256, preparedAt: new Date().toISOString(),
+    productionDatabaseCopied: false, servicesChanged: false,
+    prepareTailContinuation: { continuationSha256, originalMainPreparedSha256: mainPreparedSha256,
+      originalGuardInputSha256: guardInputSha256, hdObservation: hdFile, schemaReadiness } };
+  writeJsonExclusive(m.stage + '/guard-prepared.json', result);
+  return { main: JSON.parse(mainBytes), guard: result };
 }
 
 export async function buildCandidate(m, kind) {

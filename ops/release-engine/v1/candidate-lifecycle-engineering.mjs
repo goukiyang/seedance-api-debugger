@@ -1318,6 +1318,57 @@ for (const mutation of ['original-switched', 'original-migration-collision', 'ac
     assert.equal(f.state.starts, 0); add('full-path-premaintenance-refuses-' + mutation);
   } finally { f.clean(); }
 }
+// Only the appended prepare tail is exercised here. Service observations are
+// isolated adapters; the production tail body and unused-input guards run intact.
+for (const scenario of ['success', 'main-drift', 'guard-input-drift', 'consumed-input', 'hd-conflict']) {
+  const stage = '/isolated-prepare-tail', runId = '10000000-0000-4000-8000-000000000002';
+  const m = { stage, runId, appUser: 'isolated', reuseBuilds: null,
+    main: { root: stage + '/main', source: 'a'.repeat(40), version: '0.104.0', buildDist: '.next-prod-candidate' },
+    guard: { root: stage + '/guard', source: 'b'.repeat(40), version: '0.104.0+guard', buildDist: '.next-prod-candidate' } };
+  const main = { schema: 'rate-impl2-candidate-prepared.v1', label: 'main', preparedAt: '2026-10-23T00:00:00Z',
+    hdHelperProbe: {}, preservedField: 'original preparation bytes' };
+  const originalMain = Buffer.from(JSON.stringify(main)), guardInput = Buffer.from('original isolated input');
+  const mainFile = stage + '/main-prepared.json', guardInputFile = m.guard.root + '/.role-tests/pricing-prepared-' + runId + '/candidate-inputs.json';
+  const writes = [], present = new Set(scenario === 'consumed-input'
+    ? [m.guard.root + '/.role-tests/pricing-prepared-' + runId + '/.pricing-gate-claim'] : []);
+  const rootFile = file => {
+    if (file === mainFile) return scenario === 'main-drift' ? Buffer.concat([originalMain, Buffer.from(' ')]) : originalMain;
+    assert.equal(file, guardInputFile); return scenario === 'guard-input-drift' ? Buffer.from('changed input') : guardInput;
+  };
+  const namespace = { assert: sameAssert, Buffer, Date, JSON, sha, rootFile,
+    absent: file => assert.equal(present.has(file), false, 'Never overwrite candidate state'),
+    assertControlPreflight: () => {}, assertReleaseWindow: () => {}, requireOriginalLive: () => {},
+    context: (_m, kind) => ({ c: m[kind], source: { files: {} }, manifestSha256: 'c'.repeat(64), sourceManifestSha256: 'd'.repeat(64) }),
+    readProtection: () => ({ unchanged: true }), assertProtection: (a, b) => assert.deepEqual(copy(a), copy(b)),
+    sourceCheck: () => {}, runtimeBindings: () => {}, inputs: () => ({ prepared: main }),
+    verifyHdCandidateResolver: () => {}, verifyPrepareTailDependencies: () => {}, verifyPrepareTailSchema: () => ({ readOnly: true }),
+    readPreparedPricingInputs: () => ({ candidateRoot: m.guard.root, source: m.guard.source, runId, appUser: m.appUser }),
+    probeUploadHelper: () => ({ readOnly: true }), probeHdCandidateResolver: async () => ({ readOnly: true }),
+    inspectHdReconciliation: async () => ({ readOnly: true, issues: scenario === 'hd-conflict' ? [{ code: 'exact-retained-conflict', key: 'key' }] : [] }),
+    isSharedEngine: () => false, verifyPricingInputs: () => {},
+    writeJsonExclusive: (file, value) => { assert.notEqual(file, mainFile); writes.push({ file, value: copy(value) }); },
+  };
+  const functions = ['assertPrepareTailUnused', 'inspectPrepareTailInputs', 'resumePrepareTail'].map(name =>
+    functionNode('candidate.mjs', name).node.getText().replace(/^export /, '')).join('\n');
+  vm.runInNewContext(functions + '\nglobalThis.run=resumePrepareTail;', namespace);
+  const binding = { mainPreparedSha256: sha(originalMain), guardInputSha256: sha(guardInput), continuationSha256: 'e'.repeat(64) };
+  if (scenario === 'success') {
+    const result = await namespace.run(m, binding);
+    assert.deepEqual(copy(result.main), main); assert.equal(result.main.preparedAt, main.preparedAt);
+    assert.equal(writes.length, 2); assert.match(writes[0].file, /prepare-tail-hd-/);
+    assert.equal(writes[1].file, stage + '/guard-prepared.json');
+    assert.equal(writes[1].value.prepareTailContinuation.originalMainPreparedSha256, binding.mainPreparedSha256);
+  } else {
+    const message = { 'main-drift': /Original successful main preparation changed/, 'guard-input-drift': /Original guard isolated input changed/,
+      'consumed-input': /Never overwrite candidate state/, 'hd-conflict': /exact issues retained/ }[scenario];
+    await assert.rejects(() => namespace.run(m, binding), message);
+    if (scenario === 'hd-conflict') {
+      assert.equal(writes.length, 1); assert.equal(writes[0].value.hdReconciliation.issues[0].code, 'exact-retained-conflict');
+    } else assert.equal(writes.length, 0);
+  }
+  assert.equal(sha(originalMain), binding.mainPreparedSha256);
+  add('prepare-tail_actual-body_' + scenario);
+}
 for (const invalid of [NaN, Infinity, 1.5, '2026-02-30T00:00:00Z', '2026-10-21', '1792590000000'])
   assert.ok(Number.isNaN(parseReleaseTimestamp(invalid)));
 add('shared-approval-time-parser-rejects-invalid-or-ambiguous-values');

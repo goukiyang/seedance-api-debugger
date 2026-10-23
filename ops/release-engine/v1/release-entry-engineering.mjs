@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   NATIVE_FIXTURES, RELEASE_PHASES, captureReleaseScene, createReleaseController, nextReleasePhase,
   postcheckReleasePhase, releaseChildAction, releaseResumeDecision, runPhaseTransaction, validateNativeFixture,
-  validatePackageRequest,
+  validatePackageRequest, validatePrepareTailContinuation, assertPrepareTailControllerDifference, assertPrepareTailChildRoute,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -297,13 +297,49 @@ function scenarioPackageInput() {
   return 'package_request_rejects_remote_publish_authority_and_unknown_fields';
 }
 
+function scenarioPrepareTailContract() {
+  const request = { schema: 'sd2-release-prepare-tail-continuation.v1', terminalEventSha256: digest('original-terminal'),
+    phaseResultEventSha256: digest('original-prepare-result'), childReceiptSha256: digest('original-child-exit'),
+    processorControllerSetSha256: digest('processor'), mainPreparedSha256: digest('original-main-prepared'),
+    guardInputSha256: digest('original-guard-input') };
+  assert.deepEqual(validatePrepareTailContinuation(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validatePrepareTailContinuation(missing));
+    assert.throws(() => validatePrepareTailContinuation({ ...request, [key]: 'unbound' }));
+  }
+  assert.throws(() => validatePrepareTailContinuation({ ...request, processorRoot: '/unbound' }));
+  const original = Object.fromEntries(['release-entry.mjs', 'candidate.mjs', 'candidate-inputs.mjs',
+    'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'release.mjs', 'attempt-state.mjs']
+    .map(name => [name, digest('original:' + name)]));
+  const processor = { ...original, 'release-entry.mjs': digest('new-entry'), 'candidate.mjs': digest('new-candidate'),
+    'candidate-inputs.mjs': digest('new-read-only-input-helper'), 'release-entry-engineering.mjs': digest('new-entry-fixture'),
+    'candidate-lifecycle-engineering.mjs': digest('new-tail-fixture') };
+  assert.equal(Object.keys(assertPrepareTailControllerDifference(original, processor)).length, 5);
+  for (const name of ['release.mjs', 'attempt-state.mjs'])
+    assert.throws(() => assertPrepareTailControllerDifference(original, { ...processor, [name]: digest('unauthorized') }));
+  assert.throws(() => assertPrepareTailControllerDifference(original, { ...processor, 'new-executor.mjs': HASH }));
+  const missing = { ...processor }; delete missing['release.mjs'];
+  assert.throws(() => assertPrepareTailControllerDifference(original, missing));
+  assert.throws(() => assertPrepareTailControllerDifference(original, original));
+  const proof = { schema: 'sd2-release-prepare-tail-proof.v1', engine: { root: '/original-engine' }, processor: { root: '/tail-processor' } };
+  assert.equal(assertPrepareTailChildRoute('prepare', '/original-engine', '/tail-processor', proof), true);
+  assert.equal(assertPrepareTailChildRoute('guard-build', '/original-engine', '/original-engine', null), false);
+  for (const phase of [...RELEASE_PHASES.filter(value => value !== 'prepare'), 'recovery'])
+    assert.throws(() => assertPrepareTailChildRoute(phase, '/original-engine', '/tail-processor', proof));
+  assert.throws(() => assertPrepareTailChildRoute('prepare', '/original-engine', '/tail-processor', null));
+  assert.throws(() => assertPrepareTailChildRoute('prepare', '/wrong-original', '/tail-processor', proof));
+  assert.throws(() => assertPrepareTailChildRoute('prepare', '/original-engine', '/wrong-processor', proof));
+  return 'prepare_tail_has_exact_failure_hash_inputs_five_file_processor_boundary_and_no_later_phase_authority';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
   const reuseRoot = fs.mkdtempSync('/data/sd2-release-entry-reuse-'); fs.chmodSync(reuseRoot, 0o700);
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
-  const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput()];
+  const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
+    scenarioPrepareTailContract()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

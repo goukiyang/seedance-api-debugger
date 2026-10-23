@@ -41,6 +41,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const HASH = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[a-f0-9]{12}$/;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const PREPARE_TAIL_SCHEMA = 'sd2-release-prepare-tail-continuation.v1';
+const PREPARE_TAIL_PROOF_SCHEMA = 'sd2-release-prepare-tail-proof.v1';
+const PREPARE_TAIL_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate.mjs', 'candidate-inputs.mjs',
+  'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs']);
 
 function exactKeys(value, expected, name) {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), `${name} must be an object`);
@@ -224,6 +228,177 @@ function assertManifest(batch) {
   return value;
 }
 
+export function validatePrepareTailContinuation(value) {
+  exactKeys(value, ['schema', 'terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256',
+    'processorControllerSetSha256', 'mainPreparedSha256', 'guardInputSha256'], 'prepare-tail continuation');
+  assert.equal(value.schema, PREPARE_TAIL_SCHEMA);
+  for (const [key, hash] of Object.entries(value)) if (key !== 'schema') assert.match(hash, HASH);
+  return value;
+}
+
+export function assertPrepareTailControllerDifference(original, processor) {
+  assert.deepEqual(Object.keys(processor).sort(), Object.keys(original).sort(), 'Prepare-tail processor must retain the entire original module set');
+  const changed = {};
+  for (const name of Object.keys(original).sort()) {
+    assert.equal(path.basename(name), name); assert.ok(name.endsWith('.mjs'));
+    assert.match(original[name], HASH); assert.match(processor[name], HASH);
+    if (original[name] !== processor[name]) {
+      assert.ok(PREPARE_TAIL_CONTROLLERS.includes(name), 'Unreviewed prepare-tail processor difference: ' + name);
+      changed[name] = { originalSha256: original[name], processorSha256: processor[name] };
+    }
+  }
+  assert.ok(changed['release-entry.mjs'] && changed['candidate.mjs'], 'Prepare-tail requires the actual new entry and candidate handlers');
+  return changed;
+}
+
+function stableControllerHashes(directory) {
+  safeAbsolute(directory, 'controller directory'); assert.equal(fs.realpathSync(directory), directory);
+  const stat = fs.lstatSync(directory);
+  assert.ok(stat.isDirectory() && !stat.isSymbolicLink() && stat.uid === 0 && !(stat.mode & 0o077));
+  const names = fs.readdirSync(directory).filter(name => name.endsWith('.mjs')).sort(), result = {};
+  assert.ok(names.length > 0 && names.length <= 256);
+  for (const name of names) {
+    const file = path.join(directory, name), before = fs.lstatSync(file);
+    assert.equal(fs.realpathSync(file), file);
+    assert.ok(before.isFile() && !before.isSymbolicLink() && before.uid === 0 && before.nlink === 1
+      && !(before.mode & 0o022) && before.size > 0 && before.size <= 32 * 1024 * 1024);
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const opened = fs.fstatSync(fd), bytes = fs.readFileSync(fd), after = fs.fstatSync(fd), named = fs.lstatSync(file);
+      for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']) {
+        assert.equal(opened[key], before[key]); assert.equal(after[key], before[key]); assert.equal(named[key], before[key]);
+      }
+      result[name] = digest(bytes);
+    } finally { fs.closeSync(fd); }
+  }
+  assert.deepEqual(fs.readdirSync(directory).filter(name => name.endsWith('.mjs')).sort(), names);
+  assert.equal(fs.realpathSync(directory), directory);
+  for (const key of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(fs.lstatSync(directory)[key], stat[key]);
+  return result;
+}
+
+function prepareTailProcessor(batch, processorControllerSetSha256) {
+  assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
+  const processor = { ...batch.engine, controllerSetSha256: processorControllerSetSha256,
+    root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${processorControllerSetSha256}` };
+  validateEngine(processor, batch.projectRoot); assert.equal(here, processor.root);
+  assert.notEqual(processor.root, batch.engine.root, 'Never replace the original frozen engine');
+  const originalHashes = stableControllerHashes(batch.engine.root), processorHashes = stableControllerHashes(processor.root);
+  assert.equal(digest(JSON.stringify(originalHashes)), batch.engine.controllerSetSha256, 'Original frozen engine bytes changed');
+  assert.equal(digest(JSON.stringify(processorHashes)), processor.controllerSetSha256, 'Prepare-tail processor bytes changed');
+  return { processor, changedControllers: assertPrepareTailControllerDifference(originalHashes, processorHashes) };
+}
+
+function prepareTailFailure(batch, loaded, request, inspectOwner) {
+  validatePrepareTailContinuation(request);
+  const terminalIndex = loaded.events.findIndex(item => item.sha256 === request.terminalEventSha256);
+  assert.ok(terminalIndex >= 3, 'Original failed prepare terminal is missing');
+  const terminal = loaded.events[terminalIndex], result = loaded.events[terminalIndex - 1], exit = loaded.events[terminalIndex - 2];
+  assert.equal(terminal.value.kind, 'attempt_finished'); assert.equal(terminal.value.outcome, 'failed');
+  assert.equal(result.sha256, request.phaseResultEventSha256); assert.equal(result.value.kind, 'phase_result');
+  assert.equal(result.value.phase, 'prepare'); assert.equal(result.value.outcome, 'failed');
+  assert.equal(terminal.value.previousSha256, result.sha256); assert.equal(result.value.previousSha256, exit.sha256);
+  assert.equal(exit.value.kind, 'observation'); assert.equal(exit.value.name, 'phase_child_exit');
+  assert.equal(exit.value.value.phase, 'prepare'); assert.equal(exit.value.value.intentSha256, result.value.intentSha256);
+  assert.equal(exit.value.value.receiptSha256, request.childReceiptSha256);
+  assert.equal(exit.value.value.receiptFile, childReceiptFile(loaded, 'prepare', result.value.intentSha256));
+  const original = { events: loaded.events.slice(0, terminalIndex + 1) };
+  assert.equal(nextReleasePhase(original), 'prepare');
+  assert.equal(original.events.some(item => item.value.kind === 'phase_intent'
+    && RELEASE_PHASES.indexOf(item.value.phase) > RELEASE_PHASES.indexOf('prepare')), false);
+  assert.equal(switchBoundaryFacts(original).effectsStarted, false);
+  const saved = readChildReceipt(exit.value.value.receiptFile, 'prepare', result.value.intentSha256);
+  assert.equal(saved.saved.sha256, request.childReceiptSha256);
+  assert.deepEqual(saved.child, exit.value.value.child); assert.deepEqual(saved.child, result.value.child);
+  assert.ok(Number.isSafeInteger(saved.child.status) && saved.child.status > 0, 'Prepare-tail requires a real failed child exit');
+  assert.equal(saved.child.signal, null); assert.equal(saved.child.error, null);
+  assert.deepEqual(result.value.owner, terminal.value.owner); assert.deepEqual(exit.value.owner, terminal.value.owner);
+  assert.equal(inspectOwner(terminal.value.owner), 'dead', 'Original prepare controller must be proven dead');
+  const processFile = childProcessFile(loaded, 'prepare', result.value.intentSha256), processDocument = rootDocument(processFile, 32768);
+  const child = processDocument.value, invocationFile = path.join(loaded.place.attempt, `prepare-${result.value.intentSha256}.invocation.json`);
+  assert.equal(child.schema, 'sd2-release-child-process.v1'); assert.equal(child.invocationFile, invocationFile);
+  const invocationDocument = rootDocument(invocationFile, 256 * 1024), invocation = validateInvocation(invocationDocument.value, invocationFile);
+  assert.equal(child.invocationSha256, digest(invocationDocument.bytes)); assert.equal(invocation.processFile, processFile);
+  assert.equal(invocation.batchFile, loaded.header.manifest.file); assert.equal(invocation.phase, 'prepare');
+  assert.equal(invocation.taskRoot, `${batch.projectRoot}/release-tasks`);
+  assert.equal(invocation.taskId, batch.taskId); assert.equal(invocation.attemptId, batch.attemptId);
+  assert.deepEqual(invocation.owner, terminal.value.owner); assert.equal(child.owner.token, invocation.owner.token);
+  assert.equal(inspectOwner(child.owner), 'dead', 'Original prepare child must be proven dead');
+  assert.equal(result.value.after.facts.files['main-prepared.json']?.sha256, request.mainPreparedSha256);
+  assert.equal(result.value.after.facts.files['guard-prepared.json'], null);
+  assert.equal(terminal.value.after.facts.files['main-prepared.json']?.sha256, request.mainPreparedSha256);
+  return { terminal, result, processReceiptSha256: digest(processDocument.bytes), invocationSha256: digest(invocationDocument.bytes) };
+}
+
+function assertPrepareTailInputs(batch, request, scene) {
+  const manifest = assertManifest(batch), stage = path.dirname(batch.manifestFile);
+  assert.ok(manifest.fullRelease && !manifest.reuseBuilds, 'Prepare-tail is restricted to the original FULL input build');
+  assert.equal(batch.artifacts.main.schema, 'sd2-release-artifact-input.v1');
+  assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+  for (const name of ['guard-prepared.json', 'main-build.json', 'guard-build.json', 'main-immutable-success.json',
+    'guard-immutable-success.json', 'fixed-guard-recovery.json', 'switch-before.json', 'pricing-pair-published.json', 'switch-complete.json'])
+    assert.equal(fs.lstatSync(path.join(stage, name), { throwIfNoEntry: false }), undefined, 'Prepare-tail must precede build and switching: ' + name);
+  verifyBuildInputIdentity(batch);
+  const main = rootDocument(path.join(stage, 'main-prepared.json'), 32 * 1024 * 1024);
+  assert.equal(digest(main.bytes), request.mainPreparedSha256); assert.equal(main.value.label, 'main');
+  assert.equal(main.value.runId, batch.runId); assert.equal(main.value.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  assert.equal(main.value.sourceManifestSha256, batch.artifacts.main.sourceManifestSha256);
+  for (const kind of ['main', 'guard']) {
+    const candidate = manifest[kind]; safeAbsolute(candidate.root, kind + ' candidate root');
+    assert.equal(candidate.source, batch.artifacts[kind].source); assert.equal(candidate.version, batch.artifacts[kind].version);
+    const preparedRoot = path.join(candidate.root, '.role-tests', `pricing-prepared-${batch.runId}`);
+    assert.equal(fs.lstatSync(path.join(preparedRoot, '.pricing-gate-claim'), { throwIfNoEntry: false }), undefined, 'Candidate build input was already consumed');
+    assert.ok(typeof candidate.buildDist === 'string' && path.basename(candidate.buildDist) === candidate.buildDist);
+    assert.equal(fs.lstatSync(path.join(candidate.root, candidate.buildDist), { throwIfNoEntry: false }), undefined, 'Candidate already has build output');
+  }
+  const guardInputFile = path.join(manifest.guard.root, '.role-tests', `pricing-prepared-${batch.runId}`, 'candidate-inputs.json');
+  const guard = rootDocument(guardInputFile, 32 * 1024 * 1024);
+  assert.equal(fs.lstatSync(guardInputFile).mode & 0o777, 0o444); assert.equal(digest(guard.bytes), request.guardInputSha256);
+  assert.equal(guard.value.schema, 'rate-impl2-candidate-inputs.v1'); assert.equal(guard.value.runId, batch.runId);
+  assert.equal(guard.value.source, manifest.guard.source); assert.equal(guard.value.candidateRoot, manifest.guard.root);
+  assert.equal(guard.value.buildsRun, false); assert.equal(guard.value.productionDatabaseCopied, false); assert.equal(guard.value.servicesChanged, false);
+  return manifest;
+}
+
+function prepareTailProofFile(loaded, sha256) { assert.match(sha256, HASH); return path.join(loaded.place.attempt, `prepare-tail-${sha256}.json`); }
+
+function readPrepareTailProof(batch, batchFile, loaded) {
+  const continuations = loaded.events.filter(item => item.value.kind === 'failure_continued');
+  assert.equal(continuations.length, 1, 'Prepare-tail requires its sole exact failed-attempt continuation');
+  const continued = continuations[0], sha256 = continued.value.failureReceiptSha256;
+  const file = prepareTailProofFile(loaded, sha256), document = rootDocument(file, 1024 * 1024), proof = document.value;
+  assert.equal(digest(document.bytes), sha256);
+  exactKeys(proof, ['schema', 'taskId', 'attemptId', 'runId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256',
+    'manifestSha256', 'artifactsSha256', 'engine', 'processor', 'changedControllers', 'request', 'processReceiptSha256',
+    'invocationSha256', 'observedAt'], 'prepare-tail proof');
+  assert.equal(proof.schema, PREPARE_TAIL_PROOF_SCHEMA); assert.equal(proof.taskId, batch.taskId);
+  assert.equal(proof.attemptId, batch.attemptId); assert.equal(proof.runId, batch.runId); assert.equal(proof.batchFile, batchFile);
+  assert.equal(proof.batchSha256, digest(rootDocument(batchFile).bytes));
+  assert.equal(proof.contextSha256, digest(rootDocument(batch.contextFile, 256 * 1024).bytes));
+  assert.equal(proof.seedSha256, digest(rootDocument(batch.seedFile).bytes));
+  assert.equal(proof.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  assert.equal(proof.artifactsSha256, digest(JSON.stringify(batch.artifacts))); assert.deepEqual(proof.engine, batch.engine);
+  validatePrepareTailContinuation(proof.request);
+  const identity = prepareTailProcessor(batch, proof.request.processorControllerSetSha256);
+  assert.deepEqual(proof.processor, identity.processor); assert.deepEqual(proof.changedControllers, identity.changedControllers);
+  const failure = prepareTailFailure(batch, loaded, proof.request, inspectControllerOwner);
+  assert.equal(continued.value.previousTerminalSha256, failure.terminal.sha256);
+  assert.equal(continued.value.previousSha256, failure.terminal.sha256);
+  assert.equal(proof.processReceiptSha256, failure.processReceiptSha256); assert.equal(proof.invocationSha256, failure.invocationSha256);
+  assertAttemptBindings(loaded, kernelBindings(batchFile, batch));
+  assert.equal(nextReleasePhase(loaded), 'prepare'); assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+  assertPrepareTailInputs(batch, proof.request, captureReleaseScene(batch));
+  return { proof, file, sha256 };
+}
+
+export function assertPrepareTailChildRoute(phase, originalRoot, processorRoot, proof) {
+  if (processorRoot === originalRoot) return false;
+  assert.equal(phase, 'prepare', 'Non-prepare phases must use the original frozen release entry');
+  assert.ok(proof && proof.schema === PREPARE_TAIL_PROOF_SCHEMA, 'Changed entry requires the journal-bound prepare-tail proof');
+  assert.equal(proof.engine.root, originalRoot); assert.equal(proof.processor.root, processorRoot);
+  return true;
+}
+
 function parseTime(value, name) {
   const result = typeof value === 'number' ? value : Date.parse(value);
   assert.ok(Number.isSafeInteger(result) && result > 0, `${name} is invalid`); return result;
@@ -348,7 +523,23 @@ export async function invokeReleaseChild({ invocationFile }) {
   assert.ok(RELEASE_PHASES.includes(phase) || phase === 'recovery');
   const context = assertContext(batch, batchFile);
   if (phase === 'capture') assertSeed(batch); else assertManifest(batch);
+  let tail = null;
+  if (here !== batch.engine.root) {
+    assert.equal(phase, 'prepare', 'Changed entry may only execute the bound prepare tail');
+    const loaded = readAttempt({ root: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId });
+    assert.equal(loaded.derivedState.activePhase?.phase, 'prepare');
+    assert.equal(invocationFile, path.join(loaded.place.attempt, `prepare-${loaded.derivedState.activePhase.intentSha256}.invocation.json`));
+    assert.deepEqual(invocation.owner, loaded.derivedState.owner);
+    tail = readPrepareTailProof(batch, batchFile, loaded);
+  }
+  assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
   engineContext.configureReleaseContext(context);
+  if (tail) {
+    const { resumePrepareTail } = await import('./candidate.mjs');
+    assert.equal(typeof resumePrepareTail, 'function');
+    return resumePrepareTail(assertManifest(batch), { mainPreparedSha256: tail.proof.request.mainPreparedSha256,
+      guardInputSha256: tail.proof.request.guardInputSha256, continuationSha256: tail.sha256 });
+  }
   if (phase === 'switch') {
     assert.equal(typeof engineContext.configureBoundaryRecorder, 'function', 'Shared switch requires the durable boundary recorder');
     engineContext.configureBoundaryRecorder(async record => {
@@ -386,6 +577,12 @@ function kernelStartTicks(pid) {
 }
 
 async function defaultRunChild({ batchFile, phase, loaded, intentSha256, owner, batch }) {
+  let tail = null;
+  if (here !== batch.engine.root) {
+    assert.equal(phase, 'prepare', 'Changed entry may only start the bound prepare-tail child');
+    tail = readPrepareTailProof(batch, batchFile, loaded);
+  }
+  assertPrepareTailChildRoute(phase, batch.engine.root, here, tail?.proof);
   const processFile = childProcessFile(loaded, phase, intentSha256);
   const invocation = { schema: 'sd2-release-phase-invocation.v1', batchFile, phase,
     taskRoot: `${batch.projectRoot}/release-tasks`, taskId: batch.taskId, attemptId: batch.attemptId, owner, processFile };
@@ -488,7 +685,13 @@ export function postcheckReleasePhase({ batch, phase, receipt }) {
   else if (phase === 'prepare') {
     if (assertManifest(batch).reuseBuilds) {
       for (const kind of ['main', 'guard']) assert.deepEqual(output[kind], candidateEvidence(batch, kind).value);
-    } else { requireMarker(stage, 'main-prepared.json'); requireMarker(stage, 'guard-prepared.json'); }
+    } else {
+      requireMarker(stage, 'main-prepared.json'); requireMarker(stage, 'guard-prepared.json');
+      if (here !== batch.engine.root) {
+        assert.deepEqual(output.main, rootJson(path.join(stage, 'main-prepared.json'), 32 * 1024 * 1024));
+        assert.deepEqual(output.guard, rootJson(path.join(stage, 'guard-prepared.json'), 32 * 1024 * 1024));
+      }
+    }
   }
   else if (phase === 'guard-build') assert.deepEqual(output, candidateEvidence(batch, 'guard').value);
   else if (phase === 'main-build') assert.deepEqual(output, candidateEvidence(batch, 'main').value);
@@ -771,6 +974,14 @@ export function createReleaseController(overrides = {}) {
   }
 
   async function run(batchFile, windowFile, requestedPhase = null, approvalFile = null) {
+    if (deps.runChild === defaultRunChild) {
+      const batch = readReleaseBatch(batchFile);
+      if (here !== batch.engine.root) {
+        const loaded = load(batchFile, batch), phase = nextReleasePhase(loaded);
+        assert.equal(phase, 'prepare', 'Continue later phases using the original frozen release entry');
+        readPrepareTailProof(batch, batchFile, loaded);
+      }
+    }
     const acquired = acquire(batchFile, windowFile);
     const reconciled = await reconcileActive(batchFile, acquired);
     if (reconciled.recovered || reconciled.stoppedForFreshAttempt) return reconciled;
@@ -805,6 +1016,32 @@ export function createReleaseController(overrides = {}) {
   function continueFailed(batchFile, windowFile, failureFile) {
     const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); assertManifest(batch);
     const loaded = load(batchFile, batch), request = rootJson(failureFile, 16384);
+    if (request.schema === PREPARE_TAIL_SCHEMA) {
+      validatePrepareTailContinuation(request);
+      assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
+      assert.equal(loaded.events.at(-1).sha256, request.terminalEventSha256);
+      assert.equal(loaded.events.some(item => item.value.kind === 'failure_continued'), false, 'Prepare-tail continuation may not recursively retry');
+      const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+      const failure = prepareTailFailure(batch, loaded, request, deps.inspectOwner);
+      const identity = prepareTailProcessor(batch, request.processorControllerSetSha256);
+      const now = deps.now(), scene = deps.scene(batch, now);
+      assertPrepareTailInputs(batch, request, scene);
+      assert.equal(failure.result.value.after.facts.files['manifest.json']?.sha256,
+        digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+      const owner = deps.createOwner(), window = releaseWindowReference(batch, windowFile, now);
+      const proof = { schema: PREPARE_TAIL_PROOF_SCHEMA, taskId: batch.taskId, attemptId: batch.attemptId, runId: batch.runId,
+        batchFile, batchSha256: bindings.manifest.sha256, contextSha256: digest(rootDocument(batch.contextFile, 256 * 1024).bytes),
+        seedSha256: digest(rootDocument(batch.seedFile).bytes), manifestSha256: digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes),
+        artifactsSha256: digest(JSON.stringify(batch.artifacts)), engine: batch.engine, ...identity, request,
+        processReceiptSha256: failure.processReceiptSha256, invocationSha256: failure.invocationSha256, observedAt: new Date(now).toISOString() };
+      const proofSha256 = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+      const saved = writeJsonExclusive(prepareTailProofFile(loaded, proofSha256), proof);
+      assert.equal(saved.sha256, proofSha256);
+      const result = continueFailedAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId,
+        owner, ...bindings, window, terminalEventSha256: request.terminalEventSha256,
+        failureReceiptSha256: saved.sha256, before: scene, now, inspectOwner: deps.inspectOwner });
+      return { ...result, continuation: saved, processor: identity.processor };
+    }
     exactKeys(request, ['schema', 'terminalEventSha256', 'failureReceiptSha256'], 'pre-child failure continuation');
     assert.equal(request.schema, 'sd2-release-failed-continuation.v1');
     assert.equal(loaded.derivedState.status, 'failed'); assert.equal(nextReleasePhase(loaded), 'guard-build');
@@ -832,6 +1069,14 @@ export function createReleaseController(overrides = {}) {
   }
 
   async function resume(batchFile, windowFile) {
+    if (deps.runChild === defaultRunChild) {
+      const batch = readReleaseBatch(batchFile);
+      if (here !== batch.engine.root) {
+        const loaded = load(batchFile, batch);
+        assert.equal(nextReleasePhase(loaded), 'prepare', 'Continue later phases using the original frozen release entry');
+        readPrepareTailProof(batch, batchFile, loaded);
+      }
+    }
     const acquired = acquire(batchFile, windowFile);
     return reconcileActive(batchFile, acquired);
   }
