@@ -1084,6 +1084,88 @@ function assertRecoveryContinuationFailure(m, runtime, failure, failureSha256) {
   return 'verified-e2big-transport-repair-before-first-guard-start';
 }
 
+function assertStartedGuardIdentity(m, expected, armed) {
+  for (const role of ROLES) {
+    const actual = running(m, role, 'guard'), previous = expected[role]; assert.ok(previous);
+    assert.equal(actual.pid, previous.pid); assert.equal(actual.invocation, previous.invocation);
+    assert.equal(actual.start, previous.kernelStartTicks); assert.equal(actual.root, previous.root);
+    assert.equal(actual.source, previous.source); assert.equal(actual.build, previous.build); assert.equal(actual.version, previous.version);
+    assert.equal(actual.source, armed.guardEntry.source); assert.equal(actual.build, armed.guardEntry.build);
+  }
+}
+
+function runningRecoveryPolicies(m, before) {
+  const known = [];
+  for (const name of fs.readdirSync(m.stage).filter(name => /^(writer-no-force|hd-manual-start-gate-released)/.test(name) && name.endsWith('.json'))) {
+    const value = json(m.stage + '/' + name);
+    if (value.files) known.push(...Object.values(value.files));
+    if (value.after?.file) known.push(value.after);
+  }
+  const files = {};
+  for (const role of ROLES) {
+    const file = '/run/systemd/system/' + m.live[role].unit + '.d/rate-impl2-' + m.runId + '.conf';
+    const current = rootSnapshot(file);
+    assert.equal(current.sha256, sha(noForceBytes(m)));
+    assert.ok(known.some(item => JSON.stringify(item) === JSON.stringify(current)), 'Running guard policy has no exact original snapshot');
+    files[role] = current;
+  }
+  const result = { manifestSha256: before.manifestSha256, files }; assertPolicy(m, before, result); return result;
+}
+
+async function continueStartedGuardRecovery(m, input, before, armed, runtime) {
+  const binding = runtime.currentProcessor; assert.equal(runtime.phase, 'recovery'); assert.ok(binding);
+  assert.equal(binding.purpose, 'complete-started-guard-recovery');
+  for (const name of ['guardStartIntent', 'startLatch', 'guardRecoveryResumeFailure']) {
+    const item = binding[name]; assert.equal(assertTypedFileUnchanged(item.snapshot).sha256, item.sha256);
+  }
+  const start = json(binding.startLatch.file);
+  assert.equal(start.onlyGuard, true); assert.equal(start.runId, m.runId); assert.equal(start.guardSource, m.guardSource);
+  assert.equal(start.build, armed.guardEntry.build); assert.equal(start.fixedRecoverySha256, sha(rootFile(m.stage + '/fixed-guard-recovery.json')));
+  assert.equal(start.allowedSha256, capturePricingStartControl({ verifyReleases: false }).allowed.sha256);
+  const installed = input.installed || json(nginxInstalledFile(m));
+  assert.equal(installed.runId, operationalNginxRunId(m)); assert.equal(installed.stageRoot, operationalNginxStage(m));
+  const savedMaster = input.master || boundRecord(m, 'nginx-master', before.manifestSha256);
+  const master = { masterPid: savedMaster.masterPid, masterStart: savedMaster.masterStart };
+  const temporary = runningRecoveryPolicies(m, before), check = (_m, kind) => {
+    assert.equal(_m, m); if (kind !== undefined) assert.equal(kind, 'guard');
+    assert.deepEqual(readGuardRecovery(m), armed); assertStartedGuardIdentity(m, binding.runningGuardSnapshot, armed);
+  };
+  check(m, 'guard'); verifyGuardRecovery(m, before);
+  assert.equal(typeof input.safety?.inspectRecoveryFence, 'function');
+  const fence = await input.safety.inspectRecoveryFence({ ...input, m, before, installed, master, temporary, recoveryOnly: true, recoveryRoute: 'guard' });
+  assert.ok(fence === null || fence.phase === 'restored', 'The existing guard network restoration is not confirmed');
+  // assertPolicy compares the actual network with the original policy. The
+  // completed fence is observed here; neither restoration nor migration repeats.
+  assertPolicy(m, before, temporary);
+  const protectedState = readProtection(m);
+  for (const item of installed.files) protectedState.files[item.file] = before.protection.files[item.file];
+  const local = observeRestored(m, 'guard', { host: '127.0.0.1', origin: 'http://127.0.0.1:3302' });
+  verifyUploadPrivateDirectory(m); assert.equal(local.build, armed.guardEntry.build);
+  const healthy = { kind: 'guard', source: local.source, build: local.build, releaseVersion: local.releaseVersion,
+    readabilityMode: 'normal', actualHealthy: true, evidenceSha256: local.evidenceSha256,
+    imageCapability: capability(m, 'guard'), hd: verifyHdSupervisor(m, 'guard') };
+  const role = await startUsageRole(m, 'guard', () => check(m, 'guard')); check(m, 'guard');
+  const multiviewWorks = await ensurePrivateMultiviewGuard(m, () => check(m, 'guard')); check(m, 'guard');
+  assertProtected(m, protectedState, installed);
+  restorePolicies(m, before, temporary, 'guard', check); check(m, 'guard');
+  const ingress = await restoreNginxMaintenance({ installed, nginxMaster: master,
+    healthyConsumers: { ...healthy, role, multiviewWorks, runId: installed.runId },
+    observeMaintenance: () => observeMaintenance(m, check), observeRestored: async () => {
+      let evidence; await waitFor(m, 'Recovered guard is not reachable at both entries', () => {
+        check(m, 'guard');
+        try { evidence = TARGETS.map(target => observeRestored(m, 'guard', target)); return true; }
+        catch (error) { if (error?.code !== 'ERR_ASSERTION' || error.actual !== 503 || error.expected !== 200) throw error; return false; }
+      }, 30000, check); return evidence;
+    } });
+  check(m, 'guard'); assertProtected(m, protectedState);
+  const result = { schema: 'mv-hd-upload-fault-recovery.v1', manifestSha256: before.manifestSha256, route: 'fixed-guard',
+    completed: true, source: m.guardSource, build: armed.guardEntry.build, healthy: { ...healthy, role, multiviewWorks }, ingress,
+    continuedExistingGuardStart: true, existingGuardProcessesPreserved: true, originalProofAndReceiptsPreserved: true,
+    originalBuildStartedAt: armed.originalGuardBuild.startedAt, candidateFreshGateClaimed: false, businessDataRestored: false,
+    currentProcessorEventSha256: binding.resumeSceneEventSha256, finishedAt: new Date().toISOString() };
+  save(m, 'guard-recovery-complete', result); return result;
+}
+
 export async function recoverFailedSwitch(m, input = {}) {
   const { manifestSha256 } = context(m), runtime = guardBuildTailRuntime(m);
   const before = input.before || (runtime?.restoredOriginalRepair
@@ -1095,6 +1177,7 @@ export async function recoverFailedSwitch(m, input = {}) {
     const owner = json(switchLock); assert.equal(owner.runId, m.runId);
     assert.ok(input.alreadyLocked && owner.pid === process.pid || !exists('/proc/' + owner.pid), 'Original release controller is still alive');
   }
+  if (runtime?.currentProcessor) return continueStartedGuardRecovery(m, input, before, armed, runtime);
   const attemptFile = m.stage + '/guard-recovery-attempt.json';
   if (exists(attemptFile)) {
     const resumes = fs.readdirSync(m.stage).filter(file => /^guard-recovery-resume-[a-f0-9-]+\.json$/.test(file)).sort();

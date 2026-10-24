@@ -78,6 +78,71 @@ assert.ok(roleSource.includes('SendSIGKILL=no\\nTimeoutStopSec=infinity'));
 checks.push('normal_abort_guard_rollback_and_protection_are_actually_wired');
 
 {
+  const start = roleSource.indexOf('function publishRoleStart('), end = roleSource.indexOf('\nexport async function startUsageRole(', start);
+  const startEnd = roleSource.indexOf('\nexport async function restoreOriginalUsageRole(', end);
+  assert.ok(start > 0 && end > start && startEnd > end);
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const control = '/isolated-role-control', sourceFile = '/isolated-role-source', noForceFile = '/isolated-role-no-force';
+  const m = { runId: 'fixture-run', deployedUsageSchema: {}, appUser: 'gouki',
+    main: { root: '/candidate/main', source: 'b'.repeat(40) }, guard: { root: '/candidate/guard', source: 'c'.repeat(40) } };
+  const moduleBytes = Buffer.from('same reviewed role start module'), oldAllowed = Buffer.from('sealed old pair');
+  const contract = { schema: 'sd2-usage-role-start.v1', runId: m.runId, releases: [m.main, m.guard] };
+  const nextAllowed = Buffer.from(JSON.stringify(contract, null, 2) + '\n'), oldSource = Buffer.from('sealed old source');
+  const prior = { allowed: oldAllowed, source: oldSource, moduleSha256: digest(moduleBytes) };
+  const intent = { phase: 'control-intent', kind: 'pair', stopping: { MainPID: '123' },
+    previousAllowedSha256: digest(oldAllowed), nextAllowedSha256: digest(nextAllowed), moduleSha256: digest(moduleBytes) };
+  const files = new Map([[control + '/allowed.json', nextAllowed], [control + '/start.mjs', moduleBytes],
+    [sourceFile, oldSource], [noForceFile, Buffer.from('no-force')]]), entries = [structuredClone(intent)], operations = [];
+  const captured = { original: true }; let active = false;
+  const rootFile = file => { assert.ok(files.has(file)); return files.get(file); };
+  const record = (_m, phase, value) => { assert.equal(_m, m); operations.push(phase); entries.push({ phase, ...value }); };
+  const stopped = _m => { assert.equal(_m, m); assert.equal(active, false); assert.equal(entries.at(-1).phase, 'control-intent'); };
+  const noWrite = () => assert.fail('The published control intent must not rewrite its allowlist, module or journal');
+  const publish = new Function('assert', 'assertUsageRoleStopped', 'exists', 'operationalLive', 'roleStartContract', 'directory',
+    'CONTROL', 'rootFile', 'writeProgram', 'Buffer', 'priorUsageRoleControl', 'sha', 'journals', 'record', 'replaceOwned',
+    roleSource.slice(start, end) + ';return publishRoleStart;')(
+    assert, stopped, file => files.has(file), (_m, role) => ({ pid: { web: 101, image: 102, hd: 103 }[role] }),
+    () => ({ contract, moduleBytes }), () => {}, control, rootFile, noWrite, Buffer, () => prior, digest, () => entries, noWrite, noWrite);
+  const published = publish(m); assert.equal(published.sha256, digest(nextAllowed)); assert.deepEqual(operations, []);
+  for (const key of ['kind', 'previousAllowedSha256', 'nextAllowedSha256', 'moduleSha256']) {
+    entries[0] = { ...intent, [key]: key === 'kind' ? 'guard' : '0'.repeat(64) }; assert.throws(() => publish(m));
+  }
+  entries[0] = structuredClone(intent); files.set(control + '/allowed.json', Buffer.from('unreviewed pair'));
+  assert.throws(() => publish(m)); files.set(control + '/allowed.json', nextAllowed);
+  const startRole = new Function('assert', 'assertUsageRoleStopped', 'assertReleaseWindow', 'before', 'journals',
+    'assertPriorUsageRoleControl', 'exists', 'SOURCE', 'publishRoleStart', 'directory', 'path', 'rootFile', 'sourceBytes',
+    'priorUsageRoleControl', 'replaceOwned', 'record', 'call', 'CONTROL', 'NAME', 'waitFor', 'state', 'assertRunning',
+    'assertPolicy', 'sha', 'noForce', 'noForceBytes', 'fs',
+    roleSource.slice(end, startEnd).replace('export ', '') + ';return startUsageRole;')(
+    assert, stopped, () => {}, () => captured, () => entries, noWrite, file => files.has(file), sourceFile, publish,
+    () => {}, path, rootFile, (_m, kind) => Buffer.from('candidate source ' + kind), () => prior,
+    (file, bytes) => { assert.equal(file, sourceFile); assert.deepEqual(rootFile(file), oldSource); operations.push('source'); files.set(file, bytes); },
+    record, (bin, args, options) => {
+      operations.push(bin + ' ' + args.join(' '));
+      if (bin === 'runuser') { assert.equal(options.cwd, m.guard.root); assert.ok(operations.includes('start-intent'));
+        return JSON.stringify({ source: m.guard.source, sourceAndSchemaVerified: true }); }
+      assert.equal(bin, 'systemctl');
+      if (args[0] === 'start') { assert.deepEqual(args, ['start', '--no-block', 'sd2-role-coordinator.service']); active = true; }
+      else assert.deepEqual(args, ['daemon-reload']);
+    }, control, 'sd2-role-coordinator.service', async (check, predicate) => { check(); assert.equal(predicate(), true); },
+    () => ({ ActiveState: active ? 'active' : 'inactive', InvocationID: 'd'.repeat(32) }),
+    (_m, value, _state, kind) => { assert.equal(active, true); assert.equal(value, captured); assert.equal(kind, 'guard');
+      assert.deepEqual(rootFile(sourceFile), Buffer.from('candidate source guard')); return { verified: true }; },
+    () => {}, digest, () => noForceFile, () => Buffer.from('no-force'),
+    { unlinkSync: file => { assert.equal(file, noForceFile); files.delete(file); } });
+  await startRole(m, 'guard', () => {});
+  assert.equal(entries.filter(value => value.phase === 'control-intent').length, 1);
+  assert.equal(entries.filter(value => value.phase === 'start-intent').length, 1);
+  assert.equal(entries.find(value => value.phase === 'start-intent').kind, 'guard');
+  assert.ok(operations.indexOf('source') < operations.indexOf('start-intent'));
+  assert.ok(operations.findIndex(value => value.startsWith('runuser ')) < operations.indexOf('systemctl start --no-block sd2-role-coordinator.service'));
+  assert.equal(operations.filter(value => value.startsWith('systemctl start ')).length, 1);
+  assert.deepEqual(entries[0], intent); assert.deepEqual(rootFile(control + '/allowed.json'), nextAllowed);
+  checks.push('actual_published_role_control_intent_reuses_exact_pair_module_and_prior_cas_without_republication');
+  checks.push('actual_first_guard_role_start_replaces_source_records_first_intent_checks_prestart_and_starts_only_role');
+}
+
+{
   const start = roleSource.indexOf('function roleJournalFile('), end = roleSource.indexOf('function noForce(', start);
   assert.ok(start > 0 && end > start);
   const bytes = new Map(), root = '/isolated-restored-role', proofSha256 = 'f'.repeat(64);

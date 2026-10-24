@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { DEPLOYED_SCHEMA, DEPLOYED_FIELDS, assertDeployedSchemaInput, DEPLOYED_PROBE, assertRetainedProofCommand, unchangedSchemaInputs, SCHEMA_FILES, assertPriorPublication, readPublishedBaselineSourceFiles, priorUsageRoleControl } from './deployed-usage-schema.mjs';
+import { DEPLOYED_SCHEMA, DEPLOYED_FIELDS, assertDeployedSchemaInput, DEPLOYED_PROBE, assertRetainedProofCommand, unchangedSchemaInputs, SCHEMA_FILES, assertPriorPublication, readPublishedBaselineSourceFiles, priorUsageRoleControl, assertFullPriorUsageRoleControl } from './deployed-usage-schema.mjs';
 import { CANVAS_BATCH_SQL, CANVAS_BATCH_MIGRATOR, CANVAS_BATCH_MODE } from './canvas-batch-schema-contract.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
 import { rootFile, validateManifest, isSharedEngine } from './common.mjs';
@@ -35,6 +35,57 @@ for (const mode of [
   { normalContinuation: { schema: 'sd2-normal-continuation-input.v2' }, reuseBuilds: {} },
 ]) assert.throws(() => assertPriorPublication({ deployedUsageSchema: input, ...mode }, {}, {}, {}, {}, {}, {}, {}));
 const deployedSource = fs.readFileSync(new URL('./deployed-usage-schema.mjs', import.meta.url), 'utf8');
+{
+  // 真实旧记录和当前旧源码只读；适配器仅隔离原生来源读取，不接触数据库、控制文件或服务。
+  const stage = '/data/video-api-debugger/release-staging/15fe9bbb-c012-4dae-9a86-6e473e259c67';
+  const pins = { 'manifest.json': 'bb99fc3eae449e09c2dc05d0ee0a74a33461cf88ce0a5cdb3da55babddbc5156',
+    'usage-role-transition-0011.json': 'd5528e80378d6643dec35f84bf17c4a1ca5cad4a30c833ecadab691ca5eae25d',
+    'usage-role-transition-0012.json': '0b7980a568cb9e880f6e3cbd5c1b3903f29fd2ff5a75671dcab61dc2c788b8d4' };
+  const originals = new Map(Object.entries(pins).map(([name, digest]) => {
+    const file = stage + '/' + name, bytes = rootFile(file); assert.equal(sha(bytes), digest); return [file, bytes];
+  }));
+  const records = { prior: JSON.parse(originals.get(stage + '/manifest.json')),
+    start: JSON.parse(originals.get(stage + '/usage-role-transition-0011.json')),
+    active: JSON.parse(originals.get(stage + '/usage-role-transition-0012.json')) };
+  const role = records.start.published.contract.releases.find(value => value.source === records.prior.guardSource); assert.ok(role);
+  const m = { appUser: 'gouki', fullRelease: { liveRoles: { role } } };
+  const sourceManifestBytes = rootFile('/data/video-api-debugger/release-staging/1243443f-ca0d-482c-8ca1-cdfc5accab20/guard/source-manifest.json');
+  assert.equal(sha(sourceManifestBytes), '790e5bbfb092d880f2c9446b2b9eaadffc62b6a3b26d0d96ca8205da7b639c05');
+  const sourceManifest = JSON.parse(sourceManifestBytes); assert.equal(sourceManifest.source, role.source);
+  const proof = { root: role.root, source: role.source, sourceFiles: Object.fromEntries(Object.keys(role.sourceSha256).map(file => {
+    const digest = sha(fs.readFileSync(role.root + '/' + file)); assert.equal(digest, sourceManifest.files[file]); return [file, digest];
+  })) };
+  const allowed = assertFullPriorUsageRoleControl(m, records, proof, 1004);
+  assert.equal(sha(allowed.allowed), '50c1dd232fd6069055354e4c18bd862ee13006c3f23dd8f8306de73eea7bb0be');
+  assert.equal(sha(allowed.source), '4defd0b850b9c44fce5d1a9123e953b22290578b0e0d6f3dbe89fbf7791e80e9');
+  const constantStart = deployedSource.indexOf('const FULL_PRIOR_ROLE ='), constantEnd = deployedSource.indexOf('\nconst stageFor', constantStart);
+  const readerStart = deployedSource.indexOf('export function priorUsageRoleControl('), readerEnd = deployedSource.indexOf('\nexport function assertPriorUsageRoleControl(', readerStart);
+  assert.ok(constantStart > 0 && constantEnd > constantStart && readerStart > 0 && readerEnd > readerStart);
+  const reads = [], changed = new Map();
+  const read = new Function('assert', 'stageFor', 'stageIdentity', 'pinned', 'readFullLiveSourceFiles', 'call', 'assertFullPriorUsageRoleControl',
+    deployedSource.slice(constantStart, constantEnd) + '\n' + deployedSource.slice(readerStart, readerEnd).replace('export ', '') + ';return priorUsageRoleControl;')(
+    assert, run => '/data/video-api-debugger/release-staging/' + run, value => assert.equal(value, stage),
+    (file, expected) => { reads.push(file); assert.ok(originals.has(file), 'Old role must not read the mutable current pair');
+      const bytes = changed.get(file) || originals.get(file); assert.equal(sha(bytes), expected); return JSON.parse(bytes); },
+    (manifest, files, name) => { assert.equal(manifest, m); assert.equal(name, 'role'); assert.deepEqual(files, Object.keys(role.sourceSha256)); return proof; },
+    (bin, args) => { assert.equal(bin, 'id'); assert.deepEqual(args, ['-u', 'gouki']); return '1004'; }, assertFullPriorUsageRoleControl);
+  assert.deepEqual(read(m), allowed); assert.deepEqual(reads, [...originals.keys()]);
+  for (const file of originals.keys()) {
+    changed.set(file, Buffer.concat([originals.get(file), Buffer.from(' ')])); assert.throws(() => read(m)); changed.clear();
+  }
+  for (const change of [v => { v.active.previousSha256 = '0'.repeat(64); }, v => { v.active.kind = 'main'; },
+    v => { v.active.current.ActiveState = 'inactive'; }, v => { v.start.published.contract.runId = 'other-run'; },
+    v => { v.start.published.contract.releases = []; }]) {
+    const invalid = structuredClone(records); change(invalid); assert.throws(() => assertFullPriorUsageRoleControl(m, invalid, proof, 1004));
+  }
+  for (const change of [v => { v.root += '-other'; }, v => { v.source = '0'.repeat(40); },
+    v => { v.sourceFiles['ops/sd2-usage-role-start.mjs'] = '0'.repeat(64); }]) {
+    const invalid = structuredClone(proof); change(invalid); assert.throws(() => assertFullPriorUsageRoleControl(m, records, invalid, 1004));
+  }
+  assert.throws(() => assertFullPriorUsageRoleControl(m, records, proof, 1));
+  cases.push('actual_full_role_reader_pins_old_manifest_start_active_and_old_source_table_without_reading_new_pair');
+  cases.push('actual_full_role_reader_rejects_old_record_sha_chain_pair_source_module_or_app_identity_drift');
+}
 assert.ok(deployedSource.includes('if (m.normalContinuation || m.reuseBuilds) verifyDeployedContinuationProvenance(m);'));
 assert.ok(deployedSource.indexOf('verifyDeployedContinuationProvenance(m);') < deployedSource.indexOf('const pair = publicationPair(prior, final);'));
 cases.push('actual_deployed_usage_publication_consumer_rejects_arbitrary_reuse_and_unknown_or_incomplete_v2_before_native_io');

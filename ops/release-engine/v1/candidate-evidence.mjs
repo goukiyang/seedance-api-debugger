@@ -472,6 +472,46 @@ function verifyGuardHeartbeatRepair(m, runtime, predecessor) {
   return proof;
 }
 
+function verifyCurrentRecoveryProcessor(m, runtime, predecessor) {
+  const current = runtime.currentProcessor;
+  assert.equal(runtime.phase, 'recovery'); assert.ok(runtime.guardHeartbeatRepair);
+  assert.equal(current.schema, 'sd2-release-current-processor.v1');
+  assert.equal(current.purpose, 'complete-started-guard-recovery'); assert.equal(current.phase, 'recovery');
+  assert.deepEqual(current.predecessorProcessor, predecessor.processor);
+  assert.equal(current.predecessorProofFile, runtime.guardHeartbeatRepair.proofFile);
+  assert.equal(current.predecessorProofSha256, runtime.guardHeartbeatRepair.proofSha256);
+  assert.equal(predecessor.processor.controllerSetSha256, '29aaf8f75335e0821a4dcccc9796c5902468200adee2894cb15c46026176019d');
+  processorBytes(current, m);
+  const allowed = new Set(['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs',
+    'switch.mjs', 'candidate-lifecycle-engineering.mjs', 'deployed-usage-schema.mjs', 'deployed-usage-schema-engineering.mjs',
+    'usage-role-control.mjs', 'usage-role-engineering.mjs']);
+  const changed = Object.keys(current.processorControllers).filter(name => current.processorControllers[name] !== predecessor.processorControllers[name]).sort();
+  assert.deepEqual(Object.keys(current.changedControllers).sort(), changed); assert.ok(changed.length > 0);
+  for (const name of changed) assert.ok(allowed.has(name), 'Unrelated current recovery processor change: ' + name);
+  for (const name of changed) assert.deepEqual(current.changedControllers[name], {
+    predecessorSha256: predecessor.processorControllers[name], processorSha256: current.processorControllers[name] });
+  const { loaded } = successorJournal(m, runtime);
+  const observed = loaded.events.find(item => item.sha256 === current.resumeSceneEventSha256);
+  assert.equal(observed?.value.kind, 'observation'); assert.equal(observed.value.name, 'resume_scene');
+  const { resumeSceneEventSha256, takeoverEventSha256, ...binding } = current;
+  assert.deepEqual(observed.value.value.currentProcessor, binding);
+  assert.equal(observed.value.previousSha256, takeoverEventSha256);
+  const takeover = loaded.events.find(item => item.sha256 === takeoverEventSha256);
+  assert.equal(takeover?.value.kind, 'owner_takeover'); assert.deepEqual(takeover.value.owner, observed.value.owner);
+  assert.equal(takeover.value.previousSha256, current.phaseResultEventSha256);
+  const active = loaded.derivedState.activePhase;
+  assert.equal(active?.phase, 'recovery');
+  const intent = loaded.events.find(item => item.sha256 === active.intentSha256);
+  assert.deepEqual(intent.value.owner, observed.value.owner);
+  assert.deepEqual(intent.value.before.facts.currentProcessor, { resumeSceneEventSha256,
+    processorControllerSetSha256: current.processor.controllerSetSha256 });
+  for (const name of ['guardStartIntent', 'startLatch', 'guardRecoveryResumeFailure']) {
+    const input = current[name]; assert.equal(input.snapshot.requestedPath, input.file);
+    assert.equal(assertTypedFileUnchanged(input.snapshot).sha256, input.sha256);
+  }
+  return current;
+}
+
 export function guardBuildTailRuntime(m) {
   const context = currentReleaseContext(), runtime = context?.guardBuildTail;
   if (!runtime) return null;
@@ -554,13 +594,14 @@ export function guardBuildTailRuntime(m) {
     assert.ok(runtime.guardRecoveryRepair, 'Heartbeat recovery retains the consumed recovery proof and exact failed child');
     active = verifyGuardHeartbeatRepair(m, runtime, active);
   }
+  if (runtime.currentProcessor) active = verifyCurrentRecoveryProcessor(m, runtime, active);
   assert.equal(path.dirname(fileURLToPath(import.meta.url)), active.processor.root);
   return runtime;
 }
 
 export function candidateCompatibilityDirectory(m) {
   const runtime = guardBuildTailRuntime(m);
-  return ((runtime?.phase === 'recovery' ? runtime.guardHeartbeatRepair?.proof || runtime.guardRecoveryRepair?.proof : null) || runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
+  return ((runtime?.phase === 'recovery' ? runtime.currentProcessor || runtime.guardHeartbeatRepair?.proof || runtime.guardRecoveryRepair?.proof : null) || runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
 }
 
 export function hdMaintenanceApprovalFile(m) {

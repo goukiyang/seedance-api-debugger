@@ -36,6 +36,7 @@ import {
   assertGuardRecoveryRepairFailure, assertGuardRecoveryRepairAdmission, GUARD_RECOVERY_REPAIR_ORIGIN,
   validateGuardHeartbeatRepair, assertGuardHeartbeatRepairFailure, assertGuardHeartbeatRepairControllerDifference,
   assertGuardHeartbeatRepairAdmission, GUARD_HEARTBEAT_REPAIR_ORIGIN,
+  STARTED_GUARD_RECOVERY, assertStartedGuardRecoveryResume, assertCurrentRecoveryControllerDifference, bindCurrentProcessorScene,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -1387,6 +1388,55 @@ function scenarioCompletedSchemaHeartbeatSummary() {
   return 'completed_schema_summary_keeps_original_bytes_identity_schema_and_completion_time_while_fresh_heartbeat_observation_may_advance';
 }
 
+function scenarioStartedGuardRecoveryResume() {
+  const origin = STARTED_GUARD_RECOVERY;
+  const loaded = { events: [{ value: { kind: 'observation', name: 'guard_heartbeat_repair' } }], derivedState: {
+    status: 'running', activePhase: null, terminal: null, lastEventSha256: origin.phaseResultEventSha256,
+    lastPhase: { phase: 'recovery', outcome: 'failed', resultSha256: origin.phaseResultEventSha256, intentSha256: origin.failureIntentSha256 } } };
+  const runtime = { phase: 'recovery', guardHeartbeatRepair: { proofSha256: origin.heartbeatProofSha256,
+    proof: { processor: { controllerSetSha256: origin.predecessorControllerSetSha256 } } } };
+  const scene = { schema: 'sd2-release-scene-summary.v1', capturedAt: 1, sha256: HASH, facts: { effectsStarted: true,
+    switchComplete: false, fixedGuardRecoveryAvailable: true, files: { 'pricing-pair-published.json': { sha256: HASH },
+      'full-schema-ready.json': { sha256: HASH }, 'fixed-guard-recovery.json': { sha256: HASH },
+      'guard-recovery-start-intent.json': { sha256: origin.guardStartIntentSha256 }, 'pricing-start-intent.json': null,
+      'guard-recovery-complete.json': null, 'switch-complete.json': null } } };
+  assertStartedGuardRecoveryResume(loaded, runtime, scene);
+  for (const edit of [value => { value.derivedState.status = 'failed'; }, value => { value.derivedState.activePhase = { phase: 'recovery' }; },
+    value => { value.derivedState.terminal = { outcome: 'failed' }; }, value => { value.derivedState.lastEventSha256 = HASH; },
+    value => { value.derivedState.lastPhase.phase = 'switch'; }, value => { value.derivedState.lastPhase.outcome = 'succeeded'; },
+    value => { value.derivedState.lastPhase.intentSha256 = HASH; }, value => { value.events = []; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'resume_scene', value: { currentProcessor: {} } } }); }]) {
+    const changed = structuredClone(loaded); edit(changed); assert.throws(() => assertStartedGuardRecoveryResume(changed, runtime, scene));
+  }
+  for (const edit of [value => { value.phase = 'switch'; }, value => { value.guardHeartbeatRepair.proofSha256 = HASH; },
+    value => { value.guardHeartbeatRepair.proof.processor.controllerSetSha256 = HASH; }]) {
+    const changed = structuredClone(runtime); edit(changed); assert.throws(() => assertStartedGuardRecoveryResume(loaded, changed, scene));
+  }
+  for (const edit of [value => { value.facts.effectsStarted = false; }, value => { value.facts.switchComplete = true; },
+    value => { value.facts.files['guard-recovery-start-intent.json'] = null; }, value => { value.facts.files['pricing-start-intent.json'] = { sha256: HASH }; },
+    value => { delete value.facts.files['guard-recovery-complete.json']; }, value => { value.facts.files['guard-recovery-complete.json'] = { sha256: HASH }; }]) {
+    const changed = structuredClone(scene); edit(changed); assert.throws(() => assertStartedGuardRecoveryResume(loaded, runtime, changed));
+  }
+  const names = ['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs',
+    'candidate-lifecycle-engineering.mjs', 'deployed-usage-schema.mjs', 'deployed-usage-schema-engineering.mjs', 'usage-role-control.mjs', 'usage-role-engineering.mjs'];
+  const protectedNames = ['common.mjs', 'attempt-state.mjs', 'full-release-contract.mjs', 'multiview-works-control.mjs'];
+  const previous = Object.fromEntries([...names, ...protectedNames, ...Array.from({ length: 65 - names.length - protectedNames.length }, (_, i) => `unchanged-${i}.mjs`)].map(name => [name, HASH]));
+  const current = { ...previous, ...Object.fromEntries(names.map(name => [name, digest(name)])) };
+  const changed = assertCurrentRecoveryControllerDifference(previous, current);
+  assert.deepEqual(Object.keys(changed).sort(), names.sort());
+  for (const name of protectedNames) assert.throws(() => assertCurrentRecoveryControllerDifference(previous, { ...current, [name]: digest(name) }));
+  assert.throws(() => assertCurrentRecoveryControllerDifference(previous, { ...current, 'new-framework.mjs': HASH }));
+  assert.throws(() => assertCurrentRecoveryControllerDifference(previous, { ...current, 'release-entry.mjs': HASH }));
+  const currentProcessor = { phase: 'recovery', processor: { controllerSetSha256: digest('current-map') }, resumeSceneEventSha256: digest('existing-resume-scene') };
+  const before = bindCurrentProcessorScene(scene, currentProcessor);
+  assert.deepEqual(before.facts.currentProcessor, { resumeSceneEventSha256: currentProcessor.resumeSceneEventSha256,
+    processorControllerSetSha256: currentProcessor.processor.controllerSetSha256 });
+  assert.equal(before.sha256, digest(JSON.stringify(before.facts))); assert.notEqual(before.sha256, scene.sha256);
+  assert.equal(scene.facts.currentProcessor, undefined); assert.equal(before.facts.effectsStarted, true);
+  assert.throws(() => bindCurrentProcessorScene(scene, { ...currentProcessor, phase: 'switch' }));
+  return 'existing_resume_scene_binds_only_exact_failed_started_guard_recovery_with_65_reviewed_sources_and_real_recovery_phase_pointer';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -1394,7 +1444,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages(), scenarioGuardRecoveryRepair(), scenarioGuardRecoveryLargeFixedInput(), scenarioGuardHeartbeatRepair(), scenarioCompletedSchemaHeartbeatSummary()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages(), scenarioGuardRecoveryRepair(), scenarioGuardRecoveryLargeFixedInput(), scenarioGuardHeartbeatRepair(), scenarioCompletedSchemaHeartbeatSummary(), scenarioStartedGuardRecoveryResume()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

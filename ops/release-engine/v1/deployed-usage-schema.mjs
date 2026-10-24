@@ -15,6 +15,12 @@ export const SCHEMA_FILES = ['prisma/migrations/20261021073000_usage_attribution
   'ops/sd2-usage-attribution-migrate.py', 'prisma/schema.prisma', 'ops/sd2-usage-role-start.mjs'];
 const ROLE_ROOT = '/data/video-api-debugger/controls/usage-role-writer-v1';
 const ROLE_SOURCE = '/etc/systemd/system/sd2-role-coordinator.service.d/admin-usage-source.conf';
+// 旧 role 来源取自已封存的首次 guard 启动链，不能从已经换成新 pair 的可变 allowlist 反查。
+const FULL_PRIOR_ROLE = Object.freeze({ runId: '15fe9bbb-c012-4dae-9a86-6e473e259c67',
+  manifestSha256: 'bb99fc3eae449e09c2dc05d0ee0a74a33461cf88ce0a5cdb3da55babddbc5156',
+  startSha256: 'd5528e80378d6643dec35f84bf17c4a1ca5cad4a30c833ecadab691ca5eae25d',
+  activeSha256: '0b7980a568cb9e880f6e3cbd5c1b3903f29fd2ff5a75671dcab61dc2c788b8d4',
+  allowedSha256: '50c1dd232fd6069055354e4c18bd862ee13006c3f23dd8f8306de73eea7bb0be' });
 const stageFor = run => '/data/video-api-debugger/release-staging/' + run;
 const json = file => JSON.parse(rootFile(file));
 const receiptFile = m => m.stage + '/usage-attribution-deployed-schema-adopt.json';
@@ -321,18 +327,48 @@ export function readDeployedUsageEvidence(m) {
   assert.ok(call('lsattr', ['-d', receiptFile(m)]).split(/\s+/)[0].includes('i'));
   return receipt;
 }
+export function assertFullPriorUsageRoleControl(m, { prior, start, active }, proof, appUid) {
+  assert.ok(m.fullRelease); const role = m.fullRelease.liveRoles.role;
+  assert.equal(prior.runId, FULL_PRIOR_ROLE.runId); assert.equal(prior.stage, stageFor(prior.runId));
+  assert.equal(prior.schema, 'rate-impl2-release.v1'); assert.equal(prior.project, 'video-api-debugger');
+  for (const value of [start, active]) bound(value, prior.runId, FULL_PRIOR_ROLE.manifestSha256);
+  assert.equal(start.sequence, 11); assert.equal(start.phase, 'start-intent'); assert.equal(start.kind, 'guard');
+  assert.equal(active.sequence, 12); assert.equal(active.phase, 'active'); assert.equal(active.kind, 'guard');
+  assert.equal(active.previousSha256, FULL_PRIOR_ROLE.startSha256);
+  assert.equal(active.current.ActiveState, 'active'); assert.equal(active.current.SubState, 'running');
+  assert.equal(active.current.ControlPID, '0'); assert.ok(Number(active.current.MainPID) > 1);
+  assert.equal(active.current.WorkingDirectory, role.root); assert.equal(active.runtime.sourceRoot, role.root);
+  assert.equal(active.runtime.version, role.version);
+  for (const key of ['root', 'source', 'version']) assert.equal(prior.guard[key], role[key]);
+  const published = start.published, contract = published.contract;
+  assert.equal(contract.schema, 'sd2-usage-role-start.v1'); assert.equal(contract.runId, prior.runId);
+  assert.equal(contract.appUid, appUid); assert.equal(contract.releases.length, 2);
+  const allowed = Buffer.from(JSON.stringify(contract, null, 2) + '\n');
+  assert.equal(sha(allowed), published.sha256); assert.equal(published.sha256, FULL_PRIOR_ROLE.allowedSha256);
+  for (const kind of ['main', 'guard']) {
+    const matches = contract.releases.filter(value => value.source === prior[kind].source); assert.equal(matches.length, 1);
+    for (const key of ['root', 'source', 'version']) assert.equal(matches[0][key], prior[kind][key]);
+  }
+  const entry = contract.releases.find(value => value.source === role.source); assert.ok(entry);
+  for (const key of ['root', 'source', 'version', 'build']) assert.equal(entry[key], role[key]);
+  assert.equal(proof.root, role.root); assert.equal(proof.source, role.source);
+  assert.deepEqual(proof.sourceFiles, entry.sourceSha256);
+  const moduleSha256 = proof.sourceFiles['ops/sd2-usage-role-start.mjs'];
+  assert.equal(moduleSha256, published.moduleSha256);
+  const source = Buffer.from('# Usage origin writer ' + prior.runId + '\n[Service]\nWorkingDirectory=' + role.root
+    + '\nExecStartPre=/usr/bin/node ' + ROLE_ROOT + '/start.mjs\n');
+  return { allowed, source, moduleSha256, root: ROLE_ROOT, sourceFile: ROLE_SOURCE };
+}
 export function priorUsageRoleControl(m) {
   if (m.fullRelease) {
-    const allowed = rootFile(ROLE_ROOT + '/allowed.json'), contract = JSON.parse(allowed);
-    assert.equal(contract.schema, 'sd2-usage-role-start.v1'); assert.equal(contract.appUid, Number(call('id', ['-u', m.appUser])));
-    const role = m.fullRelease.liveRoles.role, entry = contract.releases.find(v => v.source === role.source);
-    assert.ok(entry); for (const key of ['root', 'source', 'version', 'build']) assert.equal(entry[key], role[key]);
-    const proof = readFullLiveSourceFiles(m, ['ops/sd2-usage-role-start.mjs'], 'role');
-    const moduleSha256 = proof.sourceFiles['ops/sd2-usage-role-start.mjs'];
-    assert.equal(entry.sourceSha256['ops/sd2-usage-role-start.mjs'], moduleSha256);
-    const source = Buffer.from('# Usage origin writer ' + contract.runId + '\n[Service]\nWorkingDirectory=' + role.root
-      + '\nExecStartPre=/usr/bin/node ' + ROLE_ROOT + '/start.mjs\n');
-    return { allowed, source, moduleSha256, root: ROLE_ROOT, sourceFile: ROLE_SOURCE };
+    const stage = stageFor(FULL_PRIOR_ROLE.runId); stageIdentity(stage);
+    const records = { prior: pinned(stage + '/manifest.json', FULL_PRIOR_ROLE.manifestSha256),
+      start: pinned(stage + '/usage-role-transition-0011.json', FULL_PRIOR_ROLE.startSha256),
+      active: pinned(stage + '/usage-role-transition-0012.json', FULL_PRIOR_ROLE.activeSha256) };
+    const entry = records.start.published.contract.releases.find(value => value.source === m.fullRelease.liveRoles.role.source);
+    assert.ok(entry);
+    const proof = readFullLiveSourceFiles(m, Object.keys(entry.sourceSha256), 'role');
+    return assertFullPriorUsageRoleControl(m, records, proof, Number(call('id', ['-u', m.appUser])));
   }
   const value = history(m), { prior, final, roleKind, manifestSha256 } = verifiedRuntimeAuthority(value), { receipt } = value;
   const starts = final.role.transitions.filter(entry => entry.phase === 'start-intent' && entry.kind === roleKind);

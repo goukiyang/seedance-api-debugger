@@ -2113,7 +2113,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window', 'recovery', 'heartbeat'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window', 'recovery', 'heartbeat', 'current'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -2165,6 +2165,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   runtime.guardHeartbeatRepair = { proof: sets.heartbeat.proof };
   activeBytes = sets.heartbeat.bytes; namespace.verify(m, runtime);
   assert.equal(namespace.compatibility(m), sets.heartbeat.proof.processor.root);
+  runtime.currentProcessor = sets.current.proof; activeBytes = sets.current.bytes;
+  namespace.verify(m, runtime); assert.equal(namespace.compatibility(m), sets.current.proof.processor.root);
+  activeBytes = sets.heartbeat.bytes; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
+  delete runtime.currentProcessor; activeBytes = sets.heartbeat.bytes;
   runtime.phase = 'switch'; activeBytes = sets.window.bytes; namespace.verify(m, runtime);
   assert.equal(namespace.compatibility(m), sets.window.proof.processor.root);
   runtime.phase = 'recovery'; activeBytes = sets.heartbeat.bytes;
@@ -2176,6 +2180,100 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   assert.equal(namespace.operationalNginxRunId(m), 'original-restored-maintenance');
   add('guard_recovery_processor_is_selected_only_for_recovery_and_keeps_original_restored_operational_records');
 
+}
+
+{
+  const m = { projectRoot: '/isolated-current-processor', operation: { taskId: randomUUID() }, runId: randomUUID(), privateSha256: {} };
+  const bytes = { 'release.mjs': Buffer.from('current release'), 'common.mjs': Buffer.from('unchanged common') };
+  const hashes = Object.fromEntries(Object.entries(bytes).map(([name, value]) => [name, sha(value)])); m.privateSha256 = hashes;
+  const predecessor = { processor: { root: '/isolated-predecessor', controllerSetSha256: '29aaf8f75335e0821a4dcccc9796c5902468200adee2894cb15c46026176019d' },
+    processorControllers: { ...hashes, 'release.mjs': sha(Buffer.from('old release')) } };
+  const current = { schema: 'sd2-release-current-processor.v1', purpose: 'complete-started-guard-recovery', phase: 'recovery',
+    predecessorProcessor: predecessor.processor, predecessorProofFile: '/isolated-original-heartbeat-proof', predecessorProofSha256: '1'.repeat(64),
+    processor: { root: '/isolated-current', controllerSetSha256: sha(JSON.stringify(hashes)) }, processorControllers: hashes,
+    changedControllers: { 'release.mjs': { predecessorSha256: predecessor.processorControllers['release.mjs'], processorSha256: hashes['release.mjs'] } },
+    resumeSceneEventSha256: '2'.repeat(64), takeoverEventSha256: '3'.repeat(64), phaseResultEventSha256: '4'.repeat(64) };
+  for (const name of ['guardStartIntent', 'startLatch', 'guardRecoveryResumeFailure'])
+    current[name] = { file: '/isolated-' + name, sha256: '5'.repeat(64), snapshot: { requestedPath: '/isolated-' + name, sha256: '5'.repeat(64) } };
+  const runtime = { phase: 'recovery', currentProcessor: current, guardHeartbeatRepair: {
+    proofFile: current.predecessorProofFile, proofSha256: current.predecessorProofSha256 } };
+  const owner = { token: 'actual-owner-token' }, { resumeSceneEventSha256, takeoverEventSha256, ...binding } = copy(current);
+  const observed = { sha256: resumeSceneEventSha256, value: { kind: 'observation', name: 'resume_scene', owner,
+    previousSha256: takeoverEventSha256, value: { currentProcessor: binding } } };
+  const takeover = { sha256: takeoverEventSha256, value: { kind: 'owner_takeover', owner, previousSha256: current.phaseResultEventSha256 } };
+  const intent = { sha256: '6'.repeat(64), value: { owner, before: { facts: { currentProcessor: {
+    resumeSceneEventSha256, processorControllerSetSha256: current.processor.controllerSetSha256 } } } } };
+  const loaded = { events: [takeover, observed, intent], derivedState: { activePhase: { phase: 'recovery', intentSha256: intent.sha256 } } };
+  const namespace = { assert: sameAssert, path, JSON, sha, engineDirectory: () => '/isolated-original-engine',
+    fs: { readdirSync: directory => { assert.equal(directory, current.processor.root); return Object.keys(bytes); } },
+    rootFile: file => bytes[path.basename(file)], successorJournal: () => ({ loaded }), assertTypedFileUnchanged: value => value };
+  vm.runInNewContext(['processorBytes', 'verifyCurrentRecoveryProcessor'].map(name => functionNode('candidate-evidence.mjs', name).node.getText()).join('\n')
+    + '\nglobalThis.verify=verifyCurrentRecoveryProcessor;', namespace);
+  assert.equal(namespace.verify(m, runtime, predecessor), current);
+  runtime.phase = 'switch'; assert.throws(() => namespace.verify(m, runtime, predecessor)); runtime.phase = 'recovery';
+  bytes['release.mjs'] = Buffer.from('modified after native binding'); assert.throws(() => namespace.verify(m, runtime, predecessor)); bytes['release.mjs'] = Buffer.from('current release');
+  intent.value.before.facts.currentProcessor.resumeSceneEventSha256 = '0'.repeat(64); assert.throws(() => namespace.verify(m, runtime, predecessor));
+  intent.value.before.facts.currentProcessor.resumeSceneEventSha256 = resumeSceneEventSha256;
+  observed.value.owner = { token: 'other-owner' }; assert.throws(() => namespace.verify(m, runtime, predecessor)); observed.value.owner = owner;
+  add('actual_current_recovery_processor_keeps_original_proof_and_requires_real_bytes_same_owner_takeover_and_phase_binding');
+}
+
+{
+  const m = { runId: randomUUID(), stage: '/isolated-started-guard', guardSource: 'c'.repeat(40), guard: { root: '/isolated-fixed-guard' } };
+  const armed = { guardEntry: { source: m.guardSource, build: 'fixed-original-build' }, originalGuardBuild: { startedAt: 1792800000000 } };
+  const expected = Object.fromEntries(['web', 'image', 'hd'].map((role, index) => [role, { pid: 4200 + index, invocation: String(index + 1).repeat(32),
+    kernelStartTicks: String(5200 + index), root: m.guard.root, source: m.guardSource, build: armed.guardEntry.build, version: '0.104.0+creation-compat-guard.1' }]));
+  const states = copy(expected), identityNamespace = { assert: sameAssert, ROLES: ['web', 'image', 'hd'], running: (value, role, kind) => {
+    assert.equal(value, m); assert.equal(kind, 'guard'); return { ...states[role], start: states[role].kernelStartTicks }; } };
+  vm.runInNewContext(functionNode('switch.mjs', 'assertStartedGuardIdentity').node.getText() + '\nglobalThis.verify=assertStartedGuardIdentity;', identityNamespace);
+  identityNamespace.verify(m, expected, armed);
+  for (const key of ['pid', 'invocation', 'kernelStartTicks', 'root', 'source', 'build', 'version']) {
+    const original = states.image[key]; states.image[key] = typeof original === 'number' ? original + 1 : original + '-changed';
+    assert.throws(() => identityNamespace.verify(m, expected, armed)); states.image[key] = original;
+  }
+  add('started_guard_tail_requires_the_same_three_pids_invocations_kernel_starts_and_actual_fixed_build');
+
+  const calls = [], before = { manifestSha256: 'b'.repeat(64), protection: { files: { '/isolated-nginx': { original: true } } } };
+  const installed = { runId: randomUUID(), stageRoot: '/isolated-original-nginx-operation', files: [{ file: '/isolated-nginx' }] };
+  const binding = { purpose: 'complete-started-guard-recovery', runningGuardSnapshot: expected, resumeSceneEventSha256: 'a'.repeat(64) };
+  for (const name of ['guardStartIntent', 'startLatch', 'guardRecoveryResumeFailure']) binding[name] = { file: '/isolated-' + name, sha256: 'd'.repeat(64), snapshot: { sha256: 'd'.repeat(64) } };
+  const runtime = { phase: 'recovery', currentProcessor: binding }, record = {}, input = { installed, master: { masterPid: 99, masterStart: '110' },
+    safety: { inspectRecoveryFence: async context => { assert.equal(context.recoveryRoute, 'guard'); calls.push('observe-existing-network'); return { phase: 'restored' }; } } };
+  let badNetwork = false;
+  const namespace = { assert: sameAssert, Date, JSON, TARGETS: [{ host: 'entry-a' }, { host: 'entry-b' }],
+    assertTypedFileUnchanged: value => value, sha: () => 'f'.repeat(64), rootFile: () => Buffer.from('fixed'),
+    json: file => { assert.equal(file, binding.startLatch.file); return { onlyGuard: true, runId: m.runId, guardSource: m.guardSource,
+      build: armed.guardEntry.build, fixedRecoverySha256: 'f'.repeat(64), allowedSha256: 'e'.repeat(64) }; },
+    capturePricingStartControl: () => ({ allowed: { sha256: 'e'.repeat(64) } }), operationalNginxRunId: () => installed.runId,
+    operationalNginxStage: () => installed.stageRoot, runningRecoveryPolicies: () => ({ files: {} }), readGuardRecovery: () => armed,
+    assertStartedGuardIdentity: (value, snapshot, fixed) => identityNamespace.verify(value, snapshot, fixed),
+    verifyGuardRecovery: () => { calls.push('fixed-artifact'); }, assertPolicy: () => { if (badNetwork) throw new Error('network drift'); },
+    readProtection: () => ({ files: {} }), observeRestored: (value, kind, target) => ({ source: m.guardSource, build: armed.guardEntry.build,
+      releaseVersion: '0.104.0+creation-compat-guard.1', evidenceSha256: '0'.repeat(64), host: target.host }),
+    verifyUploadPrivateDirectory: () => {}, capability: () => ({ actual: true }), verifyHdSupervisor: () => ({ actual: true }),
+    startUsageRole: async (value, kind, check) => { check(); calls.push('role-first-start'); return { kind }; },
+    ensurePrivateMultiviewGuard: async (value, check) => { check(); calls.push('works-first-start'); return { kind: 'guard' }; },
+    assertProtected: () => calls.push('protected-state'), restorePolicies: (value, saved, temporary, kind, check) => { check(value, kind); calls.push('restore-owned-policies'); },
+    observeMaintenance: () => [], waitFor: async (value, label, predicate) => assert.equal(await predicate(), true),
+    restoreNginxMaintenance: async options => { assert.equal(options.healthyConsumers.runId, installed.runId);
+      assert.equal(options.healthyConsumers.kind, 'guard'); await options.observeRestored(); calls.push('open-original-nginx'); return { restored: true }; },
+    save: (value, name, result) => { assert.equal(name, 'guard-recovery-complete'); Object.assign(record, copy(result)); calls.push('complete'); },
+    start: () => { throw new Error('Existing guard must never restart'); }, applyFullSchema: () => { throw new Error('Migration must never replay'); },
+    stopNaturally: () => { throw new Error('Existing guard must never stop'); } };
+  vm.runInNewContext(functionNode('switch.mjs', 'continueStartedGuardRecovery').node.getText() + '\nglobalThis.continueTail=continueStartedGuardRecovery;', namespace);
+  const completed = await namespace.continueTail(m, input, before, armed, runtime);
+  assert.equal(completed.completed, true); assert.equal(completed.businessDataRestored, false); assert.equal(completed.existingGuardProcessesPreserved, true);
+  assert.ok(calls.indexOf('role-first-start') < calls.indexOf('works-first-start'));
+  assert.ok(calls.indexOf('works-first-start') < calls.indexOf('restore-owned-policies'));
+  assert.ok(calls.indexOf('restore-owned-policies') < calls.indexOf('open-original-nginx'));
+  assert.equal(record.currentProcessorEventSha256, binding.resumeSceneEventSha256); assert.deepEqual(states, expected);
+  calls.length = 0; badNetwork = true;
+  await assert.rejects(namespace.continueTail(m, input, before, armed, runtime), /network drift/);
+  assert.equal(calls.includes('role-first-start'), false); assert.equal(calls.includes('open-original-nginx'), false);
+  badNetwork = false; states.web.pid++;
+  await assert.rejects(namespace.continueTail(m, input, before, armed, runtime));
+  assert.equal(calls.includes('role-first-start'), false); states.web.pid--;
+  add('actual_started_guard_recovery_tail_preserves_running_services_and_migrations_then_orders_role_works_policy_and_original_nginx');
 }
 
 {

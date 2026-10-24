@@ -328,8 +328,15 @@ function publishRoleStart(m) {
     assert.equal(sha(moduleBytes), prior.moduleSha256);
     assert.ok(current.equals(prior.allowed) || current.equals(bytes), 'Role allowlist is neither prior publication nor current pair');
     const last = journals(m).at(-1);
-    if (last.phase !== 'control-intent') record(m, 'control-intent', { kind: 'pair', stopping: last.stopping,
-      previousAllowedSha256: sha(prior.allowed), nextAllowedSha256: sha(bytes), moduleSha256: sha(moduleBytes) });
+    if (last.phase === 'control-intent') {
+      // 已发布而尚未启动时，只接续原意图绑定的同一组来源，不重写原记录。
+      assert.equal(last.kind, 'pair'); assert.equal(last.previousAllowedSha256, sha(prior.allowed));
+      assert.equal(last.nextAllowedSha256, sha(bytes)); assert.equal(last.moduleSha256, sha(moduleBytes));
+    } else {
+      assert.equal(last.phase, 'stopped');
+      record(m, 'control-intent', { kind: 'pair', stopping: last.stopping,
+        previousAllowedSha256: sha(prior.allowed), nextAllowedSha256: sha(bytes), moduleSha256: sha(moduleBytes) });
+    }
     if (!current.equals(bytes)) replaceOwned(CONTROL + '/allowed.json', bytes);
   }
   else if (exists(CONTROL + '/allowed.json')) assert.deepEqual(rootFile(CONTROL + '/allowed.json'), bytes);
