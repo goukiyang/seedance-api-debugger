@@ -13360,6 +13360,10 @@ body.compare-fullscreen-open {
     display: none;
   }
 
+  .composer-topbar-version {
+    font-size: 0.7em;
+  }
+
   .composer-topbar-nav {
     display: none;
   }
