@@ -13356,8 +13356,7 @@ body.compare-fullscreen-open {
     flex: 1 1 auto;
   }
 
-  .composer-topbar-home,
-  .composer-topbar-version {
+  .composer-topbar-home {
     display: none;
   }
 
