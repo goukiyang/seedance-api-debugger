@@ -24,6 +24,9 @@ import {
   assertSwitchTypedRepairControllerDifference, assertSwitchTypedRepairAdmission, assertSwitchTypedApprovalPath, SWITCH_TYPED_REPAIR_ORIGIN,
   validateSwitchScanRepair, assertSwitchScanRepairFailure, assertSwitchScanRepairRefusalLog,
   assertSwitchScanRepairControllerDifference, assertSwitchScanRepairAdmission, assertSwitchScanApprovalPath, SWITCH_SCAN_REPAIR_ORIGIN,
+  validateSwitchOwnerRepair, assertSwitchOwnerRepairFailure, assertSwitchOwnerRepairRefusalLog, assertSwitchOwnerStrictResult,
+  assertSwitchOwnerRepairControllerDifference, assertSwitchOwnerRepairAdmission, assertSwitchOwnerApprovalPath, SWITCH_OWNER_REPAIR_ORIGIN,
+  assertCandidateSwitchOwnerObservationAdmission,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -922,6 +925,112 @@ function scenarioSwitchScanRepair() {
   return 'only_exact_full_hd_scan_failure_with_consumed_49d_d3ec_and_original_stack_can_continue_switch_once';
 }
 
+function scenarioSwitchOwnerRepair() {
+  const request = { schema: 'sd2-release-switch-owner-repair.v1',
+    ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'switchScanRepairProofSha256',
+      'candidateSwitchObservationProofSha256', 'refusalLogSha256', 'strictResultSha256'].map(key => [key, SWITCH_OWNER_REPAIR_ORIGIN[key]])),
+    childReceiptSha256: digest('original-typed-failure-child'), processorControllerSetSha256: digest('typed-repair-processor'),
+    approvalFile: '/fixture/hd-release-safety-approval-switch-owner-r01.json', approvalSha256: digest('new-typed-approval'),
+    windowSha256: digest('new-typed-window'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateSwitchOwnerRepair(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateSwitchOwnerRepair(missing));
+    assert.throws(() => validateSwitchOwnerRepair({ ...request, [key]: 'unbound' }));
+  }
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'switchScanRepairProofSha256', 'candidateSwitchObservationProofSha256', 'refusalLogSha256', 'strictResultSha256'])
+    assert.throws(() => validateSwitchOwnerRepair({ ...request, [key]: digest('different:' + key) }));
+  assert.throws(() => validateSwitchOwnerRepair({ ...request, resetAdmission: true }));
+  const error = { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true };
+  const cause = 'AssertionError [ERR_ASSERTION]: HD work is in flight or unexplained; keep the original site and do not enter maintenance\n\nfalse !== true\n';
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'switch', intentSha256: SWITCH_OWNER_REPAIR_ORIGIN.failureIntentSha256,
+    child: { status: 1, signal: null, error: null }, stderr: JSON.stringify({ error, cause }) + '\n' };
+  assertSwitchOwnerRepairFailure(child); assert.throws(() => assertSwitchScanRepairFailure(child));
+  for (const value of [{ ...child, phase: 'arm' }, { ...child, intentSha256: HASH }, { ...child, child: { status: 0, signal: null, error: null } },
+    { ...child, stderr: JSON.stringify({ error, cause: cause + '\n' }) },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('in flight or unexplained', 'in flight') }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, category: 'another_failure' }, cause }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, stop: false }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
+    assert.throws(() => assertSwitchOwnerRepairFailure(value));
+  const root = '/data/video-api-debugger/release-engines/1.0.0-' + SWITCH_OWNER_REPAIR_ORIGIN.predecessorControllerSetSha256;
+  const stack = "AssertionError [ERR_ASSERTION]: HD work is in flight or unexplained; keep the original site and do not enter maintenance\n\nfalse !== true\n\n    at file:///data/video-api-debugger/release-engines/1.0.0-4ace8cb587fc5020f63110bec2f3e11f30881dcc316f461c494f9ded4e31ae42/switch.mjs:1278:16\n    at async locked (file:///data/video-api-debugger/release-engines/1.0.0-4ace8cb587fc5020f63110bec2f3e11f30881dcc316f461c494f9ded4e31ae42/switch.mjs:801:16)\n    at async releaseEntryCli (file:///data/video-api-debugger/release-engines/1.0.0-4ace8cb587fc5020f63110bec2f3e11f30881dcc316f461c494f9ded4e31ae42/release-entry.mjs:3205:62)";
+  assertSwitchOwnerRepairRefusalLog(Buffer.from(stack));
+  for (const value of [stack + '\n', stack.replace(':1278:16', ':1279:16'), stack.replace('async locked', 'async anotherLock'), stack.replace(root, '/another-processor')])
+    assert.throws(() => assertSwitchOwnerRepairRefusalLog(Buffer.from(value)));
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'candidate-inputs.mjs', 'hd-storage-preflight.mjs', 'hd-storage-preflight-engineering.mjs'];
+  const retained = ['attempt-state.mjs', 'common.mjs', 'typed-files.mjs', 'candidate.mjs', 'candidate-reuse.mjs',
+    'pricing-start-pair.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs',
+    'hd-compiled-cache.mjs'];
+  const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('cebe:' + name)]));
+  const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('typed-repair:' + name)])) };
+  assert.equal(Object.keys(assertSwitchOwnerRepairControllerDifference(predecessor, processor)).length, 9);
+  for (const name of retained) assert.throws(() => assertSwitchOwnerRepairControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertSwitchOwnerRepairControllerDifference(predecessor, predecessor));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'switch_scan_repair', value: { proofSha256: request.switchScanRepairProofSha256 } } },
+    { value: { kind: 'observation', name: 'candidate_switch_observation', value: { proofSha256: request.candidateSwitchObservationProofSha256 } } });
+  const failed = { events, derivedState: { status: 'failed', activePhase: null, lastPhase: {
+    phase: 'switch', outcome: 'failed', resultSha256: request.phaseResultEventSha256 }, terminal: { eventSha256: request.terminalEventSha256 },
+    lastEventSha256: request.terminalEventSha256 } };
+  const originalFixedGuardSha256 = digest('original-fixed-guard'), originalSwitchBeforeSha256 = digest('original-switch-before');
+  const runtime = { phase: 'switch', switchScanRepair: { proofSha256: request.switchScanRepairProofSha256,
+    proof: { originalFixedGuardSha256, originalSwitchBeforeSha256 } }, candidateSwitchObservation: { proofSha256: request.candidateSwitchObservationProofSha256 } };
+  const scene = { facts: { effectsStarted: false, switchComplete: false, files: {
+    'fixed-guard-recovery.json': { sha256: originalFixedGuardSha256 }, 'switch-before.json': { sha256: originalSwitchBeforeSha256 } } } };
+  assertSwitchOwnerRepairAdmission(failed, request, runtime, scene);
+  for (const edit of [value => { value.derivedState.status = 'running'; }, value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.lastPhase.phase = 'arm'; }, value => { value.derivedState.terminal.eventSha256 = HASH; },
+    value => { value.events = value.events.filter(item => item.value.name !== 'switch_scan_repair'); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'candidate_switch_observation'); },
+    value => { value.events.push({ value: { kind: 'observation', name: 'switch_owner_repair' } }); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(failed); edit(value); assert.throws(() => assertSwitchOwnerRepairAdmission(value, request, runtime, scene));
+  }
+  assert.throws(() => assertSwitchOwnerRepairAdmission(failed, request, { ...runtime, phase: 'arm' }, scene));
+  for (const facts of [{ ...scene.facts, effectsStarted: true }, { ...scene.facts, switchComplete: true },
+    { ...scene.facts, files: { ...scene.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...scene.facts, files: { ...scene.facts.files, 'ingress-503-switch.json': { sha256: HASH } } }])
+    assert.throws(() => assertSwitchOwnerRepairAdmission(failed, request, runtime, { facts }));
+  for (const round of ['r01', 'r02']) assertSwitchOwnerApprovalPath('/fixture', `/fixture/hd-release-safety-approval-switch-owner-${round}.json`);
+  for (const file of ['/fixture/hd-release-safety-approval-switch-owner-r03.json', '/elsewhere/hd-release-safety-approval-switch-owner-r01.json',
+    '/fixture/hd-release-safety-approval-switch-admission-r02.json', '/fixture/arbitrary.json'])
+    assert.throws(() => assertSwitchOwnerApprovalPath('/fixture', file));
+  const strict = { runId: 'fixture-run', manifestSha256: HASH, attempt: 1, result: { schema: 'hd-storage-reconciliation-v1', final: false, safe: false, unstable: true, canEnterControlledDrain: false, counts: { canonical: 1397, fork: 121, overlapping: 121 }, issues: [{"run": "324bd942092794e38be1365e502ca98746a749f3635683d0a9b3362703bbf049.6c6adbba-6e43-42ad-bf5b-4a5a07d71a00", "category": "invalid_cache_evidence", "name": "AssertionError", "code": "closed_cache_refused", "reason": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '1834737865'\n- '1834737866'\n            ^", "cacheCode": "ERR_ASSERTION", "role": "canonical"}] } };
+  assertSwitchOwnerStrictResult(strict, 'fixture-run', HASH);
+  for (const edit of [value => { value.result.safe = true; }, value => { value.result.unstable = false; }, value => { value.result.issues.push(value.result.issues[0]); }, value => { value.result.issues[0].reason += 'another mismatch'; }, value => { value.result.counts.canonical++; }, value => { value.manifestSha256 = digest('another-manifest'); }]) { const value = structuredClone(strict); edit(value); assert.throws(() => assertSwitchOwnerStrictResult(value, 'fixture-run', HASH)); }
+  return 'only_exact_completed_hd_identity_refusal_with_consumed_b3c_d3ec_and_original_strict_record_can_continue_switch_once';
+}
+
+function scenarioSwitchOwnerObservation() {
+  const repairSha = digest('bound-owner-repair'), originalFixedGuardSha256 = digest('retained-fixed-guard'), originalSwitchBeforeSha256 = digest('retained-switch-before');
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'candidate_switch_observation', value: { proofSha256: SWITCH_OWNER_REPAIR_ORIGIN.candidateSwitchObservationProofSha256 } } },
+    { value: { kind: 'observation', name: 'switch_owner_repair', value: { proofSha256: repairSha } } });
+  const loaded = { events, derivedState: { status: 'running', activePhase: null } };
+  const runtime = { phase: 'switch', switchOwnerRepair: { schema: 'sd2-release-switch-owner-repair-runtime.v1', proofSha256: repairSha,
+    proof: { originalFixedGuardSha256, originalSwitchBeforeSha256 } }, candidateSwitchObservation: {
+    schema: 'sd2-release-candidate-observation-runtime.v1', proofSha256: SWITCH_OWNER_REPAIR_ORIGIN.candidateSwitchObservationProofSha256, proof: { expiresAt: 2000 } } };
+  const scene = { facts: { effectsStarted: false, switchComplete: false, files: {
+    'fixed-guard-recovery.json': { sha256: originalFixedGuardSha256 }, 'switch-before.json': { sha256: originalSwitchBeforeSha256 } } } };
+  assertCandidateSwitchOwnerObservationAdmission(loaded, runtime, 2000, scene);
+  assert.throws(() => assertCandidateSwitchOwnerObservationAdmission(loaded, runtime, 1999, scene));
+  for (const edit of [value => { value.derivedState.activePhase = { phase: 'switch' }; }, value => { value.derivedState.status = 'failed'; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'candidate_switch_owner_observation' } }); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'switch_owner_repair'); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'candidate_switch_observation'); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(loaded); edit(value); assert.throws(() => assertCandidateSwitchOwnerObservationAdmission(value, runtime, 2001, scene));
+  }
+  assert.throws(() => assertCandidateSwitchOwnerObservationAdmission(loaded, { ...runtime, phase: 'arm' }, 2001, scene));
+  for (const facts of [{ ...scene.facts, effectsStarted: true }, { ...scene.facts, switchComplete: true },
+    { ...scene.facts, files: { ...scene.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...scene.facts, files: { ...scene.facts.files, 'ingress-503-switch.json': { sha256: HASH } } }])
+    assert.throws(() => assertCandidateSwitchOwnerObservationAdmission(loaded, runtime, 2001, { facts }));
+  return 'only_one_owner_bound_expired_d3_candidate_observation_without_active_or_effects_is_permitted';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -929,7 +1038,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

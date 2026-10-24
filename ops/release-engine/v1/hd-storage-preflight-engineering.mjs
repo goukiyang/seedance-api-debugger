@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { compileFunction } from 'node:vm';
 import { readHdStorageProtection, assertHdStorageProtection, inspectHdReconciliation, inspectHdBeforeMaintenance,
   createProtectedDiscoveryContinuation, readHdCompiledCacheProofs, readHdTsxCompilerClosure } from './hd-storage-preflight.mjs';
 import { APPROVED_HD_LEGACY_READY, APPROVED_HD_HISTORICAL_VERSIONS } from './hd-legacy-ready-allowlist.mjs';
@@ -629,18 +630,135 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
     for (const root of roots) for (const file of discoverySources) {
       fs.mkdirSync(path.dirname(root + '/' + file), { recursive: true }); fs.copyFileSync(applicationRoot + '/' + file, root + '/' + file);
     }
+    // Run the actual HD consumer bodies with explicit synthetic root-proof and
+    // historical-capsule verifier adapters. This cannot establish production
+    // root/journal/capsule validity; those existing verifiers run at real entry.
+    // Real typed-file, SHA/entity/owner, /proc, candidate descriptor and strict
+    // storage readers remain in use, including a live R09 capsule without the
+    // subsequently introduced originalReceipt.hdCompiledCache field.
+    const ts = require('typescript'), helperUrl = new URL('./hd-storage-preflight.mjs', import.meta.url);
+    const fullDiscoveryHelperSource = fs.readFileSync(helperUrl, 'utf8'), fullDiscoveryHelperSyntax = ts.createSourceFile(String(helperUrl), fullDiscoveryHelperSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const fullContexts = new WeakMap(), fullValues = new WeakSet(), originalContexts = new Map();
+    const contractSource = fs.readFileSync(new URL('./full-release-contract.mjs', import.meta.url), 'utf8');
+    const contractSyntax = ts.createSourceFile('full-release-contract.mjs', contractSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const functionCode = (syntax, source, name) => {
+      const matches = syntax.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+      assert.equal(matches.length, 1); return source.slice(matches[0].getStart(syntax), matches[0].end).replace(/^export\s+/, '');
+    };
+    const fullReader = compileFunction(['input', 'rootInput', 'readFullLiveSourceFiles'].map(name => functionCode(contractSyntax, contractSource, name)).join('\n')
+      + '\nreturn readFullLiveSourceFiles;', ['assert', 'fs', 'path', 'hash', 'HASH', 'assertFullReleaseInput', 'FULL_ROLES'])(
+      assert, fs, path, sha, /^[a-f0-9]{64}$/, value => { assert.ok(fullValues.has(value), 'Only this synthetic full context is adapted'); return value; }, ['hd']);
+    const dependencies = new Map();
+    for (const statement of fullDiscoveryHelperSyntax.statements.filter(ts.isImportDeclaration)) {
+      const specifier = statement.moduleSpecifier.text;
+      dependencies.set(specifier, specifier.startsWith('node:') ? require(specifier) : await import(new URL(specifier, helperUrl)));
+    }
+    let activeFullContext;
+    const fixtureRequire = specifier => {
+      assert.ok(dependencies.has(specifier), 'Unknown HD consumer fixture import: ' + specifier);
+      const original = dependencies.get(specifier);
+      if (specifier === './candidate-evidence.mjs') return { ...original, assertSwitchAdmissionRepair(value) {
+        const context = fullContexts.get(value); assert.ok(context, 'No synthetic root proof was supplied'); return structuredClone(context.repair);
+      } };
+      if (specifier === './candidate-reuse.mjs') return { ...original, readOriginalSuccess(value, kind) {
+        const context = originalContexts.get(value.runId); assert.ok(context);
+        assert.deepEqual(value, context.originalManifest); assert.equal(kind, 'guard');
+        context.onOriginalCapsule?.(); return structuredClone(context.capsule);
+      } };
+      if (specifier === './full-release-contract.mjs') return { ...original,
+        releaseDependencyRoot(value) { const context = fullContexts.get(value); assert.ok(context); assert.equal(value.live.hd.root, context.hdRoot);
+          assert.deepEqual(value.live.hd.sourceProof.compiledCapsule, value.fullRelease.dependencyCapsule); return context.hdRoot; },
+        readFullLiveSourceFiles: fullReader };
+      if (specifier === 'node:child_process') return { ...original, execFileSync(bin, args, options) {
+        if (bin === 'getconf' && activeFullContext?.fault === 'unknown-hz') return 'unknown';
+        return original.execFileSync(bin, args, options);
+      } };
+      return original;
+    };
+    const compiledHelper = ts.transpileModule(fullDiscoveryHelperSource, { compilerOptions: { module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+    const fixtureModule = { exports: {} };
+    compileFunction(compiledHelper, ['require', 'module', 'exports'])(fixtureRequire, fixtureModule, fixtureModule.exports);
+    const fullHd = fixtureModule.exports;
+    function prepareFullDiscoveryFixture(value, unit, info, fault) {
+      const folder = fs.mkdtempSync(path.join(directory, 'full-discovery-authority-')), source = 'a'.repeat(40), candidateSource = 'b'.repeat(40);
+      const sourceStat = file => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']
+        .map(key => [key, fs.lstatSync(file)[key]]));
+      // Three of the actual live/candidate discovery files may legitimately
+      // differ. The real resolver file stays intact for the existing fixture.
+      for (const file of [discoverySources[0], discoverySources[1], discoverySources[3]])
+        fs.appendFileSync(roots[0] + '/' + file, '\n// synthetic independently pinned older live source\n');
+      const contexts = roots.map((root, index) => {
+        for (const file of sourceFiles) {
+          fs.mkdirSync(path.dirname(root + '/' + file), { recursive: true }); fs.copyFileSync(applicationRoot + '/' + file, root + '/' + file);
+        }
+        const files = Object.fromEntries([...new Set([...discoverySources, ...sourceFiles])].map(file => [file, sha(fs.readFileSync(root + '/' + file))]));
+        const stage = folder + '/' + (index ? 'candidate' : 'live'); fs.mkdirSync(stage);
+        const archive = stage + '/source.tar.gz', sourceManifest = stage + '/source-manifest.json';
+        const archiveBytes = Buffer.from('Synthetic archive binding; not an application release or production capsule');
+        fs.writeFileSync(archive, archiveBytes, { mode: 0o600 });
+        const manifest = { project: 'video-api-debugger', source: index ? candidateSource : source,
+          version: '0.0.0', archiveSha256: sha(archiveBytes), files };
+        fs.writeFileSync(sourceManifest, JSON.stringify(manifest), { mode: 0o600 });
+        return { source: manifest.source, root, version: '0.0.0', build: 'synthetic-build', sourceManifest, archive,
+          sourceManifestSha256: sha(fs.readFileSync(sourceManifest)), archiveSha256: sha(archiveBytes) };
+      });
+      const [live, candidate] = contexts, run = randomUUID(), capsuleFile = folder + '/guard-immutable-success.json';
+      const originalManifest = { runId: run, guard: { ...live } };
+      fs.writeFileSync(folder + '/manifest.json', JSON.stringify(originalManifest), { mode: 0o600 });
+      const capsule = { schema: 'sd2-immutable-successful-build.v1', kind: 'guard', sourceRun: run,
+        originalManifestSha256: sha(fs.readFileSync(folder + '/manifest.json')), originalSourceManifestSha256: live.sourceManifestSha256,
+        originalReceipt: { source: live.source, build: live.build }, originalTimesChanged: false, newCompilationClaimed: false,
+        snapshot: { sourceFiles: Object.fromEntries(discoverySources.map(file => [file, { ...sourceStat(live.root + '/' + file), sha256: sha(fs.readFileSync(live.root + '/' + file)) }])) } };
+      assert.equal(capsule.originalReceipt.hdCompiledCache, undefined);
+      fs.writeFileSync(capsuleFile, JSON.stringify(capsule), { mode: 0o600 });
+      const capsuleRef = { file: capsuleFile, sha256: sha(fs.readFileSync(capsuleFile)), kind: 'guard', sourceRun: run };
+      unit.Id = value.live.hd.unit;
+      value.live = { hd: { ...value.live.hd, ...live, sourceProof: { sourceManifest: live.sourceManifest, archive: live.archive, compiledCapsule: capsuleRef } } };
+      value.main = { ...candidate }; value.guard = { ...candidate };
+      value.fullRelease = { liveRoles: { hd: { ...live } }, dependencyCapsule: capsuleRef }; fullValues.add(value.fullRelease);
+      const context = { folder, hdRoot: live.root, originalManifest, capsule, fault,
+        repair: { liveSnapshot: { services: { hd: { ...unit, kernelStartTicks: info.startTicks, cwd: live.root } },
+          sources: { hd: { source: live.source, root: live.root, sourceManifestSha256: live.sourceManifestSha256 } } } } };
+      fullContexts.set(value, context); originalContexts.set(run, context);
+      // Only candidates possess the later compiled-cache descriptor. The old
+      // live capsule must succeed using its original source/entity snapshot.
+      const entries = sourceFiles.map((sourceFile, index) => {
+        const bytes = Buffer.from(JSON.stringify({ code: '/* synthetic compiler contract only */', map: { version: 3, sources: [candidate.root + '/' + sourceFile] }, warnings: [] }));
+        const cacheFile = folder + '/' + Math.floor(Date.now() / 1e8) + '-' + createHash('sha1').update(bytes).digest('hex');
+        fs.writeFileSync(cacheFile, bytes, { mode: 0o600 });
+        return { sourceFile, sourceSha256: sha(fs.readFileSync(candidate.root + '/' + sourceFile)), cacheFile,
+          cacheBytes: bytes.length, cacheSha256: sha(bytes) };
+      });
+      fullHd.readHdCompiledCacheProofs(value, [{ source: candidate.source, sourceRoot: candidate.root,
+        sourceManifest: candidate.sourceManifest, archive: candidate.archive, compiler, entries }], current => structuredClone(current));
+      if (fault === 'kernel-start') context.repair.liveSnapshot.services.hd.kernelStartTicks = String(BigInt(info.startTicks) + 1n);
+      if (fault === 'large-kernel-start') context.repair.liveSnapshot.services.hd.kernelStartTicks = String(BigInt(info.startTicks) - 100000n);
+      if (fault === 'historical-systemd') context.repair.liveSnapshot.services.hd.ExecMainStartTimestampMonotonic = String(BigInt(unit.ExecMainStartTimestampMonotonic) + 1n);
+      if (fault === 'source-authority') context.repair.liveSnapshot.sources.hd.sourceManifestSha256 = '0'.repeat(64);
+      if (fault === 'capsule-sha') capsuleRef.sha256 = '0'.repeat(64);
+      if (fault === 'capsule-bytes') fs.appendFileSync(capsuleFile, '\n');
+      if (fault === 'live-source') fs.appendFileSync(live.root + '/' + discoverySources[0], '\n// unbound live mutation\n');
+      if (fault === 'live-mode') fs.chmodSync(live.root + '/' + discoverySources[0], 0o666);
+      return context;
+    }
     const admissionTimings = [];
+    const fixtureHz = Number(execFileSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).trim());
+    assert.ok(Number.isSafeInteger(fixtureHz) && fixtureHz > 0 && 1000000 % fixtureHz === 0);
     async function admissionCase(name, { held = true, trigger, mutate, reject = false, deadlineMs = 5000, clockJump = false,
-      sharedFull = false, staticOver15 = false, freshScanOver15 = false, ownerOver15 = false, scanDeadlineMs = deadlineMs, checkFailure = false, expectedCode } = {}) {
+      sharedFull = false, staticOver15 = false, freshScanOver15 = false, ownerOver15 = false, scanDeadlineMs = deadlineMs, checkFailure = false, expectedCode,
+      postSpawnOffsetUs = 0, identityFault, releaseDuringProvenance = false, boundEmptyDirectory = false, unboundEmptyDirectory = false } = {}) {
       const lock = m.hdRoot + '/discovery.lock', marker = path.join(directory, 'owner-ready-' + randomUUID());
       const beforeJob = fs.readFileSync(path.join(m.hdRoot, pending.key + '.json'));
       const candidateFile = roots[1] + '/src/lib/media/hd-discovery.ts', beforeSource = fs.readFileSync(candidateFile);
+      const beforeLive = discoverySources.map(file => ({ file: roots[0] + '/' + file,
+        bytes: fs.readFileSync(roots[0] + '/' + file), mode: fs.statSync(roots[0] + '/' + file).mode & 0o7777 }));
       const records = [], actualNow = Date.now, start = actualNow(); let triggered = false, moved = null, invokedAt, invocationDeadline, invocationScanDeadline, failure;
       let clockOffset = 0, staticAdvanced = false, ownerDelayInjected = false, authorityChanged = false;
       const program = `const fs=require('node:fs'),os=require('node:os'),crypto=require('node:crypto');process.umask(0o022);
 const [lock,marker,held]=process.argv.slice(1);const acquire=()=>{fs.mkdirSync(lock);fs.writeFileSync(lock+'/owner.json',JSON.stringify({pid:process.pid,host:os.hostname(),token:crypto.randomUUID()}),{mode:384});fs.writeFileSync(marker,'ready');};
-const release=()=>{if(fs.existsSync(lock)){fs.unlinkSync(lock+'/owner.json');fs.rmdirSync(lock);}};
-process.on('message',v=>{if(v==='acquire')acquire();if(v==='release')release();if(v==='exit'){release();process.disconnect();}});
+const release=()=>{if(fs.existsSync(lock)){if(fs.existsSync(lock+'/owner.json'))fs.unlinkSync(lock+'/owner.json');fs.rmdirSync(lock);}};
+process.on('message',v=>{if(v==='acquire')acquire();if(v==='release-owner-only')fs.unlinkSync(lock+'/owner.json');if(v==='release')release();if(v==='exit'){release();process.disconnect();}});
 if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2).trim().split(/\\s+/);process.send({pid:process.pid,startTicks:f[19],cgroup:fs.readFileSync('/proc/self/cgroup','utf8').trim()});`;
       const child = spawn(process.execPath, ['-e', program, lock, marker, held ? 'yes' : 'no'], { cwd: roots[0], detached: true,
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
@@ -648,22 +766,51 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       let childError = ''; child.stderr.on('data', b => { childError += b; });
       const exit = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
       const info = await new Promise((resolve, rejectReady) => { child.once('message', resolve); child.once('error', rejectReady); });
+      const waitForOriginalChildCondition = (condition, limit, label) => {
+        for (;;) {
+          const raw = fs.readFileSync('/proc/' + info.pid + '/stat', 'utf8'), fields = raw.slice(raw.lastIndexOf(')') + 2).trim().split(/\s+/);
+          assert.equal(fields[19], info.startTicks, 'The original fixture child was replaced while awaiting ' + label);
+          assert.ok(!['Z', 'X', 'x'].includes(fields[0]), 'The original fixture child exited while awaiting ' + label);
+          const remaining = limit - actualNow();
+          assert.ok(remaining > 0, 'The original fixture child did not complete ' + label + ' within its original admission deadline');
+          if (condition()) return;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(2, remaining));
+        }
+      };
       const ownerReadyAt = actualNow();
       const unit = { MainPID: String(info.pid), ControlPID: '0', InvocationID: '1'.repeat(32),
-        ExecMainStartTimestampMonotonic: String(Number(info.startTicks) * 10000), ControlGroup: '/system.slice/sd2-hd-derivatives.service',
+        ExecMainStartTimestampMonotonic: String(BigInt(info.startTicks) * (1000000n / BigInt(fixtureHz)) + BigInt(postSpawnOffsetUs)), ControlGroup: '/system.slice/sd2-hd-derivatives.service',
         ActiveState: 'active', SubState: 'running', WorkingDirectory: roots[0] };
       m.privateMultiviewInstall = true; m.main = { root: roots[1] };
       m.live = { hd: { unit: 'sd2-hd-derivatives.service', pid: info.pid, invocation: unit.InvocationID,
         execMainStartTimestampMonotonic: unit.ExecMainStartTimestampMonotonic, root: roots[0] } };
       m.hdAdmissionFixtureUnit = unit; m.hdAdmissionFixtureCgroup = info.cgroup;
       if (sharedFull) { m.engine = { schema: 'sd2-release-engine.v1' }; m.fullRelease = {}; }
+      const admissionManifest = sharedFull ? { ...m } : m;
+      const fullContext = sharedFull ? prepareFullDiscoveryFixture(admissionManifest, unit, info, identityFault) : null;
+      activeFullContext = fullContext;
+      if (releaseDuringProvenance) fullContext.onOriginalCapsule = () => {
+        fullContext.onOriginalCapsule = null; child.send('release');
+        const limit = actualNow() + 2000;
+        while (fs.existsSync(lock) && actualNow() < limit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+        assert.equal(fs.existsSync(lock), false, 'The bound original owner must actually release while its provenance is read');
+      };
       const acquireAtBoundary = () => {
         if (fs.existsSync(marker)) fs.unlinkSync(marker); child.send('acquire');
         const limit = records.find(item => item.kind.startsWith('strict-start-'))?.value.deadline ?? invocationDeadline;
         while (!fs.existsSync(marker) && actualNow() < limit) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         assert.ok(fs.existsSync(marker), 'Isolated owner did not acquire its lease at the requested boundary');
       };
-      const originalLstat = fs.lstatSync, originalOpen = fs.openSync, originalFstat = fs.fstatSync;
+      const originalLstat = fs.lstatSync, originalOpen = fs.openSync, originalFstat = fs.fstatSync, originalAdmissionReaddir = fs.readdirSync;
+      let cleanupObserved = false, laterEmptyDirectoryReads = 0;
+      if (boundEmptyDirectory) fs.readdirSync = function (target, ...args) {
+        const entries = originalAdmissionReaddir.call(fs, target, ...args);
+        // Keep the real same directory empty for a complete second cleanup
+        // observation. Release only after its actual third directory read:
+        // owner read, owner recheck, then the existing natural-release branch.
+        if (target === lock && entries.length === 0 && cleanupObserved && ++laterEmptyDirectoryReads === 3) child.send('release');
+        return entries;
+      };
       if (ownerOver15) fs.openSync = function (target, ...args) {
         const fd = originalOpen.call(fs, target, ...args);
         if (!ownerDelayInjected && target === lock + '/owner.json') {
@@ -733,7 +880,12 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
         if (name === 'unknown-cache') fs.mkdirSync(m.hdRoot + '/.runs/' + pending.key + '.' + randomUUID(), { recursive: true });
         const action = async () => {
           invokedAt = Date.now(); invocationDeadline = invokedAt + deadlineMs; invocationScanDeadline = invokedAt + scanDeadlineMs;
-          const result = await inspectHdBeforeMaintenance(m, { sourceRoot: roots[0], deadline: invocationDeadline,
+          if (unboundEmptyDirectory) {
+            child.send('release-owner-only');
+            waitForOriginalChildCondition(() => !fs.existsSync(lock + '/owner.json'), invocationDeadline, 'unbound owner removal');
+            assert.equal(fs.existsSync(lock), true);
+          }
+          const result = await (sharedFull ? fullHd.inspectHdBeforeMaintenance : inspectHdBeforeMaintenance)(admissionManifest, { sourceRoot: roots[0], deadline: invocationDeadline,
           ...(sharedFull ? { scanDeadline: invocationScanDeadline } : {}),
           check: () => { if (authorityChanged) throw Object.assign(Error('Synthetic outer authority drift'), { code: 'SYNTHETIC_AUTHORITY_DRIFT' }); },
           record: (kind, value) => {
@@ -744,6 +896,13 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
             if (kind.startsWith('boundary-') && checkFailure) authorityChanged = true;
             if (kind.startsWith('boundary-') && value.phase === trigger && !triggered) { triggered = true; acquireAtBoundary(); }
             if (kind === 'known-busy') {
+              if (boundEmptyDirectory) {
+                child.send('release-owner-only'); const limit = actualNow() + 2000;
+                while (fs.existsSync(lock + '/owner.json') && actualNow() < limit)
+                  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+                assert.equal(fs.existsSync(lock + '/owner.json'), false);
+                assert.equal(fs.existsSync(lock), true, 'The original bound directory must remain until the cleanup observation');
+              }
               if (name === 'natural-release-unlinked-stat' || ownerUnlinkedCase) cleanupRequested = true;
               const firstStrictAt = records.find(item => item.kind.startsWith('strict-start-')).value.at;
               if (sharedFull) {
@@ -764,9 +923,19 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
               }
               if (mutate === 'path') { moved = m.hdRoot + '.held'; const old = fs.statSync(m.hdRoot); fs.renameSync(m.hdRoot, moved); fs.mkdirSync(m.hdRoot, { mode: 0o700 }); assert.notEqual(fs.statSync(m.hdRoot).ino, old.ino); }
               if (clockJump) { clockOffset += 16000; Date.now = () => actualNow() + clockOffset; }
-              if (!ownerUnlinkedCase && name !== 'owner-file-replaced'
+              if (!boundEmptyDirectory && !ownerUnlinkedCase && name !== 'owner-file-replaced'
                 && !['persistent', 'short-deadline', 'hard-cap', 'natural-release-unlinked-stat'].includes(name)
-                && !['path', 'owner'].includes(mutate)) child.send('release');
+                && !['path', 'owner'].includes(mutate)) {
+                child.send('release');
+                // Legacy positive cases cover a completed natural release,
+                // not the newer shared/full empty-directory admission rule.
+                if (!sharedFull && !reject) waitForOriginalChildCondition(() => !fs.existsSync(lock), value.deadline, 'complete discovery release');
+              }
+            }
+            if (kind === 'known-owner-cleanup' && boundEmptyDirectory) {
+              assert.equal(value.phase, 'bound-owner-absent-empty-directory'); assert.equal(value.originalOwnerBound, true);
+              assert.equal(records.filter(item => item.kind === 'known-owner-cleanup').length, 1, 'The real exclusive recorder permits one cleanup receipt');
+              cleanupObserved = true;
             }
             if (kind === 'natural-release' && name === 'second-strict-collision') acquireAtBoundary();
             if (kind === 'natural-release' && freshScanOver15) { clockOffset += 16000; Date.now = () => actualNow() + clockOffset; }
@@ -774,13 +943,35 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
           assert.equal(result.safe, true, 'The caller must still require the complete original strict result');
           return result;
         };
-        const observedAction = async () => { try { return await action(); } catch (error) { failure = error; throw error; } };
+        const observedAction = async () => { try { return await action(); } catch (error) {
+          failure = error; error.hdAdmissionCase = name;
+          error.hdAdmissionRecords = records.map(({ kind, value }) => ({ kind, at: value.at, phase: value.phase,
+            attempt: value.attempt, error: value.error, originalOwnerBound: value.originalOwnerBound }));
+          throw error;
+        } };
         if (reject) await assert.rejects(observedAction, name === 'owner-file-replaced' ? /Bound discovery owner file identity changed/
           : name === 'owner-file-unlinked-still-present' ? /requires a fresh absence/
           : ownerUnlinkedCase ? /Bound discovery owner path changed while reading/ : undefined);
-        else { const result = await action(); assert.equal(result.safe, true);
+        else { const result = await observedAction(); assert.equal(result.safe, true);
           assert.equal(records.filter(v => v.kind.startsWith('strict-start-')).length, held || trigger ? 2 : 1); }
         if (expectedCode) assert.equal(failure?.code, expectedCode);
+        if (boundEmptyDirectory) {
+          assert.equal(records.filter(item => item.kind === 'known-owner-cleanup').length, 1);
+          assert.ok(laterEmptyDirectoryReads >= 3, 'The same original empty directory must be freshly checked across multiple waiting turns');
+          assert.equal(records.filter(item => item.kind === 'natural-release').length, 1);
+        }
+        if (unboundEmptyDirectory) assert.equal(records.some(item => item.kind === 'known-busy' || item.kind === 'known-owner-cleanup'), false);
+        if (sharedFull && !reject && (held || trigger)) {
+          assert.equal(records.filter(item => item.kind === 'full-discovery-original-identity').length, 1);
+          const interval = records.find(item => item.kind === 'full-discovery-original-identity').value.interval;
+          assert.equal(interval.independentlyPinnedEvents, true); assert.equal(interval.clockTicksPerSecond, fixtureHz);
+          assert.equal(interval.kernelCreationLowerNanoseconds, String(BigInt(info.startTicks) * (1000000000n / BigInt(fixtureHz))));
+          assert.equal(interval.kernelCreationUpperExclusiveNanoseconds, String((BigInt(info.startTicks) + 1n) * (1000000000n / BigInt(fixtureHz))));
+          assert.equal(interval.systemdPostSpawnObservedMicroseconds, unit.ExecMainStartTimestampMonotonic);
+          assert.equal(fullContext.capsule.originalReceipt.hdCompiledCache, undefined);
+          if (postSpawnOffsetUs > 1000000 / fixtureHz)
+            assert.notEqual(info.startTicks, String(BigInt(unit.ExecMainStartTimestampMonotonic) * BigInt(fixtureHz) / 1000000n));
+        }
         if (ownerOver15) { assert.equal(ownerDelayInjected, true); assert.equal(records.some(value => value.kind === 'known-busy'), false); }
         if (sharedFull && staticOver15 && !reject) {
           assert.ok(Date.now() - invokedAt >= 16000);
@@ -803,12 +994,17 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
           completedResults: records.filter(v => v.kind.startsWith('strict-result-')).length, fixtureFinalOnly: true });
         checks.push('bounded-discovery-' + name);
       } finally {
-        fs.lstatSync = originalLstat; fs.openSync = originalOpen; fs.fstatSync = originalFstat;
+        fs.lstatSync = originalLstat; fs.openSync = originalOpen; fs.fstatSync = originalFstat; fs.readdirSync = originalAdmissionReaddir;
         Date.now = actualNow;
         if (moved) { fs.rmdirSync(m.hdRoot); fs.renameSync(moved, m.hdRoot); }
-        child.send('exit'); assert.deepEqual(await exit, { code: 0, signal: null }); assert.equal(childError, '');
+        if (child.connected) child.send('exit');
+        assert.deepEqual(await exit, { code: 0, signal: null }); assert.equal(childError, '');
         fixtureProcessIds.delete(child.pid);
         fs.writeFileSync(path.join(m.hdRoot, pending.key + '.json'), beforeJob); fs.writeFileSync(candidateFile, beforeSource);
+        for (const item of beforeLive) { fs.writeFileSync(item.file, item.bytes); fs.chmodSync(item.file, item.mode); }
+        if (fullContext) { originalContexts.delete(fullContext.originalManifest.runId); fullContexts.delete(admissionManifest);
+          fs.rmSync(fullContext.folder, { recursive: true }); }
+        activeFullContext = null;
         if (fs.existsSync(m.hdRoot + '/unknown.lock')) fs.rmdirSync(m.hdRoot + '/unknown.lock');
         if (name === 'unknown-cache') fs.rmSync(m.hdRoot + '/.runs', { recursive: true });
         if (fs.existsSync(marker)) fs.unlinkSync(marker);
@@ -829,6 +1025,14 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       ['shared-full-collision-source-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'source', reject: true }],
       ['shared-full-collision-runtime-drift-refused', { sharedFull: true, deadlineMs: 60000, mutate: 'unit', reject: true }],
     ];
+    const fullDiscoveryIdentityCases = [
+      ['shared-full-original-proc-and-postspawn-times-independent-old-live-capsule', { sharedFull: true, postSpawnOffsetUs: 16070 }],
+      ['shared-full-original-owner-natural-release-during-provenance', { sharedFull: true, postSpawnOffsetUs: 16070, releaseDuringProvenance: true }],
+      ['shared-full-bound-original-owner-empty-directory-natural-cleanup', { sharedFull: true, postSpawnOffsetUs: 16070, boundEmptyDirectory: true }],
+      ['shared-full-unbound-empty-directory-refused', { sharedFull: true, postSpawnOffsetUs: 16070, unboundEmptyDirectory: true, reject: true }],
+      ...['kernel-start', 'large-kernel-start', 'historical-systemd', 'unknown-hz', 'source-authority', 'capsule-sha', 'capsule-bytes', 'live-source', 'live-mode']
+        .map(identityFault => ['shared-full-exact-identity-' + identityFault + '-refused', { sharedFull: true, postSpawnOffsetUs: 16070, identityFault, reject: true }]),
+    ];
     for (const [name, options] of [
       ['no-collision', { held: false }], ['natural-release', {}], ['natural-release-unlinked-stat', {}],
       ['owner-file-unlinked-stat', {}], ['owner-file-unlinked-inode-changed', { reject: true }],
@@ -843,6 +1047,7 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       ['short-deadline', { reject: true, deadlineMs: 1 }], ['hard-cap', { reject: true, deadlineMs: 60000, clockJump: true }],
       ['second-strict-collision', { reject: true }], ['unknown-cache', { reject: true }], ['five-source-drift', { reject: true }],
       ...fullReleaseClockCases,
+      ...fullDiscoveryIdentityCases,
     ]) await admissionCase(name, options);
 
     const protectedContinuationTimings = [], protectedSources = [...discoverySources,
@@ -1116,13 +1321,16 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 49 + protectedCases.length + fullReleaseClockCases.length);
+    assert.equal(checks.length, 49 + protectedCases.length + fullReleaseClockCases.length + fullDiscoveryIdentityCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,
       supersededCacheProjectionCovered: true, realWholeServiceDrainProven: false,
       processInventoryScope: 'fixture-self-and-owned-children-real-proc', productionProcessAbsenceProven: false,
       compiledCacheConsumerStructureOnly: true, actualOriginalCapsuleProvenByFixture: false,
+      fullDiscoveryConsumerBodiesCovered: true, fullDiscoveryRootAndOriginalCapsuleProducersAdapted: true,
+      fullDiscoverySourceSha256: { 'hd-storage-preflight.mjs': sha(Buffer.from(fullDiscoveryHelperSource)),
+        'full-release-contract.mjs': sha(Buffer.from(contractSource)) },
       unrecordedLegacyArchiveConsumerStructureOnly: true,
       helperSha256: sha(fs.readFileSync(helper)), productionWrites: 0, productionDatabaseUsed: false,
       legacyAllowlistSha256: sha(fs.readFileSync(fileURLToPath(new URL('./hd-legacy-ready-allowlist.mjs', import.meta.url)))),

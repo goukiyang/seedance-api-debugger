@@ -307,7 +307,7 @@ function nativeTailBinding({ candidateRoot, source, runId, uid, receipt, since, 
   assert.equal(m.runId, runId); assert.equal(runtime.proof.runId, runId);
   const now = Date.now(), observedAt = tailContext.observedAt;
   let original, definitions, observationProofSha256 = null;
-  const currentObservation = runtime.candidateSwitchObservation || runtime.candidateReobservation || runtime.candidateObservation;
+  const currentObservation = runtime.candidateSwitchOwnerObservation || runtime.candidateSwitchObservation || runtime.candidateReobservation || runtime.candidateObservation;
   if (currentObservation) {
     const kind = ['main', 'guard'].find(role => m[role]?.root === candidateRoot);
     assert.ok(kind, 'Independent observation must bind an original candidate');

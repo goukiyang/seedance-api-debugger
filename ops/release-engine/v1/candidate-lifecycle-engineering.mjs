@@ -1756,6 +1756,53 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
       assert.deepEqual(runtime.candidateReobservation, priorReference); assert.deepEqual(documents.get(priorReference.proofFile), priorBytes);
       assert.deepEqual(runtime.candidateObservation, retainedObservation); assert.deepEqual(documents.get(observationFile), retainedBytes);
       for (const kind of ['main', 'guard']) assert.deepEqual(documents.get(candidateRecords[kind].receiptFile), retainedReceiptBytes[kind]);
+      {
+        const retainedSwitch = copy(runtime.candidateSwitchObservation), retainedSwitchBytes = Buffer.from(documents.get(retainedSwitch.proofFile));
+        const ownerRepair = { ...processor('/isolated-reader/owner-processor'),
+          originalCandidateSwitchObservationProofSha256: retainedSwitch.proofSha256 };
+        const ownerRepairSha = '1'.repeat(64);
+        runtime.switchOwnerRepair = { proofSha256: ownerRepairSha, proof: ownerRepair };
+        const repairedEvent = { sha256: '2'.repeat(64), value: { kind: 'observation', name: 'switch_owner_repair', sequence: 8,
+          previousSha256: events.at(-1).sha256, owner, value: { proofSha256: ownerRepairSha } } };
+        events.push(repairedEvent);
+        const ownerNow = latest.expiresAt + 1000, ownerHead = repairedEvent.sha256;
+        const ownerFresh = { ...copy(latest), eventHeadSha256: ownerHead,
+          previousObservationProofSha256: retainedSwitch.proofSha256, switchOwnerRepairProofSha256: ownerRepairSha,
+          observedAt: ownerNow - 1, expiresAt: ownerNow - 1 + 1800000,
+          verifier: { file: ownerRepair.processor.root + '/candidate-reuse.mjs', sha256: ownerRepair.processorControllers['candidate-reuse.mjs'],
+            method: 'verifyOriginalSuccess', startedAt: latest.expiresAt + 1, finishedAt: ownerNow - 1 } };
+        const ownerEvent = { sha256: '3'.repeat(64), value: { kind: 'observation', name: 'candidate_switch_owner_observation', sequence: 9,
+          previousSha256: ownerHead, owner, value: null } };
+        events.push(ownerEvent);
+        const publishOwner = (patch = {}) => {
+          const value = { ...copy(ownerFresh), ...patch }, bytes = Buffer.from(JSON.stringify(value)), hash = sha(bytes);
+          const file = taskRoot + '/attempts/' + runId + '/candidate-observation-' + hash + '.json'; put(file, bytes);
+          runtime.candidateSwitchOwnerObservation = { schema: 'sd2-release-candidate-observation-runtime.v1', proofFile: file, proofSha256: hash, proof: value };
+          ownerEvent.value.value = { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: file, proofSha256: hash };
+        };
+        publishOwner();
+        for (const kind of ['main', 'guard']) {
+          assert.deepEqual(copy(freshApi.assertFreshCandidateEvidence(receipts[kind], m, kind, ownerNow)), retainedReceipts[kind]);
+          assert.equal(freshApi.candidateEvidenceExpiresAt(receipts[kind], m, kind, ownerNow), ownerFresh.expiresAt);
+          assert.equal(freshApi.candidateGateObservation(receipts[kind], m, kind, ownerNow).candidateObservation.proofSha256,
+            runtime.candidateSwitchOwnerObservation.proofSha256);
+        }
+        const rejectOwner = patch => { publishOwner(patch); assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', ownerNow)); publishOwner(); };
+        rejectOwner({ previousObservationProofSha256: priorReference.proofSha256 });
+        rejectOwner({ switchOwnerRepairProofSha256: '4'.repeat(64) });
+        rejectOwner({ verifier: { ...ownerFresh.verifier, startedAt: latest.expiresAt - 1 } });
+        rejectOwner({ verifier: { ...ownerFresh.verifier, file: latest.verifier.file, sha256: latest.verifier.sha256 } });
+        ownerEvent.value.owner = { token: 'different-owner' };
+        assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', ownerNow)); ownerEvent.value.owner = owner;
+        events.push({ ...ownerEvent, sha256: '5'.repeat(64) });
+        assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', ownerNow)); events.pop();
+        assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', ownerFresh.expiresAt), /expired/);
+        assert.deepEqual(runtime.candidateSwitchObservation, retainedSwitch); assert.deepEqual(documents.get(retainedSwitch.proofFile), retainedSwitchBytes);
+        delete runtime.candidateSwitchOwnerObservation;
+        assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', ownerNow), /expired/);
+        delete runtime.switchOwnerRepair; events.pop(); events.pop();
+        add('candidate_owner_observation_actual_consumers_retain_expired_d3_and_require_new_exact_owner_repair_current_verifier_journal_owner_and_real_expiry');
+      }
       delete runtime.candidateSwitchObservation;
       assert.throws(() => freshApi.assertCandidateObservation(receipts.main, m, 'main', switchNow), /expired/);
       delete runtime.switchAdmissionRepair; events.pop(); events.pop();
@@ -1893,7 +1940,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -1902,10 +1949,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   const m = { privateSha256: sets.original.proof.processorControllers };
   const runtime = { proof: sets.tail.proof, retry: { proof: sets.retry.proof }, reader: { proof: sets.reader.proof },
     armPairRepair: { proof: sets.pair.proof }, armProcessorRepair: { proof: sets.processor.proof },
-    switchAdmissionRepair: { proof: sets.switch.proof }, switchTypedRepair: { proof: sets.typed.proof }, switchScanRepair: { proof: sets.scan.proof },
+    switchAdmissionRepair: { proof: sets.switch.proof }, switchTypedRepair: { proof: sets.typed.proof }, switchScanRepair: { proof: sets.scan.proof }, switchOwnerRepair: { proof: sets.owner.proof },
     candidateObservation: { proof: { observedAt: 1792796185000, expiresAt: 1792797985000 } } };
   const originalRuntime = copy(runtime), reads = [];
-  let activeBytes = sets.scan.bytes, actualFiles = [...files], selectedRuntime = runtime;
+  let activeBytes = sets.owner.bytes, actualFiles = [...files], selectedRuntime = runtime;
   const namespace = { assert: sameAssert, path, JSON, sha, directory,
     guardBuildTailRuntime: value => { assert.equal(value, m); return selectedRuntime; }, engineDirectory: () => '/isolated-trusted/original-engine',
     fs: { readdirSync: root => { assert.equal(root, directory); return actualFiles; } },
@@ -1916,16 +1963,16 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     + functionNode('candidate-evidence.mjs', 'candidateCompatibilityDirectory').node.getText().replace(/^export /, '')
     + '\nglobalThis.verify=trustedCode;globalThis.compatibility=candidateCompatibilityDirectory;', namespace);
   namespace.verify(m, runtime); assert.deepEqual(reads.sort(), [...files].sort()); assert.deepEqual(runtime, originalRuntime);
-  assert.equal(namespace.compatibility(m), sets.scan.proof.processor.root);
+  assert.equal(namespace.compatibility(m), sets.owner.proof.processor.root);
   activeBytes = sets.reader.bytes; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
-  activeBytes = sets.scan.bytes;
-  const badDigest = copy(runtime); badDigest.switchScanRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
+  activeBytes = sets.owner.bytes;
+  const badDigest = copy(runtime); badDigest.switchOwnerRepair.proof.processor.controllerSetSha256 = '0'.repeat(64);
   assert.throws(() => namespace.verify(m, badDigest));
   actualFiles = [...files, 'unexpected.mjs']; assert.throws(() => namespace.verify(m, runtime)); actualFiles = [...files];
-  const corrupt = { ...sets.scan.bytes, 'release.mjs': Buffer.from('changed private source') };
+  const corrupt = { ...sets.owner.bytes, 'release.mjs': Buffer.from('changed private source') };
   activeBytes = corrupt; assert.throws(() => namespace.verify(m, runtime), /Private release code changed/);
   const fallback = copy(runtime);
-  for (const [remove, selected] of [['switchScanRepair', 'typed'], ['switchTypedRepair', 'switch'], ['switchAdmissionRepair', 'processor'],
+  for (const [remove, selected] of [['switchOwnerRepair', 'scan'], ['switchScanRepair', 'typed'], ['switchTypedRepair', 'switch'], ['switchAdmissionRepair', 'processor'],
     ['armProcessorRepair', 'pair'], ['armPairRepair', 'reader'], ['reader', 'retry'], ['retry', 'tail']]) {
     delete fallback[remove]; activeBytes = sets[selected].bytes; selectedRuntime = fallback; namespace.verify(m, fallback);
     assert.equal(namespace.compatibility(m), sets[selected].proof.processor.root);
@@ -1963,6 +2010,10 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     approvalFile: m.stage + '/hd-release-safety-approval-switch-scan-r01.json' } };
   assert.equal(namespace.select(m), runtime.switchScanRepair.proof.approvalFile);
   assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
+  runtime.switchOwnerRepair = { proof: { ...copy(runtime.switchScanRepair.proof),
+    approvalFile: m.stage + '/hd-release-safety-approval-switch-owner-r01.json' } };
+  assert.equal(namespace.select(m), runtime.switchOwnerRepair.proof.approvalFile);
+  assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
   for (const name of ['privateHdAdmissionBounds', 'sharedHdAdmissionBounds']) {
     const { parsed, node } = functionNode('switch.mjs', name);
     const files = node.body.statements.filter(statement => ts.isVariableStatement(statement))
@@ -1971,8 +2022,9 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
     const properties = files[0].initializer.properties.filter(property => property.name?.getText(parsed) === 'approval');
     assert.equal(properties.length, 1); assert.equal(properties[0].initializer.getText(parsed), 'hdMaintenanceApprovalFile(m)');
     const actual = vm.runInNewContext(properties[0].initializer.getText(parsed), { m, hdMaintenanceApprovalFile: namespace.select });
-    assert.equal(actual, runtime.switchScanRepair.proof.approvalFile);
+    assert.equal(actual, runtime.switchOwnerRepair.proof.approvalFile);
   }
+  delete runtime.switchOwnerRepair; assert.equal(namespace.select(m), runtime.switchScanRepair.proof.approvalFile);
   delete runtime.switchScanRepair; assert.equal(namespace.select(m), runtime.switchTypedRepair.proof.approvalFile);
   delete runtime.switchTypedRepair; assert.equal(namespace.select(m), runtime.switchAdmissionRepair.proof.approvalFile);
   assert.equal(namespace.recoverySelect(m), runtime.switchAdmissionRepair.proof.oldGuardApprovalFile);
@@ -2134,6 +2186,12 @@ console.log(${JSON.stringify(image ? 'Image recovery build gate verified (native
     assert.match(switchVerified, /Image recovery build gate verified/); assert.match(switchVerified, /Pricing policy build gate verified/);
     assert.throws(() => namespace.nativeVerify({ ...options, tailContext: reobservedContext }));
     assert.throws(() => namespace.nativeVerify({ ...options, tailContext: observedContext }));
+    runtime.candidateSwitchOwnerObservation = { ...runtime.candidateSwitchObservation, proofSha256: 'f'.repeat(64) };
+    const ownerObservedContext = { ...observedContext, candidateObservation: runtime.candidateSwitchOwnerObservation };
+    assert.match(namespace.nativeVerify({ ...options, tailContext: ownerObservedContext }), /Pricing policy build gate verified/);
+    assert.throws(() => namespace.nativeVerify({ ...options, tailContext: switchObservedContext }));
+    delete runtime.candidateSwitchOwnerObservation;
+    add('native_owner_observation_' + kind + '_selects_exact_new_reference_and_retains_prior_switch_proof');
     delete runtime.candidateSwitchObservation;
     assert.match(namespace.nativeVerify({ ...options, tailContext: reobservedContext }), /Pricing policy build gate verified/);
     add('native_switch_observation_' + kind + '_selects_exact_latest_reference_and_refuses_both_earlier_references');

@@ -9,6 +9,9 @@ import { APPROVED_HD_LEGACY_READY, APPROVED_HD_HISTORICAL_VERSIONS } from './hd-
 import { inspectRetiredHdCaches } from './retired-hd-cache.mjs';
 import { isSharedEngine, assertSharedEngineContext } from './engine-context.mjs';
 import { readTypedFile, assertTypedFileUnchanged } from './typed-files.mjs';
+import { readFullLiveSourceFiles, releaseDependencyRoot } from './full-release-contract.mjs';
+import { assertSwitchAdmissionRepair } from './candidate-evidence.mjs';
+import { readOriginalSuccess } from './candidate-reuse.mjs';
 
 const PROJECT = '/data/video-api-debugger';
 const FORK = '/releases/5a59c00aaba195c42d90c612a37224ad59b12ee0/storage/hd-derivatives';
@@ -21,6 +24,7 @@ const stable = value => JSON.stringify(value, (_key, item) => item && typeof ite
 const call = (bin, args, options = {}) => execFileSync(bin, args, { encoding: 'utf8', timeout: 30000,
   maxBuffer: 16 * 1024 * 1024, env: { PATH: SYSTEM_PATH, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TZ: 'UTC' }, ...options }).trim();
 const DISCOVERY_ADMISSION = Symbol('private-before-maintenance-discovery-observation');
+const FULL_DISCOVERY_AUTHORITY = Symbol('shared-full-discovery-authority');
 const COMPILED_CACHE_PROOFS = new WeakMap();
 const LEGACY_EXECUTION_SOURCE_PROOFS = new WeakMap();
 const LEGACY_HD_WRITER_SHA256 = '7442f68dd8ce7db49390293e722107c2bc57b72ea43976541427978076858fbf';
@@ -33,6 +37,109 @@ class DiscoveryOwnerReleaseCandidate extends Error {
 const DISCOVERY_SOURCES = ['src/lib/media/hd-derivatives.ts', 'src/lib/media/hd-discovery.ts',
   'src/lib/media/hd-resource-state.ts', 'scripts/process-hd-derivatives.ts', 'src/lib/media/hd-storage-root.ts'];
 const admissionStat = s => Object.fromEntries(['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'uid', 'gid', 'mode', 'nlink'].map(k => [k, s[k]]));
+const sharedFullDiscovery = m => isSharedEngine(m) && Boolean(m.fullRelease) && !m.protectedIncrement && m.privateMultiviewInstall === true;
+
+function readFullDiscoveryAuthority(m, l, admission) {
+  const holder = admission[FULL_DISCOVERY_AUTHORITY];
+  assert.ok(holder, 'Full discovery identity requires the bounded admission entry');
+  const identity = { live: m.live.hd, main: m.main, guard: m.guard, full: m.fullRelease.liveRoles.hd,
+    capsule: m.fullRelease.dependencyCapsule };
+  if (!holder.value) {
+    admission.remaining();
+    // This is the existing root/journal/full-controller verifier. A manifest
+    // field or an unsealed current path cannot substitute for its historical PID.
+    const repair = assertSwitchAdmissionRepair(m), historical = repair?.liveSnapshot;
+    assert.ok(historical?.services?.hd && historical.sources?.hd, 'Full discovery lacks its verified original HD runtime/source observation');
+    const original = structuredClone(historical.services.hd);
+    assert.equal(releaseDependencyRoot(m), m.live.hd.root);
+    const verified = COMPILED_CACHE_PROOFS.get(m);
+    assert.ok(verified, 'Full discovery requires the original successful capsule verifier');
+    const snapshots = [], archives = [];
+    const bind = (file, category, expectedSha256) => {
+      admission.remaining();
+      const read = readTypedFile({ file, category, expectedUid: l.uid, expectedSha256,
+        maximumBytes: category === 'receipt' ? 128 * 1024 * 1024 : 32 * 1024 * 1024 });
+      snapshots.push(read.snapshot); return read;
+    };
+    // Hash the live archive through the shared full-release reader while also
+    // retaining the same archive entity across that read and every later wait.
+    const liveArchive = m.live.hd.sourceProof.archive, archiveBefore = admissionStat(fs.lstatSync(liveArchive));
+    const live = readFullLiveSourceFiles(m, DISCOVERY_SOURCES, 'hd');
+    assert.deepEqual(admissionStat(fs.lstatSync(liveArchive)), archiveBefore);
+    assert.equal(live.source, historical.sources.hd.source); assert.equal(live.root, historical.sources.hd.root);
+    assert.equal(live.sourceManifestSha256, historical.sources.hd.sourceManifestSha256);
+    const capsuleRef = m.live.hd.sourceProof.compiledCapsule;
+    const capsule = JSON.parse(bind(capsuleRef.file, 'receipt', capsuleRef.sha256).bytes);
+    assert.ok(['sd2-immutable-successful-build.v1', 'sd2-immutable-successful-build-tail.v1'].includes(capsule.schema));
+    assert.equal(capsule.kind, capsuleRef.kind); assert.equal(capsule.sourceRun, capsuleRef.sourceRun);
+    assert.equal(capsule.originalSourceManifestSha256, live.sourceManifestSha256);
+    assert.equal(capsule.originalReceipt.source, m.live.hd.source); assert.equal(capsule.originalReceipt.build, m.live.hd.build);
+    assert.equal(capsule.originalTimesChanged, false); assert.equal(capsule.newCompilationClaimed, false);
+    const originalManifest = JSON.parse(bind(path.dirname(capsuleRef.file) + '/manifest.json', 'root_control', capsule.originalManifestSha256).bytes);
+    for (const [key, expected] of Object.entries({ root: m.live.hd.root, source: m.live.hd.source,
+      sourceManifest: m.live.hd.sourceProof.sourceManifest, archive: m.live.hd.sourceProof.archive }))
+      assert.equal(originalManifest[capsuleRef.kind][key], expected, 'Original HD capsule source authority changed: ' + key);
+    // R09's real successful capsule predates hdCompiledCache. Its original
+    // verifier still checks +i, the original receipt/manifest/controller bytes;
+    // no later compiler descriptor is fabricated for that historical capsule.
+    assert.deepEqual(readOriginalSuccess(originalManifest, capsuleRef.kind), capsule);
+    admission.remaining();
+    const sources = {};
+    for (const [role, c] of [['live', { ...m.live.hd.sourceProof, source: m.live.hd.source, root: m.live.hd.root }],
+      ['main', m.main], ['guard', m.guard]]) {
+      const descriptor = verified.descriptors.find(value => value.source === c.source && value.sourceRoot === c.root
+        && value.sourceManifest === c.sourceManifest && value.archive === c.archive);
+      if (role !== 'live') assert.ok(descriptor, 'Discovery candidate lacks its own verified successful capsule: ' + role);
+      const manifestRead = bind(c.sourceManifest, 'root_control', role === 'live' ? live.sourceManifestSha256 : undefined);
+      const manifest = JSON.parse(manifestRead.bytes);
+      assert.equal(manifest.project, 'video-api-debugger'); assert.equal(manifest.source, c.source);
+      assert.equal(fs.realpathSync(c.archive), c.archive);
+      const archive = admissionStat(fs.lstatSync(c.archive));
+      assert.ok(fs.lstatSync(c.archive).isFile() && archive.uid === 0 && archive.nlink === 1 && !(archive.mode & 0o022));
+      if (role !== 'live') assert.ok(verified.bindings.some(value => value.file === c.archive && stable(value.stat) === stable(archive)),
+        'Discovery candidate archive differs from its successful capsule verifier');
+      archives.push({ file: c.archive, stat: archive });
+      for (const file of DISCOVERY_SOURCES) {
+        assert.match(manifest.files?.[file] || '', HASH);
+        const current = bind(c.root + '/' + file, 'app', manifest.files[file]);
+        if (role === 'live') {
+          assert.equal(current.snapshot.sha256, live.sourceFiles[file]);
+          const sealed = capsule.snapshot.sourceFiles[file]; assert.equal(sealed?.sha256, current.snapshot.sha256);
+          for (const [key, value] of Object.entries(current.snapshot.identity)) assert.equal(sealed[key], value,
+            'Original HD source entity changed: ' + file + ':' + key);
+          sources[file] = current.snapshot.sha256;
+        }
+      }
+    }
+    holder.value = { identity: structuredClone(identity), original, sources, snapshots, archives, verified };
+  }
+  const value = holder.value; assert.deepEqual(identity, value.identity, 'Full discovery authority changed during admission');
+  assert.equal(COMPILED_CACHE_PROOFS.get(m), value.verified);
+  for (const snapshot of value.snapshots) { admission.remaining(); assertTypedFileUnchanged(snapshot); }
+  for (const item of [...value.archives, ...value.verified.bindings]) {
+    admission.remaining(); assert.equal(fs.realpathSync(item.file), item.file);
+    assert.deepEqual(admissionStat(fs.lstatSync(item.file)), item.stat, 'Verified discovery source/capsule entity changed');
+  }
+  admission.remaining(); return value;
+}
+
+function assertFullDiscoveryRuntime(runtime, original, hz) {
+  assert.ok(Number.isSafeInteger(hz) && hz > 0 && 1000000000 % hz === 0, 'Unknown or unsupported kernel clock tick frequency');
+  assert.match(original.kernelStartTicks || '', /^[1-9]\d*$/);
+  assert.equal(runtime.startTicks, original.kernelStartTicks, 'Discovery owner kernel start differs from the sealed original PID');
+  for (const key of ['Id', 'MainPID', 'ControlPID', 'InvocationID', 'ExecMainStartTimestampMonotonic', 'ActiveState', 'SubState', 'WorkingDirectory'])
+    assert.equal(runtime.state[key], original[key], 'Discovery owner original systemd identity changed: ' + key);
+  assert.equal(runtime.cwd, original.cwd);
+  // /proc uses nsec_to_clock_t(start_boottime): the exact creation interval is
+  // [ticks/HZ, (ticks+1)/HZ). systemd v255 records its own timestamp after
+  // posix_spawn_wrapper/cgroup attachment (execute.c:411-428,1648-1655), so it
+  // is a distinct, independently pinned event, never an equality or +/-1 test.
+  const tickNs = 1000000000n / BigInt(hz), lower = BigInt(runtime.startTicks) * tickNs, upper = lower + tickNs;
+  assert.match(runtime.state.ExecMainStartTimestampMonotonic, /^[1-9]\d*$/);
+  return { clockTicksPerSecond: hz, kernelCreationLowerNanoseconds: String(lower), kernelCreationUpperExclusiveNanoseconds: String(upper),
+    kernelClock: 'CLOCK_BOOTTIME', systemdClock: 'CLOCK_MONOTONIC',
+    systemdPostSpawnObservedMicroseconds: runtime.state.ExecMainStartTimestampMonotonic, independentlyPinnedEvents: true };
+}
 
 function discoveryTreeSnapshot(m, admission) {
   const trees = {};
@@ -97,45 +204,97 @@ function readDiscoveryOwner(m, l, admission, bound = null) {
   assert.equal(fs.realpathSync(lock), lock);
   const before = fs.lstatSync(lock); assert.ok(before.isDirectory() && !before.isSymbolicLink());
   assert.equal(before.uid, l.uid); assert.equal(before.gid, l.gid); assert.equal(before.mode & 0o7777, 0o755);
-  assert.deepEqual(fs.readdirSync(lock), ['owner.json']);
-  const ownerFile = lock + '/owner.json', ownerStat = fs.lstatSync(ownerFile);
+  const names = fs.readdirSync(lock), ownerFile = lock + '/owner.json';
+  if (sharedFullDiscovery(m) && bound && names.length === 0) {
+    assert.equal(bound.lock, lock);
+    const sameOriginalDirectory = current => {
+      assert.ok(current.isDirectory() && !current.isSymbolicLink());
+      for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink']) assert.equal(current[key], bound.directory[key],
+        'Bound empty discovery directory identity changed: ' + key);
+    };
+    sameOriginalDirectory(before);
+    let absent = false;
+    try { fs.lstatSync(ownerFile); } catch (error) { if (error.code !== 'ENOENT') throw error; absent = true; }
+    assert.equal(absent, true, 'Bound empty discovery directory requires fresh original owner absence');
+    assert.equal(fs.realpathSync(lock), lock); sameOriginalDirectory(fs.lstatSync(lock));
+    assert.deepEqual(fs.readdirSync(lock), [], 'A replacement discovery owner arrived during cleanup');
+    sameOriginalDirectory(fs.lstatSync(lock)); admission.check(); admission.remaining();
+    throw Object.assign(new DiscoveryOwnerReleaseCandidate(bound), { cleanupStage: 'bound-owner-absent-empty-directory' });
+  }
+  assert.deepEqual(names, ['owner.json']);
+  const ownerStat = fs.lstatSync(ownerFile);
   assert.equal(fs.realpathSync(ownerFile), ownerFile); assert.equal(ownerStat.uid, l.uid); assert.equal(ownerStat.gid, l.gid);
   assert.equal(ownerStat.mode & 0o7777, 0o600);
-  const bytes = bound ? readBoundDiscoveryOwnerBytes(ownerFile, bound) : readRegular(ownerFile, 4096), owner = JSON.parse(bytes);
+  const ownerProof = bound || (sharedFullDiscovery(m) ? { ownerFile: admissionStat(ownerStat) } : null);
+  const bytes = ownerProof ? readBoundDiscoveryOwnerBytes(ownerFile, ownerProof) : readRegular(ownerFile, 4096), owner = JSON.parse(bytes);
   assert.equal(owner.pid, m.live.hd.pid); assert.equal(owner.host, os.hostname());
   assert.match(owner.token || '', /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
   const runtime = readDiscoveryRuntime(m, l, admission);
-  assert.deepEqual(admissionStat(fs.lstatSync(ownerFile)), admissionStat(ownerStat));
-  assert.deepEqual(admissionStat(fs.lstatSync(lock)), admissionStat(before));
+  try {
+    assert.deepEqual(admissionStat(fs.lstatSync(ownerFile)), admissionStat(ownerStat));
+    assert.deepEqual(admissionStat(fs.lstatSync(lock)), admissionStat(before));
+  } catch (error) {
+    if (!sharedFullDiscovery(m) || error.code !== 'ENOENT') throw error;
+    // The complete original owner was already read before provenance checks.
+    // Its own cleanup is allowed only with a fresh absence, or its same empty
+    // directory. The existing natural-release path still performs one strict
+    // fresh inspection; a new directory/owner never borrows this observation.
+    let absent = false;
+    try { fs.lstatSync(ownerFile); } catch (missing) { if (missing.code !== 'ENOENT') throw missing; absent = true; }
+    assert.equal(absent, true, 'Full discovery cleanup requires fresh original owner absence');
+    let directory;
+    try { directory = fs.lstatSync(lock); } catch (missing) { if (missing.code !== 'ENOENT') throw missing; }
+    if (directory) {
+      for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink']) assert.equal(directory[key], before[key]);
+      assert.deepEqual(fs.readdirSync(lock), []);
+    }
+  }
   admission.check(); admission.remaining();
   return { lock, directory: admissionStat(before), ownerFile: admissionStat(ownerStat), ownerRecordSha256: sha(bytes), tokenSha256: sha(owner.token), ...runtime };
 }
 function readDiscoveryRuntime(m, l, admission) {
-  const pid = m.live.hd.pid;
-  const keys = ['MainPID', 'ControlPID', 'InvocationID', 'ExecMainStartTimestampMonotonic', 'ControlGroup', 'ActiveState', 'SubState', 'WorkingDirectory'];
-  const state = l.isolated ? structuredClone(m.hdAdmissionFixtureUnit) : Object.fromEntries(call('systemctl', ['show', m.live.hd.unit,
-    ...keys.flatMap(k => ['-p', k])], { timeout: admission.remaining() }).split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
-  for (const k of keys) assert.ok(Object.hasOwn(state, k), 'Discovery owner unit field missing: ' + k);
-  assert.equal(state.MainPID, String(pid)); assert.equal(state.ControlPID, '0');
-  assert.equal(state.InvocationID, m.live.hd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, m.live.hd.execMainStartTimestampMonotonic);
-  assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.WorkingDirectory, m.live.hd.root);
-  assert.equal(state.ControlGroup, '/system.slice/' + m.live.hd.unit);
-  const stat = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'), fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
-  assert.ok(!['Z', 'X', 'x'].includes(fields[0])); assert.match(fields[19], /^\d+$/);
-  assert.equal(Number(fields[2]), pid, 'Discovery owner process group changed');
-  const hz = Number(call('getconf', ['CLK_TCK'], { timeout: admission.remaining() })); assert.ok(Number.isSafeInteger(hz) && hz > 0);
-  assert.equal(fields[19], String(Math.floor(Number(state.ExecMainStartTimestampMonotonic) * hz / 1000000)));
-  assert.equal(fs.realpathSync('/proc/' + pid + '/cwd'), m.live.hd.root);
-  const cgroup = fs.readFileSync('/proc/' + pid + '/cgroup', 'utf8').trim();
-  if (!l.isolated) assert.equal(cgroup, '0::' + state.ControlGroup);
-  else assert.equal(cgroup, m.hdAdmissionFixtureCgroup);
-  const sources = {};
-  for (const file of DISCOVERY_SOURCES) {
-    admission.remaining(); const live = sha(readRegular(m.live.hd.root + '/' + file)), candidate = sha(readRegular(m.main.root + '/' + file));
-    assert.equal(live, candidate, 'Discovery owner source differs from the current reviewed candidate: ' + file); sources[file] = live;
+  const full = sharedFullDiscovery(m), pid = m.live.hd.pid;
+  const keys = [...(full ? ['Id'] : []), 'MainPID', 'ControlPID', 'InvocationID', 'ExecMainStartTimestampMonotonic', 'ControlGroup', 'ActiveState', 'SubState', 'WorkingDirectory'];
+  const observe = () => {
+    admission.remaining();
+    const state = l.isolated ? structuredClone(m.hdAdmissionFixtureUnit) : Object.fromEntries(call('systemctl', ['show', m.live.hd.unit,
+      ...keys.flatMap(k => ['-p', k])], { timeout: admission.remaining() }).split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
+    for (const k of keys) assert.ok(Object.hasOwn(state, k), 'Discovery owner unit field missing: ' + k);
+    assert.equal(state.MainPID, String(pid)); assert.equal(state.ControlPID, '0');
+    assert.equal(state.InvocationID, m.live.hd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, m.live.hd.execMainStartTimestampMonotonic);
+    assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.WorkingDirectory, m.live.hd.root);
+    assert.equal(state.ControlGroup, '/system.slice/' + m.live.hd.unit);
+    const stat = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'), fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    assert.ok(!['Z', 'X', 'x'].includes(fields[0])); assert.match(fields[19], /^\d+$/);
+    assert.equal(Number(fields[2]), pid, 'Discovery owner process group changed');
+    const cwd = fs.realpathSync('/proc/' + pid + '/cwd'); assert.equal(cwd, m.live.hd.root);
+    const cgroup = fs.readFileSync('/proc/' + pid + '/cgroup', 'utf8').trim();
+    if (!l.isolated) assert.equal(cgroup, '0::' + state.ControlGroup);
+    else assert.equal(cgroup, m.hdAdmissionFixtureCgroup);
+    admission.remaining();
+    return { pid, host: os.hostname(), startTicks: fields[19], processGroup: Number(fields[2]), cgroup, cwd, state };
+  };
+  const before = observe(), hz = Number(call('getconf', ['CLK_TCK'], { timeout: admission.remaining() }));
+  assert.ok(Number.isSafeInteger(hz) && hz > 0);
+  let sources;
+  if (full) {
+    const authority = readFullDiscoveryAuthority(m, l, admission);
+    const interval = assertFullDiscoveryRuntime(before, authority.original, hz);
+    const after = observe(); assertFullDiscoveryRuntime(after, authority.original, hz);
+    assert.deepEqual(after, before, 'Discovery process identity changed across its source/provenance observation');
+    const holder = admission[FULL_DISCOVERY_AUTHORITY];
+    if (!holder.recorded) { holder.recorded = true; holder.record(interval); }
+    sources = authority.sources;
+  } else {
+    assert.equal(before.startTicks, String(Math.floor(Number(before.state.ExecMainStartTimestampMonotonic) * hz / 1000000)));
+    sources = {};
+    for (const file of DISCOVERY_SOURCES) {
+      admission.remaining(); const live = sha(readRegular(m.live.hd.root + '/' + file)), candidate = sha(readRegular(m.main.root + '/' + file));
+      assert.equal(live, candidate, 'Discovery owner source differs from the current reviewed candidate: ' + file); sources[file] = live;
+    }
   }
   admission.remaining();
-  return { pid, host: os.hostname(), startTicks: fields[19], processGroup: Number(fields[2]), cgroup, state, sources };
+  const { cwd: _cwd, ...runtime } = before; return { ...runtime, sources };
 }
 
 export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scanDeadline, check, waitBudgetMs = 15000, record } = {}) {
@@ -157,7 +316,7 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
     prior.remaining(); record('strict-result', { at: Date.now(), result }); return result;
   }
   const startedAt = Date.now(); assert.ok(Number.isSafeInteger(deadline) && typeof check === 'function' && typeof record === 'function');
-  const fullReleaseClock = isSharedEngine(m) && Boolean(m.fullRelease) && !m.protectedIncrement && m.privateMultiviewInstall === true;
+  const fullReleaseClock = sharedFullDiscovery(m);
   if (fullReleaseClock) {
     assert.ok(Number.isSafeInteger(scanDeadline), 'The shared full release requires its real outer scan deadline');
     assert.ok(Number.isSafeInteger(waitBudgetMs) && waitBudgetMs > 0 && waitBudgetMs <= 15000);
@@ -179,6 +338,10 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
     return waitAdmission;
   };
   const admission = { [DISCOVERY_ADMISSION]: true, deadline, check,
+    ...(fullReleaseClock ? { [FULL_DISCOVERY_AUTHORITY]: { record(interval) {
+      record('full-discovery-original-identity', { at: Date.now(), interval, originalKernelStartPreserved: true,
+        originalSystemdTimePreserved: true, sourceAuthority: 'verified-original-live-capsule-and-own-candidate-manifests' });
+    } } } : {}),
     remaining() {
       if (fullReleaseClock) {
         try { check(); } catch (error) { error.hdAdmissionFatal = true; throw error; }
@@ -197,7 +360,9 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
       // The first confirmed collision starts the separate waiting clock before
       // owner/source/metadata reads; static scanning never spends this budget.
       const waiting = collisionAdmission();
-      const proof = readDiscoveryOwner(m, l, waiting);
+      let proof;
+      try { proof = readDiscoveryOwner(m, l, waiting); }
+      catch (error) { if (fullReleaseClock) error.hdAdmissionFatal = true; throw error; }
       assert.ok(initialSnapshot, 'Discovery wait lacks an unchanged pre-inspection metadata snapshot');
       assert.deepEqual(discoveryTreeSnapshot(m, waiting), initialSnapshot, 'HD task, cache, control or path identity changed; do not wait into safety');
       if (fullReleaseClock) waiting.remaining();
@@ -232,6 +397,7 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
   record('known-busy', { at: Date.now(), phase: busy.phase, proof: busy.proof, initialSnapshot, maximumMs: 15000, deadline: waiting.deadline,
     ...(fullReleaseClock ? { waitStartedAt, scanDeadline: deadline } : {}) });
   const originalRuntime = Object.fromEntries(['pid', 'host', 'startTicks', 'processGroup', 'cgroup', 'state', 'sources'].map(k => [k, busy.proof[k]]));
+  let cleanupRecordedFor = null;
   const lockEntry = () => {
     try { return fs.lstatSync(busy.proof.lock); }
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
@@ -259,6 +425,13 @@ export async function inspectHdBeforeMaintenance(m, { sourceRoot, deadline, scan
       catch (cleanup) {
         if (cleanup.code !== 'ENOENT') throw cleanup;
         assert.equal(lockEntry(), null); break;
+      }
+      if (fullReleaseClock && error.cleanupStage === 'bound-owner-absent-empty-directory') {
+        if (cleanupRecordedFor) assert.equal(cleanupRecordedFor, busy.proof, 'A different discovery owner cannot reuse the cleanup observation');
+        else {
+          record('known-owner-cleanup', { at: Date.now(), phase: error.cleanupStage, originalOwnerBound: true, forced: false });
+          cleanupRecordedFor = busy.proof;
+        }
       }
       assert.deepEqual(readDiscoveryRuntime(m, l, waiting), originalRuntime);
     }
