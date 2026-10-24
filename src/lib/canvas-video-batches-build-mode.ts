@@ -1,1 +1,1 @@
-export const CANVAS_VIDEO_BATCH_WRITES_ENABLED: boolean = false;
+export const CANVAS_VIDEO_BATCH_WRITES_ENABLED: boolean = true;
