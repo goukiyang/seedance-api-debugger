@@ -58,6 +58,22 @@ const ARM_PROCESSOR_REPAIR_SCHEMA = 'sd2-release-arm-processor-repair.v1';
 const ARM_PROCESSOR_REPAIR_PROOF = 'sd2-release-arm-processor-repair-proof.v1';
 const SWITCH_ADMISSION_REPAIR_SCHEMA = 'sd2-release-switch-admission-repair.v1';
 const SWITCH_ADMISSION_REPAIR_PROOF = 'sd2-release-switch-admission-repair-proof.v1';
+const SWITCH_WINDOW_REPAIR_SCHEMA = 'sd2-release-switch-window-repair.v1';
+const SWITCH_WINDOW_REPAIR_PROOF = 'sd2-release-switch-window-repair-proof.v1';
+export const SWITCH_WINDOW_REPAIR_ORIGIN = Object.freeze({
+  terminalEventSha256: '1bb7041e9624c40236c0ee0b3110523c0197946ecc6af7303a329f70e908c130',
+  phaseResultEventSha256: 'c792693f7fb8f35c855b864ee5f10664665882d38db80fcc9b34151cdb1c50a7',
+  failureIntentSha256: 'df5941a79b17e2fa8e87c0f20af24492d0635133d69c5cf5191a6b989dc958da',
+  switchOwnerRepairProofSha256: '236b62822b4c402071350ab56952999c11ebb60ddceee9f40389db1b9a096281',
+  candidateSwitchOwnerObservationProofSha256: '497f232ca063ce15c771ca8291f0b4a48f80a7c6e5c91549f59e570b18c6ad9c',
+  predecessorControllerSetSha256: 'c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938',
+  refusalLogSha256: 'd353163ec0da6b834053ac4313d63a935e5019073c817ec0924c3c453c5b1440',
+  originalHdBeforeSha256: 'ce9de99b4ea5be0795a62b678c8e5d7b0fdb4b871888df17fc87abd25a374279',
+  originalNginxMasterSha256: '6904884fbd67d55b0e77b417a32c8fda7d974f7b1696fc7bf90d4c65cd409083',
+});
+const SWITCH_WINDOW_REPAIR_CONTROLLERS = Object.freeze(['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs',
+  'switch.mjs', 'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs']);
+const SWITCH_WINDOW_REFUSAL_STACK = "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window.json'\n- '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window-evidence/46b933f427869b3f2a138558eac4a44bb22ac9abb361f5894c27053cc6102dea.json'\n    at assertSwitchAdmissionWindows (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:903:67)\n    at file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:1286:11\n    at async locked (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:801:16)\n    at async releaseEntryCli (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/release-entry.mjs:3461:62)";
 const SWITCH_OWNER_REPAIR_SCHEMA = 'sd2-release-switch-owner-repair.v1';
 const SWITCH_OWNER_REPAIR_PROOF = 'sd2-release-switch-owner-repair-proof.v1';
 export const SWITCH_OWNER_REPAIR_ORIGIN = Object.freeze({
@@ -750,7 +766,7 @@ export function assertGuardBuildTailPhase(phase, state) {
 }
 
 function readGuardBuildTailProof(batch, batchFile, loaded, phase,
-  { retryAdmission = false, readerAdmission = false, armPairAdmission = false, armProcessorAdmission = false, switchAdmission = false, switchTypedAdmission = false, switchScanAdmission = false, switchOwnerAdmission = false } = {}) {
+  { retryAdmission = false, readerAdmission = false, armPairAdmission = false, armProcessorAdmission = false, switchAdmission = false, switchTypedAdmission = false, switchScanAdmission = false, switchOwnerAdmission = false, switchWindowAdmission = false } = {}) {
   const binding = loaded.derivedState.guardBuildTail; assert.ok(binding);
   const retryBinding = loaded.derivedState.guardBuildTailRetry;
   const readerEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'reader_successor');
@@ -760,6 +776,9 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase,
   const typedEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_typed_repair');
   const scanEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_scan_repair');
   const ownerEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_owner_repair');
+  const windowEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_window_repair');
+  assert.ok(windowEvents.length <= 1, 'Only the exact immutable window path failure has this one repair');
+  if (switchWindowAdmission) assert.equal(windowEvents.length, 0);
   assert.ok(ownerEvents.length <= 1, 'Only the exact completed HD owner identity refusal has this one repair');
   if (switchOwnerAdmission) assert.equal(ownerEvents.length, 0);
   assert.ok(scanEvents.length <= 1, 'Only the exact full HD scan deadline failure has this one repair');
@@ -829,10 +848,12 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase,
     { predecessorRead: switchScanAdmission || scanEvents.length === 1 });
   if (scanEvents.length) runtime.switchScanRepair = readSwitchScanRepairProof(batch, loaded, runtime, scanEvents[0],
     { predecessorRead: switchOwnerAdmission || ownerEvents.length === 1 });
-  if (ownerEvents.length) runtime.switchOwnerRepair = readSwitchOwnerRepairProof(batch, loaded, runtime, ownerEvents[0]);
+  if (ownerEvents.length) runtime.switchOwnerRepair = readSwitchOwnerRepairProof(batch, loaded, runtime, ownerEvents[0],
+    { predecessorRead: switchWindowAdmission || windowEvents.length === 1 });
   const ownerObservations = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_switch_owner_observation');
   assert.ok(ownerObservations.length <= 1, 'Only one real candidate observation after this owner identity repair is authorized');
   if (ownerObservations.length) runtime.candidateSwitchOwnerObservation = readCandidateReobservationProof(batch, loaded, runtime, ownerObservations[0], { ownerStage: true });
+  if (windowEvents.length) runtime.switchWindowRepair = readSwitchWindowRepairProof(batch, loaded, runtime, windowEvents[0]);
   return runtime;
 }
 
@@ -2024,6 +2045,178 @@ function readSwitchScanRepairProof(batch, loaded, runtime, event, { predecessorR
   return { schema: 'sd2-release-switch-scan-repair-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
 }
 
+export function validateSwitchWindowRepair(value) {
+  exactKeys(value, ['schema', 'terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256', 'switchOwnerRepairProofSha256',
+    'candidateSwitchOwnerObservationProofSha256', 'refusalLogSha256', 'originalHdBeforeSha256', 'originalNginxMasterSha256', 'processorControllerSetSha256', 'approvalFile', 'approvalSha256', 'windowSha256', 'observedAt'],
+  'single exact immutable window path switch repair');
+  assert.equal(value.schema, SWITCH_WINDOW_REPAIR_SCHEMA);
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256', 'switchOwnerRepairProofSha256',
+    'candidateSwitchOwnerObservationProofSha256', 'refusalLogSha256', 'originalHdBeforeSha256', 'originalNginxMasterSha256', 'processorControllerSetSha256', 'approvalSha256', 'windowSha256']) assert.match(value[key], HASH);
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'switchOwnerRepairProofSha256', 'candidateSwitchOwnerObservationProofSha256', 'refusalLogSha256', 'originalHdBeforeSha256', 'originalNginxMasterSha256'])
+    assert.equal(value[key], SWITCH_WINDOW_REPAIR_ORIGIN[key]);
+  safeAbsolute(value.approvalFile, 'window switch approval'); assert.equal(typeof value.observedAt, 'string');
+  parseTime(value.observedAt, 'window switch observation'); return value;
+}
+
+export function assertSwitchWindowRepairFailure(receipt) {
+  assert.equal(receipt.schema, 'sd2-release-phase-child.v1'); assert.equal(receipt.phase, 'switch');
+  assert.equal(receipt.intentSha256, SWITCH_WINDOW_REPAIR_ORIGIN.failureIntentSha256);
+  assert.deepEqual(receipt.child, { status: 1, signal: null, error: null });
+  assert.equal(typeof receipt.stderr, 'string'); const failure = JSON.parse(receipt.stderr);
+  exactKeys(failure, ['error', 'cause'], 'original window path admission child failure');
+  assert.deepEqual(failure.error, { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true });
+  assert.equal(failure.cause, "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window.json'\n- '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window-evidence/46b933f427869b3f2a138558eac4a44bb22ac9abb361f5894c27053cc6102dea.json'");
+}
+
+export function assertSwitchWindowRepairRefusalLog(bytes) {
+  assert.equal(digest(bytes), SWITCH_WINDOW_REPAIR_ORIGIN.refusalLogSha256);
+  assert.equal(bytes.toString('utf8'), SWITCH_WINDOW_REFUSAL_STACK);
+}
+
+export function assertSwitchWindowRepairControllerDifference(predecessor, processor) {
+  assert.deepEqual(Object.keys(predecessor).sort(), Object.keys(processor).sort()); const changed = {};
+  for (const name of Object.keys(predecessor).sort()) {
+    assert.equal(path.basename(name), name); assert.ok(name.endsWith('.mjs')); assert.match(predecessor[name], HASH); assert.match(processor[name], HASH);
+    if (predecessor[name] !== processor[name]) {
+      assert.ok(SWITCH_WINDOW_REPAIR_CONTROLLERS.includes(name), 'Unreviewed window switch repair difference: ' + name);
+      changed[name] = { predecessorSha256: predecessor[name], processorSha256: processor[name] };
+    }
+  }
+  for (const name of ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs']) assert.ok(changed[name]);
+  return changed;
+}
+
+export function assertSwitchWindowRepairAdmission(loaded, request, runtime, scene) {
+  validateSwitchWindowRepair(request); const state = loaded.derivedState;
+  assert.equal(state.status, 'failed'); assert.equal(state.activePhase, null); assert.equal(nextReleasePhase(loaded), 'switch');
+  assert.equal(state.lastPhase?.phase, 'switch'); assert.equal(state.lastPhase.outcome, 'failed');
+  assert.equal(state.lastPhase.resultSha256, request.phaseResultEventSha256);
+  assert.equal(state.terminal?.eventSha256, request.terminalEventSha256); assert.equal(state.lastEventSha256, request.terminalEventSha256);
+  assert.equal(runtime.phase, 'switch'); assert.equal(runtime.switchOwnerRepair.proofSha256, request.switchOwnerRepairProofSha256);
+  assert.equal(runtime.candidateSwitchOwnerObservation.proofSha256, request.candidateSwitchOwnerObservationProofSha256);
+  for (const [name, sha256] of [['switch_owner_repair', request.switchOwnerRepairProofSha256],
+    ['candidate_switch_owner_observation', request.candidateSwitchOwnerObservationProofSha256]]) {
+    const events = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === name);
+    assert.equal(events.length, 1); assert.equal(events[0].value.value.proofSha256, sha256);
+  }
+  assert.equal(loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'switch_window_repair'), false);
+  assert.equal(scene.facts.effectsStarted, false); assert.equal(scene.facts.switchComplete, false);
+  assert.equal(switchBoundaryFacts(loaded).effectsStarted, false);
+  const original = runtime.switchOwnerRepair.proof;
+  for (const [name, sha256] of [['fixed-guard-recovery.json', original.originalFixedGuardSha256], ['switch-before.json', original.originalSwitchBeforeSha256]])
+    assert.equal(scene.facts.files[name]?.sha256, sha256);
+  for (const name of ['switch-complete.json', 'ingress-503-switch.json', 'pricing-pair-published.json', 'guard-recovery-complete.json'])
+    assert.equal(Boolean(scene.facts.files[name]), false);
+  assert.equal(loaded.events.some(item => item.value.kind === 'phase_intent' && item.value.phase === 'proof'), false);
+}
+
+function switchWindowRepairProcessor(batch, predecessor, hash) {
+  assert.equal(predecessor.processor.controllerSetSha256, SWITCH_WINDOW_REPAIR_ORIGIN.predecessorControllerSetSha256);
+  const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
+  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, here);
+  assert.notEqual(processor.root, predecessor.processor.root);
+  const processorControllers = stableControllerHashes(here); assert.equal(Object.keys(processorControllers).length, 65);
+  assert.equal(digest(JSON.stringify(processorControllers)), hash);
+  return { processor, processorControllers, changedControllers: assertSwitchWindowRepairControllerDifference(predecessor.processorControllers, processorControllers) };
+}
+
+export function assertSwitchWindowOriginalSnapshots(hd, nginx, runId, manifestSha256) {
+  const stage = '/data/video-api-debugger/release-staging/' + runId;
+  for (const [document, name, sha256, size, ino] of [
+    [hd, 'hd-reconciliation-before.json', SWITCH_WINDOW_REPAIR_ORIGIN.originalHdBeforeSha256, 399056, 195992342],
+    [nginx, 'nginx-master.json', SWITCH_WINDOW_REPAIR_ORIGIN.originalNginxMasterSha256, 196, 195992343],
+  ]) {
+    const snapshot = document.snapshot; assert.equal(snapshot.requestedPath, stage + '/' + name); assert.equal(snapshot.realPath, snapshot.requestedPath);
+    assert.equal(snapshot.category, 'root_control'); assert.equal(snapshot.sha256, sha256);
+    for (const [key, expected] of Object.entries({ uid: 0, gid: 0, nlink: 1, size, dev: 64784, ino })) assert.equal(snapshot.identity[key], expected);
+    assert.equal(snapshot.identity.mode & 0o170000, 0o100000); assert.equal(snapshot.identity.mode & 0o7777, 0o600);
+    assert.equal(document.value.runId, runId); assert.equal(document.value.manifestSha256, manifestSha256);
+  }
+  assert.equal(hd.value.schema, 'hd-storage-reconciliation-v1'); assert.equal(hd.value.final, false); assert.equal(hd.value.safe, false);
+  assert.equal(hd.value.unstable, false); assert.equal(hd.value.canEnterControlledDrain, true);
+  assert.equal(nginx.value.masterPid, 965238); assert.equal(nginx.value.masterStart, '1213376807');
+}
+
+function switchWindowRepairFailureSnapshot(batch, loaded, request, inspectOwner) {
+  const failed = armPairRepairFailureSnapshot(batch, loaded, request, inspectOwner, { phase: 'switch', failureChecker: assertSwitchWindowRepairFailure });
+  assert.equal(failed.failureIntentSha256, SWITCH_WINDOW_REPAIR_ORIGIN.failureIntentSha256);
+  const refusalLogFile = path.join(path.dirname(batch.manifestFile), `normal-switch-refusal-${request.switchOwnerRepairProofSha256}.log`);
+  const log = readTypedFile({ file: refusalLogFile, category: 'root_control', maximumBytes: 32 * 1024 });
+  assertSwitchWindowRepairRefusalLog(log.bytes); assert.equal(log.snapshot.sha256, request.refusalLogSha256);
+  const originalHdBeforeFile = path.join(path.dirname(batch.manifestFile), 'hd-reconciliation-before.json');
+  const originalNginxMasterFile = path.join(path.dirname(batch.manifestFile), 'nginx-master.json');
+  const hd = rootDocument(originalHdBeforeFile, 32 * 1024 * 1024), nginx = rootDocument(originalNginxMasterFile, 256 * 1024);
+  assert.equal(hd.snapshot.sha256, request.originalHdBeforeSha256); assert.equal(nginx.snapshot.sha256, request.originalNginxMasterSha256);
+  assertSwitchWindowOriginalSnapshots(hd, nginx, batch.runId, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  return { ...failed, refusalLogFile, refusalLogSha256: log.snapshot.sha256, refusalLogSnapshot: log.snapshot,
+    originalHdBeforeFile, originalHdBeforeSha256: hd.snapshot.sha256, originalHdBeforeSnapshot: hd.snapshot,
+    originalNginxMasterFile, originalNginxMasterSha256: nginx.snapshot.sha256, originalNginxMasterSnapshot: nginx.snapshot };
+}
+
+function switchWindowRepairProofFile(loaded, hash) { assert.match(hash, HASH); return path.join(loaded.place.attempt, `switch-window-repair-${hash}.json`); }
+
+export function assertSwitchWindowApprovalPath(stage, file) {
+  assert.ok(['r01', 'r02'].some(round => file === path.join(stage, `hd-release-safety-approval-switch-window-${round}.json`)),
+    'Window switch approval must be its exact r01 or necessary r02 stage file');
+  return file;
+}
+
+function readSwitchWindowRepairProof(batch, loaded, runtime, event) {
+  assert.ok(['switch', 'proof', 'recovery'].includes(runtime.phase));
+  const reference = event.value.value; exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'window switch repair reference');
+  assert.equal(reference.schema, 'sd2-release-switch-window-repair-reference.v1');
+  assert.equal(reference.proofFile, switchWindowRepairProofFile(loaded, reference.proofSha256));
+  const document = rootDocument(reference.proofFile, 4 * 1024 * 1024), proof = document.value;
+  assert.equal(document.snapshot.sha256, reference.proofSha256); assert.equal(proof.schema, SWITCH_WINDOW_REPAIR_PROOF);
+  validateSwitchWindowRepair(proof.request); const original = runtime.switchOwnerRepair.proof;
+  assert.equal(runtime.switchOwnerRepair.proofSha256, SWITCH_WINDOW_REPAIR_ORIGIN.switchOwnerRepairProofSha256);
+  assert.equal(runtime.candidateSwitchOwnerObservation.proofSha256, SWITCH_WINDOW_REPAIR_ORIGIN.candidateSwitchOwnerObservationProofSha256);
+  assert.equal(proof.originalSwitchOwnerRepairProofFile, runtime.switchOwnerRepair.proofFile);
+  assert.equal(proof.originalSwitchOwnerRepairProofSha256, runtime.switchOwnerRepair.proofSha256);
+  assert.equal(proof.originalCandidateSwitchOwnerObservationProofFile, runtime.candidateSwitchOwnerObservation.proofFile);
+  assert.equal(proof.originalCandidateSwitchOwnerObservationProofSha256, runtime.candidateSwitchOwnerObservation.proofSha256);
+  for (const key of ['runId', 'taskId', 'attemptId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256',
+    'engine', 'originalArmProcessorRepairProofFile', 'originalArmProcessorRepairProofSha256', 'candidateObservationProofFile', 'candidateObservationProofSha256',
+    'originalSwitchAdmissionRepairProofFile', 'originalSwitchAdmissionRepairProofSha256',
+    'originalSwitchTypedRepairProofFile', 'originalSwitchTypedRepairProofSha256', 'originalSwitchScanRepairProofFile', 'originalSwitchScanRepairProofSha256',
+    'originalCandidateSwitchObservationProofFile', 'originalCandidateSwitchObservationProofSha256', 'strictResultFile', 'strictResultSha256', 'strictResultSnapshot',
+    'liveSnapshot', 'liveSnapshotSha256', 'originalTimesChanged', 'newCompilationClaimed', 'originalSwitchBeforeReplaced', 'candidateObservationRenewed'])
+    assert.deepEqual(proof[key], original[key]);
+  for (const key of Object.keys(switchAdmissionRetainedState(batch, runtime, runtime.switchAdmissionRepair.proof.request))) assert.deepEqual(proof[key], original[key]);
+  assert.deepEqual(proof.predecessorProcessor, original.processor);
+  const identity = switchWindowRepairProcessor(batch, original, proof.request.processorControllerSetSha256);
+  for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
+  const continued = loaded.events.filter(item => item.value.kind === 'failure_continued' && item.value.failureReceiptSha256 === reference.proofSha256);
+  assert.equal(continued.length, 1); assert.equal(continued[0].value.previousTerminalSha256, proof.request.terminalEventSha256);
+  assert.equal(continued[0].value.previousSha256, proof.request.terminalEventSha256); assert.equal(continued[0].value.continuation, undefined);
+  assert.equal(event.value.previousSha256, continued[0].sha256); assert.deepEqual(event.value.owner, continued[0].value.owner);
+  const failed = switchWindowRepairFailureSnapshot(batch, loaded, proof.request, inspectControllerOwner);
+  assert.equal(proof.failureIntentSha256, failed.failureIntentSha256);
+  assert.deepEqual(Object.keys(proof.failure).sort(), Object.keys(failed.failure).sort());
+  for (const [name, current] of Object.entries(failed.failure)) {
+    const previous = proof.failure[name]; assert.equal(previous.file, current.file); assert.equal(previous.sha256, current.sha256);
+    assert.equal(previous.snapshot.requestedPath, previous.file); assert.equal(previous.snapshot.sha256, previous.sha256); assertTypedFileUnchanged(previous.snapshot);
+  }
+  assert.equal(proof.refusalLogFile, failed.refusalLogFile); assert.equal(proof.refusalLogSha256, failed.refusalLogSha256);
+  assert.equal(proof.refusalLogSnapshot.requestedPath, proof.refusalLogFile); assert.equal(proof.refusalLogSnapshot.sha256, proof.refusalLogSha256);
+  assertTypedFileUnchanged(proof.refusalLogSnapshot);
+  for (const name of ['originalHdBefore', 'originalNginxMaster']) {
+    assert.equal(proof[name + 'File'], failed[name + 'File']); assert.equal(proof[name + 'Sha256'], failed[name + 'Sha256']);
+    assert.equal(proof[name + 'Snapshot'].requestedPath, proof[name + 'File']); assert.equal(proof[name + 'Snapshot'].sha256, proof[name + 'Sha256']);
+    assertTypedFileUnchanged(proof[name + 'Snapshot']);
+  }
+  assertSwitchWindowApprovalPath(path.dirname(batch.manifestFile), proof.approvalFile);
+  assert.equal(proof.approvalFile, proof.request.approvalFile); assert.equal(proof.approvalSha256, proof.request.approvalSha256);
+  assert.equal(proof.approvalSnapshot.requestedPath, proof.approvalFile); assert.equal(proof.approvalSnapshot.sha256, proof.approvalSha256); assertTypedFileUnchanged(proof.approvalSnapshot);
+  assert.equal(proof.windowSha256, proof.request.windowSha256); assert.notEqual(proof.windowSha256, original.windowSha256);
+  assert.equal(proof.windowFile, path.join(path.dirname(batch.manifestFile), 'window-evidence', proof.windowSha256 + '.json'));
+  assert.equal(proof.windowSnapshot.requestedPath, proof.windowFile); assert.equal(proof.windowSnapshot.sha256, proof.windowSha256); assertTypedFileUnchanged(proof.windowSnapshot);
+  return { schema: 'sd2-release-switch-window-repair-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
+}
+
 export function validateSwitchOwnerRepair(value) {
   exactKeys(value, ['schema', 'terminalEventSha256', 'phaseResultEventSha256', 'childReceiptSha256', 'switchScanRepairProofSha256',
     'candidateSwitchObservationProofSha256', 'refusalLogSha256', 'strictResultSha256', 'processorControllerSetSha256', 'approvalFile', 'approvalSha256', 'windowSha256', 'observedAt'],
@@ -2092,11 +2285,13 @@ export function assertSwitchOwnerRepairAdmission(loaded, request, runtime, scene
   assert.equal(loaded.events.some(item => item.value.kind === 'phase_intent' && item.value.phase === 'proof'), false);
 }
 
-function switchOwnerRepairProcessor(batch, predecessor, hash) {
+function switchOwnerRepairProcessor(batch, predecessor, hash, { directory = here, requireHere = true } = {}) {
   assert.equal(predecessor.processor.controllerSetSha256, SWITCH_OWNER_REPAIR_ORIGIN.predecessorControllerSetSha256);
   const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
-  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, here); assert.notEqual(processor.root, predecessor.processor.root);
-  const processorControllers = stableControllerHashes(here); assert.equal(Object.keys(processorControllers).length, 65);
+  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, directory);
+  if (requireHere) assert.equal(directory, here);
+  assert.notEqual(processor.root, predecessor.processor.root);
+  const processorControllers = stableControllerHashes(directory); assert.equal(Object.keys(processorControllers).length, 65);
   assert.equal(digest(JSON.stringify(processorControllers)), hash);
   return { processor, processorControllers, changedControllers: assertSwitchOwnerRepairControllerDifference(predecessor.processorControllers, processorControllers) };
 }
@@ -2131,7 +2326,7 @@ export function assertSwitchOwnerApprovalPath(stage, file) {
   return file;
 }
 
-function readSwitchOwnerRepairProof(batch, loaded, runtime, event) {
+function readSwitchOwnerRepairProof(batch, loaded, runtime, event, { predecessorRead = false } = {}) {
   assert.ok(['switch', 'proof', 'recovery'].includes(runtime.phase));
   const reference = event.value.value; exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'owner switch repair reference');
   assert.equal(reference.schema, 'sd2-release-switch-owner-repair-reference.v1');
@@ -2153,7 +2348,8 @@ function readSwitchOwnerRepairProof(batch, loaded, runtime, event) {
     assert.deepEqual(proof[key], original[key]);
   for (const key of Object.keys(switchAdmissionRetainedState(batch, runtime, runtime.switchAdmissionRepair.proof.request))) assert.deepEqual(proof[key], original[key]);
   assert.deepEqual(proof.predecessorProcessor, original.processor);
-  const identity = switchOwnerRepairProcessor(batch, original, proof.request.processorControllerSetSha256);
+  const identity = switchOwnerRepairProcessor(batch, original, proof.request.processorControllerSetSha256,
+    { directory: proof.processor.root, requireHere: !predecessorRead });
   for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
   const continued = loaded.events.filter(item => item.value.kind === 'failure_continued' && item.value.failureReceiptSha256 === reference.proofSha256);
   assert.equal(continued.length, 1); assert.equal(continued[0].value.previousTerminalSha256, proof.request.terminalEventSha256);
@@ -2820,7 +3016,7 @@ export function createReleaseController(overrides = {}) {
         assert.equal(rootDocument(windowFile, 256 * 1024).snapshot.sha256, repair.windowSha256);
       }
       if (phase === 'switch' && loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'switch_admission_repair')) {
-        const runtime = readGuardBuildTailProof(acquired.batch, batchFile, loaded, phase), repair = (runtime.switchOwnerRepair || runtime.switchScanRepair || runtime.switchTypedRepair || runtime.switchAdmissionRepair).proof;
+        const runtime = readGuardBuildTailProof(acquired.batch, batchFile, loaded, phase), repair = (runtime.switchWindowRepair || runtime.switchOwnerRepair || runtime.switchScanRepair || runtime.switchTypedRepair || runtime.switchAdmissionRepair).proof;
         assert.equal(approvalFile, repair.approvalFile); assert.equal(rootDocument(approvalFile, 256 * 1024).snapshot.sha256, repair.approvalSha256);
         assert.equal(rootDocument(windowFile, 256 * 1024).snapshot.sha256, repair.windowSha256);
       }
@@ -3037,6 +3233,52 @@ export function createReleaseController(overrides = {}) {
         failureReceiptSha256: hash, before: fresh, now: finalNow, inspectOwner: deps.inspectOwner });
       const recorded = recordAttemptEvent({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner,
         name: 'switch_owner_repair', value: { schema: 'sd2-release-switch-owner-repair-reference.v1', proofFile: saved.file, proofSha256: hash }, now: deps.now() });
+      assert.equal(recorded.event.previousSha256, continued.eventSha256);
+      return { continuation: saved, processor: identity.processor, eventHead: recorded.eventSha256 };
+    }
+    if (request.schema === SWITCH_WINDOW_REPAIR_SCHEMA) {
+      validateSwitchWindowRepair(request); assert.equal(batch.runId, ARM_PAIR_REPAIR_ORIGIN.runId); assert.equal(batch.taskId, ARM_PAIR_REPAIR_ORIGIN.taskId);
+      const runtime = readGuardBuildTailProof(batch, batchFile, loaded, 'switch', { switchWindowAdmission: true });
+      const now = deps.now(), before = deps.scene(batch, now); assertSwitchWindowRepairAdmission(loaded, request, runtime, before);
+      const observed = parseTime(request.observedAt, 'window switch repair observation'); assert.ok(observed <= now && now - observed < 300000);
+      const original = runtime.switchOwnerRepair.proof;
+      const identity = switchWindowRepairProcessor(batch, original, request.processorControllerSetSha256);
+      const failed = switchWindowRepairFailureSnapshot(batch, loaded, request, deps.inspectOwner);
+      const result = rootJson(failed.failure.result.file, 64 * 1024 * 1024);
+      assert.equal(result.after.facts.files['fixed-guard-recovery.json']?.sha256, original.originalFixedGuardSha256);
+      assert.equal(result.after.facts.files['switch-before.json']?.sha256, original.originalSwitchBeforeSha256);
+      const retained = switchAdmissionRetainedState(batch, runtime, runtime.switchAdmissionRepair.proof.request);
+      const savedBefore = rootJson(original.originalSwitchBeforeFile, 32 * 1024 * 1024);
+      const liveSnapshot = switchAdmissionLiveSnapshot(batch, savedBefore); assert.deepEqual(liveSnapshot, original.liveSnapshot);
+      const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+      assertSwitchWindowApprovalPath(path.dirname(batch.manifestFile), request.approvalFile);
+      assert.equal(assertApproval(batch, request.approvalFile, now).sha256, request.approvalSha256);
+      assert.notEqual(request.windowSha256, original.windowSha256);
+      assert.equal(rootDocument(windowFile, 256 * 1024).snapshot.sha256, request.windowSha256);
+      const window = releaseWindowReference(batch, windowFile, deps.now()); assert.equal(window.sha256, request.windowSha256);
+      const approval = rootDocument(request.approvalFile, 256 * 1024), windowDocument = rootDocument(window.file, 256 * 1024);
+      const current = load(batchFile, batch), finalNow = deps.now(), fresh = deps.scene(batch, finalNow);
+      assertSwitchWindowRepairAdmission(current, request, runtime, fresh); assert.equal(fresh.sha256, before.sha256);
+      assert.equal(assertApproval(batch, request.approvalFile, finalNow).sha256, request.approvalSha256); assert.ok(finalNow < window.expiresAt);
+      assert.deepEqual(retained, switchAdmissionRetainedState(batch, runtime, runtime.switchAdmissionRepair.proof.request));
+      assert.deepEqual(liveSnapshot, switchAdmissionLiveSnapshot(batch, savedBefore));
+      assert.deepEqual(failed, switchWindowRepairFailureSnapshot(batch, current, request, deps.inspectOwner));
+      const proof = { ...original, schema: SWITCH_WINDOW_REPAIR_PROOF, request,
+        originalSwitchOwnerRepairProofFile: runtime.switchOwnerRepair.proofFile,
+        originalSwitchOwnerRepairProofSha256: runtime.switchOwnerRepair.proofSha256,
+        originalCandidateSwitchOwnerObservationProofFile: runtime.candidateSwitchOwnerObservation.proofFile,
+        originalCandidateSwitchOwnerObservationProofSha256: runtime.candidateSwitchOwnerObservation.proofSha256,
+        predecessorProcessor: original.processor, ...identity, ...failed,
+        approvalFile: request.approvalFile, approvalSha256: request.approvalSha256, approvalSnapshot: approval.snapshot,
+        windowFile: window.file, windowSha256: request.windowSha256, windowSnapshot: windowDocument.snapshot,
+        beforeSceneSha256: fresh.sha256, observedAt: new Date(finalNow).toISOString() };
+      const hash = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+      const saved = writeJsonExclusive(switchWindowRepairProofFile(loaded, hash), proof); assert.equal(saved.sha256, hash);
+      const owner = deps.createOwner(), continued = continueFailedAttempt({ root: taskRoot(batch), taskId: batch.taskId,
+        attemptId: batch.attemptId, owner, ...bindings, window, terminalEventSha256: request.terminalEventSha256,
+        failureReceiptSha256: hash, before: fresh, now: finalNow, inspectOwner: deps.inspectOwner });
+      const recorded = recordAttemptEvent({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner,
+        name: 'switch_window_repair', value: { schema: 'sd2-release-switch-window-repair-reference.v1', proofFile: saved.file, proofSha256: hash }, now: deps.now() });
       assert.equal(recorded.event.previousSha256, continued.eventSha256);
       return { continuation: saved, processor: identity.processor, eventHead: recorded.eventSha256 };
     }

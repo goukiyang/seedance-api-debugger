@@ -26,6 +26,8 @@ import {
   assertSwitchScanRepairControllerDifference, assertSwitchScanRepairAdmission, assertSwitchScanApprovalPath, SWITCH_SCAN_REPAIR_ORIGIN,
   validateSwitchOwnerRepair, assertSwitchOwnerRepairFailure, assertSwitchOwnerRepairRefusalLog, assertSwitchOwnerStrictResult,
   assertSwitchOwnerRepairControllerDifference, assertSwitchOwnerRepairAdmission, assertSwitchOwnerApprovalPath, SWITCH_OWNER_REPAIR_ORIGIN,
+  validateSwitchWindowRepair, assertSwitchWindowRepairFailure, assertSwitchWindowRepairRefusalLog, assertSwitchWindowOriginalSnapshots,
+  assertSwitchWindowRepairControllerDifference, assertSwitchWindowRepairAdmission, assertSwitchWindowApprovalPath, SWITCH_WINDOW_REPAIR_ORIGIN,
   assertCandidateSwitchOwnerObservationAdmission,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
@@ -925,6 +927,82 @@ function scenarioSwitchScanRepair() {
   return 'only_exact_full_hd_scan_failure_with_consumed_49d_d3ec_and_original_stack_can_continue_switch_once';
 }
 
+function scenarioSwitchWindowRepair() {
+  const request = { schema: 'sd2-release-switch-window-repair.v1',
+    ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'switchOwnerRepairProofSha256',
+      'candidateSwitchOwnerObservationProofSha256', 'refusalLogSha256', 'originalHdBeforeSha256', 'originalNginxMasterSha256'].map(key => [key, SWITCH_WINDOW_REPAIR_ORIGIN[key]])),
+    childReceiptSha256: digest('original-typed-failure-child'), processorControllerSetSha256: digest('typed-repair-processor'),
+    approvalFile: '/fixture/hd-release-safety-approval-switch-window-r01.json', approvalSha256: digest('new-typed-approval'),
+    windowSha256: digest('new-typed-window'), observedAt: new Date().toISOString() };
+  assert.deepEqual(validateSwitchWindowRepair(structuredClone(request)), request);
+  for (const key of Object.keys(request)) {
+    const missing = { ...request }; delete missing[key]; assert.throws(() => validateSwitchWindowRepair(missing));
+    assert.throws(() => validateSwitchWindowRepair({ ...request, [key]: 'unbound' }));
+  }
+  for (const key of ['terminalEventSha256', 'phaseResultEventSha256', 'switchOwnerRepairProofSha256', 'candidateSwitchOwnerObservationProofSha256', 'refusalLogSha256', 'originalHdBeforeSha256', 'originalNginxMasterSha256'])
+    assert.throws(() => validateSwitchWindowRepair({ ...request, [key]: digest('different:' + key) }));
+  assert.throws(() => validateSwitchWindowRepair({ ...request, resetAdmission: true }));
+  const error = { schema: 'sd2-release-error.v1', category: 'internal_failure', code: 'unclassified_internal_failure',
+    object: { kind: 'release_operation', id: 'child' },
+    reason: 'An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.',
+    nextStep: 'Stop dependent or side-effecting work and inspect the preserved attempt evidence.', retryable: false, stop: true };
+  const cause = "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window.json'\n- '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window-evidence/46b933f427869b3f2a138558eac4a44bb22ac9abb361f5894c27053cc6102dea.json'";
+  const child = { schema: 'sd2-release-phase-child.v1', phase: 'switch', intentSha256: SWITCH_WINDOW_REPAIR_ORIGIN.failureIntentSha256,
+    child: { status: 1, signal: null, error: null }, stderr: JSON.stringify({ error, cause }) + '\n' };
+  assertSwitchWindowRepairFailure(child); assert.throws(() => assertSwitchOwnerRepairFailure(child));
+  for (const value of [{ ...child, phase: 'arm' }, { ...child, intentSha256: HASH }, { ...child, child: { status: 0, signal: null, error: null } },
+    { ...child, stderr: JSON.stringify({ error, cause: cause + '\n' }) },
+    { ...child, stderr: JSON.stringify({ error, cause: cause.replace('/window.json', '/another-window.json') }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, category: 'another_failure' }, cause }) },
+    { ...child, stderr: JSON.stringify({ error: { ...error, stop: false }, cause }) }, { ...child, stderr: child.stderr + child.stderr }])
+    assert.throws(() => assertSwitchWindowRepairFailure(value));
+  const root = '/data/video-api-debugger/release-engines/1.0.0-' + SWITCH_WINDOW_REPAIR_ORIGIN.predecessorControllerSetSha256;
+  const stack = "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window.json'\n- '/data/video-api-debugger/release-staging/f5646431-2d69-44f6-9c62-5994432f3ade/window-evidence/46b933f427869b3f2a138558eac4a44bb22ac9abb361f5894c27053cc6102dea.json'\n    at assertSwitchAdmissionWindows (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:903:67)\n    at file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:1286:11\n    at async locked (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/switch.mjs:801:16)\n    at async releaseEntryCli (file:///data/video-api-debugger/release-engines/1.0.0-c739426ab49f1355d6e819506de359f61169cac74683ab3eec3ef61a60644938/release-entry.mjs:3461:62)";
+  assertSwitchWindowRepairRefusalLog(Buffer.from(stack));
+  for (const value of [stack + '\n', stack.replace(':903:67', ':904:67'), stack.replace('assertSwitchAdmissionWindows', 'anotherWindowReader'), stack.replace(root, '/another-processor')])
+    assert.throws(() => assertSwitchWindowRepairRefusalLog(Buffer.from(value)));
+  const allowed = ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'release-entry-engineering.mjs', 'candidate-lifecycle-engineering.mjs'];
+  const retained = ['attempt-state.mjs', 'common.mjs', 'typed-files.mjs', 'candidate.mjs', 'candidate-inputs.mjs', 'candidate-reuse.mjs',
+    'pricing-start-pair.mjs', 'cutover-driver.mjs', 'cutover-safety.mjs', 'guard-recovery.mjs', 'normal-continuation.mjs',
+    'hd-compiled-cache.mjs', 'hd-storage-preflight.mjs', 'hd-storage-preflight-engineering.mjs'];
+  const predecessor = Object.fromEntries([...allowed, ...retained].map(name => [name, digest('cebe:' + name)]));
+  const processor = { ...predecessor, ...Object.fromEntries(allowed.map(name => [name, digest('typed-repair:' + name)])) };
+  assert.equal(Object.keys(assertSwitchWindowRepairControllerDifference(predecessor, processor)).length, 6);
+  for (const name of retained) assert.throws(() => assertSwitchWindowRepairControllerDifference(predecessor, { ...processor, [name]: HASH }));
+  assert.throws(() => assertSwitchWindowRepairControllerDifference(predecessor, predecessor));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  events.push({ value: { kind: 'observation', name: 'switch_owner_repair', value: { proofSha256: request.switchOwnerRepairProofSha256 } } },
+    { value: { kind: 'observation', name: 'candidate_switch_owner_observation', value: { proofSha256: request.candidateSwitchOwnerObservationProofSha256 } } });
+  const failed = { events, derivedState: { status: 'failed', activePhase: null, lastPhase: {
+    phase: 'switch', outcome: 'failed', resultSha256: request.phaseResultEventSha256 }, terminal: { eventSha256: request.terminalEventSha256 },
+    lastEventSha256: request.terminalEventSha256 } };
+  const originalFixedGuardSha256 = digest('original-fixed-guard'), originalSwitchBeforeSha256 = digest('original-switch-before');
+  const runtime = { phase: 'switch', switchOwnerRepair: { proofSha256: request.switchOwnerRepairProofSha256,
+    proof: { originalFixedGuardSha256, originalSwitchBeforeSha256 } }, candidateSwitchOwnerObservation: { proofSha256: request.candidateSwitchOwnerObservationProofSha256 } };
+  const scene = { facts: { effectsStarted: false, switchComplete: false, files: {
+    'fixed-guard-recovery.json': { sha256: originalFixedGuardSha256 }, 'switch-before.json': { sha256: originalSwitchBeforeSha256 } } } };
+  assertSwitchWindowRepairAdmission(failed, request, runtime, scene);
+  for (const edit of [value => { value.derivedState.status = 'running'; }, value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.lastPhase.phase = 'arm'; }, value => { value.derivedState.terminal.eventSha256 = HASH; },
+    value => { value.events = value.events.filter(item => item.value.name !== 'switch_owner_repair'); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'candidate_switch_owner_observation'); },
+    value => { value.events.find(item => item.value.name === 'candidate_switch_owner_observation').value.name = 'candidate_switch_observation'; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'switch_window_repair' } }); },
+    value => { value.events.push({ value: { kind: 'phase_intent', phase: 'proof' } }); }]) {
+    const value = structuredClone(failed); edit(value); assert.throws(() => assertSwitchWindowRepairAdmission(value, request, runtime, scene));
+  }
+  assert.throws(() => assertSwitchWindowRepairAdmission(failed, request, { ...runtime, phase: 'arm' }, scene));
+  for (const facts of [{ ...scene.facts, effectsStarted: true }, { ...scene.facts, switchComplete: true },
+    { ...scene.facts, files: { ...scene.facts.files, 'switch-before.json': { sha256: HASH } } },
+    { ...scene.facts, files: { ...scene.facts.files, 'ingress-503-switch.json': { sha256: HASH } } }])
+    assert.throws(() => assertSwitchWindowRepairAdmission(failed, request, runtime, { facts }));
+  for (const round of ['r01', 'r02']) assertSwitchWindowApprovalPath('/fixture', `/fixture/hd-release-safety-approval-switch-window-${round}.json`);
+  for (const file of ['/fixture/hd-release-safety-approval-switch-window-r03.json', '/elsewhere/hd-release-safety-approval-switch-window-r01.json',
+    '/fixture/hd-release-safety-approval-switch-admission-r02.json', '/fixture/arbitrary.json'])
+    assert.throws(() => assertSwitchWindowApprovalPath('/fixture', file));
+  return 'only_exact_window_path_failure_with_consumed_owner_and_original_497_observation_can_continue_switch_once';
+}
+
 function scenarioSwitchOwnerRepair() {
   const request = { schema: 'sd2-release-switch-owner-repair.v1',
     ...Object.fromEntries(['terminalEventSha256', 'phaseResultEventSha256', 'switchScanRepairProofSha256',
@@ -1003,6 +1081,30 @@ function scenarioSwitchOwnerRepair() {
   return 'only_exact_completed_hd_identity_refusal_with_consumed_b3c_d3ec_and_original_strict_record_can_continue_switch_once';
 }
 
+function scenarioSwitchWindowOriginalSnapshots() {
+  const runId = ARM_PAIR_REPAIR_ORIGIN.runId, stage = '/data/video-api-debugger/release-staging/' + runId;
+  const snapshot = (name, sha256, size, ino) => ({ requestedPath: stage + '/' + name, realPath: stage + '/' + name, category: 'root_control', sha256,
+    identity: { uid: 0, gid: 0, nlink: 1, size, dev: 64784, ino, mode: 0o100600 } });
+  const hd = { snapshot: snapshot('hd-reconciliation-before.json', SWITCH_WINDOW_REPAIR_ORIGIN.originalHdBeforeSha256, 399056, 195992342),
+    value: { runId, manifestSha256: HASH, schema: 'hd-storage-reconciliation-v1', final: false, safe: false, unstable: false, canEnterControlledDrain: true } };
+  const nginx = { snapshot: snapshot('nginx-master.json', SWITCH_WINDOW_REPAIR_ORIGIN.originalNginxMasterSha256, 196, 195992343),
+    value: { runId, manifestSha256: HASH, masterPid: 965238, masterStart: '1213376807' } };
+  assertSwitchWindowOriginalSnapshots(hd, nginx, runId, HASH);
+  for (const target of ['hd', 'nginx']) for (const edit of [value => { value.snapshot.sha256 = HASH; },
+    value => { value.snapshot.requestedPath += '.replacement'; }, value => { value.snapshot.realPath += '.replacement'; },
+    value => { value.snapshot.identity.ino++; }, value => { value.snapshot.identity.uid = 1004; },
+    value => { value.snapshot.identity.mode = 0o100620; }, value => { value.snapshot.identity.nlink = 2; },
+    value => { value.value.manifestSha256 = digest('another-manifest'); }]) {
+    const copies = { hd: structuredClone(hd), nginx: structuredClone(nginx) }; edit(copies[target]);
+    assert.throws(() => assertSwitchWindowOriginalSnapshots(copies.hd, copies.nginx, runId, HASH));
+  }
+  const changedHd = structuredClone(hd); changedHd.value.unstable = true;
+  assert.throws(() => assertSwitchWindowOriginalSnapshots(changedHd, nginx, runId, HASH));
+  const changedNginx = structuredClone(nginx); changedNginx.value.masterStart = '1213376808';
+  assert.throws(() => assertSwitchWindowOriginalSnapshots(hd, changedNginx, runId, HASH));
+  return 'original_premaintenance_hd_and_nginx_files_keep_exact_bytes_entities_permissions_and_nginx_identity';
+}
+
 function scenarioSwitchOwnerObservation() {
   const repairSha = digest('bound-owner-repair'), originalFixedGuardSha256 = digest('retained-fixed-guard'), originalSwitchBeforeSha256 = digest('retained-switch-before');
   const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
@@ -1038,7 +1140,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

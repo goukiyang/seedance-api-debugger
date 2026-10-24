@@ -894,19 +894,69 @@ function assertSwitchAdmissionWindows(m, fixed, repair) {
   const oldApprovalFile = guardRecoveryApprovalFile(m); assert.equal(oldApprovalFile, repair.oldGuardApprovalFile);
   const oldApprovalBytes = rootFile(oldApprovalFile), oldApproval = JSON.parse(oldApprovalBytes);
   assert.equal(sha(oldApprovalBytes), repair.oldGuardApprovalSha256);
+  assert.equal(repair.oldGuardWindowFile, m.stage + '/window-evidence/' + repair.oldGuardWindowSha256 + '.json');
   assert.equal(sha(rootFile(repair.oldGuardWindowFile)), repair.oldGuardWindowSha256);
   assert.equal(fixed.originalWindowSha256, repair.oldGuardWindowSha256);
   assert.equal(fixed.approvalReceiptSha256, repair.oldGuardApprovalSha256);
   assert.equal(oldApproval.windowSha256, repair.oldGuardWindowSha256);
   const approvalFile = hdMaintenanceApprovalFile(m); assert.equal(approvalFile, repair.approvalFile);
   const approvalBytes = rootFile(approvalFile), approval = JSON.parse(approvalBytes);
-  assert.equal(sha(approvalBytes), repair.approvalSha256); assert.equal(m.windowFile, repair.windowFile);
-  assert.equal(sha(rootFile(m.windowFile)), repair.windowSha256); assert.equal(approval.windowSha256, repair.windowSha256);
+  assert.equal(sha(approvalBytes), repair.approvalSha256);
+  assert.equal(m.windowFile, m.stage + '/window.json', 'Current admission must read the actual mutable window role');
+  assert.equal(repair.windowFile, m.stage + '/window-evidence/' + repair.windowSha256 + '.json', 'Repair must retain its immutable window evidence role');
+  const currentWindowBytes = rootFile(m.windowFile), sealedWindowBytes = rootFile(repair.windowFile);
+  assert.equal(sha(currentWindowBytes), repair.windowSha256); assert.equal(sha(sealedWindowBytes), repair.windowSha256);
+  assert.deepEqual(currentWindowBytes, sealedWindowBytes, 'Current admission window differs from its root-bound immutable evidence');
+  assert.equal(approval.windowSha256, repair.windowSha256);
   for (const key of ['runId', 'mainSource', 'guardSource', 'manifestSha256', 'mainBuildReceiptSha256', 'guardBuildReceiptSha256'])
     assert.equal(approval[key], oldApproval[key], 'Switch approval changed the frozen candidate binding: ' + key);
   assert.equal(approval.runId, m.runId); assert.equal(approval.mainSource, m.mainSource); assert.equal(approval.guardSource, m.guardSource);
   assert.equal(approval.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
   for (const kind of ['main', 'guard']) assert.equal(approval[kind + 'BuildReceiptSha256'], sha(rootFile(candidateEvidenceFile(m, kind))));
+  const builds = Object.fromEntries(['main', 'guard'].map(kind => [kind, JSON.parse(rootFile(candidateEvidenceFile(m, kind)))]));
+  // The immutable historical guard window is not renewed. The actual current
+  // window, approval and candidate observation must all still pass their
+  // existing fresh bounds immediately before maintenance admission.
+  sharedHdAdmissionBounds(m, builds, approval.manifestSha256).check();
+}
+
+function captureSwitchPremaintenance(m, manifestSha256, hdBefore, { repair, repairSha256 } = {}) {
+  const originals = [];
+  let originalMaster;
+  if (repair) {
+    assert.match(repairSha256 || '', /^[a-f0-9]{64}$/);
+    for (const [prefix, name] of [['originalHdBefore', 'hd-reconciliation-before'], ['originalNginxMaster', 'nginx-master']]) {
+      const file = m.stage + '/' + name + '.json', snapshot = repair[prefix + 'Snapshot'];
+      assert.equal(repair[prefix + 'File'], file); assert.equal(snapshot?.requestedPath, file);
+      assert.equal(snapshot.sha256, repair[prefix + 'Sha256']);
+      const current = assertTypedFileUnchanged(snapshot);
+      assert.equal(current.sha256, repair[prefix + 'Sha256']);
+      assert.equal(sha(rootFile(file)), repair[prefix + 'Sha256']);
+      originals.push(snapshot);
+    }
+    const originalHd = boundRecord(m, 'hd-reconciliation-before', manifestSha256);
+    assert.equal(originalHd.canEnterControlledDrain, true, 'Original premaintenance HD observation was not admissible for controlled drain');
+    originalMaster = boundRecord(m, 'nginx-master', manifestSha256);
+    assert.ok(Number.isSafeInteger(originalMaster.masterPid) && originalMaster.masterPid > 1);
+    assert.match(originalMaster.masterStart || '', /^[1-9]\d*$/);
+  }
+  const suffix = repair ? '-' + repairSha256 : '';
+  save(m, 'hd-reconciliation-before' + suffix, { manifestSha256, ...hdBefore,
+    ...(repair ? { repairProofSha256: repairSha256, originalHdBeforeSha256: repair.originalHdBeforeSha256,
+      originalRecoveryBaselineRetained: true } : {}) });
+  const masterPid = Number(call('systemctl', ['show', 'nginx.service', '-p', 'MainPID', '--value']));
+  const observed = { masterPid, masterStart: processState(masterPid).start };
+  if (originalMaster) {
+    assert.equal(observed.masterPid, originalMaster.masterPid, 'Original nginx master PID changed before maintenance');
+    assert.equal(observed.masterStart, originalMaster.masterStart, 'Original nginx master start changed before maintenance');
+    assert.equal(Number(call('systemctl', ['show', 'nginx.service', '-p', 'MainPID', '--value'])), masterPid);
+    assert.equal(processState(masterPid).start, observed.masterStart);
+  }
+  save(m, 'nginx-master' + suffix, { manifestSha256, ...observed,
+    ...(repair ? { repairProofSha256: repairSha256, originalNginxMasterSha256: repair.originalNginxMasterSha256,
+      originalRecoveryBaselineRetained: true } : {}) });
+  for (const snapshot of originals) assertTypedFileUnchanged(snapshot);
+  return originalMaster ? { masterPid: originalMaster.masterPid, masterStart: originalMaster.masterStart } : observed;
 }
 
 export async function recoverStandaloneSwitch(m, input = {}) {
@@ -1242,7 +1292,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
     await loadHdCompiledCacheProofs(m);
     const admissionRepair = mode === 'switch' ? assertSwitchAdmissionRepair(m) : null;
     const repairRuntime = admissionRepair ? guardBuildTailRuntime(m) : null;
-    const repairSha256 = repairRuntime ? (repairRuntime.switchOwnerRepair || repairRuntime.switchScanRepair || repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
+    const repairSha256 = repairRuntime ? (repairRuntime.switchWindowRepair || repairRuntime.switchOwnerRepair || repairRuntime.switchScanRepair || repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
     if (repairSha256) assert.match(repairSha256, /^[a-f0-9]{64}$/);
     const admissionName = name => repairSha256 ? name + '-' + repairSha256 : name;
     let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;
@@ -1276,9 +1326,8 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         } else hdBefore = await inspectHdReconciliation(m, { sourceRoot: m.main.root, retiredCachePhase: 'admission' });
         hdAdmissionRecord = recordHdAdmission(m, hdBefore);
         assert.equal(hdBefore.canEnterControlledDrain, true, 'HD work is in flight or unexplained; keep the original site and do not enter maintenance');
-        save(m, 'hd-reconciliation-before', { manifestSha256, ...hdBefore });
-        const masterPid = Number(call('systemctl', ['show', 'nginx.service', '-p', 'MainPID', '--value']));
-        master = { masterPid, masterStart: processState(masterPid).start }; save(m, 'nginx-master', { manifestSha256, ...master });
+        master = captureSwitchPremaintenance(m, manifestSha256, hdBefore, repairRuntime?.switchWindowRepair
+          ? { repair: admissionRepair, repairSha256 } : undefined);
         const recoveryPair = buildPair({ captured, manifest: m, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
           main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
         if (isSharedEngine(m)) {
