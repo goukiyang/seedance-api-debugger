@@ -169,7 +169,7 @@ export function MultiviewPromptDialog(props: Props) {
   return createPortal(<dialog ref={dialog} className={`${dialogStyles.dialog} ${styles.promptDialog}`} aria-labelledby={title} aria-modal="true">
     <form onSubmit={event => { event.preventDefault(); void save(); }} aria-busy={loading || saving}>
       <header className={dialogStyles.header}><h2 id={title}>模板提示词</h2><button type="button" className={dialogStyles.close} disabled={loading || saving} onClick={dismiss} aria-label="关闭模板提示词"><X size={18} /></button></header>
-      <p className={dialogStyles.message}>保存后用于后续新任务，不改变已提交任务；个人补充要求会保留。</p>
+      <p className={dialogStyles.message}>保存后用于后续新任务，不改变已提交任务；个人补充要求会保留。可写 {'{{前段}}'}、{'{{后段}}'}、{'{{时长}}'}，提交时按所选时长换成秒数（前后各一半）。</p>
       {state && (editing ? <textarea ref={textarea} className={dialogStyles.input} rows={9} value={value} disabled={saving || Boolean(pending)} aria-label="模板提示词" onChange={event => setValue(event.target.value)} /> : <p className={styles.promptText}>{state.preset.prompt}</p>)}
       {!state && <p className={dialogStyles.message} role="status">{loading ? '正在读取模板提示词…' : '模板提示词尚未读取。'}</p>}
       {editing && !valid && <p className={dialogStyles.message} role="status">提示词不能为空，含素材说明最多 {MAX_GENERATION_PROMPT_CHARS} 字；输入未截断。</p>}

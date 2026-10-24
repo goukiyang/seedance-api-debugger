@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 export const release = { version: packageInfo.version, channel: 'production',
-  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看与上传；窄屏也显示版本号。新的视频创作、批量和3D多视图生成暂未开放。' };
+  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看与上传；窄屏也显示版本号；3D多视图模板可按所选时长分配前后段动作。新的视频创作、批量和3D多视图生成暂未开放。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

@@ -1038,7 +1038,7 @@ export async function POST(request: NextRequest) {
       if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
     }
-    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe);
+    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe, duration);
     if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
     if (trustedMultiviewSourceTask && (trustedMultiviewSourceTask.prompt !== composed.prompt.trim()
       || trustedMultiviewSourceTask.final_prompt_snapshot !== composed.prompt)) {

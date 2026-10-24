@@ -119,15 +119,23 @@ export function parseMultiviewGenerationDraft(value: unknown): MultiviewGenerati
   };
 }
 
+// Template placeholders follow the submitted duration: 50/50 split, rounded to 0.5s.
+export function renderMultiviewDurationPlaceholders(template: string, duration: number): string {
+  const first = Math.round(duration) / 2, second = duration - first;
+  return template.replaceAll('{{时长}}', String(duration)).replaceAll('{{前段}}', String(first)).replaceAll('{{后段}}', String(second));
+}
+
+/** Without a duration (template checks), placeholders stay as written; they are longer than any rendered value. */
 export function composeMultiviewGenerationPrompt(supplement: string, presetVersion: string = MULTIVIEW_ROTATION_PRESET.version,
-  preset?: MultiviewRotationPreset): {
+  preset?: MultiviewRotationPreset, duration?: number): {
   prompt: string; characters: number; remainingCharacters: number; valid: boolean; error: string | null;
 } {
   if (typeof supplement !== 'string' || !preset || !isMultiviewPresetVersion(presetVersion) || presetVersion !== preset.version
     || preset.id !== MULTIVIEW_ROTATION_PRESET.id || typeof preset.prompt !== 'string' || !preset.prompt.trim()) {
     return { prompt: '', characters: 0, remainingCharacters: 0, valid: false, error: '模板提示词暂时无法确认，原输入已保留；请重新读取模板后再生成' };
   }
-  const prompt = preset.prompt + (supplement.length ? SUPPLEMENT_SEPARATOR + supplement : '');
+  const template = duration === undefined ? preset.prompt : renderMultiviewDurationPlaceholders(preset.prompt, duration);
+  const prompt = template + (supplement.length ? SUPPLEMENT_SEPARATOR + supplement : '');
   const characters = MULTIVIEW_REFERENCE_PROMPT_PREFIX.length + prompt.length;
   // Reserve the separator before the first supplementary character is entered.
   const remainingCharacters = MAX_GENERATION_PROMPT_CHARS - characters - (supplement.length ? 0 : SUPPLEMENT_SEPARATOR.length);
