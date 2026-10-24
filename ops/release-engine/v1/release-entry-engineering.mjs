@@ -28,7 +28,10 @@ import {
   assertSwitchOwnerRepairControllerDifference, assertSwitchOwnerRepairAdmission, assertSwitchOwnerApprovalPath, SWITCH_OWNER_REPAIR_ORIGIN,
   validateSwitchWindowRepair, assertSwitchWindowRepairFailure, assertSwitchWindowRepairRefusalLog, assertSwitchWindowOriginalSnapshots,
   assertSwitchWindowRepairControllerDifference, assertSwitchWindowRepairAdmission, assertSwitchWindowApprovalPath, SWITCH_WINDOW_REPAIR_ORIGIN,
-  assertCandidateSwitchOwnerObservationAdmission,
+  assertCandidateSwitchOwnerObservationAdmission, validateRestoredOriginalClosure, validateRestoredOriginalRepair,
+  assertRestoredOriginalFailure, assertRestoredOriginalControllerDifference, assertRestoredOriginalClosureAdmission,
+  assertRestoredOriginalRepairAdmission, assertRestoredOriginalApprovalPath, assertRestoredOriginalLive, assertRestoredOriginalScene,
+  assertCandidateRestoredOriginalObservationAdmission, assertRestoredOriginalMaintenanceOperationId, RESTORED_ORIGINAL_ORIGIN,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -1133,6 +1136,106 @@ function scenarioSwitchOwnerObservation() {
   return 'only_one_owner_bound_expired_d3_candidate_observation_without_active_or_effects_is_permitted';
 }
 
+function restoredOriginalRequests() {
+  const origin = RESTORED_ORIGINAL_ORIGIN, stage = '/fixture/stage';
+  return { closure: { schema: 'sd2-release-restored-original-closure.v1', phaseResultEventSha256: origin.phaseResultEventSha256,
+    failureIntentSha256: origin.failureIntentSha256, childReceiptSha256: HASH, switchWindowRepairProofSha256: origin.switchWindowRepairProofSha256,
+    restorationReceiptSha256: origin.restorationReceiptSha256, switchFailureFile: stage + '/switch-failure.json', switchFailureSha256: HASH,
+    restoredBaselineFile: stage + '/restored-original-baseline-r01.json', restoredBaselineSha256: HASH, processorControllerSetSha256: HASH,
+    closureWindowSha256: HASH, observedAt: '2026-10-24T01:00:00.000Z' },
+  repair: { schema: 'sd2-release-restored-original-repair.v1', terminalEventSha256: HASH, phaseResultEventSha256: origin.phaseResultEventSha256,
+    childReceiptSha256: HASH, closureProofSha256: HASH, processorControllerSetSha256: HASH,
+    approvalFile: stage + '/hd-release-safety-approval-restored-original-r01.json', approvalSha256: HASH, windowSha256: HASH, observedAt: '2026-10-24T01:01:00.000Z' } };
+}
+
+function restoredOriginalScene() {
+  return { facts: { effectsStarted: true, switchComplete: false, files: Object.fromEntries([
+    'pricing-pair-published.json', 'switch-complete.json', 'pricing-start-intent.json', 'full-schema-ready.json', 'canvas-batch-schema-ready.json',
+    'raw-upload-recovery-published.json', 'guard-recovery-start-intent.json', 'guard-recovery-complete.json'].map(name => [name, null])) } };
+}
+
+function scenarioRestoredOriginalFailure() {
+  // Exact retained native failure, including nginx output; no fabricated no-effects child.
+  const child = {"schema":"sd2-release-phase-child.v1","phase":"switch","intentSha256":"38c3a8b1968ef56cdf036369711081e43fb949127b384ba786830f2fb0b7e49d","startedAt":1792802628703,"finishedAt":1792802763928,"child":{"status":1,"signal":null,"error":null},"stdout":"","stderr":"2026/10/24 00:45:10 [warn] 1517390#1517390: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n2026/10/24 08:45:28 [warn] 1518061#1518061: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n2026/10/24 08:45:58 [warn] 1519267#1519267: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n{\"error\":{\"schema\":\"sd2-release-error.v1\",\"category\":\"internal_failure\",\"code\":\"unclassified_internal_failure\",\"object\":{\"kind\":\"release_operation\",\"id\":\"child\"},\"reason\":\"An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.\",\"nextStep\":\"Stop dependent or side-effecting work and inspect the preserved attempt evidence.\",\"retryable\":false,\"stop\":true},\"cause\":\"AssertionError [ERR_ASSERTION]: Whole HD service drain or exact retired cache evidence is incomplete\\n\\nfalse !== true\\n\"}\n"};
+  assertRestoredOriginalFailure(child);
+  for (const edit of [value => { value.stderr += 'unbound output'; }, value => { value.stderr = value.stderr.replace('Whole HD service drain', 'Some other drain'); },
+    value => { value.child.status = 0; }, value => { value.intentSha256 = HASH; }, value => { value.phase = 'arm'; }]) {
+    const value = structuredClone(child); edit(value); assert.throws(() => assertRestoredOriginalFailure(value));
+  }
+  const { closure, repair } = restoredOriginalRequests(); validateRestoredOriginalClosure(closure); validateRestoredOriginalRepair(repair);
+  const operationId = randomUUID(); assertRestoredOriginalMaintenanceOperationId(operationId, ARM_PAIR_REPAIR_ORIGIN.runId);
+  assert.throws(() => assertRestoredOriginalMaintenanceOperationId(ARM_PAIR_REPAIR_ORIGIN.runId, ARM_PAIR_REPAIR_ORIGIN.runId));
+  assert.throws(() => assertRestoredOriginalMaintenanceOperationId('unbound-operation', ARM_PAIR_REPAIR_ORIGIN.runId));
+  for (const key of ['phaseResultEventSha256', 'failureIntentSha256', 'switchWindowRepairProofSha256', 'restorationReceiptSha256'])
+    assert.throws(() => validateRestoredOriginalClosure({ ...closure, [key]: HASH }));
+  for (const value of [{ ...closure, schema: repair.schema }, { ...closure, observedAt: 'unknown' }, { ...closure, extra: false },
+    { ...closure, restoredBaselineFile: 'relative.json' }]) assert.throws(() => validateRestoredOriginalClosure(value));
+  for (const value of [{ ...repair, phaseResultEventSha256: HASH }, { ...repair, schema: closure.schema }, { ...repair, extra: false },
+    { ...repair, approvalFile: 'relative.json' }]) assert.throws(() => validateRestoredOriginalRepair(value));
+  for (const round of ['r01', 'r02']) assertRestoredOriginalApprovalPath('/fixture', '/fixture/hd-release-safety-approval-restored-original-' + round + '.json');
+  for (const file of ['/fixture/hd-release-safety-approval-restored-original-r03.json', '/elsewhere/hd-release-safety-approval-restored-original-r01.json',
+    '/fixture/hd-release-safety-approval-switch-window-r01.json']) assert.throws(() => assertRestoredOriginalApprovalPath('/fixture', file));
+  return 'restored_original_closure_binds_exact_native_failure_and_separate_typed_closure_continuation_authorities';
+}
+
+function scenarioRestoredOriginalLive() {
+  const roles = ['web', 'image', 'hd', 'works', 'role', 'template'];
+  const original = Object.fromEntries(roles.map((role, i) => [role, { unit: role + '.service', pid: i + 100, invocation: String(i).repeat(32),
+    root: '/fixture/' + role, source: String(i).repeat(40), version: '0.0.1', build: role + '-build', execMainStartTimestampMonotonic: '100' }]));
+  const restored = Object.fromEntries(roles.map(role => [role, { ...original[role], kernelStartTicks: '10' }]));
+  for (const [role, pid, invocation] of [['image', 1519228, '16892719f40742bf8c0d158be6bd5efc'], ['hd', 1519173, 'a8db5ad96e46411f8867b0883ff6c200'],
+    ['role', 1518758, '34081608eac84917bdb0af3f35a48450']]) Object.assign(restored[role], { pid, invocation, kernelStartTicks: '200', execMainStartTimestampMonotonic: '200' });
+  assertRestoredOriginalLive(original, restored);
+  for (const edit of [value => { value.image.pid = original.image.pid; }, value => { value.role.invocation = original.role.invocation; },
+    value => { value.hd.source = original.web.source; }, value => { value.template.root += '/elsewhere'; }, value => { value.web.pid++; },
+    value => { value.hd.kernelStartTicks = 'unknown'; }, value => { value.web.execMainStartTimestampMonotonic = '101'; },
+    value => { delete value.works; }, value => { value.hd.unbound = true; }]) {
+    const value = structuredClone(restored); edit(value); assert.throws(() => assertRestoredOriginalLive(original, value));
+  }
+  const changedNames = ['release-entry.mjs', 'attempt-state.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'hd-storage-preflight.mjs'];
+  const oldMap = Object.fromEntries([...changedNames, 'common.mjs', 'usage-role-control.mjs', 'retired-hd-cache.mjs', 'cutover-driver.mjs', 'writer-network-fence.mjs'].map(name => [name, HASH]));
+  const nextMap = { ...oldMap, ...Object.fromEntries(changedNames.map(name => [name, digest(name)])) };
+  assertRestoredOriginalControllerDifference(oldMap, nextMap);
+  assert.throws(() => assertRestoredOriginalControllerDifference(oldMap, { ...nextMap, 'common.mjs': digest('unreviewed-common') }));
+  assert.throws(() => assertRestoredOriginalControllerDifference(oldMap, { ...nextMap, 'attempt-state.mjs': HASH }));
+  assert.throws(() => assertRestoredOriginalControllerDifference(oldMap, { ...nextMap, 'unbound.mjs': HASH }));
+  return 'restored_live_has_real_new_three_identities_but_preserves_all_six_sources_and_controller_boundary';
+}
+
+function scenarioRestoredOriginalStages() {
+  const { closure, repair } = restoredOriginalRequests(), scene = restoredOriginalScene(); assertRestoredOriginalScene(scene);
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  const lastPhase = { phase: 'switch', outcome: 'failed', resultSha256: closure.phaseResultEventSha256, intentSha256: closure.failureIntentSha256 };
+  const running = { events, derivedState: { status: 'running', activePhase: null, terminal: null, lastPhase, lastEventSha256: closure.phaseResultEventSha256 } };
+  assertRestoredOriginalClosureAdmission(running, closure, scene);
+  for (const edit of [value => { value.derivedState.status = 'failed'; }, value => { value.derivedState.activePhase = { phase: 'switch' }; },
+    value => { value.derivedState.lastEventSha256 = HASH; }, value => { value.derivedState.lastPhase.resultSha256 = HASH; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'restored_original_closure' } }); }]) {
+    const value = structuredClone(running); edit(value); assert.throws(() => assertRestoredOriginalClosureAdmission(value, closure, scene));
+  }
+  for (const facts of [{ ...scene.facts, effectsStarted: false }, { ...scene.facts, switchComplete: true },
+    { ...scene.facts, files: { ...scene.facts.files, 'full-schema-ready.json': { sha256: HASH } } },
+    { ...scene.facts, files: {} }]) assert.throws(() => assertRestoredOriginalClosureAdmission(running, closure, { facts }));
+  const failed = structuredClone(running); Object.assign(failed.derivedState, { status: 'failed', lastEventSha256: HASH, terminal: { eventSha256: HASH } });
+  const runtime = { phase: 'switch', restoredOriginalClosure: { proofSha256: HASH, terminalEventSha256: HASH } };
+  assertRestoredOriginalRepairAdmission(failed, runtime, repair, scene);
+  const consumed = structuredClone(failed); consumed.events.push({ value: { kind: 'restored_original_continued' } });
+  assert.throws(() => assertRestoredOriginalRepairAdmission(consumed, runtime, repair, scene));
+  assert.throws(() => assertRestoredOriginalRepairAdmission(failed, runtime, { ...repair, terminalEventSha256: digest('other-terminal') }, scene));
+  const restored = structuredClone(running); restored.events.push({ value: { kind: 'observation', name: 'restored_original_repair', value: { proofSha256: HASH } } });
+  const observation = { phase: 'switch', restoredOriginalRepair: { schema: 'sd2-release-restored-original-repair-runtime.v1', proofSha256: HASH },
+    candidateSwitchOwnerObservation: { proofSha256: SWITCH_WINDOW_REPAIR_ORIGIN.candidateSwitchOwnerObservationProofSha256, proof: { expiresAt: 100 } } };
+  assertCandidateRestoredOriginalObservationAdmission(restored, observation, 100, scene);
+  assert.throws(() => assertCandidateRestoredOriginalObservationAdmission(restored, observation, 99, scene));
+  for (const edit of [value => { value.derivedState.activePhase = { phase: 'switch' }; }, value => { value.derivedState.lastPhase.resultSha256 = HASH; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'candidate_restored_original_observation' } }); },
+    value => { value.events = value.events.filter(item => item.value.name !== 'restored_original_repair'); }]) {
+    const value = structuredClone(restored); edit(value); assert.throws(() => assertCandidateRestoredOriginalObservationAdmission(value, observation, 101, scene));
+  }
+  assert.throws(() => assertCandidateRestoredOriginalObservationAdmission(restored, { ...observation, phase: 'arm' }, 101, scene));
+  return 'restored_original_closes_running_failure_then_consumes_native_terminal_once_without_clearing_historical_effects';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -1140,7 +1243,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

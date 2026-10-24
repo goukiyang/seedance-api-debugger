@@ -323,6 +323,83 @@ function verifySwitchTypedRepair(m, runtime, predecessor, { scanStage = false, o
   return proof;
 }
 
+function verifyRestoredOriginalRepair(m, runtime, predecessor) {
+  const reference = runtime.restoredOriginalRepair;
+  assert.equal(reference.schema, 'sd2-release-restored-original-repair-runtime.v1');
+  assert.ok(['switch', 'proof', 'recovery'].includes(runtime.phase));
+  const proof = runtimeRootProof(reference, 'restored-original-repair-', 'sd2-release-restored-original-repair-proof.v1', m);
+  assert.equal(proof.originalSwitchWindowRepairProofFile, runtime.switchWindowRepair.proofFile);
+  assert.equal(proof.originalSwitchWindowRepairProofSha256, runtime.switchWindowRepair.proofSha256);
+  assert.deepEqual(proof.predecessorProcessor, predecessor.processor); processorBytes(proof, m);
+  const allowed = new Set(['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'candidate-inputs.mjs',
+    'attempt-state.mjs', 'attempt-state-engineering.mjs', 'release.mjs', 'switch.mjs', 'candidate-lifecycle-engineering.mjs',
+    'hd-storage-preflight.mjs', 'hd-storage-preflight-engineering.mjs', 'retired-hd-cache.mjs', 'retired-hd-cache-engineering.mjs',
+    'usage-role-control.mjs', 'usage-role-engineering.mjs', 'cutover-safety.mjs', 'cutover-safety-engineering.mjs', 'normal-continuation.mjs', 'normal-continuation-engineering.mjs']);
+  for (const [name, digest] of Object.entries(proof.processorControllers))
+    if (digest !== predecessor.processorControllers[name]) assert.ok(allowed.has(name), 'Unreviewed restored-original processor difference: ' + name);
+  const closureReference = runtime.restoredOriginalClosure;
+  assert.equal(closureReference.schema, 'sd2-release-restored-original-closure-runtime.v1');
+  const closure = runtimeRootProof(closureReference, 'restored-original-closure-', 'sd2-release-restored-original-closure-proof.v1', m);
+  assert.equal(proof.restoredOriginalClosureProofFile, closureReference.proofFile);
+  assert.equal(proof.restoredOriginalClosureProofSha256, closureReference.proofSha256);
+  assert.equal(proof.request.closureProofSha256, closureReference.proofSha256);
+  assert.deepEqual(closure.processor, proof.processor); assert.deepEqual(closure.processorControllers, proof.processorControllers);
+  for (const [key, value] of Object.entries({ completed: true, originalPairRestored: true, effectsStarted: true,
+    pairPublished: false, schemaPublished: false, newWriterStarted: false })) assert.equal(closure[key], value);
+  for (const name of ['restoredBaseline', 'restoredSwitchBefore']) {
+    assert.equal(proof[name + 'File'], closure[name + 'File']); assert.equal(proof[name + 'Sha256'], closure[name + 'Sha256']);
+    const snapshot = proof[name + 'Snapshot']; assert.equal(snapshot.requestedPath, proof[name + 'File']);
+    assert.equal(assertTypedFileUnchanged(snapshot).sha256, proof[name + 'Sha256']);
+  }
+  const baseline = JSON.parse(rootFile(proof.restoredBaselineFile));
+  assert.equal(baseline.schema, 'sd2-release-restored-original-baseline.v1'); assert.equal(baseline.runId, m.runId);
+  assert.equal(baseline.manifestSha256, proof.manifestSha256);
+  assert.deepEqual(baseline.newLiveSnapshot, proof.newLiveSnapshot); assert.deepEqual(proof.newLiveSnapshot, closure.newLiveSnapshot);
+  assert.deepEqual(proof.restoredLiveSnapshot, closure.restoredLiveSnapshot);
+  assert.equal(baseline.restoredSwitchBeforeFile, proof.restoredSwitchBeforeFile);
+  assert.equal(baseline.restoredSwitchBeforeSha256, proof.restoredSwitchBeforeSha256);
+  const before = JSON.parse(rootFile(proof.restoredSwitchBeforeFile, 8 * 1024 * 1024));
+  assert.equal(before.schema, 'rate-impl2-switch-before.v1'); assert.equal(before.runId, m.runId); assert.equal(before.manifestSha256, proof.manifestSha256);
+  assert.deepEqual(Object.keys(proof.newLiveSnapshot).sort(), ['web', 'image', 'hd', 'works', 'role', 'template'].sort());
+  for (const [role, live] of Object.entries(proof.newLiveSnapshot)) {
+    for (const key of ['unit', 'root', 'source', 'version', 'build']) assert.equal(live[key], m.live[role][key], 'Restored live source authority changed: ' + role + ':' + key);
+    assert.ok(Number.isSafeInteger(live.pid) && live.pid > 1); assert.match(live.invocation, /^[a-f0-9]{32}$/);
+    assert.match(live.kernelStartTicks, /^\d+$/); assert.match(live.execMainStartTimestampMonotonic, /^\d+$/);
+    if (before.writers[role]) {
+      assert.equal(Number(before.writers[role].MainPID), live.pid); assert.equal(before.writers[role].InvocationID, live.invocation);
+      assert.equal(before.writers[role].WorkingDirectory, live.root);
+    }
+  }
+  assert.equal(Number(before.roleControl.state.MainPID), proof.newLiveSnapshot.role.pid);
+  assert.equal(before.roleControl.state.InvocationID, proof.newLiveSnapshot.role.invocation);
+  assert.match(proof.maintenanceOperationId, /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][0-9a-f]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  assert.notEqual(proof.maintenanceOperationId, m.runId);
+  for (const key of ['originalFixedGuardFile', 'originalFixedGuardSha256', 'originalFixedGuardSnapshot', 'originalFixedGuardAttributes',
+    'originalSwitchBeforeFile', 'originalSwitchBeforeSha256', 'originalSwitchBeforeSnapshot',
+    'oldGuardApprovalFile', 'oldGuardApprovalSha256', 'oldGuardApprovalSnapshot', 'oldGuardWindowFile', 'oldGuardWindowSha256', 'oldGuardWindowSnapshot',
+    'liveSnapshot', 'liveSnapshotSha256', 'originalTimesChanged', 'newCompilationClaimed', 'originalSwitchBeforeReplaced'])
+    assert.deepEqual(proof[key], predecessor[key], 'Restored continuation changed original frozen authority: ' + key);
+  assert.equal(proof.request.processorControllerSetSha256, proof.processor.controllerSetSha256);
+  assert.equal(proof.approvalFile, proof.request.approvalFile); assert.equal(proof.approvalSha256, proof.request.approvalSha256);
+  assert.ok(['r01', 'r02'].some(round => proof.approvalFile === m.stage + '/hd-release-safety-approval-restored-original-' + round + '.json'));
+  assert.equal(assertTypedFileUnchanged(proof.approvalSnapshot).sha256, proof.approvalSha256);
+  assert.equal(proof.windowSha256, proof.request.windowSha256); assert.equal(proof.windowFile, m.stage + '/window-evidence/' + proof.windowSha256 + '.json');
+  assert.equal(assertTypedFileUnchanged(proof.windowSnapshot).sha256, proof.windowSha256);
+  const { loaded } = successorJournal(m, runtime);
+  const records = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'restored_original_repair');
+  assert.equal(records.length, 1); const observed = records[0];
+  assert.deepEqual(observed.value.value, { schema: 'sd2-release-restored-original-repair-reference.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
+  const continued = loaded.events.find(item => item.sha256 === observed.value.previousSha256);
+  assert.equal(continued?.value.kind, 'restored_original_continued'); assert.equal(continued.value.failureReceiptSha256, reference.proofSha256);
+  assert.equal(continued.value.previousTerminalSha256, proof.request.terminalEventSha256);
+  assert.equal(continued.value.restoration.closureProofSha256, closureReference.proofSha256);
+  assert.equal(continued.value.restoration.restoredBaselineSha256, proof.restoredBaselineSha256);
+  assert.equal(continued.value.before.facts.effectsStarted, true); assert.equal(continued.value.before.facts.switchComplete, false);
+  assert.deepEqual(observed.value.owner, continued.value.owner);
+  assert.equal(loaded.derivedState.restoredOriginalClosure.consumed, true);
+  return proof;
+}
+
 export function guardBuildTailRuntime(m) {
   const context = currentReleaseContext(), runtime = context?.guardBuildTail;
   if (!runtime) return null;
@@ -393,28 +470,56 @@ export function guardBuildTailRuntime(m) {
     assert.ok(runtime.switchOwnerRepair && runtime.candidateSwitchOwnerObservation, 'Window repair retains its exact owner repair and full candidate observation');
     active = verifySwitchTypedRepair(m, runtime, active, { windowStage: true });
   }
+  if (runtime.restoredOriginalRepair) {
+    assert.ok(runtime.switchWindowRepair && runtime.restoredOriginalClosure, 'Restored repair retains the exact effectful failure and closed original restoration');
+    active = verifyRestoredOriginalRepair(m, runtime, active);
+  }
   assert.equal(path.dirname(fileURLToPath(import.meta.url)), active.processor.root);
   return runtime;
 }
 
 export function candidateCompatibilityDirectory(m) {
   const runtime = guardBuildTailRuntime(m);
-  return (runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
+  return (runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
 }
 
 export function hdMaintenanceApprovalFile(m) {
   const runtime = guardBuildTailRuntime(m);
-  return runtime?.switchWindowRepair?.proof.approvalFile || runtime?.switchOwnerRepair?.proof.approvalFile || runtime?.switchScanRepair?.proof.approvalFile || runtime?.switchTypedRepair?.proof.approvalFile || runtime?.switchAdmissionRepair?.proof.approvalFile || runtime?.armProcessorRepair?.proof.approvalFile || runtime?.armPairRepair?.proof.approvalFile || m.stage + '/hd-release-safety-approval.json';
+  return runtime?.restoredOriginalRepair?.proof.approvalFile || runtime?.switchWindowRepair?.proof.approvalFile || runtime?.switchOwnerRepair?.proof.approvalFile || runtime?.switchScanRepair?.proof.approvalFile || runtime?.switchTypedRepair?.proof.approvalFile || runtime?.switchAdmissionRepair?.proof.approvalFile || runtime?.armProcessorRepair?.proof.approvalFile || runtime?.armPairRepair?.proof.approvalFile || m.stage + '/hd-release-safety-approval.json';
 }
 
 export function assertSwitchAdmissionRepair(m) {
   const runtime = guardBuildTailRuntime(m);
-  return runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || null;
+  return runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || null;
 }
 export function guardRecoveryApprovalFile(m) {
   const runtime = guardBuildTailRuntime(m);
-  return runtime?.switchWindowRepair?.proof.oldGuardApprovalFile || runtime?.switchOwnerRepair?.proof.oldGuardApprovalFile || runtime?.switchScanRepair?.proof.oldGuardApprovalFile || runtime?.switchTypedRepair?.proof.oldGuardApprovalFile || runtime?.switchAdmissionRepair?.proof.oldGuardApprovalFile || runtime?.armProcessorRepair?.proof.approvalFile
+  return runtime?.restoredOriginalRepair?.proof.oldGuardApprovalFile || runtime?.switchWindowRepair?.proof.oldGuardApprovalFile || runtime?.switchOwnerRepair?.proof.oldGuardApprovalFile || runtime?.switchScanRepair?.proof.oldGuardApprovalFile || runtime?.switchTypedRepair?.proof.oldGuardApprovalFile || runtime?.switchAdmissionRepair?.proof.oldGuardApprovalFile || runtime?.armProcessorRepair?.proof.approvalFile
     || runtime?.armPairRepair?.proof.approvalFile || m.stage + '/hd-release-safety-approval.json';
+}
+
+export function operationalLive(m, role) {
+  const runtime = guardBuildTailRuntime(m), proof = runtime?.restoredOriginalRepair?.proof;
+  if (!proof) return m.live?.[role];
+  assert.ok(Object.hasOwn(proof.newLiveSnapshot, role));
+  return proof.newLiveSnapshot[role];
+}
+export function operationalRecordName(m, name) {
+  assert.match(name, /^[a-zA-Z0-9_.-]+$/);
+  const runtime = guardBuildTailRuntime(m), repair = runtime?.restoredOriginalRepair;
+  return repair ? name + '-' + repair.proofSha256 : name;
+}
+export function operationalBeforeFile(m) {
+  const runtime = guardBuildTailRuntime(m);
+  return runtime?.restoredOriginalRepair?.proof.restoredSwitchBeforeFile || m.stage + '/switch-before.json';
+}
+export function operationalNginxRunId(m) {
+  const runtime = guardBuildTailRuntime(m);
+  return runtime?.restoredOriginalRepair?.proof.maintenanceOperationId || m.runId;
+}
+export function operationalNginxStage(m) {
+  const runtime = guardBuildTailRuntime(m), repair = runtime?.restoredOriginalRepair;
+  return repair ? m.stage + '/nginx-restored-' + repair.proofSha256 : m.stage;
 }
 
 export function assertGuardBuildTailObservation(value, m, now = Date.now(), { requireFresh = true } = {}) {
@@ -557,6 +662,35 @@ export function assertCandidateObservation(value, m, kind, now = Date.now()) {
     assert.ok(proof.verifier.startedAt >= prior.expiresAt, 'Owner observation verifies only after the retained switch observation expired');
     verifierProcessor = runtime.switchOwnerRepair.proof;
   }
+  if (runtime.candidateRestoredOriginalObservation) {
+    assert.ok(runtime.restoredOriginalRepair && runtime.candidateSwitchOwnerObservation);
+    const priorReference = reference, prior = proof, priorVerifier = prior.verifier;
+    assert.equal(priorReference.proofSha256, runtime.candidateSwitchOwnerObservation.proofSha256);
+    assert.equal(priorVerifier.file, verifierProcessor.processor.root + '/candidate-reuse.mjs');
+    assert.equal(priorVerifier.sha256, verifierProcessor.processorControllers['candidate-reuse.mjs']);
+    assert.equal(sha(rootFile(priorVerifier.file)), priorVerifier.sha256);
+    assert.equal(prior.expiresAt, prior.observedAt + 1800000);
+    reference = runtime.candidateRestoredOriginalObservation;
+    assert.equal(reference.schema, 'sd2-release-candidate-observation-runtime.v1');
+    proof = runtimeRootProof(reference, 'candidate-observation-', CANDIDATE_OBSERVATION_SCHEMA, m);
+    assert.notEqual(reference.proofSha256, priorReference.proofSha256);
+    assert.equal(proof.previousObservationProofSha256, priorReference.proofSha256);
+    assert.equal(proof.restoredOriginalRepairProofSha256, runtime.restoredOriginalRepair.proofSha256);
+    for (const key of ['runId', 'taskId', 'attemptId', 'manifestSha256', 'originalContinuationSha256', 'retryProofSha256', 'readerProofSha256'])
+      assert.equal(proof[key], prior[key]);
+    assert.deepEqual(proof.engine, prior.engine); assert.deepEqual(proof.candidates, prior.candidates);
+    const records = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_restored_original_observation');
+    assert.equal(records.length, 1); const observed = records[0];
+    assert.deepEqual(observed.value.value, { schema: 'sd2-release-candidate-observation-reference.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
+    assert.equal(observed.value.previousSha256, proof.eventHeadSha256);
+    const previous = loaded.events[loaded.events.indexOf(observed) - 1]; assert.equal(previous.sha256, proof.eventHeadSha256);
+    assert.deepEqual(observed.value.owner, previous.value.owner);
+    const repair = loaded.events.find(item => item.value.kind === 'observation' && item.value.name === 'restored_original_repair');
+    assert.ok(repair && repair.value.sequence < observed.value.sequence);
+    assert.equal(repair.value.value.proofSha256, runtime.restoredOriginalRepair.proofSha256);
+    assert.ok(proof.verifier.startedAt >= prior.expiresAt, 'Restored-original observation must verify after the old owner observation actually expired');
+    verifierProcessor = runtime.restoredOriginalRepair.proof;
+  }
   for (const [flag, expected] of Object.entries({ readOnly: true, newCompilationClaimed: false, originalTimesChanged: false,
     continuousUnchangedIntervalClaimed: false })) assert.equal(proof[flag], expected);
   assert.equal(proof.protectionComparison, 'assertProtection'); assert.deepEqual(proof.protectionFields, PROTECTION_FIELDS);
@@ -602,7 +736,7 @@ export function candidateGateObservation(value, m, kind, now = Date.now()) {
   const observation = assertCandidateObservation(value, m, kind, now);
   if (observation) {
     const runtime = guardBuildTailRuntime(m);
-    return { manifest: m, runtime, observedAt: observation.observedAt, candidateObservation: runtime.candidateSwitchOwnerObservation || runtime.candidateSwitchObservation || runtime.candidateReobservation || runtime.candidateObservation };
+    return { manifest: m, runtime, observedAt: observation.observedAt, candidateObservation: runtime.candidateRestoredOriginalObservation || runtime.candidateSwitchOwnerObservation || runtime.candidateSwitchObservation || runtime.candidateReobservation || runtime.candidateObservation };
   }
   if (kind !== 'guard' || value.schema !== GUARD_BUILD_TAIL_SCHEMA) return undefined;
   const runtime = guardBuildTailRuntime(m); assert.ok(runtime);

@@ -8,6 +8,8 @@ import {
   assertAttemptBindings,
   createAttemptIdentity,
   continueFailedAttempt,
+  continueRestoredOriginalAttempt,
+  validateRestoredOriginalBinding,
   validateGuardBuildTailBinding,
   validateGuardBuildTailRetryBinding,
   finishAttempt,
@@ -330,6 +332,82 @@ function runGuardBuildTailRetryAttempts(root, checks) {
   }
 }
 
+function runRestoredOriginalContinuation(root, checks) {
+  const taskId = 'restored-original-effectful', attemptId = '10000000-0000-4000-8000-000000000010';
+  const bindings = fixtureBindings(root), first = owner(2311, UUIDS.ownerOne), second = owner(2312, UUIDS.ownerTwo);
+  let now = 1_800_000_010_000;
+  start(root, taskId, attemptId, first, now, bindings);
+  const read = () => readAttempt({ root, taskId, attemptId });
+  const intent = startPhase({ root, taskId, attemptId, owner: first, phase: 'switch',
+    dependencyEventSha256: read().derivedState.lastEventSha256, before: scene(++now, 'original-before', { effectsStarted: false }), now });
+  finishPhase({ root, taskId, attemptId, owner: first, phase: 'switch', intentSha256: intent.eventSha256, outcome: 'failed', child: child(1),
+    after: scene(++now, 'actual-maintenance-and-stop', { effectsStarted: true, switchComplete: false }), now });
+  const failedResult = read().derivedState.lastPhase.resultSha256, place = read().place;
+  const markerNames = ['pricing-pair-published.json', 'pricing-start-intent.json', 'full-schema-ready.json', 'canvas-batch-schema-ready.json',
+    'raw-upload-recovery-published.json', 'guard-recovery-start-intent.json', 'guard-recovery-complete.json'];
+  const facts = { effectsStarted: true, switchComplete: false, files: Object.fromEntries(markerNames.map(name => [name, null])) };
+  const restorationReceiptFile = path.join(place.attempt, 'actual-original-restored.json');
+  const restored = { schema: 'controlled-hd-drain-original-restoration.v1', runId: attemptId, completed: true,
+    originalPairUnchanged: true, businessDataRestored: false, policiesRestored: true,
+    restored: { exactOriginalBytesRestored: true, runtimeRestorationVerified: true } };
+  const write = (file, value) => { const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n'); fs.writeFileSync(file, bytes, { flag: 'wx', mode: 0o600 }); return sha(bytes); };
+  const restorationReceiptSha256 = write(restorationReceiptFile, restored), newLiveSnapshot = Object.fromEntries(
+    ['web', 'image', 'hd', 'works', 'role', 'template'].map((role, i) => [role, { unit: role + '.service', pid: 3000 + i,
+      invocation: String(i + 1).repeat(32), kernelStartTicks: String(99000 + i), execMainStartTimestampMonotonic: String(990000000 + i),
+      root: '/isolated/source/' + role, source: 'a'.repeat(40), version: '0.103.2', build: 'original:' + role }]));
+  const restoredBaselineFile = path.join(place.attempt, 'restored-baseline.json');
+  const baseline = { schema: 'sd2-release-restored-original-baseline.v1', runId: attemptId, manifestSha256: bindings.manifest.sha256,
+    restorationReceiptSha256, newLiveSnapshot };
+  const restoredBaselineSha256 = write(restoredBaselineFile, baseline);
+  const proof = { schema: 'sd2-release-restored-original-closure-proof.v1', taskId, attemptId, runId: attemptId,
+    manifestSha256: bindings.manifest.sha256, failedPhaseResultSha256: failedResult, completed: true, originalPairRestored: true,
+    effectsStarted: true, pairPublished: false, schemaPublished: false, newWriterStarted: false,
+    restorationReceiptFile, restorationReceiptSha256, restoredBaselineFile, restoredBaselineSha256, newLiveSnapshot };
+  const proofBytes = Buffer.from(JSON.stringify(proof, null, 2) + '\n'), proofSha256 = sha(proofBytes);
+  const proofFile = path.join(place.attempt, 'restored-original-closure-' + proofSha256 + '.json'); fs.writeFileSync(proofFile, proofBytes, { flag: 'wx', mode: 0o600 });
+  const reference = { schema: 'sd2-release-restored-original-closure-reference.v1', proofFile, proofSha256 };
+  const originalEvents = read().events.map(item => fs.readFileSync(path.join(place.events, item.file)));
+  assert.throws(() => recordAttemptEvent({ root, taskId, attemptId, owner: first, name: 'restored_original_closure',
+    value: { ...reference, proofSha256: sha('missing-closure') }, now: ++now }));
+  assert.equal(read().events.length, originalEvents.length);
+  recordAttemptEvent({ root, taskId, attemptId, owner: first, name: 'restored_original_closure', value: reference, now: ++now });
+  assert.throws(() => recordAttemptEvent({ root, taskId, attemptId, owner: first, name: 'restored_original_closure', value: reference, now: ++now }));
+  finishAttempt({ root, taskId, attemptId, owner: first, outcome: 'failed', after: scene(++now, 'old-pair-restored', facts), now });
+  const terminal = read().derivedState.terminal.eventSha256;
+  const restoration = { schema: 'sd2-release-restored-original-binding.v1', closureProofFile: proofFile,
+    closureProofSha256: proofSha256, phaseResultSha256: failedResult, restoredBaselineSha256 };
+  assert.deepEqual(validateRestoredOriginalBinding(restoration), restoration);
+  const input = { root, taskId, attemptId, owner: second, ...bindings, terminalEventSha256: terminal,
+    failureReceiptSha256: sha('reviewed-next-restored-repair-proof'), restoration,
+    window: windowReference(root, attemptId, ++now, now + 1000, 'actual-new-window'), before: scene(now, 'fresh-restored-baseline', facts), now,
+    inspectOwner: () => 'dead' };
+  assert.throws(() => continueFailedAttempt(input), /effectsStarted|false|true/);
+  for (const status of ['alive', 'unknown']) assert.throws(() => continueRestoredOriginalAttempt({ ...input, inspectOwner: () => status }));
+  assert.throws(() => continueRestoredOriginalAttempt({ ...input, restoration: { ...restoration, phaseResultSha256: sha('wrong-result') } }));
+  assert.throws(() => continueRestoredOriginalAttempt({ ...input, before: scene(now, 'pretended-no-maintenance', { ...facts, effectsStarted: false }) }));
+  assert.throws(() => continueRestoredOriginalAttempt({ ...input, before: scene(now, 'new-writer-present', { ...facts,
+    files: { ...facts.files, 'pricing-start-intent.json': { sha256: sha('new-writer') } } }) }));
+  const missingFacts = { ...facts, files: { ...facts.files } }; delete missingFacts.files['full-schema-ready.json'];
+  assert.throws(() => continueRestoredOriginalAttempt({ ...input, before: scene(now, 'missing-state-observation', missingFacts) }));
+  const savedBaseline = fs.readFileSync(restoredBaselineFile); fs.writeFileSync(restoredBaselineFile, JSON.stringify({ ...baseline, newLiveSnapshot: {} }));
+  assert.throws(() => continueRestoredOriginalAttempt(input)); fs.writeFileSync(restoredBaselineFile, savedBaseline);
+  const continued = continueRestoredOriginalAttempt(input);
+  assert.equal(continued.event.kind, 'restored_original_continued'); assert.equal(continued.event.before.facts.effectsStarted, true);
+  assert.equal(read().derivedState.restoredOriginalClosure.consumed, true); assert.equal(read().derivedState.status, 'running');
+  assert.equal(read().derivedState.lastPhase.resultSha256, failedResult); assert.equal(read().derivedState.terminal, null);
+  const continuedCount = read().events.length;
+  assert.throws(() => continueRestoredOriginalAttempt(input)); assert.equal(read().events.length, continuedCount);
+  for (let i = 0; i < originalEvents.length; i++) assert.deepEqual(fs.readFileSync(path.join(place.events, String(i + 1).padStart(6, '0') + '.json')), originalEvents[i]);
+  const next = startPhase({ root, taskId, attemptId, owner: second, phase: 'switch', dependencyEventSha256: read().derivedState.lastEventSha256,
+    before: scene(++now, 'new-controlled-switch-only-after-restoration', facts), now });
+  finishPhase({ root, taskId, attemptId, owner: second, phase: 'switch', intentSha256: next.eventSha256, outcome: 'succeeded', child: child(0),
+    after: scene(++now, 'new-result', { effectsStarted: true, switchComplete: true }), now });
+  finishAttempt({ root, taskId, attemptId, owner: second, outcome: 'succeeded', after: scene(++now, 'new-final', { effectsStarted: true }), now });
+  assert.equal(read().derivedState.status, 'succeeded');
+  checks.push('restored_original_closure_and_continuation_keep_effects_and_failed_phase_then_consume_typed_proof_once');
+  checks.push('restored_original_continuation_refuses_alive_unknown_owner_missing_or_drifted_proof_marker_and_false_noeffects');
+}
+
 function runTypedFilesAndErrors(root, checks) {
   assert.equal(process.platform, 'linux', 'System-file engineering fixtures require the production Linux semantics');
   assert.equal(process.getuid(), 0, 'System-file engineering fixtures require the production root reader');
@@ -396,6 +474,7 @@ export function runAttemptStateEngineeringFixtures() {
   const checks = [];
   runAttempts(root, checks);
   runGuardBuildTailRetryAttempts(root, checks);
+  runRestoredOriginalContinuation(root, checks);
   runTypedFilesAndErrors(root, checks);
   return { schema: 'sd2-release-attempt-state-engineering.v1', completed: true, checks, count: checks.length,
     root, scenarios: ['A', 'B', 'C', 'D'], productionCalls: 0, serviceCalls: 0, paidRequests: 0, browserRuns: 0,

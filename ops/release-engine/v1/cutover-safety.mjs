@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { rootFile, sha, call, assertReleaseWindow, liveArtifactSource, rejectedPricingRoots, engineDirectory } from './common.mjs';
-import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateCompatibilityDirectory, hdMaintenanceApprovalFile } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, assertFreshCandidateEvidence, candidateCompatibilityDirectory, hdMaintenanceApprovalFile, operationalLive, operationalRecordName, operationalBeforeFile, operationalNginxRunId, operationalNginxStage } from './candidate-evidence.mjs';
 import { cwdBytes, assertNaturalExitEvidence, protectedFileSnapshot } from './switch.mjs';
 import { captureNginxUpstreamSockets } from './nginx-maintenance.mjs';
 import { fileIdentity } from './legacy-maintenance.mjs';
@@ -250,7 +250,7 @@ function nativeDependencies(m, operationStage = m.stage + '/hd-release-safety-r0
     lock: withEmptyWriterLock, cwd: (before, root) => cwdBytes(m, before, 'web', root).toString('utf8'),
     seal(name, body) {
       assert.match(name, /^[a-z-]+$/);
-      const file = operationStage + '/' + name + (name === 'fence-view' ? '' : '-' + randomUUID()) + '.json';
+      const file = operationStage + '/' + (name === 'fence-view' ? operationalRecordName(m, name) : name + '-' + randomUUID()) + '.json';
       const s = fs.lstatSync(operationStage);
       assert.ok(s.isDirectory() && !s.isSymbolicLink() && s.uid === 0 && (s.mode & 0o7777) === 0o700);
       assert.equal(fs.realpathSync(operationStage), operationStage);
@@ -263,18 +263,18 @@ function nativeDependencies(m, operationStage = m.stage + '/hd-release-safety-r0
       return { ...body, artifact: { path: file, sha256: sha(bytes) } };
     },
     async ingress(installed, master) {
-      assert.deepEqual(json(m.stage + '/nginx-' + m.runId + '-installed.json'), installed);
-      assert.equal(installed.runId, m.runId); assert.equal(installed.stageRoot, m.stage);
-      assert.equal(installed.markerPath, '/data/video-api-debugger/entry-maintenance/' + m.runId + '/nginx.active');
+      assert.deepEqual(json(operationalNginxStage(m) + '/nginx-' + operationalNginxRunId(m) + '-installed.json'), installed);
+      assert.equal(installed.runId, operationalNginxRunId(m)); assert.equal(installed.stageRoot, operationalNginxStage(m));
+      assert.equal(installed.markerPath, '/data/video-api-debugger/entry-maintenance/' + operationalNginxRunId(m) + '/nginx.active');
       assert.deepEqual(fileIdentity(installed.markerPath), installed.markerIdentity);
       assert.equal(sha(rootFile(installed.markerPath)), installed.markerSha256);
-      assert.equal(rootFile(installed.markerPath).toString(), 'rate-impl2 nginx entry maintenance ' + m.runId + '\n');
+      assert.equal(rootFile(installed.markerPath).toString(), 'rate-impl2 nginx entry maintenance ' + operationalNginxRunId(m) + '\n');
       assert.deepEqual(installed.files.map(item => item.file).sort(),
         ['/etc/nginx/sites-available/sd2.youdooart.com', '/etc/nginx/sites-available/sd2-server.youdoodesign.com'].sort());
       for (const item of installed.files) {
         assertConfigurationIdentity(protectedFileSnapshot(item.file), item.ownIdentity, item.maintainedSha256);
         assert.equal(item.maintainedSha256, sha(item.maintained));
-        assert.ok(item.maintained.includes('# rate-impl2-maintenance ' + m.runId)
+        assert.ok(item.maintained.includes('# rate-impl2-maintenance ' + operationalNginxRunId(m))
           && item.maintained.includes('if (-f ' + installed.markerPath + ') { return 503; }'));
         assertConfigurationIdentity(protectedFileSnapshot(item.swapPath), item.identity, item.sha256);
       }
@@ -324,13 +324,13 @@ function checkConfigurations(d, m, before, installed) {
   }
 }
 function establishActiveView(d, m, before, manifestSha256) {
-  const state = d.service('web'), process = d.processIdentity(m.live.web.pid), group = d.groupIdentity(process.cgroup);
-  assert.equal(state.MainPID, before.writers.web.MainPID); assert.equal(state.InvocationID, m.live.web.invocation);
+  const live = operationalLive(m, 'web'), state = d.service('web'), process = d.processIdentity(live.pid), group = d.groupIdentity(process.cgroup);
+  assert.equal(state.MainPID, before.writers.web.MainPID); assert.equal(state.InvocationID, live.invocation);
   assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.Delegate, 'no');
   assert.equal(process.root, m.live.web.root); assert.equal(process.cgroup, '/system.slice/sd2-gray.service');
   assert.equal(d.source(process.root), m.live.web.source);
   const view = { ...clone(m), healthUrl: 'http://127.0.0.1:3302/api/release',
-    live: { ...clone(m.live), web: { ...clone(m.live.web), processStartTicks: process.processStartTicks,
+    live: { ...clone(m.live), web: { ...clone(m.live.web), pid: live.pid, invocation: live.invocation, processStartTicks: process.processStartTicks,
       cgroup: process.cgroup, cgroupDev: group.dev, cgroupIno: group.ino, dropin: CWD } },
     main: { ...clone(m.main), cwdBytes: d.cwd(before, m.main.root) },
     guard: { ...clone(m.guard), cwdBytes: d.cwd(before, m.guard.root) } };
@@ -392,7 +392,8 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
   let view, expected, originalPolicy, receipt, baselineControl, logStart, installUnknown = false, beforeSeen = false, restored = false;
   const events = [], record = (phase, details = {}) => events.push({ phase, at: d.now(), ...details });
   const boundJson = name => {
-    const value = d.json(m.stage + '/' + name + '.json');
+    const actualName = name.startsWith('natural-stop') ? operationalRecordName(m, name) : name;
+    const value = d.json(m.stage + '/' + actualName + '.json');
     assert.equal(value.runId, m.runId); assert.equal(value.manifestSha256, manifestSha256); return value;
   };
   function checkpoint(context, builds) {
@@ -442,20 +443,24 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
     return fixed;
   }
   function checkBefore(before) {
-    const saved = boundJson('switch-before'), actual = { ...saved }; delete actual.runId;
+    const saved = d.json(operationalBeforeFile(m)); assert.equal(saved.runId, m.runId); assert.equal(saved.manifestSha256, manifestSha256);
+    const actual = { ...saved }; delete actual.runId;
     assert.deepEqual(actual, before); assert.equal(before.schema, 'rate-impl2-switch-before.v1');
     for (const role of ROLES) {
-      const original = before.writers[role]; assert.equal(Number(original.MainPID), m.live[role].pid);
-      assert.equal(original.InvocationID, m.live[role].invocation); assert.equal(original.WorkingDirectory, m.live[role].root);
+      const original = before.writers[role], live = operationalLive(m, role); assert.equal(Number(original.MainPID), live.pid);
+      assert.equal(original.InvocationID, live.invocation); assert.equal(original.WorkingDirectory, m.live[role].root);
     }
   }
   function establishView(before, rollback = false) {
     if (rollback) {
-      const saved = d.json(operationStage + '/fence-view.json'); assert.equal(saved.manifestSha256, manifestSha256); view = saved.view;
+      const saved = d.json(operationStage + '/' + operationalRecordName(m, 'fence-view') + '.json'); assert.equal(saved.manifestSha256, manifestSha256); view = saved.view;
       const original = clone(view);
       delete original.healthUrl;
       for (const key of ['processStartTicks', 'cgroup', 'cgroupDev', 'cgroupIno', 'dropin']) delete original.live.web[key];
       for (const kind of ['main', 'guard']) delete original[kind].cwdBytes;
+      const live = operationalLive(m, 'web');
+      assert.equal(original.live.web.pid, live.pid); assert.equal(original.live.web.invocation, live.invocation);
+      original.live.web.pid = m.live.web.pid; original.live.web.invocation = m.live.web.invocation;
       assert.deepEqual(original, m);
     } else ({ view, expected } = establishActiveView(d, m, before, manifestSha256));
     expected = assertWriterFenceManifest(view, manifestSha256);
@@ -486,7 +491,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
     assert.equal(d.exists('/data/video-api-debugger/controls/pricing-writer-v1/start-' + m.runId + '.json'), false);
     for (const role of roles) {
       const original = before.writers[role];
-      const prefix = d.exists(m.stage + '/natural-stop-intent-switch-' + role + '.json') ? 'switch' : 'recovery';
+      const prefix = d.exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-' + role) + '.json') ? 'switch' : 'recovery';
       const intent = boundJson('natural-stop-intent-' + prefix + '-' + role);
       if (prefix === 'switch') assert.deepEqual(intent.capturedOriginal, original);
       else for (const key of ['MainPID', 'InvocationID', 'WorkingDirectory', 'ExecMainPID', 'ExecMainStartTimestamp', 'ExecMainStartTimestampMonotonic'])
@@ -568,7 +573,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
     checkpoint(context, context.builds); checkBefore(context.before); noForce(); checkConfigurations(d, m, context.before, context.installed);
     let oldFields, newPairFields;
     if (phase === 'pre-stop-installation-abort') {
-      assert.equal(d.exists(m.stage + '/natural-stop-intent-switch-web.json'), false);
+      assert.equal(d.exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-web') + '.json'), false);
       const active = await oldWebActive(); checkPair(context.before, null);
       oldFields = { stopRequested: false, currentTarget: active.target, originalIdentityStillActive: true, pairChanged: false };
     } else {
@@ -625,7 +630,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
       let oldFields, newPairFields;
       if (original) {
         assert.equal(receipt.phase, 'failed-keep-fence');
-        assert.equal(d.exists(m.stage + '/natural-stop-intent-switch-web.json'), false);
+        assert.equal(d.exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-web') + '.json'), false);
         const current = await oldWebActive(); checkPair(context.before, null);
         oldFields = { stopRequested: false, currentTarget: current.target, originalIdentityStillActive: true, pairChanged: false };
       } else {
@@ -729,7 +734,7 @@ export function createHdReleaseSafety({ m, manifestSha256, approval, approvalSha
       if (restored || !beforeSeen) return { action: 'keep-maintenance-no-start', phase: receipt?.phase || 'not-installed' };
       if (!receipt) { try { receipt = await d.readFence(fenceArgs()); } catch {} }
       if (installUnknown || receipt?.phase !== 'failed-keep-fence' || context.published
-        || d.exists(m.stage + '/natural-stop-intent-switch-web.json')) {
+        || d.exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-web') + '.json')) {
         record('failure-kept-fence', { phase: receipt?.phase || 'unknown' });
         return { action: 'keep-fence-and-503-no-start', phase: receipt?.phase || 'unknown' };
       }

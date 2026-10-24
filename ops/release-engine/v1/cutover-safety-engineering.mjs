@@ -334,6 +334,38 @@ export async function runHdCutoverSafetyEngineering() {
     add('actual_checkpoint_approval_expression_reads_current_bound_file_and_propagates_refusal');
   }
 
+
+  {
+    const source = fs.readFileSync(new URL('./cutover-safety.mjs', import.meta.url), 'utf8');
+    const start = source.indexOf('  function checkBefore('), end = source.indexOf('  function establishView(', start);
+    assert.ok(start > 0 && end > start);
+    const m = { stage: '/isolated-restored-safety', runId: 'isolated-run', live: Object.fromEntries(roles.map((role, i) => [role,
+      { pid: 100 + i, invocation: String(i + 1).repeat(32), root: '/sealed/' + role }])) };
+    const freshLive = Object.fromEntries(roles.map((role, i) => [role, { ...m.live[role], pid: 300 + i, invocation: String(i + 4).repeat(32) }]));
+    const manifestSha256 = 'a'.repeat(64), before = { schema: 'rate-impl2-switch-before.v1', manifestSha256,
+      writers: Object.fromEntries(roles.map(role => [role, { MainPID: String(freshLive[role].pid), InvocationID: freshLive[role].invocation, WorkingDirectory: freshLive[role].root }])) };
+    const file = m.stage + '/restored-switch-before-r01.json', reads = [];
+    const d = { json: name => { reads.push(name); assert.equal(name, file); return { runId: m.runId, ...copy(before) }; } };
+    const check = new Function('assert', 'd', 'm', 'manifestSha256', 'ROLES', 'operationalLive', 'operationalBeforeFile',
+      source.slice(start, end) + ';return checkBefore;')(assert, d, m, manifestSha256, roles,
+      (manifest, role) => { assert.equal(manifest, m); return freshLive[role]; }, manifest => { assert.equal(manifest, m); return file; });
+    check(before); assert.deepEqual(reads, [file]);
+    const stale = copy(before); stale.writers.hd.MainPID = String(m.live.hd.pid); assert.throws(() => check(stale));
+    const actualStart = source.indexOf('function establishActiveView('), actualEnd = source.indexOf('async function readBeforeMaintenance(', actualStart);
+    const establish = new Function('assert', 'clone', 'CWD', 'operationalLive', 'assertWriterFenceManifest',
+      source.slice(actualStart, actualEnd) + ';return establishActiveView;')(assert, copy, CWD,
+      (manifest, role) => freshLive[role], view => { assert.equal(view.live.web.pid, freshLive.web.pid); return { expected: true }; });
+    m.main = { root: '/candidate/main' }; m.guard = { root: '/candidate/guard' }; m.live.web.source = 'b'.repeat(40);
+    let sealed;
+    const adapter = { service: () => ({ MainPID: before.writers.web.MainPID, InvocationID: freshLive.web.invocation, ActiveState: 'active', SubState: 'running', Delegate: 'no' }),
+      processIdentity: pid => { assert.equal(pid, freshLive.web.pid); return { root: m.live.web.root, processStartTicks: '1234', cgroup: '/system.slice/sd2-gray.service' }; },
+      groupIdentity: () => ({ dev: '1', ino: '2' }), source: () => m.live.web.source, cwd: (value, root) => root,
+      seal: (name, value) => { assert.equal(name, 'fence-view'); sealed = value; } };
+    const frozen = JSON.stringify(m); const result = establish(adapter, m, before, manifestSha256);
+    assert.equal(result.view.live.web.pid, freshLive.web.pid); assert.equal(sealed.view.live.web.invocation, freshLive.web.invocation);
+    assert.equal(JSON.stringify(m), frozen); add('actual_restored_safety_bodies_use_fresh_append_baseline_and_identity_without_manifest_mutation');
+  }
+
   const sourceSha256 = Object.fromEntries(['cutover-safety.mjs', 'cutover-safety-engineering.mjs'].map(file => [
     file, sha(fs.readFileSync(fileURLToPath(new URL('./' + file, import.meta.url)))),
   ]));

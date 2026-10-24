@@ -659,6 +659,10 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
       const original = dependencies.get(specifier);
       if (specifier === './candidate-evidence.mjs') return { ...original, assertSwitchAdmissionRepair(value) {
         const context = fullContexts.get(value); assert.ok(context, 'No synthetic root proof was supplied'); return structuredClone(context.repair);
+      }, operationalLive(value, role) { const context = fullContexts.get(value);
+        return context ? (context.operationalLive?.[role] || value.live?.[role]) : original.operationalLive(value, role);
+      }, operationalRecordName(value, name) { const context = fullContexts.get(value);
+        return context ? name + (context.recordSuffix || '') : original.operationalRecordName(value, name);
       } };
       if (specifier === './candidate-reuse.mjs') return { ...original, readOriginalSuccess(value, kind) {
         const context = originalContexts.get(value.runId); assert.ok(context);
@@ -681,7 +685,8 @@ console.log(JSON.stringify({sameCanonical:true,productionRefusesPrivateRoot:true
     compileFunction(compiledHelper, ['require', 'module', 'exports'])(fixtureRequire, fixtureModule, fixtureModule.exports);
     const fullHd = fixtureModule.exports;
     function prepareFullDiscoveryFixture(value, unit, info, fault) {
-      const folder = fs.mkdtempSync(path.join(directory, 'full-discovery-authority-')), source = 'a'.repeat(40), candidateSource = 'b'.repeat(40);
+      const folder = fs.mkdtempSync(path.join(directory, 'full-discovery-authority-')), source = fault === 'whole-drain'
+        ? (MV_DIRECT.fullRelease?.liveRoles.hd.source || 'a'.repeat(40)) : 'a'.repeat(40), candidateSource = 'b'.repeat(40);
       const sourceStat = file => Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs']
         .map(key => [key, fs.lstatSync(file)[key]]));
       // Three of the actual live/candidate discovery files may legitimately
@@ -1050,6 +1055,60 @@ if(held==='yes')acquire();const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.
       ...fullDiscoveryIdentityCases,
     ]) await admissionCase(name, options);
 
+    // The actual downstream predicate and source/stop reader run together. Only
+    // the original successful-capsule authorizer is an explicit offline adapter,
+    // as above; real source entities, manifests and stop-receipt bytes are read.
+    {
+      const beforeSources = discoverySources.map(file => ({ file: roots[0] + '/' + file,
+        bytes: fs.readFileSync(roots[0] + '/' + file), mode: fs.statSync(roots[0] + '/' + file).mode & 0o7777 }));
+      // Retain the existing real private fixture layout. A minimal standalone
+      // object has no isolation root and is correctly rejected as production.
+      const value = { ...m, runId: randomUUID(), engine: { schema: 'sd2-release-engine.v1' }, privateMultiviewInstall: true,
+        live: { hd: { unit: 'sd2-hd-derivatives.service', pid: closedProcessor.pid, invocation: '1'.repeat(32), execMainStartTimestampMonotonic: '1234567' } } };
+      assert.equal(value.hdStorageIsolationRoot, directory); assert.equal(value.projectRoot, project);
+      const unit = { MainPID: String(closedProcessor.pid), ExecMainPID: String(closedProcessor.pid), InvocationID: value.live.hd.invocation,
+        ExecMainStartTimestamp: 'synthetic original start', ExecMainStartTimestampMonotonic: '1234567', Restart: 'no', KillSignal: '15',
+        SendSIGKILL: 'no', TimeoutStopUSec: 'infinity' };
+      const context = prepareFullDiscoveryFixture(value, unit, { startTicks: closedProcessor.startTicks }, 'whole-drain');
+      value.stage = context.folder + '/current'; fs.mkdirSync(value.stage); unit.WorkingDirectory = value.live.hd.root;
+      const stopState = { ActiveState: 'inactive', MainPID: '0', ControlPID: '0', Result: 'success', Restart: 'no', SendSIGKILL: 'no',
+        TimeoutStopUSec: 'infinity', KillSignal: '15', WorkingDirectory: value.live.hd.root };
+      const manifestBytes = JSON.stringify(value); fs.writeFileSync(value.stage + '/manifest.json', manifestBytes, { mode: 0o600 });
+      const receipt = { runId: value.runId, manifestSha256: sha(manifestBytes), before: unit, forcedKill: false };
+      const completed = { ...receipt, originalCgroup: '/system.slice/' + value.live.hd.unit, after: stopState, completedAt: new Date().toISOString() };
+      const intent = { ...receipt, capturedOriginal: unit, requestedAt: Date.parse(completed.completedAt) - 1, signal: 'SIGTERM' };
+      const stopFile = value.stage + '/natural-stop-switch-hd.json', intentFile = value.stage + '/natural-stop-intent-switch-hd.json';
+      const writeStop = () => { fs.writeFileSync(stopFile, JSON.stringify(completed), { mode: 0o600 }); fs.writeFileSync(intentFile, JSON.stringify(intent), { mode: 0o600 }); };
+      writeStop();
+      const wholeManifest = Symbol('isolated full manifest'), layout = { uid: process.getuid(), [wholeManifest]: value };
+      const proof = { schema: 'specific-retired-hd-cache.v1', runId: value.runId, phase: 'drained', accepted: true, historicalPidsRecovered: false,
+        drain: { state: stopState, cgroupEmpty: true, originalPidAbsent: true, relatedProcessorsAbsent: true,
+          method: 'current-whole-service-natural-drain-not-historical-PID-reconstruction' } };
+      const typed = dependencies.get('./typed-files.mjs');
+      const accept = compileFunction(['readFullWholeDrainRoot', 'supersededWholeDrainAccepted'].map(name => functionCode(fullDiscoveryHelperSyntax, fullDiscoveryHelperSource, name)).join('\n')
+        + '\nreturn supersededWholeDrainAccepted;', ['assert', 'fs', 'path', 'WHOLE_DRAIN_MANIFEST', 'SIZE_LOG_SOURCE', 'DISCOVERY_SOURCES',
+        'sharedFullDiscovery', 'readTypedFile', 'assertTypedFileUnchanged', 'releaseDependencyRoot', 'readFullLiveSourceFiles', 'readOriginalSuccess', 'operationalLive', 'operationalRecordName'])(
+        assert, fs, path, wholeManifest, '/legacy-only/', discoverySources,
+        current => Boolean(current.engine && current.fullRelease && !current.protectedIncrement && current.privateMultiviewInstall === true),
+        typed.readTypedFile, typed.assertTypedFileUnchanged, fixtureRequire('./full-release-contract.mjs').releaseDependencyRoot, fullReader,
+        fixtureRequire('./candidate-reuse.mjs').readOriginalSuccess, fixtureRequire('./candidate-evidence.mjs').operationalLive,
+        fixtureRequire('./candidate-evidence.mjs').operationalRecordName);
+      try {
+        assert.equal(accept(proof, layout), true); assert.equal(value.live.hd.source, MV_DIRECT.fullRelease?.liveRoles.hd.source || 'a'.repeat(40));
+        assert.throws(() => accept({ ...proof, drain: { ...proof.drain, state: { ...stopState, WorkingDirectory: roots[1] } } }, layout));
+        assert.throws(() => accept(proof, {}), 'An unbound full root cannot replace the legacy source contract');
+        completed.before = { ...unit, InvocationID: '2'.repeat(32) }; writeStop(); assert.throws(() => accept(proof, layout));
+        completed.before = unit; intent.signal = 'SIGKILL'; writeStop(); assert.throws(() => accept(proof, layout));
+        intent.signal = 'SIGTERM'; completed.after = { ...stopState, Result: 'timeout' }; writeStop(); assert.throws(() => accept(proof, layout));
+        completed.after = stopState; writeStop(); assert.equal(accept(proof, layout), true);
+        checks.push('shared_full_actual_whole_drain_accepts_only_sealed_original_source_and_current_natural_stop_receipts');
+      } finally {
+        originalContexts.delete(context.originalManifest.runId); fullContexts.delete(value);
+        fs.rmSync(context.folder, { recursive: true });
+        for (const item of beforeSources) { fs.writeFileSync(item.file, item.bytes); fs.chmodSync(item.file, item.mode); }
+      }
+    }
+
     const protectedContinuationTimings = [], protectedSources = [...discoverySources,
       'src/lib/media/hd-encoder.ts', 'src/lib/media/hd-image-processor.ts'];
     for (const file of protectedSources) {
@@ -1321,7 +1380,7 @@ const s=fs.readFileSync('/proc/self/stat','utf8'),f=s.slice(s.lastIndexOf(')')+2
     assert.throws(() => readHdStorageProtection(m), /hd_ready_protection_failed/);
     checks.push('ready_original_is_bound_to_real_original_identity_length_and_version');
 
-    assert.equal(checks.length, 49 + protectedCases.length + fullReleaseClockCases.length + fullDiscoveryIdentityCases.length);
+    assert.equal(checks.length, 50 + protectedCases.length + fullReleaseClockCases.length + fullDiscoveryIdentityCases.length);
     const helper = fileURLToPath(new URL('./hd-storage-preflight.mjs', import.meta.url));
     const receipt = { schema: 'hd-storage-preflight-engineering-v1', completed: true, checks, total: checks.length,
       passed: checks.length, admissionTimings, protectedContinuationTimings, retiredFourCacheAdmissionProvenByIsolatedCases: false,

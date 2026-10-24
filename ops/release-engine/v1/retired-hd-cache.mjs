@@ -5,6 +5,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { MV_DIRECT } from './release-contract.mjs';
+import { operationalLive } from './candidate-evidence.mjs';
+import { isSharedEngine } from './engine-context.mjs';
 
 const RUN = MV_DIRECT.recoveryRunId;
 const ROOT = '/data/video-api-debugger/var-lib/storage/hd-derivatives';
@@ -56,10 +58,16 @@ function groupMembers(directory) {
   return [...new Set([...fs.readFileSync(directory+'/cgroup.procs','utf8').trim().split(/\s+/).filter(Boolean).map(Number),
     ...fs.readdirSync(directory,{withFileTypes:true}).filter(x=>x.isDirectory()).flatMap(x=>groupMembers(directory+'/'+x.name))])];
 }
+function retiredHdOperationalIdentity(m) {
+  const hd=operationalLive(m,'hd');assert.equal(hd.root,m.live.hd.root);
+  if(hd===m.live.hd)assert.equal(hd.pid,MV_DIRECT.starts.hd[0]);
+  else {assert.ok(isSharedEngine(m)&&m.fullRelease&&!m.protectedIncrement&&m.privateMultiviewInstall===true);assert.equal(hd.source,m.live.hd.source);}
+  return hd;
+}
 export function inspectRetiredHdCaches(m,phase) {
   assert.equal(m.runId,RUN);assert.ok(['admission','drained'].includes(phase));
   assert.equal(m.hdRoot,ROOT);assert.equal(m.live.hd.root,releaseDependencyRoot(MV_DIRECT));
-  assert.equal(m.live.hd.pid,MV_DIRECT.starts.hd[0]);
+  const hd=retiredHdOperationalIdentity(m);
   assert.equal(fs.readdirSync(ROOT).some(name=>name.includes('.lock')||name.endsWith('.publish.json')||name.endsWith('.tmp')),false);
   const jobs=OBJECTS.map(object=>{
     const file=ROOT+'/'+object.key+'.json',bytes=fs.readFileSync(file),job=JSON.parse(bytes);
@@ -97,7 +105,7 @@ export function inspectRetiredHdCaches(m,phase) {
   if(phase==='drained') {
     const state=Object.fromEntries(call(['show','sd2-hd-derivatives.service',...['ActiveState','MainPID','ControlPID','Result','Restart','SendSIGKILL','TimeoutStopUSec','WorkingDirectory'].flatMap(k=>['-p',k])]).split('\n').map(line=>{const i=line.indexOf('=');return[line.slice(0,i),line.slice(i+1)]}));
     const members=groupMembers('/sys/fs/cgroup/system.slice/sd2-hd-derivatives.service'),processes=processInventory();
-    assertWholeHdDrain(state,members,processes,m.live.hd.pid);
+    assertWholeHdDrain(state,members,processes,hd.pid);
     drain={state,cgroupEmpty:true,originalPidAbsent:true,relatedProcessorsAbsent:true,method:'current-whole-service-natural-drain-not-historical-PID-reconstruction'};
   }
   for(const {file,bytes} of jobs)assert.equal(sha(fs.readFileSync(file)),sha(bytes));

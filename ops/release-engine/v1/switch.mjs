@@ -21,10 +21,11 @@ import { inspectHdReconciliation, inspectHdBeforeMaintenance, readHdStorageProte
   probeHdCandidateResolver } from './hd-storage-preflight.mjs';
 import { armGuardRecovery, readGuardRecovery, inspectGuardRecoveryControl, verifyGuardRecovery, runGuardRecovery, markFixedGuardStart } from './guard-recovery.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory, hdMaintenanceApprovalFile, guardRecoveryApprovalFile, assertSwitchAdmissionRepair, guardBuildTailRuntime } from './candidate-evidence.mjs';
+import { assertFreshCandidateEvidence, candidateEvidenceFile, candidateEvidenceExpiresAt, candidateCompatibilityDirectory, hdMaintenanceApprovalFile, guardRecoveryApprovalFile, assertSwitchAdmissionRepair, guardBuildTailRuntime,
+  operationalLive, operationalRecordName, operationalBeforeFile, operationalNginxRunId, operationalNginxStage } from './candidate-evidence.mjs';
 import { originalPreparedFile, originalManifestForInputs, assertRuntimeAliasUnchanged } from './candidate-reuse.mjs';
 import { captureUsageRole, stopUsageRole, startUsageRole, assertUsageRoleStopped, inspectUsageRoleAdmission,
-  restoreOriginalUsageRole, usageRoleProof } from './usage-role-control.mjs';
+  restoreOriginalUsageRole, usageRoleProof, captureRestoredUsageRole } from './usage-role-control.mjs';
 import { finishPrivateMultiviewPreopen, ensurePrivateMultiviewGuard, stopMultiviewWorksForGuardRecovery } from './multiview-works-control.mjs';
 import { inspectMultiviewBackupProtection, privateMultiviewBackupFileProtection } from './multiview-backup-control.mjs';
 import { loadHdCompiledCacheProofs } from './hd-compiled-cache.mjs';
@@ -152,8 +153,19 @@ function approved(m, kind) {
   }
   return value.releases.find(entry => entry.source === m[kind].source);
 }
-function running(m, role, kind = null) {
-  const state = service(m, role), expected = kind ? m[kind] : m.live[role];
+function assertRestoredLiveRole(m, role, expected) {
+  for (const key of ['unit', 'root', 'source', 'version', 'build']) assert.equal(expected[key], m.live[role][key], 'Restored observation changed the sealed role: ' + role + ':' + key);
+  assert.ok(Number.isSafeInteger(expected.pid) && expected.pid > 1);
+  assert.match(expected.invocation || '', /^[a-f0-9]{32}$/);
+  assert.match(expected.kernelStartTicks || '', /^[1-9]\d*$/);
+  assert.match(expected.execMainStartTimestampMonotonic || '', /^[1-9]\d*$/);
+}
+function running(m, role, kind = null, overrideExpected) {
+  if (overrideExpected) {
+    assert.equal(kind, null, 'Restored observation cannot override a candidate identity');
+    assertRestoredLiveRole(m, role, overrideExpected);
+  }
+  const state = service(m, role), expected = overrideExpected || (kind ? m[kind] : operationalLive(m, role));
   assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.ControlPID, '0');
   assert.equal(state.User, m.appUser);
   assert.equal(fs.realpathSync(state.WorkingDirectory), expected.root);
@@ -167,7 +179,12 @@ function running(m, role, kind = null) {
     assert.equal(fs.realpathSync(actual.root + '/.next-prod'), actual.root + '/' + m[kind].buildDist);
     assert.equal(actual.build, approved(m, kind).build);
   }
-  if (!kind) { assert.equal(actual.build, expected.build); assert.equal(instance.pid, expected.pid); assert.equal(state.InvocationID, expected.invocation); }
+  if (!kind) {
+    assert.equal(actual.build, expected.build); assert.equal(instance.pid, expected.pid); assert.equal(state.InvocationID, expected.invocation);
+    if (expected.kernelStartTicks !== undefined) {
+      assert.equal(instance.start, expected.kernelStartTicks); assert.equal(state.ExecMainStartTimestampMonotonic, expected.execMainStartTimestampMonotonic);
+    }
+  }
   const confirmed = service(m, role);
   assert.equal(confirmed.MainPID, state.MainPID); assert.equal(confirmed.InvocationID, state.InvocationID);
   return { ...actual, pid: instance.pid, start: instance.start, invocation: state.InvocationID, state };
@@ -265,7 +282,7 @@ function installNoForce(m, before, manifestSha256, mode, check = assertReleaseWi
   const present = ROLES.filter(role => exists(paths[role]));
   if (present.length) {
     assert.equal(present.length, ROLES.length, 'Partial writer policy installation needs lead diagnosis');
-    const previous = boundRecord(m, 'writer-no-force-switch', manifestSha256);
+    const previous = boundRecord(m, operationalRecordName(m, 'writer-no-force-switch'), manifestSha256);
     for (const role of ROLES) assert.deepEqual(rootSnapshot(paths[role]), previous.files[role]);
     assertPolicy(m, before, previous); return previous;
   }
@@ -289,10 +306,10 @@ function installNoForce(m, before, manifestSha256, mode, check = assertReleaseWi
         assert.equal(String(owned.dev), files[role].dev); assert.equal(String(owned.ino), files[role].ino);
       } finally { fs.closeSync(fd); }
     }
-    save(m, 'writer-no-force-install-progress-' + mode + '-' + role, { manifestSha256, files });
+    save(m, operationalRecordName(m, 'writer-no-force-install-progress-' + mode + '-' + role), { manifestSha256, files });
   }
   call('systemctl', ['daemon-reload']);
-  const record = { manifestSha256, files }; save(m, 'writer-no-force-' + mode, record);
+  const record = { manifestSha256, files }; save(m, operationalRecordName(m, 'writer-no-force-' + mode), record);
   assert.equal(call('systemctl', ['show', m.live.hd.unit, '-p', 'RefuseManualStart', '--value']), 'yes');
   assertPolicy(m, before, record); return record;
   } catch (cause) {
@@ -300,7 +317,7 @@ function installNoForce(m, before, manifestSha256, mode, check = assertReleaseWi
     // captured objects can be removed, even if daemon-reload was ambiguous.
     try {
       for (const role of ROLES) {
-        assert.equal(exists(m.stage + '/natural-stop-intent-' + mode + '-' + role + '.json'), false);
+        assert.equal(exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-' + mode + '-' + role) + '.json'), false);
         const state = service(m, role), original = installationWriters[role];
         for (const key of ['MainPID', 'InvocationID', 'WorkingDirectory']) assert.equal(state[key], original[key]);
         assert.equal(state.ActiveState, 'active');
@@ -310,7 +327,7 @@ function installNoForce(m, before, manifestSha256, mode, check = assertReleaseWi
       }
       call('systemctl', ['daemon-reload']); assertPolicy(m, before);
       assert.equal(call('systemctl', ['show', m.live.hd.unit, '-p', 'RefuseManualStart', '--value']), 'no');
-      save(m, 'writer-no-force-install-aborted-' + mode, { manifestSha256, files, originalPoliciesRestored: true, noStopsRequested: true });
+      save(m, operationalRecordName(m, 'writer-no-force-install-aborted-' + mode), { manifestSha256, files, originalPoliciesRestored: true, noStopsRequested: true });
     } catch (recovery) {
       throw new AggregateError([cause, recovery], 'Partial writer policy installation could not be safely restored', { cause });
     }
@@ -391,7 +408,7 @@ async function stopNaturally(m, before, temporary, role, mode, original, check =
   } else assert.ok([m.main.root, m.guard.root].includes(fs.realpathSync(initial.WorkingDirectory)));
   assert.equal(initial.SendSIGKILL, 'no'); assert.equal(initial.TimeoutStopUSec, 'infinity');
   assert.equal(initial.Restart, 'no'); assert.equal(initial.KillSignal, '15');
-  save(m, 'natural-stop-intent-' + mode + '-' + role, { manifestSha256: before.manifestSha256,
+  save(m, operationalRecordName(m, 'natural-stop-intent-' + mode + '-' + role), { manifestSha256: before.manifestSha256,
     before: initial, capturedOriginal: original, requestedAt: Date.now(), signal: 'SIGTERM', forcedKill: false });
   call('systemctl', ['stop', '--no-block', m.live[role].unit]);
   let result;
@@ -409,14 +426,14 @@ async function stopNaturally(m, before, temporary, role, mode, original, check =
     if (!original && Number(initial.MainPID) > 0) assert.ok(!exists('/proc/' + initial.MainPID));
     return true;
   }, 300000, check, check === assertReleaseWindow ? null : 'NATURAL_STOP_PENDING');
-  save(m, 'natural-stop-' + mode + '-' + role, { manifestSha256: before.manifestSha256, before: initial, after: result,
+  save(m, operationalRecordName(m, 'natural-stop-' + mode + '-' + role), { manifestSha256: before.manifestSha256, before: initial, after: result,
     originalCgroup: initial.ControlGroup, forcedKill: false, completedAt: new Date().toISOString() });
   return result;
 }
 function assertOriginalStopped(m, before) {
   assertUsageRoleStopped(m);
   for (const role of ROLES) {
-    const intent = boundRecord(m, 'natural-stop-intent-switch-' + role, before.manifestSha256);
+    const intent = boundRecord(m, operationalRecordName(m, 'natural-stop-intent-switch-' + role), before.manifestSha256);
     assert.deepEqual(intent.capturedOriginal, before.writers[role]);
     assert.equal(intent.signal, 'SIGTERM'); assert.equal(intent.forcedKill, false);
     stopped(m, role, before.writers[role]);
@@ -717,8 +734,10 @@ function restorePolicies(m, before, temporary, kind, check = assertReleaseWindow
 async function restoreControlledDrain(m, before, temporary, installed, master, networkRestored = false) {
   assert.equal(m.runId, MV_DIRECT.recoveryRunId);
   for (const name of ['pricing-pair-published', 'pricing-start-intent', 'natural-stop-intent-switch-web', 'raw-upload-recovery-published'])
-    assert.equal(exists(m.stage + '/' + name + '.json'), false, 'Original recovery is only allowed before the writer transition');
-  if (!networkRestored) assert.equal(exists(m.stage + '/network-fence-installed.json'), false);
+    for (const recordName of new Set([name, operationalRecordName(m, name)]))
+      assert.equal(exists(m.stage + '/' + recordName + '.json'), false, 'Original recovery is only allowed before the writer transition');
+  if (!networkRestored) for (const name of new Set(['network-fence-installed', operationalRecordName(m, 'network-fence-installed')]))
+    assert.equal(exists(m.stage + '/' + name + '.json'), false);
   inspectRecoveryCertificate(m, before, { phase: 'early-original' });
   assert.equal(exists(PRICING_START_CONTROL + '/start-' + m.runId + '.json'), false);
   const control = capturePricingStartControl();
@@ -728,14 +747,14 @@ async function restoreControlledDrain(m, before, temporary, installed, master, n
   assertPolicy(m, before, temporary);
   for (const role of ROLES) assert.equal(service(m, role).WorkingDirectory, m.live[role].root);
   for (const role of ['image', 'hd']) {
-    const file = m.stage + '/natural-stop-intent-switch-' + role + '.json';
+    const name = operationalRecordName(m, 'natural-stop-intent-switch-' + role), file = m.stage + '/' + name + '.json';
     if (!exists(file)) {
       const current = service(m, role), original = before.writers[role];
       for (const key of ['MainPID', 'InvocationID', 'WorkingDirectory']) assert.equal(current[key], original[key]);
       assert.equal(current.ActiveState, 'active');
       continue;
     }
-    const intent = boundRecord(m, 'natural-stop-intent-switch-' + role, before.manifestSha256);
+    const intent = boundRecord(m, name, before.manifestSha256);
     assert.deepEqual(intent.capturedOriginal, before.writers[role]);
     assert.equal(intent.signal, 'SIGTERM'); assert.equal(intent.forcedKill, false);
     await waitForOriginalRecovery(m, 'Requested old ' + role + ' stop has not completed', () => {
@@ -788,12 +807,12 @@ async function restoreControlledDrain(m, before, temporary, installed, master, n
         }); if (output.some(row => !row)) return false; rows = output; return true;
       }, 30000); return rows;
     };
-  const restored = installed ? await restoreNginxMaintenance({ installed, nginxMaster: master, healthyConsumers: healthy,
+  const restored = installed ? await restoreNginxMaintenance({ installed, nginxMaster: master, healthyConsumers: { ...healthy, runId: installed.runId },
     observeRestored: observeOriginalEntries }) : { installationAborted: true, responses: await observeOriginalEntries() };
   assertPolicy(m, before); assertProtection(before.protection, readProtection(m));
   const result = { schema: 'controlled-hd-drain-original-restoration.v1', completed: true, source: old.source, version: old.version,
     build: old.build, restored, restoredRole, originalPairUnchanged: true, businessDataRestored: false, policiesRestored: true, at: new Date().toISOString() };
-  save(m, 'controlled-drain-original-restored', result); return result;
+  save(m, operationalRecordName(m, 'controlled-drain-original-restored'), result); return result;
 }
 async function locked(m, work) {
   const file = m.stage + '/.switch.lock'; writeJsonExclusive(file, { pid: process.pid, token: randomUUID(), runId: m.runId });
@@ -803,9 +822,9 @@ async function locked(m, work) {
 }
 
 // No import-time operations and no old-pair/database recovery path.
-export function captureSwitchBefore(m, manifestSha256) {
+function captureSwitchBeforeState(m, manifestSha256, restoredLive) {
   assert.equal(call('systemctl', ['show', m.live.hd.unit, '-p', 'RefuseManualStart', '--value']), 'no', 'An unrelated manual-start gate is already installed');
-  const writers = Object.fromEntries(ROLES.map(role => [role, running(m, role).state]));
+  const writers = Object.fromEntries(ROLES.map(role => [role, running(m, role, null, restoredLive?.[role]).state]));
   const policies = Object.fromEntries(ROLES.map(role => [role, policy(m, role)]));
   const protectedFileIdentities = Object.fromEntries(m.protectedFiles.map(file => {
     const captured = protectedFileSnapshot(file); assert.equal(captured.sha256, m.expectedProtectedFileSha256[file]);
@@ -815,11 +834,25 @@ export function captureSwitchBefore(m, manifestSha256) {
     assert.equal(program(m.live[role].root).source, m.fullRelease ? m.fullRelease.liveRoles[role].source : MV_DIRECT.baselineSource);
   const legacy = captureLegacyWriterContracts(m);
   const captured = capturePricingStartControl(), hdLegacy = captureHdLegacyContract(m);
-  const before = { schema: 'rate-impl2-switch-before.v1', manifestSha256, protection: readProtection(m),
-    protectedFileIdentities, writers, policies, legacy, hdLegacy, captured, roleControl: captureUsageRole(m),
+  const roleControl = restoredLive ? captureRestoredUsageRole(m, restoredLive.role) : captureUsageRole(m);
+  const protection = readProtection(m);
+  if (restoredLive) {
+    assert.equal(Number(roleControl.state.MainPID), restoredLive.role.pid); assert.equal(roleControl.state.InvocationID, restoredLive.role.invocation);
+    assert.equal(roleControl.state.WorkingDirectory, m.live.role.root);
+    protection.otherServices.role = { pid: String(restoredLive.role.pid), invocation: restoredLive.role.invocation, root: m.live.role.root };
+  }
+  const before = { schema: 'rate-impl2-switch-before.v1', manifestSha256, protection,
+    protectedFileIdentities, writers, policies, legacy, hdLegacy, captured,
+    roleControl,
     ...(MV_DIRECT.privateMultiviewInstall ? { privateWebPids: groupPids(writers.web.ControlGroup).map(Number) } : {}) };
   for (const [file, captured] of Object.entries(protectedFileIdentities)) assert.deepEqual(protectedFileSnapshot(file), captured);
   return before;
+}
+export function captureSwitchBefore(m, manifestSha256) { return captureSwitchBeforeState(m, manifestSha256); }
+export function captureRestoredSwitchBefore(m, manifestSha256, newLiveSnapshot) {
+  assert.ok(newLiveSnapshot && ['web', 'image', 'hd', 'works', 'role', 'template'].every(role => newLiveSnapshot[role]));
+  for (const role of ['web', 'image', 'hd', 'works', 'role', 'template']) assertRestoredLiveRole(m, role, newLiveSnapshot[role]);
+  return captureSwitchBeforeState(m, manifestSha256, newLiveSnapshot);
 }
 
 function assertNoEscapedRecoveryWriter(m) {
@@ -854,6 +887,46 @@ export function normalizeSavedSwitchBefore(saved, runId, manifestSha256) {
   return before;
 }
 
+function switchBeforeForAttempt(m, manifestSha256, repair, runtime) {
+  assert.equal(repair.originalSwitchBeforeFile, m.stage + '/switch-before.json');
+  assert.equal(sha(rootFile(repair.originalSwitchBeforeFile)), repair.originalSwitchBeforeSha256);
+  const frozenBefore = normalizeSavedSwitchBefore(boundRecord(m, 'switch-before', manifestSha256), m.runId, manifestSha256);
+  if (!runtime.restoredOriginalRepair) return { before: frozenBefore, frozenBefore };
+  const snapshot = repair.restoredSwitchBeforeSnapshot;
+  assert.equal(snapshot?.requestedPath, repair.restoredSwitchBeforeFile);
+  assert.equal(snapshot.sha256, repair.restoredSwitchBeforeSha256);
+  assert.equal(path.dirname(repair.restoredSwitchBeforeFile), m.stage);
+  assert.notEqual(repair.restoredSwitchBeforeFile, repair.originalSwitchBeforeFile);
+  assertTypedFileUnchanged(snapshot);
+  const bytes = rootFile(repair.restoredSwitchBeforeFile); assert.equal(sha(bytes), repair.restoredSwitchBeforeSha256);
+  const before = normalizeSavedSwitchBefore(JSON.parse(bytes), m.runId, manifestSha256);
+  assertTypedFileUnchanged(snapshot);
+  return { before, frozenBefore };
+}
+
+function saveHdDrainResult(m, name, manifestSha256, result, failureMessage) {
+  // Persist the complete strict result even when admission must be refused.
+  const file = save(m, operationalRecordName(m, name), { manifestSha256, ...result });
+  assert.equal(result.safe, true, failureMessage);
+  return file;
+}
+
+function nginxInstalledFile(m) {
+  return operationalNginxStage(m) + '/nginx-' + operationalNginxRunId(m) + '-installed.json';
+}
+function captureOperationalNginx(m) {
+  const runId = operationalNginxRunId(m), stageRoot = operationalNginxStage(m);
+  if (stageRoot !== m.stage) {
+    assert.equal(path.dirname(stageRoot), m.stage); assert.notEqual(runId, m.runId);
+    assert.match(runId, /^[a-f0-9-]{36}$/); assert.equal(fs.realpathSync(m.stage), m.stage);
+    const parent = fs.lstatSync(m.stage); assert.ok(parent.isDirectory() && parent.uid === 0 && !(parent.mode & 0o077));
+    fs.mkdirSync(stageRoot, { mode: 0o700 });
+    const s = fs.lstatSync(stageRoot); assert.equal(fs.realpathSync(stageRoot), stageRoot);
+    assert.ok(s.isDirectory() && !s.isSymbolicLink() && s.uid === 0 && (s.mode & 0o7777) === 0o700 && s.dev === parent.dev);
+  } else assert.equal(runId, m.runId);
+  return captureNginxMaintenance({ runId, stageRoot });
+}
+
 function assertSwitchAdmissionBefore(m, current, original, liveSnapshot) {
   assert.equal(current.manifestSha256, original.manifestSha256);
   for (const key of ['writers', 'policies', 'protectedFileIdentities', 'hdLegacy', 'privateWebPids'])
@@ -874,7 +947,7 @@ function assertSwitchAdmissionBefore(m, current, original, liveSnapshot) {
   }
   const live = {};
   for (const role of ['web', 'image', 'hd', 'works', 'role', 'template']) {
-    const expected = m.live[role]; assert.ok(expected, 'Missing original live process: ' + role);
+    const expected = operationalLive(m, role); assert.ok(expected, 'Missing original live process: ' + role);
     assert.equal(liveArtifactSource(expected.root), expected.source, 'Original live source changed: ' + role);
     const observed = unit(expected.unit);
     assert.equal(observed.ActiveState, 'active'); assert.equal(observed.SubState, 'running'); assert.equal(observed.ControlPID, '0');
@@ -961,7 +1034,10 @@ function captureSwitchPremaintenance(m, manifestSha256, hdBefore, { repair, repa
 
 export async function recoverStandaloneSwitch(m, input = {}) {
   const { manifestSha256 } = context(m), saved = boundRecord(m, 'switch-before', manifestSha256);
-  const before = normalizeSavedSwitchBefore(saved, m.runId, manifestSha256);
+  const runtime = guardBuildTailRuntime(m);
+  const before = runtime?.restoredOriginalRepair
+    ? switchBeforeForAttempt(m, manifestSha256, assertSwitchAdmissionRepair(m), runtime).before
+    : normalizeSavedSwitchBefore(saved, m.runId, manifestSha256);
   if (input.before !== undefined) assert.deepEqual(input.before, before, 'Standalone before input changed');
   readGuardRecovery(m);
   const file = m.stage + '/.switch.lock';
@@ -985,7 +1061,10 @@ export async function recoverStandaloneSwitch(m, input = {}) {
 }
 
 export async function recoverFailedSwitch(m, input = {}) {
-  const { manifestSha256 } = context(m), before = input.before || boundRecord(m, 'switch-before', manifestSha256);
+  const { manifestSha256 } = context(m), runtime = guardBuildTailRuntime(m);
+  const before = input.before || (runtime?.restoredOriginalRepair
+    ? switchBeforeForAttempt(m, manifestSha256, assertSwitchAdmissionRepair(m), runtime).before
+    : boundRecord(m, 'switch-before', manifestSha256));
   const armed = readGuardRecovery(m);
   const switchLock = m.stage + '/.switch.lock';
   if (exists(switchLock)) {
@@ -1005,7 +1084,7 @@ export async function recoverFailedSwitch(m, input = {}) {
       reason: 'Previously pending natural stops are now independently observed empty; continue the same fixed recovery before its first guard start' });
   } else save(m, 'guard-recovery-attempt', { manifestSha256, pid: process.pid, at: new Date().toISOString(), guardSource: m.guardSource,
     originalBuildStartedAt: armed.originalGuardBuild.startedAt, candidateFreshGateClaimed: false });
-  const installed = input.installed || (exists(m.stage + '/nginx-' + m.runId + '-installed.json') ? json(m.stage + '/nginx-' + m.runId + '-installed.json') : null);
+  const installed = input.installed || (exists(nginxInstalledFile(m)) ? json(nginxInstalledFile(m)) : null);
   const savedMaster = input.master || boundRecord(m, 'nginx-master', manifestSha256);
   const master = { masterPid: savedMaster.masterPid, masterStart: savedMaster.masterStart };
   let temporary = input.temporary;
@@ -1086,12 +1165,12 @@ export async function recoverFailedSwitch(m, input = {}) {
       ctx.recoveryWriters = writers;
       return { certificate: certificateState.createdByThisRun, startIntent: intent, originalPair: verified.originalPair,
         fencePhase: fence?.phase, fenceRestorePhase: fence?.restorePhase,
-        webStopRequested: exists(m.stage + '/natural-stop-intent-switch-web.json') };
+        webStopRequested: exists(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-web') + '.json') };
     },
     record: async (label, value) => { save(m, 'guard-recovery-' + label + (label === 'complete' ? '' : '-' + randomUUID()), { manifestSha256, ...value }); return value; },
     restoreOriginalNetwork: async () => {
-      assert.ok(temporary || exists(m.stage + '/writer-no-force-switch.json'));
-      temporary ||= boundRecord(m, 'writer-no-force-switch', manifestSha256);
+      assert.ok(temporary || exists(m.stage + '/' + operationalRecordName(m, 'writer-no-force-switch') + '.json'));
+      temporary ||= boundRecord(m, operationalRecordName(m, 'writer-no-force-switch'), manifestSha256);
       await safety.restoreForRecovery({ ...ctx, temporary, recoveryRoute: 'original' });
       delete temporary.fenceNetworkFiles;
     },
@@ -1118,7 +1197,7 @@ export async function recoverFailedSwitch(m, input = {}) {
     },
     assertAllGone: async () => {
       allGone();
-      const originalDrain = boundRecord(m, 'hd-retired-caches-after-whole-service-drain', manifestSha256);
+      const originalDrain = boundRecord(m, operationalRecordName(m, 'hd-retired-caches-after-whole-service-drain'), manifestSha256);
       assert.equal(originalDrain.safe, true);
       const hd = await inspectHdReconciliation(m, { sourceRoot: m.guard.root, final: true, retiredCachePhase: 'admission' });
       assert.equal(hd.canEnterControlledDrain, true, 'A lease, publication or unexplained HD artifact remains');
@@ -1162,7 +1241,7 @@ export async function recoverFailedSwitch(m, input = {}) {
     },
     restorePolicies: async () => restorePolicies(m, before, temporary, 'guard', check),
     openIngress: async (_context, healthy) => restoreNginxMaintenance({ installed, nginxMaster: master,
-      healthyConsumers: { runId: m.runId, ...healthy }, observeMaintenance: () => observeMaintenance(m, check),
+      healthyConsumers: { ...healthy, runId: installed.runId }, observeMaintenance: () => observeMaintenance(m, check),
       observeRestored: async () => {
         let evidence; await waitFor(m, 'Recovered guard is not reachable at both entries', () => {
           try { evidence = TARGETS.map(target => observeRestored(m, 'guard', target)); return true; }
@@ -1292,25 +1371,26 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
     await loadHdCompiledCacheProofs(m);
     const admissionRepair = mode === 'switch' ? assertSwitchAdmissionRepair(m) : null;
     const repairRuntime = admissionRepair ? guardBuildTailRuntime(m) : null;
-    const repairSha256 = repairRuntime ? (repairRuntime.switchWindowRepair || repairRuntime.switchOwnerRepair || repairRuntime.switchScanRepair || repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
+    const repairSha256 = repairRuntime ? (repairRuntime.restoredOriginalRepair || repairRuntime.switchWindowRepair || repairRuntime.switchOwnerRepair || repairRuntime.switchScanRepair || repairRuntime.switchTypedRepair || repairRuntime.switchAdmissionRepair).proofSha256 : null;
     if (repairSha256) assert.match(repairSha256, /^[a-f0-9]{64}$/);
     const admissionName = name => repairSha256 ? name + '-' + repairSha256 : name;
-    let before, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;
+    let before, frozenBefore, installed, master, temporary, published, protectedState, hdAdmissionRecord, admissionObservation, controlledDrainPhase = false;
     try {
       if (mode === 'switch') {
         const currentBefore = captureSwitchBefore(m, manifestSha256);
         before = currentBefore;
         if (admissionRepair) {
-          assert.equal(admissionRepair.originalSwitchBeforeFile, m.stage + '/switch-before.json');
-          assert.equal(sha(rootFile(admissionRepair.originalSwitchBeforeFile)), admissionRepair.originalSwitchBeforeSha256);
-          before = normalizeSavedSwitchBefore(boundRecord(m, 'switch-before', manifestSha256), m.runId, manifestSha256);
+          ({ before, frozenBefore } = switchBeforeForAttempt(m, manifestSha256, admissionRepair, repairRuntime));
         }
         verifyNormalContinuation(m, currentBefore);
         if (m.deployedUsageSchema) { readDeployedUsageEvidence(m); assertPriorUsageRoleControl(m); }
         if (admissionRepair) {
-          const live = assertSwitchAdmissionBefore(m, currentBefore, before, admissionRepair.liveSnapshot);
+          const boundLiveSnapshot = admissionRepair.restoredLiveSnapshot || admissionRepair.liveSnapshot;
+          const live = assertSwitchAdmissionBefore(m, currentBefore, before, boundLiveSnapshot);
           const file = save(m, admissionName('switch-admission-before'), { ...currentBefore, originalBeforeSha256: admissionRepair.originalSwitchBeforeSha256,
-            repairProofSha256: repairSha256, originalRecoveryBaselineRetained: true, live, boundLiveSnapshot: admissionRepair.liveSnapshot });
+            repairProofSha256: repairSha256, originalRecoveryBaselineRetained: true, live, boundLiveSnapshot,
+            ...(repairRuntime.restoredOriginalRepair ? { restoredBeforeFile: admissionRepair.restoredSwitchBeforeFile,
+              restoredBeforeSha256: admissionRepair.restoredSwitchBeforeSha256 } : {}) });
           admissionObservation = { file, sha256: sha(rootFile(file)) };
         } else { before = currentBefore; save(m, 'switch-before', before); }
         const { captured, hdLegacy } = currentBefore;
@@ -1326,12 +1406,12 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         } else hdBefore = await inspectHdReconciliation(m, { sourceRoot: m.main.root, retiredCachePhase: 'admission' });
         hdAdmissionRecord = recordHdAdmission(m, hdBefore);
         assert.equal(hdBefore.canEnterControlledDrain, true, 'HD work is in flight or unexplained; keep the original site and do not enter maintenance');
-        master = captureSwitchPremaintenance(m, manifestSha256, hdBefore, repairRuntime?.switchWindowRepair
+        master = captureSwitchPremaintenance(m, manifestSha256, hdBefore, repairRuntime?.restoredOriginalRepair || repairRuntime?.switchWindowRepair
           ? { repair: admissionRepair, repairSha256 } : undefined);
         const recoveryPair = buildPair({ captured, manifest: m, runId: m.runId, manifestSha256, reuseBuilds: m.reuseBuilds,
           main: candidateInput(m, 'main', builds.main), guard: candidateInput(m, 'guard', builds.guard) });
         if (isSharedEngine(m)) {
-          const fixed = verifyGuardRecovery(m, before).value;
+          const fixed = verifyGuardRecovery(m, frozenBefore || before).value;
           assertSwitchAdmissionWindows(m, fixed, admissionRepair);
           assert.equal(fixed.pair.runId, recoveryPair.runId);
           assert.equal(fixed.pair.manifestSha256, recoveryPair.manifestSha256);
@@ -1348,22 +1428,22 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         await releaseBoundary(m, 'preparation', 'result', { manifestSha256, effectsStarted: false,
           guardArmedSha256: sha(rootFile(m.stage + '/fixed-guard-recovery-armed.json')) });
         assertReleaseWindow(m);
-        save(m, 'usage-role-readonly-admission', { manifestSha256, ...inspectUsageRoleAdmission(m) });
+        save(m, operationalRecordName(m, 'usage-role-readonly-admission'), { manifestSha256, ...inspectUsageRoleAdmission(m) });
         await releaseBoundary(m, 'drain', 'intent', { manifestSha256, effectsStarted: true,
-          beforeSha256: sha(rootFile(m.stage + '/switch-before.json')) });
+          beforeSha256: sha(rootFile(repairRuntime?.restoredOriginalRepair ? admissionRepair.restoredSwitchBeforeFile : m.stage + '/switch-before.json')) });
         await stopUsageRole(m);
-        installed = installNginxMaintenance({ captured: captureNginxMaintenance({ runId: m.runId, stageRoot: m.stage }) });
+        installed = installNginxMaintenance({ captured: captureOperationalNginx(m) });
         controlledDrainPhase = true;
-        save(m, 'ingress-503-switch', { manifestSha256, responses: await observeMaintenance(m) });
+        save(m, operationalRecordName(m, 'ingress-503-switch'), { manifestSha256, responses: await observeMaintenance(m) });
         temporary = installNoForce(m, before, manifestSha256, mode);
         const firstSockets = captureNginxUpstreamSockets({ ...master, upstreamPort: 3302 });
         await waitFor(m, 'Old nginx upstream connections have not drained', () => captureNginxUpstreamSockets({ ...master, upstreamPort: 3302 }).count === 0);
-        save(m, 'old-upstream-drained', { manifestSha256, before: firstSockets, after: captureNginxUpstreamSockets({ ...master, upstreamPort: 3302 }) });
+        save(m, operationalRecordName(m, 'old-upstream-drained'), { manifestSha256, before: firstSockets, after: captureNginxUpstreamSockets({ ...master, upstreamPort: 3302 }) });
         for (const role of ['image', 'hd']) await stopNaturally(m, before, temporary, role, mode, before.writers[role]);
         const drainedCaches = await inspectHdReconciliation(m, { sourceRoot: m.main.root, final: true, retiredCachePhase: 'drained',
           ...(isSharedEngine(m) ? sharedReadOnlyHdBounds(m) : {}) });
-        assert.equal(drainedCaches.safe, true, 'Whole HD service drain or exact retired cache evidence is incomplete');
-        save(m, 'hd-retired-caches-after-whole-service-drain', { manifestSha256, ...drainedCaches });
+        saveHdDrainResult(m, 'hd-retired-caches-after-whole-service-drain', manifestSha256, drainedCaches,
+          'Whole HD service drain or exact retired cache evidence is incomplete');
         controlledDrainPhase = false;
         const fenced = await safety.installFence({ m, before, temporary, installed, master });
         assert.ok(fenced && Array.isArray(fenced.networkDropins) && fenced.receipt, 'Missing exact network fence evidence');
@@ -1375,11 +1455,10 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         assertOriginalStopped(m, before); assertProtected(m, protectedState, installed);
         const hdStopped = await inspectHdReconciliation(m, { sourceRoot: m.main.root, final: true, retiredCachePhase: 'drained',
           ...(isSharedEngine(m) ? sharedReadOnlyHdBounds(m) : {}) });
-        assert.equal(hdStopped.safe, true, 'HD identity/ready/receipt/lease conflict after natural drain');
+        saveHdDrainResult(m, 'hd-reconciliation-stopped', manifestSha256, hdStopped, 'HD identity/ready/receipt/lease conflict after natural drain');
         assertHdStorageProtection(before.protection.hdStorage, readHdStorageProtection(m));
-        save(m, 'hd-reconciliation-stopped', { manifestSha256, ...hdStopped });
         await releaseBoundary(m, 'drain', 'result', { manifestSha256, effectsStarted: true,
-          hdWholeDrainSha256: sha(rootFile(m.stage + '/hd-retired-caches-after-whole-service-drain.json')) });
+          hdWholeDrainSha256: sha(rootFile(m.stage + '/' + operationalRecordName(m, 'hd-retired-caches-after-whole-service-drain') + '.json')) });
         const hdMetadata = captureHdMetadata(m);
         save(m, 'hd-metadata-stopped', { manifestSha256, roots: hdMetadata, sourceFiles: hdLegacy,
           controlOwner: 'canonical-original-worker', copiedLocks: false, copiedImages: false, automaticRestore: false });
@@ -1420,13 +1499,15 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
         await releaseBoundary(m, 'publish', 'result', { manifestSha256, effectsStarted: true,
           publishedSha256: sha(rootFile(m.stage + '/pricing-pair-published.json')) });
       } else {
-        before = boundRecord(m, 'switch-before', manifestSha256);
+        before = operationalBeforeFile(m) === m.stage + '/switch-before.json'
+          ? boundRecord(m, 'switch-before', manifestSha256)
+          : normalizeSavedSwitchBefore(JSON.parse(rootFile(operationalBeforeFile(m))), m.runId, manifestSha256);
         published = boundRecord(m, 'pricing-pair-published', manifestSha256).published;
         await safety.assertRollbackAllowed({ m, before, published, builds });
         startIntent(m, published);
         assert.deepEqual(json(published.receiptFile), Object.fromEntries(Object.entries(published).filter(([key]) => !['receiptFile', 'receiptSha256'].includes(key))));
         assert.equal(sha(rootFile(published.receiptFile)), published.receiptSha256);
-        installed = json(m.stage + '/nginx-' + m.runId + '-installed.json');
+        installed = json(nginxInstalledFile(m));
         const currentProtection = readProtection(m);
         protectedState = { ...currentProtection, files: { ...currentProtection.files } };
         for (const file of installed.files) {
@@ -1476,7 +1557,7 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
       assertReleaseWindow(m);
       await releaseBoundary(m, 'reopen', 'intent', { manifestSha256, kind, effectsStarted: true });
       const restored = await restoreNginxMaintenance({ installed, nginxMaster: master,
-        healthyConsumers: { runId: m.runId, ...healthy }, observeMaintenance: () => observeMaintenance(m),
+        healthyConsumers: { ...healthy, runId: installed.runId }, observeMaintenance: () => observeMaintenance(m),
         observeRestored: async () => {
           let evidence;
           await waitFor(m, 'Reloaded nginx has not served both healthy consumers', () => {
@@ -1503,7 +1584,8 @@ export async function switchPair(m, { mode = 'switch', safety } = {}) {
       return result;
     } catch (error) {
       if (mode === 'switch' && before && !installed && !published
-        && !fs.readdirSync(m.stage).some(file => /^(usage-role-transition|natural-stop)/.test(file))) {
+        && !fs.readdirSync(m.stage).some(file => /^(usage-role-transition|natural-stop)/.test(file)
+          && (!repairRuntime?.restoredOriginalRepair || file.endsWith('-' + repairRuntime.restoredOriginalRepair.proofSha256 + '.json')))) {
         recordNormalRefusal(m, before, error, hdAdmissionRecord, repairSha256 ? {
           receiptName: admissionName('normal-switch-refusal') + '.json', logName: admissionName('normal-switch-refusal') + '.log',
         } : undefined);

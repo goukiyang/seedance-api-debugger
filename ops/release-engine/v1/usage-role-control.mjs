@@ -4,7 +4,7 @@ import path from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { call, rootFile, sha, unit, writeJsonExclusive, assertReleaseWindow, liveArtifactSource } from './common.mjs';
-import { candidateEvidenceFile } from './candidate-evidence.mjs';
+import { candidateEvidenceFile, operationalLive, operationalBeforeFile, operationalRecordName } from './candidate-evidence.mjs';
 import { readMigrationEvidence } from './normal-continuation.mjs';
 import { assertPriorUsageRoleControl, priorUsageRoleControl } from './deployed-usage-schema.mjs';
 
@@ -34,7 +34,7 @@ const bound = (m, value) => {
   assert.equal(value.runId, m.runId); assert.equal(value.manifestSha256, sha(rootFile(m.stage + '/manifest.json')));
   return value;
 };
-const baseline = m => ({ pid: String(m.live.role.pid), invocation: m.live.role.invocation, root: m.live.role.root });
+const baseline = m => { const live = operationalLive(m, 'role'); return { pid: String(live.pid), invocation: live.invocation, root: live.root }; };
 function state() {
   const more = Object.fromEntries(call('systemctl', ['show', '--all', NAME, ...FIELDS.flatMap(key => ['-p', key])]).split('\n')
     .map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)]; }));
@@ -81,13 +81,13 @@ function runtimeFiles(root, attribution) {
     ...fs.readdirSync(root + '/src/lib/canvas-roles').filter(file => file.endsWith('.ts')).sort().map(file => 'src/lib/canvas-roles/' + file)];
 }
 function fileHashes(root, files) { return Object.fromEntries(files.map(file => [file, sha(fs.readFileSync(root + '/' + file))])); }
-function originalCapture(m) {
+function originalCapture(m, expected = operationalLive(m, 'role')) {
   if (m.deployedUsageSchema) assertPriorUsageRoleControl(m);
   const v = state();
   assert.equal(v.User, m.appUser); assert.equal(v.TasksMax, '128'); assert.equal(v.KillSignal, '15');
   assert.ok(['mixed', 'control-group'].includes(v.KillMode));
   assert.equal(v.ActiveState, 'active'); assert.equal(v.SubState, 'running'); assert.equal(v.ControlPID, '0');
-  assert.equal(Number(v.MainPID), m.live.role.pid); assert.equal(v.InvocationID, m.live.role.invocation);
+  assert.equal(Number(v.MainPID), expected.pid); assert.equal(v.InvocationID, expected.invocation);
   assert.equal(fs.realpathSync(v.WorkingDirectory), m.live.role.root);
   assert.equal(fs.realpathSync('/proc/' + v.MainPID + '/cwd'), m.live.role.root);
   assert.equal(liveArtifactSource(m.live.role.root), m.live.role.source);
@@ -98,12 +98,24 @@ function originalCapture(m) {
     runtime: runtime(m.live.role.root, loadedModuleSha, v), loadedModuleSha };
 }
 export function captureUsageRole(m) { return originalCapture(m); }
+export function captureRestoredUsageRole(m, identity) {
+  assert.ok(m.fullRelease && m.privateMultiviewInstall && !m.protectedIncrement);
+  for (const key of ['unit', 'root', 'source', 'version', 'build']) assert.equal(identity[key], m.live.role[key]);
+  assert.ok(Number.isSafeInteger(identity.pid) && identity.pid > 1); assert.match(identity.invocation, /^[a-f0-9]{32}$/);
+  const captured = originalCapture(m, identity), after = state();
+  assert.equal(Number(after.MainPID), identity.pid); assert.equal(after.InvocationID, identity.invocation);
+  assert.equal(after.ExecMainStartTimestampMonotonic, identity.execMainStartTimestampMonotonic);
+  return captured;
+}
+
 function before(m) {
-  const value = bound(m, json(m.stage + '/switch-before.json'));
+  const value = bound(m, json(operationalBeforeFile(m)));
   assert.ok(value.roleControl); return value.roleControl;
 }
+function roleJournalFile(m, sequence) { return operationalRecordName(m, 'usage-role-transition-' + String(sequence).padStart(4, '0')) + '.json'; }
 function journals(m) {
-  const files = fs.readdirSync(m.stage).filter(file => /^usage-role-transition-\d{4}\.json$/.test(file)).sort();
+  const files = fs.readdirSync(m.stage).filter(file => /^usage-role-transition-\d{4}(?:-[a-f0-9]{64})?\.json$/.test(file)
+    && file === roleJournalFile(m, Number(file.slice('usage-role-transition-'.length, 'usage-role-transition-'.length + 4)))).sort();
   return files.map((file, index) => {
     const value = bound(m, json(m.stage + '/' + file));
     assert.equal(value.sequence, index + 1);
@@ -115,9 +127,9 @@ function record(m, phase, value = {}) {
   const previous = journals(m), sequence = previous.length + 1;
   assert.ok(sequence < 1000);
   const entry = { runId: m.runId, manifestSha256: sha(rootFile(m.stage + '/manifest.json')), sequence,
-    previousSha256: previous.length ? sha(rootFile(m.stage + '/usage-role-transition-' + String(sequence - 1).padStart(4, '0') + '.json')) : null,
+    previousSha256: previous.length ? sha(rootFile(m.stage + '/' + roleJournalFile(m, sequence - 1))) : null,
     at: new Date().toISOString(), phase, ...value };
-  writeJsonExclusive(m.stage + '/usage-role-transition-' + String(sequence).padStart(4, '0') + '.json', entry);
+  writeJsonExclusive(m.stage + '/' + roleJournalFile(m, sequence), entry);
   return entry;
 }
 function noForce(m) { return '/run/systemd/system/' + NAME + '.d/admin-usage-' + m.runId + '.conf'; }
@@ -305,7 +317,7 @@ export function inspectUsageRoleAdmission(m) {
 }
 function publishRoleStart(m) {
   assertUsageRoleStopped(m);
-  for (const role of ['web', 'image', 'hd']) assert.equal(exists('/proc/' + m.live[role].pid), false, 'Original writer remains alive');
+  for (const role of ['web', 'image', 'hd']) assert.equal(exists('/proc/' + operationalLive(m, role).pid), false, 'Original writer remains alive');
   const { contract, moduleBytes } = roleStartContract(m);
   directory(CONTROL);
   if (exists(CONTROL + '/start.mjs')) assert.deepEqual(rootFile(CONTROL + '/start.mjs'), moduleBytes);

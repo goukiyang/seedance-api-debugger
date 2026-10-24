@@ -10,7 +10,7 @@ import { inspectRetiredHdCaches } from './retired-hd-cache.mjs';
 import { isSharedEngine, assertSharedEngineContext } from './engine-context.mjs';
 import { readTypedFile, assertTypedFileUnchanged } from './typed-files.mjs';
 import { readFullLiveSourceFiles, releaseDependencyRoot } from './full-release-contract.mjs';
-import { assertSwitchAdmissionRepair } from './candidate-evidence.mjs';
+import { assertSwitchAdmissionRepair, operationalLive, operationalRecordName } from './candidate-evidence.mjs';
 import { readOriginalSuccess } from './candidate-reuse.mjs';
 
 const PROJECT = '/data/video-api-debugger';
@@ -25,6 +25,7 @@ const call = (bin, args, options = {}) => execFileSync(bin, args, { encoding: 'u
   maxBuffer: 16 * 1024 * 1024, env: { PATH: SYSTEM_PATH, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TZ: 'UTC' }, ...options }).trim();
 const DISCOVERY_ADMISSION = Symbol('private-before-maintenance-discovery-observation');
 const FULL_DISCOVERY_AUTHORITY = Symbol('shared-full-discovery-authority');
+const WHOLE_DRAIN_MANIFEST = Symbol('shared-full-whole-drain-manifest');
 const COMPILED_CACHE_PROOFS = new WeakMap();
 const LEGACY_EXECUTION_SOURCE_PROOFS = new WeakMap();
 const LEGACY_HD_WRITER_SHA256 = '7442f68dd8ce7db49390293e722107c2bc57b72ea43976541427978076858fbf';
@@ -48,7 +49,7 @@ function readFullDiscoveryAuthority(m, l, admission) {
     admission.remaining();
     // This is the existing root/journal/full-controller verifier. A manifest
     // field or an unsealed current path cannot substitute for its historical PID.
-    const repair = assertSwitchAdmissionRepair(m), historical = repair?.liveSnapshot;
+    const repair = assertSwitchAdmissionRepair(m), historical = repair?.restoredLiveSnapshot || repair?.liveSnapshot;
     assert.ok(historical?.services?.hd && historical.sources?.hd, 'Full discovery lacks its verified original HD runtime/source observation');
     const original = structuredClone(historical.services.hd);
     assert.equal(releaseDependencyRoot(m), m.live.hd.root);
@@ -227,7 +228,7 @@ function readDiscoveryOwner(m, l, admission, bound = null) {
   assert.equal(ownerStat.mode & 0o7777, 0o600);
   const ownerProof = bound || (sharedFullDiscovery(m) ? { ownerFile: admissionStat(ownerStat) } : null);
   const bytes = ownerProof ? readBoundDiscoveryOwnerBytes(ownerFile, ownerProof) : readRegular(ownerFile, 4096), owner = JSON.parse(bytes);
-  assert.equal(owner.pid, m.live.hd.pid); assert.equal(owner.host, os.hostname());
+  assert.equal(owner.pid, operationalLive(m, 'hd').pid); assert.equal(owner.host, os.hostname());
   assert.match(owner.token || '', /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
   const runtime = readDiscoveryRuntime(m, l, admission);
   try {
@@ -253,7 +254,7 @@ function readDiscoveryOwner(m, l, admission, bound = null) {
   return { lock, directory: admissionStat(before), ownerFile: admissionStat(ownerStat), ownerRecordSha256: sha(bytes), tokenSha256: sha(owner.token), ...runtime };
 }
 function readDiscoveryRuntime(m, l, admission) {
-  const full = sharedFullDiscovery(m), pid = m.live.hd.pid;
+  const full = sharedFullDiscovery(m), currentHd = operationalLive(m, 'hd'), pid = currentHd.pid;
   const keys = [...(full ? ['Id'] : []), 'MainPID', 'ControlPID', 'InvocationID', 'ExecMainStartTimestampMonotonic', 'ControlGroup', 'ActiveState', 'SubState', 'WorkingDirectory'];
   const observe = () => {
     admission.remaining();
@@ -261,7 +262,7 @@ function readDiscoveryRuntime(m, l, admission) {
       ...keys.flatMap(k => ['-p', k])], { timeout: admission.remaining() }).split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
     for (const k of keys) assert.ok(Object.hasOwn(state, k), 'Discovery owner unit field missing: ' + k);
     assert.equal(state.MainPID, String(pid)); assert.equal(state.ControlPID, '0');
-    assert.equal(state.InvocationID, m.live.hd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, m.live.hd.execMainStartTimestampMonotonic);
+    assert.equal(state.InvocationID, currentHd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, currentHd.execMainStartTimestampMonotonic);
     assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.WorkingDirectory, m.live.hd.root);
     assert.equal(state.ControlGroup, '/system.slice/' + m.live.hd.unit);
     const stat = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'), fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
@@ -504,6 +505,7 @@ function layout(m, admission) {
   if (compiledCacheProof) for (const snapshot of compiledCacheProof.systemBindings) assertTypedFileUnchanged(snapshot);
   return { isolated, project, uid, gid, legacyApproval, historicalApproval, compiledCaches: compiledCacheProof?.entries,
     legacyExecutionSource: () => readLegacyHdExecutionSource(m, uid),
+    ...(sharedFullDiscovery(m) ? { [WHOLE_DRAIN_MANIFEST]: m } : {}),
     dataDevice: fs.statSync(isolated ? project : '/data').dev };
 }
 
@@ -964,7 +966,50 @@ function assertNoSupersededHdProcess(root) {
   assert.ok(observed > 0);
   return { observed, complete: true, hdChildrenAbsent: true, privateRunProcessesAbsent: true };
 }
-function supersededWholeDrainAccepted(proof) {
+function readFullWholeDrainRoot(m, l, proof) {
+  assert.equal(sharedFullDiscovery(m), true); assert.equal(proof.runId, m.runId);
+  const snapshots = [], read = (file, category, expectedSha256) => {
+    const value = readTypedFile({ file, category, expectedSha256, expectedUid: l.uid,
+      maximumBytes: category === 'receipt' ? 128 * 1024 * 1024 : 32 * 1024 * 1024 });
+    snapshots.push(value.snapshot); return value;
+  };
+  const manifest = read(m.stage + '/manifest.json', 'root_control'); assert.deepEqual(JSON.parse(manifest.bytes), m);
+  const root = releaseDependencyRoot(m); assert.equal(root, m.live.hd.root);
+  const source = readFullLiveSourceFiles(m, DISCOVERY_SOURCES, 'hd');
+  const origin = m.live.hd.sourceProof.compiledCapsule, capsule = JSON.parse(read(origin.file, 'receipt', origin.sha256).bytes);
+  const original = JSON.parse(read(path.dirname(origin.file) + '/manifest.json', 'root_control', capsule.originalManifestSha256).bytes);
+  assert.equal(original[origin.kind].root, root); assert.equal(original[origin.kind].source, source.source);
+  assert.equal(original[origin.kind].sourceManifest, m.live.hd.sourceProof.sourceManifest);
+  assert.equal(original[origin.kind].archive, m.live.hd.sourceProof.archive);
+  assert.equal(capsule.originalSourceManifestSha256, source.sourceManifestSha256);
+  assert.deepEqual(readOriginalSuccess(original, origin.kind), capsule);
+  for (const file of DISCOVERY_SOURCES) {
+    const current = read(root + '/' + file, 'app', source.sourceFiles[file]).snapshot, sealed = capsule.snapshot.sourceFiles[file];
+    assert.equal(sealed?.sha256, current.sha256);
+    for (const [key, value] of Object.entries(current.identity)) assert.equal(sealed[key], value, 'Sealed HD drain source entity changed: ' + file + ':' + key);
+  }
+  const hd = operationalLive(m, 'hd'), stop = JSON.parse(read(m.stage + '/' + operationalRecordName(m, 'natural-stop-switch-hd') + '.json', 'root_control').bytes);
+  const intent = JSON.parse(read(m.stage + '/' + operationalRecordName(m, 'natural-stop-intent-switch-hd') + '.json', 'root_control').bytes);
+  for (const value of [stop, intent]) {
+    assert.equal(value.runId, m.runId); assert.equal(value.manifestSha256, manifest.snapshot.sha256); assert.equal(value.forcedKill, false);
+    assert.equal(value.before.MainPID, String(hd.pid)); assert.equal(value.before.InvocationID, hd.invocation);
+    assert.equal(value.before.ExecMainStartTimestampMonotonic, hd.execMainStartTimestampMonotonic);
+    assert.equal(value.before.WorkingDirectory, root); assert.equal(value.before.Restart, 'no'); assert.equal(value.before.KillSignal, '15');
+    assert.equal(value.before.SendSIGKILL, 'no'); assert.equal(value.before.TimeoutStopUSec, 'infinity');
+  }
+  assert.equal(intent.signal, 'SIGTERM');
+  for (const key of ['MainPID', 'InvocationID', 'WorkingDirectory', 'ExecMainPID', 'ExecMainStartTimestamp', 'ExecMainStartTimestampMonotonic'])
+    assert.equal(intent.capturedOriginal[key], stop.before[key], 'HD natural stop changed its original invocation: ' + key);
+  assert.equal(stop.originalCgroup, '/system.slice/' + hd.unit);
+  const finished = Date.parse(stop.completedAt); assert.ok(Number.isFinite(finished) && Number.isSafeInteger(intent.requestedAt)
+    && intent.requestedAt <= finished && finished <= Date.now());
+  for (const [key, value] of Object.entries(proof.drain.state)) assert.equal(stop.after[key], value, 'Fresh HD drain differs from its original natural-stop receipt: ' + key);
+  assert.equal(stop.after.KillSignal, '15'); assert.equal(fs.existsSync('/proc/' + hd.pid), false, 'The original HD PID remains after natural drain');
+  for (const snapshot of snapshots) assertTypedFileUnchanged(snapshot);
+  return root;
+}
+
+function supersededWholeDrainAccepted(proof, l) {
   if (!proof || proof.phase !== 'drained') return false;
   assert.equal(proof.schema, 'specific-retired-hd-cache.v1');
   assert.equal(proof.accepted, true); assert.equal(proof.historicalPidsRecovered, false);
@@ -975,7 +1020,9 @@ function supersededWholeDrainAccepted(proof) {
   assert.equal(drain.method, 'current-whole-service-natural-drain-not-historical-PID-reconstruction');
   assert.equal(state.ActiveState, 'inactive'); assert.equal(state.MainPID, '0'); assert.equal(state.ControlPID, '0');
   assert.equal(state.Result, 'success'); assert.equal(state.Restart, 'no'); assert.equal(state.SendSIGKILL, 'no');
-  assert.equal(state.TimeoutStopUSec, 'infinity'); assert.equal(state.WorkingDirectory, SIZE_LOG_SOURCE.slice(0, -1));
+  assert.equal(state.TimeoutStopUSec, 'infinity');
+  const manifest = l?.[WHOLE_DRAIN_MANIFEST];
+  assert.equal(state.WorkingDirectory, manifest ? readFullWholeDrainRoot(manifest, l, proof) : SIZE_LOG_SOURCE.slice(0, -1));
   return true;
 }
 export function inspectHdClosedExecutionCache(root, run, l, job, admission, retiredProof) {
@@ -1129,7 +1176,7 @@ export function inspectHdClosedExecutionCache(root, run, l, job, admission, reti
     if (l.isolated) assert.equal(process.env.NODE_ENV, 'test');
     else assert.equal(root, PROJECT + '/var-lib/storage/hd-derivatives', 'Unknown attempt exit requires the canonical worker root');
     const processAfter = assertNoSupersededHdProcess(root), processFirst = processBefore || processAfter;
-    const accepted = completeAttemptExit || supersededWholeDrainAccepted(retiredProof);
+    const accepted = completeAttemptExit || supersededWholeDrainAccepted(retiredProof, l);
     return { run, status: job.status, executionId: match[2], latestExecutionId: job.executionId,
       proofKind: completeAttemptExit ? 'execution-attempt-closed' : 'superseded-attempt-whole-service-drain', historicalPidKnown, historicalExitReceipt,
       accepted, pendingWholeDrain: !accepted, historyKind, historicalAttempt: boundAttempt,
@@ -1232,12 +1279,12 @@ function createProtectedDiscoveryContinuation(m, { sourceRoot, prior, scanDeadli
     return { live: Object.fromEntries(Object.entries({ ...live, ...candidates }).map(([file, v]) => [file, { file: v.file, stat: v.stat, sha256: v.sha256 }])), archives };
   }
   function runtime() {
-    admission.check(); const pid = m.live.hd.pid;
+    admission.check(); const currentHd = operationalLive(m, 'hd'), pid = currentHd.pid;
     const keys = ['MainPID', 'ControlPID', 'InvocationID', 'ExecMainStartTimestampMonotonic', 'ControlGroup', 'ActiveState', 'SubState', 'WorkingDirectory'];
     const state = l.isolated ? structuredClone(m.hdAdmissionFixtureUnit) : Object.fromEntries(call('systemctl', ['show', m.live.hd.unit,
       ...keys.flatMap(k => ['-p', k])], { timeout: admission.remaining() }).split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
     assert.equal(state.MainPID, String(pid)); assert.equal(state.ControlPID, '0');
-    assert.equal(state.InvocationID, m.live.hd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, m.live.hd.execMainStartTimestampMonotonic);
+    assert.equal(state.InvocationID, currentHd.invocation); assert.equal(state.ExecMainStartTimestampMonotonic, currentHd.execMainStartTimestampMonotonic);
     assert.equal(state.ActiveState, 'active'); assert.equal(state.SubState, 'running'); assert.equal(state.WorkingDirectory, runningRoot);
     assert.equal(state.ControlGroup, '/system.slice/' + m.live.hd.unit);
     const raw = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'), fields = raw.slice(raw.lastIndexOf(')') + 2).trim().split(/\s+/);
@@ -1270,7 +1317,7 @@ function createProtectedDiscoveryContinuation(m, { sourceRoot, prior, scanDeadli
     assert.deepEqual(fs.readdirSync(lock), ['owner.json']);
     const file = regular(lock + '/owner.json', l.uid, 4096); assert.equal(file.stat.gid, l.gid); assert.equal(file.stat.mode & 0o7777, 0o600);
     const value = JSON.parse(file.bytes); assert.deepEqual(Object.keys(value).sort(), ['host', 'pid', 'token']);
-    assert.equal(value.pid, m.live.hd.pid); assert.equal(value.host, os.hostname());
+    assert.equal(value.pid, operationalLive(m, 'hd').pid); assert.equal(value.host, os.hostname());
     assert.match(value.token || '', /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);
     assert.deepEqual(stat(lock), directory); return { directory, file: { stat: file.stat, sha256: file.sha256 } };
   }
@@ -1597,7 +1644,7 @@ function globalLock(m, l) {
   });
   return { holders: matches.length, unknown: matches.some(line => {
     const fields = line.trim().split(/\s+/), token = fields.findIndex(value => /^[a-f0-9]+:[a-f0-9]+:\d+$/i.test(value));
-    return !line.includes(' FLOCK ') || Number(fields[token - 1]) !== m.live?.hd?.pid;
+    return !line.includes(' FLOCK ') || Number(fields[token - 1]) !== operationalLive(m, 'hd')?.pid;
   }) };
 }
 

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { assertUsageRoleStart } from './usage-role-start.mjs';
 import { assertUsageRoleExit } from './usage-role-control.mjs';
@@ -75,6 +76,41 @@ assert.ok(roleSource.includes("assert.equal(current.TasksMax, '128')"));
 assert.ok(!roleSource.includes("'-p', 'Environment'"));
 assert.ok(roleSource.includes('SendSIGKILL=no\\nTimeoutStopSec=infinity'));
 checks.push('normal_abort_guard_rollback_and_protection_are_actually_wired');
+
+{
+  const start = roleSource.indexOf('function roleJournalFile('), end = roleSource.indexOf('function noForce(', start);
+  assert.ok(start > 0 && end > start);
+  const bytes = new Map(), root = '/isolated-restored-role', proofSha256 = 'f'.repeat(64);
+  const sha = value => requireHash(value);
+  const requireHash = value => createHash('sha256').update(value).digest('hex');
+  bytes.set(root + '/manifest.json', Buffer.from('isolated-manifest'));
+  const oldFile = root + '/usage-role-transition-0001.json', oldBytes = Buffer.from('{"phase":"historical-restoration"}'); bytes.set(oldFile, oldBytes);
+  const m = { stage: root, runId: 'isolated-restored-run' };
+  const functions = new Function('assert', 'fs', 'bound', 'json', 'operationalRecordName', 'sha', 'rootFile', 'writeJsonExclusive',
+    roleSource.slice(start, end) + '; return { journals, record };')(
+    assert, { readdirSync: () => [...bytes.keys()].filter(file => file.startsWith(root + '/')).map(file => path.basename(file)) },
+    (manifest, value) => { assert.equal(value.runId, manifest.runId); assert.equal(value.manifestSha256, sha(bytes.get(root + '/manifest.json'))); return value; },
+    file => JSON.parse(bytes.get(file)), (manifest, name) => { assert.equal(manifest, m); return name + '-' + proofSha256; }, sha,
+    file => { assert.ok(bytes.has(file)); return bytes.get(file); },
+    (file, value) => { assert.equal(bytes.has(file), false); bytes.set(file, Buffer.from(JSON.stringify(value))); });
+  assert.deepEqual(functions.journals(m), []);
+  const first = functions.record(m, 'policy-intent'), firstFile = root + '/usage-role-transition-0001-' + proofSha256 + '.json';
+  assert.equal(first.sequence, 1); assert.equal(first.previousSha256, null); assert.ok(bytes.has(firstFile));
+  const second = functions.record(m, 'stopped'); assert.equal(second.sequence, 2); assert.equal(second.previousSha256, sha(bytes.get(firstFile)));
+  assert.equal(functions.journals(m).length, 2); assert.deepEqual(bytes.get(oldFile), oldBytes);
+  const captureStart = roleSource.indexOf('export function captureRestoredUsageRole('), captureEnd = roleSource.indexOf('\nfunction before(', captureStart);
+  const identity = { unit: 'role.service', root: '/sealed/old-source', source: 'b'.repeat(40), version: '0.103.2', build: 'old-build',
+    pid: 303, invocation: 'c'.repeat(32), execMainStartTimestampMonotonic: '1234567' };
+  const captureM = { fullRelease: {}, privateMultiviewInstall: true, live: { role: { ...identity, pid: 101, invocation: 'd'.repeat(32) } } };
+  const capture = new Function('assert', 'originalCapture', 'state', roleSource.slice(captureStart, captureEnd).replace('export ', '') + ';return captureRestoredUsageRole;')(
+    assert, (manifest, expected) => { assert.equal(manifest, captureM); assert.equal(expected, identity); return { fresh: true }; },
+    () => ({ MainPID: '303', InvocationID: identity.invocation, ExecMainStartTimestampMonotonic: identity.execMainStartTimestampMonotonic }));
+  assert.deepEqual(capture(captureM, identity), { fresh: true });
+  assert.throws(() => capture(captureM, { ...identity, source: 'e'.repeat(40) }));
+  checks.push('actual_role_journal_bodies_append_new_identity_namespace_and_preserve_original_history');
+  checks.push('actual_restored_capture_body_binds_new_invocation_without_changing_original_source_authority');
+}
+
 console.log(JSON.stringify({ schema: 'sd2-usage-role-engineering.v1', completed: true, checks,
   fixtureOnly: true, nativeSigtermExecuted: true, servicesChanged: false, productionWrites: 0,
   paidRequests: 0, browserRuns: 0, functionalAcceptance: false }));

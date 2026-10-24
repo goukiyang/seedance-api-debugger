@@ -14,7 +14,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const TASK = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const PHASE = /^[a-z][a-z0-9_-]{0,63}$/;
 const TERMINAL = new Set(['succeeded', 'failed', 'rolled_back', 'stopped']);
-const RESERVED_EVENTS = new Set(['attempt_started', 'window_refreshed', 'owner_takeover', 'phase_intent', 'phase_result', 'attempt_finished', 'failure_continued']);
+const RESERVED_EVENTS = new Set(['attempt_started', 'window_refreshed', 'owner_takeover', 'phase_intent', 'phase_result', 'attempt_finished', 'failure_continued', 'restored_original_continued']);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function fail(category, code, kind, id, reason, nextStep, options) {
@@ -232,6 +232,61 @@ function initialDerived(header) {
     lastSequence: 0, lastEventSha256: null, updatedAt: header.createdAt };
 }
 
+export function validateRestoredOriginalBinding(value) {
+  exactKeys(value, ['schema', 'closureProofFile', 'closureProofSha256', 'phaseResultSha256', 'restoredBaselineSha256'], 'restored original continuation binding');
+  assert.equal(value.schema, 'sd2-release-restored-original-binding.v1');
+  for (const key of ['closureProofSha256', 'phaseResultSha256', 'restoredBaselineSha256']) assert.match(value[key], HASH);
+  assert.ok(path.isAbsolute(value.closureProofFile) && path.resolve(value.closureProofFile) === value.closureProofFile);
+  assert.equal(path.basename(value.closureProofFile), 'restored-original-closure-' + value.closureProofSha256 + '.json');
+  return value;
+}
+function restoredOriginalClosure(reference, state) {
+  exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'restored original closure reference');
+  assert.equal(reference.schema, 'sd2-release-restored-original-closure-reference.v1'); assert.match(reference.proofSha256, HASH);
+  assert.ok(path.isAbsolute(reference.proofFile) && path.resolve(reference.proofFile) === reference.proofFile);
+  assert.equal(path.basename(reference.proofFile), 'restored-original-closure-' + reference.proofSha256 + '.json');
+  assert.equal(path.basename(path.dirname(reference.proofFile)), state.attemptId);
+  assert.equal(path.basename(path.dirname(path.dirname(reference.proofFile))), 'attempts');
+  assert.equal(path.basename(path.dirname(path.dirname(path.dirname(reference.proofFile)))), state.taskId);
+  const raw = readBytes(reference.proofFile, 4 * 1024 * 1024), proof = JSON.parse(raw);
+  assert.equal(digest(raw), reference.proofSha256); assert.equal(proof.schema, 'sd2-release-restored-original-closure-proof.v1');
+  for (const key of ['taskId', 'attemptId', 'runId']) assert.equal(proof[key], state[key]);
+  assert.equal(proof.failedPhaseResultSha256, state.lastPhase?.resultSha256);
+  assert.equal(state.lastPhase?.phase, 'switch'); assert.equal(state.lastPhase?.outcome, 'failed');
+  for (const [key, value] of Object.entries({ completed: true, originalPairRestored: true, effectsStarted: true,
+    pairPublished: false, schemaPublished: false, newWriterStarted: false })) assert.equal(proof[key], value);
+  for (const prefix of ['restorationReceipt', 'restoredBaseline']) {
+    assert.ok(path.isAbsolute(proof[prefix + 'File'])); assert.match(proof[prefix + 'Sha256'], HASH);
+    assert.equal(digest(readBytes(proof[prefix + 'File'], 4 * 1024 * 1024)), proof[prefix + 'Sha256']);
+  }
+  const restored = readJson(proof.restorationReceiptFile, 4 * 1024 * 1024);
+  assert.equal(restored.runId, state.runId); assert.equal(restored.schema, 'controlled-hd-drain-original-restoration.v1');
+  for (const [key, value] of Object.entries({ completed: true, originalPairUnchanged: true, businessDataRestored: false, policiesRestored: true }))
+    assert.equal(restored[key], value);
+  assert.equal(restored.restored.exactOriginalBytesRestored, true); assert.equal(restored.restored.runtimeRestorationVerified, true);
+  const baseline = readJson(proof.restoredBaselineFile, 4 * 1024 * 1024);
+  assert.equal(baseline.schema, 'sd2-release-restored-original-baseline.v1'); assert.equal(baseline.runId, state.runId);
+  assert.equal(baseline.manifestSha256, proof.manifestSha256); assert.equal(baseline.restorationReceiptSha256, proof.restorationReceiptSha256);
+  assert.deepEqual(baseline.newLiveSnapshot, proof.newLiveSnapshot);
+  assert.deepEqual(Object.keys(baseline.newLiveSnapshot).sort(), ['web', 'image', 'hd', 'works', 'role', 'template'].sort());
+  for (const live of Object.values(baseline.newLiveSnapshot)) {
+    assert.ok(Number.isSafeInteger(live.pid) && live.pid > 1); assert.match(live.invocation, /^[a-f0-9]{32}$/);
+    assert.match(live.kernelStartTicks, /^\d+$/); assert.match(live.execMainStartTimestampMonotonic, /^\d+$/);
+    assert.ok(path.isAbsolute(live.root)); assert.match(live.source, /^[a-f0-9]{40}$/);
+    assert.ok(typeof live.version === 'string' && live.version && typeof live.build === 'string' && live.build);
+  }
+  return { reference, proof, baseline };
+}
+function assertRestoredContinuationScene(before) {
+  validateScene(before, 'restored original continuation before summary');
+  assert.equal(before.facts.effectsStarted, true, 'Historical maintenance effects remain recorded');
+  assert.equal(before.facts.switchComplete, false);
+  for (const name of ['pricing-pair-published.json', 'pricing-start-intent.json', 'full-schema-ready.json',
+    'canvas-batch-schema-ready.json', 'raw-upload-recovery-published.json', 'guard-recovery-start-intent.json', 'guard-recovery-complete.json'])
+    { assert.equal(Object.hasOwn(before.facts.files || {}, name), true, 'Restored continuation needs an explicit current marker observation: ' + name);
+      assert.equal(Boolean(before.facts.files[name]), false, 'Restoration cannot admit an existing published/new-writer effect: ' + name); }
+}
+
 function applyEvent(state, event, hash) {
   assert.equal(event.schema, ATTEMPT_EVENT_SCHEMA); assert.equal(event.taskId, state.taskId);
   assert.equal(event.attemptId, state.attemptId); assert.equal(event.runId, state.runId);
@@ -302,11 +357,34 @@ function applyEvent(state, event, hash) {
         originalTerminalEventSha256: event.previousTerminalSha256, status: 'pending', resultSha256: null };
     }
     state.status = 'running'; state.terminal = null; state.owner = event.owner; state.currentWindow = event.window;
+  } else if (event.kind === 'restored_original_continued') {
+    exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
+      'previousTerminalSha256', 'failureReceiptSha256', 'window', 'before', 'restoration'], 'restored original continuation event');
+    assert.equal(state.status, 'failed'); assert.equal(state.activePhase, null);
+    assert.equal(state.terminal.eventSha256, event.previousTerminalSha256); assert.equal(state.lastEventSha256, event.previousTerminalSha256);
+    assert.match(event.failureReceiptSha256, HASH); validateRestoredOriginalBinding(event.restoration);
+    validateWindow(event.window, state.attemptId, state.runId, event.at, false); assertRestoredContinuationScene(event.before);
+    const closure = state.restoredOriginalClosure; assert.ok(closure && closure.consumed === false, 'A restored original proof is consumed only once');
+    assert.equal(event.restoration.closureProofFile, closure.proofFile); assert.equal(event.restoration.closureProofSha256, closure.proofSha256);
+    assert.equal(event.restoration.phaseResultSha256, state.lastPhase.resultSha256);
+    assert.equal(event.restoration.restoredBaselineSha256, closure.restoredBaselineSha256);
+    restoredOriginalClosure({ schema: 'sd2-release-restored-original-closure-reference.v1', proofFile: closure.proofFile, proofSha256: closure.proofSha256 }, state);
+    state.restoredOriginalClosure = { ...closure, consumed: true };
+    state.restoredOriginalContinuation = { schema: 'sd2-release-restored-original-continuation-binding.v1',
+      proofSha256: event.failureReceiptSha256, closureProofSha256: closure.proofSha256, eventSha256: hash };
+    state.status = 'running'; state.terminal = null; state.owner = event.owner; state.currentWindow = event.window;
   } else if (event.kind === 'observation') {
     exactKeys(event, ['schema', 'taskId', 'attemptId', 'runId', 'sequence', 'previousSha256', 'at', 'atIso', 'owner', 'kind',
       'name', 'value'], 'observation event');
     assert.equal(state.status, 'running'); assert.ok(ownerEqual(event.owner, state.owner));
     assert.match(event.name, PHASE); safeJson(event.value, 'observation value', 128 * 1024);
+    if (event.name === 'restored_original_closure') {
+      assert.equal(state.restoredOriginalClosure, undefined, 'Only this single restored-original closure is permitted');
+      assert.equal(state.activePhase, null); const { proof } = restoredOriginalClosure(event.value, state);
+      state.restoredOriginalClosure = { proofFile: event.value.proofFile, proofSha256: event.value.proofSha256,
+        phaseResultSha256: proof.failedPhaseResultSha256, restoredBaselineSha256: proof.restoredBaselineSha256, consumed: false };
+    }
+
   } else assert.fail('Unknown attempt event kind');
   state.lastSequence = event.sequence; state.lastEventSha256 = hash; state.updatedAt = event.atIso;
   return state;
@@ -371,6 +449,8 @@ function appendEvent(loaded, owner, body, now) {
     runId: loaded.header.runId, sequence, previousSha256: loaded.derivedState.lastEventSha256,
     at: now, atIso: iso(now), owner, ...body };
   const file = path.join(loaded.place.events, String(sequence).padStart(6, '0') + '.json');
+  if (event.kind === 'observation' && event.name === 'restored_original_closure')
+    applyEvent(structuredClone(loaded.derivedState), event, digest(Buffer.from(JSON.stringify(event, null, 2) + '\n')));
   const hash = writeExclusiveJson(file, event), next = applyEvent(structuredClone(loaded.derivedState), event, hash);
   writeCasJson(path.join(loaded.place.attempt, 'state.json'), next, loaded.stateSha256);
   return { event, eventSha256: hash, state: next };
@@ -610,6 +690,43 @@ export function continueFailedAttempt({ root, taskId, attemptId, owner, engine, 
     previousSha256: terminalEventSha256, at: now, atIso: iso(now), owner, kind: 'failure_continued',
     previousTerminalSha256: terminalEventSha256, failureReceiptSha256, window, before,
     ...(continuation === undefined ? {} : { continuation }) };
+  const eventSha256 = writeExclusiveJson(path.join(loaded.place.events, String(sequence).padStart(6, '0') + '.json'), event);
+  const next = applyEvent(structuredClone(loaded.derivedState), event, eventSha256);
+  writeCasJson(path.join(loaded.place.attempt, 'state.json'), next, loaded.stateSha256);
+  return { event, eventSha256, state: next };
+}
+
+export function continueRestoredOriginalAttempt({ root, taskId, attemptId, owner, engine, manifest, artifacts, window,
+  terminalEventSha256, failureReceiptSha256, before, restoration, now = Date.now(), inspectOwner = inspectControllerOwner }) {
+  const loaded = validateAttempt({ root, taskId, attemptId }); validateOwner(owner);
+  assertAttemptBindings(loaded, { engine, manifest, artifacts });
+  assert.equal(loaded.derivedState.status, 'failed'); assert.equal(loaded.derivedState.activePhase, null);
+  assert.equal(loaded.derivedState.lastEventSha256, terminalEventSha256);
+  assert.equal(loaded.derivedState.terminal.eventSha256, terminalEventSha256);
+  validateWindow(window, attemptId, attemptId, now, true); validateScene(before, 'continuation before summary');
+  assertRestoredContinuationScene(before); validateRestoredOriginalBinding(restoration);
+  const closure = loaded.derivedState.restoredOriginalClosure; assert.ok(closure && closure.consumed === false);
+  assert.equal(restoration.closureProofFile, closure.proofFile); assert.equal(restoration.closureProofSha256, closure.proofSha256);
+  assert.equal(restoration.phaseResultSha256, loaded.derivedState.lastPhase.resultSha256);
+  assert.equal(restoration.restoredBaselineSha256, closure.restoredBaselineSha256);
+  restoredOriginalClosure({ schema: 'sd2-release-restored-original-closure-reference.v1', proofFile: closure.proofFile, proofSha256: closure.proofSha256 }, loaded.derivedState);
+  assert.match(failureReceiptSha256, HASH);
+  const task = readJson(path.join(loaded.place.task, 'task.json'));
+  assert.equal(task.latestAttemptId, attemptId, 'A superseded attempt cannot be continued');
+  assert.equal(fs.existsSync(ownerLeaseFile(loaded.place)), false);
+  const priorOwner = loaded.derivedState.owner;
+  assert.equal(inspectOwner(priorOwner), 'dead', 'Original failed controller must be proven dead');
+  const priorLease = fs.readdirSync(loaded.place.attempt).filter(name => /^owner-final-[a-f0-9]{64}\.json$/.test(name))
+    .map(name => ({ name, bytes: readBytes(path.join(loaded.place.attempt, name), 16384) }))
+    .find(item => ownerEqual(validateLease(JSON.parse(item.bytes), taskId, attemptId).owner, priorOwner));
+  assert.ok(priorLease, 'Original terminal owner lease is missing');
+  assert.equal(priorLease.name, 'owner-final-' + digest(priorLease.bytes) + '.json');
+  writeExclusiveJson(ownerLeaseFile(loaded.place), { schema: 'sd2-release-attempt-owner.v1', taskId, attemptId, owner });
+  const sequence = loaded.derivedState.lastSequence + 1; assert.ok(sequence <= 999999);
+  const event = { schema: ATTEMPT_EVENT_SCHEMA, taskId, attemptId, runId: attemptId, sequence,
+    previousSha256: terminalEventSha256, at: now, atIso: iso(now), owner, kind: 'restored_original_continued',
+    previousTerminalSha256: terminalEventSha256, failureReceiptSha256, window, before,
+    restoration };
   const eventSha256 = writeExclusiveJson(path.join(loaded.place.events, String(sequence).padStart(6, '0') + '.json'), event);
   const next = applyEvent(structuredClone(loaded.derivedState), event, eventSha256);
   writeCasJson(path.join(loaded.place.attempt, 'state.json'), next, loaded.stateSha256);

@@ -7,6 +7,7 @@ import { readDeployedUsageEvidence, verifyDeployedUsageSchema, assertDeployedSch
 import { assertDeployedCanvasInput } from './canvas-batch-schema.mjs';
 import { assertCanvasBatchSchemaInput } from './canvas-batch-schema-contract.mjs';
 import { readOriginalSuccess } from './candidate-reuse.mjs';
+import { guardBuildTailRuntime, operationalLive } from './candidate-evidence.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -628,17 +629,32 @@ export function recordHdAdmission(m, detail) {
   writeJsonExclusive(file, { runId: m.runId, manifestSha256: sha(rootFile(m.stage + '/manifest.json')),
     observedAt: new Date().toISOString(), detail }); return file;
 }
+export function restoredRefusalCurrentFiles(names, proofSha256, historicalDynamic, predecessorProofSha256) {
+  assert.match(proofSha256, HASH); assert.match(predecessorProofSha256, HASH); assert.notEqual(proofSha256, predecessorProofSha256);
+  assert.ok(Array.isArray(historicalDynamic) && historicalDynamic.every(name => typeof name === 'string' && path.basename(name) === name));
+  const historical = new Set(historicalDynamic);
+  return names.filter(name => !historical.has(name) && !name.endsWith('-' + predecessorProofSha256 + '.json'));
+}
 export function recordNormalRefusal(m, before, error, hdFile, { receiptName = 'normal-switch-refusal.json',
   logName = 'normal-switch-refusal.log' } = {}) {
   assert.match(receiptName, /^normal-switch-refusal(?:-[a-f0-9]{64})?\.json$/);
   assert.match(logName, /^normal-switch-refusal(?:-[a-f0-9]{64})?\.log$/);
   assert.equal(receiptName.slice(0, -5), logName.slice(0, -4), 'Refusal receipt and log must belong to the same attempt');
-  assertNoCutoverEffects(fs.readdirSync(m.stage).filter(file => file !== '.switch.lock'));
+  const runtime = guardBuildTailRuntime(m), repair = runtime?.restoredOriginalRepair;
+  let names = fs.readdirSync(m.stage).filter(file => file !== '.switch.lock');
+  if (repair) {
+    assert.equal(receiptName, 'normal-switch-refusal-' + repair.proofSha256 + '.json');
+    const terminal = JSON.parse(rootFile(runtime.restoredOriginalClosure.terminal.file, 4 * 1024 * 1024));
+    assert.equal(sha(rootFile(runtime.restoredOriginalClosure.terminal.file)), runtime.restoredOriginalClosure.terminal.sha256);
+    assert.equal(terminal.kind, 'attempt_finished'); assert.equal(terminal.outcome, 'failed'); assert.equal(terminal.after.facts.effectsStarted, true);
+    names = restoredRefusalCurrentFiles(names, repair.proofSha256, terminal.after.facts.dynamic, runtime.switchWindowRepair.proofSha256);
+  }
+  assertNoCutoverEffects(names);
   for (const role of ['web', 'image', 'hd', 'role']) {
-    const current = unit(m.live[role].unit);
+    const live = operationalLive(m, role), current = unit(live.unit);
     assert.equal(current.ActiveState, 'active'); assert.equal(current.SubState, 'running'); assert.equal(current.ControlPID, '0');
-    assert.equal(Number(current.MainPID), m.live[role].pid); assert.equal(current.InvocationID, m.live[role].invocation);
-    assert.equal(fs.realpathSync('/proc/' + current.MainPID + '/cwd'), m.live[role].root);
+    assert.equal(Number(current.MainPID), live.pid); assert.equal(current.InvocationID, live.invocation);
+    assert.equal(fs.realpathSync('/proc/' + current.MainPID + '/cwd'), live.root);
   }
   assertProtection(before.protection, readProtection(m));
   const logFile = logName, bytes = Buffer.from(String(error.stack || error));
@@ -648,5 +664,6 @@ export function recordNormalRefusal(m, before, error, hdFile, { receiptName = 'n
     manifestSha256: sha(rootFile(m.stage + '/manifest.json')), phase: 'before-maintenance', effectsStarted: false,
     exitCode: 1, at: new Date().toISOString(), logFile, logSha256: sha(bytes),
     hdDetailFile: hdFile ? path.basename(hdFile) : null, hdDetailSha256: hdFile ? sha(rootFile(hdFile)) : null,
-    originalPidAndProtectionFreshlyVerified: true });
+    ...(repair ? { historicalEffectsRetained: true, restoredOriginalClosureProofSha256: runtime.restoredOriginalClosure.proofSha256,
+      currentRepairProofSha256: repair.proofSha256 } : {}), originalPidAndProtectionFreshlyVerified: true });
 }

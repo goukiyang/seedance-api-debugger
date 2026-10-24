@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { isSharedEngine } from './engine-context.mjs';
 import { MV_DIRECT } from './release-contract.mjs';
-import { assertContinuationInput, assertNoCutoverEffects, assertOriginalMigration, assertFreshLegacyCapture, assertFreshPricingCapture, CONTINUATION_V2, EXACT_UNPUBLISHED_PAIR, assertExactUnpublishedFacts, UNPUBLISHED_SCHEMA, verifyExactUnpublishedProvenance } from './normal-continuation.mjs';
+import { assertContinuationInput, assertNoCutoverEffects, restoredRefusalCurrentFiles, assertOriginalMigration, assertFreshLegacyCapture, assertFreshPricingCapture, CONTINUATION_V2, EXACT_UNPUBLISHED_PAIR, assertExactUnpublishedFacts, UNPUBLISHED_SCHEMA, verifyExactUnpublishedProvenance } from './normal-continuation.mjs';
 import { assertFirstRuntimeAliasProvenance } from './candidate-reuse.mjs';
 import { assertDeployedSchemaInput, DEPLOYED_FIELDS, DEPLOYED_SCHEMA } from './deployed-usage-schema.mjs';
 import { assertDeployedCanvasInput, DEPLOYED_CANVAS_FIELDS } from './canvas-batch-schema.mjs';
@@ -193,6 +193,21 @@ for (const name of ['.switch.lock', 'natural-stop-intent-switch-web.json', 'usag
   'guard-recovery-attempt.json']) assert.throws(() => assertNoCutoverEffects([name]));
 assertNoCutoverEffects(['switch-before.json', 'hd-release-safety-approval.json', 'fixed-guard-recovery.json', 'usage-role-readonly-admission.json']);
 checks.push('only_zero_side_effect_premaintenance_history_can_continue');
+
+{
+  const old = 'e'.repeat(64), current = 'f'.repeat(64), historical = ['natural-stop-switch-hd-' + old + '.json', 'usage-role-transition-0001.json'];
+  const preserved = [...historical, 'writer-no-force-final-switch-hd-' + old + '.json', 'switch-before.json'];
+  assertNoCutoverEffects(restoredRefusalCurrentFiles(preserved, current, historical, old));
+  assert.deepEqual(preserved.slice(0, 2), historical);
+  for (const name of ['natural-stop-switch-hd-' + current + '.json', 'usage-role-transition-0001-' + current + '.json',
+    'pricing-pair-published.json', 'switch-complete.json', 'writer-no-force-final-switch-hd-' + current + '.json', 'unknown-natural-stop']) {
+    const names = restoredRefusalCurrentFiles([...preserved, name], current, historical, old);
+    if (name === 'unknown-natural-stop') assert.ok(names.includes(name)); else assert.throws(() => assertNoCutoverEffects(names));
+  }
+  assert.throws(() => restoredRefusalCurrentFiles(preserved, current, historical, current));
+  checks.push('restored_refusal_preserves_historical_effects_but_rejects_current_or_unscoped_cutover_effects');
+}
+
 for (const change of [r => { r.completed = false; }, r => { r.historyBackfilled = true; },
   r => { r.source = 'f'.repeat(40); }, r => { r.originalSchemaPreserved = false; }]) {
   const receipt = structuredClone(good.receipt); change(receipt);

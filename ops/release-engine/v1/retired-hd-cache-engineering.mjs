@@ -27,6 +27,23 @@ assert.ok(begin>0&&end>begin);const restoreSource=code.slice(begin,end);
 const runtimeBegin=code.indexOf('export function originalRuntimeBuild('),runtimeEnd=code.indexOf('\nexport function protectedFileSnapshot(',runtimeBegin);
 assert.ok(runtimeBegin>0&&runtimeEnd>runtimeBegin);const runtimeSource=code.slice(runtimeBegin,runtimeEnd).replace(/^export /,'');
 const sha=x=>createHash('sha256').update(x).digest('hex');
+// Exercise the production identity selector; the root-proof authorization is
+// an explicit adapter here, not a synthetic claim of a real restored attempt.
+const retiredSource=fs.readFileSync(new URL('./retired-hd-cache.mjs',import.meta.url),'utf8');
+const identityBegin=retiredSource.indexOf('function retiredHdOperationalIdentity('),identityEnd=retiredSource.indexOf('\nexport function inspectRetiredHdCaches(',identityBegin);
+assert.ok(identityBegin>0&&identityEnd>identityBegin);
+let selectedHd;const identityNamespace={assert,MV_DIRECT,isSharedEngine:m=>m.engine?.schema==='sd2-release-engine.v1',operationalLive:(_m,role)=>{assert.equal(role,'hd');return selectedHd;}};
+const selectHd=vm.runInNewContext('('+retiredSource.slice(identityBegin,identityEnd)+')',identityNamespace);
+const identityManifest={engine:{schema:'sd2-release-engine.v1'},fullRelease:{},privateMultiviewInstall:true,live:{hd:{pid:MV_DIRECT.starts.hd[0],root:source,source:'a'.repeat(40)}}};
+selectedHd=identityManifest.live.hd;assert.equal(selectHd(identityManifest),selectedHd);
+selectedHd={...selectedHd,pid:selectedHd.pid+1};assert.equal(selectHd(identityManifest),selectedHd);
+assert.throws(()=>assertWholeHdDrain(good,[],[{pid:selectedHd.pid,related:false}],selectedHd.pid));
+for(const change of [m=>{m.protectedIncrement={};},m=>{m.privateMultiviewInstall=false;},m=>{delete m.engine;},m=>{m.fullRelease=null;}]){
+  const changed=structuredClone(identityManifest);change(changed);assert.throws(()=>selectHd(changed));
+}
+for(const key of ['root','source']){const prior=selectedHd[key];selectedHd[key]='/unsealed';assert.throws(()=>selectHd(identityManifest));selectedHd[key]=prior;}
+selectedHd=identityManifest.live.hd;selectedHd.pid++;assert.throws(()=>selectHd(identityManifest));selectedHd.pid--;
+checks.push('actual-retired-identity-keeps-old-pid-and-accepts-only-verified-shared-full-restored-pid-with-original-source');
 async function recoveryCase(fault){
   const events=[],runId=MV_DIRECT.recoveryRunId,roles=['web','image','hd'];
   const m={runId,stage:'/stage',expectedProtectedFileSha256:{},live:Object.fromEntries(roles.map((role,i)=>[role,{unit:role,root:'/old/'+role,source:'a'.repeat(40),build:'build',version:'0.99.3'}])),hdWorkerLockPath:'/lock'};
@@ -34,7 +51,7 @@ async function recoveryCase(fault){
   const temporary={files:Object.fromEntries(roles.map(role=>[role,{file:'/own/'+role,ino:1}]))};
   const states=Object.fromEntries(roles.map((role,i)=>[role,{MainPID:String(101+i),InvocationID:'1'.repeat(32),ActiveState:'active',SubState:'running',WorkingDirectory:'/old/'+role}]));
   const asset='static/chunk.js',assetBytes=Buffer.from('actual-original-chunk');
-  const context={assert,ROLES:roles,PRICING_START_CONTROL:'/control',sha,MV_DIRECT,
+  const context={assert,ROLES:roles,PRICING_START_CONTROL:'/control',sha,MV_DIRECT,operationalRecordName:(_m,name)=>name,
     inspectRecoveryCertificate:(manifest,captured,options)=>validateRecoveryCertificate(manifest,captured,null,options.phase),
     exists:file=>fault==='new-writer'&&file.includes('/start-'),capturePricingStartControl:()=>fault==='changed-control'?{...before.captured,allowed:9}:before.captured,
     service:(_m,role)=>fault==='changed-web'&&role==='web'?{...states[role],MainPID:'999'}:states[role],
