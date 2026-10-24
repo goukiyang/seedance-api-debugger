@@ -1,4 +1,4 @@
-import { applyFullSchema, publishLegacyReuseWriterProof, readFullLiveSourceFiles } from './full-release-contract.mjs';
+import { applyFullSchema, publishLegacyReuseWriterProof, readFullLiveSourceFiles, verifyCompletedFullSchemaHeartbeat } from './full-release-contract.mjs';
 import { inspectRecoveryCertificate } from './certificate.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -1064,6 +1064,16 @@ export async function recoverStandaloneSwitch(m, input = {}) {
 }
 
 function assertRecoveryContinuationFailure(m, runtime, failure, failureSha256) {
+  if (runtime?.guardHeartbeatRepair) {
+    assert.equal(runtime.phase, 'recovery'); const proof = runtime.guardHeartbeatRepair.proof;
+    assert.equal(proof.recoveryOnly, true); assert.equal(proof.continueMain, false); assert.equal(proof.newWriterStartAbsent, true);
+    assert.equal(proof.guardRecoveryResumeFailureFile, m.stage + '/guard-recovery-resume-failed-882d6126-6a46-4065-b653-7e690f8623f2.json');
+    assert.equal(proof.guardRecoveryResumeFailureSha256, failureSha256);
+    assert.equal(failure.preservedSafetyState, true); assert.equal(failure.businessDataRestored, false);
+    assert.equal(failure.forcedKill, false); assert.equal(failure.code, null);
+    assert.ok(failure.error.includes('AssertionError: Original business rows changed while stopped'));
+    return 'verified-completed-schema-periodic-credit-heartbeat-before-first-guard-start';
+  }
   if (!runtime?.guardRecoveryRepair) { assert.equal(failure.code, 'NATURAL_STOP_PENDING'); return 'natural-stop-completed'; }
   assert.equal(runtime.phase, 'recovery'); const proof = runtime.guardRecoveryRepair.proof;
   assert.equal(proof.recoveryOnly, true); assert.equal(proof.continueMain, false);
@@ -1087,15 +1097,26 @@ export async function recoverFailedSwitch(m, input = {}) {
   }
   const attemptFile = m.stage + '/guard-recovery-attempt.json';
   if (exists(attemptFile)) {
-    assert.equal(fs.readdirSync(m.stage).some(file => /^guard-recovery-resume-[a-f0-9-]+\.json$/.test(file)), false,
+    const resumes = fs.readdirSync(m.stage).filter(file => /^guard-recovery-resume-[a-f0-9-]+\.json$/.test(file)).sort();
+    if (runtime?.guardHeartbeatRepair) {
+      const proof = runtime.guardHeartbeatRepair.proof;
+      assert.deepEqual(resumes, [path.basename(proof.originalRecoveryResumeFile)]);
+      assert.equal(sha(rootFile(proof.originalRecoveryResumeFile)), proof.originalRecoveryResumeSha256);
+      assert.equal(fs.readdirSync(m.stage).some(file => /^guard-recovery-heartbeat-resume-/.test(file)), false,
+        'The exact completed-schema recovery continuation was already consumed');
+    } else assert.equal(resumes.length, 0,
       'Only one condition-proven pre-start continuation is supported; preserve evidence and escalate further failures');
     const previous = json(attemptFile); assert.equal(previous.manifestSha256, manifestSha256);
     assert.equal(exists('/proc/' + previous.pid), false, 'The first recovery controller is still alive');
     assert.equal(exists(m.stage + '/guard-recovery-start-intent.json'), false, 'A guard start was already attempted; do not retry it blindly');
-    const failureFile = m.stage + '/guard-recovery-failed.json', failure = json(failureFile);
+    const failureFile = runtime?.guardHeartbeatRepair?.proof.guardRecoveryResumeFailureFile || m.stage + '/guard-recovery-failed.json', failure = json(failureFile);
     const continuationReason = assertRecoveryContinuationFailure(m, runtime, failure, sha(rootFile(failureFile)));
     for (const role of ROLES) stopped(m, role);
-    save(m, 'guard-recovery-resume-' + randomUUID(), { manifestSha256, previousAttemptSha256: sha(rootFile(attemptFile)),
+    if (runtime?.guardHeartbeatRepair) {
+      const fresh = verifyCompletedFullSchemaHeartbeat(m), expected = runtime.guardHeartbeatRepair.proof.completedFullSchemaHeartbeat;
+      for (const key of Object.keys(expected).filter(key => !['observedAt', 'heartbeatTimeChanged'].includes(key))) assert.deepEqual(fresh[key], expected[key]);
+    }
+    save(m, runtime?.guardHeartbeatRepair ? 'guard-recovery-heartbeat-resume-' + runtime.guardHeartbeatRepair.proofSha256 : 'guard-recovery-resume-' + randomUUID(), { manifestSha256, previousAttemptSha256: sha(rootFile(attemptFile)),
       reason: continuationReason, originalFailurePreserved: true, firstGuardStartOnly: true });
   } else save(m, 'guard-recovery-attempt', { manifestSha256, pid: process.pid, at: new Date().toISOString(), guardSource: m.guardSource,
     originalBuildStartedAt: armed.originalGuardBuild.startedAt, candidateFreshGateClaimed: false });
@@ -1243,7 +1264,15 @@ export async function recoverFailedSwitch(m, input = {}) {
       await safety.restoreForRecovery({ ...ctx, temporary, recoveryRoute: 'guard', prestart });
       delete temporary.fenceNetworkFiles; assertPolicy(m, before, temporary);
     },
-    markGuardStart: async () => { allGone(); const intent = markFixedGuardStart(m, before, allGone); save(m, 'guard-recovery-start-intent', { manifestSha256, intent }); },
+    markGuardStart: async () => {
+      allGone();
+      if (runtime?.guardHeartbeatRepair) {
+        const fresh = verifyCompletedFullSchemaHeartbeat(m), expected = runtime.guardHeartbeatRepair.proof.completedFullSchemaHeartbeat;
+        for (const key of Object.keys(expected).filter(key => !['observedAt', 'heartbeatTimeChanged'].includes(key))) assert.deepEqual(fresh[key], expected[key]);
+        save(m, 'guard-recovery-completed-schema-before-start', { manifestSha256, verification: fresh });
+      }
+      const intent = markFixedGuardStart(m, before, allGone); save(m, 'guard-recovery-start-intent', { manifestSha256, intent });
+    },
     startGuard: async () => {
       const healthy = await start(m, before, temporary, 'guard', null, ctx.builds, { check,
       assertStart: () => {

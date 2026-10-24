@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import * as engineContext from './engine-context.mjs';
 import { readTypedJson, readTypedFile, assertTypedFileUnchanged } from './typed-files.mjs';
-import { readFullLiveSourceFiles } from './full-release-contract.mjs';
+import { readFullLiveSourceFiles, verifyCompletedFullSchemaHeartbeat } from './full-release-contract.mjs';
 import { classifyReleaseError, ReleaseEngineError } from './release-errors.mjs';
 import {
   assertAttemptBindings,
@@ -59,6 +59,20 @@ const ARM_PROCESSOR_REPAIR_SCHEMA = 'sd2-release-arm-processor-repair.v1';
 const ARM_PROCESSOR_REPAIR_PROOF = 'sd2-release-arm-processor-repair-proof.v1';
 const SWITCH_ADMISSION_REPAIR_SCHEMA = 'sd2-release-switch-admission-repair.v1';
 const SWITCH_ADMISSION_REPAIR_PROOF = 'sd2-release-switch-admission-repair-proof.v1';
+const GUARD_HEARTBEAT_REPAIR_SCHEMA = 'sd2-release-guard-heartbeat-repair.v1';
+const GUARD_HEARTBEAT_REPAIR_PROOF = 'sd2-release-guard-heartbeat-repair-proof.v1';
+export const GUARD_HEARTBEAT_REPAIR_ORIGIN = Object.freeze({
+  phaseResultEventSha256: 'ba4d85f668693232d0760fd8ab94793706d142ea0f689257e093612ee4ea0577',
+  failureIntentSha256: 'ac2eb4f975a16c70ca17e5978ef8895a4d70ab2a1b3d3abe79fcdfe6fe3b95a7',
+  childReceiptSha256: '11e2feba709066d553ae752888ea1adbce63a319c2e2cb0e238bfd2dce6ab6e0',
+  guardRecoveryRepairProofSha256: 'cf3ab16d36f2d72c1df6b44b0d472e2db73d94aaecee99ff4340a195247a2099',
+  guardRecoveryResumeFailureSha256: '57d6aac94097ada524e4c027388855606866da562283a980af68991f5454e6ed',
+  originalRecoveryResumeSha256: '61bde2d4196ae5fa8505d6947cb5519b67bd29659e92b9eeb4a6676c50c1217b',
+  predecessorControllerSetSha256: '630d22ea5fc1fe9c878081253bd995bb9c7c60d4bae1791aa9092058dc046b6a',
+  stderrSha256: 'e2f41f726629593bcc90cc45ed8e1e9682e36ff83b499c09661fc54949513948',
+});
+const GUARD_HEARTBEAT_REPAIR_CONTROLLERS = Object.freeze(['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs',
+  'release.mjs', 'switch.mjs', 'full-release-contract.mjs', 'full-release-engineering.mjs', 'candidate-lifecycle-engineering.mjs']);
 const GUARD_RECOVERY_REPAIR_SCHEMA = 'sd2-release-guard-recovery-repair.v1';
 const GUARD_RECOVERY_REPAIR_PROOF = 'sd2-release-guard-recovery-repair-proof.v1';
 export const GUARD_RECOVERY_REPAIR_ORIGIN = Object.freeze({
@@ -798,7 +812,7 @@ export function assertGuardBuildTailPhase(phase, state) {
 }
 
 function readGuardBuildTailProof(batch, batchFile, loaded, phase,
-  { retryAdmission = false, readerAdmission = false, armPairAdmission = false, armProcessorAdmission = false, switchAdmission = false, switchTypedAdmission = false, switchScanAdmission = false, switchOwnerAdmission = false, switchWindowAdmission = false, restoredClosureAdmission = false, guardRecoveryAdmission = false } = {}) {
+  { retryAdmission = false, readerAdmission = false, armPairAdmission = false, armProcessorAdmission = false, switchAdmission = false, switchTypedAdmission = false, switchScanAdmission = false, switchOwnerAdmission = false, switchWindowAdmission = false, restoredClosureAdmission = false, guardRecoveryAdmission = false, guardHeartbeatAdmission = false } = {}) {
   const binding = loaded.derivedState.guardBuildTail; assert.ok(binding);
   const retryBinding = loaded.derivedState.guardBuildTailRetry;
   const readerEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'reader_successor');
@@ -809,6 +823,9 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase,
   const scanEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_scan_repair');
   const ownerEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_owner_repair');
   const windowEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'switch_window_repair');
+  const heartbeatEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'guard_heartbeat_repair');
+  assert.ok(heartbeatEvents.length <= 1, 'This completed-migration heartbeat failure permits only one exact repair');
+  if (guardHeartbeatAdmission) assert.equal(heartbeatEvents.length, 0);
   const recoveryEvents = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'guard_recovery_repair');
   assert.ok(recoveryEvents.length <= 1, 'Only the exact guard recovery failure has this one processor repair');
   if (guardRecoveryAdmission) assert.equal(recoveryEvents.length, 0);
@@ -900,7 +917,9 @@ function readGuardBuildTailProof(batch, batchFile, loaded, phase,
   const restoredObservations = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'candidate_restored_original_observation');
   assert.ok(restoredObservations.length <= 1);
   if (restoredObservations.length) runtime.candidateRestoredOriginalObservation = readCandidateReobservationProof(batch, loaded, runtime, restoredObservations[0], { restoredStage: true });
-  if (recoveryEvents.length) runtime.guardRecoveryRepair = readGuardRecoveryRepairProof(batch, loaded, runtime, recoveryEvents[0]);
+  if (recoveryEvents.length) runtime.guardRecoveryRepair = readGuardRecoveryRepairProof(batch, loaded, runtime, recoveryEvents[0],
+    { predecessorRead: guardHeartbeatAdmission || heartbeatEvents.length === 1 });
+  if (heartbeatEvents.length) runtime.guardHeartbeatRepair = readGuardHeartbeatRepairProof(batch, loaded, runtime, heartbeatEvents[0]);
   return runtime;
 }
 
@@ -2454,6 +2473,176 @@ function readSwitchOwnerRepairProof(batch, loaded, runtime, event, { predecessor
   return { schema: 'sd2-release-switch-owner-repair-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
 }
 
+export function validateGuardHeartbeatRepair(value) {
+  exactKeys(value, ['schema', 'phaseResultEventSha256', 'failureIntentSha256', 'childReceiptSha256', 'guardRecoveryRepairProofSha256',
+    'guardRecoveryResumeFailureSha256', 'processorControllerSetSha256', 'windowSha256', 'observedAt'], 'exact completed-migration heartbeat repair');
+  assert.equal(value.schema, GUARD_HEARTBEAT_REPAIR_SCHEMA);
+  for (const key of Object.keys(value).filter(key => !['schema', 'observedAt'].includes(key))) assert.match(value[key], HASH);
+  for (const key of ['phaseResultEventSha256', 'failureIntentSha256', 'childReceiptSha256', 'guardRecoveryRepairProofSha256', 'guardRecoveryResumeFailureSha256'])
+    assert.equal(value[key], GUARD_HEARTBEAT_REPAIR_ORIGIN[key]);
+  assert.equal(typeof value.observedAt, 'string'); parseTime(value.observedAt, 'guard heartbeat repair observation'); return value;
+}
+export function assertGuardHeartbeatRepairFailure(receipt) {
+  assert.equal(receipt.schema, 'sd2-release-phase-child.v1'); assert.equal(receipt.phase, 'recovery');
+  assert.equal(receipt.intentSha256, GUARD_HEARTBEAT_REPAIR_ORIGIN.failureIntentSha256);
+  assert.equal(receipt.startedAt, 1792807310738); assert.equal(receipt.finishedAt, 1792807385923);
+  assert.deepEqual(receipt.child, { status: 1, signal: null, error: null }); assert.equal(digest(receipt.stderr), GUARD_HEARTBEAT_REPAIR_ORIGIN.stderrSha256);
+  const failure = JSON.parse(receipt.stderr.trimEnd().split('\n').at(-1));
+  assert.equal(failure.error.schema, 'sd2-release-error.v1'); assert.equal(failure.error.stop, true); assert.equal(failure.error.retryable, false);
+}
+export function assertGuardHeartbeatRepairControllerDifference(predecessor, processor) {
+  assert.deepEqual(Object.keys(predecessor).sort(), Object.keys(processor).sort()); const changed = {};
+  for (const name of Object.keys(predecessor).sort()) {
+    assert.match(predecessor[name], HASH); assert.match(processor[name], HASH);
+    if (predecessor[name] !== processor[name]) {
+      assert.ok(GUARD_HEARTBEAT_REPAIR_CONTROLLERS.includes(name), 'Unreviewed completed-migration heartbeat repair: ' + name);
+      changed[name] = { predecessorSha256: predecessor[name], processorSha256: processor[name] };
+    }
+  }
+  for (const name of ['release-entry.mjs', 'candidate-evidence.mjs', 'release.mjs', 'switch.mjs', 'full-release-contract.mjs']) assert.ok(changed[name]);
+  return changed;
+}
+function guardHeartbeatRepairProcessor(batch, predecessor, hash) {
+  assert.equal(predecessor.processor.controllerSetSha256, GUARD_HEARTBEAT_REPAIR_ORIGIN.predecessorControllerSetSha256);
+  const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
+  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, here); assert.notEqual(processor.root, predecessor.processor.root);
+  const processorControllers = stableControllerHashes(here); assert.equal(Object.keys(processorControllers).length, 65); assert.equal(digest(JSON.stringify(processorControllers)), hash);
+  return { processor, processorControllers, changedControllers: assertGuardHeartbeatRepairControllerDifference(predecessor.processorControllers, processorControllers) };
+}
+export function assertGuardHeartbeatRepairAdmission(loaded, request, runtime, scene) {
+  validateGuardHeartbeatRepair(request); const state = loaded.derivedState;
+  assert.equal(state.status, 'running'); assert.equal(state.activePhase, null); assert.equal(state.terminal, null);
+  assert.equal(state.lastEventSha256, request.phaseResultEventSha256); assert.equal(nextReleasePhase(loaded), 'switch');
+  assert.equal(state.lastPhase?.phase, 'recovery'); assert.equal(state.lastPhase.outcome, 'failed');
+  assert.equal(state.lastPhase.resultSha256, request.phaseResultEventSha256); assert.equal(state.lastPhase.intentSha256, request.failureIntentSha256);
+  assert.equal(runtime.guardRecoveryRepair.proofSha256, request.guardRecoveryRepairProofSha256);
+  assert.equal(runtime.guardRecoveryRepair.proof.processor.controllerSetSha256, GUARD_HEARTBEAT_REPAIR_ORIGIN.predecessorControllerSetSha256);
+  assert.equal(loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'guard_heartbeat_repair'), false);
+  assert.equal(scene.facts.effectsStarted, true); assert.equal(scene.facts.switchComplete, false); assert.equal(scene.facts.fixedGuardRecoveryAvailable, true);
+  for (const name of ['pricing-pair-published.json', 'full-schema-ready.json', 'fixed-guard-recovery.json']) assert.match(scene.facts.files[name]?.sha256 || '', HASH);
+  for (const name of ['pricing-start-intent.json', 'guard-recovery-start-intent.json', 'guard-recovery-complete.json', 'switch-complete.json']) {
+    assert.equal(Object.hasOwn(scene.facts.files, name), true); assert.equal(scene.facts.files[name], null);
+  }
+}
+export function assertCompletedFullSchemaHeartbeatSummary(batch, summary, previous = null) {
+  const m = assertManifest(batch); assert.equal(summary.schema, 'sd2-completed-full-schema-heartbeat-verification.v1');
+  assert.equal(summary.runId, m.runId); assert.equal(summary.source, m.mainSource); assert.equal(summary.guardSource, m.guardSource);
+  assert.equal(summary.manifestSha256, digest(rootDocument(batch.manifestFile, 32 * 1024 * 1024).bytes));
+  for (const key of ['receiptSha256', 'intentSha256', 'backupSha256', 'beforeSchemaSha256', 'newSchemaSha256']) assert.match(summary[key], HASH);
+  assert.equal(summary.heartbeatKey, 'periodic_credit_worker'); assert.equal(typeof summary.heartbeatTimeChanged, 'boolean');
+  assert.equal(summary.originalTablesUnchangedExceptPeriodicCreditHeartbeat, true); assert.equal(summary.databaseWrites, 0); assert.equal(summary.ddlExecuted, false);
+  assert.ok(summary.databaseIdentity && typeof summary.databaseIdentity === 'object');
+  const isoTime = (value, name) => {
+    assert.equal(typeof value, 'string', name);
+    assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/, name);
+    const at = Date.parse(value); assert.ok(Number.isFinite(at) && at > 0, name); return at;
+  };
+  const completedAt = isoTime(summary.completedAt, 'original schema completion'), observedAt = isoTime(summary.observedAt, 'fresh schema heartbeat observation');
+  assert.ok(completedAt <= observedAt && observedAt <= Date.now(), 'Completed schema heartbeat timestamps are out of order');
+  if (previous) for (const key of new Set([...Object.keys(previous), ...Object.keys(summary)]))
+    if (!['observedAt', 'heartbeatTimeChanged'].includes(key)) assert.deepEqual(summary[key], previous[key]);
+  return summary;
+}
+function completedFullSchemaInputs(batch, summary) {
+  const inputs = {}, directory = path.dirname(batch.manifestFile) + '/full-schema-adoption';
+  for (const [name, basename] of [['receipt', 'receipt.json'], ['intent', 'intent.json'], ['backup', 'consistent-backup.sqlite']]) {
+    const file = directory + '/' + basename;
+    const document = name === 'backup' ? readTypedFile({ file, category: 'root_control', maximumBytes: 512 * 1024 * 1024 })
+      : readTypedJson({ file, category: 'root_control', maximumBytes: 32 * 1024 * 1024 });
+    assert.equal(document.snapshot.sha256, summary[name + 'Sha256']);
+    const attributes = execFileSync('lsattr', ['-d', '--', file], { encoding: 'utf8' }).trim().split(/\s+/)[0]; assert.ok(attributes.includes('i'));
+    inputs[name] = { file, sha256: document.snapshot.sha256, snapshot: document.snapshot, attributes };
+  }
+  return inputs;
+}
+function assertCompletedFullSchemaInputs(batch, summary, inputs) {
+  exactKeys(inputs, ['receipt', 'intent', 'backup'], 'completed schema original inputs');
+  const directory = path.dirname(batch.manifestFile) + '/full-schema-adoption';
+  for (const [name, basename] of [['receipt', 'receipt.json'], ['intent', 'intent.json'], ['backup', 'consistent-backup.sqlite']]) {
+    const item = inputs[name]; assert.equal(item.file, directory + '/' + basename); assert.equal(item.sha256, summary[name + 'Sha256']);
+    assert.equal(item.snapshot.requestedPath, item.file); assert.equal(item.snapshot.sha256, item.sha256); assertTypedFileUnchanged(item.snapshot);
+    const attributes = execFileSync('lsattr', ['-d', '--', item.file], { encoding: 'utf8' }).trim().split(/\s+/)[0]; assert.equal(attributes, item.attributes); assert.ok(attributes.includes('i'));
+  }
+  const receipt = rootJson(inputs.receipt.file, 32 * 1024 * 1024);
+  for (const key of ['databaseIdentity', 'completedAt', 'beforeSchemaSha256', 'newSchemaSha256']) assert.deepEqual(summary[key], receipt[key]);
+}
+function guardHeartbeatRepairEvidence(batch, runtime, request) {
+  const stage = path.dirname(batch.manifestFile), evidence = {};
+  for (const [name, basename, expected] of [
+    ['guardRecoveryResumeFailure', 'guard-recovery-resume-failed-882d6126-6a46-4065-b653-7e690f8623f2.json', request.guardRecoveryResumeFailureSha256],
+    ['originalRecoveryResume', 'guard-recovery-resume-d67c13d8-c9f0-475d-aa07-b9513acd2509.json', GUARD_HEARTBEAT_REPAIR_ORIGIN.originalRecoveryResumeSha256]]) {
+    const file = stage + '/' + basename, document = rootDocument(file, 32 * 1024 * 1024); assert.equal(document.snapshot.sha256, expected);
+    assert.equal(document.value.runId, batch.runId); assert.equal(document.value.manifestSha256, runtime.proof.manifestSha256);
+    Object.assign(evidence, { [name + 'File']: file, [name + 'Sha256']: expected, [name + 'Snapshot']: document.snapshot });
+  }
+  return evidence;
+}
+function guardHeartbeatRepairProofFile(loaded, hash) { assert.match(hash, HASH); return path.join(loaded.place.attempt, `guard-heartbeat-repair-${hash}.json`); }
+function readGuardHeartbeatRepairProof(batch, loaded, runtime, event) {
+  assert.ok(['switch', 'recovery'].includes(runtime.phase)); const reference = event.value.value;
+  exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'guard heartbeat repair reference');
+  assert.equal(reference.schema, 'sd2-release-guard-heartbeat-repair-reference.v1'); assert.equal(reference.proofFile, guardHeartbeatRepairProofFile(loaded, reference.proofSha256));
+  const document = rootDocument(reference.proofFile, 8 * 1024 * 1024), proof = document.value;
+  assert.equal(document.snapshot.sha256, reference.proofSha256); assert.equal(proof.schema, GUARD_HEARTBEAT_REPAIR_PROOF); validateGuardHeartbeatRepair(proof.request);
+  const predecessor = runtime.guardRecoveryRepair;
+  assert.equal(proof.request.guardRecoveryRepairProofSha256, predecessor.proofSha256);
+  assert.equal(proof.originalGuardRecoveryRepairProofFile, predecessor.proofFile); assert.equal(proof.originalGuardRecoveryRepairProofSha256, predecessor.proofSha256);
+  assert.deepEqual(proof.predecessorProcessor, predecessor.proof.processor);
+  const identity = guardHeartbeatRepairProcessor(batch, predecessor.proof, proof.request.processorControllerSetSha256);
+  for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
+  for (const key of ['runId', 'taskId', 'attemptId', 'batchFile', 'batchSha256', 'contextSha256', 'seedSha256', 'manifestSha256', 'artifactsSha256', 'engine',
+    'originalRestoredOriginalRepairProofFile', 'originalRestoredOriginalRepairProofSha256', 'originalRestoredOriginalClosureProofFile', 'originalRestoredOriginalClosureProofSha256',
+    'originalFixedGuardFile', 'originalFixedGuardSha256', 'originalFixedGuardSnapshot', 'originalFixedGuardAttributes', 'publishedPairFile', 'publishedPairSha256', 'publishedPairSnapshot',
+    'fullSchemaReadyFile', 'fullSchemaReadySha256', 'fullSchemaReadySnapshot', 'recoveryOnly', 'continueMain', 'businessDataRestored', 'newWriterStartAbsent']) assert.deepEqual(proof[key], predecessor.proof[key]);
+  const failed = guardHeartbeatRepairFailureSnapshot(batch, loaded, proof.request, inspectControllerOwner); assert.equal(proof.failureIntentSha256, failed.failureIntentSha256);
+  for (const [name, item] of Object.entries(failed.failure)) {
+    assert.equal(proof.failure[name].file, item.file); assert.equal(proof.failure[name].sha256, item.sha256);
+    assert.equal(proof.failure[name].snapshot.requestedPath, item.file); assert.equal(proof.failure[name].snapshot.sha256, item.sha256); assertTypedFileUnchanged(proof.failure[name].snapshot);
+  }
+  const inputs = guardHeartbeatRepairEvidence(batch, runtime, proof.request);
+  for (const name of ['guardRecoveryResumeFailure', 'originalRecoveryResume']) {
+    assert.equal(proof[name + 'File'], inputs[name + 'File']); assert.equal(proof[name + 'Sha256'], inputs[name + 'Sha256']);
+    assert.equal(proof[name + 'Snapshot'].requestedPath, proof[name + 'File']); assert.equal(proof[name + 'Snapshot'].sha256, proof[name + 'Sha256']); assertTypedFileUnchanged(proof[name + 'Snapshot']);
+  }
+  for (const name of ['originalFixedGuard', 'publishedPair', 'fullSchemaReady', 'window']) {
+    assert.equal(proof[name + 'Snapshot'].requestedPath, proof[name + 'File']); assert.equal(proof[name + 'Snapshot'].sha256, proof[name + 'Sha256']); assertTypedFileUnchanged(proof[name + 'Snapshot']);
+  }
+  assert.equal(proof.windowSha256, proof.request.windowSha256); assert.equal(proof.windowFile, path.join(path.dirname(batch.manifestFile), 'window-evidence', proof.windowSha256 + '.json'));
+  assertCompletedFullSchemaHeartbeatSummary(batch, proof.completedFullSchemaHeartbeat);
+  assertCompletedFullSchemaInputs(batch, proof.completedFullSchemaHeartbeat, proof.completedFullSchemaInputs);
+  const index = loaded.events.findIndex(item => item.sha256 === event.sha256), takeover = loaded.events[index - 1];
+  assert.equal(takeover.value.kind, 'owner_takeover'); assert.equal(takeover.value.previousSha256, proof.request.phaseResultEventSha256);
+  assert.equal(proof.eventHeadSha256, proof.request.phaseResultEventSha256); assert.equal(proof.takeoverEventSha256, takeover.sha256);
+  assert.equal(event.value.previousSha256, takeover.sha256); assert.deepEqual(event.value.owner, takeover.value.owner);
+  return { schema: 'sd2-release-guard-heartbeat-repair-runtime.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256, proof };
+}
+
+function guardHeartbeatRepairFailureSnapshot(batch, loaded, request, inspectOwner) {
+  const index = loaded.events.findIndex(item => item.sha256 === request.phaseResultEventSha256); assert.ok(index > 0);
+  const result = loaded.events[index], exit = loaded.events[index - 1], intent = request.failureIntentSha256;
+  assert.equal(result.value.kind, 'phase_result'); assert.equal(result.value.phase, 'recovery'); assert.equal(result.value.outcome, 'failed');
+  assert.equal(result.value.intentSha256, intent); assert.equal(result.value.previousSha256, exit.sha256);
+  assert.equal(result.value.after.facts.effectsStarted, true); assert.equal(result.value.after.facts.switchComplete, false);
+  assert.equal(exit.value.kind, 'observation'); assert.equal(exit.value.name, 'phase_child_exit'); assert.equal(exit.value.value.phase, 'recovery');
+  const file = childReceiptFile(loaded, 'recovery', intent), child = readChildReceipt(file, 'recovery', intent);
+  assert.equal(exit.value.value.receiptFile, file); assert.equal(exit.value.value.receiptSha256, request.childReceiptSha256);
+  assert.equal(child.saved.sha256, request.childReceiptSha256); assertGuardHeartbeatRepairFailure(child.receipt);
+  assert.deepEqual(result.value.child, child.child); assert.deepEqual(exit.value.value.child, child.child);
+  assert.deepEqual(exit.value.owner, result.value.owner); assert.equal(inspectOwner(result.value.owner), 'dead');
+  const processFile = childProcessFile(loaded, 'recovery', intent), processDoc = rootDocument(processFile, 32768);
+  const invocationFile = path.join(loaded.place.attempt, `recovery-${intent}.invocation.json`), invocationDoc = rootDocument(invocationFile, 256 * 1024);
+  const invocation = validateInvocation(invocationDoc.value, invocationFile);
+  assert.equal(processDoc.value.schema, 'sd2-release-child-process.v1'); assert.equal(processDoc.value.invocationFile, invocationFile);
+  assert.equal(processDoc.value.invocationSha256, invocationDoc.snapshot.sha256); assert.equal(invocation.batchFile, loaded.header.manifest.file);
+  assert.equal(invocation.taskRoot, `${batch.projectRoot}/release-tasks`); assert.equal(invocation.taskId, batch.taskId); assert.equal(invocation.attemptId, batch.attemptId);
+  assert.equal(invocation.phase, 'recovery'); assert.equal(invocation.processFile, processFile); assert.deepEqual(invocation.owner, result.value.owner);
+  assert.equal(processDoc.value.owner.token, invocation.owner.token); assert.equal(inspectOwner(processDoc.value.owner), 'dead');
+  const read = (file, expected) => { const document = rootDocument(file, 64 * 1024 * 1024); if (expected) assert.equal(document.snapshot.sha256, expected);
+    return { file, sha256: document.snapshot.sha256, snapshot: document.snapshot }; };
+  return { failureIntentSha256: intent, failure: { result: read(path.join(loaded.place.events, String(result.value.sequence).padStart(6, '0') + '.json'), result.sha256),
+    child: read(file, request.childReceiptSha256), process: read(processFile), invocation: read(invocationFile) } };
+}
+
 export function validateGuardRecoveryRepair(value) {
   exactKeys(value, ['schema', 'phaseResultEventSha256', 'failureIntentSha256', 'childReceiptSha256', 'restoredOriginalRepairProofSha256',
     'restoredOriginalClosureProofSha256', 'guardRecoveryFailureSha256', 'switchFailureSha256', 'processorControllerSetSha256', 'windowSha256', 'observedAt'], 'exact guard recovery repair');
@@ -2481,11 +2670,11 @@ export function assertGuardRecoveryRepairControllerDifference(predecessor, proce
   return changed;
 }
 
-function guardRecoveryRepairProcessor(batch, predecessor, hash) {
+function guardRecoveryRepairProcessor(batch, predecessor, hash, { directory = here, requireHere = true } = {}) {
   assert.equal(predecessor.processor.controllerSetSha256, GUARD_RECOVERY_REPAIR_ORIGIN.predecessorControllerSetSha256);
   const processor = { ...batch.engine, controllerSetSha256: hash, root: `${batch.projectRoot}/release-engines/${ENGINE_VERSION}-${hash}` };
-  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, here); assert.notEqual(processor.root, predecessor.processor.root);
-  const processorControllers = stableControllerHashes(here); assert.equal(Object.keys(processorControllers).length, 65);
+  validateEngine(processor, batch.projectRoot); assert.equal(processor.root, directory); if (requireHere) assert.equal(directory, here); assert.notEqual(processor.root, predecessor.processor.root);
+  const processorControllers = stableControllerHashes(directory); assert.equal(Object.keys(processorControllers).length, 65);
   assert.equal(digest(JSON.stringify(processorControllers)), hash);
   return { processor, processorControllers, changedControllers: assertGuardRecoveryRepairControllerDifference(predecessor.processorControllers, processorControllers) };
 }
@@ -2582,7 +2771,7 @@ function guardRecoveryRepairStoppedScene(batch) {
 }
 
 function guardRecoveryRepairProofFile(loaded, sha256) { assert.match(sha256, HASH); return path.join(loaded.place.attempt, `guard-recovery-repair-${sha256}.json`); }
-function readGuardRecoveryRepairProof(batch, loaded, runtime, event) {
+function readGuardRecoveryRepairProof(batch, loaded, runtime, event, { predecessorRead = false } = {}) {
   assert.ok(['switch', 'recovery'].includes(runtime.phase), 'Guard recovery repair is not a publication or build authority');
   const reference = event.value.value; exactKeys(reference, ['schema', 'proofFile', 'proofSha256'], 'guard recovery repair reference');
   assert.equal(reference.schema, 'sd2-release-guard-recovery-repair-reference.v1'); assert.equal(reference.proofFile, guardRecoveryRepairProofFile(loaded, reference.proofSha256));
@@ -2593,7 +2782,9 @@ function readGuardRecoveryRepairProof(batch, loaded, runtime, event) {
     assert.equal(proof['original' + name + 'ProofFile'], runtime[key].proofFile); assert.equal(proof['original' + name + 'ProofSha256'], runtime[key].proofSha256);
   }
   assert.deepEqual(proof.predecessorProcessor, runtime.restoredOriginalRepair.proof.processor);
-  const identity = guardRecoveryRepairProcessor(batch, runtime.restoredOriginalRepair.proof, proof.request.processorControllerSetSha256);
+  if (predecessorRead) assert.equal(proof.processor.controllerSetSha256, GUARD_HEARTBEAT_REPAIR_ORIGIN.predecessorControllerSetSha256);
+  const identity = guardRecoveryRepairProcessor(batch, runtime.restoredOriginalRepair.proof, proof.request.processorControllerSetSha256,
+    { directory: proof.processor.root, requireHere: !predecessorRead });
   for (const key of ['processor', 'processorControllers', 'changedControllers']) assert.deepEqual(proof[key], identity[key]);
   const failed = guardRecoveryRepairFailureSnapshot(batch, loaded, proof.request, inspectControllerOwner);
   assert.equal(proof.failureIntentSha256, failed.failureIntentSha256);
@@ -3401,6 +3592,11 @@ export function createReleaseController(overrides = {}) {
     const decision = releaseResumeDecision({ ownerStatus, activePhase: resumablePhase,
       effectsStarted, switchComplete: scene.facts.switchComplete,
       childReceiptPresent: Boolean(childFile && fs.existsSync(childFile)) });
+    if (!loaded.derivedState.activePhase && loaded.derivedState.lastPhase?.resultSha256 === GUARD_HEARTBEAT_REPAIR_ORIGIN.phaseResultEventSha256
+      && loaded.events.some(item => item.value.kind === 'observation' && item.value.name === 'guard_heartbeat_repair')) {
+      const runtime = readGuardBuildTailProof(batch, batchFile, loaded, 'recovery'); assert.ok(runtime.guardHeartbeatRepair);
+      if (decision.action === 'takeover') { decision.action = 'takeover_recover'; decision.reason = 'bound_failed_guard_heartbeat_recovery'; }
+    }
     if (decision.action === 'refuse') throw new ReleaseEngineError(classifyReleaseError(Object.assign(new Error(decision.reason),
       { code: ownerStatus === 'alive' ? 'EBUSY' : 'ENODATA' }), { phase: 'resume', object: { kind: 'attempt', id: batch.attemptId },
       verifiedBusy: ownerStatus === 'alive', busyEvidence: ownerStatus === 'alive' ? `pid=${lease.value.owner.pid};host=${lease.value.owner.host}` : undefined }));
@@ -3625,6 +3821,44 @@ export function createReleaseController(overrides = {}) {
       for (const key of ['uid', 'gid', 'mode', 'nlink']) assert.equal(current.configurations[file].identity[key], expected.identity[key]);
     }
     return current;
+  }
+
+  function authorizeGuardHeartbeatRepair(batchFile, windowFile, requestFile) {
+    const batch = readReleaseBatch(batchFile); assertContext(batch, batchFile); assertSeed(batch); const m = assertManifest(batch);
+    assert.equal(batch.runId, ARM_PAIR_REPAIR_ORIGIN.runId); assert.equal(batch.taskId, ARM_PAIR_REPAIR_ORIGIN.taskId);
+    const loaded = load(batchFile, batch), request = validateGuardHeartbeatRepair(rootJson(requestFile, 16384)), now = deps.now();
+    const runtime = readGuardBuildTailProof(batch, batchFile, loaded, 'recovery', { guardHeartbeatAdmission: true }), scene = deps.scene(batch, now);
+    assertGuardHeartbeatRepairAdmission(loaded, request, runtime, scene);
+    const observed = parseTime(request.observedAt, 'guard heartbeat request observation'); assert.ok(observed <= now && now - observed < 300000);
+    const bindings = kernelBindings(batchFile, batch); assertAttemptBindings(loaded, bindings);
+    const lease = ownerLease(loaded); assert.ok(lease); assert.equal(deps.inspectOwner(lease.value.owner), 'dead');
+    const original = runtime.guardRecoveryRepair.proof, identity = guardHeartbeatRepairProcessor(batch, original, request.processorControllerSetSha256);
+    const failed = guardHeartbeatRepairFailureSnapshot(batch, loaded, request, deps.inspectOwner), evidence = guardHeartbeatRepairEvidence(batch, runtime, request);
+    const stopped = guardRecoveryRepairStoppedScene(batch), initialHeartbeat = assertCompletedFullSchemaHeartbeatSummary(batch, verifyCompletedFullSchemaHeartbeat(m));
+    const completedInputs = completedFullSchemaInputs(batch, initialHeartbeat);
+    assert.notEqual(request.windowSha256, original.windowSha256); assert.equal(rootDocument(windowFile, 256 * 1024).snapshot.sha256, request.windowSha256);
+    const window = releaseWindowReference(batch, windowFile, deps.now()), windowDocument = rootDocument(window.file, 256 * 1024); assert.equal(window.sha256, request.windowSha256);
+    const current = load(batchFile, batch), finalNow = deps.now(), fresh = deps.scene(batch, finalNow);
+    assertGuardHeartbeatRepairAdmission(current, request, runtime, fresh); assert.equal(fresh.sha256, scene.sha256);
+    assert.equal(deps.inspectOwner(lease.value.owner), 'dead'); assert.equal(ownerLease(current).sha256, lease.sha256); assert.ok(finalNow < window.expiresAt);
+    for (const name of ['guardRecoveryResumeFailure', 'originalRecoveryResume']) assertTypedFileUnchanged(evidence[name + 'Snapshot']);
+    for (const name of ['originalFixedGuard', 'publishedPair', 'fullSchemaReady']) assertTypedFileUnchanged(original[name + 'Snapshot']);
+    for (const item of Object.values(failed.failure)) assertTypedFileUnchanged(item.snapshot); assert.deepEqual(stopped, guardRecoveryRepairStoppedScene(batch));
+    const completedFullSchemaHeartbeat = initialHeartbeat;
+    assertCompletedFullSchemaInputs(batch, completedFullSchemaHeartbeat, completedInputs);
+    const owner = deps.createOwner(), takeover = takeoverAttempt({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner,
+      priorLeaseSha256: lease.sha256, ...bindings, window, now: deps.now(), inspectOwner: deps.inspectOwner });
+    const proof = { ...original, schema: GUARD_HEARTBEAT_REPAIR_PROOF, request,
+      originalGuardRecoveryRepairProofFile: runtime.guardRecoveryRepair.proofFile, originalGuardRecoveryRepairProofSha256: runtime.guardRecoveryRepair.proofSha256,
+      predecessorProcessor: original.processor, ...identity, ...failed, ...evidence, ...stopped, completedFullSchemaHeartbeat, completedFullSchemaInputs: completedInputs,
+      windowFile: window.file, windowSha256: window.sha256, windowSnapshot: windowDocument.snapshot,
+      eventHeadSha256: current.derivedState.lastEventSha256, takeoverEventSha256: takeover.eventSha256, beforeSceneSha256: fresh.sha256, observedAt: new Date(deps.now()).toISOString() };
+    const hash = digest(Buffer.from(JSON.stringify(proof, null, 2) + '\n'));
+    const saved = writeJsonExclusive(guardHeartbeatRepairProofFile(loaded, hash), proof); assert.equal(saved.sha256, hash);
+    const recorded = recordAttemptEvent({ root: taskRoot(batch), taskId: batch.taskId, attemptId: batch.attemptId, owner,
+      name: 'guard_heartbeat_repair', value: { schema: 'sd2-release-guard-heartbeat-repair-reference.v1', proofFile: saved.file, proofSha256: hash }, now: deps.now() });
+    assert.equal(recorded.event.previousSha256, takeover.eventSha256);
+    return { guardHeartbeatRepair: saved, processor: identity.processor, eventHead: recorded.eventSha256 };
   }
 
   function authorizeGuardRecoveryRepair(batchFile, windowFile, requestFile) {
@@ -4290,7 +4524,7 @@ export function createReleaseController(overrides = {}) {
     return reconcileActive(batchFile, acquired);
   }
 
-  return { start, run, resume, continueFailed, closeRestoredOriginal, authorizeGuardRecoveryRepair, authorizeReaderSuccessor, observeCandidates, status, inspect };
+  return { start, run, resume, continueFailed, closeRestoredOriginal, authorizeGuardRecoveryRepair, authorizeGuardHeartbeatRepair, authorizeReaderSuccessor, observeCandidates, status, inspect };
 }
 
 export function validateEngineInstall(value) {
@@ -4352,6 +4586,7 @@ export async function releaseEntryCli(argv = process.argv.slice(2)) {
   if (command === 'start' && args.length === 2) return print(controller.start(args[0], args[1]).derivedState);
   if (command === 'status' && args.length === 1) return print(controller.status(args[0]));
   if (command === 'inspect' && args.length === 1) return print(controller.inspect(args[0]));
+  if (command === 'authorize-guard-heartbeat-repair' && args.length === 3) return print(controller.authorizeGuardHeartbeatRepair(args[0], args[1], args[2]));
   if (command === 'authorize-guard-recovery-repair' && args.length === 3) return print(controller.authorizeGuardRecoveryRepair(args[0], args[1], args[2]));
   if (command === 'close-restored-original' && args.length === 3) return print(controller.closeRestoredOriginal(args[0], args[1], args[2]));
   if (command === 'continue-failed' && args.length === 3) return print(controller.continueFailed(args[0], args[1], args[2]));
@@ -4361,7 +4596,7 @@ export async function releaseEntryCli(argv = process.argv.slice(2)) {
   if (command === 'resume' && args.length === 2) return print(await controller.resume(args[0], args[1]));
   if (command === 'run' && args.length >= 2 && args.length <= 4)
     return print(await controller.run(args[0], args[1], args[2] || null, args[3] || null));
-  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | authorize-guard-recovery-repair BATCH.json WINDOW.json REQUEST.json | close-restored-original BATCH.json WINDOW.json REQUEST.json | continue-failed BATCH.json WINDOW.json FAILURE.json | authorize-reader-successor BATCH.json WINDOW.json REQUEST.json | observe-candidates BATCH.json WINDOW.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Usage: release-entry.mjs package CONTEXT.json REQUEST.json | native CONTEXT.json FIXTURE.mjs [...args] | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | authorize-guard-heartbeat-repair BATCH.json WINDOW.json REQUEST.json | authorize-guard-recovery-repair BATCH.json WINDOW.json REQUEST.json | close-restored-original BATCH.json WINDOW.json REQUEST.json | continue-failed BATCH.json WINDOW.json FAILURE.json | authorize-reader-successor BATCH.json WINDOW.json REQUEST.json | observe-candidates BATCH.json WINDOW.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

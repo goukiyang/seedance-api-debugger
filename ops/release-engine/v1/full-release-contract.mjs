@@ -287,6 +287,76 @@ def rows(c, columns):
   result[table]=sha('\n'.join(sorted(encode(row) for row in values)).encode())
  return result
 receipt=directory/'receipt.json';intent=directory/'intent.json';backup=directory/'consistent-backup.sqlite'
+def completed_heartbeat():
+ r=json.loads(receipt.read_text());v=json.loads(intent.read_text())
+ assert r['schema']=='sd2-full-schema-adoption.v1' and r['completed'] is True
+ assert r['businessValuesChanged'] is False and r['historyBackfilled'] is False
+ assert set(r)==set(v)|{'schema','completed','newSchemaSha256','businessValuesChanged','historyBackfilled','beforeSchemaSha256','completedAt'}
+ assert all(r[k]==value for k,value in v.items())
+ assert r['identity']==v['identity']==p['identity'] and r['databaseIdentity']==identity()
+ assert r['beforeSchemaSha256']==digest(v['beforeSchema'])
+ assert file_sha(p['sqlFile'])==p['identity']['sqlSha256']
+ pins={name+'Sha256':file_sha(file) for name,file in [('receipt',receipt),('intent',intent),('backup',backup)]}
+ assert pins['backupSha256']==v['backupSha256']==r['backupSha256']
+ if 'pins' in p:assert pins==p['pins']
+ def timestamp(value):
+  assert isinstance(value,str) and value
+  parsed=datetime.datetime.fromisoformat(value.replace('Z','+00:00'));assert parsed.tzinfo is not None
+  return parsed.timestamp()
+ assert timestamp(r['completedAt'])<=datetime.datetime.now(datetime.timezone.utc).timestamp()
+ def strict_json(text):
+  def pairs(items):
+   result={}
+   for key,value in items:
+    assert key not in result;result[key]=value
+   return result
+  assert isinstance(text,str)
+  return json.loads(text,object_pairs_hook=pairs,parse_constant=lambda value:(_ for _ in ()).throw(AssertionError('Nonfinite heartbeat JSON')))
+ def selected(c,names):
+  return c.execute('SELECT '+','.join('"'+name.replace('"','""')+'"' for name in names)+' FROM "PlatformSetting"').fetchall()
+ def encoded(values):return sorted(json.dumps([{'blob':x.hex()} if isinstance(x,bytes) else x for x in row],separators=(',',':'),ensure_ascii=True) for row in values)
+ changed=False
+ with ro(backup) as b,ro(db) as c:
+  b.execute('BEGIN');c.execute('BEGIN')
+  assert b.execute('PRAGMA integrity_check').fetchall()==[('ok',)] and c.execute('PRAGMA integrity_check').fetchall()==[('ok',)]
+  assert b.execute('PRAGMA foreign_key_check').fetchall()==[] and c.execute('PRAGMA foreign_key_check').fetchall()==[]
+  assert schema(b)==v['beforeSchema'] and rows(b,v['beforeColumns'])==v['beforeRows']
+  current_schema=schema(c);assert digest(current_schema)==r['newSchemaSha256']
+  for name in set(current_schema)-set(v['beforeSchema']):
+   if current_schema[name][0]=='table':
+    assert c.execute('SELECT COUNT(*) FROM "'+name.replace('"','""')+'"').fetchone()[0]==0,'Completed schema new table is not empty: '+name
+  actual=rows(c,v['beforeColumns'])
+  for table,wanted in v['beforeRows'].items():
+   if actual[table]==wanted:continue
+   assert table=='PlatformSetting','Completed schema original business rows changed: '+table
+   names=v['beforeColumns'][table];assert all(name in names for name in ['key','value_json','updated_at'])
+   old=selected(b,names);new=selected(c,names);key=names.index('key')
+   old_target=[row for row in old if row[key]=='periodic_credit_worker'];new_target=[row for row in new if row[key]=='periodic_credit_worker']
+   assert len(old)==len(new) and len(old_target)==len(new_target)==1
+   assert encoded([row for row in old if row[key]!='periodic_credit_worker'])==encoded([row for row in new if row[key]!='periodic_credit_worker'])
+   left=dict(zip(names,old_target[0]));right=dict(zip(names,new_target[0]))
+   old_at=left.pop('updated_at');new_at=right.pop('updated_at')
+   assert type(old_at) is int and type(new_at) is int and 0<=old_at<=new_at
+   datetime.datetime.fromtimestamp(old_at/1000,datetime.timezone.utc);datetime.datetime.fromtimestamp(new_at/1000,datetime.timezone.utc)
+   time_changed=old_at!=new_at
+   old_value=strict_json(left.pop('value_json'));new_value=strict_json(right.pop('value_json'))
+   assert isinstance(old_value,dict) and isinstance(new_value,dict)
+   for old_object,new_object in [(old_value,new_value),(old_value.get('result'),new_value.get('result'))]:
+    assert isinstance(old_object,dict) and isinstance(new_object,dict) and 'at' in old_object and 'at' in new_object
+    assert timestamp(old_object['at'])<=timestamp(new_object['at'])
+    time_changed=time_changed or old_object['at']!=new_object['at']
+    del old_object['at'];del new_object['at']
+   assert time_changed and digest(left)==digest(right) and digest(old_value)==digest(new_value),'Heartbeat changed non-time values'
+   changed=True
+  assert b.total_changes==0 and c.total_changes==0
+ assert identity()==r['databaseIdentity']
+ assert pins=={name+'Sha256':file_sha(file) for name,file in [('receipt',receipt),('intent',intent),('backup',backup)]}
+ return r,{'schema':'sd2-completed-full-schema-heartbeat-verification.v1',**{k:p['identity'][k] for k in ['runId','source','guardSource','manifestSha256']},
+  'databaseIdentity':r['databaseIdentity'],**pins,'beforeSchemaSha256':r['beforeSchemaSha256'],'newSchemaSha256':r['newSchemaSha256'],
+  'completedAt':r['completedAt'],'observedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+  'heartbeatKey':'periodic_credit_worker','heartbeatTimeChanged':changed,'originalTablesUnchangedExceptPeriodicCreditHeartbeat':True,'databaseWrites':0,'ddlExecuted':False}
+if mode=='completed-heartbeat' or mode=='apply' and receipt.exists():
+ r,summary=completed_heartbeat();print(json.dumps(summary if mode=='completed-heartbeat' else r));sys.exit()
 if mode=='projection':
  if not receipt.exists():
   assert not intent.exists(),'Full schema intent exists without completion; resume exact stopped-writer migration first'
@@ -366,9 +436,46 @@ export function fullSchemaProjection(m) {
   if (!m.fullRelease) return null;
   return JSON.parse(invoke('python3', ['-I', '-c', FULL_SCHEMA_PY, JSON.stringify(schemaArguments(m, 'projection'))]));
 }
+function completedSchemaFile(file) {
+  assert.equal(fs.realpathSync(file), file);
+  const s = fs.lstatSync(file);
+  assert.ok(s.isFile() && !s.isSymbolicLink() && s.uid === 0 && s.nlink === 1 && (s.mode & 0o7777) === 0o600);
+  const attributes = invoke('lsattr', ['-d', '--', file]).split(/\s+/)[0]; assert.ok(attributes.includes('i'));
+  const sha256 = invoke('sha256sum', ['--', file]).split(/\s+/)[0]; assert.match(sha256, HASH);
+  return { file, identity: Object.fromEntries(['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(key => [key, s[key]])), attributes, sha256 };
+}
+export function verifyCompletedFullSchemaHeartbeat(m) {
+  const args = schemaArguments(m, 'completed-heartbeat'), startedAt = Date.now();
+  for (const directory of [m.stage, args.directory]) {
+    assert.equal(fs.realpathSync(directory), directory); const s = fs.lstatSync(directory);
+    assert.ok(s.isDirectory() && !s.isSymbolicLink() && s.uid === 0 && (s.mode & 0o7777) === 0o700);
+  }
+  const files = Object.fromEntries([['receipt', 'receipt.json'], ['intent', 'intent.json'], ['backup', 'consistent-backup.sqlite']]
+    .map(([name, file]) => [name, completedSchemaFile(args.directory + '/' + file)]));
+  const pins = Object.fromEntries(Object.entries(files).map(([name, value]) => [name + 'Sha256', value.sha256]));
+  const summary = JSON.parse(invoke('python3', ['-I', '-c', FULL_SCHEMA_PY, JSON.stringify({ ...args, pins })]));
+  assert.equal(summary.schema, 'sd2-completed-full-schema-heartbeat-verification.v1');
+  for (const key of ['runId', 'source', 'guardSource', 'manifestSha256']) assert.equal(summary[key], args.identity[key]);
+  for (const [key, value] of Object.entries(pins)) assert.equal(summary[key], value);
+  assert.equal(summary.heartbeatKey, 'periodic_credit_worker'); assert.equal(typeof summary.heartbeatTimeChanged, 'boolean');
+  assert.equal(summary.originalTablesUnchangedExceptPeriodicCreditHeartbeat, true); assert.equal(summary.databaseWrites, 0); assert.equal(summary.ddlExecuted, false);
+  assert.ok(Date.parse(summary.observedAt) >= startedAt && Date.parse(summary.observedAt) <= Date.now());
+  const receipt = JSON.parse(rootInput(files.receipt.file));
+  assert.deepEqual(summary.databaseIdentity, receipt.databaseIdentity); assert.equal(summary.completedAt, receipt.completedAt);
+  assert.equal(summary.beforeSchemaSha256, receipt.beforeSchemaSha256); assert.equal(summary.newSchemaSha256, receipt.newSchemaSha256);
+  for (const value of Object.values(files)) assert.deepEqual(completedSchemaFile(value.file), value, 'Completed schema evidence changed during its read-only verification');
+  return summary;
+}
 export function applyFullSchema(m, assertWritersStopped, check) {
   if (!m.fullRelease) return null;
   verifyFullCandidateSources(m); check(m); assertWritersStopped();
+  const receiptFile = m.stage + '/full-schema-adoption/receipt.json';
+  if (fs.existsSync(receiptFile)) {
+    const verified = verifyCompletedFullSchemaHeartbeat(m), bytes = rootInput(receiptFile);
+    assert.equal(hash(bytes), verified.receiptSha256);
+    const receipt = JSON.parse(bytes); assert.equal(receipt.completed, true);
+    assertWritersStopped(); check(m); return receipt;
+  }
   const result = JSON.parse(invoke('python3', ['-I', '-c', FULL_SCHEMA_PY, JSON.stringify(schemaArguments(m, 'apply'))], { timeout: 180000 }));
   assertWritersStopped(); check(m); assert.equal(result.completed, true);
   for (const name of ['consistent-backup.sqlite', 'intent.json', 'receipt.json']) invoke('chattr', ['+i', m.stage + '/full-schema-adoption/' + name]);

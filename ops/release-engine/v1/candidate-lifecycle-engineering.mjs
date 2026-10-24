@@ -2113,7 +2113,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window', 'recovery'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window', 'recovery', 'heartbeat'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -2162,6 +2162,12 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   assert.equal(namespace.compatibility(m), sets.window.proof.processor.root);
   runtime.phase = 'recovery'; activeBytes = sets.recovery.bytes; namespace.verify(m, runtime);
   assert.equal(namespace.compatibility(m), sets.recovery.proof.processor.root);
+  runtime.guardHeartbeatRepair = { proof: sets.heartbeat.proof };
+  activeBytes = sets.heartbeat.bytes; namespace.verify(m, runtime);
+  assert.equal(namespace.compatibility(m), sets.heartbeat.proof.processor.root);
+  runtime.phase = 'switch'; activeBytes = sets.window.bytes; namespace.verify(m, runtime);
+  assert.equal(namespace.compatibility(m), sets.window.proof.processor.root);
+  runtime.phase = 'recovery'; activeBytes = sets.heartbeat.bytes;
   for (const name of ['operationalLive', 'operationalRecordName', 'operationalBeforeFile', 'operationalNginxRunId'])
     vm.runInNewContext(functionNode('candidate-evidence.mjs', name).node.getText().replace(/^export /, '') + '\nglobalThis.' + name + '=' + name + ';', namespace);
   assert.equal(namespace.operationalLive(m, 'hd').pid, 303);
@@ -2262,6 +2268,17 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   assert.throws(() => namespace.verify(m, runtime, failure, 'c'.repeat(64)));
   assert.throws(() => namespace.verify(m, { ...runtime, phase: 'switch' }, failure, hash));
   assert.throws(() => namespace.verify(m, runtime, { ...failure, code: 'OTHER' }, hash));
+  const heartbeatFailure = { preservedSafetyState: true, businessDataRestored: false, forcedKill: false, code: null,
+    error: 'Python refused: AssertionError: Original business rows changed while stopped' };
+  const heartbeat = { phase: 'recovery', guardHeartbeatRepair: { proof: { recoveryOnly: true, continueMain: false, newWriterStartAbsent: true,
+    guardRecoveryResumeFailureFile: m.stage + '/guard-recovery-resume-failed-882d6126-6a46-4065-b653-7e690f8623f2.json', guardRecoveryResumeFailureSha256: hash } } };
+  assert.match(namespace.verify(m, heartbeat, heartbeatFailure, hash), /completed-schema-periodic-credit-heartbeat/);
+  for (const edit of [v => { v.guardHeartbeatRepair.proof.continueMain = true; }, v => { v.guardHeartbeatRepair.proof.newWriterStartAbsent = false; },
+    v => { v.guardHeartbeatRepair.proof.guardRecoveryResumeFailureFile += '.other'; }, v => { v.phase = 'switch'; }]) {
+    const value = copy(heartbeat); edit(value); assert.throws(() => namespace.verify(m, value, heartbeatFailure, hash));
+  }
+  assert.throws(() => namespace.verify(m, heartbeat, { ...heartbeatFailure, error: 'Other schema error' }, hash));
+  assert.throws(() => namespace.verify(m, heartbeat, heartbeatFailure, 'c'.repeat(64)));
   add('existing_prestart_recovery_continuation_accepts_only_exact_bound_e2big_repair_and_preserves_old_natural_stop_contract');
 }
 
