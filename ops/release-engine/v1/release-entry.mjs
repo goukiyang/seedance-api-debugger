@@ -2544,7 +2544,7 @@ export function assertGuardRecoveryRepairAdmission(loaded, request, runtime, sce
 }
 
 function guardRecoveryRepairEvidence(batch, runtime, request) {
-  const stage = path.dirname(batch.manifestFile), m = assertManifest(batch), evidence = {};
+  const stage = path.dirname(batch.manifestFile), m = assertManifest(batch), evidence = {}, values = {};
   for (const [name, basename, expected] of [['guardRecoveryFailure', 'guard-recovery-failed.json', request.guardRecoveryFailureSha256],
     ['switchFailure', 'switch-failure-3b49e1ed-1cad-4bc6-8439-da81bcd7a890.json', request.switchFailureSha256],
     ['originalFixedGuard', 'fixed-guard-recovery.json', runtime.restoredOriginalRepair.proof.originalFixedGuardSha256],
@@ -2553,14 +2553,15 @@ function guardRecoveryRepairEvidence(batch, runtime, request) {
     if (expected) assert.equal(document.snapshot.sha256, expected);
     assert.equal(document.value.runId, batch.runId); assert.equal(document.value.manifestSha256, runtime.proof.manifestSha256);
     Object.assign(evidence, { [name + 'File']: file, [name + 'Sha256']: document.snapshot.sha256, [name + 'Snapshot']: document.snapshot });
+    values[name] = document.value;
   }
-  const failure = rootJson(evidence.guardRecoveryFailureFile), original = rootJson(evidence.switchFailureFile);
+  const failure = values.guardRecoveryFailure, original = values.switchFailure;
   const cause = `Error: ENOENT: no such file or directory, lstat '${stage}/natural-stop-switch-web.json'`;
   assert.equal(failure.originalFailure, cause); assert.equal(failure.error, 'Error: spawnSync python3 E2BIG'); assert.equal(failure.code, 'E2BIG');
   assert.equal(failure.preservedSafetyState, true); assert.equal(failure.businessDataRestored, false); assert.equal(failure.candidateFreshGateClaimed, false);
   assert.equal(original.error, cause); assert.equal(original.safetyRecoveryError, 'Error: spawnSync python3 E2BIG');
   assert.equal(original.writerStartIntentPresent, false); assert.equal(original.automaticOldPairRecovery, false); assert.equal(original.databaseRestored, false);
-  const fixed = rootJson(evidence.originalFixedGuardFile); assert.equal(fixed.guardEntry.source, m.guardSource); assert.equal(fixed.guardEntry.root, m.guard.root);
+  const fixed = values.originalFixedGuard; assert.equal(fixed.guardEntry.source, m.guardSource); assert.equal(fixed.guardEntry.root, m.guard.root);
   assert.equal(fixed.continueMain, false); assert.equal(fixed.replaceGuard, false);
   const attributes = execFileSync('lsattr', ['-d', '--', evidence.originalFixedGuardFile], { encoding: 'utf8' }).trim().split(/\s+/)[0];
   assert.equal(attributes, runtime.restoredOriginalRepair.proof.originalFixedGuardAttributes); assert.ok(attributes.includes('i'));

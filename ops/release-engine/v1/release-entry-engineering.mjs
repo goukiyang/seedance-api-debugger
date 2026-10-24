@@ -1287,6 +1287,39 @@ function scenarioGuardRecoveryRepair() {
   return 'exact_effectful_guard_recovery_failure_has_one_journal_authority_for_recovery_only_with_frozen_predecessor_and_eight_file_delta';
 }
 
+function scenarioGuardRecoveryLargeFixedInput() {
+  const source = fs.readFileSync(self.replace(/release-entry-engineering\.mjs$/, 'release-entry.mjs'), 'utf8');
+  const start = source.indexOf('function guardRecoveryRepairEvidence('), end = source.indexOf('\nfunction guardRecoveryRepairStoppedScene(', start);
+  assert.ok(start > 0 && end > start); const body = source.slice(start, end);
+  const stage = '/fixture/stage', runId = 'fixture-run', manifestSha256 = HASH, guardSource = 'b'.repeat(40);
+  const cause = `Error: ENOENT: no such file or directory, lstat '${stage}/natural-stop-switch-web.json'`;
+  const fixed = { runId, manifestSha256, guardEntry: { source: guardSource, root: '/fixture/guard' }, continueMain: false, replaceGuard: false, padding: '' };
+  fixed.padding = 'x'.repeat(3819683 - Buffer.byteLength(JSON.stringify(fixed)));
+  const records = new Map(), put = (name, value) => records.set(stage + '/' + name, Buffer.from(JSON.stringify(value)));
+  put('fixed-guard-recovery.json', fixed); assert.equal(records.get(stage + '/fixed-guard-recovery.json').length, 3819683);
+  put('guard-recovery-failed.json', { runId, manifestSha256, originalFailure: cause, error: 'Error: spawnSync python3 E2BIG', code: 'E2BIG',
+    preservedSafetyState: true, businessDataRestored: false, candidateFreshGateClaimed: false });
+  put('switch-failure-3b49e1ed-1cad-4bc6-8439-da81bcd7a890.json', { runId, manifestSha256, error: cause, safetyRecoveryError: 'Error: spawnSync python3 E2BIG',
+    writerStartIntentPresent: false, automaticOldPairRecovery: false, databaseRestored: false });
+  for (const name of ['pricing-pair-published.json', 'full-schema-ready.json']) put(name, { runId, manifestSha256 });
+  const attributes = '----i--------e-------', fixedHash = digest(records.get(stage + '/fixed-guard-recovery.json')), reads = [];
+  const runtime = { proof: { manifestSha256 }, restoredOriginalRepair: { proof: { originalFixedGuardSha256: fixedHash, originalFixedGuardAttributes: attributes } } };
+  const request = { guardRecoveryFailureSha256: digest(records.get(stage + '/guard-recovery-failed.json')),
+    switchFailureSha256: digest(records.get(stage + '/switch-failure-3b49e1ed-1cad-4bc6-8439-da81bcd7a890.json')) };
+  const fn = new Function('assert', 'path', 'assertManifest', 'rootDocument', 'rootJson', 'execFileSync', 'return (' + body + ');')(
+    assert, path, () => ({ guardSource, guard: { root: '/fixture/guard' } }), (file, maximumBytes) => {
+      assert.equal(maximumBytes, 32 * 1024 * 1024); const bytes = records.get(file); assert.ok(bytes && bytes.length <= maximumBytes); reads.push(file);
+      return { value: JSON.parse(bytes), snapshot: { requestedPath: file, sha256: digest(bytes) } };
+    }, () => assert.fail('A verified recovery input must not be reread with the default 1 MiB limit'),
+    (command, args) => { assert.equal(command, 'lsattr'); assert.equal(args.at(-1), stage + '/fixed-guard-recovery.json'); return attributes; });
+  const result = fn({ runId, manifestFile: stage + '/manifest.json' }, runtime, request);
+  assert.equal(result.originalFixedGuardSha256, fixedHash); assert.equal(reads.length, 5);
+  assert.equal(reads.filter(file => file === stage + '/fixed-guard-recovery.json').length, 1);
+  const wrongHash = structuredClone(runtime); wrongHash.restoredOriginalRepair.proof.originalFixedGuardSha256 = digest('wrong-fixed-bytes');
+  assert.throws(() => fn({ runId, manifestFile: stage + '/manifest.json' }, wrongHash, request));
+  return 'guard_recovery_3819683_byte_fixed_input_uses_same_32MiB_typed_read_and_still_rejects_wrong_digest';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -1294,7 +1327,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages(), scenarioGuardRecoveryRepair()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages(), scenarioGuardRecoveryRepair(), scenarioGuardRecoveryLargeFixedInput()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }
