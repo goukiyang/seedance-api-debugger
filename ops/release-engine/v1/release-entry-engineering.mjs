@@ -1258,7 +1258,8 @@ function scenarioGuardRecoveryRepair() {
   assertGuardRecoveryRepairChildPhase('recovery');
   for (const phase of RELEASE_PHASES) assert.throws(() => assertGuardRecoveryRepairChildPhase(phase));
   const changed = ['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs',
-    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs'];
+    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'deployed-usage-schema.mjs', 'deployed-usage-schema-engineering.mjs',
+    'candidate-lifecycle-engineering.mjs', 'switch.mjs'];
   const oldMap = Object.fromEntries([...changed, 'attempt-state.mjs', 'common.mjs', 'full-release-contract.mjs'].map(name => [name, HASH]));
   const newMap = { ...oldMap, ...Object.fromEntries(changed.map(name => [name, digest(name)])) };
   assertGuardRecoveryRepairControllerDifference(oldMap, newMap);
@@ -1284,7 +1285,7 @@ function scenarioGuardRecoveryRepair() {
     value => { value.facts.files['pricing-pair-published.json'] = null; }, value => { value.facts.files['full-schema-ready.json'] = null; }]) {
     const value = structuredClone(scene); edit(value); assert.throws(() => assertGuardRecoveryRepairAdmission(loaded, request, runtime, value));
   }
-  return 'exact_effectful_guard_recovery_failure_has_one_journal_authority_for_recovery_only_with_frozen_predecessor_and_eight_file_delta';
+  return 'exact_effectful_guard_recovery_failure_has_one_journal_authority_for_recovery_only_with_frozen_predecessor_and_ten_file_delta';
 }
 
 function scenarioGuardRecoveryLargeFixedInput() {

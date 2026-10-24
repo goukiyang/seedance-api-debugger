@@ -54,27 +54,46 @@ try {
 import sqlite3,sys,json,os,hashlib,pathlib
 d=json.loads(sys.argv[1]); backup=d['backup']; db=d['database']
 with sqlite3.connect(backup) as c:
- c.execute('CREATE TABLE ExistingBusiness (id TEXT PRIMARY KEY, value TEXT)')
+ default=(" DEFAULT '"+'x'*140000+"'") if d.get('largeSchema') else ''
+ c.execute('CREATE TABLE ExistingBusiness (id TEXT PRIMARY KEY, value TEXT'+default+')')
  c.executemany('INSERT INTO ExistingBusiness VALUES (?,?)',[('a','kept'),('b','kept'),('c','kept')]); c.commit()
 with sqlite3.connect(backup) as b,sqlite3.connect(db) as c:
  b.backup(c); c.executescript(d['sql'])
  c.execute("INSERT INTO UsageAttribution (source_kind, source_id, owner_user_id, context_origin, occurred_at) VALUES ('image','a','owner','explicit','2026-10-21T00:00:00Z')")
  c.commit()
  rows={r[0]:[r[1],r[2],r[3]] for r in c.execute("SELECT name,type,tbl_name,sql FROM sqlite_master WHERE name LIKE 'UsageAttribution%' ORDER BY name")}
+ allRows={r[0]:[r[1],r[2],r[3]] for r in c.execute("SELECT name,type,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name")}
 s=os.stat(db)
-print(json.dumps({'database':db,'backup':backup,'identity':[str(s.st_dev),str(s.st_ino)],'backupCounts':{'ExistingBusiness':3},'schemaSha256':hashlib.sha256(json.dumps(rows,separators=(',',':'),ensure_ascii=True).encode()).hexdigest()}))
+print(json.dumps({'database':db,'backup':backup,'identity':[str(s.st_dev),str(s.st_ino)],'backupCounts':{'ExistingBusiness':3},'schemaSha256':hashlib.sha256(json.dumps(rows,separators=(',',':'),ensure_ascii=True).encode()).hexdigest(),**({'fullSchemaBefore':allRows} if d.get('largeSchema') else {})}))
 `;
-  const python = (code, value) => execFileSync('python3', ['-I', '-c', code, JSON.stringify(value)],
-    { encoding: 'utf8', timeout: 30000, env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  const make = name => {
+  const python = (code, value) => {
+    const stdin = code === DEPLOYED_PROBE, bytes = JSON.stringify(value);
+    return execFileSync('python3', ['-I', '-c', code, ...(stdin ? [] : [bytes])],
+      { encoding: 'utf8', timeout: stdin ? 120000 : 30000, env: { PATH: '/usr/bin:/bin' },
+        stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'], ...(stdin ? { input: bytes } : {}) }).trim();
+  };
+  const make = (name, largeSchema = false) => {
     const root = path.join(temporary, name); fs.mkdirSync(root);
-    return JSON.parse(python(create, { database: root + '/database.sqlite', backup: root + '/backup.sqlite', sql }));
+    return JSON.parse(python(create, { database: root + '/database.sqlite', backup: root + '/backup.sqlite', sql, largeSchema }));
   };
   const good = make('valid'), before = sha(fs.readFileSync(good.database)), backupBefore = sha(fs.readFileSync(good.backup));
   const observed = JSON.parse(python(DEPLOYED_PROBE, good));
   assert.equal(observed.attributionRows, 1); assert.equal(observed.databaseWrites, 0); assert.equal(observed.ddlExecuted, false);
   assert.equal(sha(fs.readFileSync(good.database)), before); assert.equal(sha(fs.readFileSync(good.backup)), backupBefore);
   cases.push('real_sqlite_nonempty_table_allowed_without_db_or_backup_byte_changes');
+  // Actual original SQLite SQL carries the large content. No unconsumed JSON
+  // padding is used to make the stdin transport appear to cover the real case.
+  const large = make('large-schema', true), largeBefore = sha(fs.readFileSync(large.database)), largeBackupBefore = sha(fs.readFileSync(large.backup));
+  assert.ok(Buffer.byteLength(JSON.stringify(large)) > 138154);
+  const legacy = { ...large }; delete legacy.fullSchemaBefore;
+  const legacyObserved = JSON.parse(execFileSync('python3', ['-I', '-c', DEPLOYED_PROBE, JSON.stringify(legacy)], {
+    encoding: 'utf8', timeout: 120000, env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.deepEqual(JSON.parse(python(DEPLOYED_PROBE, large)), legacyObserved);
+  const changedLarge = structuredClone(large); changedLarge.fullSchemaBefore.ExistingBusiness[2] += ' -- changed original SQL';
+  assert.throws(() => python(DEPLOYED_PROBE, changedLarge));
+  assert.throws(() => python(DEPLOYED_PROBE, { ...large, identity: ['0', '0'] }));
+  assert.equal(sha(fs.readFileSync(large.database)), largeBefore); assert.equal(sha(fs.readFileSync(large.backup)), largeBackupBefore);
+  cases.push('actual_original_sqlite_schema_over_138154_bytes_uses_stdin_preserves_legacy_argv_and_rejects_schema_or_identity_drift_without_writes');
   for (const change of [v => { v.identity[1] = '0'; }, v => { v.schemaSha256 = '0'.repeat(64); },
     v => { v.backupCounts.ExistingBusiness = 99; }, v => { v.database += '.missing'; }]) {
     const invalid = structuredClone(good); change(invalid); assert.throws(() => python(DEPLOYED_PROBE, invalid));

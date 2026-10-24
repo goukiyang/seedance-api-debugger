@@ -72,7 +72,8 @@ export const GUARD_RECOVERY_REPAIR_ORIGIN = Object.freeze({
   stderrSha256: 'bdcb2780145572cf523c6ef3150ca8478212e85dd659ff0c1e1936675f23b0d3',
 });
 const GUARD_RECOVERY_REPAIR_CONTROLLERS = Object.freeze(['release-entry.mjs', 'release-entry-engineering.mjs',
-  'candidate-evidence.mjs', 'release.mjs', 'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs']);
+  'candidate-evidence.mjs', 'release.mjs', 'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs',
+  'deployed-usage-schema.mjs', 'deployed-usage-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs']);
 const RESTORED_CLOSURE_SCHEMA = 'sd2-release-restored-original-closure.v1';
 const RESTORED_CLOSURE_PROOF = 'sd2-release-restored-original-closure-proof.v1';
 const RESTORED_REPAIR_SCHEMA = 'sd2-release-restored-original-repair.v1';

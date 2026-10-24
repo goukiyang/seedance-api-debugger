@@ -410,7 +410,8 @@ function verifyGuardRecoveryRepair(m, runtime, predecessor) {
   assert.equal(proof.originalRestoredOriginalClosureProofSha256, runtime.restoredOriginalClosure.proofSha256);
   assert.deepEqual(proof.predecessorProcessor, predecessor.processor); processorBytes(proof, m);
   const allowed = new Set(['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs',
-    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs']);
+    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'deployed-usage-schema.mjs', 'deployed-usage-schema-engineering.mjs',
+    'candidate-lifecycle-engineering.mjs', 'switch.mjs']);
   for (const [name, hash] of Object.entries(proof.processorControllers))
     if (hash !== predecessor.processorControllers[name]) assert.ok(allowed.has(name), 'Unreviewed guard recovery processor difference: ' + name);
   for (const name of ['guardRecoveryFailure', 'switchFailure', 'originalFixedGuard', 'publishedPair', 'fullSchemaReady', 'window']) {

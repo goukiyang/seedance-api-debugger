@@ -18,6 +18,7 @@ import { assertHdMaintenanceApproval, privateFreezeSha256 } from './cutover-driv
 import { assertNaturalExitEvidence } from './switch.mjs';
 import { assertFreshLegacyCapture, assertFreshPricingCapture, assertNoCutoverEffects, CONTINUATION_V2, assertContinuationInput, assertDeployedContinuationSources } from './normal-continuation.mjs';
 import { assertUsageRoleStart } from './usage-role-start.mjs';
+import { DEPLOYED_PROBE } from './deployed-usage-schema.mjs';
 import { MV_DIRECT, assertProtectedIncrementCandidate } from './release-contract.mjs';
 
 assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
@@ -387,7 +388,10 @@ function fixture({ fault = null, previous = null, retainedProof = null } = {}) {
       return script === 'scripts/check-image-recovery.mjs' ? 'Image recovery build gate verified (synthetic observation)' : 'Pricing policy build gate verified (synthetic observation)';
     }
     if (name === 'python3') {
-      assert.ok(args.includes('-I') && args.includes('-c')); const input = JSON.parse(args.at(-1));
+      assert.deepEqual(copy(args.slice(0, 3)), ['-I', '-c', DEPLOYED_PROBE], 'Only the actual deployed-schema probe has this isolated adapter');
+      assert.ok(args.length === 3 || args.length === 4);
+      const payload = args.length === 3 ? options.input : args[3];
+      assert.equal(typeof payload, 'string'); const input = JSON.parse(payload);
       assert.deepEqual(input.identity, ['64784', '171442216']); assert.equal(input.schemaSha256, sha('synthetic schema'));
       assert.deepEqual(input.backupCounts, { ExistingBusiness: 3 });
       note('readonly-schema-observation', { attributionRows: state.attributionRows, databaseWrites: 0 });

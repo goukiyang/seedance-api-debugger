@@ -240,7 +240,8 @@ export function unchangedSchemaInputs(m, value, { candidates = true, batchMigrat
 }
 export const DEPLOYED_PROBE = String.raw`
 import sys,json,sqlite3,hashlib,os,pathlib
-d=json.loads(sys.argv[1]); db=d['database']; backup=d['backup']
+d=json.loads(sys.argv[1]) if len(sys.argv)>1 else json.load(sys.stdin)
+db=d['database']; backup=d['backup']
 def identity(p):
  assert not os.path.islink(p) and os.path.isfile(p)
  s=os.stat(p); assert s.st_nlink==1
@@ -276,9 +277,9 @@ export function verifyDeployedUsageSchema(m, { candidates = true } = {}) {
   if (batchMigration) assert.deepEqual(batchMigration.receipt.databaseIdentity, value.identity);
   const sourceSha256 = unchangedSchemaInputs(m, value, { candidates, batchMigration });
   assert.equal(call('findmnt', ['-n', '-o', 'TARGET', '-T', m.database]), '/data');
-  const observed = JSON.parse(call('python3', ['-I', '-c', DEPLOYED_PROBE, JSON.stringify({ database: m.database,
+  const observed = JSON.parse(call('python3', ['-I', '-c', DEPLOYED_PROBE], { timeout: 120000, input: JSON.stringify({ database: m.database,
     backup: value.backup, identity: value.identity, schemaSha256: value.receipt.newSchemaSha256,
-    backupCounts: value.proof.originalTableCounts, fullSchemaBefore: fullSchemaBefore(m), canvasBatchObjects: batchMigration?.observed.objects || {} })], { timeout: 120000 }));
+    backupCounts: value.proof.originalTableCounts, fullSchemaBefore: fullSchemaBefore(m), canvasBatchObjects: batchMigration?.observed.objects || {} }) }));
   assert.deepEqual(observed.databaseIdentity, value.identity); assert.equal(observed.newSchemaSha256, value.receipt.newSchemaSha256);
   assert.equal(observed.databaseWrites, 0); assert.equal(observed.ddlExecuted, false);
   return { ...value, sourceSha256, observed };
