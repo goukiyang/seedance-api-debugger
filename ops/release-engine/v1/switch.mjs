@@ -857,6 +857,7 @@ export function captureRestoredSwitchBefore(m, manifestSha256, newLiveSnapshot) 
 
 function assertNoEscapedRecoveryWriter(m) {
   const roots = new Set([...ROLES.map(role => m.live[role].root), m.main.root, m.guard.root]);
+  const originalDirectory = engineDirectory(m), compatibleDirectory = candidateCompatibilityDirectory(m);
   const ancestors = new Set(); let parent = process.pid;
   while (parent > 0 && !ancestors.has(parent)) {
     ancestors.add(parent);
@@ -870,11 +871,13 @@ function assertNoEscapedRecoveryWriter(m) {
       const command = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8').replaceAll('\0', ' ');
       const related = roots.has(cwd) && /node|next|tsx|esbuild|ffmpeg/.test(command)
         || /ffmpeg/.test(command) && (command.includes(m.hdRoot) || [...roots].some(root => command.includes(root)))
-        || command.includes(engineDirectory(m) + '/') || command.includes(candidateCompatibilityDirectory(m) + '/')
+        || command.includes(originalDirectory + '/') || command.includes(compatibleDirectory + '/')
         || command.includes(m.stage + '/hd-release-safety-r03/');
       if (related) throw new Error('Related process remains outside the proven empty writer groups: ' + pid);
     } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error; }
   }
+  assert.equal(engineDirectory(m), originalDirectory, 'Original recovery engine changed during the same process inventory');
+  assert.equal(candidateCompatibilityDirectory(m), compatibleDirectory, 'Recovery proof or processor changed during the same process inventory');
 }
 
 // One attempt, one frozen guard, no window renewal or candidate-age relabeling.
@@ -1060,6 +1063,17 @@ export async function recoverStandaloneSwitch(m, input = {}) {
   });
 }
 
+function assertRecoveryContinuationFailure(m, runtime, failure, failureSha256) {
+  if (!runtime?.guardRecoveryRepair) { assert.equal(failure.code, 'NATURAL_STOP_PENDING'); return 'natural-stop-completed'; }
+  assert.equal(runtime.phase, 'recovery'); const proof = runtime.guardRecoveryRepair.proof;
+  assert.equal(proof.recoveryOnly, true); assert.equal(proof.continueMain, false);
+  assert.equal(proof.guardRecoveryFailureFile, m.stage + '/guard-recovery-failed.json');
+  assert.equal(proof.guardRecoveryFailureSha256, failureSha256);
+  assert.equal(failure.code, 'E2BIG'); assert.equal(failure.error, 'Error: spawnSync python3 E2BIG');
+  assert.equal(failure.preservedSafetyState, true); assert.equal(failure.businessDataRestored, false);
+  return 'verified-e2big-transport-repair-before-first-guard-start';
+}
+
 export async function recoverFailedSwitch(m, input = {}) {
   const { manifestSha256 } = context(m), runtime = guardBuildTailRuntime(m);
   const before = input.before || (runtime?.restoredOriginalRepair
@@ -1078,10 +1092,11 @@ export async function recoverFailedSwitch(m, input = {}) {
     const previous = json(attemptFile); assert.equal(previous.manifestSha256, manifestSha256);
     assert.equal(exists('/proc/' + previous.pid), false, 'The first recovery controller is still alive');
     assert.equal(exists(m.stage + '/guard-recovery-start-intent.json'), false, 'A guard start was already attempted; do not retry it blindly');
-    const failure = json(m.stage + '/guard-recovery-failed.json'); assert.equal(failure.code, 'NATURAL_STOP_PENDING');
+    const failureFile = m.stage + '/guard-recovery-failed.json', failure = json(failureFile);
+    const continuationReason = assertRecoveryContinuationFailure(m, runtime, failure, sha(rootFile(failureFile)));
     for (const role of ROLES) stopped(m, role);
     save(m, 'guard-recovery-resume-' + randomUUID(), { manifestSha256, previousAttemptSha256: sha(rootFile(attemptFile)),
-      reason: 'Previously pending natural stops are now independently observed empty; continue the same fixed recovery before its first guard start' });
+      reason: continuationReason, originalFailurePreserved: true, firstGuardStartOnly: true });
   } else save(m, 'guard-recovery-attempt', { manifestSha256, pid: process.pid, at: new Date().toISOString(), guardSource: m.guardSource,
     originalBuildStartedAt: armed.originalGuardBuild.startedAt, candidateFreshGateClaimed: false });
   const installed = input.installed || (exists(nginxInstalledFile(m)) ? json(nginxInstalledFile(m)) : null);

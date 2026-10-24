@@ -106,20 +106,32 @@ p=pathlib.Path(sys.argv[1]);db=p/'live.sqlite';backup=p/'backup.sqlite'
 def schema(c):return {r[0]:[r[1],r[2],r[3]] for r in c.execute("SELECT name,type,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name")}
 def digest(o):return hashlib.sha256(json.dumps(o,separators=(',',':'),ensure_ascii=True).encode()).hexdigest()
 with sqlite3.connect(db) as c:
- c.execute('CREATE TABLE Original(id TEXT PRIMARY KEY)');c.execute("INSERT INTO Original VALUES ('keep')");c.commit()
+ c.execute("CREATE TABLE Original(id TEXT PRIMARY KEY, original_note TEXT DEFAULT '"+'x'*140000+"')")
+ c.execute("INSERT INTO Original(id) VALUES ('keep')");c.commit()
  old=schema(c)
  with sqlite3.connect(backup) as b:c.backup(b)
  c.execute('CREATE TABLE CanvasVideoBatch(id TEXT PRIMARY KEY)')
  c.execute('CREATE TABLE CanvasVideoBatchChild(id TEXT PRIMARY KEY)')
  new=schema(c);added={n:new[n] for n in sorted(set(new)-set(old))}
 s=os.stat(db)
-print(json.dumps({'database':str(db),'backup':str(backup),'databaseIdentity':[str(s.st_dev),str(s.st_ino)],'originalSchemaSha256':digest(old),'newSchemaSha256':digest(added),'newObjects':list(added)}))
+print(json.dumps({'database':str(db),'backup':str(backup),'databaseIdentity':[str(s.st_dev),str(s.st_ino)],'originalSchemaSha256':digest(old),'newSchemaSha256':digest(added),'newObjects':list(added),'fullSchemaBefore':new}))
 `;
   const proof = JSON.parse(execFileSync('python3', ['-I', '-c', setup, root], { encoding: 'utf8' }));
-  const observed = JSON.parse(execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(proof)], { encoding: 'utf8' }));
+  // The large input is actual SQLite original-schema SQL, not an ignored
+  // padding field. Keep one small argv call to prove the old reader contract.
+  const legacyProof = { ...proof }; delete legacyProof.fullSchemaBefore;
+  const legacyObserved = JSON.parse(execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(legacyProof)], { encoding: 'utf8' }));
+  const schemaInput = JSON.stringify(proof), schemaInputBytes = Buffer.byteLength(schemaInput);
+  assert.ok(schemaInputBytes > 133499);
+  const probeFromStdin = value => JSON.parse(execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE], {
+    encoding: 'utf8', timeout: 120000, input: JSON.stringify(value) }));
+  const observed = probeFromStdin(proof); assert.deepEqual(observed, legacyObserved);
   assert.equal(observed.databaseWrites, 0); assert.equal(observed.backupIntegrity, 'ok');
+  assert.throws(() => probeFromStdin({ ...proof, databaseIdentity: ['0', '0'] }));
+  const changedOriginal = structuredClone(proof); changedOriginal.fullSchemaBefore.Original[2] += ' -- changed original SQL';
+  assert.throws(() => probeFromStdin(changedOriginal));
   execFileSync('python3', ['-I', '-c', "import sqlite3,sys\nwith sqlite3.connect(sys.argv[1]) as c:c.execute('CREATE TABLE Unexpected(id TEXT)')", proof.database]);
-  assert.throws(() => execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(proof)], { stdio: 'pipe' }));
+  assert.throws(() => probeFromStdin(legacyProof));
   const directory = path.dirname(fileURLToPath(import.meta.url));
   const source = fs.readFileSync(path.join(directory, 'switch.mjs'), 'utf8');
   assert.ok(source.includes('applyCanvasBatchMigration(m, allGone, check)'));
@@ -212,16 +224,17 @@ print(json.dumps({'database':str(db),'backup':str(backup),'databaseIdentity':[st
     let writersStopped = false, migrationCalls = 0, windowChecks = 0;
     const immutable = new Set();
     const checked = file => { assert.ok(file.startsWith(sandbox + '/')); assert.equal(fs.realpathSync(file), file); return fs.readFileSync(file); };
-    const call = (name, args) => {
+    const call = (name, args, options = {}) => {
       if (name === 'chattr') {
         assert.equal(args[0], '+i'); checked(args[1]); immutable.add(args[1]); return '';
       }
       assert.equal(name, 'python3'); assert.equal(args[0], '-I');
       if (args[1] === '-c') {
         assert.equal(args[2], CANVAS_BATCH_PROBE);
-        const values = JSON.parse(args[3]); assert.equal(values.database, fixture.database);
+        assert.equal(args.length, 3); assert.equal(options.timeout, 120000); assert.equal(typeof options.input, 'string');
+        const values = JSON.parse(options.input); assert.equal(values.database, fixture.database);
         assert.ok(values.backup.startsWith(fixture.stage + '/'));
-        return execFileSync('python3', args, { encoding: 'utf8' });
+        return execFileSync('python3', args, { encoding: 'utf8', input: options.input, timeout: options.timeout });
       }
       assert.equal(writersStopped, true); migrationCalls++;
       assert.equal(args[1], fixture.main.root + '/' + contract.CANVAS_BATCH_MIGRATOR);
@@ -346,15 +359,16 @@ print('actual-first-migration-produced')`;
     const io = { ...fs, realpathSync: file => { assert.equal(fs.realpathSync(physical(file)), physical(file)); return file; },
       readFileSync: (file, ...args) => fs.readFileSync(physical(file), ...args),
       lstatSync: file => fs.lstatSync(physical(file)), existsSync: file => fs.existsSync(physical(file)) };
-    const vcall = (name, args) => {
+    const vcall = (name, args, options = {}) => {
       if (name === 'findmnt') { physical(args.at(-1)); return '/data'; }
       if (name === 'chattr') { assert.equal(args[0], '+i'); vbytes(args[1]); vimmutable.add(args[1]); return ''; }
       if (name === 'lsattr') return (vimmutable.has(args[1]) ? '----i---' : '--------') + ' ' + args[1];
       assert.equal(name, 'python3'); assert.equal(args[0], '-I');
       if (args[1] !== '-c') { forbiddenMigrationCalls++; throw new Error('Deployed adoption invoked a migration'); }
       assert.equal(args[2], CANVAS_BATCH_PROBE);
-      const values = JSON.parse(args[3]); values.database = physical(values.database); values.backup = physical(values.backup);
-      return execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify(values)], { encoding: 'utf8' });
+      assert.equal(args.length, 3); assert.equal(options.timeout, 120000); assert.equal(typeof options.input, 'string');
+      const values = JSON.parse(options.input); values.database = physical(values.database); values.backup = physical(values.backup);
+      return execFileSync('python3', ['-I', '-c', CANVAS_BATCH_PROBE], { encoding: 'utf8', input: JSON.stringify(values), timeout: options.timeout });
     };
     const adoptionContext = vm.createContext({ assert: normalizedAssert, fs: io, ...contract, assertProtectedIncrementCandidate, engineDirectory, isSharedEngine,
       verifyDeployedContinuationProvenance, verifySharedBuildProvenance, fullSchemaBefore, verifyFullCandidateSources,
@@ -408,6 +422,8 @@ print('actual-first-migration-produced')`;
       tamperedReceiptAndBackupRejected: true, originalRowsPreserved: true, productionWrites: 0 }));
   }
   console.log(JSON.stringify({ checks: ['exact old Prisma declarations preserved', 'unbound input rejected',
-    'real SQLite read-only schema and backup proof', 'unexpected object rejected', 'normal and recovery stopped-writer/start gates wired'],
+    'real SQLite read-only schema and backup proof', 'actual original-schema SQL over 133499 bytes preserved through stdin with legacy argv compatibility',
+    'stdin rejects changed original schema and wrong database identity', 'unexpected object rejected', 'normal and recovery stopped-writer/start gates wired'],
+    schemaInputBytes,
     productionWrites: 0, servicesChanged: false }));
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

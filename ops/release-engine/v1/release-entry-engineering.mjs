@@ -32,6 +32,8 @@ import {
   assertRestoredOriginalFailure, assertRestoredOriginalControllerDifference, assertRestoredOriginalClosureAdmission,
   assertRestoredOriginalRepairAdmission, assertRestoredOriginalApprovalPath, assertRestoredOriginalLive, assertRestoredOriginalScene,
   assertCandidateRestoredOriginalObservationAdmission, assertRestoredOriginalMaintenanceOperationId, RESTORED_ORIGINAL_ORIGIN,
+  validateGuardRecoveryRepair, assertGuardRecoveryRepairChildPhase, assertGuardRecoveryRepairControllerDifference,
+  assertGuardRecoveryRepairFailure, assertGuardRecoveryRepairAdmission, GUARD_RECOVERY_REPAIR_ORIGIN,
 } from './release-entry.mjs';
 import { createControllerOwner, finishPhase, readAttempt, recordAttemptEvent, startPhase } from './attempt-state.mjs';
 import { ENGINE_VERSION } from './engine-version.mjs';
@@ -1236,6 +1238,55 @@ function scenarioRestoredOriginalStages() {
   return 'restored_original_closes_running_failure_then_consumes_native_terminal_once_without_clearing_historical_effects';
 }
 
+function scenarioGuardRecoveryRepair() {
+  const origin = GUARD_RECOVERY_REPAIR_ORIGIN, request = { schema: 'sd2-release-guard-recovery-repair.v1',
+    phaseResultEventSha256: origin.phaseResultEventSha256, failureIntentSha256: origin.failureIntentSha256, childReceiptSha256: HASH,
+    restoredOriginalRepairProofSha256: origin.restoredOriginalRepairProofSha256, restoredOriginalClosureProofSha256: origin.restoredOriginalClosureProofSha256,
+    guardRecoveryFailureSha256: origin.guardRecoveryFailureSha256, switchFailureSha256: origin.switchFailureSha256,
+    processorControllerSetSha256: HASH, windowSha256: HASH, observedAt: '2026-10-24T02:00:00.000Z' };
+  validateGuardRecoveryRepair(request);
+  for (const key of ['phaseResultEventSha256', 'failureIntentSha256', 'restoredOriginalRepairProofSha256', 'restoredOriginalClosureProofSha256',
+    'guardRecoveryFailureSha256', 'switchFailureSha256']) assert.throws(() => validateGuardRecoveryRepair({ ...request, [key]: HASH }));
+  for (const value of [{ ...request, schema: 'sd2-release-restored-original-repair.v1' }, { ...request, extra: false },
+    { ...request, observedAt: 'unknown' }, { ...request, processorControllerSetSha256: 'unknown' }]) assert.throws(() => validateGuardRecoveryRepair(value));
+  const child = {"schema":"sd2-release-phase-child.v1","phase":"switch","intentSha256":"8a3e2207cc19654f1fc634f1b46a041cda54786d141368fc5e737a0c48558adb","startedAt":1792805017973,"finishedAt":1792805554487,"child":{"status":1,"signal":null,"error":null},"stdout":"","stderr":"2026/10/24 01:25:06 [warn] 1568141#1568141: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n2026/10/24 09:25:30 [warn] 1568935#1568935: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n2026/10/24 01:25:59 [warn] 1569718#1569718: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\nWarning: The unit file, source configuration file or drop-ins of sd2-gray.service changed on disk. Run 'systemctl daemon-reload' to reload units.\n2026/10/24 09:27:46 [warn] 1572396#1572396: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n2026/10/24 09:27:58 [warn] 1572778#1572778: protocol options redefined for [::]:443 in /etc/nginx/sites-enabled/nexflow.youdooart.com:22\nnginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n{\"error\":{\"schema\":\"sd2-release-error.v1\",\"category\":\"internal_failure\",\"code\":\"unclassified_internal_failure\",\"object\":{\"kind\":\"release_operation\",\"id\":\"child\"},\"reason\":\"An unclassified release-engine failure occurred; the original exception remains in the private attempt evidence.\",\"nextStep\":\"Stop dependent or side-effecting work and inspect the preserved attempt evidence.\",\"retryable\":false,\"stop\":true},\"cause\":\"AggregateError: Release failed and safety recovery failed\"}\n"};
+  assertGuardRecoveryRepairFailure(child);
+  for (const edit of [value => { value.stderr += 'unbound recovery output'; }, value => { value.child.status = 0; },
+    value => { value.intentSha256 = HASH; }, value => { value.phase = 'recovery'; }]) {
+    const value = structuredClone(child); edit(value); assert.throws(() => assertGuardRecoveryRepairFailure(value));
+  }
+  assertGuardRecoveryRepairChildPhase('recovery');
+  for (const phase of RELEASE_PHASES) assert.throws(() => assertGuardRecoveryRepairChildPhase(phase));
+  const changed = ['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs',
+    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs'];
+  const oldMap = Object.fromEntries([...changed, 'attempt-state.mjs', 'common.mjs', 'full-release-contract.mjs'].map(name => [name, HASH]));
+  const newMap = { ...oldMap, ...Object.fromEntries(changed.map(name => [name, digest(name)])) };
+  assertGuardRecoveryRepairControllerDifference(oldMap, newMap);
+  for (const name of ['attempt-state.mjs', 'common.mjs', 'full-release-contract.mjs'])
+    assert.throws(() => assertGuardRecoveryRepairControllerDifference(oldMap, { ...newMap, [name]: digest(name) }));
+  assert.throws(() => assertGuardRecoveryRepairControllerDifference(oldMap, { ...newMap, 'canvas-batch-schema.mjs': HASH }));
+  const events = RELEASE_PHASES.slice(0, RELEASE_PHASES.indexOf('switch')).map(phase => ({ value: { kind: 'phase_result', phase, outcome: 'succeeded' } }));
+  const loaded = { events, derivedState: { status: 'running', activePhase: null, terminal: null, lastEventSha256: origin.phaseResultEventSha256,
+    lastPhase: { phase: 'switch', outcome: 'failed', resultSha256: origin.phaseResultEventSha256, intentSha256: origin.failureIntentSha256 } } };
+  const runtime = { restoredOriginalRepair: { proofSha256: origin.restoredOriginalRepairProofSha256,
+    proof: { processor: { controllerSetSha256: origin.predecessorControllerSetSha256 } } }, restoredOriginalClosure: { proofSha256: origin.restoredOriginalClosureProofSha256 } };
+  const scene = { facts: { effectsStarted: true, switchComplete: false, fixedGuardRecoveryAvailable: true, files: {
+    'pricing-pair-published.json': { sha256: HASH }, 'full-schema-ready.json': { sha256: HASH }, 'fixed-guard-recovery.json': { sha256: HASH },
+    'pricing-start-intent.json': null, 'guard-recovery-start-intent.json': null, 'guard-recovery-complete.json': null, 'switch-complete.json': null } } };
+  assertGuardRecoveryRepairAdmission(loaded, request, runtime, scene);
+  for (const edit of [value => { value.derivedState.status = 'failed'; }, value => { value.derivedState.activePhase = { phase: 'recovery' }; },
+    value => { value.derivedState.lastEventSha256 = HASH; }, value => { value.derivedState.lastPhase.resultSha256 = HASH; },
+    value => { value.events.push({ value: { kind: 'observation', name: 'guard_recovery_repair' } }); }]) {
+    const value = structuredClone(loaded); edit(value); assert.throws(() => assertGuardRecoveryRepairAdmission(value, request, runtime, scene));
+  }
+  for (const edit of [value => { value.facts.effectsStarted = false; }, value => { value.facts.fixedGuardRecoveryAvailable = false; },
+    value => { value.facts.files['pricing-start-intent.json'] = { sha256: HASH }; }, value => { value.facts.files['guard-recovery-start-intent.json'] = { sha256: HASH }; },
+    value => { value.facts.files['pricing-pair-published.json'] = null; }, value => { value.facts.files['full-schema-ready.json'] = null; }]) {
+    const value = structuredClone(scene); edit(value); assert.throws(() => assertGuardRecoveryRepairAdmission(loaded, request, runtime, value));
+  }
+  return 'exact_effectful_guard_recovery_failure_has_one_journal_authority_for_recovery_only_with_frozen_predecessor_and_eight_file_delta';
+}
+
 export async function runReleaseEntryEngineering(dependencies = {}) {
   const runTransaction = dependencies.runPhaseTransaction || runPhaseTransaction;
   const processChecks = dependencies.controllerMatrix ? await dependencies.controllerMatrix() : await scenarioControllerMatrix();
@@ -1243,7 +1294,7 @@ export async function runReleaseEntryEngineering(dependencies = {}) {
   let reuse;
   try { reuse = scenarioReuseNoBuild(reuseRoot); } finally { fs.rmSync(reuseRoot, { recursive: true, force: true }); }
   const checks = [await scenarioA(runTransaction), scenarioDecisions(), ...processChecks, reuse, scenarioE(), scenarioPackageInput(),
-    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages()];
+    scenarioPrepareTailContract(), scenarioGuardBuildTailContract(), scenarioGuardBuildTailRetry(), scenarioReaderSuccessor(), scenarioArmPairRepair(), scenarioArmProcessorRepair(), scenarioSwitchAdmissionRepair(), scenarioLegacyTemplateBuildAlias(), scenarioSwitchTypedRepair(), scenarioSwitchScanRepair(), scenarioSwitchOwnerRepair(), scenarioSwitchOwnerObservation(), scenarioSwitchWindowRepair(), scenarioSwitchWindowOriginalSnapshots(), scenarioRestoredOriginalFailure(), scenarioRestoredOriginalLive(), scenarioRestoredOriginalStages(), scenarioGuardRecoveryRepair()];
   return { schema: 'sd2-release-entry-engineering.v2', fixtureOnly: true, productionEnvironmentUsed: false,
     productionFaultInjectionUsed: false, realControllerProcessesUsed: true, realAttemptJournalUsed: true, checks };
 }

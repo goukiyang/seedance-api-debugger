@@ -400,6 +400,39 @@ function verifyRestoredOriginalRepair(m, runtime, predecessor) {
   return proof;
 }
 
+function verifyGuardRecoveryRepair(m, runtime, predecessor) {
+  const reference = runtime.guardRecoveryRepair; assert.equal(reference.schema, 'sd2-release-guard-recovery-repair-runtime.v1');
+  assert.ok(['switch', 'recovery'].includes(runtime.phase), 'Guard recovery repair cannot execute another application phase');
+  const proof = runtimeRootProof(reference, 'guard-recovery-repair-', 'sd2-release-guard-recovery-repair-proof.v1', m);
+  assert.equal(proof.originalRestoredOriginalRepairProofFile, runtime.restoredOriginalRepair.proofFile);
+  assert.equal(proof.originalRestoredOriginalRepairProofSha256, runtime.restoredOriginalRepair.proofSha256);
+  assert.equal(proof.originalRestoredOriginalClosureProofFile, runtime.restoredOriginalClosure.proofFile);
+  assert.equal(proof.originalRestoredOriginalClosureProofSha256, runtime.restoredOriginalClosure.proofSha256);
+  assert.deepEqual(proof.predecessorProcessor, predecessor.processor); processorBytes(proof, m);
+  const allowed = new Set(['release-entry.mjs', 'release-entry-engineering.mjs', 'candidate-evidence.mjs', 'release.mjs',
+    'canvas-batch-schema.mjs', 'canvas-batch-schema-engineering.mjs', 'candidate-lifecycle-engineering.mjs', 'switch.mjs']);
+  for (const [name, hash] of Object.entries(proof.processorControllers))
+    if (hash !== predecessor.processorControllers[name]) assert.ok(allowed.has(name), 'Unreviewed guard recovery processor difference: ' + name);
+  for (const name of ['guardRecoveryFailure', 'switchFailure', 'originalFixedGuard', 'publishedPair', 'fullSchemaReady', 'window']) {
+    const snapshot = proof[name + 'Snapshot']; assert.equal(snapshot.requestedPath, proof[name + 'File']);
+    assert.equal(assertTypedFileUnchanged(snapshot).sha256, proof[name + 'Sha256']);
+  }
+  assert.equal(proof.originalFixedGuardFile, predecessor.originalFixedGuardFile);
+  assert.equal(proof.originalFixedGuardSha256, predecessor.originalFixedGuardSha256);
+  assert.equal(proof.publishedPairFile, m.stage + '/pricing-pair-published.json');
+  assert.equal(proof.fullSchemaReadyFile, m.stage + '/full-schema-ready.json');
+  assert.equal(proof.newWriterStartAbsent, true); assert.equal(proof.recoveryOnly, true);
+  const { loaded } = successorJournal(m, runtime);
+  const records = loaded.events.filter(item => item.value.kind === 'observation' && item.value.name === 'guard_recovery_repair');
+  assert.equal(records.length, 1); const observed = records[0];
+  assert.deepEqual(observed.value.value, { schema: 'sd2-release-guard-recovery-repair-reference.v1', proofFile: reference.proofFile, proofSha256: reference.proofSha256 });
+  assert.equal(observed.value.previousSha256, proof.takeoverEventSha256);
+  const takeover = loaded.events.find(item => item.sha256 === proof.takeoverEventSha256);
+  assert.equal(takeover?.value.kind, 'owner_takeover'); assert.equal(takeover.value.previousSha256, proof.request.phaseResultEventSha256);
+  assert.deepEqual(takeover.value.owner, observed.value.owner);
+  return proof;
+}
+
 export function guardBuildTailRuntime(m) {
   const context = currentReleaseContext(), runtime = context?.guardBuildTail;
   if (!runtime) return null;
@@ -474,13 +507,17 @@ export function guardBuildTailRuntime(m) {
     assert.ok(runtime.switchWindowRepair && runtime.restoredOriginalClosure, 'Restored repair retains the exact effectful failure and closed original restoration');
     active = verifyRestoredOriginalRepair(m, runtime, active);
   }
+  if (runtime.guardRecoveryRepair) {
+    assert.ok(runtime.restoredOriginalRepair, 'Guard recovery retains the actual restored continuation and effectful failure');
+    active = verifyGuardRecoveryRepair(m, runtime, active);
+  }
   assert.equal(path.dirname(fileURLToPath(import.meta.url)), active.processor.root);
   return runtime;
 }
 
 export function candidateCompatibilityDirectory(m) {
   const runtime = guardBuildTailRuntime(m);
-  return (runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
+  return ((runtime?.phase === 'recovery' ? runtime.guardRecoveryRepair?.proof : null) || runtime?.restoredOriginalRepair?.proof || runtime?.switchWindowRepair?.proof || runtime?.switchOwnerRepair?.proof || runtime?.switchScanRepair?.proof || runtime?.switchTypedRepair?.proof || runtime?.switchAdmissionRepair?.proof || runtime?.armProcessorRepair?.proof || runtime?.armPairRepair?.proof || runtime?.reader?.proof || runtime?.retry?.proof || runtime?.proof)?.processor.root || engineDirectory(m);
 }
 
 export function hdMaintenanceApprovalFile(m) {

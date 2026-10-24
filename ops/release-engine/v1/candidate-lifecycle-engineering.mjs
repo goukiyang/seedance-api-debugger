@@ -2109,7 +2109,7 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
 // explicit isolated input here; no selector expression is copied or rewritten.
 {
   const files = ['release.mjs', 'candidate-evidence.mjs'], directory = '/isolated-trusted/current';
-  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window'].map(name => {
+  const sets = Object.fromEntries(['original', 'tail', 'retry', 'reader', 'pair', 'processor', 'switch', 'typed', 'scan', 'owner', 'window', 'recovery'].map(name => {
     const bytes = Object.fromEntries(files.map(file => [file, Buffer.from(name + ':' + file)]));
     const hashes = Object.fromEntries(files.map(file => [file, sha(bytes[file])]));
     return [name, { bytes, proof: { processor: { root: '/isolated-trusted/' + name, controllerSetSha256: sha(JSON.stringify(hashes)) },
@@ -2151,6 +2151,21 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   assert.equal(namespace.compatibility(m), '/isolated-trusted/original-engine');
   assert.deepEqual(runtime.reader, originalRuntime.reader); assert.deepEqual(runtime.candidateObservation, originalRuntime.candidateObservation);
   add('trustedCode_actual_body_selects_processor_then_pair_reader_retry_original_and_refuses_hash_or_module_drift');
+  runtime.restoredOriginalRepair = { proofSha256: 'a'.repeat(64), proof: { ...sets.window.proof,
+    newLiveSnapshot: { hd: { pid: 303 } }, restoredSwitchBeforeFile: '/original-restored/before.json', maintenanceOperationId: 'original-restored-maintenance' } };
+  runtime.guardRecoveryRepair = { proof: sets.recovery.proof }; selectedRuntime = runtime;
+  runtime.phase = 'switch'; activeBytes = sets.window.bytes; namespace.verify(m, runtime);
+  assert.equal(namespace.compatibility(m), sets.window.proof.processor.root);
+  runtime.phase = 'recovery'; activeBytes = sets.recovery.bytes; namespace.verify(m, runtime);
+  assert.equal(namespace.compatibility(m), sets.recovery.proof.processor.root);
+  for (const name of ['operationalLive', 'operationalRecordName', 'operationalBeforeFile', 'operationalNginxRunId'])
+    vm.runInNewContext(functionNode('candidate-evidence.mjs', name).node.getText().replace(/^export /, '') + '\nglobalThis.' + name + '=' + name + ';', namespace);
+  assert.equal(namespace.operationalLive(m, 'hd').pid, 303);
+  assert.equal(namespace.operationalRecordName(m, 'natural-stop-switch-hd'), 'natural-stop-switch-hd-' + 'a'.repeat(64));
+  assert.equal(namespace.operationalBeforeFile(m), '/original-restored/before.json');
+  assert.equal(namespace.operationalNginxRunId(m), 'original-restored-maintenance');
+  add('guard_recovery_processor_is_selected_only_for_recovery_and_keeps_original_restored_operational_records');
+
 }
 
 {
@@ -2210,6 +2225,40 @@ for (const scenario of ['success', 'npm-failed', 'duplicate-gate', 'artifact-dri
   namespace.guardBuildTailRuntime = () => { throw Error('unbound approval runtime'); };
   assert.throws(() => namespace.select(m), /unbound approval runtime/);
   add('hd_approval_selector_defaults_to_original_and_both_switch_consumers_use_bound_repair_without_refreshing_observation');
+}
+
+
+{
+  const manifest = { live: { web: { root: '/original/web' }, image: { root: '/original/image' }, hd: { root: '/original/hd' } },
+    main: { root: '/candidate/main' }, guard: { root: '/candidate/guard' }, hdRoot: '/storage/hd', stage: '/original/stage' };
+  let checks = 0, drift = false, related = false, inspected = 0;
+  const namespace = { assert: sameAssert, ROLES: ['web', 'image', 'hd'], process: { pid: 9 },
+    engineDirectory: () => '/original-engine', candidateCompatibilityDirectory: () => { checks++; return drift && checks === 2 ? '/changed-engine' : '/repair-engine'; },
+    fs: { readdirSync: file => { assert.equal(file, '/proc'); return ['9', '11', '12', '13']; },
+      realpathSync: file => { inspected++; return related && file.includes('/12/') ? manifest.main.root : '/unrelated'; },
+      readFileSync: file => file.endsWith('/stat') ? '9 (node) R 0 0 0' : related && file.includes('/12/') ? 'node\0program' : 'sleep\0' } };
+  const node = functionNode('switch.mjs', 'assertNoEscapedRecoveryWriter').node;
+  vm.runInNewContext(node.getText() + '\nglobalThis.verify=assertNoEscapedRecoveryWriter;', namespace);
+  namespace.verify(manifest); assert.equal(checks, 2); assert.equal(inspected, 3);
+  checks = 0; drift = true; assert.throws(() => namespace.verify(manifest)); assert.equal(checks, 2);
+  checks = 0; drift = false; related = true; assert.throws(() => namespace.verify(manifest), /Related process remains/);
+  add('actual_recovery_process_inventory_keeps_each_pid_gate_and_completely_revalidates_processor_only_before_and_after_same_scan');
+}
+
+{
+  const m = { stage: '/original-stage' }, hash = 'b'.repeat(64), failure = { code: 'E2BIG', error: 'Error: spawnSync python3 E2BIG',
+    preservedSafetyState: true, businessDataRestored: false };
+  const runtime = { phase: 'recovery', guardRecoveryRepair: { proof: { recoveryOnly: true, continueMain: false,
+    guardRecoveryFailureFile: m.stage + '/guard-recovery-failed.json', guardRecoveryFailureSha256: hash } } };
+  const namespace = { assert: sameAssert }; const node = functionNode('switch.mjs', 'assertRecoveryContinuationFailure').node;
+  vm.runInNewContext(node.getText() + '\nglobalThis.verify=assertRecoveryContinuationFailure;', namespace);
+  assert.equal(namespace.verify(m, null, { code: 'NATURAL_STOP_PENDING' }, hash), 'natural-stop-completed');
+  assert.match(namespace.verify(m, runtime, failure, hash), /verified-e2big/);
+  assert.throws(() => namespace.verify(m, null, failure, hash));
+  assert.throws(() => namespace.verify(m, runtime, failure, 'c'.repeat(64)));
+  assert.throws(() => namespace.verify(m, { ...runtime, phase: 'switch' }, failure, hash));
+  assert.throws(() => namespace.verify(m, runtime, { ...failure, code: 'OTHER' }, hash));
+  add('existing_prestart_recovery_continuation_accepts_only_exact_bound_e2big_repair_and_preserves_old_natural_stop_contract');
 }
 
 const nativeTailBase = '/data/video-api-debugger-engineering';

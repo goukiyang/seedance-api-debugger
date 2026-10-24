@@ -84,8 +84,8 @@ export function readOriginalCanvasBatchMigration(m) {
     assert.equal(sha(sourceBytes(original[kind].root, CANVAS_BATCH_SQL)), m.canvasVideoBatchSchema.sqlSha256);
     assert.equal(sha(sourceBytes(original[kind].root, CANVAS_BATCH_MIGRATOR)), m.canvasVideoBatchSchema.migrationModuleSha256);
   }
-  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE,
-    JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) })], { timeout: 120000 }));
+  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE], { timeout: 120000,
+    input: JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) }) }));
   assert.deepEqual(observed.databaseIdentity, receipt.databaseIdentity); assert.equal(observed.databaseWrites, 0);
   return { original, publication, receipt, proof, observed, backup };
 }
@@ -138,7 +138,7 @@ export function verifyCanvasBatchCandidates(m) {
 
 export const CANVAS_BATCH_PROBE = String.raw`
 import sys,json,sqlite3,hashlib,pathlib,os
-d=json.loads(sys.argv[1])
+d=json.loads(sys.argv[1]) if len(sys.argv)>1 else json.load(sys.stdin)
 def ro(p):
  c=sqlite3.connect(pathlib.Path(p).as_uri()+'?mode=ro',uri=True,timeout=30)
  c.execute('PRAGMA query_only=ON');c.execute('BEGIN');return c
@@ -183,7 +183,8 @@ export function readCanvasBatchMigration(m, { required = false, candidates = tru
   for (const key of ['runId', 'source', 'guardSource', 'manifestSha256', 'sqlSha256', 'backupSha256', 'originalSchemaSha256'])
     assert.equal(proof[key], receipt[key]);
   assert.equal(proof.integrity, 'ok'); assert.equal(proof.consistent, true);
-  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE, JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) })], { timeout: 120000 }));
+  const observed = JSON.parse(call('python3', ['-I', '-c', CANVAS_BATCH_PROBE], { timeout: 120000,
+    input: JSON.stringify({ ...receipt, backup, database: m.database, fullSchemaBefore: fullSchemaBefore(m) }) }));
   assert.deepEqual(observed.databaseIdentity, receipt.databaseIdentity); assert.equal(observed.databaseWrites, 0);
   return { receipt, observed };
 }
