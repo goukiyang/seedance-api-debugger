@@ -48,6 +48,7 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
 import { AssetPlaybackCoordinator, getAssetCardClickAction, type AssetPlaybackBoundary, type AssetPlaybackLease } from '@/lib/media/asset-playback';
+import { fetchReadWithRetry } from '@/lib/http/read-retry';
 
 type AssetScope = 'history' | 'project' | 'user';
 type AssetView = AssetScope | 'enhance' | 'favorites' | 'likes';
@@ -1225,7 +1226,7 @@ function AssetsPageContent() {
       }
 
       try {
-        const response = await fetch(`/api/assets/library?${params.toString()}`, { cache: 'no-store', signal: abort.signal });
+        const response = await fetchReadWithRetry(`/api/assets/library?${params.toString()}`, { signal: abort.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || data.message || '资产加载失败');
         if (!cancelled) {
