@@ -117,3 +117,17 @@
 }
 .progressComplete { display: flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--text-secondary); font-size: 12px; }
 .progressComplete a { margin-left: auto; }
+/* Generation/frame settings dropdown: a listbox so each own row can carry 编辑/删除. */
+.settingsPickerSelect { position: relative; }
+.settingsPicker .settingsPickerTrigger { width: 100%; min-height: 38px; justify-content: space-between; text-align: left; }
+.settingsPicker .settingsPickerTrigger::after { content: ''; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); flex: 0 0 auto; }
+.settingsPickerList { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 320px; overflow: auto;
+  border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated, var(--bg-card, #1b1d21)); box-shadow: 0 12px 28px rgba(0, 0, 0, .35); }
+.settingsPickerList li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.settingsPickerList li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settingsPickerList li[data-active="true"] { background: var(--bg-hover); }
+.settingsPickerList li[aria-selected="true"] > span:first-child { color: var(--primary, #2463eb); }
+.settingsPickerRowActions { display: inline-flex; gap: 4px; flex: 0 0 auto; visibility: hidden; }
+.settingsPickerList li:hover .settingsPickerRowActions, .settingsPickerList li[data-active="true"] .settingsPickerRowActions, .settingsPickerList li:focus-within .settingsPickerRowActions { visibility: visible; }
+.settingsPicker .settingsPickerRowActions button { min-height: 28px; padding: 2px 8px; font-size: 13px; }
+@media (hover: none) { .settingsPickerRowActions { visibility: visible; } }

@@ -202,9 +202,23 @@ function MultiviewSettingsPickerContent(props: Props) {
     } catch { if (current(scope)) setNotice('操作结果暂未确认，请继续查询原操作；当前设置保留。'); }
     finally { if (current(scope)) { lock.current = false; setBusy(false); } }
   }
-  async function manage(action: 'rename' | 'delete', anchor: HTMLElement) {
-    if (!displaySelection?.ownedByViewer || lock.current || pendingRef.current || storageBlocked || live.current.disabled) return;
-    const item = displaySelection; const scope = capture(); if (!current(scope)) return;
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listRoot = useRef<HTMLDivElement>(null);
+  const pickerDisabled = Boolean(props.disabled || busy || loading);
+  const options = [{ id: '', label: props.kind === 'generation' ? '当前360°旋转模板' : '当前选帧', item: null as (typeof items)[number] | null },
+    ...(selected && !items.some(item => item.id === selected) ? [{ id: selected, label: selectedRecord?.name || '原设置待核对（输入保留）', item: null }] : []),
+    ...items.map(item => ({ id: item.id, item, label: `${item.name} · ${item.ownedByViewer ? '我的' : '同事共享'}${item.ownedByViewer ? item.isShared ? ' · 已共享' : ' · 私有' : ''}` }))];
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => { if (!listRoot.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  useEffect(() => { if (pickerDisabled) setOpen(false); }, [pickerDisabled]);
+  async function manage(action: 'rename' | 'delete', anchor: HTMLElement, target = displaySelection) {
+    if (!target?.ownedByViewer || lock.current || pendingRef.current || storageBlocked || live.current.disabled) return;
+    const item = target; const scope = capture(); if (!current(scope)) return;
     const submit = async (name?: string) => {
       if (!current(scope) || lock.current || pendingRef.current || live.current.disabled) throw new Error('操作状态已变化，请重新打开设置管理。');
       let other: Mutation | null;
@@ -340,11 +354,31 @@ function MultiviewSettingsPickerContent(props: Props) {
   }
   return <div className={styles.settingsPicker} aria-busy={busy}>
     <div className={styles.settingsPickerRow}>
-      <label className={styles.settingsPickerSelect} htmlFor={inputId}>{label}<select id={inputId} value={selected} disabled={props.disabled || busy || loading} onChange={event => void apply(event.target.value)}>
-        <option value="">{props.kind === 'generation' ? '当前360°旋转模板' : '当前选帧'}</option>
-        {selected && !items.some(item => item.id === selected) && <option value={selected}>{selectedRecord?.name || '原设置待核对（输入保留）'}</option>}
-        {items.map(item => <option value={item.id} key={item.id}>{item.name} · {item.ownedByViewer ? '我的' : '同事共享'}{item.ownedByViewer ? item.isShared ? ' · 已共享' : ' · 私有' : ''}</option>)}
-      </select></label>
+      <div className={styles.settingsPickerSelect} ref={listRoot}><span id={`${inputId}-label`}>{label}</span>
+        <button type="button" id={inputId} className={styles.settingsPickerTrigger} aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${inputId}-label ${inputId}`}
+          disabled={pickerDisabled} onClick={() => { setOpen(value => !value); setActiveIndex(Math.max(0, options.findIndex(option => option.id === selected))); }}
+          onKeyDown={event => {
+            if (event.key === 'Escape') { setOpen(false); return; }
+            if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
+            event.preventDefault();
+            if (!open) { setOpen(true); setActiveIndex(Math.max(0, options.findIndex(option => option.id === selected))); return; }
+            if (event.key === 'ArrowDown') setActiveIndex(index => Math.min(options.length - 1, index + 1));
+            else if (event.key === 'ArrowUp') setActiveIndex(index => Math.max(0, index - 1));
+            else { const option = options[activeIndex]; setOpen(false); if (option) void apply(option.id); }
+          }}>{options.find(option => option.id === selected)?.label || options[0].label}</button>
+        {open && <ul className={styles.settingsPickerList} role="listbox" aria-labelledby={`${inputId}-label`} aria-activedescendant={`${inputId}-option-${activeIndex}`}>
+          {options.map((option, index) => <li key={option.id || 'default'} id={`${inputId}-option-${index}`} role="option" aria-selected={option.id === selected}
+            data-active={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => { setOpen(false); void apply(option.id); }}>
+            <span>{option.label}</span>
+            {option.item?.ownedByViewer && <span className={styles.settingsPickerRowActions}>
+              <button type="button" title="编辑这份设置" aria-label={`编辑 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending)}
+                onClick={event => { event.stopPropagation(); setOpen(false); void apply(option.id, true); }}><Pencil size={14} />编辑</button>
+              <button type="button" title="删除这份设置" aria-label={`删除 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending) || storageBlocked}
+                onClick={event => { event.stopPropagation(); const anchor = event.currentTarget; const target = option.item; setOpen(false); void manage('delete', anchor, target); }}><Trash2 size={14} />删除</button>
+            </span>}
+          </li>)}
+        </ul>}
+      </div>
       <div className={styles.settingsPickerActions}>
         <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value || Boolean(selected && !owned)} title={selected && !owned ? '共享设置由创建者维护，可另存为自己的设置' : undefined} onClick={event => void save(false, event.currentTarget)}><Save size={14} />保存设置</button>
         <ProductActionMenu label={`管理${label}`} disabled={busy} actions={[
