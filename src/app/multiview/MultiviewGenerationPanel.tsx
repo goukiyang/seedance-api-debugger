@@ -368,9 +368,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const item = result.settings;
     const sourceKey = propsRef.current.currentSourceKey;
     const nextPreset = parsePublicPresetState({ revision: item.revision, preset: result.preset });
-    if (item.kind !== 'generation' || !nextPreset) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
     const legacy = Boolean(result.legacyPresetVersion && result.legacyPresetVersion === item.value.presetVersion);
-    if (!legacy && item.value.presetVersion !== nextPreset.preset.version) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
+    if (item.kind !== 'generation' || !nextPreset || !legacy && item.value.presetVersion !== nextPreset.preset.version) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
     const previousKey = JSON.stringify(previous);
     const projectResponse = await fetch('/api/projects?lite=true', { headers: { 'x-app-session-user': scope.owner }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
     const projectPayload = await readJsonResponse<ApiError & { projects?: Project[] }>(projectResponse);
