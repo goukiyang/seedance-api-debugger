@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Copy, Download, Expand, Pencil, RefreshCw, Undo2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, Download, Expand, History, Images, Pencil, RefreshCw, Undo2, WandSparkles, X } from 'lucide-react';
 import { DndContext, KeyboardCode, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -1045,7 +1045,7 @@ function MultiviewPageContent() {
 
   return <div className={styles.page}>
     <PageBanner title="3D多视图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
-    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}>工作台</button><button type="button" aria-pressed={pageView === 'generations'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('generations'); }}>生成记录</button><button type="button" aria-pressed={pageView === 'works'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('works'); }}>我的作品</button></div>
+    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}><WandSparkles size={16} />工作台</button><button type="button" aria-pressed={pageView === 'generations'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('generations'); }}><History size={16} />生成记录{['submitting', 'submitted', 'unknown'].includes(generation.phase) && <span className={styles.tabBadge}>进行中</span>}</button><button type="button" aria-pressed={pageView === 'works'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('works'); }}><Images size={16} />我的作品</button></div>
     {pageView === 'generations' && <MultiviewGenerations owner={owner} authority={authority} currentPhase={generation.phase} currentTaskId={generation.taskId}
       onOpenTask={id => void selectTask(id)} onOpenWork={id => writeLocation('works', id)} onOpenDraft={() => writeLocation('editor', editingWorkId)} />}
     {pageView === 'works' && <MultiviewWorks owner={owner} authority={authority} initialWorkId={query.get('workId') || undefined}

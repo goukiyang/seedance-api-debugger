@@ -29,7 +29,8 @@ export function multiviewGenerationProgress(
   const result = (step: number | null, label: string, uncertain = false, failed = false) => ({ step, label, uncertain, failed, createdAt });
   if (phase === 'submitting') return result(0, '正在提交');
   if (phase === 'failed' || phase === 'closed' || ['failed', 'cancelled'].includes(task?.local_status || '')) return result(previous?.step ?? null, '本次生成未完成', false, true);
-  if (phase === 'unknown' || task?.submission_unconfirmed) return result(null, '提交结果待确认', true);
+  // Step 1 stays lit while the original request is checked; the system never resubmits it.
+  if (phase === 'unknown' || task?.submission_unconfirmed) return result(0, '正在确认是否提交成功', true);
   if (phase === 'video_ready') return { ...result(3, '视频已就绪'), videoReady: true };
   if (task?.local_status === 'succeeded') return result(3, '正在准备视频');
   const accepted = Boolean(task?.provider_task_id && task.provider_task_id !== task.id
@@ -37,5 +38,6 @@ export function multiviewGenerationProgress(
   const upstream = task?.provider_status?.toLowerCase();
   if (accepted && ['queued', 'pending', 'created'].includes(upstream || '')) return result(1, '等待生成');
   if (accepted && ['running', 'processing', 'in_progress'].includes(upstream || '')) return result(2, '视频生成中');
-  return result(previous?.step ?? null, '状态暂未确认', true);
+  // A server task id proves acceptance by this site, so step 1 is done even before upstream reports.
+  return previous ? result(previous.step, '状态暂未确认', true) : result(1, '已提交，等待生成');
 }

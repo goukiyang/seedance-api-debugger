@@ -61,7 +61,7 @@ type Association = { schema: 1; ownerId: string; requestId: string; workspaceTab
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
 type TaskStatus = ApiError & MultiviewTaskProgressInput;
 type Quote = { key: string; points: number; pricingRevision: string | null; pricingQuoteToken?: string };
-type RequestCheckOutcome = 'pending' | 'deferred' | 'stop';
+type RequestCheckOutcome = 'pending' | 'deferred' | 'stop' | 'close';
 type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
 const responseCode = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value);
@@ -255,12 +255,12 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [draft, setDraft] = useState<MultiviewGenerationDraft | null>(null);
   const [receipt, setReceipt] = useState<RequestReceipt | null>(null);
   const [taskProgress, setTaskProgress] = useState<{ key: string; value: MultiviewGenerationProgressState } | null>(null);
-  const [sections, setSections] = useState({ owner: '', advanced: false, card: false, create: false });
+  const [sections, setSections] = useState({ owner: '', advanced: false, card: false, create: false, dest: false });
   useEffect(() => {
-    const next = { owner, advanced: false, card: false, create: false };
+    const next = { owner, advanced: false, card: false, create: false, dest: false };
     try {
       const stored = JSON.parse(localStorage.getItem(`sd2:multiview:generation-sections:v1:${owner}`) || 'null');
-      if (stored && typeof stored === 'object') for (const key of ['advanced', 'card', 'create'] as const)
+      if (stored && typeof stored === 'object') for (const key of ['advanced', 'card', 'create', 'dest'] as const)
         if (typeof stored[key] === 'boolean') next[key] = stored[key];
     } catch { /* Display preferences never block restoring the actual draft. */ }
     setSections(next);
@@ -269,7 +269,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     if (!sessionReady || sections.owner !== owner) return;
     try { localStorage.setItem(`sd2:multiview:generation-sections:v1:${owner}`, JSON.stringify(sections)); } catch {}
   }, [owner, sections, sessionReady]);
-  function toggleSection(key: 'advanced' | 'card' | 'create', open: boolean) {
+  function toggleSection(key: 'advanced' | 'card' | 'create' | 'dest', open: boolean) {
     if (!sessionReady || sections.owner !== owner) return;
     setSections(current => current[key] === open ? current : { ...current, [key]: open });
   }
@@ -814,7 +814,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         }
         if (!payload.task?.id) {
           if (next.closeAttempted && ['pending', 'not_found'].includes(payload.lookup || '')) setCloseRetryKey(next.key);
-          setStatus(payload.lookup === 'pending' ? '原提交仍在核对中，尚未确认视频任务。' : '暂未查到原任务，尚不能确认是否受理。请保留原编号，按需查询原请求。');
+          // The server answered the submission with an error and has no record of this key: ask it to
+          // close the request. The server still refuses when any acceptance or charge record exists.
+          if (payload.lookup === 'not_found' && !next.closeAttempted && next.observation?.httpStatus && next.observation.httpStatus >= 400) return 'close';
+          setStatus(payload.lookup === 'pending' ? '正在确认是否提交成功…' : '暂未查到这次提交。可以在“详情”里结束这次再重新生成，不会重复扣点。');
           return payload.lookup === 'pending' ? 'pending' : 'stop';
         }
         if (!identifier(payload.task.id)) throw new Error('原任务编号无法确认。');
@@ -826,7 +829,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       if (!response.ok || task.id !== next.taskId || task.idempotency_key !== next.key) { if ([401, 403, 404].includes(response.status)) invalidateMedia(); throw new Error(task.message || task.error || '原任务状态或请求编号暂不可确认，已保留原记录。'); }
       setTaskProgress(previous => ({ key: next.key, value: multiviewGenerationProgress('submitted', task, previous?.key === next.key ? previous.value : null)! }));
       if (['failed', 'cancelled'].includes(task.local_status)) { saveReceipt({ ...next, phase: 'failed' }); setStatus(task.message || '原视频任务未完成，输入已保留。不会自动重新生成。'); void refreshCredits(); return 'stop'; }
-      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(multiviewGenerationProgress('submitted', task)!.label); return 'pending'; }
+      if (task.local_status !== 'succeeded' || task.submission_unconfirmed) { setStatus(''); return 'pending'; }
       setStatus('正在准备视频与选帧');
       const media = await fetch(`/api/video/multiview/${encodeURIComponent(next.taskId!)}`, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
       const result = await readJsonResponse<ApiError & { info?: { taskId: string; sourceVersion: string } }>(media);
@@ -857,11 +860,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     let cancelled = false; let timer: ReturnType<typeof setTimeout> | undefined; let pendingChecks = 0;
     const poll = async () => {
       const outcome = await checkRequest();
-      if (cancelled || outcome === 'stop' || !pendingActive(receiptRef.current)) return;
-      if (outcome === 'pending' && !receiptRef.current?.taskId && ++pendingChecks >= 12) {
-        setStatus('本次自动核对已暂停，原请求仍待确认。可继续查询原请求，不会重新提交。'); return;
-      }
-      timer = setTimeout(() => void poll(), 5000);
+      if (cancelled) return;
+      if (outcome === 'close') { void closeRef.current(); return; }
+      if (outcome === 'stop' || !pendingActive(receiptRef.current)) return;
+      // Keep checking in the background, slower after the first minute.
+      timer = setTimeout(() => void poll(), !receiptRef.current?.taskId && ++pendingChecks >= 12 ? 30000 : 5000);
     };
     void poll();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
@@ -869,18 +872,21 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const phase: MultiviewGenerationPhase = submitting ? 'submitting' : receipt?.phase === 'unknown' ? 'unknown'
     : receipt?.phase === 'accepted' ? 'submitted' : receipt?.phase === 'ready' ? 'video_ready'
       : receipt?.phase === 'closed' ? 'closed' : receipt?.phase === 'failed' || receipt?.phase === 'rejected' ? 'failed' : imageReady ? 'ready' : 'empty';
+  // The server proved this request was never accepted, so nothing was charged.
+  const notSubmitted = Boolean(receipt && !receipt.taskId && (receipt.phase === 'rejected' || receipt.phase === 'closed'));
   useEffect(() => {
     const confirmedProgress = taskProgress && receipt && taskProgress.key === receipt.key ? taskProgress.value : null;
     propsRef.current.onStateChange?.({
       phase: ready ? phase : 'empty',
       progress: ready ? phase === 'submitted' && confirmedProgress ? confirmedProgress
-        : multiviewGenerationProgress(phase, null, confirmedProgress) : null,
+        : notSubmitted ? { step: null, label: '没有提交成功，没有扣点', uncertain: false, failed: true }
+          : multiviewGenerationProgress(phase, null, confirmedProgress) : null,
       busy: ready && (working || submitting || closing || active),
       ...(ready && receipt?.taskId ? { taskId: receipt.taskId } : {}),
       unsaved: ready && draftEdited && !saved && JSON.stringify(draft) !== retainedDraft || requestStorageFailed || promptRisk.unsaved || settingsRisk.unsaved,
       leavingBusy: working || submitting || closing || Boolean(creating) || promptRisk.busy || settingsRisk.busy,
     });
-  }, [ready, phase, working, submitting, closing, active, receipt?.taskId, receipt?.key, taskProgress, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
+  }, [ready, phase, notSubmitted, working, submitting, closing, active, receipt?.taskId, receipt?.key, taskProgress, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
 
   async function generate() {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState
@@ -936,17 +942,18 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         saveReceipt(pending); setStatus(''); return;
       }
       if (!identifier(result.id)) throw new Error('提交结果待确认，原请求编号已保留。');
-      saveReceipt({ ...pending, taskId: result.id, phase: 'accepted' }); setStatus('原视频任务已受理，正在查询成品。'); void refreshCredits();
+      saveReceipt({ ...pending, taskId: result.id, phase: 'accepted' }); setStatus(''); void refreshCredits();
     } catch (cause) {
       if (current(scope)) {
         if (storedBeforeSubmission && pending && receiptRef.current && receiptRef.current.key === pending.key && pendingActive(receiptRef.current)) {
           saveReceipt({ ...receiptRef.current, observation: responseObservation(submissionHttpStatus) });
-          setStatus('提交结果尚未确认，请查询原任务，不会自动再次提交。');
+          setStatus('');
         }
         else setError(message(cause, '尚未提交，请检查输入。'));
       }
     } finally { if (submitLock.current === token) { submitLock.current = null; setSubmitting(false); } }
   }
+  const closeRef = useRef(closeOriginalRequest); closeRef.current = closeOriginalRequest;
   async function closeOriginalRequest() {
     const previous = receiptRef.current;
     if (!ready || !allowed || !previous || previous.phase !== 'unknown' || previous.taskId || previous.closeAttempted && closeRetryKey !== previous.key
@@ -987,12 +994,12 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       }
       const closeObservation = responseObservation(response.status, result);
       saveReceipt({ ...original, closeObservation });
-      setStatus(`尚未确认结束：${shortReason(closeObservation.message)} 请先查询原请求，仍无法结束时可再次核对或联系管理员。`);
+      setStatus(`暂时还不能确认这次提交的结果：${shortReason(closeObservation.message)} 系统会继续确认，不会重复扣点。`);
     } catch (cause) {
       if (requestCurrent()) {
         if (attempted) {
           saveReceipt({ ...receiptRef.current!, closeObservation: responseObservation(null, { message: '服务未返回可确认的结束结果，请先查询原请求。' }) });
-          setStatus('核对结束的结果尚未确认，请先查询原请求；不会自动再次发送结束操作，也不会生成视频。');
+          setStatus('暂时还不能确认这次提交的结果，系统会继续确认，不会重复扣点。');
         } else setStatus(message(cause, '原记录尚未保存，未发送结束操作。'));
       }
     } finally { if (closeLock.current === token) { closeLock.current = null; setClosing(false); } }
@@ -1057,10 +1064,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !seedValid;
   const sameReady = Boolean(receipt?.phase === 'ready' && receipt.taskId && receipt.taskId === props.currentTaskId);
   const quietReady = sameReady && !props.expanded && !error && !status && saved && !requestStorageFailed && !accountRequestBlocked && !recoveryBlocked;
-  const requestSummary = receipt?.phase === 'rejected' && receipt.rejection
-    ? `未开始生成：${shortReason(receipt.rejection.message)} 请调整当前设置后再主动生成。`
-    : receipt?.phase === 'closed' && receipt.closure ? '本次提交已结束，未开始生成。材料与设置已保留，可主动生成新的请求。'
-      : receipt?.phase === 'unknown' ? `提交结果待确认。${receipt.observation ? `上次反馈：${shortReason(receipt.observation.message)}` : '原提交反馈未保存，尚不能确认是否受理。'}` : '';
+  const notSubmittedReason = receipt?.rejection?.message || receipt?.observation?.message;
+  const requestSummary = notSubmitted
+    ? `没有提交成功，没有扣点。${notSubmittedReason ? `原因：${shortReason(notSubmittedReason)} ` : ''}图片和设置已保留，可以直接重新生成。`
+    : receipt?.phase === 'unknown' ? '正在确认是否提交成功，系统会自动确认，不会重复扣点。' : '';
+  const admin = user.role === 'admin';
   return <section className={styles.panel} aria-label="原图与生成设置" onPaste={event => {
     const images = Array.from(event.clipboardData.files).filter(item => item.type.startsWith('image/'));
     if (!images.length || formDisabled) return;
@@ -1119,7 +1127,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <div className={styles.checks}>{(['generateAudio', 'returnLastFrame', 'watermark'] as const).map((key, index) => <label key={key}><input type="checkbox" checked={draft[key]} disabled={formDisabled} onChange={event => change({ [key]: event.target.checked })} />{['生成声音', '返回末帧', '水印'][index]}</label>)}</div>
           <button type="button" disabled={formDisabled || !presetState} onClick={() => { const defaults = presetState?.preset.defaults; if (!defaults) return; change({ ...defaults, presetVersion: presetState.preset.version, settingsBinding: undefined, resolutionApprovalConfirmed: false, resolutionApprovalId: '' }); }}>恢复模板参数</button>
         </details>
-        <div className={styles.destination}>
+        <details className={styles.destination} open={!currentProject || cardSelectionInvalid || sections.owner === owner && sections.dest} onToggle={event => toggleSection('dest', event.currentTarget.open)}>
+          <summary>保存到：{currentProject ? currentProject.name : '请选择项目'} · {currentCard ? currentCard.title : '不关联视频卡'}</summary>
           <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <details open={cardSelectionInvalid || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
             <summary>关联视频卡（可选）{currentCard ? `：${currentCard.title}` : ''}</summary>
@@ -1129,10 +1138,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setRevision(value => value + 1)}><RefreshCw size={13} />刷新列表</button>
           <details open={sections.owner === owner && sections.create} onToggle={event => toggleSection('create', event.currentTarget.open)}><summary>新建项目或视频卡</summary><div className={styles.createRow}><input aria-label="新项目名称" value={projectName} maxLength={80} placeholder="新项目名称" disabled={formDisabled || Boolean(projectCreate.pending)} onChange={event => setProjectName(event.target.value)} /><button type="button" disabled={formDisabled || !projectName.trim() || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)} onClick={() => void createDestination('project')}>新建项目</button></div>
             <div className={styles.createRow}><input aria-label="新视频卡标题" value={cardTitle} maxLength={100} placeholder="新视频卡标题" disabled={formDisabled} onChange={event => setCardTitle(event.target.value)} /><button type="button" disabled={formDisabled || !currentProject || !cardTitle.trim()} onClick={() => void createDestination('card')}>新建视频卡</button></div></details>
-        </div>
+        </details>
         {needsApproval && !creation.context?.v2Available && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
         {needsApproval && !creation.context?.v2Available && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
-        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '提交结果待确认' : receipt?.phase === 'accepted' ? '视频任务已记录' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
+        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '正在确认提交…' : receipt?.phase === 'accepted' ? '已提交，生成中' : notSubmitted ? '重新生成' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
     </div>}
@@ -1142,30 +1151,31 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       {error && <p role="status">{error}</p>}{status && !sameReady && <p role="status">{status}</p>}
       {!saved && <p role="status">{saveNotice || '本次修改无法保存在此设备，刷新可能丢失输入。'}</p>}
       {requestStorageFailed && <p role="status">原任务已保留在当前页面，但最新查询记录无法保存到此设备。请保留任务编号后再离开。</p>}
-      {receipt && !sameReady && <div className={styles.requestActions}><a href={receipt.taskId ? `/tasks/${encodeURIComponent(receipt.taskId)}` : '/tasks'} target="_blank" rel="noreferrer">{receipt.taskId ? '查看原视频任务' : '核对任务列表'}</a>
-        {receipt.phase !== 'ready' && <button type="button" disabled={checking || submitting || closing} onClick={() => void checkRequest()}>{checking ? '正在查询…' : '查询原请求'}</button>}
-        {receipt.phase === 'unknown' && !receipt.taskId && (!receipt.closeAttempted || closeRetryKey === receipt.key || closing) && <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => void closeOriginalRequest()}>{closing ? '正在核对结束…' : '核对并结束本次提交'}</button>}
-        {receipt.phase === 'ready' && receipt.taskId && <button type="button" onClick={() => { if (current(capture())) props.onReady({ taskId: receipt.taskId!, requestKey: receipt.key, ownerId: owner, startedFromSourceKey: receipt.startedFromSourceKey, explicitOpen: true }); }}>打开新结果</button>}</div>}
-      {receipt && (receipt.observation || receipt.closeObservation || receipt.rejection || receipt.closure) && <details>
-        <summary>查看原提交记录</summary>
+      {receipt?.phase === 'ready' && receipt.taskId && !sameReady && <div className={styles.requestActions}><button type="button" onClick={() => { if (current(capture())) props.onReady({ taskId: receipt.taskId!, requestKey: receipt.key, ownerId: owner, startedFromSourceKey: receipt.startedFromSourceKey, explicitOpen: true }); }}>打开新结果</button></div>}
+      {receipt && !sameReady && <details className={styles.requestDetails}>
+        <summary>详情</summary>
+        <div className={styles.requestActions}>{receipt.taskId ? <a href={`/tasks/${encodeURIComponent(receipt.taskId)}`} target="_blank" rel="noreferrer">查看视频任务</a> : admin && <a href="/tasks" target="_blank" rel="noreferrer">任务列表</a>}
+          {receipt.phase !== 'ready' && pendingActive(receipt) && <button type="button" disabled={checking || submitting || closing} onClick={() => void checkRequest()}>{checking ? '正在确认…' : '立即确认'}</button>}
+          {receipt.phase === 'unknown' && !receipt.taskId && (!receipt.closeAttempted || closeRetryKey === receipt.key || closing) && <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => void closeOriginalRequest()}>{closing ? '正在结束…' : '结束这次，重新开始'}</button>}</div>
+        <p>请求编号：{receipt.taskId || receipt.key}</p>
         {receipt.observation && <p>上次提交反馈{receipt.observation.httpStatus ? `（HTTP ${receipt.observation.httpStatus}）` : ''}：{receipt.observation.message}</p>}
         {receipt.closeObservation && <p>上次核对结束反馈：{receipt.closeObservation.message}</p>}
         {receipt.rejection && <p>服务器已确认未开始生成：{receipt.rejection.message}</p>}
-        {receipt.closure && <p>{receipt.closure.message} 结束本次提交不代表已查明原提交失败的具体原因。</p>}
+        {receipt.closure && <p>{receipt.closure.message}</p>}
       </details>}
-      <details className={styles.requestHistory} open={accountRequestBlocked}>
-        <summary>本账号原请求{requestScan.records.some(pendingActive) ? '（仍有待确认）' : ''}</summary>
-        {(requestScan.invalid || requestScan.incomplete) && <p role="status">本机原请求记录未能完整确认，未列出的记录不代表不存在；新生成暂不放行。</p>}
+      {(admin || accountRequestBlocked) && <details className={styles.requestHistory} open={accountRequestBlocked && !active}>
+        <summary>{requestScan.records.some(pendingActive) ? '还有提交在确认中' : '本账号提交记录'}</summary>
+        {(requestScan.invalid || requestScan.incomplete) && <p role="status">本机的提交记录没有读全，为避免重复扣点，暂时不能新建生成。可以点“刷新”。</p>}
         {requestScan.records.slice(historyPage * 8, historyPage * 8 + 8).map(record => <div className={styles.historyRow} key={record.key}>
-          <span>{record.taskId ? `任务 ${record.taskId}` : `请求 ${record.key}`} · {record.phase === 'unknown' ? '提交结果待确认' : record.phase === 'accepted' ? '任务已记录' : record.phase === 'rejected' ? '未开始生成' : record.phase === 'closed' ? '本次提交已结束' : record.phase === 'ready' ? '视频可查询' : '原任务已结束'}</span>
-          <button type="button" disabled={formDisabled || !pendingActive(record) && record.key === receipt?.key} onClick={() => chooseOriginalRequest(record)}>查询原记录</button>
+          <span>{record.taskId ? `任务 ${record.taskId}` : `请求 ${record.key}`} · {record.phase === 'unknown' ? '确认中' : record.phase === 'accepted' ? '生成中' : record.phase === 'rejected' || record.phase === 'closed' ? '没有提交成功' : record.phase === 'ready' ? '视频已生成' : '已结束'}</span>
+          <button type="button" disabled={formDisabled || !pendingActive(record) && record.key === receipt?.key} onClick={() => chooseOriginalRequest(record)}>切换到这次</button>
         </div>)}
         <div className={styles.requestActions}><button type="button" disabled={historyPage === 0} onClick={() => setHistoryPage(value => value - 1)}>上一页</button>
-          <span>第 {historyPage + 1} 页 · 已读取 {requestScan.records.length} 条原记录</span>
+          <span>第 {historyPage + 1} 页 · 共 {requestScan.records.length} 条</span>
           <button type="button" disabled={(historyPage + 1) * 8 >= requestScan.records.length} onClick={() => setHistoryPage(value => value + 1)}>下一页</button>
-          <button type="button" onClick={() => refreshRequests()}>重新核对记录</button>
+          <button type="button" onClick={() => refreshRequests()}>刷新</button>
           {requestScan.next !== null && <button type="button" onClick={() => refreshRequests(requestScan.next!)}>继续读取未列记录</button>}</div>
-      </details>
+      </details>}
     </footer>}
     <CreationAvailability controller={creation} onBaselineChange={id => { setCreationBaselineId(id); if (creation.intent && creationDraftBody.current) void creation.prepare({ ...creationDraftBody.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(message(cause, '基准更新未确认，输入已保留'))); }} />
     {pickerOpen && <UploadedImagePicker open imageOnly target="workspace" title="选择视频主图" purpose="multiview-main-image" contextKey={`${owner}:multiview:${sessionTab}:main-image`} maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} onClose={() => setPickerOpen(false)}

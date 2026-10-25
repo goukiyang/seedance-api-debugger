@@ -22,10 +22,10 @@ export function MultiviewGenerationProgress({ state, taskId, previewReady, prepa
     <Check size={14} /><span>{step === 4 ? '视频已就绪，可以选帧' : '视频已就绪'}</span>
     {taskId && <a href={`/tasks/${encodeURIComponent(taskId)}`} target="_blank" rel="noreferrer">详情</a>}
   </section>;
-  return <section className={styles.progress} aria-label="本次生成">
+  return <section className={styles.progress} aria-label="本次生成" data-failed={state.failed || undefined}>
     <div className={styles.progressHeading}><strong>{label}</strong>
       {elapsed !== null && !state.videoReady && step !== 4 && !state.failed && <small>提交后已用时 {Math.floor(elapsed / 60)}分{elapsed % 60}秒</small>}
-      {state.uncertain && step !== 4 && <small>上次确认的阶段保留，继续查询原请求</small>}
+      {state.uncertain && step !== 4 && <small>系统会自动确认，不会重复扣点</small>}
     </div>
     <ol className={styles.progressSteps}>{['提交', '等待生成', '生成视频', '准备选帧', '可以选帧'].map((text, index) =>
       <li key={text} data-done={step !== null && index < step || undefined} aria-current={step === index ? 'step' : undefined}>

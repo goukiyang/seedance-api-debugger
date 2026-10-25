@@ -50,7 +50,8 @@
 .panel textarea { resize: vertical; width: 100%; min-height: 88px; padding: 10px; line-height: 1.55; }
 .supplement { gap: 8px; }
 .advanced, .destination { border-top: 1px solid var(--border-color, #d8dee5); padding-top: 10px; font-size: 13px; }
-.advanced > :not(summary), .destination details > :not(summary) { margin-top: 12px; }
+.advanced > :not(summary), .destination > :not(summary), .destination details > :not(summary) { margin-top: 12px; }
+.destination > summary { cursor: pointer; }
 .advanced > button { margin-top: 10px; }
 .checks { display: flex; flex-wrap: wrap; gap: 14px; }
 .panel .checks label { flex-direction: row; align-items: center; }
@@ -72,6 +73,9 @@
 .footer p + p { margin-top: 6px; }
 .requestActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 .requestHistory { margin-top: 12px; font-size: 12px; }
+.requestDetails { margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+.requestDetails summary { cursor: pointer; }
+.requestDetails p { margin: 8px 0 0; word-break: break-all; }
 .historyRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .historyRow > span { min-width: 0; overflow-wrap: anywhere; }
 .historyRow > button { flex-shrink: 0; }
@@ -90,6 +94,12 @@
 .progressSteps li > span { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border-color); border-radius: 50%; box-sizing: border-box; }
 .progressSteps li[aria-current], .progressSteps li[data-done] { color: var(--primary); }
 .progressSteps li[aria-current] > span, .progressSteps li[data-done] > span { border-color: currentColor; }
+/* The current step is filled so a just-submitted request is visibly lit. */
+.progressSteps li[aria-current] > span { color: #fff; background: var(--primary); animation: progressPulse 1.6s ease-in-out infinite; }
+.progressSteps li[aria-current] { font-weight: 650; }
+.progress[data-failed] .progressHeading strong { color: var(--tone-danger-text, #dc2626); }
+@keyframes progressPulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 25%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .progressSteps li[aria-current] > span { animation: none; } }
 .progress > a { font-size: 12px; flex-shrink: 0; color: var(--text-primary); }
 @media (max-width: 650px) {
   .progress { flex-wrap: wrap; gap: 12px; }
