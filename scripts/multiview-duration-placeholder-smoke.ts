@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { renderMultiviewDurationPlaceholders as render } from '../src/lib/video/multiview-generation-contract';
 
 const t = '前{{前段}}秒转身，后{{后段}}秒回正，共{{时长}}秒。';
+assert.equal(render(t, 4), '前2秒转身，后2秒回正，共4秒。');
 assert.equal(render(t, 8), '前4秒转身，后4秒回正，共8秒。');
 assert.equal(render(t, 9), '前4.5秒转身，后4.5秒回正，共9秒。');
 assert.equal(render(t, 15), '前7.5秒转身，后7.5秒回正，共15秒。');

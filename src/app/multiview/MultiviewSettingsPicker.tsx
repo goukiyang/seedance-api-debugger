@@ -318,6 +318,7 @@ function MultiviewSettingsPickerContent(props: Props) {
         body: JSON.stringify({ expectedRevision: fresh.revision, ...(props.kind === 'frame' ? { target: props.target } : {}) }), signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(checked); if (!current(scope)) return;
       const applied = object(payload) ? record(payload.settings, props.kind) : null;
+      if (!checked.ok && object(payload) && payload.code === 'MULTIVIEW_PRESET_LEGACY' && typeof payload.error === 'string') throw new Error(payload.error);
       if (!checked.ok || !applied || applied.id !== id || applied.revision !== fresh.revision) throw new Error('设置已变化或暂不可用，当前输入保留；请刷新后重新选用。');
       if (live.current.disabled || targetKey !== JSON.stringify(live.current.target || null) || valueKey !== JSON.stringify(valueRef.current)) throw new Error('当前工作现场已变化，请重新选用设置。');
       const result: MultiviewSettingsPickerApplyResult = { settings: applied };

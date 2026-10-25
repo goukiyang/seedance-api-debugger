@@ -611,7 +611,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         const value = binding ? boundSettings?.id === binding.id && boundSettings.revision === binding.revision && boundSettings.kind === 'generation'
           && boundSettings.value.presetVersion === draftRef.current?.presetVersion
           ? parsePublicPresetState({ revision: binding.revision, preset: bound?.preset }) : null : parsePublicPresetState(payload);
-        if (!response.ok || !value) throw new Error('模板暂不可读取，请重试；当前图片和补充要求已保留。');
+        if (!response.ok || !value) throw new Error(typeof bound?.error === 'string' && bound.code === 'MULTIVIEW_PRESET_LEGACY' ? bound.error : '模板暂不可读取，请重试；当前图片和补充要求已保留。');
         const scanned = refreshRequests();
         if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) return;
         setPresetState(value);
@@ -1160,7 +1160,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     <CreationAvailability controller={creation} onBaselineChange={id => { setCreationBaselineId(id); if (creation.intent && creationDraftBody.current) void creation.prepare({ ...creationDraftBody.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(message(cause, '基准更新未确认，输入已保留'))); }} />
     {pickerOpen && <UploadedImagePicker open imageOnly target="workspace" title="选择视频主图" purpose="multiview-main-image" contextKey={`${owner}:multiview:${sessionTab}:main-image`} maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} onClose={() => setPickerOpen(false)}
       onUploadFile={(file, onProgress) => current(capture()) ? uploadFileToHistory(file, { ownerId: owner, onProgress }) : Promise.reject(new Error('当前账号尚未确认，未上传素材。'))} onConfirm={async () => ({ success: false, message: '请选择一张主图。' })} onConfirmSelection={selectItem} />}
-    {user.role === 'admin' && <MultiviewPromptDialog open={promptOpen} authorityKey={authorityKey} ownerId={owner} onClose={() => { setPromptOpen(false); setPresetRefresh(count => count + 1); }} onStateChange={setPromptRisk} onSaved={() => {
+    {user.role === 'admin' && <MultiviewPromptDialog open={promptOpen} authorityKey={authorityKey} ownerId={owner} duration={draft?.duration} onClose={() => { setPromptOpen(false); setPresetRefresh(count => count + 1); }} onStateChange={setPromptRisk} onSaved={() => {
       if (!current(capture())) return;
       // A saved mutation may be historical; only a fresh current read can select the next preset.
       setPresetState(null); setPresetError(''); setQuote(null);

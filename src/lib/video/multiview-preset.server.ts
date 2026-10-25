@@ -83,6 +83,9 @@ export async function readMultiviewRotationPresetVersion(version: string, db: Db
   if (!isMultiviewPresetVersion(version)) throw changed();
   const row = await db.platformSetting.findUnique({ where: { key: VERSION_KEY_PREFIX + version }, select: { value_json: true } });
   if (!row) throw changed();
+  // Versions saved before defaults/composition reference existed cannot generate; say so instead of a retryable 503.
+  const legacy = (() => { try { const p = JSON.parse(row.value_json)?.preset; return record(p) && only(p, ['id', 'version', 'prompt']); } catch { return false; } })();
+  if (legacy) throw new MultiviewPresetError(`这份设置基于旧版模板 ${version} 保存，旧模板缺少当前生成所需的默认参数和构图参考，不能直接使用；请改用当前模板，需要时重新保存设置。原输入已保留。`, 409, 'MULTIVIEW_PRESET_LEGACY');
   const state = parseState(row.value_json);
   if (state.preset.version !== version) throw unreadable();
   return state.preset;

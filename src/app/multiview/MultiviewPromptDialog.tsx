@@ -8,7 +8,7 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { MAX_GENERATION_PROMPT_CHARS } from '@/lib/prompt/limits';
-import { isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_REFERENCE_PROMPT_PREFIX,
+import { isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_REFERENCE_PROMPT_PREFIX, renderMultiviewDurationPlaceholders,
   type MultiviewRotationPresetState } from '@/lib/video/multiview-generation-contract';
 import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
@@ -42,7 +42,7 @@ export function parsePresetState(value: unknown): MultiviewRotationPresetState |
       ownerId: reference.ownerId as string, sha256: reference.sha256 } } };
 }
 
-type Props = { open: boolean; ownerId: string; authorityKey: string; onClose: () => void | boolean;
+type Props = { open: boolean; ownerId: string; authorityKey: string; duration?: number; onClose: () => void | boolean;
   onSaved: (state: MultiviewRotationPresetState) => void; onStateChange: (value: { unsaved: boolean; busy: boolean }) => void };
 const mutationPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -170,7 +170,10 @@ export function MultiviewPromptDialog(props: Props) {
     <form onSubmit={event => { event.preventDefault(); void save(); }} aria-busy={loading || saving}>
       <header className={dialogStyles.header}><h2 id={title}>模板提示词</h2><button type="button" className={dialogStyles.close} disabled={loading || saving} onClick={dismiss} aria-label="关闭模板提示词"><X size={18} /></button></header>
       <p className={dialogStyles.message}>保存后用于后续新任务，不改变已提交任务；个人补充要求会保留。可写 {'{{前段}}'}、{'{{后段}}'}、{'{{时长}}'}，提交时按所选时长换成秒数（前后各一半）。</p>
-      {state && (editing ? <textarea ref={textarea} className={dialogStyles.input} rows={9} value={value} disabled={saving || Boolean(pending)} aria-label="模板提示词" onChange={event => setValue(event.target.value)} /> : <p className={styles.promptText}>{state.preset.prompt}</p>)}
+      {state && (editing ? <textarea ref={textarea} className={dialogStyles.input} rows={9} value={value} disabled={saving || Boolean(pending)} aria-label="模板提示词" onChange={event => setValue(event.target.value)} /> : <p className={styles.promptText}>{props.duration === undefined ? state.preset.prompt : renderMultiviewDurationPlaceholders(state.preset.prompt, props.duration)}</p>)}
+      {state && props.duration !== undefined && /\{\{(前段|后段|时长)\}\}/.test(editing ? value : state.preset.prompt) && <>
+        <p className={dialogStyles.message}>{editing ? `按当前 ${props.duration} 秒发送：` : `以上按当前 ${props.duration} 秒显示，与提交内容一致。`}</p>
+        {editing && <p className={styles.promptText}>{renderMultiviewDurationPlaceholders(value, props.duration)}</p>}</>}
       {!state && <p className={dialogStyles.message} role="status">{loading ? '正在读取模板提示词…' : '模板提示词尚未读取。'}</p>}
       {editing && !valid && <p className={dialogStyles.message} role="status">提示词不能为空，含素材说明最多 {MAX_GENERATION_PROMPT_CHARS} 字；输入未截断。</p>}
       {pending && !saving && <p className={dialogStyles.message} role="status">上次保存结果待确认，请查询原保存；不会自动再次保存。</p>}
