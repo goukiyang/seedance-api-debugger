@@ -1038,8 +1038,13 @@ export async function POST(request: NextRequest) {
       if (error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
     }
-    const composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe, duration);
+    let composed = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe, duration);
     if (!composed.valid) return errorJson(composed.error || '完整旋转文案无效', 400);
+    if (trustedMultiviewSourceTask && trustedMultiviewSourceTask.final_prompt_snapshot !== composed.prompt) {
+      // Tasks frozen before the automatic timing clause retry with their original wording.
+      const legacy = composeMultiviewGenerationPrompt(multiviewGeneration.supplement, multiviewGeneration.presetVersion, multiviewRecipe, duration, false);
+      if (legacy.valid && trustedMultiviewSourceTask.final_prompt_snapshot === legacy.prompt) composed = legacy;
+    }
     if (trustedMultiviewSourceTask && (trustedMultiviewSourceTask.prompt !== composed.prompt.trim()
       || trustedMultiviewSourceTask.final_prompt_snapshot !== composed.prompt)) {
       return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_UNAVAILABLE',

@@ -125,18 +125,32 @@ export function renderMultiviewDurationPlaceholders(template: string, duration: 
   return template.replaceAll('{{时长}}', String(duration)).replaceAll('{{前段}}', String(first)).replaceAll('{{后段}}', String(second));
 }
 
-/** Without a duration (template checks), placeholders stay as written; they are longer than any rendered value. */
+// Timing is owned by the program: appended from the chosen duration whatever the template says.
+export function multiviewTimingClause(duration: number): string {
+  const first = Math.round(duration) / 2;
+  return `【时长控制】视频总时长${duration}秒：第0–${first}秒完成第一段动作，第${first}–${duration}秒完成第二段动作；`
+    + `每段在各自时段内匀速完成，第${duration}秒正好结束。以本段时间为准，忽略上文中与之冲突的秒数。`;
+}
+export function applyMultiviewDuration(template: string, duration: number): string {
+  return renderMultiviewDurationPlaceholders(template, duration) + '\n\n' + multiviewTimingClause(duration);
+}
+// Checks without a duration reserve the longest clause (odd two-digit durations print e.g. 14.5).
+const TIMING_RESERVE = 2 + multiviewTimingClause(29).length;
+
+/** Without a duration (template checks), placeholders stay as written and the timing clause is only reserved.
+ * autoTiming=false reproduces prompts frozen before the clause existed (trusted retries only). */
 export function composeMultiviewGenerationPrompt(supplement: string, presetVersion: string = MULTIVIEW_ROTATION_PRESET.version,
-  preset?: MultiviewRotationPreset, duration?: number): {
+  preset?: MultiviewRotationPreset, duration?: number, autoTiming = true): {
   prompt: string; characters: number; remainingCharacters: number; valid: boolean; error: string | null;
 } {
   if (typeof supplement !== 'string' || !preset || !isMultiviewPresetVersion(presetVersion) || presetVersion !== preset.version
     || preset.id !== MULTIVIEW_ROTATION_PRESET.id || typeof preset.prompt !== 'string' || !preset.prompt.trim()) {
     return { prompt: '', characters: 0, remainingCharacters: 0, valid: false, error: '模板提示词暂时无法确认，原输入已保留；请重新读取模板后再生成' };
   }
-  const template = duration === undefined ? preset.prompt : renderMultiviewDurationPlaceholders(preset.prompt, duration);
+  const template = duration === undefined ? preset.prompt
+    : autoTiming ? applyMultiviewDuration(preset.prompt, duration) : renderMultiviewDurationPlaceholders(preset.prompt, duration);
   const prompt = template + (supplement.length ? SUPPLEMENT_SEPARATOR + supplement : '');
-  const characters = MULTIVIEW_REFERENCE_PROMPT_PREFIX.length + prompt.length;
+  const characters = MULTIVIEW_REFERENCE_PROMPT_PREFIX.length + prompt.length + (duration === undefined ? TIMING_RESERVE : 0);
   // Reserve the separator before the first supplementary character is entered.
   const remainingCharacters = MAX_GENERATION_PROMPT_CHARS - characters - (supplement.length ? 0 : SUPPLEMENT_SEPARATOR.length);
   return { prompt, characters, remainingCharacters, valid: characters <= MAX_GENERATION_PROMPT_CHARS,
