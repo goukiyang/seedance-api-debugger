@@ -1127,6 +1127,25 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   useEffect(() => {
     if (!coverView && active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
   }, [active, navigation, modules, hydrateModules, coverView]);
+  // A restored shared entry is only highlighted until opened. Recover it once without creating a workspace
+  // (explicitSelection stays false, so the server only reuses an existing one and otherwise reports it).
+  const autoOpenedShared = useRef('');
+  useEffect(() => {
+    if (coverView || !viewRestored || sharedOpening || !active || modules.some(item => item.id === active)) return;
+    const entry = navigation.find(item => item.id === active);
+    if (!entry?.presetId || autoOpenedShared.current === `${userId}:${active}`) return;
+    autoOpenedShared.current = `${userId}:${active}`;
+    void openSharedPreset(entry.presetId, { recordUse: false, markViewed: false });
+  }, [coverView, viewRestored, sharedOpening, active, modules, navigation, userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On first restore, show the group that holds the restored module; later group clicks are left alone.
+  const initialGroupAligned = useRef('');
+  useEffect(() => {
+    if (!viewRestored || coverView || !active || !navigation.length || initialGroupAligned.current === viewStorageKey) return;
+    const entry = navigation.find(item => item.id === active);
+    if (!entry) return;
+    initialGroupAligned.current = viewStorageKey;
+    if ((entry.groupName || '未分组') !== selectedGroup) setSelectedGroup(entry.groupName || '未分组');
+  }, [viewRestored, coverView, active, navigation, selectedGroup, viewStorageKey]);
   useEffect(() => {
     if (!coverView || gallery.scope !== 'mine' || !shared.catalogReady
       || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision) return;
@@ -1441,6 +1460,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       onReloadSettings={discard => { void globalEditor.controller.load(discard); }} />)}
     {(loading || hydrating) && <p role="status">正在读取模块…</p>}
+    {!coverView && !loading && !hydrating && !sharedOpening && !error && visibleModules.length === 0 && (groupedModules[selectedGroup] || []).length > 0
+      && <p role="status" className={styles.muted}>这个分组的模块还没有在你的工作区打开，请点击左侧模块名打开；已有结果和输入不受影响。</p>}
     {missingGroupModules.length > 0 && <button disabled={hydrating} onClick={() => void hydrateModules(missingGroupModules.slice(0, 12).map(item => item.id))}>加载更多模块（{missingGroupModules.length}）</button>}
     {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
     </div>

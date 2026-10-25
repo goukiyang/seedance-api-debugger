@@ -1,6 +1,6 @@
 import packageInfo from '../../package.json';
 export const release = { version: packageInfo.version, channel: 'production',
-  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看与上传；窄屏也显示版本号；3D多视图模板可按所选时长分配前后段动作，模板预览与提交一致；旧版模板设置给出明确提示；生图设置与模板读取遇到数据库短暂繁忙时自动重试，并减少对数据库写锁的占用；开放新的视频创作、画布批量视频、3D多视图生成和费率设置。' };
+  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看与上传；窄屏也显示版本号；3D多视图模板可按所选时长分配前后段动作，模板预览与提交一致；旧版模板设置给出明确提示；生图设置与模板读取遇到数据库短暂繁忙时自动重试，并减少对数据库写锁的占用；进入模板工作台时直接显示上次选中的模块，不再需要刷新；开放新的视频创作、画布批量视频、3D多视图生成和费率设置。' };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.
