@@ -1175,7 +1175,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           <div className={styles.checks}>{(['generateAudio', 'returnLastFrame', 'watermark'] as const).map((key, index) => <label key={key}><input type="checkbox" checked={draft[key]} disabled={formDisabled} onChange={event => change({ [key]: event.target.checked })} />{['生成声音', '返回末帧', '水印'][index]}</label>)}</div>
           <button type="button" disabled={formDisabled || !presetState} onClick={() => { const defaults = presetState?.preset.defaults; if (!defaults) return; change({ ...defaults, presetVersion: presetState.preset.version, settingsBinding: undefined, resolutionApprovalConfirmed: false, resolutionApprovalId: '' }); }}>恢复模板参数</button>
         </details>
-        <details className={styles.destination} open={!currentProject || cardSelectionInvalid || sections.owner === owner && sections.dest} onToggle={event => toggleSection('dest', event.currentTarget.open)}>
+        <details className={styles.destination} open={!currentProject || cardSelectionInvalid || sections.owner === owner && sections.dest} onToggle={event => {
+          // An automatic open (no project yet / invalid card) is not the user's preference.
+          if (currentProject && !cardSelectionInvalid) toggleSection('dest', event.currentTarget.open);
+        }}>
           <summary>保存到：{currentProject ? currentProject.name : '请选择项目'} · {currentCard ? currentCard.title : '不关联视频卡'}</summary>
           <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <details open={cardSelectionInvalid || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
