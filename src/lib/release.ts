@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '可以更换头像了', outline: [
-  '点个人信息里的头像即可上传、裁切并更换',
-  '可随时恢复为飞书头像或默认首字母',
-  '模块横幅可拖动缩放裁切，按原图生成',
+const notice = { title: '选图和上传统一', outline: [
+  '3D多视图和更换头像都改用与生图模板相同的选图窗口',
+  '可直接从素材库挑图，也能在同一个窗口里上传',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

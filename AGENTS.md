@@ -313,3 +313,7 @@
 ## 发版更新提示（2026-10-25 用户规则）
 
 - 网站上的新版本更新提示只写一个更新标题和 2–4 条用户语言的大纲，不写详细更新内容；文案在 `src/lib/release.ts` 的 `title` / `outline`。
+
+## 选图与上传统一（2026-10-25 用户规则）
+
+- 新增或修改任何“添加图片 / 选择素材 / 上传文件”的入口，必须复用 `src/components/ResourceLibraryPicker.tsx`（`UploadedImagePicker`），不另写选图或上传组件；需要裁切的，在选完图后接同一个 react-easy-crop 裁切步骤。例外与迁移进度见 `tasks/todo/2026-10-25-unified-picker.md`。

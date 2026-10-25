@@ -1853,7 +1853,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const fileInput = useRef<HTMLInputElement>(null);
   const auxiliaryFileInput = useRef<HTMLInputElement>(null);
   const fixedFileInput = useRef<HTMLInputElement>(null);
-  const bannerFileInput = useRef<HTMLInputElement>(null);
   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
   const draftKey = `sd2-image-studio-draft:${suffix}`;
   const defaultsRecoveryKey = `${draftKey}:before-defaults`;
@@ -3908,7 +3907,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块横幅' : '移除模块横幅'}><X size={16} /></button></>}
       </> : definitionReady ? <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块横幅' : '添加模块横幅'}</button> : <span className={styles.bannerEmpty}>暂无横幅</span>}
     </div>
-    <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) setBannerCrop(URL.createObjectURL(file)); event.target.value = ''; }} />
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
     {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
     <div className={styles.workspace}>

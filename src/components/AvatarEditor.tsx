@@ -5,6 +5,8 @@ import Cropper, { type Area } from 'react-easy-crop';
 import { ImagePlus, X } from 'lucide-react';
 import { uploadFileToHistory } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
+import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import type { PickerItem } from '@/lib/assets/picker-types';
 import styles from './AvatarEditor.module.css';
 
 const TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -15,18 +17,20 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
   userId: string; hasFeishu: boolean; onClose: () => void; onChanged: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
+  // Picking goes through the shared file finder/uploader (project rule, 2026-10-25); drag/paste stay as shortcuts.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [libraryAssetId, setLibraryAssetId] = useState('');
   const [source, setSource] = useState('');
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [area, setArea] = useState<Area | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const input = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const large = useRef<HTMLCanvasElement>(null), small = useRef<HTMLCanvasElement>(null), image = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => { dialog.current?.showModal(); }, []);
-  useEffect(() => () => { if (source) URL.revokeObjectURL(source); }, [source]);
+  useEffect(() => () => { if (source.startsWith('blob:')) URL.revokeObjectURL(source); }, [source]);
   useEffect(() => {
     // Live previews at the two sizes the site shows.
     const img = image.current;
@@ -46,10 +50,21 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
     const url = URL.createObjectURL(next), probe = new Image();
     probe.onload = () => {
       if (Math.min(probe.naturalWidth, probe.naturalHeight) < 128) { URL.revokeObjectURL(url); setError('图片太小，短边至少需要 128 像素'); return; }
-      image.current = probe; setError(''); setFile(next); setSource(url); setZoom(1); setCrop({ x: 0, y: 0 });
+      image.current = probe; setError(''); setFile(next); setLibraryAssetId(''); setSource(url); setZoom(1); setCrop({ x: 0, y: 0 });
     };
     probe.onerror = () => { URL.revokeObjectURL(url); setError('这张图片读不出来，请换一张'); };
     probe.src = url;
+  }
+  async function pick(items: PickerItem[]) {
+    const item = items[0];
+    if (items.length !== 1 || item.type !== 'image' || !item.assetId || !item.originalUrl) return { success: false, message: '请选择一张图片' };
+    const probe = new Image();
+    try { await new Promise<void>((resolve, reject) => { probe.onload = () => resolve(); probe.onerror = () => reject(); probe.src = item.originalUrl; }); }
+    catch { return { success: false, message: '这张图片的原图读不出来，请换一张' }; }
+    if (Math.min(probe.naturalWidth, probe.naturalHeight) < 128) return { success: false, message: '图片太小，短边至少需要 128 像素' };
+    image.current = probe; setError(''); setFile(null); setLibraryAssetId(item.assetId); setSource(item.originalUrl); setZoom(1); setCrop({ x: 0, y: 0 });
+    setPickerOpen(false);
+    return { success: true };
   }
   async function send(body: Record<string, unknown>) {
     const response = await fetch('/api/me/avatar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(60000) });
@@ -64,10 +79,14 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
     finally { setBusy(false); }
   }
   const save = () => run(async () => {
-    if (!file || !area) throw new Error('请先选择并调整图片');
-    const asset = await uploadFileToHistory(file, { ownerId: userId });
-    if (!asset.id) throw new Error('图片已上传，但编号未确认，请重试');
-    await send({ action: 'custom', assetId: asset.id, crop: { x: area.x, y: area.y, width: area.width, height: area.height } });
+    if (!area || !file && !libraryAssetId) throw new Error('请先选择并调整图片');
+    let assetId = libraryAssetId;
+    if (!assetId) {
+      const asset = await uploadFileToHistory(file!, { ownerId: userId });
+      if (!asset.id) throw new Error('图片已上传，但编号未确认，请重试');
+      assetId = asset.id;
+    }
+    await send({ action: 'custom', assetId, crop: { x: area.x, y: area.y, width: area.width, height: area.height } });
   });
 
   return <dialog ref={dialog} className={styles.dialog} aria-labelledby="avatar-editor-title" onClose={onClose}
@@ -78,13 +97,13 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
       <div className={styles.stage} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
         {source ? <Cropper image={source} crop={crop} zoom={zoom} aspect={1} cropShape="round" showGrid={false} maxZoom={8}
           onCropChange={setCrop} onZoomChange={setZoom} onCropComplete={(_, pixels) => setArea(pixels)} />
-          : <button type="button" className={styles.pick} onClick={() => input.current?.click()}><ImagePlus size={28} /><strong>选择图片</strong><small>或拖到这里、Ctrl+V 粘贴</small></button>}
+          : <button type="button" className={styles.pick} onClick={() => setPickerOpen(true)}><ImagePlus size={28} /><strong>选择图片</strong><small>从素材库选或上传，也可拖到这里、Ctrl+V 粘贴</small></button>}
       </div>
       <aside className={styles.side}>
         <span className={styles.previewLabel}>预览</span>
         <div className={styles.previews}><canvas ref={large} width={96} height={96} /><canvas ref={small} width={32} height={32} /></div>
         {source && <label className={styles.zoom}>缩放<input type="range" min={1} max={8} step={0.05} value={zoom} onChange={event => setZoom(Number(event.target.value))} /></label>}
-        {source && <button type="button" onClick={() => input.current?.click()} disabled={busy}>换一张</button>}
+        {source && <button type="button" onClick={() => setPickerOpen(true)} disabled={busy}>换一张</button>}
         <p className={styles.hint}>JPG / PNG / WebP，10MB 以内</p>
         <span className={styles.previewLabel}>恢复为</span>
         <div className={styles.restore}>
@@ -95,7 +114,10 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
     </div>
     {error && <p className={styles.error} role="alert">{error}</p>}
     <footer className={styles.footer}><button type="button" disabled={busy} onClick={() => dialog.current?.close()}>取消</button>
-      <button type="button" className={styles.primary} disabled={busy || !file || !area} onClick={() => void save()}>{busy ? '正在保存…' : '保存头像'}</button></footer>
-    <input ref={input} type="file" accept={TYPES.join(',')} hidden onChange={event => { choose(event.target.files?.[0]); event.target.value = ''; }} />
+      <button type="button" className={styles.primary} disabled={busy || !file && !libraryAssetId || !area} onClick={() => void save()}>{busy ? '正在保存…' : '保存头像'}</button></footer>
+    {pickerOpen && <UploadedImagePicker open imageOnly target="image-studio" purpose="avatar" title="选择头像图片" confirmLabel="用这张做头像"
+      contextKey={`${userId}:avatar`} maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} portalContainer={dialog.current || undefined}
+      onClose={() => setPickerOpen(false)} onUploadFile={(next, onProgress) => uploadFileToHistory(next, { ownerId: userId, onProgress })}
+      onConfirm={async () => ({ success: false, message: '请选择一张图片' })} onConfirmSelection={pick} />}
   </dialog>;
 }

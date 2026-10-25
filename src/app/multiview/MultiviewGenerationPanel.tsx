@@ -319,7 +319,6 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [revision, setRevision] = useState(0);
   const [requestScan, setRequestScan] = useState<RequestScan>({ records: [], incomplete: true, invalid: false, next: null });
   const [historyPage, setHistoryPage] = useState(0);
-  const fileInput = useRef<HTMLInputElement>(null);
   const epoch = useRef(0);
   const mountedOwner = useRef(owner); mountedOwner.current = owner;
   const liveAuthority = useRef(authorityKey); liveAuthority.current = authorityKey;
@@ -1132,12 +1131,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     <header className={styles.summary}>
       {imageReady && draft.mainImage && <img src={`/api/reference-images/${encodeURIComponent(draft.mainImage.referenceImageId)}/content?variant=thumbnail`} alt="当前生成主图" onError={() => setImageReady(false)} />}
       <div><h2>原图与生成设置</h2><p>{sameReady ? '当前视频已打开 · ' : ''}360°旋转模板 · {selectedModel?.label || draft.model} · {draft.duration}秒 · {draft.resolution}</p>{!props.expanded && working && <small role="status">主图正在准备，尚未生成视频…</small>}</div>
-      <div className={styles.summaryActions}><button type="button" disabled={formDisabled} onClick={() => fileInput.current?.click()}><ImagePlus size={16} />更换图片</button>
+      <div className={styles.summaryActions}><button type="button" disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />更换图片</button>
         <button type="button" onClick={props.onUseExisting}><FolderOpen size={16} />使用已有视频</button>
         {receipt && !blocksNewRequest(receipt) && <button type="button" title="上一单继续在后台生成，这里开始新的一单" disabled={submitting || closing} onClick={startNew}><Plus size={16} />新建</button>}
         <button type="button" aria-expanded={props.expanded} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? '收起设置' : '展开设置'}<ChevronDown size={16} /></button></div>
     </header>
-    <input ref={fileInput} className={styles.fileInput} type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void selectFile(file); }} />
     {props.expanded && <div className={styles.body}>
       <div className={styles.imageArea} onDragOver={event => { event.preventDefault(); }} onDrop={event => {
         event.preventDefault();
@@ -1145,9 +1143,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         if (event.dataTransfer.files.length !== 1) { setError('一次放入一张主图，原主图未改变。'); return; }
         void selectFile(event.dataTransfer.files[0]);
       }}>
-        <button type="button" className={styles.imageButton} disabled={formDisabled} onClick={() => fileInput.current?.click()}>
+        <button type="button" className={styles.imageButton} disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}>
           {imageReady && draft.mainImage ? <img src={`/api/reference-images/${encodeURIComponent(draft.mainImage.referenceImageId)}/content?variant=preview`} alt="本次视频的直接输入主图" onError={() => { setImageReady(false); setError('主图暂不可读取，请重新选择，参数已保留。'); }} />
-            : <span><Upload size={28} /><strong>放入一张图片</strong><small>点击选择，也可拖入或粘贴图片</small></span>}
+            : <span><Upload size={28} /><strong>放入一张图片</strong><small>点击从素材库选择或上传，也可拖入或粘贴图片</small></span>}
         </button>
         <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}>从我的素材选择</button>
         {progress && <UploadProgressIndicator label={progress.label} percent={progress.percent} variant="light" />}
