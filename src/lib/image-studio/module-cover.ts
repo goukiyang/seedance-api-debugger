@@ -227,6 +227,12 @@ export async function readModuleCoverEditor(user: ImageStudioIdentity, moduleId:
   return { target: state.target, revision: stored?.record.revision ?? 0, canManage: state.canManage, fixedCover,
     recipe: state.canManage ? stored?.record.recipe ?? null : null, sources, ...(sourceError ? { sourceError } : {}) };
 }
+async function sharedDataDiskDirectory(real: string) {
+  const data = await fs.realpath('/data').catch(() => null);
+  if (!data || !real.startsWith(`${data}${path.sep}`)) return false;
+  const [stat, dataStat, systemStat] = await Promise.all([fs.stat(real), fs.stat(data), fs.stat('/')]);
+  return stat.isDirectory() && stat.dev === dataStat.dev && dataStat.dev !== systemStat.dev;
+}
 async function coverDirectory(write = false) {
   // storage is the existing persistent deployment symlink, outside anonymous public uploads.
   const root = await fs.realpath(path.join(process.cwd(), 'storage'));
@@ -244,7 +250,8 @@ async function coverDirectory(write = false) {
     await fs.mkdir(folder, { recursive: true, mode: 0o700 });
   }
   const real = await fs.realpath(folder);
-  if (real !== folder) throw new ModuleCoverError('封面存储路径无法确认', 503);
+  // Releases link module-covers to the shared data-disk store (since 2026-10-18); accept only such a link.
+  if (real !== folder && !await sharedDataDiskDirectory(real)) throw new ModuleCoverError('封面存储路径无法确认', 503);
   return real;
 }
 async function publishCoverFile(directory: string, name: string, bytes: Buffer) {
