@@ -338,10 +338,8 @@ function MultiviewSettingsPickerContent(props: Props) {
       const result: MultiviewSettingsPickerApplyResult = { settings: applied };
       if (props.kind === 'generation') {
         const preset = publicPreset(object(payload) ? payload.preset : null);
-        const legacy = object(payload) && typeof payload.legacyPresetVersion === 'string' && payload.legacyPresetVersion === (applied.value as MultiviewGenerationSettingsValue).presetVersion
-          ? payload.legacyPresetVersion : undefined;
-        if (!preset || !legacy && preset.version !== (applied.value as MultiviewGenerationSettingsValue).presetVersion) throw new Error('这份设置的默认配置暂不可确认，当前输入保留。');
-        result.preset = preset; if (legacy) result.legacyPresetVersion = legacy;
+        if (!preset || preset.version !== (applied.value as MultiviewGenerationSettingsValue).presetVersion) throw new Error('这份设置的默认配置暂不可确认，当前输入保留。');
+        result.preset = preset;
       } else {
         const slots = object(payload) ? parseMultiviewFrameSettingsInput({ schema: 1, slots: payload.slots }) : null;
         if (!slots) throw new Error('当前视频暂不能使用这份选帧方案，原选帧保留。');
@@ -350,8 +348,7 @@ function MultiviewSettingsPickerContent(props: Props) {
       await live.current.onApply(result);
       if (!current(scope)) return;
       setSelected(id); setSelectedRecord(applied); setItems(previous => previous.map(item => item.id === id ? applied : item));
-      setNotice(result.legacyPresetVersion ? `这份设置原基于旧版模板 ${result.legacyPresetVersion}，已改用当前模板；参数保留${owned || applied.ownedByViewer ? '，保存设置即更新为当前模板' : ''}。`
-        : editing ? '已载入原设置，调整后点击保存设置覆盖。' : '');
+      setNotice(editing ? '已载入原设置，调整后点击保存设置覆盖。' : '');
     } catch (cause) { if (current(scope)) setNotice(cause instanceof Error ? cause.message : '设置未应用，原输入保留。'); }
     finally { if (current(scope)) { lock.current = false; setBusy(false); } }
   }

@@ -8,7 +8,7 @@ import { assertMultiviewWorkSource } from './multiview-works';
 import type { MultiviewInfo } from './multiview-contract';
 import { composeMultiviewGenerationPrompt, publicMultiviewRotationPreset,
   type MultiviewGenerationSnapshot } from './multiview-generation-contract';
-import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPreset, readMultiviewRotationPresetVersion, MultiviewPresetError } from './multiview-preset.server';
+import { assertCurrentMultiviewRotationPreset, readMultiviewRotationPresetVersion } from './multiview-preset.server';
 import { isMultiviewSettingsId, isMultiviewSettingsMutationId, parseMultiviewSettingsBinding, parseMultiviewGenerationSettingsValue,
   parseMultiviewFrameSettingsInput, parseMultiviewSettingsDto,
   type MultiviewSettingsBinding, type MultiviewSettingsDto, type MultiviewSettingsSummary, type MultiviewSettingsReceipt,
@@ -273,15 +273,9 @@ export async function applyMultiviewSettings(user: SessionUser, id: string, inpu
   if (settings.revision !== input.expectedRevision) throw changed();
   if (settings.kind === 'generation') {
     if (input.target !== undefined) throw invalid('生成设置不接收媒体或项目归属。');
-    // Settings saved on a pre-defaults template keep the owner's own values but use the current template text/recipe.
-    let preset, legacyPresetVersion: string | undefined;
-    try { preset = await readMultiviewRotationPresetVersion(settings.value.presetVersion); }
-    catch (error) {
-      if (!(error instanceof MultiviewPresetError && error.code === 'MULTIVIEW_PRESET_LEGACY')) throw error;
-      preset = (await readMultiviewRotationPreset()).preset; legacyPresetVersion = settings.value.presetVersion;
-    }
+    const preset = await readMultiviewRotationPresetVersion(settings.value.presetVersion);
     if (!composeMultiviewGenerationPrompt(settings.value.supplement, preset.version, preset).valid) throw unavailable();
-    return { settings, preset: publicMultiviewRotationPreset(preset), ...(legacyPresetVersion ? { legacyPresetVersion } : {}) };
+    return { settings, preset: publicMultiviewRotationPreset(preset) };
   }
   const target = parseSource(input.target);
   const info = await sourceInfo(user, target, request);
