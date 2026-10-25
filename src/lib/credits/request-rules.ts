@@ -12,3 +12,7 @@ export function canRequestCredits(available: number) {
 export class CreditRequestError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
+
+// 3D multiview 1080p: every use needs the configured approver's Feishu approval; the approver is exempt.
+export const MULTIVIEW_1080P_KIND = 'multiview_1080p';
+export const MULTIVIEW_1080P_TTL_MS = 24 * 3600_000; // pending and approved-but-unused both lapse after 24h

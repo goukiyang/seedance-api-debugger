@@ -404,6 +404,11 @@ model CreditRequest {
   approver_open_id    String
   tenant_key          String
   app_id              String
+  /// "credits" (积分申请) or "multiview_1080p" (one approval allows one 1080p multiview generation).
+  kind                String @default("credits")
+  expires_at          DateTime?
+  used_at             DateTime?
+  used_request_key    String?
   created_at          DateTime @default(now())
   decided_at          DateTime?
   updated_at          DateTime @updatedAt
@@ -412,6 +417,7 @@ model CreditRequest {
   deliveries          CreditRequestDelivery[]
   @@index([user_id, created_at])
   @@index([approver_id, status, created_at])
+  @@index([user_id, kind, status])
 }
 
 model CreditRequestDelivery {

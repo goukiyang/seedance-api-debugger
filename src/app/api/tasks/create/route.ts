@@ -13,6 +13,8 @@ import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptR
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFence, acceptMultiviewRequest,
   rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
+import { consumeMultiview1080pApproval, hasMultiview1080pApproval, MULTIVIEW_1080P_APPROVAL_REQUIRED,
+  MULTIVIEW_1080P_REQUIRED_MESSAGE } from '@/lib/video/multiview-1080p-approval';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot, type MultiviewRotationPreset } from '@/lib/video/multiview-generation-contract';
 import { readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/video/multiview-preset.server';
@@ -1396,6 +1398,10 @@ export async function POST(request: NextRequest) {
       if (error instanceof MultiviewPresetError || error instanceof MultiviewSettingsError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
       throw error;
     }
+    // A 4xx here becomes a "not submitted" receipt, so the page can say nothing was charged.
+    if (resolution === '1080p' && !await hasMultiview1080pApproval(user.id)) {
+      return NextResponse.json({ error: MULTIVIEW_1080P_REQUIRED_MESSAGE, code: MULTIVIEW_1080P_APPROVAL_REQUIRED }, { status: 403 });
+    }
   }
 
   // Existing accepted requests return above without recalculating today's quote.
@@ -2213,6 +2219,10 @@ export async function POST(request: NextRequest) {
           || systemReference.owner_user_id !== resolved.preset.compositionReference.ownerId
           || systemOwner?.status !== 'active') {
           throw new MultiviewPresetError('3D多视图输入权限或系统参考已变化，原输入保留；未提交生成。', 409, 'MULTIVIEW_INPUT_CHANGED');
+        }
+        // Uses one approval in the same transaction as the task, so a rolled-back creation keeps it.
+        if (resolution === '1080p' && await consumeMultiview1080pApproval(tx, user.id, idempotencyKey || null) === false) {
+          throw new MultiviewPresetError(MULTIVIEW_1080P_REQUIRED_MESSAGE, 403, MULTIVIEW_1080P_APPROVAL_REQUIRED);
         }
       }
       const task = await tx.videoTask.create({

@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   try {
     const event = verified.event;
     const value = event?.action?.value;
-    if (!value || value.source !== CREDIT_CARD_SOURCE || typeof value.requestId !== 'string' || !['prepare', 'confirm', 'back', 'reject'].includes(value.action)) throw new CreditRequestError('卡片操作无效');
+    if (!value || value.source !== CREDIT_CARD_SOURCE || typeof value.requestId !== 'string' || !['prepare', 'confirm', 'back', 'reject', 'approve_1080p'].includes(value.action)) throw new CreditRequestError('卡片操作无效');
     const result = await handleCreditDecision({ requestId: value.requestId, action: value.action,
       openId: event.operator?.open_id, nonce: value.nonce, amount: value.amount, confirmationNonce: value.confirmationNonce });
     return NextResponse.json({ toast: { type: 'success', content: result.message }, card: { type: 'raw', data: result.card } });

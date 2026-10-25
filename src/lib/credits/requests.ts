@@ -4,7 +4,7 @@ import { prisma } from '../prisma';
 import { addCredits, assertCreditWriteback } from './precision';
 import { getCreditSummary } from './policy';
 import { createInAppNotification } from '../notifications';
-import { canRequestCredits, CreditRequestError, validGrantAmount } from './request-rules';
+import { canRequestCredits, CreditRequestError, MULTIVIEW_1080P_KIND, MULTIVIEW_1080P_TTL_MS, validGrantAmount } from './request-rules';
 import { creditApprovalCard, creditConfirmationCard, creditResultCard } from './request-cards';
 
 const nonce = () => randomBytes(24).toString('hex');
@@ -22,7 +22,7 @@ function active(user: User | null): asserts user is User {
   }
 }
 
-async function parties(tx: Prisma.TransactionClient, userId: string, approverId: string) {
+export async function parties(tx: Prisma.TransactionClient, userId: string, approverId: string) {
   const user = await tx.user.findUnique({ where: { id: userId } });
   const approver = await tx.user.findUnique({ where: { id: approverId } });
   active(user); active(approver);
@@ -77,7 +77,7 @@ export async function submitCreditRequest(userId: string, purpose: unknown) {
 
 export async function handleCreditDecision(input: {
   requestId: string; actorId?: string; openId?: string; nonce?: string;
-  action: 'prepare' | 'confirm' | 'back' | 'reject' | 'withdraw';
+  action: 'prepare' | 'confirm' | 'back' | 'reject' | 'withdraw' | 'approve_1080p';
   amount?: unknown; confirmationNonce?: string; reason?: string;
 }) {
   if (input.action !== 'withdraw' && !creditRequestsConfigured()) throw new CreditRequestError('积分审批暂不可用', 503);
@@ -110,6 +110,8 @@ export async function handleCreditDecision(input: {
       || approver.feishu_open_id !== request.approver_open_id || user.feishu_tenant_key !== request.tenant_key) {
       throw new CreditRequestError('飞书身份发生变更，请联系管理员', 409);
     }
+    if (request.kind === MULTIVIEW_1080P_KIND) return decideMultiview1080p(tx, request, user, approver, input.action, input.reason);
+    if (input.action === 'approve_1080p') throw new CreditRequestError('不支持此操作');
     const summary = await getCreditSummary(tx, user);
     if (input.action === 'prepare') {
       if (!validGrantAmount(input.amount)) throw new CreditRequestError('请选择有效的发放额度');
@@ -164,6 +166,29 @@ export async function handleCreditDecision(input: {
   }, { timeout: 2500 });
 }
 
+async function decideMultiview1080p(tx: Prisma.TransactionClient, request: { id: string; created_at: Date; applicant_open_id: string },
+  user: User, approver: User, action: string, inputReason?: string) {
+  if (!['approve_1080p', 'reject'].includes(action)) throw new CreditRequestError('不支持此操作');
+  const now = new Date();
+  const lapsed = request.created_at.getTime() + MULTIVIEW_1080P_TTL_MS <= now.getTime();
+  const status = lapsed ? 'expired' : action === 'approve_1080p' ? 'approved' : 'rejected';
+  const reason = (typeof inputReason === 'string' && inputReason.trim() ? inputReason : '暂不同意，请联系管理员了解详情').trim().slice(0, 300);
+  const claimed = await tx.creditRequest.updateMany({ where: { id: request.id, status: 'pending' }, data: {
+    status, pending_key: null, decided_at: now, decision_reason: status === 'rejected' ? reason : null,
+    ...(status === 'approved' ? { expires_at: new Date(now.getTime() + MULTIVIEW_1080P_TTL_MS) } : {}),
+  } });
+  if (claimed.count !== 1) throw new CreditRequestError('申请已经处理，请刷新', 409);
+  const message = status === 'approved' ? '1080p 申请已同意：可生成 1 次 3D多视图 1080p，24 小时内有效。'
+    : status === 'rejected' ? `1080p 申请未通过：${reason}` : '1080p 申请已超过 24 小时，已作废，请重新申请。';
+  await tx.operationLog.create({ data: { operator_id: approver.id, action: `multiview_1080p_request_${status}`,
+    target_type: 'CreditRequest', target_id: request.id } });
+  await createInAppNotification(tx, { targetUserId: user.id, actorUserId: approver.id, type: 'credit_request_result',
+    title: '1080p 申请结果', body: message, metadata: { request_id: request.id, href: '/multiview' } });
+  await tx.creditRequestDelivery.create({ data: { request_id: request.id, kind: 'result',
+    payload_json: JSON.stringify({ receive_id: request.applicant_open_id, msg_type: 'text', content: JSON.stringify({ text: `SD2 3D多视图\n${message}` }) }) } });
+  return { message, card: creditResultCard(message) };
+}
+
 export async function listCreditRequests(userId: string, cursor?: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   active(user);
@@ -173,12 +198,12 @@ export async function listCreditRequests(userId: string, cursor?: string) {
     requester: { select: { name: true, avatar_url: true } },
     deliveries: { select: { kind: true, status: true, error_code: true } } } satisfies Prisma.CreditRequestSelect;
   const requests = await prisma.creditRequest.findMany({
-    where: canApprove ? { OR: [{ user_id: userId }, { approver_id: userId }] } : { user_id: userId },
+    where: { kind: 'credits', ...(canApprove ? { OR: [{ user_id: userId }, { approver_id: userId }] } : { user_id: userId }) },
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 31,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), select,
   });
   const pendingRequest = await prisma.creditRequest.findUnique({ where: { pending_key: userId }, select });
-  const pendingCount = canApprove ? await prisma.creditRequest.count({ where: { approver_id: userId, status: 'pending' } }) : (pendingRequest ? 1 : 0);
+  const pendingCount = canApprove ? await prisma.creditRequest.count({ where: { approver_id: userId, status: 'pending', kind: 'credits' } }) : (pendingRequest ? 1 : 0);
   const page = requests.slice(0, 30);
   return { enabled: creditRequestsConfigured(), canApprove, requests: page, pendingRequest, pendingCount,
     nextCursor: requests.length > 30 ? page[page.length - 1].id : null };

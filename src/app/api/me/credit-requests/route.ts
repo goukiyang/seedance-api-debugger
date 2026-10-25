@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       const result = await submitCreditRequest(user.id, body.purpose);
       return NextResponse.json({ id: result.id, status: result.status });
     }
-    if (typeof body.requestId !== 'string' || !['prepare', 'confirm', 'reject', 'withdraw'].includes(body.action)) throw new CreditRequestError('操作无效');
+    if (typeof body.requestId !== 'string' || !['prepare', 'confirm', 'reject', 'withdraw', 'approve_1080p'].includes(body.action)) throw new CreditRequestError('操作无效');
     const result = await handleCreditDecision({ requestId: body.requestId, actorId: user.id, action: body.action,
       amount: body.amount, confirmationNonce: body.confirmationNonce, reason: body.reason });
     return NextResponse.json(result);

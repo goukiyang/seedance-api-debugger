@@ -60,6 +60,8 @@ type RequestReceipt = { schema: 1; ownerId: string; key: string; fingerprint: st
 type Association = { schema: 1; ownerId: string; requestId: string; workspaceTabId: string; assetId: string; referenceImageId?: string };
 type ApiError = { error?: string; message?: string; code?: string; task_id?: string; existing_task_id?: string };
 type TaskStatus = ApiError & MultiviewTaskProgressInput;
+type HdApproval = { exempt: boolean; state: 'approved' | 'pending' | 'none'; expiresAt?: string; enabled?: boolean;
+  lastState?: 'rejected' | 'used' | 'expired' | null; reason?: string };
 type Quote = { key: string; points: number; pricingRevision: string | null; pricingQuoteToken?: string };
 type RequestCheckOutcome = 'pending' | 'deferred' | 'stop' | 'close';
 type RequestResponse = ApiError & { request_receipt?: unknown; new_request_allowed?: unknown };
@@ -285,6 +287,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [closing, setClosing] = useState(false);
   const [closeRetryKey, setCloseRetryKey] = useState('');
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [hd, setHd] = useState<HdApproval | null>(null);
+  const [hdPurpose, setHdPurpose] = useState('');
+  const [hdBusy, setHdBusy] = useState(false);
+  const [hdError, setHdError] = useState('');
+  const [hdRefresh, setHdRefresh] = useState(0);
   const [quoteError, setQuoteError] = useState('');
   const [presetState, setPresetState] = useState<MultiviewRotationPresetPublicState | null>(null);
   const [presetError, setPresetError] = useState('');
@@ -730,6 +737,34 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, allowed, owner, quoteKey, revision, presetReady, active, accountRequestBlocked]);
 
+  useEffect(() => {
+    if (!ready || !allowed) return;
+    const scope = capture(); const controller = new AbortController();
+    void fetch('/api/multiview/1080p-approval', { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]) })
+      .then(response => response.ok ? readJsonResponse<HdApproval>(response) : null)
+      .then(value => { if (current(scope) && !controller.signal.aborted && value) setHd(value); })
+      .catch(() => undefined);
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, allowed, owner, draft?.resolution, receipt?.key, receipt?.phase, hdRefresh]);
+  useEffect(() => {
+    if (hd?.state !== 'pending' || draft?.resolution !== '1080p') return;
+    const timer = window.setInterval(() => setHdRefresh(value => value + 1), 10000);
+    return () => window.clearInterval(timer);
+  }, [hd?.state, draft?.resolution]);
+  async function requestHd() {
+    if (hdBusy || !hdPurpose.trim()) return;
+    const scope = capture(); setHdBusy(true); setHdError('');
+    try {
+      const response = await fetch('/api/multiview/1080p-approval', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'submit', purpose: hdPurpose.trim() }), signal: AbortSignal.timeout(30000) });
+      const payload = await readJsonResponse<HdApproval & ApiError>(response);
+      if (!current(scope)) return;
+      if (!response.ok) throw new Error(payload.error || '申请没有发出，请重试。');
+      setHd(payload); setHdPurpose('');
+    } catch (cause) { if (current(scope)) setHdError(message(cause, '申请没有发出，请重试。')); }
+    finally { setHdBusy(false); }
+  }
   async function attach(record: Association) {
     const scope = capture();
     if (!current(scope) || !draftRef.current || !identifier(tabRef.current) || record.ownerId !== scope.owner || !isMultiviewWorkspaceTabId(record.workspaceTabId)) throw new Error('账号或主图现场已变化，未套用原素材。');
@@ -1060,8 +1095,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const durationOptions = seedanceVideoDurationOptions(draft.model);
   const settingsDisabled = submitting || closing || working || Boolean(creating) || active || accountRequestBlocked || recoveryBlocked;
   const formDisabled = submitting || closing || working || Boolean(creating) || settingsRisk.busy;
+  const hdBlocked = draft.resolution === '1080p' && hd?.state !== 'approved';
   const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
-    || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !seedValid;
+    || cardSelectionInvalid || approvalBlocked || hdBlocked || !currentQuote || !presetReady || !seedValid;
   const sameReady = Boolean(receipt?.phase === 'ready' && receipt.taskId && receipt.taskId === props.currentTaskId);
   const quietReady = sameReady && !props.expanded && !error && !status && saved && !requestStorageFailed && !accountRequestBlocked && !recoveryBlocked;
   const notSubmittedReason = receipt?.rejection?.message || receipt?.observation?.message;
@@ -1117,8 +1153,20 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         <div className={styles.parameters}>
           <label>模型<select value={draft.model} disabled={formDisabled} onChange={event => change({ model: event.target.value })}>{!selectedModel && <option value={draft.model}>{draft.model || '未选择'}</option>}{SEEDANCE_VIDEO_MODEL_OPTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           <label>时长<select value={draft.duration} disabled={formDisabled} onChange={event => change({ duration: Number(event.target.value) })}>{!durationOptions.some(value => value === draft.duration) && <option value={draft.duration}>{draft.duration}秒（需确认）</option>}{durationOptions.map(value => <option key={value} value={value}>{value}秒</option>)}</select></label>
-          <label>清晰度<select value={draft.resolution} disabled={formDisabled} onChange={event => change({ resolution: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}>{!RESOLUTION_OPTIONS.some(value => value === draft.resolution) && <option value={draft.resolution}>{draft.resolution || '未选择'}</option>}{RESOLUTION_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label>清晰度<select value={draft.resolution} disabled={formDisabled} onChange={event => change({ resolution: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}>{!RESOLUTION_OPTIONS.some(value => value === draft.resolution) && <option value={draft.resolution}>{draft.resolution || '未选择'}</option>}{RESOLUTION_OPTIONS.map(value => <option key={value} value={value}>{value === '1080p' && hd && !hd.exempt ? '1080p（需审批）' : value}</option>)}</select></label>
         </div>
+        {draft.resolution === '1080p' && !hd?.exempt && <div className={styles.feedback} role="status">
+          {!hd ? <p>正在确认 1080p 审批…</p>
+            : hd.state === 'approved' ? <p>管理员已同意 1 次 1080p{hd.expiresAt ? `，${new Date(hd.expiresAt).toLocaleString()} 前有效` : ''}。提交后即使生成失败也不退回次数。</p>
+              : hd.state === 'pending' ? <p>已发给管理员，等待在飞书同意（24 小时内有效）。也可以先改用 720p。</p>
+                : <>
+                  <p>3D多视图 1080p 每次都需要管理员在飞书同意。{hd.lastState === 'rejected' ? `上次申请未通过${hd.reason ? `：${hd.reason}` : ''}。` : hd.lastState === 'used' ? '上次同意的 1 次已经用掉。' : hd.lastState === 'expired' ? '上次的申请已过期。' : ''}</p>
+                  {hd.enabled === false ? <p>1080p 申请暂未开放，请先使用 720p。</p> : <div className={styles.createRow}>
+                    <input aria-label="1080p 用途" value={hdPurpose} maxLength={200} placeholder="用途，如：客户提案需要高清" disabled={hdBusy} onChange={event => setHdPurpose(event.target.value)} />
+                    <button type="button" disabled={hdBusy || !hdPurpose.trim()} onClick={() => void requestHd()}>{hdBusy ? '正在发送…' : '申请 1080p'}</button></div>}
+                </>}
+          {hdError && <p>{hdError}</p>}
+        </div>}
         <label className={styles.supplement}>补充要求（可选）<textarea rows={3} maxLength={40000} value={draft.supplement} disabled={submitting} placeholder="如：保持帽子和背包完整，背景使用浅灰色" onChange={event => change({ supplement: event.target.value })} /><small>仅补充本次视频要求，不修改固定模板</small></label>
         {!seedValid && <p className={styles.feedback} role="status">随机种子须为 -1 或0至2147483647的整数，原值已保留，请在高级设置中调整。</p>}
         <details className={styles.advanced} open={sections.owner === owner && sections.advanced} onToggle={event => toggleSection('advanced', event.currentTarget.open)}><summary>高级设置</summary>
