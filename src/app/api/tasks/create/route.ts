@@ -13,7 +13,7 @@ import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptR
 import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { multiviewRequestIntent, claimMultiviewRequest, assertMultiviewRequestFence, acceptMultiviewRequest,
   rejectMultiviewRequest, type MultiviewRequestClaim } from '@/lib/video/multiview-request-receipt';
-import { consumeMultiview1080pApproval, hasMultiview1080pApproval, MULTIVIEW_1080P_APPROVAL_REQUIRED,
+import { consumeMultiview1080pApproval, hasMultiview1080pApproval, restoreMultiview1080pApproval, MULTIVIEW_1080P_APPROVAL_REQUIRED,
   MULTIVIEW_1080P_REQUIRED_MESSAGE } from '@/lib/video/multiview-1080p-approval';
 import { composeMultiviewGenerationPrompt, MULTIVIEW_REFERENCE_PROMPT_PREFIX, isMultiviewGenerationSeed, parseMultiviewGenerationSnapshot,
   type MultiviewGenerationSnapshot, type MultiviewRotationPreset } from '@/lib/video/multiview-generation-contract';
@@ -2875,6 +2875,7 @@ async function handleProviderFailure(
     const taskBeforeSettlement = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!taskBeforeSettlement) return;
 
+    if (taskBeforeSettlement.idempotency_key) await restoreMultiview1080pApproval(tx, userId, taskBeforeSettlement.idempotency_key);
     const consumedApprovals = await tx.approvalUsage.findMany({
       where: { task_id: taskId, creation_intent_id: null },
       select: { approval_id: true },

@@ -1157,7 +1157,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         </div>
         {draft.resolution === '1080p' && !hd?.exempt && <div className={styles.feedback} role="status">
           {!hd ? <p>正在确认 1080p 审批…</p>
-            : hd.state === 'approved' ? <p>管理员已同意 1 次 1080p{hd.expiresAt ? `，${new Date(hd.expiresAt).toLocaleString()} 前有效` : ''}。提交后即使生成失败也不退回次数。</p>
+            : hd.state === 'approved' ? <p>管理员已同意 1 次 1080p{hd.expiresAt ? `，${new Date(hd.expiresAt).toLocaleString()} 前有效` : ''}。开始生成后即使失败也不退回次数；没开始生成就失败会退回。</p>
               : hd.state === 'pending' ? <p>已发给管理员，等待在飞书同意（24 小时内有效）。也可以先改用 720p。</p>
                 : <>
                   <p>3D多视图 1080p 每次都需要管理员在飞书同意。{hd.lastState === 'rejected' ? `上次申请未通过${hd.reason ? `：${hd.reason}` : ''}。` : hd.lastState === 'used' ? '上次同意的 1 次已经用掉。' : hd.lastState === 'expired' ? '上次的申请已过期。' : ''}</p>

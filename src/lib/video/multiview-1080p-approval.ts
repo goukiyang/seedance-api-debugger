@@ -76,3 +76,9 @@ export async function consumeMultiview1080pApproval(tx: Prisma.TransactionClient
     data: { status: 'used', used_at: now, used_request_key: requestKey } }) : { count: 0 };
   return claimed.count === 1 ? approval!.id : false;
 }
+
+/** Creation failed before generation started (credits returned): the approval was not really used. */
+export async function restoreMultiview1080pApproval(tx: Prisma.TransactionClient, userId: string, requestKey: string) {
+  return tx.creditRequest.updateMany({ where: { user_id: userId, kind: MULTIVIEW_1080P_KIND, status: 'used', used_request_key: requestKey },
+    data: { status: 'approved', used_at: null, used_request_key: null } });
+}

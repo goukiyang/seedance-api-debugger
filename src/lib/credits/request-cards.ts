@@ -52,7 +52,7 @@ export function multiview1080pApprovalCard(input: { id: string; nonce: string; p
     config: { wide_screen_mode: true, update_multi: true },
     header: { title: plain('SD2 3D多视图 1080p 申请'), template: 'blue' },
     elements: [
-      section(`${input.name}\n用途：${input.purpose}\n同意后可生成 1 次 1080p，24 小时内未使用自动作废；生成失败也不退回次数。`),
+      section(`${input.name}\n用途：${input.purpose}\n同意后可生成 1 次 1080p，24 小时内未使用自动作废；开始生成后失败不退回次数。`),
       { tag: 'action', actions: [
         { tag: 'button', text: plain('同意 1 次'), type: 'primary',
           confirm: { title: plain('确认同意'), text: plain(`允许 ${input.name} 生成 1 次 3D多视图 1080p。`) },

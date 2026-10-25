@@ -51,6 +51,12 @@ async function main() {
   await handleCreditDecision({ requestId: second.id, actorId: 'boss', action: 'approve_1080p' });
   await assert.rejects(prisma.$transaction(async tx => { await mv.consumeMultiview1080pApproval(tx, 'user', 'e'); throw new Error('create failed'); }), /create failed/);
   assert.equal(await mv.hasMultiview1080pApproval('user'), true);
+  // Creation failed before generation started: the approval comes back.
+  const usedId = await consume('user', 'g');
+  assert.equal(typeof usedId, 'string');
+  assert.equal(await mv.hasMultiview1080pApproval('user'), false);
+  await prisma.$transaction(tx => mv.restoreMultiview1080pApproval(tx, 'user', 'g'));
+  assert.equal(await mv.hasMultiview1080pApproval('user'), true);
   // Unused approval lapses after 24h.
   await prisma.creditRequest.update({ where: { id: second.id }, data: { expires_at: new Date(Date.now() - 1) } });
   assert.equal(await consume('user', 'f'), false);
