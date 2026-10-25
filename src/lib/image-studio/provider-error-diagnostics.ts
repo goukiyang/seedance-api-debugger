@@ -95,13 +95,31 @@ export function sanitizeStudioProviderErrorFrozen(value: unknown): StudioProvide
   return { model: model(input.model), resolution: member(input.resolution, ['0.5K', '1K', '2K', '4K']), requestedRatio: ratio(input.requestedRatio),
     resolvedRatio: ratio(input.resolvedRatio), expectedSize: size(input.expectedSize) };
 }
-function summary(event: Pick<StudioProviderErrorEvent, 'providerReasonCode' | 'localCode' | 'identityEvidence' | 'providerStatus'>) {
+// Reviewed fixed wording of what the supplier said for each status (FluxPort reply, 2026-10-24). It describes the
+// supplier's statement, never a confirmed final cause, and does not change task state, retries or billing.
+const SUPPLIER_HTTP_MEANING: Record<number, string> = {
+  451: '按供应商说明为内容安全拦截，具体触发项未知', 429: '按供应商说明为提交限流', 503: '按供应商说明为服务池不可用或提交未决，不代表最终失败',
+  504: '按供应商说明为生成超时', 502: '按供应商说明为参考图传输或上游网关失败', 500: '按供应商说明为请求失败',
+};
+function supplierHttp(status: number) {
+  const meaning = SUPPLIER_HTTP_MEANING[status];
+  return meaning ? `（${meaning}）` : '';
+}
+function summary(event: Pick<StudioProviderErrorEvent, 'providerReasonCode' | 'localCode' | 'identityEvidence' | 'providerStatus' | 'transportHttpStatus'>) {
   if (event.identityEvidence === 'conflict') return '供应商返回的编号与原任务不一致，未将该正文归入原任务。';
-  if (event.providerReasonCode?.startsWith('service_http_')) return `供应商声明内部服务返回 HTTP ${event.providerReasonCode.slice(-3)}；具体原因尚未证实。`;
+  if (event.providerReasonCode?.startsWith('service_http_')) {
+    const status = Number(event.providerReasonCode.slice(-3));
+    return `供应商声明内部服务返回 HTTP ${status}${supplierHttp(status)}；本站未证实具体原因。`;
+  }
   if (event.providerReasonCode === 'result_uncertain') return '供应商声明结果尚未确认；费用结论仍须按原账单核对。';
   if (event.localCode === 'generated_dimensions_mismatch') return '返图尺寸与请求不符；原图可用性和费用沿原流程处理。';
   if (event.localCode === 'generated_format_mismatch') return '返图格式与请求不符；原图和费用沿原流程处理。';
   if (event.providerStatus === 'success') return '供应商最新状态为成功；返图校验和费用仍沿原流程确认。';
+  if (event.localCode === 'empty_output') return '供应商返回成功但没有图片；本站未交付，费用沿原流程处理。';
+  if (event.localCode === 'network') return '与供应商的连接中断，结果尚未确认；只查询原请求，不自动重发。';
+  if (event.transportHttpStatus && event.transportHttpStatus >= 400 && SUPPLIER_HTTP_MEANING[event.transportHttpStatus]) {
+    return `供应商返回 HTTP ${event.transportHttpStatus}${supplierHttp(event.transportHttpStatus)}；本站未证实具体原因。`;
+  }
   return event.providerStatus === 'failed' ? '供应商状态为失败，未取得可识别的具体原因。'
     : '已记录安全诊断；具体原因尚未证实。';
 }

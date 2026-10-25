@@ -39,7 +39,7 @@ type Task = { id: string; ordinal: number; status: string; resultDisposition?: s
 function hasReturnedImage(task: Task | null | undefined): task is Task & { asset: NonNullable<Task['asset']> } {
   return Boolean(task?.asset) && (task!.status === 'succeeded' || studioOutputMismatchDisposition(task!.resultDisposition));
 }
-const taskLabel = (task: Task) => studioOutputMismatchDisposition(task.resultDisposition) && task.asset ? '图片已返回 · 规格不符' : statusLabel[task.status] || '状态待确认';
+const taskLabel = (task: Task) => studioOutputMismatchDisposition(task.resultDisposition) && task.asset ? '图片已返回' : statusLabel[task.status] || '状态待确认';
 type Payload = { total: number; records: AvatarRecord[]; recentConfigs:AvatarRecord[];recordTasks:Record<string,Task>; nextCursor?: string | null; settings: { model: string; revision: number; prices: Record<string, number | null>; imageChannels?: unknown; billingReadiness?: { models: Record<string, { ready: boolean }> } } };
 type AvatarImageQuote = ImageUiQuote & { billingQuoteId: string | null };
 type CachedAvatarImageQuote = { planId: string; parameters: string; quote: AvatarImageQuote };
