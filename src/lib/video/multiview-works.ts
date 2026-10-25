@@ -396,6 +396,15 @@ export async function multiviewWorkDirectory(ownerId: string, workId: string, re
   const root = process.env.NODE_ENV === 'production' ? '/data/video-api-debugger/var-lib/storage/multiview-works' : path.join(process.cwd(), '.cache', 'multiview-works');
   return path.join(root, ownerId, workId, String(revision));
 }
+/** Read-only: the content hash of the current ready collage/frame, used to find the library asset it was saved as. */
+export async function multiviewWorkReadyFileHash(user: SessionUser, workId: string, role: string) {
+  if (role !== 'collage' && !role.startsWith('frame-') || !isMultiviewWorkFileRole(role)) throw invalid('只能使用拼图或单张作为参考图。');
+  const row = await ownedWork(user, workId), recipe = readRecipe(row, true);
+  const manifest = recipe && row.ready_revision !== null ? parseMultiviewWorkManifest(row.ready_manifest_json, recipe, row.ready_revision, multiviewWorkRecipeHash(recipe)) : null;
+  const entry = manifest?.files.find(file => file.role === role);
+  if (!entry) throw new MultiviewWorkError('该作品成品尚未准备好。', 404, 'WORK_FILE_UNAVAILABLE');
+  return entry.sha256;
+}
 export async function readMultiviewWorkFile(user: SessionUser, workId: string, role: string, readyRevision: number) {
   if (!isMultiviewWorkFileRole(role) || !Number.isSafeInteger(readyRevision) || readyRevision < 1) throw invalid('作品文件或版本无效。');
   const row = await ownedWork(user, workId), recipe = readRecipe(row, true);

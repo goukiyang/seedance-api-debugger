@@ -40,6 +40,9 @@ export type MultiviewGenerationPanelProps = {
   onUseExisting: () => void; onReady: (result: MultiviewGenerationReady) => void;
   onStateChange?: (state: MultiviewGenerationPanelState) => void; initialProjectId?: string; initialVideoCardId?: string;
   currentTaskId?: string;
+  /** A saved work output chosen with “用作参考图”; replaces the main image once, never starts a generation. */
+  incomingMainAsset?: { assetId: string; token: number } | null;
+  onIncomingMainAssetDone?: (result: { success: boolean; message?: string }) => void;
 };
 type Project = { id: string; name: string; type: string; status?: string; can_generate?: boolean };
 type VideoCard = { id: string; project_id: string; title: string; status: string };
@@ -766,6 +769,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     } catch (cause) { if (current(scope)) setError(message(cause, '图片未准备好，请重试原操作。')); }
     finally { if (uploadLock.current === token) { uploadLock.current = null; setWorking(false); setProgress(null); } }
   }
+  const handledIncoming = useRef(0);
+  useEffect(() => {
+    const incoming = props.incomingMainAsset;
+    if (!incoming || handledIncoming.current === incoming.token || !ready || !allowed || !draft) return;
+    handledIncoming.current = incoming.token;
+    void selectItem([{ type: 'image', assetId: incoming.assetId } as PickerItem]).then(result => props.onIncomingMainAssetDone?.(result));
+  }, [props.incomingMainAsset, ready, allowed, draft]); // eslint-disable-line react-hooks/exhaustive-deps
   async function selectItem(items: PickerItem[]) {
     if (items.length !== 1 || items[0].type !== 'image' || !items[0].assetId) return { success: false, message: '请选择一张可用于生成的完整图片。' };
     if (!ready || !allowed || !draft || !current(capture()) || uploadLock.current || association || submitLock.current) return { success: false, message: '请先确认当前账号并完成图片准备。' };

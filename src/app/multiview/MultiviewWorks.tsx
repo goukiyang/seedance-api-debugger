@@ -13,7 +13,8 @@ import styles from './multiview-works.module.css';
 
 type Pending = { mutationId: string; workId: string; action: 'save' | 'branch' | 'remove' | 'restore' };
 type LibraryPreferences = { projectId: string; q: string; removed: boolean; selected: string; y: number };
-type Props = { owner: string; authority: string; initialWorkId?: string; onEdit: (work: MultiviewWorkDto) => void; onNew: () => void };
+type Props = { owner: string; authority: string; initialWorkId?: string; onEdit: (work: MultiviewWorkDto) => void; onNew: () => void;
+  onUseReference?: (work: MultiviewWorkDto, role: string) => void };
 type ListResult = MultiviewWorkList & { projects: Array<{ id: string; title: string }> };
 const base = '/api/video/multiview/works';
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value);
@@ -53,7 +54,7 @@ const messageFor = (status: number) => status === 409 ? '作品已在别处更�
   : status === 401 || status === 403 ? '当前账号暂不能读取此作品，请核对登录和原视频权限。'
     : status === 404 ? '作品或原视频暂不可读取，请返回作品库重新核对。' : '作品读取未完成，请重试；原作品和本机修改保持不变。';
 
-export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew }: Props) {
+export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew, onUseReference }: Props) {
   const router = useRouter(), query = useSearchParams();
   const identity = `${owner}:${authority}`;
   const identityRef = useRef(identity); identityRef.current = identity;
@@ -248,7 +249,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
         const captured = identity, id = work.id;
         void fetchList(true).then(next => { if (alive(captured) && workRef.current?.id === id && next?.[0]) navigate(next[0].id); });
       } : undefined}
-      onEdit={onEdit} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')}
+      onEdit={onEdit} onUseReference={onUseReference} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')}
       onRefresh={() => { setNotice(''); setChecking(true); void fetchDetail(work.id, true).finally(() => setChecking(false)); }} onRetry={() => void mutate('save', work.title)} /> : <>
       <div className={styles.filters}>
         <label>项目<select value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>

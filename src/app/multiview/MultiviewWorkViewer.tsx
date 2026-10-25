@@ -19,6 +19,7 @@ export type WorkViewerProps = {
   onBack: () => void; onPrevious?: () => void; onNext?: () => void;
   onEdit: (work: MultiviewWorkDto) => void; onRename: (title: string) => void;
   onBranch: () => void; onRemove: () => void; onRefresh: () => void; onRetry: () => void;
+  onUseReference?: (work: MultiviewWorkDto, role: string) => void;
 };
 const statusText = (work: MultiviewWorkDto) => work.sourceState === 'changed' ? '原视频已变化，保留上次成品'
   : work.ready?.revision === work.draftRevision && work.status === 'ready' ? '已保存'
@@ -169,6 +170,9 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       {ready.revision !== work.draftRevision && ' · 上次已保存版本'}</div></>}
     <footer className={styles.viewerActions}>
       <button type="button" className={styles.button} onClick={() => void leave(() => props.onEdit(work))} disabled={busy || work.removed || work.sourceState !== 'current'}><Pencil size={16} />继续编辑</button>
+      {props.onUseReference && <button type="button" className={styles.button} disabled={!ready || reading || busy || work.removed || mode === 'single' && !slot}
+        title={mode === 'single' ? '把当前单张设为编辑页的主图' : '把拼图成品设为编辑页的主图'}
+        onClick={() => void leave(() => props.onUseReference!(work, mode === 'single' ? `frame-${slot!.id}` : 'collage'))}>用作参考图</button>}
       <button type="button" className={styles.primary} disabled={!ready || reading || busy} onClick={() => perform('copy')}><Copy size={16} />复制拼图</button>
       <button type="button" className={styles.button} disabled={!ready || reading || busy} onClick={() => perform('png')}><Download size={16} />下载PNG</button>
       <button type="button" className={styles.button} disabled={!ready || reading || busy} onClick={() => perform('zip')}>下载单图ZIP</button>

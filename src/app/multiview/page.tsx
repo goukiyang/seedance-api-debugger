@@ -673,6 +673,23 @@ function MultiviewPageContent() {
     if (!explicitPreference && !generationArea.current?.contains(document.activeElement)) setExpanded(false);
   }, [owner, storageKey, validSlots.length, visible]);
 
+  // “用作参考图”: a saved work output becomes the editor's main image; nothing is generated.
+  const [incomingMainAsset, setIncomingMainAsset] = useState<{ assetId: string; token: number } | null>(null);
+  const [referenceNotice, setReferenceNotice] = useState('');
+  function applyWorkAsReference(work: MultiviewWorkDto, role: string) {
+    void (async () => {
+      if (!owner || isClientSessionBlocked()) return;
+      setReferenceNotice('正在把作品图片设为主图…');
+      try {
+        const response = await fetch(`/api/video/multiview/works/${encodeURIComponent(work.id)}/files/${encodeURIComponent(role)}/asset`,
+          { cache: 'no-store', headers: { 'x-app-session-user': owner } });
+        const payload = await response.json().catch(() => ({})) as { assetId?: unknown; error?: unknown };
+        if (!response.ok || typeof payload.assetId !== 'string') throw new Error(typeof payload.error === 'string' ? payload.error : '作品图片暂不可用，请重试。');
+        writeLocation('editor', editingWorkId); changeExpanded(true);
+        setIncomingMainAsset({ assetId: payload.assetId, token: Date.now() });
+      } catch (cause) { setReferenceNotice(cause instanceof Error ? cause.message : '作品图片暂不可用，请重试。'); }
+    })();
+  }
   function changeExpanded(value: boolean) {
     setExpanded(value);
     try { localStorage.setItem(`sd2:multiview:preferences:v1:${owner}`, JSON.stringify({ expanded: value })); } catch { setViewSaved(false); }
@@ -1039,11 +1056,13 @@ function MultiviewPageContent() {
         if (ownerRef.current !== owner || selectionEpoch !== context.current || selectionAuthority !== authorityRef.current || isClientSessionBlocked()) return;
         setEditorWork({ owner, id: work.id }); setLocation({ owner, taskId: work.sourceTaskId }); setAllowWorkCreate(false); writeLocation('editor', work.id, work.sourceTaskId);
       })(); }}
-      onNew={() => writeLocation('editor', editingWorkId)} />}
+      onNew={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} />}
+    {referenceNotice && <div className={styles.notice} role="status">{referenceNotice}</div>}
     <div hidden={pageView !== 'editor'}>
     <div ref={generationArea}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} currentTaskId={visible ? taskId : undefined} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
       onUseExisting={() => setPickerOpen(true)} onReady={generationReady} onStateChange={setGeneration}
-      initialProjectId={query.get('projectId') || undefined} initialVideoCardId={query.get('videoCardId') || undefined} /></div>
+      initialProjectId={query.get('projectId') || undefined} initialVideoCardId={query.get('videoCardId') || undefined}
+      incomingMainAsset={incomingMainAsset} onIncomingMainAssetDone={result => setReferenceNotice(result.success ? '已把作品图片设为主图，未开始生成。' : result.message || '主图未替换，请重试。')} /></div>
     <MultiviewGenerationProgress state={generation.progress} taskId={generation.taskId}
       preparing={generation.taskId === taskId && (loading || previewState.loading)}
       previewReady={Boolean(generation.taskId === taskId && visible && validSlots.length > 0)} />
