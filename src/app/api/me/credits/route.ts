@@ -3,6 +3,9 @@ import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { getCreditSummary } from '@/lib/credits/policy';
 
+// Concurrent polls from one account share a single summary transaction (no caching beyond the in-flight request).
+const inflight = new Map<string, Promise<Awaited<ReturnType<typeof getCreditSummary>>>>();
+
 export async function GET(request: NextRequest) {
   let user: { id: string } | null = null;
   try {
@@ -17,7 +20,14 @@ export async function GET(request: NextRequest) {
   });
   if (!dbUser) return errorJson('用户不存在', 404);
 
-  const summary = await retrySqliteBusy(() => prisma.$transaction((tx) => getCreditSummary(tx, dbUser)));
+  let pending = inflight.get(dbUser.id);
+  if (!pending) {
+    pending = retrySqliteBusy(() => prisma.$transaction((tx) => getCreditSummary(tx, dbUser)));
+    inflight.set(dbUser.id, pending);
+    const settled = pending;
+    settled.finally(() => { if (inflight.get(dbUser.id) === settled) inflight.delete(dbUser.id); }).catch(() => {});
+  }
+  const summary = await pending;
   const { account } = summary;
 
   return NextResponse.json({

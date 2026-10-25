@@ -91,8 +91,17 @@ export async function readPricingImageScopes(client: Client = prisma): Promise<P
 }
 
 /** Menu projections consume only typed, identity-matched unavailability, never general failures. */
+// Display menus (settings, canvas bootstrap, avatar) share one short-lived read: each build otherwise holds the
+// SQLite write lock (BEGIN IMMEDIATE). Charging paths pass their own transaction and are never cached.
+let displayOptions: { at: number; value: Promise<PricingImageChannelOptions> } | null = null;
 export async function getPricingImageChannelOptions(client: Client = prisma): Promise<PricingImageChannelOptions> {
-  if (client === prisma) return retrySqliteBusy(() => prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 }));
+  if (client === prisma) {
+    if (displayOptions && Date.now() - displayOptions.at < 15000) return displayOptions.value;
+    const value = retrySqliteBusy(() => prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 }));
+    displayOptions = { at: Date.now(), value };
+    value.catch(() => { if (displayOptions?.value === value) displayOptions = null; });
+    return value;
+  }
   const options: PricingImageChannelOptions = await getImageGenerationChannelOptions(client, true);
   const channels = await getImageGenerationChannels(client, true);
   const scopes = await readPricingImageScopes(client);
