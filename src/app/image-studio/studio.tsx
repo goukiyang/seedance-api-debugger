@@ -2077,6 +2077,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const currentTemplateCap = Math.max(0, Math.min(referenceImageLimit - activeTemplateCount, auxiliaryLimit - activeFixedCount, MAX_REFERENCE_IMAGES - images.length - activeFixedCount) - auxiliaryImages.length);
   const currentStyleCap = Math.max(0, Math.min(restoredSnapshot ? generationReferencePolicy.styleMax ?? MAX_REFERENCE_IMAGES : styleLimit,
     (restoredSnapshot ? generationReferencePolicy.auxiliaryMax : auxiliaryLimit) - ordinaryReferenceCount, MAX_REFERENCE_IMAGES - images.length - ordinaryReferenceCount));
+  // A shared view can only be (un)shared through its source preset by someone who manages it.
+  const sharingLocked = Boolean(sharedLive && !(module.sourcePresetCanManageSharing && module.sourcePresetId));
+  const sharingTip = sharingLocked ? '只有创建者或管理员可以修改共享'
+    : module.sourcePresetShared === true || unpublishedSharing ? '已共享：同事可见，点击取消共享' : '未共享：仅自己可见，点击共享给同事';
   const sourceSharingBlocked = sharedLive ? !sharedReady : Boolean(module.sourcePresetId && module.sourcePresetShared === false && !module.sourcePresetOwnedByViewer);
 
   useLayoutEffect(() => {
@@ -2472,12 +2476,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
 
   async function changeModuleSharing(anchor?: HTMLElement) {
-    if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading || submitting || pendingSubmission || presetSaveLock.current) return;
+    if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading || submitting || pendingSubmission || presetSaveLock.current) {
+      setError('请等当前保存或生成完成后再修改共享'); return;
+    }
     if (module.sourcePresetCanManageSharing && module.sourcePresetId) {
       await onToggleSharing(module, anchor);
       return;
     }
-    if (!module.canChooseSharing || sharedLive) return;
+    if (!module.canChooseSharing || sharedLive) { setError('只有创建者或管理员可以修改共享'); return; }
     const request = sharingPreferenceRequest.current ||= { id: module.id, revision: revisionRef.current,
       isShared: !module.sharingPreference?.enabled, requestId: crypto.randomUUID() };
     moduleSaveLock.current = true; setSharingPreferenceSaving(true); setError('');
@@ -3869,9 +3875,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
         {(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing) &&
-          <label className={`toggle-switch ${styles.moduleShareSwitch}`}>
-            <input type="checkbox" role="switch" aria-label="共享给同事" checked={module.sourcePresetShared === true || unpublishedSharing}
-              disabled={sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
+          <label className={`toggle-switch ${styles.moduleShareSwitch}`} data-tip={sharingTip} title={sharingTip}>
+            <input type="checkbox" role="switch" aria-label={`共享给同事：${sharingTip}`} checked={module.sourcePresetShared === true || unpublishedSharing}
+              disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
             <span className="toggle-slider" />
           </label>}
         {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
@@ -4049,8 +4055,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
-            <button type="button" title="管理模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
-            <button type="button" title="恢复默认" aria-label="恢复默认" disabled={!draftLoaded || presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} /></button>
+            <button type="button" title="管理模板" data-tip="管理已保存的快捷模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
+            <button type="button" title="恢复默认" data-tip="恢复为模板默认设置" aria-label="恢复默认" disabled={!draftLoaded || presetSaving || Boolean(quickPresetApplying) || draftRestoring || submitting || Boolean(pendingSubmission) || moduleSaving || uploading || bannerUploading} onClick={restoreDefaults}><RefreshCw size={16} /></button>
             <div className={styles.quickPresetChoices} aria-label="已保存快捷模板">
               {quickPresets.map(preset => <button type="button" key={preset.id} title={`套用：${preset.name}`} className="sd2-loading-surface" data-busy={quickPresetApplying === preset.id}
                 disabled={!draftLoaded || draftRestoring || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing}

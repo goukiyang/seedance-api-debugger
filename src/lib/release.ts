@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板工作台和3D多视图更好用', outline: [
-  '共享模板可自行替换风格组，模板上下文保持不变',
-  '模板工作台默认显示全部封面，并按最近使用排序',
-  '3D多视图生成进度自动更新，完成后自动打开',
-  '作品的每个角度可单击放大，左右切换查看',
+const notice = { title: '3D多视图可随时新建，共享开关更清楚', outline: [
+  '3D多视图上一单在后台生成时，可点“新建”开始下一单',
+  '生成进度自动更新，完成后自动打开',
+  '模板共享开关悬停即显示当前状态和作用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

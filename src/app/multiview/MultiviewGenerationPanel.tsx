@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, FolderOpen, ImagePlus, RefreshCw, Upload } from 'lucide-react';
+import { ChevronDown, FolderOpen, ImagePlus, Plus, RefreshCw, Upload } from 'lucide-react';
 import { useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
@@ -119,6 +119,9 @@ let documentTab: { id: string; resumeTab: string | null } | null = null;
 const MAX_SCAN_KEYS = 8192;
 type RequestScan = { records: RequestReceipt[]; incomplete: boolean; invalid: boolean; next: number | null };
 const pendingActive = (receipt: RequestReceipt | null) => receipt?.phase === 'unknown' || receipt?.phase === 'accepted';
+// Only a submission whose acceptance is still unknown blocks a new one (it could be charged twice).
+// Accepted tasks keep generating in the background; each one is charged on its own.
+const blocksNewRequest = (receipt: RequestReceipt) => pendingActive(receipt) && !receipt.taskId;
 function parsePublicPresetState(value: unknown): MultiviewRotationPresetPublicState | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -352,7 +355,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const quoteKey = draft ? JSON.stringify([owner, authorityKey, draft.provider, draft.model, draft.duration, draft.resolution, draft.presetVersion,
     draft.settingsBinding?.id, draft.settingsBinding?.revision, draft.projectId, draft.videoCardId, draft.ratio]) : '';
   const currentQuote = quote?.key === quoteKey ? quote : null;
-  const accountRequestBlocked = requestScan.invalid || requestScan.incomplete || requestScan.records.some(pendingActive);
+  const accountRequestBlocked = requestScan.invalid || requestScan.incomplete || requestScan.records.some(blocksNewRequest);
   const seedValid = !draft || isMultiviewGenerationSeed(draft.seed);
   const capture = () => ({ owner, authorityKey, epoch: epoch.current, uploadEpoch: uploadSession().epoch });
   const current = (scope: ReturnType<typeof capture>) => scope.owner === mountedOwner.current && scope.epoch === epoch.current
@@ -560,7 +563,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       return;
     }
     const scanned = refreshRequests();
-    if (recoveryBlocked || pendingActive(receiptRef.current) || scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) {
+    if (recoveryBlocked || pendingActive(receiptRef.current) || scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) {
       setStatus('本账号仍有3D多视图原请求待确认，本次复用没有覆盖当前现场。请先核对原请求，确认结束后刷新本页再应用；不会自动重发。');
       return;
     }
@@ -623,7 +626,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           ? parsePublicPresetState({ revision: binding.revision, preset: bound?.preset }) : null : parsePublicPresetState(payload);
         if (!response.ok || !value) throw new Error(typeof bound?.error === 'string' && bound.code === 'MULTIVIEW_PRESET_LEGACY' ? bound.error : '模板暂不可读取，请重试；当前图片和补充要求已保留。');
         const scanned = refreshRequests();
-        if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) return;
+        if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) return;
         setPresetState(value);
         const previous = draftRef.current;
         if (!binding && awaitingInitialPresetDefaults.current && previous && !previous.settingsBinding) {
@@ -927,7 +930,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState
       || !seedValid || !current(capture()) || working || settingsRisk.busy || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
-    if (scanned.invalid || scanned.incomplete || scanned.records.some(pendingActive)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
+    if (scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
     const scope = capture(); const token = {}; submitLock.current = token; setSubmitting(true); setError(''); setStatus('');
     const frozen = JSON.parse(JSON.stringify(draft)) as MultiviewGenerationDraft;
     const startedFromSourceKey = props.currentSourceKey;
@@ -953,7 +956,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       if (!current(scope)) return;
       if (presetRef.current?.preset.version !== frozen.presetVersion) { setStatus('模板已更新，正在重新报价；当前输入未提交。'); return; }
       const latest = refreshRequests();
-      if (latest.invalid || latest.incomplete || latest.records.some(pendingActive)) { setStatus('本账号有原请求尚未确认，请先查询原记录；当前内容未提交。'); return; }
+      if (latest.invalid || latest.incomplete || latest.records.some(blocksNewRequest)) { setStatus('本账号有原请求尚未确认，请先查询原记录；当前内容未提交。'); return; }
       pending = { schema: 1, ownerId: owner, key, fingerprint: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''),
         taskId: null, phase: 'unknown', startedFromSourceKey };
       saveReceipt(pending, true);
@@ -987,6 +990,20 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         else setError(message(cause, '尚未提交，请检查输入。'));
       }
     } finally { if (submitLock.current === token) { submitLock.current = null; setSubmitting(false); } }
+  }
+  // 新建: the accepted (or finished) task keeps running in the background and appears in 生成记录; this
+  // panel starts an empty slot with the same settings. Nothing is cancelled, resubmitted or charged here.
+  function startNew() {
+    const previous = receiptRef.current;
+    if (!previous || blocksNewRequest(previous) || !ready || submitLock.current || closeLock.current || !identifier(tabRef.current) || !current(capture())) return;
+    try { persist(tabKey(owner, tabRef.current, 'request-key'), null); }
+    catch { setError('本机记录未能保存，暂不能新建；当前任务不受影响。'); return; }
+    checkAbort.current?.abort(); checkAbort.current = null; checkLock.current = null; setChecking(false);
+    emittedReady.current = ''; receiptRef.current = null; setReceipt(null); setTaskProgress(null); setCloseRetryKey('');
+    const draftNow = draftRef.current;
+    if (draftNow?.mainImage) { const next = { ...draftNow, mainImage: null }; draftRef.current = next; setDraft(next); setImageReady(false); }
+    setError(''); setStatus(previous.phase === 'accepted' ? '上一单在后台继续生成，完成后可在“生成记录”打开。' : '');
+    refreshRequests();
   }
   const closeRef = useRef(closeOriginalRequest); closeRef.current = closeOriginalRequest;
   async function closeOriginalRequest() {
@@ -1117,6 +1134,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       <div><h2>原图与生成设置</h2><p>{sameReady ? '当前视频已打开 · ' : ''}360°旋转模板 · {selectedModel?.label || draft.model} · {draft.duration}秒 · {draft.resolution}</p>{!props.expanded && working && <small role="status">主图正在准备，尚未生成视频…</small>}</div>
       <div className={styles.summaryActions}><button type="button" disabled={formDisabled} onClick={() => fileInput.current?.click()}><ImagePlus size={16} />更换图片</button>
         <button type="button" onClick={props.onUseExisting}><FolderOpen size={16} />使用已有视频</button>
+        {receipt && !blocksNewRequest(receipt) && <button type="button" title="上一单继续在后台生成，这里开始新的一单" disabled={submitting || closing} onClick={startNew}><Plus size={16} />新建</button>}
         <button type="button" aria-expanded={props.expanded} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? '收起设置' : '展开设置'}<ChevronDown size={16} /></button></div>
     </header>
     <input ref={fileInput} className={styles.fileInput} type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void selectFile(file); }} />
@@ -1215,7 +1233,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         {receipt.closure && <p>{receipt.closure.message}</p>}
       </details>}
       {(admin || accountRequestBlocked) && <details className={styles.requestHistory} open={accountRequestBlocked && !active}>
-        <summary>{requestScan.records.some(pendingActive) ? '还有提交在确认中' : '本账号提交记录'}</summary>
+        <summary>{requestScan.records.some(blocksNewRequest) ? '还有提交在确认中' : '本账号提交记录'}</summary>
         {(requestScan.invalid || requestScan.incomplete) && <p role="status">本机的提交记录没有读全，为避免重复扣点，暂时不能新建生成。可以点“刷新”。</p>}
         {requestScan.records.slice(historyPage * 8, historyPage * 8 + 8).map(record => <div className={styles.historyRow} key={record.key}>
           <span>{record.taskId ? `任务 ${record.taskId}` : `请求 ${record.key}`} · {record.phase === 'unknown' ? '确认中' : record.phase === 'accepted' ? '生成中' : record.phase === 'rejected' || record.phase === 'closed' ? '没有提交成功' : record.phase === 'ready' ? '视频已生成' : '已结束'}</span>

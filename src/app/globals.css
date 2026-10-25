@@ -18756,3 +18756,15 @@ body.compare-fullscreen-open {
     border-radius: 8px;
   }
 }
+
+/* Shared hover/focus bubble for icon controls: <button data-tip="说明"> (2026-10-25). Keeps `title` for touch/AT. */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 8px); z-index: 40;
+  width: max-content; max-width: 240px; padding: 6px 9px; border-radius: 8px; transform: translate(-50%, 4px);
+  color: oklch(0.91 0.012 245); background: oklch(0.19 0.012 250 / 0.96); border: 1px solid oklch(0.36 0.02 245 / 0.9);
+  font-size: 12px; font-weight: 600; line-height: 1.5; white-space: pre-line; text-align: left;
+  pointer-events: none; opacity: 0; transition: opacity 120ms ease, transform 120ms ease;
+}
+[data-tip]:hover::after, [data-tip]:focus-visible::after, [data-tip]:focus-within::after { opacity: 1; transform: translate(-50%, 0); }
+@media (hover: none) { [data-tip]:hover::after { opacity: 0; } }
