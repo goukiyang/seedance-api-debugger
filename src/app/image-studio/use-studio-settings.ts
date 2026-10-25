@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { createStudioSettingsController, studioSettingsDirty } from './settings-controller';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
+import { fetchReadWithRetry } from '@/lib/http/read-retry';
 
 async function readSettingsResponse(response: Response) {
   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
@@ -12,7 +13,7 @@ async function readSettingsResponse(response: Response) {
 
 export function useStudioSettings(userId: string, isAdmin: boolean) {
   const { controller } = useMemo(() => ({ userId, controller: createStudioSettingsController(isAdmin, {
-      read: async () => readSettingsResponse(await fetch('/api/image-studio/settings', { cache: 'no-store' })),
+      read: async () => readSettingsResponse(await fetchReadWithRetry('/api/image-studio/settings')),
       write: async value => readSettingsResponse(await fetch('/api/image-studio/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
       })),

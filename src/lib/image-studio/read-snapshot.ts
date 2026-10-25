@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 
 type ReadQueue = { tail: Promise<void>; pending: number };
 const processState = globalThis as typeof globalThis & { studioSharedReadQueue?: ReadQueue };
@@ -19,7 +19,7 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
   queue.pending++;
   const result = queue.tail.then(() => {
     if (Date.now() - requestedAt > 5000) throw busyError();
-    return prisma.$transaction(read, { timeout: 15000 });
+    return retrySqliteBusy(() => prisma.$transaction(read, { timeout: 15000 }));
   });
   queue.tail = result.then(() => { queue.pending--; }, () => { queue.pending--; });
   return result;

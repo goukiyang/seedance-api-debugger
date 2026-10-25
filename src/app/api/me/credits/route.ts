@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { getCreditSummary } from '@/lib/credits/policy';
 
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   });
   if (!dbUser) return errorJson('用户不存在', 404);
 
-  const summary = await prisma.$transaction((tx) => getCreditSummary(tx, dbUser));
+  const summary = await retrySqliteBusy(() => prisma.$transaction((tx) => getCreditSummary(tx, dbUser)));
   const { account } = summary;
 
   return NextResponse.json({

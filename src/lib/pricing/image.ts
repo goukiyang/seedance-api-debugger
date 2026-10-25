@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import type { ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { getImageGenerationChannelOptions, getImageGenerationChannels, selectPricingImageGenerationSettings,
   readPricingImageActualReadiness, type ImageGenerationChannels } from '@/lib/integrations/image-generation';
@@ -92,7 +92,7 @@ export async function readPricingImageScopes(client: Client = prisma): Promise<P
 
 /** Menu projections consume only typed, identity-matched unavailability, never general failures. */
 export async function getPricingImageChannelOptions(client: Client = prisma): Promise<PricingImageChannelOptions> {
-  if (client === prisma) return prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 });
+  if (client === prisma) return retrySqliteBusy(() => prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 }));
   const options: PricingImageChannelOptions = await getImageGenerationChannelOptions(client, true);
   const channels = await getImageGenerationChannels(client, true);
   const scopes = await readPricingImageScopes(client);

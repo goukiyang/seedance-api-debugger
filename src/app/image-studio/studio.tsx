@@ -108,6 +108,7 @@ import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
+import { fetchReadWithRetry } from '@/lib/http/read-retry';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
@@ -616,7 +617,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     listLock.current = true; setLoading(true); setError('');
     const scope = moduleReadScope.current;
     try {
-      const data = await readResponse(await fetch(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`, { cache: 'no-store' }));
+      const data = await readResponse(await fetchReadWithRetry(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`));
       if (moduleReadScope.current !== scope) return;
       if (Array.isArray(data.directory)) {
         setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
@@ -701,7 +702,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const { requestId } = original;
       let opened: StudioModule;
       if (original.retained) {
-        const result: StudioOpenCommandStatus = await readResponse(await fetch(`/api/image-studio/modules?mode=open-status&presetId=${encodeURIComponent(presetId)}&requestId=${encodeURIComponent(requestId)}`, { cache: 'no-store' }));
+        const result: StudioOpenCommandStatus = await readResponse(await fetchReadWithRetry(`/api/image-studio/modules?mode=open-status&presetId=${encodeURIComponent(presetId)}&requestId=${encodeURIComponent(requestId)}`));
         if (moduleReadScope.current !== scope || sequence !== sharedOpenSequence.current || isClientSessionBlocked()) return false;
         if (result.status === 'retired') {
           const proof = result.retiredOpen;
@@ -713,7 +714,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         }
         if (result.status !== 'opened' || result.version !== 1 || result.actorId !== userId || result.presetId !== presetId
           || result.requestId !== requestId || typeof result.moduleId !== 'string' || !/^[A-Za-z0-9:_-]{1,160}$/.test(result.moduleId)) throw new Error('暂未查到原打开回执，结果仍待确认；不会重新提交');
-        const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(result.moduleId)}`, { cache: 'no-store' }));
+        const data = await readResponse(await fetchReadWithRetry(`/api/image-studio/modules?ids=${encodeURIComponent(result.moduleId)}`));
         opened = data.modules?.find((item: StudioModule) => item.id === result.moduleId);
         if (!opened) throw new Error('原工作区目前未能读取，请继续核对原请求');
       } else {
