@@ -96,9 +96,18 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       setTitleRetained(true);
     } catch { setTitleRetained(false); setNotice('浏览位置和未保存名称本次无法记住，服务器作品不会受影响'); }
   }
-  function choose(nextMode: 'collage' | 'single', nextSelected = selected) {
-    setMode(nextMode); setSelected(nextSelected); setImageFailed(false); setZoom(false);
+  function choose(nextMode: 'collage' | 'single', nextSelected = selected, keepZoom = false) {
+    setMode(nextMode); setSelected(nextSelected); setImageFailed(false); if (!keepZoom) setZoom(false);
     retainReader(nextMode, nextSelected);
+  }
+  // In the enlarged view, ←/→ walk 拼图 → each angle → 拼图.
+  function step(delta: 1 | -1) {
+    const slots = ready?.recipe.slots || [];
+    if (!slots.length) return;
+    const views = ['', ...slots.map(item => item.id)];
+    const at = mode === 'collage' ? 0 : Math.max(1, views.indexOf(slot?.id || ''));
+    const next = views[(at + delta + views.length) % views.length];
+    choose(next ? 'single' : 'collage', next || selected, true);
   }
   async function leave(action?: () => void) {
     if (!action) return;
@@ -162,7 +171,7 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       <div className={styles.thumbnails} aria-label="组内图片">{ready.recipe.slots.map((item, index) => {
         const frame = multiviewWorkFile(work, `frame-${item.id}`);
         return <button type="button" key={item.id} aria-label={`查看第${index + 1}张${item.name ? ` ${item.name}` : ''}`} aria-pressed={mode === 'single' && slot?.id === item.id}
-          onClick={() => choose('single', item.id)}>{frame && <img src={workFileUrl(work.id, frame)} alt="" loading="lazy" />}<span>{item.name || index + 1}</span></button>;
+          title="单击放大这个角度" onClick={() => { choose('single', item.id, true); setZoom(true); }}>{frame && <img src={workFileUrl(work.id, frame)} alt="" loading="lazy" />}<span>{item.name || index + 1}</span></button>;
       })}</div>
       <div className={styles.segment} aria-label="浏览模式"><button type="button" aria-pressed={mode === 'collage'} onClick={() => choose('collage')}>拼图</button>
         <button type="button" aria-pressed={mode === 'single'} onClick={() => choose('single')}>单张</button></div>
@@ -182,8 +191,10 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
     </footer>
     <p role="status" className={styles.notice}>{notice || work.lastError || ''}</p>
     <details className={styles.original}><summary>查看原视频</summary><a href={`/tasks/${encodeURIComponent(work.sourceTaskId)}?returnTo=${encodeURIComponent(`/multiview?view=works&workId=${work.id}`)}`}>打开原视频</a></details>
-    {zoom && src && !imageFailed && <ZoomableImagePreview src={src} alt={work.title} sourceVersion={`${work.sourceVersion}:${ready?.revision}:${role}`}
-      previewKey={`multiview-work:${owner}:${work.id}:${ready?.revision}:${role}`} onClose={() => setZoom(false)} />}
+    {zoom && src && !imageFailed && <ZoomableImagePreview src={src} alt={mode === 'single' ? slot?.name || '当前单张' : work.title}
+      title={mode === 'single' ? slot?.name || '当前单张' : '拼图'} sourceVersion={`${work.sourceVersion}:${ready?.revision}:${role}`}
+      previewKey={`multiview-work:${owner}:${work.id}:${ready?.revision}:${role}`} hasNavigation={Boolean(ready?.recipe.slots.length)}
+      onPrevious={() => step(-1)} onNext={() => step(1)} onClose={() => setZoom(false)} />}
     {productDialog}
   </section>;
 }

@@ -94,7 +94,8 @@ export default function ReleaseNotice() {
     {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
       <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>{risk?.busy.length ? '操作进行中' : risk?.unsaved.length ? '未保存内容' : '发现新版本'}</h2></header>
       <div className={styles.body}><p>v{target.version}</p>
-        {user?.account_type === 'internal' && target.summary && <p>{target.summary}</p>}
+        {user?.account_type === 'internal' && (target.title || target.summary) && <p><strong>{target.title || target.summary}</strong></p>}
+        {user?.account_type === 'internal' && Array.isArray(target.outline) && target.outline.length > 0 && <ul>{target.outline.slice(0, 4).map(item => <li key={item}>{item}</li>)}</ul>}
         {risk?.busy.length ? <p role="status">{risk.busy.join('、')}。完成后再刷新，不会中断当前操作。</p>
           : risk?.unsaved.length ? <p>{risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。</p>
           : <p>新版本已就绪，可刷新后使用。</p>}

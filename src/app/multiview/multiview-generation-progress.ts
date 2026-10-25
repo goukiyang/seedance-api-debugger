@@ -6,6 +6,8 @@ export type MultiviewTaskProgressInput = {
   provider_task_id?: string | null;
   provider_client_request_id?: string | null;
   idempotency_key?: string | null;
+  /** Private multiview tasks expose only this, not the upstream id. */
+  provider_accepted?: boolean;
   created_at?: string | null;
   delivery_status?: string | null;
 };
@@ -33,7 +35,7 @@ export function multiviewGenerationProgress(
   if (phase === 'unknown' || task?.submission_unconfirmed) return result(0, '正在确认是否提交成功', true);
   if (phase === 'video_ready') return { ...result(3, '视频已就绪'), videoReady: true };
   if (task?.local_status === 'succeeded') return result(3, '正在准备视频');
-  const accepted = Boolean(task?.provider_task_id && task.provider_task_id !== task.id
+  const accepted = task?.provider_accepted === true || Boolean(task?.provider_task_id && task.provider_task_id !== task.id
     && task.provider_task_id !== task.provider_client_request_id && task.provider_task_id !== task.idempotency_key);
   const upstream = task?.provider_status?.toLowerCase();
   if (accepted && ['queued', 'pending', 'created'].includes(upstream || '')) return result(1, '等待生成');

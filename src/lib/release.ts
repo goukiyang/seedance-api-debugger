@@ -1,6 +1,14 @@
 import packageInfo from '../../package.json';
-export const release = { version: packageInfo.version, channel: 'production',
-  summary: '视频可直接保存到项目，素材恢复和模板作者信息更清楚；改进高清查看与上传；窄屏也显示版本号；3D多视图的动作时间由系统按所选时长自动控制，模板不用写秒数，模板预览与提交一致；3D多视图页面三个入口更醒目，点“生成视频”后进度第一步立即亮起，提交没成功时直接说明原因和“没有扣点”，内部核对信息收进“详情”，保存位置折叠为一行；3D多视图 1080p 改为每次经管理员飞书同意后使用（一次同意可用一次，24 小时内有效）；生图失败详情按供应商说明区分内容安全、限流、服务繁忙、超时等原因；图片尺寸或格式与请求不同时不再当作问题提示，实际规格可在详情查看；修复模板封面无法显示和保存的问题；使用别人共享的模板时，可以自行选择、替换和移除风格组（风格组内容仍只有创建者和管理员能看），模板上下文保持不变；进入模板工作台默认显示“全部封面”；全部封面按本人最近使用排序，生成过的模板换设备也排在前面；旧版模板设置给出明确提示；生图设置与模板读取遇到数据库短暂繁忙时自动重试，并减少对数据库写锁的占用；进入模板工作台和切换模块时直接显示内容，不再需要刷新；素材较多时素材选择窗口也能正常读取；多视图作品“重新核对”会显示核对结果；多视图作品可“用作参考图”，把拼图或当前单张设为编辑页主图；多视图生成设置下拉菜单的每一项可直接编辑或删除；恢复3D多视图新生成；开放新的视频创作、画布批量视频、3D多视图生成和费率设置。' };
+// Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
+const notice = { title: '模板工作台和3D多视图更好用', outline: [
+  '共享模板可自行替换风格组，模板上下文保持不变',
+  '模板工作台默认显示全部封面，并按最近使用排序',
+  '3D多视图生成进度自动更新，完成后自动打开',
+  '作品的每个角度可单击放大，左右切换查看',
+] };
+export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
+  // Older open pages still read `summary`; it now carries only the title.
+  summary: notice.title };
 
 function numericOrder(a: string, b: string) {
   // Compare decimal strings without rounding identifiers beyond Number's precision.

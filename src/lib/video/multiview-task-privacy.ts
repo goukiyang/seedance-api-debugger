@@ -91,6 +91,8 @@ const scalarKeys = [
   'cost_allocation_status', 'version_role', 'can_delete',
   'delivery_status', 'created_at', 'updated_at', 'submitted_at', 'completed_at',
   'started_at', 'succeeded_at', 'failed_at', 'deleted_at', 'is_draft', 'retry_count',
+  // The owner's own request key: the multiview page matches its poll to the original submission by it.
+  'idempotency_key',
 ] as const;
 const pricingKeys = ['estimatedCost', 'actualCost', 'frozenCost', 'duration', 'resolution', 'rate', 'currency',
   'unit', 'unitPrice', 'pointsPerYuan', 'pricingRuleId', 'pricingRuleName', 'pricingRuleVersion', 'pricingPolicyRevision',
@@ -117,6 +119,10 @@ export function projectPrivateMultiviewTask<T extends object & TaskProtectionSou
     const status = typeof result.provider_status === 'string' ? result.provider_status.toLowerCase() : '';
     result.provider_status = providerStatuses.has(status) ? status : 'unknown';
   }
+  // Only whether the supplier accepted the task is shown, never its upstream id.
+  const upstreamId = source.provider_task_id;
+  result.provider_accepted = typeof upstreamId === 'string' && upstreamId.length > 0 && upstreamId !== source.id
+    && upstreamId !== source.provider_client_request_id && upstreamId !== source.idempotency_key;
   Object.assign(result, { prompt: MULTIVIEW_PUBLIC_TASK_TITLE, source_label: MULTIVIEW_PUBLIC_TASK_TITLE,
     protected_module: true, module_path: '/multiview', reference_image_ids: null, reference_image_urls: null });
   const error = privateMultiviewFailure(source.error_message, source.local_status);
