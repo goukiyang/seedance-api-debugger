@@ -21,6 +21,7 @@ import { readReadyStudioInputMain } from '@/lib/image-studio/input-main-client';
 import type { StudioInputMainPreview, StudioInputMainResponse, StudioInputMainSource } from '@/lib/image-studio/input-main';
 import type { StudioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
 import { ImageResultIssueDetails } from '@/components/ImageResultIssueDetails';
+import { BannerCropDialog } from '@/components/BannerCropDialog';
 import { ImageResultOperationFeedback, type ImageResultOperation } from '@/components/ImageResultOperationFeedback';
 import { TemplateAuthorCard } from '@/components/TemplateAuthorCard';
 import { TemplateDefinitionRead } from '@/components/TemplateDefinitionRead';
@@ -1731,6 +1732,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [uploadProgress, setUploadProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerProgress, setBannerProgress] = useState<ReturnType<typeof studioUploadProgress> | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
+  // Banner images are cropped from the original before upload (2026-10-25); a blob: source is a local file.
+  const [bannerCrop, setBannerCrop] = useState<string | null>(null);
+  const closeBannerCrop = () => setBannerCrop(current => { if (current?.startsWith('blob:')) URL.revokeObjectURL(current); return null; });
   const [error, setError] = useState('');
   const [preview, setPreview] = useState<ImagePreviewState | null>(null);
   const sharedReferencePreviewId = useRef<string | null>(null);
@@ -3904,8 +3908,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块横幅' : '移除模块横幅'}><X size={16} /></button></>}
       </> : definitionReady ? <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块横幅' : '添加模块横幅'}</button> : <span className={styles.bannerEmpty}>暂无横幅</span>}
     </div>
-    <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void uploadBanner(file); event.target.value = ''; }} />
+    <input ref={bannerFileInput} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event => { const file = event.target.files?.[0]; if (file) setBannerCrop(URL.createObjectURL(file)); event.target.value = ''; }} />
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
+    {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
         {(appliedSource || reproduceSourceTaskId) && <p role="status" className={styles.appliedSource}>
@@ -4257,7 +4262,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           setTemplateImages(current => [...current, ...additions]);
         } else if (imageSourceTarget === 'banner') {
           if (picked.length !== 1) throw new Error('请选择一张图片');
-          setBanner(picked[0]);
+          if (picked[0].originalUrl) setBannerCrop(picked[0].originalUrl); else setBanner(picked[0]);
         } else if (imageSourceTarget === 'fixed') {
           if (!fixedEditable) throw new Error('当前不能编辑固定参考图');
           const additions = picked.filter(asset => !fixedReferences.some(image => image.id === asset.id));

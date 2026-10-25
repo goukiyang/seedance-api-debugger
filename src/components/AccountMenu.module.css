@@ -17,3 +17,5 @@
 .secondary { border: 1px solid #414b48; color: #c4d7cd; background: transparent; }
 .dialog button:disabled { opacity: .55; cursor: default; }
 @media (any-pointer: coarse) { .dialog :is(button, a) { min-height: 44px; } .close { width: 44px; } }
+.avatarButton { position: relative; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.avatarCamera { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--primary, #2563eb); color: #fff; }

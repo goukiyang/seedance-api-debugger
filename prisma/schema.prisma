@@ -324,6 +324,11 @@ model User {
   expires_at            DateTime?
   mobile                String?
   avatar_url            String?
+  /// Latest Feishu profile photo; avatar_url follows it only while avatar_source is "feishu".
+  feishu_avatar_url     String?
+  /// "feishu" | "custom" | "initials"
+  avatar_source         String    @default("feishu")
+  custom_avatar_key     String?
   feishu_user_id        String?   @unique
   feishu_open_id        String?   @unique
   feishu_union_id       String?

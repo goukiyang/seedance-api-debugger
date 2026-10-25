@@ -260,6 +260,8 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
   );
 }
 
+/** For components that may render outside the provider (returns null there). */
+export function useOptionalAppSession() { return useContext(AppSessionContext); }
 export function useAppSession() {
   const context = useContext(AppSessionContext);
   if (!context) {

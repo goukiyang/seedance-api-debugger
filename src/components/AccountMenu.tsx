@@ -3,7 +3,9 @@ import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
+import { AvatarEditor } from './AvatarEditor';
+import { useOptionalAppSession } from '@/lib/context/AppSessionContext';
 import Link from 'next/link';
 import { useDialogDismiss } from './useDialogDismiss';
 import { getPageExitRisk, runApprovedPageExit } from '@/lib/hooks/page-exit-guard';
@@ -69,6 +71,8 @@ export default function AccountMenu({
   const [loggingOut, setLoggingOut] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
+  const appSession = useOptionalAppSession();
   const [logoutError, setLogoutError] = useState('');
   const logoutLock = useRef(false);
 
@@ -161,12 +165,13 @@ export default function AccountMenu({
         </span>
       </button>
       {detailsOpen && <AccountDetails busy={loggingOut} onClose={() => setDetailsOpen(false)}>
-        <div className={styles.identity}><span className="account-menu-avatar" style={{ backgroundColor: fallbackColor }} aria-hidden="true">{avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : label}</span><strong>{displayName}</strong></div>
+        <div className={styles.identity}><button type="button" className={styles.avatarButton} data-tip="更换头像" aria-label="更换头像" onClick={() => setAvatarEditorOpen(true)}><span className="account-menu-avatar" style={{ backgroundColor: fallbackColor }} aria-hidden="true">{avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : label}</span><span className={styles.avatarCamera} aria-hidden="true"><Camera size={12} /></span></button><strong>{displayName}</strong></div>
         <dl className={styles.info}>{user?.username && <><dt>账号</dt><dd>{user.username}</dd></>}{role && <><dt>角色</dt><dd>{role}</dd></>}</dl>
         <p className={styles.hint}>切换账号会退出当前账号，再前往登录页选择账号。同站其它已打开的页面也会退出；按账号保存的草稿会保留。</p>
         {logoutError && <p className={styles.error} role="alert">{logoutError}</p>}
         <footer className={styles.actions}><Link href="/account" className={styles.secondary}>管理个人资料</Link><button type="button" className={styles.primary} disabled={loggingOut} onClick={() => void handleLogout(true)}>{loggingOut ? '退出中…' : '切换账号'}</button></footer>
       </AccountDetails>}
+      {avatarEditorOpen && user?.id && <AvatarEditor userId={user.id} hasFeishu onClose={() => setAvatarEditorOpen(false)} onChanged={() => { if (appSession) void appSession.refreshUser(); else window.location.reload(); }} />}
       <button
         type="button"
         className="account-menu-logout"
