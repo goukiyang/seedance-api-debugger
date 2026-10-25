@@ -667,6 +667,10 @@ export async function dispatchStudioBatches() {
         const allIds = Array.from(new Set<string>((snapshot.referenceImages || []).map((reference: { id: string }) => reference.id)));
         const assets = await tx.asset.findMany({ where: { id: { in: allIds }, status: 'active', type: 'image' }, select: { id: true, owner_id: true, hash: true } });
         if (assets.length !== allIds.length || assets.some(asset => asset.owner_id !== snapshot.authorizedReferenceOwners?.[asset.id] || snapshot.referenceImages.find((reference: { id: string }) => reference.id === asset.id)?.hash !== asset.hash)) throw new StudioError('本批素材归属或内容已变化，未派发新任务');
+        // Style groups a colleague chose for a shared template are rechecked like any personal choice.
+        if (sharedUse && !snapshot.restoredSettings && Array.isArray(snapshot.consumerStyleGroupIds) && snapshot.consumerStyleGroupIds.length) {
+          await resolveStudioStyleReferences(user, snapshot.consumerStyleGroupIds, tx);
+        }
         if ((!sharedUse || snapshot.restoredSettings) && snapshot.styleGroupIds?.length) {
           const selected = await resolveStudioStyleReferences(user, snapshot.styleGroupIds, tx);
           if (snapshot.restoredSettings) {

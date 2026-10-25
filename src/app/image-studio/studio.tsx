@@ -11,7 +11,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, ClipboardList, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ModuleGallery } from './ModuleGallery';
-import { deriveModuleGallery, type GalleryScope, type GallerySort } from './module-gallery-state';
+import { deriveModuleGallery, mergeModuleGalleryLastOpened, type GalleryScope, type GallerySort } from './module-gallery-state';
 import { useModuleGalleryState } from './useModuleGalleryState';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { createUploadBatch, uniqueUploadFiles, uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -392,6 +392,16 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const [active, setActive] = useState('');
   const [coverView, setCoverView] = useState(false);
   const gallery = useModuleGalleryState(userId);
+  const [serverRecentUse, setServerRecentUse] = useState<{ owner: string; lastUsed: Record<string, number> }>({ owner: '', lastUsed: {} });
+  useEffect(() => {
+    if (!templateWorkbench || !userId) return;
+    const controller = new AbortController();
+    void fetch('/api/image-studio/recent-use', { cache: 'no-store', signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(value => { if (value?.lastUsed && typeof value.lastUsed === 'object') setServerRecentUse({ owner: userId, lastUsed: value.lastUsed }); })
+      .catch(() => undefined); // Ordering falls back to this browser's own record.
+    return () => controller.abort();
+  }, [templateWorkbench, userId]);
   const [galleryCoverModuleId, setGalleryCoverModuleId] = useState<string | null>(null);
   const [galleryReadErrors, setGalleryReadErrors] = useState<Set<string>>(new Set());
   const [galleryOwnedPresets, setGalleryOwnedPresets] = useState<{ owner: string; revision: string; ids: string[] }>({ owner: '', revision: '', ids: [] });
@@ -806,6 +816,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     } else {
       routedContentHandled.current = routeKey;
       if (params.get('view') === 'covers') setCoverView(true);
+      else if (templateWorkbench) {
+        // Entering the workbench without a named template opens 全部封面, not the last template (2026-10-25).
+        // A template page keeps its moduleId in the URL, so refresh/back/forward still reopen that template.
+        replaceImageModuleLocation(null, true);
+        routedContentHandled.current = `${userId}:${window.location.search}`;
+        setPendingModuleScroll(null); setCoverView(true);
+      }
     }
   }, [directory, loading, navigateToModule, routeQuery, userId, viewRestored, shared.catalogReady]);
   async function createModule() {
@@ -1172,9 +1189,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     mine: entry.sharedLive?.mode === 'publisher' || !entry.sharedLive && !entry.presetId
       || galleryOwnedPresets.owner === userId && Boolean(entry.presetId && galleryOwnedPresets.ids.includes(entry.presetId)) })), [navigation, galleryOwnedPresets, userId]);
   const galleryDirectoryReady = directoryReady && shared.catalogReady && !shared.error && galleryOwnershipReady && (gallery.scope !== 'mine' || !galleryOwnershipError);
+  // 最近使用 = the later of this browser's opens and this user's own generations (server, any device).
+  const galleryLastUsed = useMemo(() => serverRecentUse.owner === userId
+    ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
+  [gallery.lastOpened, serverRecentUse, userId]);
   const galleryDerived = useMemo(() => deriveModuleGallery(galleryCatalog, { query: gallery.query,
-    scope: gallery.scope, sort: gallery.sort, lastOpened: gallery.lastOpened }),
-  [galleryCatalog, gallery.query, gallery.scope, gallery.sort, gallery.lastOpened]);
+    scope: gallery.scope, sort: gallery.sort, lastOpened: galleryLastUsed }),
+  [galleryCatalog, gallery.query, gallery.scope, gallery.sort, galleryLastUsed]);
   const coverPages = useResultPages({ items: directoryReady && gallery.ready ? galleryDerived.filteredEntries : [], storageKey: `sd2:module-covers:v1:${userId}`,
     visible: coverView, busy: loading || hydrating || !galleryDirectoryReady || !gallery.ready, error: Boolean(error || shared.error), hasMore: false,
     total: galleryDirectoryReady ? galleryDerived.filteredTotal : null, loadMore: async () => undefined, currentId: null });
@@ -1874,7 +1895,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     ...(restoredSnapshot?.referencePolicy || (reproduceSourceTaskId ? reproductionReferencePolicy || savedGenerationPolicy : savedGenerationPolicy)),
     primaryIds: images.flatMap(image => image.id ? [image.id] : []),
   };
-  const generationStyles = restoredSnapshot ? styleGroups : reproduceSourceTaskId ? reproductionStyles : effectiveGenerationDefinition.styleGroups || [];
+  const generationStyles = restoredSnapshot || sharedLive && !definitionEditable && !reproduceSourceTaskId ? styleGroups : reproduceSourceTaskId ? reproductionStyles : effectiveGenerationDefinition.styleGroups || [];
   const generationSkills = restoredSnapshot ? skills : reproduceSourceTaskId ? reproductionSkills : effectiveGenerationDefinition.skills || [];
   const restoredStylesChanged = Boolean(restoredSnapshot && JSON.stringify(styleGroups.map(group => [group.id, group.revision]))
     !== JSON.stringify((restoredSnapshot.styleGroups || []).map(group => [group.id, group.revision])));
@@ -3132,7 +3153,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         fixedReferences: !sharedLive && !reproduceSourceTaskId && fixedEditable ? fixedReferencePayload(effectiveGenerationDefinition.fixedReferences || []) : undefined,
         skillIds: restoredTaskSettings && !retryTask ? restoredSkillsChanged ? generationSkills.map(group => group.id) : undefined : sharedLive || reproduceSourceTaskId ? undefined : generationSkills.map(group => group.id),
         skillVersions: restoredTaskSettings && !retryTask ? restoredSkillsChanged ? Object.fromEntries(generationSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])) : undefined : sharedLive || reproduceSourceTaskId ? undefined : Object.fromEntries(generationSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])),
-        styleGroupIds: restoredTaskSettings && !retryTask ? restoredStylesChanged ? generationStyles.map(group => group.id) : undefined : sharedLive || reproduceSourceTaskId ? undefined : generationStyles.map(group => group.id),
+        // A colleague using a shared template sends the style groups chosen for this use; the author's context is not sent.
+        styleGroupIds: restoredTaskSettings && !retryTask ? restoredStylesChanged ? generationStyles.map(group => group.id) : undefined
+          : sharedLive && !definitionEditable && !retryTask ? generationStyles.map(group => group.id)
+            : sharedLive || reproduceSourceTaskId ? undefined : generationStyles.map(group => group.id),
         styleGroupVersions: restoredTaskSettings && !retryTask && restoredStylesChanged
           ? Object.fromEntries(generationStyles.filter(group => Number.isInteger(group.revision)).map(group => [group.id, group.revision!])) : undefined,
         referencePolicy: generationReferencePolicy } };
@@ -3908,7 +3932,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           <StudioStyleSkillSelector ref={styleSkillSelector} userId={userId} scope={module.id}
             selectedStyles={activeStyles} selectedSkills={skills}
             currentImages={auxiliaryImages} maxReferences={currentStyleCap}
-            disabled={!definitionReady || uploading || submitting || Boolean(pendingSubmission)}
+            disabled={!definitionReady && !sharedReady || uploading || submitting || Boolean(pendingSubmission)}
             onStylesChange={setStyleGroups}
             onSkillsChange={setSkills} />
         </section>

@@ -169,7 +169,7 @@ export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnT
     } : {}) };
 }
 
-function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
+export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
   shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>, input: ReturnType<typeof parseStudioRequest>) {
   if (input.restoredSettings) { assertRestoredStudioDraft(input); return; }
   const draft = input.draft;
@@ -177,7 +177,11 @@ function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
     || draft?.fixedReferences !== undefined || draft?.styleGroupIds !== undefined
     || draft?.skillIds !== undefined || draft?.skillVersions !== undefined;
   if (!hasDefinition) return;
-  if (shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id) {
+  const consumer = shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id;
+  // A colleague may choose, swap or remove style groups for this use; the template context stays the author's.
+  if (consumer && input.reproduceFromTaskId === undefined && draft?.moduleContext === undefined && draft?.fixedReferences === undefined
+    && draft?.skillIds === undefined && draft?.skillVersions === undefined) return;
+  if (consumer) {
     throw new StudioError('共享模板的历史定义不能直接用于生成；请重新读取当前模板，个人设置仍保留', 409);
   }
   const definition = shared.definition;
@@ -656,6 +660,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let styleReferenceGroups: StudioTaskStyleReferenceGroup[] = [];
     let historicalReferenceOwners: Record<string, string> = {};
     const freshlySelectedStyleIds = new Set<string>();
+    let consumerStyleGroupIds: string[] = [];
     let historicalSnapshot: Record<string, unknown> | null = null;
     let historicalTemplateReferences: Record<string, unknown>[] = [];
     let skills: SkillSnapshot[] = [];
@@ -745,8 +750,23 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     } else if (sharedDefinition) {
       templateFixedReferences = sharedDefinition.reproduction?.templateFixedReferences ?? sharedDefinition.fixedReferences;
-      styleGroupIds = sharedDefinition.styleGroupIds;
-      const styleGroups = sharedDefinition.styleGroups;
+      styleGroupIds = input.draft?.styleGroupIds ?? sharedDefinition.styleGroupIds;
+      // Groups of the template are used under the author's sharing; any other choice must be usable by this user.
+      type SharedStyleGroup = (typeof sharedDefinition.styleGroups)[number];
+      const templateGroups = new Map(sharedDefinition.styleGroups.map(group => [group.id, group]));
+      consumerStyleGroupIds = styleGroupIds.filter(id => !templateGroups.has(id));
+      const chosen = new Map<string, SharedStyleGroup>();
+      try {
+        if (consumerStyleGroupIds.length) for (const group of (await resolveStudioStyleReferences(identity, consumerStyleGroupIds, tx)).groups) {
+          const note = (group as { note?: unknown }).note;
+          chosen.set(group.id, { ...group, ...(typeof note === 'string' ? { note } : {}) } as SharedStyleGroup);
+        }
+      } catch (error) {
+        if (error instanceof StudioStyleError) throw new StudioError(error.message, error.status);
+        throw error;
+      }
+      const styleGroups = styleGroupIds.map(id => templateGroups.get(id) ?? chosen.get(id)!);
+      if (styleGroups.flatMap(group => group.references).length > MAX_REFERENCE_IMAGES) throw new StudioError(`风格组图片合计不能超过 ${MAX_REFERENCE_IMAGES} 张`);
       styleGroupSnapshot = styleGroups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
         referenceCount: group.references.length, ownerId: group.ownerId, ...(group.note ? { note: group.note } : {}) }));
       styleReferenceGroups = styleGroups.map((group, index) => ({ ...styleGroupSnapshot[index], references: group.references }));
@@ -1003,7 +1023,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       templateFixedCount: actualTemplateFixedReferences.length,
       primaryReferenceImages: primaryReferenceSnapshot,
       auxiliaryReferenceImages: auxiliaryReferenceSnapshot,
-      styleGroupIds, styleGroups: styleGroupSnapshot,
+      styleGroupIds, styleGroups: styleGroupSnapshot, ...(consumerStyleGroupIds.length ? { consumerStyleGroupIds } : {}),
       skills, skillIds: skills.map(skill => skill.id), effectiveContext: context,
       referencePolicy: { ...referencePolicy, primaryIds: primaryReferenceIds },
       authorizedReferenceOwners: Object.fromEntries(references.map(ref => [ref.id, ref.owner_id])),
