@@ -126,15 +126,19 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     } catch (error) { if (alive(captured) && epoch === listEpoch.current) setNotice(error instanceof Error ? error.message : messageFor(503)); }
     finally { if (alive(captured) && epoch === listEpoch.current) setLoading(false); }
   }, [owner, loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed, cursor, request, alive]);
-  const fetchDetail = useCallback(async (id: string) => {
-    const captured = identity, epoch = ++detailEpoch.current;
+  const fetchDetail = useCallback(async (id: string, report = false) => {
+    const captured = identity, epoch = ++detailEpoch.current, previous = workRef.current?.id === id ? workRef.current.revision : null;
     if (!validId(id)) return;
     try {
       const response = await request(`${base}/${encodeURIComponent(id)}`);
       if (!alive(captured) || epoch !== detailEpoch.current) return;
       if (!response.ok) { setWork(null); clearMultiviewWorkFiles(); throw new Error(messageFor(response.status)); }
       const data = await response.json() as { work: MultiviewWorkDto };
-      if (alive(captured) && epoch === detailEpoch.current) setWork(data.work);
+      if (alive(captured) && epoch === detailEpoch.current) {
+        setWork(data.work);
+        // A manual recheck that changes nothing must still say it ran.
+        if (report) setNotice(previous === data.work.revision ? '已重新核对，作品与服务器一致。' : '已重新核对，已更新为服务器上的最新内容。');
+      }
     } catch (error) { if (alive(captured) && epoch === detailEpoch.current) setNotice(error instanceof Error ? error.message : messageFor(503)); }
   }, [identity, alive, request]);
   useEffect(() => { if (loadedIdentity === identity) void fetchList();
@@ -245,7 +249,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
         void fetchList(true).then(next => { if (alive(captured) && workRef.current?.id === id && next?.[0]) navigate(next[0].id); });
       } : undefined}
       onEdit={onEdit} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')}
-      onRefresh={() => void fetchDetail(work.id)} onRetry={() => void mutate('save', work.title)} /> : <>
+      onRefresh={() => { setNotice(''); setChecking(true); void fetchDetail(work.id, true).finally(() => setChecking(false)); }} onRetry={() => void mutate('save', work.title)} /> : <>
       <div className={styles.filters}>
         <label>项目<select value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>
           <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
