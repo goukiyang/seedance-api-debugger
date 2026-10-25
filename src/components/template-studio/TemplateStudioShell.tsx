@@ -191,7 +191,9 @@ export default function TemplateStudioShell({
     }
 
     setHasRememberedLocation(true);
-    if (!userInteracted.current) router.replace(locationHref(remembered), { scroll: false });
+    // A bare entry restores only the image/video tab; the image workbench then opens 全部封面, not the last template.
+    const restoreTarget: RememberedStudioLocation = remembered.type === 'image' ? { version: 1, type: 'image' } : remembered;
+    if (!userInteracted.current) router.replace(locationHref(restoreTarget), { scroll: false });
     setRestoreReady(true);
   }, [
     activeType,
