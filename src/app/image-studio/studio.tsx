@@ -3898,7 +3898,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {banner?.originalUrl ? <>
         {/* 横幅按框宽等比显示，固定高度内居中裁切上下溢出。 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img decoding="async" className={styles.moduleBannerImage} src={banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块横幅' : '模块横幅'} />
+        <img decoding="async" className={styles.moduleBannerImage} src={banner.originalUrl || banner.thumbnailUrl || undefined} alt={templateWorkbench ? '模块横幅' : '模块横幅'} />
         <span className={styles.bannerLabel}>{templateWorkbench ? '模块横幅' : '模块横幅'}</span>
         {definitionReady && <><button type="button" className={styles.bannerReplace} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}>{bannerUploading ? '上传中' : '更换图片'}</button>
         <button type="button" className={styles.bannerRemove} disabled={bannerUploading || submitting} onClick={() => setBanner(null)} aria-label={templateWorkbench ? '移除模块横幅' : '移除模块横幅'}><X size={16} /></button></>}
@@ -4202,7 +4202,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     {copyFeedback && <ImageResultOperationFeedback feedback={copyFeedback} anchorRef={copyFeedbackAnchor} onDismiss={operationId => setCopyFeedback(current => current?.operationId === operationId ? null : current)} onRetry={copyFeedback.phase === 'error' ? () => { const task = tasks.find(item => item.id === copyFeedback.id); if (task) void copyTaskContext(task); } : undefined} />}
     {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${taskReadScope}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
     {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} onClose={() => setReadingDefinition(false)} />}
-    {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio"
+    {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio" contextTemplateId={module.sourcePresetId || sharedLive?.intent.presetId || module.id}
       contextKey={inputScopeKey(imageSourceTarget)} focusIntent={inputFocusIntents[imageSourceTarget]}
       onFocusIntentConsumed={id => setInputFocusIntents(previous => { if (previous[imageSourceTarget]?.id !== id) return previous; const next = { ...previous }; delete next[imageSourceTarget]; return next; })}
       initialSource={templateWorkbench ? 'template-image' : 'all'}

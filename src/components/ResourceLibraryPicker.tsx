@@ -35,6 +35,8 @@ export interface ResourceLibraryPickerProps {
   focusIntent?: PickerFocusIntent | null;
   onFocusIntentConsumed?: (id: string) => void;
   initialSource?: 'all' | 'template-image' | 'random-person';
+  /** Opened from a template page: default the template filter to it (2026-10-25). */
+  contextTemplateId?: string;
   maxSelection?: number;
   typeLimits?: Partial<Record<AssetType, number>>;
   acceptedTypes?: AssetType[];
@@ -83,7 +85,15 @@ function Thumbnail({ item }: { item: PickerItem }) {
   return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', contextKey, focusIntent, onFocusIntentConsumed, initialSource = 'all', maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
+// The template filter choice made while opened from a template is kept for this browser session only.
+const templateChoiceKey = (prefsKey: string, templateId: string) => `${prefsKey}:template-context:${templateId}`;
+function templateChoice(prefsKey: string, templateId: string) {
+  try { return sessionStorage.getItem(templateChoiceKey(prefsKey, templateId)); } catch { return null; }
+}
+function rememberTemplateChoice(prefsKey: string, templateId: string, value: 'template' | 'all') {
+  try { sessionStorage.setItem(templateChoiceKey(prefsKey, templateId), value); } catch { /* Optional preference. */ }
+}
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', contextKey, focusIntent, onFocusIntentConsumed, initialSource = 'all', contextTemplateId, maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user, loadingUser, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const pickerId = useId();
   const { confirm: askConfirm, productDialog } = useProductDialog();
@@ -148,6 +158,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [expanded, setExpanded] = useState(false), [failedUploads, setFailedUploads] = useState<FailedUploadItem[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
+  const contextFallback = useRef(false);
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0), initializedKey = useRef('');
   const failedUploadIds = useRef(new WeakMap<File, string>());
   const readingMore = useRef(false);
@@ -207,6 +218,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (typeof position.scroll === 'number' && Number.isFinite(position.scroll)) next.scroll = Math.max(0, position.scroll);
     if (typeof position.pages === 'number') next.pages = Math.min(20, Math.max(1, Math.floor(position.pages) || 1));
     for (const field of ['filtersOpen', 'selectionOpen'] as const) if (typeof raw[field] === 'boolean') next[field] = raw[field]!;
+    // Opened from a template page: show that template's images first, unless the user chose otherwise for it this session.
+    if (contextTemplateId && /^[a-zA-Z0-9_-]{1,100}$/.test(contextTemplateId) && templateChoice(prefsKey, contextTemplateId) !== 'all') {
+      next.source = 'template-image'; next.template = contextTemplateId; next.scroll = 0; next.pages = 1;
+    }
+    contextFallback.current = Boolean(contextTemplateId && next.template === contextTemplateId);
     browseRevision.current++; setNavigation(null); setRemovedInSession(false);
     restoration.current = next.scroll; restoring.current = true; lastVisiblePage.current = null;
     locked.current = false; setBusy(false);
@@ -276,7 +292,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           const data = await fetchPage(nextPage, after); if (token !== sequence.current) return;
           after = data.nextCursor || null; readCursor.current = after;
           batch = Array.from(new Map([...batch, ...data.items].map(item => [item.identity, item])).values()); setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setDirectoryNotice(data.notice || '');
-          if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) { setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return; }
+          if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) {
+            if (contextFallback.current && prefs.template === contextTemplateId) { contextFallback.current = false; setNotice('这个模板还没有生成过图片，已显示全部。'); setPrefs(p => ({ ...p, source: 'all', template: '', pages: 1, scroll: 0 })); return; }
+            setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return;
+          }
           if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
             restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
           }
@@ -301,7 +320,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const next = selected.some(s => s.identity === item.identity) ? selected.filter(s => s.identity !== item.identity) : [...selected, item];
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
-  const change = (patch: Partial<Preferences>) => { browseRevision.current++; setNavigation(null); sequence.current++; readingMore.current = false; restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
+  const change = (patch: Partial<Preferences>) => {
+    if (contextTemplateId && ('source' in patch || 'template' in patch)) {
+      const source = patch.source ?? prefs.source, template = patch.template ?? prefs.template;
+      rememberTemplateChoice(prefsKey, contextTemplateId, source === 'template-image' && template === contextTemplateId ? 'template' : 'all');
+    } browseRevision.current++; setNavigation(null); sequence.current++; readingMore.current = false; restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const changeSource = (source: string) => { if (prefs.source !== source) change({ source, template: '' }); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
     if (!item.canRemoveFromLibrary || !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(item.identity) || locked.current) return;
