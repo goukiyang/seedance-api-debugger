@@ -13,14 +13,22 @@ export function assetGenerationOrigin(asset: { id: string; metadata_json: string
   } catch { /* No filename-based provenance. */ }
   return undefined;
 }
+function readOriginTasks(condition: { asset_id: { in: string[] } } | { id: { in: string[] } }) {
+  return prisma.imageStudioTask.findMany({ where: { AND: [studioOutputTaskWhere], deleted_at: null, ...condition },
+    select: { id: true, asset_id: true, owner_id: true, source_preset_id: true, module_id: true, snapshot_json: true, status: true, usage_json: true } });
+}
 export async function generationOrigins(user: SessionUser, assets: Array<{ id: string; owner_id: string; metadata_json: string | null }>) {
   const metadataTasks = new Map<string, string>();
   for (const asset of assets) {
     try { const meta = JSON.parse(asset.metadata_json || '{}'); if (typeof meta.studioTaskId === 'string') metadataTasks.set(asset.id, meta.studioTaskId); } catch { /* Invalid metadata stays unknown. */ }
   }
-  const tasks = (await prisma.imageStudioTask.findMany({ where: { AND: [studioOutputTaskWhere], deleted_at: null, OR: [
-    { asset_id: { in: assets.map(a => a.id) } }, { id: { in: Array.from(metadataTasks.values()) } },
-  ] }, select: { id: true, asset_id: true, owner_id: true, source_preset_id: true, module_id: true, snapshot_json: true, status: true, usage_json: true } })).filter(studioTaskHasViewableOutput);
+  // Prisma cannot split an IN list combined with the negation inside studioOutputTaskWhere, so a library past
+  // SQLite's 999-parameter limit failed with P2029. Query in bounded chunks and merge.
+  const chunks = <T,>(values: T[]) => Array.from({ length: Math.ceil(values.length / 400) }, (_, index) => values.slice(index * 400, index * 400 + 400));
+  const conditions = [...chunks(assets.map(a => a.id)).map(ids => ({ asset_id: { in: ids } })), ...chunks(Array.from(metadataTasks.values())).map(ids => ({ id: { in: ids } }))];
+  const found = new Map<string, Awaited<ReturnType<typeof readOriginTasks>>[number]>();
+  for (const condition of conditions) for (const task of await readOriginTasks(condition)) found.set(task.id, task);
+  const tasks = Array.from(found.values()).filter(studioTaskHasViewableOutput);
   const taskById = new Map(tasks.map(task => [task.id, task]));
   const tasksByAsset = new Map<string, typeof tasks>();
   const snapshots = new Map<string, Record<string, unknown>>();
