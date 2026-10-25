@@ -25,6 +25,7 @@ import type { ContentKey } from '@/lib/content-reactions/types';
 import type { StudioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
 import type { StudioInputMainPreview } from '@/lib/image-studio/input-main';
 import { ImageResultOperationFeedback, type ImageResultOperation } from './ImageResultOperationFeedback';
+import { ImageResultStatusDetails } from './ImageResultStatusDetails';
 
 export type GeneratedImageResult = {
   id: string;
@@ -80,9 +81,10 @@ export function ResultImageContextMenuHint() {
   return <span className={styles.contextHint}><span className={styles.pointerHint}>图片右键可操作</span><span className={styles.touchHint}>长按图片可操作</span></span>;
 }
 
-function WaitingImage({ src }: { src?: string }) {
+function WaitingImage({ src, inputCover = false }: { src?: string; inputCover?: boolean }) {
   const [failed, setFailed] = useState('');
-  return src && failed !== src ? <img className={styles.waitingImage} src={src} alt="本次输入图片" onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
+  return src && failed !== src ? <img className={`${styles.waitingImage}${inputCover ? ` ${styles.inputCover}` : ''}`} src={src}
+    alt={inputCover ? '' : '本次输入图片'} aria-hidden={inputCover || undefined} onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
 function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, dismissFeedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
@@ -133,11 +135,21 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     menuItems.push(...pageActions.filter(action => action.group !== 'continue'));
   }
   const input = compactInformation && !item.media ? item.inputMainPreview : undefined;
+  if (input?.state === 'ready' && onPreviewInputMain && !menuItems.some(action => action.id === 'view-input-main')) {
+    menuItems.push({ id: 'view-input-main', label: '查看本次输入主图', group: 'view', icon: <Eye size={15} />,
+      onSelect: () => { void onPreviewInputMain(item); } });
+  }
   if (input && onQuickUse && !menuItems.some(action => action.label === '取回本次输入主图')) {
     menuItems.push({ id: 'input-main', label: '取回本次输入主图', group: 'continue', icon: <ImagePlus size={15} />,
       disabled: input.state !== 'ready', description: input.state === 'none' ? '本次为文生图，没有输入主图' : input.state === 'unknown' ? '本次输入主图尚无法确认' : input.state === 'unavailable' ? '本次输入主图已不可用或无权读取' : undefined,
       onSelect: () => onQuickUse(item) });
   }
+  const inputMenuEnabled = Boolean(input && menuItems.some(action => action.id === 'view-input-main' || action.id === 'input-main'));
+  const resultMenuEnabled = contextActionsEnabled || inputMenuEnabled;
+  const compactNotice = compactInformation && item.notice && !item.outputIssue ? item.notice : null;
+  const statusDetail = compactInformation
+    ? resultError && compactNotice && compactNotice !== resultError ? `${resultError}\n\n${compactNotice}` : resultError || compactNotice
+    : null;
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
   const primaryActions = renderPrimaryActions?.(item, waitDisplay);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
@@ -148,22 +160,32 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={prepared => changePreview(item, true, prepared)} previewSource={previewAccount ? previewPreparationOptions(item, previewAccount) || undefined : undefined} onViewed={item.onViewed} active={visible && Boolean(previewAccount)} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
     contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} recoverFromThumbnailError={compactInformation} cancelPreviewRef={cancelPreviewRef} />
     : <div className={`${styles.pending}${item.generationWait && item.pending ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
-      data-result-choice={onSelect ? '' : undefined} role={onSelect || contextActionsEnabled ? 'button' : undefined} tabIndex={onSelect || contextActionsEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : contextActionsEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
+      data-result-choice={onSelect ? '' : undefined} role={onSelect || resultMenuEnabled ? 'button' : undefined} tabIndex={onSelect || resultMenuEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : resultMenuEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
       onClick={onSelect ? event => { if (!event.defaultPrevented) select(item); } : undefined}
       onKeyDown={onSelect ? event => { if (!event.defaultPrevented && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); select(item); } } : undefined}>
-      <WaitingImage src={compactInformation && item.inputMainPreview ? undefined : item.waitingThumbnail} />{waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
+      <WaitingImage src={compactInformation ? input?.state === 'ready' ? input.thumbnailUrl : undefined : item.waitingThumbnail}
+        inputCover={Boolean(compactInformation && input?.state === 'ready' && input.thumbnailUrl)} />
+      {waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
     </div>;
   return <article ref={cardRef} id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
     <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
-      {contextActionsEnabled ? <ResultImageContextMenu identity={identity} active={menuActive} items={menuItems} onOpenChange={open => {
+      {resultMenuEnabled ? <ResultImageContextMenu identity={identity} active={menuActive} items={menuItems} onOpenChange={open => {
         if (open) cancelPreviewRef.current?.();
         setMenuOpen(open);
       }}>{cover}</ResultImageContextMenu> : cover}
       {waitDisplay?.finishing && <ImageGenerationWaiting display={waitDisplay} visible={visible} />}
+      {statusDetail && !item.media && <div className={styles.pendingDetailSlot} data-track={Boolean(waitDisplay?.showTrack) || undefined}>
+        <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />
+      </div>}
       {coverReactions ? <div className={styles.coverReactions}>{reactions}<div className={styles.coverPin}>{renderReactionAction?.(item)}</div></div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
-      {(hasCommonActions || secondaryActions) && <div className={styles.mediaActions} data-cover-context-delete={coverDeleteWithContextActions || undefined} data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+      {(hasCommonActions || secondaryActions || item.media && statusDetail) && <div className={styles.mediaActions}
+        data-cover-context-delete={coverDeleteWithContextActions || undefined} data-has-status-detail={Boolean(item.media && statusDetail) || undefined}
+        data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+        {item.media && statusDetail && <div className={styles.mediaDetailAction}>
+          <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />
+        </div>}
         {hasCommonActions && <div className={styles.commonActions}>
           {item.media && <>
             {item.download && (!contextActionsEnabled || !readOnly) && <button type="button" aria-label="下载图片" title="下载图片" disabled={item.downloadDisabled || Boolean(feedback?.busy)} onClick={() => void operate(item, 'download')}><Download size={15} /></button>}
@@ -175,26 +197,13 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
       </div>}
     </div>
-    {input && <div className={styles.inputMain}>
-      {input.thumbnailUrl && input.state === 'ready' && <div className={styles.inputMainThumb}>
-        <ResultImageContextMenu identity={`${identity}:input-main`} active={menuActive} items={[
-          { id: 'view-input-main', label: '查看本次输入主图', group: 'view', icon: <Eye size={15} />, onSelect: () => { void onPreviewInputMain?.(item); } },
-          ...(onQuickUse ? [{ id: 'use-input-main', label: '取回本次输入主图', group: 'continue' as const, icon: <ImagePlus size={15} />, onSelect: () => onQuickUse(item) }] : []),
-        ]} onOpenChange={open => { if (open) cancelPreviewRef.current?.(); setMenuOpen(open); }}>
-          <ResultImageCover src={input.thumbnailUrl} alt="本次输入主图" selected={false} applied={false} recoverFromThumbnailError active={menuActive} onSelect={() => {}}
-            onPreview={() => { void onPreviewInputMain?.(item); }} onQuickUse={onQuickUse ? () => onQuickUse(item) : undefined}
-            contextMenuEnabled menuOpen={menuOpen && menuActive} cancelPreviewRef={cancelPreviewRef} />
-        </ResultImageContextMenu>
-      </div>}
-      <span>{input.state === 'ready' ? `输入主图${input.count && input.count > 1 ? ` · ${input.count}张` : ''}` : input.state === 'none' ? '本次为文生图，无输入主图' : input.state === 'unknown' ? '本次输入主图尚无法确认' : '输入主图已不可用或无权读取'}</span>
-    </div>}
     {contextActionsEnabled ? <ImageResultNextActionFeedback controller={controller} className={`${styles.feedback} ${styles.nextFeedback}`} /> : item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
     {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
     {feedback?.id === item.id && (compactInformation ? <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
       onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} /> : <p className={styles.feedback} role="status">{feedback.message}</p>)}
-    {item.notice && !(compactInformation && item.outputIssue) && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
-    {resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
+    {!compactInformation && item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
+    {!compactInformation && resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
     {renderSupplement?.(item)}
   </article>;
 }

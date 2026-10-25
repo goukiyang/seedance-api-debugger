@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '选图和上传统一', outline: [
-  '3D多视图和更换头像都改用与生图模板相同的选图窗口',
-  '可直接从素材库挑图，也能在同一个窗口里上传',
+const notice = { title: '结果与模板同步', outline: [
+  '模板生成素材找回完整分类，结果卡状态和详情更清楚',
+  '创作者保存后自动同步模板横幅和设置，保留个人输入',
+  '大图对比与换图分开，已有图片可直接切换对比',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

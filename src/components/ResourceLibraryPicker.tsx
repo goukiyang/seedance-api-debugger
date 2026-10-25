@@ -15,7 +15,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { describeUploadFileError, uniqueUploadFiles, type UploadFileFailure, type UploadProgressHandler, type UploadProgressSnapshot, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
-import type { PickerAlbum, PickerItem, PickerResponse, PickerScope } from '@/lib/assets/picker-types';
+import type { PickerAlbum, PickerItem, PickerResponse, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
 import styles from './ResourceLibraryPicker.module.css';
 import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
@@ -76,6 +76,9 @@ function selectionName(item: PickerItem) {
 const scopes: Array<[PickerScope, string]> = [['mine', '我的素材'], ['project', '项目素材'], ['shared', '共享给我'], ['public', '公共素材']];
 function stored<T>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; } }
 function validKeys(input: unknown): string[] { return Array.isArray(input) ? input.filter((key): key is string => typeof key === 'string' && /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(key)).slice(0, 60) : []; }
+function templateFilterId(input: unknown) {
+  return typeof input === 'string' && input.length <= 100 && /^(?:module-source:)?[a-zA-Z0-9_-]+$/.test(input) ? input : '';
+}
 function failure(result: UploadedImagePickerConfirmResult) { return result === false ? '所选素材未能加入，请重试' : result && typeof result === 'object' && !result.success ? result.message || '所选素材未能加入，请重试' : null; }
 function durationText(value: number) { return `${Math.floor(value / 60).toString().padStart(2, '0')}:${Math.floor(value % 60).toString().padStart(2, '0')}`; }
 function Thumbnail({ item }: { item: PickerItem }) {
@@ -148,7 +151,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const positionScope = `${prefsKey}:${contextKey || 'legacy'}`;
   const recentKey = user ? `sd2:resource-recent:v1:${user.id}:${target}` : '';
   const [prefs, setPrefs] = useState<Preferences>(defaults), [ready, setReady] = useState(false), [query, setQuery] = useState('');
-  const [templates, setTemplates] = useState<Array<{ id: string; name: string }>>([]);
+  const [templates, setTemplates] = useState<PickerTemplate[]>([]);
+  const templateContextId = templateFilterId(contextTemplateId);
   const [sessionOwner, setSessionOwner] = useState('');
   const [notice, setNotice] = useState(''), [directoryNotice, setDirectoryNotice] = useState('');
   const imports = useRef(new Map<string, PickerItem>()), importOwner = useRef('');
@@ -158,7 +162,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const [expanded, setExpanded] = useState(false), [failedUploads, setFailedUploads] = useState<FailedUploadItem[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
   const browseSurface = useCallback(() => window.matchMedia('(max-width: 760px)').matches ? browse.current : body.current, []);
-  const contextFallback = useRef(false);
+  const contextFallback = useRef('');
   const sequence = useRef(0), session = useRef(0), locked = useRef(false), restoring = useRef(false), restoration = useRef(0), initializedKey = useRef('');
   const failedUploadIds = useRef(new WeakMap<File, string>());
   const readingMore = useRef(false);
@@ -202,7 +206,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
 
   useEffect(() => {
     if (!open || !sessionReady || !user || !prefsKey) return;
-    const ownerKey = `${positionScope}:${typesKey}:${initialSource}`;
+    const ownerKey = `${positionScope}:${typesKey}:${initialSource}:${templateContextId}`;
     if (initializedKey.current === ownerKey && ready && sessionOwner === prefsKey) return;
     if (importOwner.current !== recentKey) { imports.current.clear(); uploadReceipts.current.clear(); importOwner.current = recentKey; }
     const raw = stored<Partial<Preferences>>(prefsKey, {}), next = { ...defaults, source: initialSource as string };
@@ -212,17 +216,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (raw.type === 'all' || types.includes(raw.type as AssetType)) next.type = raw.type!;
     if (typeof raw.query === 'string') next.query = raw.query.slice(0, 160);
     if (raw.sort === 'name') next.sort = 'name';
-    for (const field of ['album', 'project', 'template'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
+    for (const field of ['album', 'project'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
+    next.template = templateFilterId(raw.template);
     // Old v1 positions have no target identity; retain their filter preferences only.
     const position = stored<{ scroll?: unknown; pages?: unknown }>(`${positionScope}:position:v2:${pickerFilterKey(typesKey, next)}`, {});
     if (typeof position.scroll === 'number' && Number.isFinite(position.scroll)) next.scroll = Math.max(0, position.scroll);
     if (typeof position.pages === 'number') next.pages = Math.min(20, Math.max(1, Math.floor(position.pages) || 1));
     for (const field of ['filtersOpen', 'selectionOpen'] as const) if (typeof raw[field] === 'boolean') next[field] = raw[field]!;
     // Opened from a template page: show that template's images first, unless the user chose otherwise for it this session.
-    if (contextTemplateId && /^[a-zA-Z0-9_-]{1,100}$/.test(contextTemplateId) && templateChoice(prefsKey, contextTemplateId) !== 'all') {
-      next.source = 'template-image'; next.template = contextTemplateId; next.scroll = 0; next.pages = 1;
+    if (templateContextId && templateChoice(prefsKey, templateContextId) !== 'all') {
+      next.source = 'template-image'; next.template = templateContextId; next.scroll = 0; next.pages = 1;
     }
-    contextFallback.current = Boolean(contextTemplateId && next.template === contextTemplateId);
+    contextFallback.current = templateContextId && next.template === templateContextId ? templateContextId : '';
     browseRevision.current++; setNavigation(null); setRemovedInSession(false);
     restoration.current = next.scroll; restoring.current = true; lastVisiblePage.current = null;
     locked.current = false; setBusy(false);
@@ -230,7 +235,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     initializedKey.current = ownerKey;
     setReady(true);
     return () => { sequence.current++; session.current++; };
-  }, [open, prefsKey, ready, recentKey, sessionOwner, sessionReady, types, typesKey, user?.id, initialSource, positionScope]);
+  }, [open, prefsKey, ready, recentKey, sessionOwner, sessionReady, types, typesKey, user?.id, initialSource, positionScope, templateContextId]);
   useEffect(() => {
     if (!open || !ready) return;
     const viewport = window.visualViewport;
@@ -292,9 +297,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           const data = await fetchPage(nextPage, after); if (token !== sequence.current) return;
           after = data.nextCursor || null; readCursor.current = after;
           batch = Array.from(new Map([...batch, ...data.items].map(item => [item.identity, item])).values()); setAlbums(data.albums); setTemplates(data.templates || []); setTotal(data.total); setPage(data.page); setHasMore(data.hasMore); setDirectoryNotice(data.notice || '');
-          if (prefs.template && !(data.templates || []).some(t => t.id === prefs.template)) {
-            if (contextFallback.current && prefs.template === contextTemplateId) { contextFallback.current = false; setNotice('这个模板还没有生成过图片，已显示全部。'); setPrefs(p => ({ ...p, source: 'all', template: '', pages: 1, scroll: 0 })); return; }
-            setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return;
+          if (prefs.template) {
+            const template = (data.templates || []).find(t => t.id === prefs.template)
+              || (data.templates || []).find(t => t.aliases?.includes(prefs.template));
+            if (!template) {
+              if (contextFallback.current === prefs.template) { contextFallback.current = ''; setNotice('这个模板还没有生成过图片，已显示全部。'); setPrefs(p => ({ ...p, source: 'all', template: '', pages: 1, scroll: 0 })); return; }
+              setPrefs(p => ({ ...p, template: '', pages: 1, scroll: 0 })); return;
+            }
+            if (template.id !== prefs.template) {
+              if (contextFallback.current === prefs.template) contextFallback.current = template.id;
+              // Keep the restored position and other filters while replacing a verified historical alias.
+              setPrefs(p => p.template === prefs.template ? { ...p, template: template.id } : p); return;
+            }
           }
           if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
             restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
@@ -321,9 +335,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     const issue = canSelect(next); if (issue) { setError(issue); return; } setSelected(next); setError('');
   };
   const change = (patch: Partial<Preferences>) => {
-    if (contextTemplateId && ('source' in patch || 'template' in patch)) {
+    if (templateContextId && ('source' in patch || 'template' in patch)) {
       const source = patch.source ?? prefs.source, template = patch.template ?? prefs.template;
-      rememberTemplateChoice(prefsKey, contextTemplateId, source === 'template-image' && template === contextTemplateId ? 'template' : 'all');
+      const isContext = template === templateContextId || templates.some(t => t.id === template && t.aliases?.includes(templateContextId));
+      rememberTemplateChoice(prefsKey, templateContextId, source === 'template-image' && isContext ? 'template' : 'all');
     } browseRevision.current++; setNavigation(null); sequence.current++; readingMore.current = false; restoring.current = false; browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, ...patch, scroll: 0, pages: 1 })); };
   const changeSource = (source: string) => { if (prefs.source !== source) change({ source, template: '' }); };
   const removeItem = async (item: Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'>, restore = false) => {
