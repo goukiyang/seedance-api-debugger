@@ -794,6 +794,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const target = directory.find(item => item.id === moduleId);
       if (target) {
         navigateToModule(target.groupName || '未分组', moduleId, { behavior: 'auto', markViewed: false, recordUse: false, expandParents: sidebarInteraction.current === 0 });
+      } else if (!shared.catalogReady) {
+        return; // a shared workspace may not be listed yet; decide once the shared directory is read
       } else {
         routedContentHandled.current = routeKey;
         setError('指定的图片模板不存在或当前不可用');
@@ -805,7 +807,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       routedContentHandled.current = routeKey;
       if (params.get('view') === 'covers') setCoverView(true);
     }
-  }, [directory, loading, navigateToModule, routeQuery, userId, viewRestored]);
+  }, [directory, loading, navigateToModule, routeQuery, userId, viewRestored, shared.catalogReady]);
   async function createModule() {
     if (createLock.current) return;
     createLock.current = true; setCreating(true); setError('');
@@ -1142,12 +1144,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   // On first restore, show the group that holds the restored module; later group clicks are left alone.
   const initialGroupAligned = useRef('');
   useEffect(() => {
-    if (!viewRestored || coverView || !active || !navigation.length || initialGroupAligned.current === viewStorageKey) return;
+    if (!viewRestored || coverView || !active || !directoryReady || !shared.catalogReady || initialGroupAligned.current === viewStorageKey) return;
     const entry = navigation.find(item => item.id === active);
     if (!entry) return;
     initialGroupAligned.current = viewStorageKey;
     if ((entry.groupName || '未分组') !== selectedGroup) setSelectedGroup(entry.groupName || '未分组');
-  }, [viewRestored, coverView, active, navigation, selectedGroup, viewStorageKey]);
+  }, [viewRestored, coverView, active, navigation, selectedGroup, viewStorageKey, directoryReady, shared.catalogReady]);
   useEffect(() => {
     if (!coverView || gallery.scope !== 'mine' || !shared.catalogReady
       || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision) return;
@@ -1214,8 +1216,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     const availableGroups = Object.keys(groupedModules);
     const activeModule = orderedModules.find(item => item.id === active);
     if (!coverView && activeModule?.sharedLive) { setSelectedGroup(activeModule.groupName || '未分组'); return; }
-    setSelectedGroup(current => current && availableGroups.includes(current) ? current : availableGroups[0] || groups[0]);
-  }, [groups, groupedModules, navigation.length, active, orderedModules, coverView]);
+    // Until personal and shared directories are both read, a restored group may simply not be listed yet; keep it.
+    const complete = directoryReady && shared.catalogReady;
+    setSelectedGroup(current => current && (availableGroups.includes(current) || !complete) ? current : availableGroups[0] || groups[0]);
+  }, [groups, groupedModules, navigation.length, active, orderedModules, coverView, directoryReady, shared.catalogReady]);
   const [groupDeleting, setGroupDeleting] = useState(false);
   const groupDeleteLock = useRef(false);
   const groupDeleteRequests = useRef(new Map<string, { requestId: string; expectedMembers: Array<{ id: string; revision: number }> }>());
