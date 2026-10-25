@@ -25,7 +25,9 @@ export type MultiviewSettingsDto = MultiviewSettingsSummary & { contentHash: str
 );
 export type MultiviewSettingsSource = { taskId: string; sourceVersion: string };
 export type MultiviewSettingsReceipt = { state: 'committed'; mutationId: string; action: 'create' | 'save' | 'rename' | 'delete'; settings: MultiviewSettingsDto };
-export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPresetPublicDto; slots?: MultiviewFrameSettingsSlot[] };
+export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPresetPublicDto; slots?: MultiviewFrameSettingsSlot[];
+  /** Set when the saved preset version predates defaults/composition reference; preset is then the current one. */
+  legacyPresetVersion?: string };
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const only = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).every(key => keys.includes(key));

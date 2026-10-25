@@ -368,7 +368,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     const item = result.settings;
     const sourceKey = propsRef.current.currentSourceKey;
     const nextPreset = parsePublicPresetState({ revision: item.revision, preset: result.preset });
-    if (item.kind !== 'generation' || !nextPreset || item.value.presetVersion !== nextPreset.preset.version) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
+    const legacy = Boolean(result.legacyPresetVersion && result.legacyPresetVersion === item.value.presetVersion);
+    if (item.kind !== 'generation' || !nextPreset || !legacy && item.value.presetVersion !== nextPreset.preset.version) throw new Error('这份设置的模板版本暂不可确认，输入保留。');
     const previousKey = JSON.stringify(previous);
     const projectResponse = await fetch('/api/projects?lite=true', { headers: { 'x-app-session-user': scope.owner }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
     const projectPayload = await readJsonResponse<ApiError & { projects?: Project[] }>(projectResponse);
@@ -393,8 +394,11 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       || submitLock.current || pendingActive(receiptRef.current)) throw new Error('当前输入或原请求已变化，请重新选用设置。');
     if (freshCards) setCards(freshCards);
     const value = item.value;
-    const next = parseMultiviewGenerationDraft({ ...previous, ...value, settingsBinding: { id: item.id, revision: item.revision },
-      resolutionApprovalConfirmed: false, resolutionApprovalId: '' });
+    // A legacy template version is replaced by the current one; the draft is then unbound until the owner saves it again.
+    const merged: Record<string, unknown> = { ...previous, ...value, ...(legacy ? { presetVersion: nextPreset.preset.version } : {}),
+      settingsBinding: { id: item.id, revision: item.revision }, resolutionApprovalConfirmed: false, resolutionApprovalId: '' };
+    if (legacy) delete merged.settingsBinding;
+    const next = parseMultiviewGenerationDraft(merged);
     if (!next) throw new Error('这份设置暂不能安全读取，原输入保留。');
     // Persist the existing account/Document draft before replacing any visible input.
     persistDraft(scope.owner, tabRef.current, next);
