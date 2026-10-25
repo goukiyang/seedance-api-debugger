@@ -517,9 +517,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const savedGroup = typeof view?.group === 'string' && view.group.length <= 120 ? view.group : '';
       const savedActive = typeof view?.active === 'string' && view.active.length <= 200 ? view.active : '';
       const hasExpandedGroups = Array.isArray(view?.expandedGroups);
+      // Without a template named in the URL the workbench opens on 全部封面; the remembered template is not reopened.
+      const location = new URLSearchParams(window.location.search);
+      const namedTarget = Boolean(location.get('moduleId') || location.get('presetId'));
       setSelectedGroup(savedGroup);
-      setActive(savedActive);
-      setCoverView(typeof view?.coverView === 'boolean' ? view.coverView : false);
+      setActive(namedTarget ? savedActive : '');
+      setCoverView(namedTarget ? typeof view?.coverView === 'boolean' ? view.coverView : false : true);
       const savedGroups = hasExpandedGroups
         ? view.expandedGroups.filter((group: unknown): group is string => typeof group === 'string' && group.length > 0 && group.length <= 120).slice(0, 100)
         : savedGroup ? [savedGroup] : [];
