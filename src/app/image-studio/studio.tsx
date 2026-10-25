@@ -778,7 +778,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   useEffect(() => {
     if (loading || !viewRestored) return;
     const routeKey = `${userId}:${window.location.search}`;
-    if (routedContentHandled.current === routeKey) return;
+    // Self-initiated navigation (sidebar, delete, covers) marks its new URL as handled before Next syncs the query;
+    // it is resolved too, otherwise the content wrapper below stays hidden until a reload.
+    if (routedContentHandled.current === routeKey) { setResolvedRoute(routeKey); return; }
     const params = new URLSearchParams(window.location.search);
     const moduleId = params.get('moduleId');
     const presetId = params.get('presetId');
