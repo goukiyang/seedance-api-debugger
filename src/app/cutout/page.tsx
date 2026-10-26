@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent } from 'react';
+import type { DragEvent } from 'react';
 import {
   Archive, Brush, ChevronLeft, ChevronRight, Crop, Download, Image as ImageIcon,
   LoaderCircle, Play, RefreshCw, Scan, Trash2, X,
@@ -299,7 +299,6 @@ export default function CutoutPage() {
   const automaticHandoffImport = useRef('');
   const currentSourceIdRef = useRef('');
   currentSourceIdRef.current = source?.id || '';
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const sourceSelection = useRef(0);
   const selectedJobIdRef = useRef('');
@@ -1113,11 +1112,6 @@ export default function CutoutPage() {
     return () => document.removeEventListener('paste', paste);
   }, [acceptFile, isAdmin, imagePickerOpen]);
 
-  const onFileInput = (event: ChangeEvent<HTMLInputElement>) => {
-    acceptFile(event.currentTarget.files?.[0] || null);
-    event.currentTarget.value = '';
-  };
-
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragActive(false);
@@ -1593,14 +1587,13 @@ export default function CutoutPage() {
               {source && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => setImagePickerOpen(true)} disabled={isBusy || handoffBusy || Boolean(pendingSubmission)}>更换图片</button><button className={styles.iconButton} type="button" aria-label="清除当前图片" onClick={() => void acceptFile(null)} disabled={isBusy || Boolean(pendingSubmission)}><X size={15} /></button></div>}
             </div>
             {!source && !mainResultUrl ? <div className={`${styles.sourceDropzone} ${dragActive ? styles.sourceDropActive : ''}`} onDragEnter={event => { event.preventDefault(); if (!isBusy && !pendingSubmission) setDragActive(true); }} onDragOver={event => event.preventDefault()} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false); }} onDrop={onDrop}>
-              <ImageIcon size={36} aria-hidden="true" /><strong>选择要处理的图片</strong><span>拖入图片或粘贴，支持 PNG、JPG、WebP</span><div className={styles.buttonRow}><button type="button" className={styles.primaryButton} onClick={() => fileInputRef.current?.click()} disabled={isBusy}>上传图片</button><button type="button" className={styles.secondaryButton} onClick={() => setImagePickerOpen(true)} disabled={isBusy}>从素材库选择</button></div>
+              <ImageIcon size={36} aria-hidden="true" /><strong>选择要处理的图片</strong><span>拖入图片或粘贴，支持 PNG、JPG、WebP</span><div className={styles.buttonRow}><button type="button" className={styles.primaryButton} onClick={() => setImagePickerOpen(true)} disabled={isBusy}>选择或上传图片</button></div>
             </div> : repairTarget ? <>
               <div className={styles.sectionHeading}><h2>修一下</h2><button className={styles.quietButton} type="button" onClick={async () => { if (!repairDirty || await confirm('放弃未应用的画笔修改？已应用结果保留。', { title: '关闭修图', confirmLabel: '放弃修改' })) { setRepairTarget(null); setRepairDirty(false); } }}>关闭修图</button></div>
               <BrushRepair resultUrl={repairTarget.url} originalUrl={repairTarget.originalUrl} cropMeta={repairTarget.cropMeta} filename={repairTarget.filename} disabled={isBusy} onDraftDirtyChange={setRepairDirty} onApply={onApplyRepair} />
             </> : mode === 'characters' && characterSettings.strategy === 'sam_box' && sourceUrl && sourceWidth > 0 && sourceHeight > 0 && view === 'original' ?
               <CharacterBoxEditor imageUrl={sourceUrl} width={sourceWidth} height={sourceHeight} boxes={boxes} onBoxesChange={setBoxes} prompts={prompts} onPromptsChange={setPrompts} disabled={isBusy} /> :
               <CutoutWorkspacePreview scope={`${accountId}:${source?.id || outputJob?.job_id || 'empty'}`} originalUrl={sourceUrl} resultUrl={mainResultUrl} matchingOriginal={Boolean(matchingOriginal) && Boolean(activeOutput?.main)} crop={activeOutput?.main ? resultCrop : null} view={view} background={previewBackground} onOriginalSize={setSourceSize} onZoom={url => setZoom({ src: url, alt: source?.name || '抠图结果' })} />}
-            <input ref={fileInputRef} className={styles.hiddenInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={onFileInput} />
             {source && <div className={styles.sourceHint}><span title={source.name}>{source.name}</span><span>{sourceWidth && sourceHeight ? `${sourceWidth} × ${sourceHeight} px` : '正在读取尺寸'} · {source.kind === 'local' ? cachedAsset?.sourceId === source.id ? '已暂存' : '尚未上传' : '任务结果'}</span></div>}
             <div className={styles.previewTools}><div className={styles.buttonRow}><span>预览底色</span>{(['checker', 'light', 'dark'] as const).map(background => <button className={`${styles.modeTab} ${previewBackground === background ? styles.modeActive : ''}`} aria-pressed={previewBackground === background} key={background} type="button" onClick={() => setPreviewBackground(background)}>{background === 'checker' ? '透明网格' : background === 'light' ? '浅色' : '深色'}</button>)}</div><span>仅预览，不改变导出</span></div>
             {mainResultUrl && <div className={styles.operationBar}>

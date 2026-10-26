@@ -117,6 +117,8 @@ export interface UseWorkspaceResult {
   restoreRecovery: (snapshot: WorkspaceInputRecovery) => Promise<void>;
   // P0-1: 替换素材
   replaceAsset: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
+  /** Puts a library asset (picked in the shared picker) in the place of an existing reference. */
+  replaceAssetWithLibrary: (assetId: string, nextId: string) => Promise<void>;
   // P0-1: 设置 frame 角色
   setAssetFrameRole: (assetId: string, role: FrameRole) => Promise<void>;
 }
@@ -291,6 +293,16 @@ export function useWorkspace(): UseWorkspaceResult {
       } catch (cause) { if (isCurrent(scope)) setUploadStatuses(previous => ({ ...previous, [assetId]: 'failed' })); throw cause; }
     }).catch(() => {});
   }, [assertCurrent, associate, isCurrent, mutate, request, uploadAssetToHistory]);
+  const replaceAssetWithLibrary = useCallback(async (assetId: string, nextId: string) => {
+    if (!nextId || nextId === assetId) return;
+    await mutate(async scope => {
+      const assets = workspaceRef.current?.assets || [], target = assets.find(item => item.assetId === assetId);
+      await associate(scope, { assetId: nextId, role: target?.role || 'reference_image' });
+      await request(scope, `/api/workspace/assets/${encodeURIComponent(assetId)}`, 'DELETE');
+      if (target) await request(scope, '/api/workspace/assets/reorder', 'PATCH', { order: assets.map(item => item.assetId === assetId ? nextId : item.assetId)
+        .filter((id, index, all) => all.indexOf(id) === index).map((id, index) => ({ assetId: id, sortOrder: index })) });
+    });
+  }, [associate, mutate, request]);
   const addAssets = useCallback(async (ids: string[]) => { const assetIds = ids.map(id => id.trim()).filter(Boolean); if (assetIds.length) await mutate(scope => associate(scope, { assetIds })); }, [associate, mutate]);
   const addReferenceImages = useCallback(async (referenceImageIds: string[]) => { if (referenceImageIds.length) await mutate(scope => associate(scope, { referenceImageIds })); }, [associate, mutate]);
   const addLibrarySelection = useCallback(async (selection: Array<{ assetId?: string; referenceImageId?: string }>) => { if (selection.length) await mutate(scope => associate(scope, { selection })); }, [associate, mutate]);
@@ -333,5 +345,5 @@ export function useWorkspace(): UseWorkspaceResult {
   return { workspace, loading, error, assets: workspace?.assets ?? [], uploadStatuses, uploadAsset, uploadAssetToHistory,
     pendingWorkspaceAttach, retryPendingAttach, addAssets, addReferenceImages, addLibrarySelection, loadReferenceAlbum,
     saveCurrentAsReferenceAlbum, createReferenceAlbum, clearAssets, removeAsset, reorderAssets, validatePrompt,
-    refresh: fetchWorkspace, captureRecovery, restoreRecovery, replaceAsset, setAssetFrameRole };
+    refresh: fetchWorkspace, captureRecovery, restoreRecovery, replaceAsset, replaceAssetWithLibrary, setAssetFrameRole };
 }

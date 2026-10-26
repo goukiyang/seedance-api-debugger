@@ -20,6 +20,8 @@ interface Props {
   onReplace: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
   onOpenHistory?: () => void;
+  /** When given, “替换” opens the shared picker for this asset instead of a raw file input. */
+  onReplaceFromLibrary?: (assetId: string) => void;
   generationMode?: string;
   model?: string | null;
   loading?: boolean;
@@ -96,6 +98,7 @@ export function ReferenceStrip({
   onReplace,
   onPreview,
   onOpenHistory,
+  onReplaceFromLibrary,
   generationMode,
   model,
   loading = false,
@@ -303,9 +306,10 @@ export function ReferenceStrip({
 
   const handleReplaceClick = useCallback((assetId: string) => {
     if (uploading || loading) return;
+    if (onReplaceFromLibrary) { onReplaceFromLibrary(assetId); return; }
     replaceTargetAssetIdRef.current = assetId;
     replaceInputRef.current?.click();
-  }, [loading, uploading]);
+  }, [loading, onReplaceFromLibrary, uploading]);
 
   const handleAddClick = useCallback(() => {
     if (onOpenHistory) {

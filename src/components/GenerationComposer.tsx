@@ -581,6 +581,8 @@ export function GenerationComposer({
   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
+  // “替换” a reference through the shared picker (project rule, 2026-10-25).
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
@@ -2293,6 +2295,7 @@ export function GenerationComposer({
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
+              onReplaceFromLibrary={setReplaceTargetId}
               generationMode={generationMode}
               loading={workspace.loading}
             />
@@ -2323,6 +2326,7 @@ export function GenerationComposer({
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
+              onReplaceFromLibrary={setReplaceTargetId}
               generationMode={generationMode}
               loading={workspace.loading}
             />
@@ -2542,6 +2546,20 @@ export function GenerationComposer({
         onClose={() => setPreviewMedia(null)}
       />}
 
+      {replaceTargetId && !interactionLocked && <UploadedImagePicker open target="workspace" title="替换这一项素材" confirmLabel="用它替换"
+        purpose={`video-${generationMode}-replace`} contextKey={`${creationContextKey || 'video'}:replace`} maxSelection={1}
+        acceptedTypes={[workspace.assets.find(asset => asset.assetId === replaceTargetId)?.type || 'image']}
+        currentCount={0} currentAssetIds={workspace.assets.map(asset => asset.assetId)} currentReferenceImageIds={currentReferenceImageIds}
+        onClose={() => setReplaceTargetId(null)}
+        onUploadFile={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAssetToHistory(file, onProgress))}
+        onConfirm={async () => ({ success: false, message: '请选择一项素材' })}
+        onConfirmSelection={async (items: PickerItem[]) => {
+          const nextId = items[0]?.assetId;
+          if (items.length !== 1 || !nextId) return { success: false, message: '请选择一项素材' };
+          await runWorkspaceOperation(async () => { await workspace.replaceAssetWithLibrary(replaceTargetId, nextId); await refreshReferenceAlbums(); });
+          setReplaceTargetId(null);
+          return { success: true };
+        }} />}
       <UploadedImagePicker
         contextKey={creationContextKey || `video:${pricingProjectId || 'draft'}:${selectedVideoCardId || 'new'}`}
         open={(showUploadedImagePicker || showAlbumPicker) && !interactionLocked}

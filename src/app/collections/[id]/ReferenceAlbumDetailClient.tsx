@@ -11,7 +11,9 @@ import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/Share
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useAppSession } from '@/lib/context/AppSessionContext';
-import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import type { PickerItem } from '@/lib/assets/picker-types';
 import styles from '../ReferenceAlbumsClient.module.css';
 
 interface AlbumDetail {
@@ -154,12 +156,6 @@ function AlbumDetailThumbnail({ image, alt }: { image: ReferenceImageItem; alt: 
   return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-function formatUploadProgressDetail(files: File[], file: File, index: number, progress: UploadProgressSnapshot) {
-  const itemText = files.length > 1 ? `第 ${index + 1}/${files.length} 个：${file.name}` : file.name;
-  if (progress.percent != null) return itemText;
-  return `${itemText}，${progress.label}`;
-}
-
 export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albumId: string; returnTo?: string | null }) {
   const { confirm, prompt, productDialog } = useProductDialog();
   const { user, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
@@ -182,7 +178,6 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
   const [loading, setLoading] = useState(false);
   const [shareDialogAlbum, setShareDialogAlbum] = useState<ShareAlbumDialogAlbum | null>(null);
   const [sharingImageId, setSharingImageId] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!hasLoadedUser) void refreshUser();
@@ -287,51 +282,21 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
     setUploadFeedback({ type: 'success', message: `已上传 ${uploadedCount} 个素材到图集。` });
   }, [attachAssetsToAlbum, contextKey, isCurrent, loadAlbum]);
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    if (files.length === 0) return;
+  // Files are found or uploaded in the shared picker (project rule, 2026-10-25); picked assets join this album.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const addFromPicker = async (items: PickerItem[]) => {
+    const picked = items.filter(item => item.assetId);
+    if (!picked.length) return { success: false, message: '请选择要加入图集的素材' };
     const epoch = contextRef.current.epoch;
-    setLoading(true);
-    setError(null);
-    setUploadProgress(null);
-    setPendingAlbumAttach(null);
-    setUploadFeedback({
-      type: 'info',
-      message: `正在上传 ${files.length} 个素材。视频或音频会先校验时长并上传到公网存储，文件较大时可能需要几十秒。`,
-    });
+    setLoading(true); setError(null); setPendingAlbumAttach(null);
     try {
-      const assetIds: string[] = [];
-      const fileNames = files.map((file) => file.name || 'upload.bin');
-      for (let index = 0; index < files.length; index += 1) {
-        if (!aliveRef.current || !isCurrent(epoch)) return;
-        const file = files[index];
-        const asset = await uploadFileAsAsset(file, {
-          invalidJsonMessage: '图集上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
-          onProgress: (progress) => {
-            if (!aliveRef.current || !isCurrent(epoch)) return;
-            setUploadProgress({
-              label: progress.label,
-              detail: formatUploadProgressDetail(files, file, index, progress),
-              ...(progress.percent != null ? { percent: progress.percent } : {}),
-            });
-          },
-        });
-        if (!aliveRef.current || !isCurrent(epoch)) return;
-        if (!asset.id) throw new Error(`素材上传成功但没有返回 ID：${file.name}`);
-        assetIds.push(asset.id);
-      }
-      await finishAlbumAttach(assetIds, fileNames, files.length);
+      await finishAlbumAttach(picked.map(item => item.assetId!), picked.map(item => item.fileName || 'upload.bin'), picked.length);
+      if (aliveRef.current && isCurrent(epoch)) setPickerOpen(false);
+      return { success: true };
     } catch (err) {
-      if (aliveRef.current && isCurrent(epoch)) {
-        setError(err instanceof Error ? err.message : '上传失败');
-        setUploadFeedback(null);
-      }
+      return { success: false, message: err instanceof Error ? err.message : '加入图集失败' };
     } finally {
-      if (aliveRef.current && isCurrent(epoch)) {
-        setUploadProgress(null);
-        setLoading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }
+      if (aliveRef.current && isCurrent(epoch)) { setUploadProgress(null); setLoading(false); }
     }
   };
 
@@ -544,9 +509,8 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
           <div className="album-detail-actions">
             {album.permissions.edit && (
               <>
-                <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple style={{ display: 'none' }} onChange={handleUpload} />
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading}>
-                  {loading && uploadFeedback?.type === 'info' ? '上传处理中...' : '上传素材到图集'}
+                <button type="button" onClick={() => setPickerOpen(true)} disabled={loading}>
+                  {loading && uploadFeedback?.type === 'info' ? '加入处理中...' : '添加素材到图集'}
                 </button>
                 <button type="button" onClick={handleRenameAlbum} disabled={loading}>重命名图集</button>
                 <button type="button" className="danger" onClick={handleDeleteAlbum} disabled={loading}>删除图集</button>
@@ -627,6 +591,11 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
               if (shareDialogAlbum?.id === album.id) void loadAlbum().catch(() => {});
             }}
           />
+
+          {pickerOpen && <UploadedImagePicker open target="assets" purpose="album" title="添加素材到图集" confirmLabel="加入图集"
+            acceptedTypes={['image', 'video', 'audio']} contextKey={`album:${album.id}`} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]}
+            onClose={() => setPickerOpen(false)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
+            onConfirm={async () => ({ success: false, message: '请选择素材' })} onConfirmSelection={addFromPicker} />}
         </>
       )}
     </div>
