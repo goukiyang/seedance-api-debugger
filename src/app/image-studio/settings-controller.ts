@@ -49,7 +49,7 @@ function mergeSettingsDraft(previous: SettingsValue, draft: SettingsDraft, next:
     return mine;
   };
   result.context = field('context', previous.context ?? '', draft.context, next.context ?? '') as string;
-  for (const key of new Set([...Object.keys(previous.prices), ...Object.keys(draft.prices), ...Object.keys(next.prices)])) {
+  for (const key of Array.from(new Set([...Object.keys(previous.prices), ...Object.keys(draft.prices), ...Object.keys(next.prices)]))) {
     result.prices[key] = field(`prices.${key}`, previous.prices[key] ?? null, draft.prices[key] ?? null, next.prices[key] ?? null) as number | null;
   }
   for (const key of Object.keys(next.templateDefaults) as Array<keyof StudioTemplateDefaults>) {

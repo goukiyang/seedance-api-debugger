@@ -1,6 +1,5 @@
 'use client';
 import { parseStudioTaskSettings, studioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
-import type { SettingsValue } from './settings-controller';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
@@ -2259,7 +2258,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const saveSourceTaskId = manualSettings ? restoredTaskSettings?.sourceTaskId ?? reproduceTaskId : baseline.reproduceFromTaskId;
     const savePayload: Record<string, unknown> = sharedLive || publishNew ? {
       id: module.id, revision: revisionOverride, saveIntent: saveDefinition ? 'definition' : 'personal', personalOverrides: submittedOverrides, entryPoint: 'workbench',
-      taskSettings: saveMode,
       resetFields: submittedResets,
       ...(saveDefinition ? { ...snapshot, prompt: templatePrompt, templatePrompt, sharedLive: definitionBaseline.current.sharedLive?.intent,
         ...(publishNew ? { isShared: true, sharingPreferenceRevision: module.sharingPreference?.revision } : {}),
@@ -2268,6 +2266,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         reproduceFromTaskId: saveSourceTaskId || undefined,
         context: contextEditable ? contextSnapshot : undefined, fixedReferences: fixedEditable ? fixedReferencePayload(fixedSnapshot) : undefined }
         : { referenceIds: snapshot.referenceIds, referencePolicy, reproduceFromTaskId: saveSourceTaskId || null }),
+      taskSettings: saveMode,
     } : { id: module.id, revision: revisionOverride, ...snapshot, taskSettings: saveMode, reproduceFromTaskId: saveSourceTaskId || null,
       context: contextEditable ? contextSnapshot : undefined, fixedReferences: fixedEditable && (manualSettings || fixedOverride) ? fixedReferencePayload(fixedSnapshot) : undefined };
     if (saveDefinition && fixedRepairAllowed && fixedReferenceRepairs.length) savePayload.fixedReferenceRepairs = fixedReferenceRepairs;

@@ -467,8 +467,6 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
     const preset = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: user.id } });
     if (!preset || !canManageStudioPreset(user, preset)) throw new StudioModuleError('只能管理自己的模板', 403);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
-    const settingsSource = await readStudioWorkspaceSource(tx, preset.owner_id, preset.id, 'preset');
-    if (settingsSource?.taskSettings.sourceTaskId) await studioSettingsSourceContext(tx, user, settingsSource.taskSettings.sourceTaskId);
     if (typeof revision !== 'string' || revision !== preset.updated_at.toISOString()) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
     const where = { id: presetId, owner_id: user.id, updated_at: preset.updated_at };
     if (action === 'rename') {
@@ -663,6 +661,8 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
     const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
     if (!preset || !canViewStudioPreset(user, preset)) throw new StudioModuleError('模板不存在或无权使用', 404);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
+    const settingsSource = await readStudioWorkspaceSource(tx, preset.owner_id, preset.id, 'preset');
+    if (settingsSource?.taskSettings.sourceTaskId) await studioSettingsSourceContext(tx, user, settingsSource.taskSettings.sourceTaskId);
     const storedIds = parsePreset(preset);
     const storedPolicy = await getStudioPresetReferencePolicy(preset.owner_id, preset.id, storedIds, preset.reference_limit, tx);
     const ids = storedIds.filter(id => !storedPolicy.primaryIds.includes(id));
