@@ -83,7 +83,7 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     // Display menus coalesce one readonly projection; the three real quotes above remain independent.
     transactions(menuOffset, 1);
     equal(menus[1], menus[0]); equal(menus[2], menus[0]);
-    const options = await getPricingImageChannelOptions(db);
+    const options = await db.$transaction(tx => getPricingImageChannelOptions(tx));
     equal(options, menus[0]);
     equal(options.items.find(item => item.id === 'original')!.models['gpt-image-2']!.fixedPoints, 0.2);
     const missing = options.items.find(item => item.id === 'banana')!.models['gemini-3.1-flash-image-preview']!;
@@ -193,7 +193,8 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     const disabledPro = disabled.modelOptions.find(item => item.model === 'gemini-3-pro-image-preview')!;
     equal(disabledPro.reason, 'disabled'); equal(disabledPro.unitCredits, null); equal(disabledPro.estimatedCredits, null);
     const beforeAlias = await snapshots();
-    const alias = await getPricingImageChannelOptions(db);
+    // Explicit fresh-price checks use the same transaction boundary as charging, not the display cache.
+    const alias = await db.$transaction(tx => getPricingImageChannelOptions(tx));
     equal(await snapshots(), beforeAlias);
     equal(alias.items.find(item => item.id === 'original')!.models['gpt-image-2.5-flare']!.fixedPoints, 2);
     equal(alias.items.find(item => item.id === 'original')!.models['gpt-image-2.5-flare']!.ready, true);

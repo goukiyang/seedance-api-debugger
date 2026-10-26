@@ -264,7 +264,8 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     const executionId = randomUUID();
     await assert.rejects(runner.runHdImageProcessor({ protocol: runner.HD_IMAGE_PROTOCOL, key: job.key, executionId,
       sourceVersion: job.version, inputFile: original.file, workDirectory: work, preserveText: false },
-    { applicationRoot, script, limits: shortLimits, onClose: async value => { close = value; }, onGroupExit: async value => { group = value; } }), /hd_child_abnormal_exit/);
+    // This case proves exit code 7, not startup latency; timeout/termination still use shortLimits above.
+    { applicationRoot, script, limits: { ...shortLimits, readingMs: 5_000, wallMs: 10_000 }, onClose: async value => { close = value; }, onGroupExit: async value => { group = value; } }), /hd_child_abnormal_exit/);
     assert.equal(close?.code, 7); assert.equal(close?.signal, null); assert.equal(close?.executionId, executionId);
     assert.equal(group?.evidenceKind, 'process-group-gone');
   });
