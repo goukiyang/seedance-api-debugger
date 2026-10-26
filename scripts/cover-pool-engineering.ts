@@ -86,10 +86,43 @@ async function main() {
   await assert.rejects(api.setIndependentReaction(actor, operation('wrong-key-request', { key: 'image_module:module-a' })), { status: 404 });
   await assert.rejects(api.setIndependentReaction(actor, operation('wrong-actor-request', { viewerId: 'owner-b' })), { status: 409 });
   checks.push('fresh_transaction_actor_source_revocation_and_bound_module_key_guards');
+  const studioFile = 'src/app/image-studio/studio.tsx';
+  const studioAst = ts.createSourceFile(studioFile, readFileSync(path.join(root, studioFile), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let projection: ts.Expression | undefined;
+  const findProjection = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(studioAst) === 'naturalNavigation'
+      && node.initializer && ts.isCallExpression(node.initializer)) projection = node.initializer.arguments[0];
+    ts.forEachChild(node, findProjection);
+  };
+  findProjection(studioAst); assert(projection, 'actual sidebar projection must exist');
+  const directory = [
+    { id: 'local-a', name: 'same name', sourcePresetId: null, sourcePresetShared: false },
+    { id: 'shared:source-a', presetId: 'source-a', sourcePresetId: 'source-a', sourcePresetShared: true, name: 'same name' },
+    { id: 'legacy-copy', sourcePresetId: 'source-a', sourcePresetShared: true, name: 'same name' },
+    { id: 'bound-b', presetId: 'source-b', sourcePresetId: 'source-b', sourcePresetShared: true, name: 'bound source' },
+    { id: 'history-a', sourcePresetId: 'withdrawn', sourcePresetShared: null, name: 'remembered history' },
+    { id: 'default-owner-a', sourcePresetId: null, sourcePresetShared: false, name: 'virtual default' },
+  ];
+  const modules = [{ id: 'local-a', name: 'stale loaded name' }, { id: 'not-authorized', name: 'must not return' },
+    { id: 'history-a', name: 'old source', sharedLive: { available: false, intent: { presetId: 'withdrawn' } },
+      fixedCover: { available: true, thumbnailUrl: 'old-cover', imageUrl: 'old-original' } }];
+  const beforeNavigation = JSON.stringify([directory, modules]), projected: any = {};
+  vm.runInNewContext(ts.transpileModule(`exports.project = ${projection.getText(studioAst)};`, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+  } }).outputText, { exports: projected, directory, modules, userId: actor.id, Map, Array,
+    navigationMemory: { get: (value: any) => ({ name: value.name, groupName: 'history' }) } });
+  const navigation = projected.project();
+  assert.equal(navigation.length, directory.length);
+  assert.deepEqual(Array.from(navigation, (item: any) => item.id).sort(), directory.map(item => item.id).sort());
+  assert.equal(navigation.find((item: any) => item.id === 'local-a').name, 'same name');
+  assert.equal(navigation.find((item: any) => item.id === 'history-a').fixedCover.imageUrl, null);
+  assert.equal(navigation.find((item: any) => item.id === 'history-a').fixedCover.available, false);
+  assert.equal(JSON.stringify([directory, modules]), beforeNavigation);
+  checks.push('actual_sidebar_projection_keeps_authorized_sources_copies_history_virtuals_without_heavy_catalog_or_writes');
   const files = ['scripts/cover-pool-engineering.ts', source, 'src/lib/image-studio/gallery.ts', 'src/lib/image-studio/gallery-context.ts',
     'src/lib/image-studio/gallery-types.ts', 'src/lib/image-studio/shared-contract.ts', 'src/app/api/content-reactions/independent/route.ts',
     'src/app/api/image-studio/gallery/query/route.ts', 'src/components/content-reactions/GalleryReactionButtons.tsx',
-    'src/app/image-studio/module-gallery-state.ts', 'src/app/image-studio/useModuleGalleryState.ts', 'src/app/image-studio/useGalleryCatalog.ts'];
+    'src/app/image-studio/module-gallery-state.ts', 'src/app/image-studio/useModuleGalleryState.ts', 'src/app/image-studio/useGalleryCatalog.ts', studioFile];
   const receipt = { schema: 'cover-pool-engineering.v1', completed: true, synthetic: true, candidateRoot: root,
     runId: process.env.IMAGE_RECOVERY_GATE_RUN_ID, applicationDatabaseOpened: false, productionWrites: 0, forbiddenCalls: 0, paidRequests: 0, browserRuns: 0,
     checks, sourceSha256: Object.fromEntries(files.map(file => [file, createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex')])) };

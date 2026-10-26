@@ -708,7 +708,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       return true;
     }
     if (options.explicitSelection !== true) {
-      const existing = directory.find(item => item.sharedLive?.intent.presetId === presetId && !item.id.startsWith('shared:'));
+      const existing = directory.find(item => (item.presetId === presetId || item.sharedLive?.intent.presetId === presetId) && !item.id.startsWith('shared:'));
       if (existing) { navigateToModule(existing.groupName || '未分组', existing.id, options); return true; }
     }
     if (sharedOpenLock.current) return;
@@ -759,6 +759,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       if (moduleReadScope.current !== scope || sequence !== sharedOpenSequence.current || isClientSessionBlocked()) return false;
       setDeletedSourcePresetIds(current => current.filter(id => id !== presetId));
       setModules(current => [...current.filter(item => item.id !== opened.id), opened]);
+      pool.refresh();
       if (options.forCoverEditor) {
         if (opened.coverEditable !== true) throw new Error('当前模板封面不可编辑，请重新读取权限');
         setGalleryCoverModuleId(opened.id);
@@ -967,16 +968,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   }
   const naturalNavigation = useMemo(() => {
     const items = new Map<string, StudioNavigationEntry>();
-    const liveModules = new Map<string, StudioNavigationEntry>();
-    const known = new Map<string, StudioNavigationEntry>(directory.filter(item => !item.id.startsWith('shared:')).map(item => [item.id, item]));
+    // The catalog already resolves source identity and retains independent copies and history.
+    const known = new Map<string, StudioNavigationEntry>(directory.map(item => [item.id, item]));
     modules.filter(item => directory.some(entry => entry.id === item.id)).forEach(item => known.set(item.id, { ...item, ...known.get(item.id),
       deletion: known.get(item.id)?.deletion || (item as StudioModule & { deletion?: StudioDeletionTarget }).deletion,
       canManageGroup: known.get(item.id)?.canManageGroup ?? (!item.sharedLive || item.sharedLive.mode === 'publisher' && item.sourcePresetCanManageSharing === true) }));
     known.forEach(item => {
       if (item.sharedLive) {
-        const previous = liveModules.get(item.sharedLive.intent.presetId);
-        if (previous) items.delete(previous.id);
-        liveModules.set(item.sharedLive.intent.presetId, item);
         if (!item.sharedLive.available) {
           const metadata = navigationMemory.get({ moduleId: item.id, presetId: item.sharedLive.intent.presetId, name: item.name, groupName: item.groupName });
           items.set(item.id, { ...item, ...metadata, shared: false, fixedCover: item.fixedCover ? { ...item.fixedCover, available: false, thumbnailUrl: null, imageUrl: null } : null });
@@ -985,15 +983,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       }
       else items.set(item.id, { ...item, shared: item.sourcePresetShared === true });
     });
-    const knownSources = new Set(Array.from(known.values()).flatMap(item => item.sourcePresetId ? [item.sourcePresetId] : []));
-    shared.items.filter(item => item.available && !deletedSourcePresetIds.includes(item.presetId)
-      && (liveModules.has(item.presetId) || !knownSources.has(item.presetId))).forEach(item => {
-      const binding = liveModules.get(item.presetId);
-      items.set(binding?.id || `shared:${item.presetId}`, { ...binding, id: binding?.id || `shared:${item.presetId}`, presetId: item.presetId,
-      name: item.name, groupName: item.groupName, banner: item.banner, fixedCover: item.fixedCover, deletion: binding?.deletion || item.deletion, coverEditable: item.coverEditable === true, shared: item.isShared === true });
-    });
     return Array.from(items.values()).sort((a, b) => Number(b.id === `default-${userId}`) - Number(a.id === `default-${userId}`));
-  }, [directory, modules, userId, shared.items, navigationMemory.get, deletedSourcePresetIds]);
+  }, [directory, modules, userId, navigationMemory.get]);
   const navigation = useMemo(() => {
     const naturalGroups = Array.from(new Set(naturalNavigation.map(item => item.groupName || '未分组')));
     return orderStudioItems(naturalGroups, studioOrder.groups, group => group).flatMap(group =>

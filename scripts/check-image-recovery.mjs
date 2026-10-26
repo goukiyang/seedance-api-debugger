@@ -161,6 +161,7 @@ const publicUsageFixtures = [
     'src/app/api/content-reactions/independent/route.ts', 'src/app/api/image-studio/gallery/query/route.ts',
     'src/components/content-reactions/GalleryReactionButtons.tsx', 'src/app/image-studio/module-gallery-state.ts',
     'src/app/image-studio/useModuleGalleryState.ts', 'src/app/image-studio/useGalleryCatalog.ts',
+    'src/app/image-studio/studio.tsx',
   ] },
   { file: 'scripts/template-author-cover-contract-engineering.ts', schema: 'template-author-cover-contract-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', checks: [
