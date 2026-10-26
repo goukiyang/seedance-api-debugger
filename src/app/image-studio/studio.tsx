@@ -636,9 +636,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     const scope = moduleReadScope.current;
     try {
       const catalog = await readResponse(await fetch('/api/image-studio/gallery/query', { method: 'POST', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ page: 1, pageSize: 12, sort: 'directory' }) }));
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ page: 1, pageSize: 12, sort: 'directory', navigationOnly: true }) }));
       const data = { directory: catalog.navigation.map((entry: GalleryNavigationItem) => ({ ...entry,
-        sourcePresetId: entry.presetId || null, sourcePresetShared: entry.shared,
+        sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null, sourcePresetShared: entry.sourcePresetShared ?? entry.shared,
         canManageGroup: entry.mine && entry.coverEditable })), modules: [] as StudioModule[], nextCursor: null };
       if (moduleReadScope.current !== scope) return;
       if (Array.isArray(data.directory)) {
@@ -778,7 +778,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     else if (entry.presetId) void openSharedPreset(entry.presetId, options);
   }
   async function openPresetTarget(presetId: string, options: ModuleNavigationOptions = {}) {
-    if (shared.items.some(item => item.presetId === presetId && item.available)
+    if (directory.some(item => item.presetId === presetId) || shared.items.some(item => item.presetId === presetId && item.available)
       || modules.some(item => item.sharedLive?.intent.presetId === presetId)) return openSharedPreset(presetId, options);
     const scope = moduleReadScope.current;
     try {
@@ -1178,13 +1178,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
   [gallery.lastOpened, serverRecentUse, userId]);
   const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
-    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries } }, gallery.ready);
+    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView }, gallery.ready);
   useEffect(() => { if (coverView) pool.refresh(); }, [coverView, shared.catalogRevision, pool.refresh]);
   useEffect(() => {
     if (pool.denied) { setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
     if (!pool.data) return;
-    setDirectory(pool.data.navigation.map(entry => ({ ...entry, sourcePresetId: entry.presetId || null,
-      sourcePresetShared: entry.shared, canManageGroup: entry.mine && entry.coverEditable })));
+    setDirectory(pool.data.navigation.map(entry => ({ ...entry, sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null,
+      sourcePresetShared: entry.sourcePresetShared ?? entry.shared, canManageGroup: entry.mine && entry.coverEditable })));
     setDirectoryReady(true);
     setRemovedDefaultGroups(pool.data.removedDefaultGroups);
     setDeletedSourcePresetIds(pool.data.deletedSourcePresetIds);

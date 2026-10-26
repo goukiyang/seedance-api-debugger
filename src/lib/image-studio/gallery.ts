@@ -22,6 +22,7 @@ export function parseGalleryQuery(value: unknown): GalleryQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioSharingError('封面查询格式无效', 400);
   const input = value as GalleryQuery;
   if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 160)
+    || input.navigationOnly !== undefined && typeof input.navigationOnly !== 'boolean'
     || input.scope !== undefined && !['all', 'mine', 'shared', 'favorites'].includes(input.scope)
     || input.sort !== undefined && !['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(input.sort)
     || input.authorKey != null && !knownKey(input.authorKey)
@@ -77,6 +78,8 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
     const item: GalleryNavigationItem = { key, id: row.id, title: merged && sourceVisible ? source!.name : row.name, name: merged && sourceVisible ? source!.name : row.name,
       groupName: (merged && sourceVisible ? source!.group_name : row.group_name) || '未分组', mine: merged ? source!.owner_id === actor.id : true,
       shared: merged && sourceVisible && source!.is_shared, navigationTarget: { moduleId: row.id }, ...(merged ? { presetId: binding!.presetId } : {}),
+      sourcePresetId: row.source_preset_id, sourcePresetShared: sourceVisible ? source!.is_shared : row.source_preset_id ? null : false,
+      objectKind: binding ? binding.mode : row.source_preset_id ? 'legacy-copy' : 'local',
       author: bindingInvalid || row.source_preset_id && !sourceVisible ? { known: false, key: null, displayName: '作者未知', avatarUrl: null }
         : await author(merged ? { presetId: binding!.presetId } : { moduleId: row.id }),
       createdAt: merged ? sourceVisible ? source!.created_at?.toISOString() || null : null : row.created_at?.toISOString() || null,
@@ -146,7 +149,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       : sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : directoryCompare(a, b)) || a.key.localeCompare(b.key));
     const pageSize = input.pageSize || 12, page = Math.min(input.page || 1, Math.max(1, Math.ceil(matches.length / pageSize)));
     const items: GalleryItem[] = [];
-    for (const entry of matches.slice((page - 1) * pageSize, page * pageSize)) {
+    for (const entry of input.navigationOnly ? [] : matches.slice((page - 1) * pageSize, page * pageSize)) {
       const target = catalog.targets.get(entry.key);
       let fixedCover: GalleryItem['fixedCover'] = null, banner: GalleryItem['banner'] = null;
       let cover: GalleryItem['cover'] = null;

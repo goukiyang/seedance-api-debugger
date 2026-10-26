@@ -8,6 +8,8 @@ export type GalleryAuthor = { known: boolean; key: string | null; displayName: s
 export type GalleryNavigationItem = {
   key: string; id: string; title: string; name: string; groupName: string; mine: boolean; shared: boolean;
   navigationTarget: { moduleId?: string; presetId?: string }; presetId?: string;
+  sourcePresetId?: string | null; sourcePresetShared?: boolean | null;
+  objectKind?: 'publisher' | 'live' | 'legacy-copy' | 'local';
   author: GalleryAuthor; createdAt: string | null; updatedAt: string | null; available: boolean;
   reaction: ReactionState | null; coverEditable: boolean; deletion: StudioDeletionCapability;
 };
@@ -21,6 +23,7 @@ export type GalleryQuery = {
   query?: string; scope?: GalleryScope; authorKey?: string | null; sort?: GallerySort;
   page?: number; pageSize?: number; catalogRevision?: string;
   recentHints?: Record<string, number>; directoryOrder?: { groups?: string[]; entries?: string[] };
+  navigationOnly?: boolean;
 };
 export type GalleryQueryResult = {
   items: GalleryItem[]; navigation: GalleryNavigationItem[]; matches: GalleryNavigationItem[];
