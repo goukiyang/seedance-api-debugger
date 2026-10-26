@@ -771,3 +771,12 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 | `src/lib/navigation.ts`、`src/components/template-studio/TemplateStudioShell.tsx`、`src/app/image-studio/page.tsx` | 统一入口、账号隔离恢复、旧地址兼容 |
 | `src/app/projects/[id]/page.tsx`、`video-cards/[cardId]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/approvals/page.tsx`、`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/lib/notifications/display.ts` | 隐藏视频卡管理和直达，保留生成归属和原数据 |
 | `package.json`、`package-lock.json`、`src/lib/release.ts`、`.gitignore`、`docs/materials/index.md`、`tasks/todo.md` | 版本/升级摘要、敏感截图本地归档与完整交接 |
+
+
+COVER-POOL前置完成（2026-10-26）：[正式工单v1.0.0/R01](todo/2026-10-26-cover-pool-preflight.md)已完成原站/R03、源码、开源实现及历史兼容核对，取代上方“尚未就绪”阶段描述。选定原站入口置顶、单行标题/作者底栏、六排序、作者筛选/搜索、严格我的收藏及独立互动；现有like连写两列，故新增独立协议、保旧合同。无可靠首次发布时间，采用“最新创建”。CP01–CP05待实施，A01–A12待用户手验；本轮未改业务代码/部署。附件沿原资料目录，真实页面只本地私有保存。
+
+| 编号 | 任务内容 | 完成标准 | 当前状态 |
+|---|---|---|---|
+| COVER-POOL | 全部封面共享池前置工单 | 基于原站与 R03，完成需求拆解、源码及开源方案核对、接口与兼容设计、实施和手验清单，并附正式资料 | 已完成前置；实施未开始 |
+
+Review：已核读关键源码、官方开源实现/许可证及现有附件，完成权限、原请求、历史、操作和返回恢复设计闭合；非独立审核、非功能验收。无必要前置阻塞，无新增分类误判；首版不加外部依赖、不改schema，保护旧记录。

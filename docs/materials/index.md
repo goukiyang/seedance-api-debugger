@@ -359,3 +359,8 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 - 正式归档：[原始截图](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png)，正式路径：`/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png`。PNG 566×216、29,327 字节；已打开可读，源与副本逐字节比较一致，SHA-256 均为 `b4a88859c4791c715259ae98e6163b49749a3fd88150954697df3f5e419378a6`。
 - 版本/关系：首次归档，截图对应的应用版本未知；保留原文件名，不覆盖或替代既有附件。此 Q1/Q2 记录与封面/banner V1 样板任务分开，V1 状态及资料不变。
 - 当前工单：[Q1/Q2固定记录](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)。v0.39.0已实现快捷模板入口与原上下文恢复，统一发布检查中；用户手动功能验收。该截图只作需求参考，实现/发布状态由Codex写入工单，不要求用户补充。
+
+
+### COVER-POOL 全部封面共享池前置工单（2026-10-26）
+
+[正式工单v1.0.0/R01](../../tasks/todo/2026-10-26-cover-pool-preflight.md)，来源为本轮用户详细拆解/开源优先/前置工单要求。主题：原站局部调整、R03单行作者底栏、排序、独立点赞收藏、完整授权目录分页。已核读56ad0219源码及Immich/Radix/TanStack Virtual官方实现和许可证，首版复用现有分页且不加库。前置已完成，CP01–05未实施，A01–12待用户手验；不是上线证据。附件见工单§1.1的COVER-POOL原站截图/R03，R01废止、R02底栏被R03替代，作者示例不当真实身份。正文及四附件存在可读，关键图原件复制证据复用，未重新功能验收。真实截图/预览本地私有保存，不随Git外传。
