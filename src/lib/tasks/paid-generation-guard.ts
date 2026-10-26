@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import type { GenerationRequestSource } from '@/lib/integrations/codex';
+type PaidRequestSource = Omit<GenerationRequestSource, 'source_type'> & { source_type: GenerationRequestSource['source_type'] | 'customer_api' };
 
 export const PAID_GENERATION_INTENT_HEADER = 'x-paid-generation-intent';
 export const PAID_GENERATION_REASON_HEADER = 'x-paid-generation-reason';
@@ -77,7 +78,7 @@ function scriptUserAgentIndicator(userAgent: string) {
 function collectIndicators(
   request: NextRequest,
   body: PaidGenerationBody,
-  requestSource: GenerationRequestSource,
+  requestSource: PaidRequestSource,
 ) {
   const indicators: string[] = [];
   const userAgent = request.headers.get('user-agent') || '';
@@ -85,6 +86,7 @@ function collectIndicators(
   const path = request.nextUrl.pathname;
 
   if (requestSource.source_type === 'codex_api') indicators.push('codex_api_source');
+  if (requestSource.source_type === 'customer_api') indicators.push('customer_api_source');
   if (path.startsWith('/api/codex/')) indicators.push('codex_api_path');
   if (scriptUserAgent) indicators.push(scriptUserAgent);
   if (request.headers.get('x-codex-request-id')) indicators.push('codex_request_header');
@@ -111,7 +113,7 @@ export function evaluatePaidGenerationGuard({
 }: {
   request: NextRequest;
   body: PaidGenerationBody;
-  requestSource: GenerationRequestSource;
+  requestSource: PaidRequestSource;
 }): PaidGenerationGuardDecision {
   const intent = cleanHeader(request.headers.get(PAID_GENERATION_INTENT_HEADER));
   const reason = cleanHeader(request.headers.get(PAID_GENERATION_REASON_HEADER));

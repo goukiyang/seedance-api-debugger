@@ -80,7 +80,7 @@ async function main() {
 
   const routes = [
     ['src/app/api/tasks/create/route.ts', '$transaction'],
-    ['src/app/api/ip/tasks/create/route.ts', '$transaction'],
+    ['src/lib/video/ip-create.ts', '$transaction'],
     ['src/app/api/assets/generate/route.ts', 'getImageGenerationChannels'],
     ['src/app/api/tools/ultimate-canvas/images/generate/route.ts', 'saveStudioModule'],
     ['src/app/api/tools/ultimate-canvas/styles/generate/route.ts', 'submitStudioBatch'],

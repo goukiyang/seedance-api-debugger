@@ -107,6 +107,7 @@ async function backfillTaskThumbnails(mode: BackfillMode, limit: number, maxCand
     },
     select: {
       id: true,
+      source_type: true,
       public_video_url: true,
       local_video_path: true,
       result_video_url: true,

@@ -5,6 +5,7 @@ import { once } from 'events';
 import { prisma } from '@/lib/prisma';
 import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 import { downloadH3JobOutput, parseH3InternalOutputUrl } from '@/lib/provider/h3';
+import { preparePrivateApiOutput, finishPrivateApiOutput } from '@/lib/customer-api/output';
 
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
@@ -113,6 +114,7 @@ export async function writeResponseToFile(
   targetPath: string,
   expectedBytes: number,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
+  privateLimit?: number,
 ) {
   const body = response.body;
   if (!body) {
@@ -120,7 +122,7 @@ export async function writeResponseToFile(
   }
 
   const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  const stream = createWriteStream(tempPath);
+  const stream = createWriteStream(tempPath, privateLimit ? { mode: 0o600, flags: 'wx' } : undefined);
   const reader = body.getReader();
   let receivedBytes = 0;
   const startedAt = Date.now();
@@ -141,6 +143,7 @@ export async function writeResponseToFile(
       if (done) break;
       if (!value) continue;
       receivedBytes += value.length;
+      if (privateLimit && receivedBytes > privateLimit) throw new Error('API output exceeds storage reservation');
       if (!stream.write(Buffer.from(value))) {
         await readWithTimeout(once(stream, 'drain'), timeoutMs, startedAt);
         throwIfStreamErrored();
@@ -159,6 +162,7 @@ export async function writeResponseToFile(
     if (expectedBytes > 0 && info.size < expectedBytes) {
       throw new Error(`下载后的视频文件不完整: expected ${expectedBytes}, got ${info.size}`);
     }
+    if (privateLimit && expectedBytes > 0 && info.size !== expectedBytes) throw new Error('API output length mismatch');
     if (receivedBytes > 0 && info.size < receivedBytes) {
       throw new Error(`视频文件写入不完整: received ${receivedBytes}, got ${info.size}`);
     }
@@ -226,8 +230,10 @@ async function cacheTaskVideoToLocalInner(
 ): Promise<LocalVideoCacheResult> {
   const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
   const refreshOnForbidden = options.refreshOnForbidden !== false;
-  const publicPath = publicVideoPath(task.id);
-  const targetPath = localVideoPath(task.id);
+  const privateOutput = await preparePrivateApiOutput(task.id);
+  if (privateOutput?.existing) return { success: true, local_video_path: privateOutput.existing.url, file_size: privateOutput.existing.bytes, already_exists: true };
+  let publicPath = publicVideoPath(task.id);
+  const targetPath = privateOutput?.target || localVideoPath(task.id);
 
   const existingSize = await fileSizeIfExists(targetPath);
   if (existingSize) {
@@ -262,7 +268,7 @@ async function cacheTaskVideoToLocalInner(
     };
   }
 
-  await mkdir(PUBLIC_VIDEO_DIR, { recursive: true });
+  if (!privateOutput) await mkdir(PUBLIC_VIDEO_DIR, { recursive: true });
 
   let sourceUrl = task.result_video_url;
   let lastFrameUrl = task.result_last_frame_url;
@@ -342,6 +348,10 @@ async function cacheTaskVideoToLocalInner(
 
   const contentLength = response.headers.get('content-length');
   const expectedBytes = contentLength ? Number.parseInt(contentLength, 10) : 0;
+  if (privateOutput && (response.status !== 200 || expectedBytes > privateOutput.maxBytes)) {
+    await response.body?.cancel();
+    throw new Error('API output response cannot be safely stored');
+  }
   let fileSize: number;
   try {
     fileSize = await writeResponseToFile(
@@ -349,6 +359,7 @@ async function cacheTaskVideoToLocalInner(
       targetPath,
       Number.isFinite(expectedBytes) ? expectedBytes : 0,
       timeoutMs,
+      privateOutput?.maxBytes,
     );
   } catch (error) {
     if (isDownloadTimeoutError(error)) {
@@ -360,7 +371,8 @@ async function cacheTaskVideoToLocalInner(
     throw error;
   }
 
-  await updateTaskLocalPath(task.id, publicPath);
+  if (privateOutput) publicPath = await finishPrivateApiOutput(task.id, privateOutput.ownerId, targetPath, fileSize);
+  else await updateTaskLocalPath(task.id, publicPath);
 
   return {
     success: true,

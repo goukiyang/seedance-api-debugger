@@ -936,7 +936,7 @@ export default function AdminIntegrationsClient() {
         eyebrow="管理后台"
         title="API 设置"
         description="按模型或服务维护供应商与调用配置。"
-        actions={<Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>}
+        actions={<><Link className="btn btn-secondary" href="/admin/api-clients">客户 API</Link><Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link></>}
       />
 
       <label className="form-group" style={{ display: 'block', maxWidth: 640 }}><span className="form-label">模型或服务</span>

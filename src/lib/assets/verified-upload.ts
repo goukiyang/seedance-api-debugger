@@ -346,7 +346,7 @@ async function verifyBitmap(file: string, bytes: number) {
   if (frames.length === 0 || frames[frames.length - 1][1] !== '1' || !/^progress=end\s*$/m.test(decoded.stdout)) throw new Error('bmp_complete_frame');
   return { width, height };
 }
-async function inspectUpload(file: string, declared: string, hash: string, bytes: number): Promise<VerifiedUpload> {
+export async function inspectUpload(file: string, declared: string, hash: string, bytes: number): Promise<VerifiedUpload> {
   const mimeType = declared.split(';')[0].trim().toLowerCase(), type = uploadKind(mimeType);
   if (!bytes || bytes > limits[type]) throw new VerifiedUploadError('UPLOAD_SIZE_INVALID', '文件大小超出上传限制', 400);
   const version = await uploadFileVersion(file);
@@ -431,6 +431,14 @@ export async function verifyExistingUpload(asset: Asset, ownerId: string) {
   if (!await canReadStudioAsset(user, asset)) throw new VerifiedUploadError('UPLOAD_ASSET_UNAVAILABLE', '这张图片当前不可使用', 403);
   if (asset.file_size <= 0 || asset.file_size > limits[uploadKind(asset.mime_type)]) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有原件大小无法安全核实');
   const local = siteUploadPathFromUrl(asset.original_url);
+  if (asset.original_url.startsWith('api-private://uploads/')) {
+    const { privateMediaPath } = await import('@/lib/customer-api/private-media');
+    const file = await privateMediaPath(asset.original_url, uploadDigest(ownerId));
+    if (!file || (await fs.stat(file)).size !== asset.file_size || await uploadFileHash(file) !== asset.hash) {
+      throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有私有原件校验失败，未覆盖。');
+    }
+    return inspectUpload(file, asset.mime_type, asset.hash, asset.file_size);
+  }
   if (!local) {
     const base = process.env.R2_PUBLIC_BASE_URL?.replace(/\/+$/, '');
     const ownerPrefix = `seedance-direct-uploads/${uploadDigest(ownerId).slice(0, 16)}/`;
@@ -507,7 +515,8 @@ export async function readVerifiedUploadReceipt(ownerId: string, requestId: stri
   return { asset, proof, reused: receipt.disposition === 'reused' };
 }
 export async function registerVerifiedUpload(input: { ownerId: string; proof: VerifiedUpload; fileName: string; originalUrl: string;
-  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null }) {
+  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null;
+  authorize?: (tx: Prisma.TransactionClient) => Promise<void> }) {
   await uploadIdentity(input.ownerId);
   const existing = await prisma.asset.findUnique({ where: { owner_id_hash: { owner_id: input.ownerId, hash: input.proof.hash } } });
   const existingProof = existing ? await verifyExistingUpload(existing, input.ownerId) : null;
@@ -516,6 +525,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
   const key = input.requestId ? receiptKey(input.ownerId, input.requestId) : null;
   const fingerprint = input.fingerprint || uploadDigest(JSON.stringify([input.proof.hash, input.proof.bytes, input.proof.mimeType]));
   const register = async (db: Prisma.TransactionClient) => {
+    await input.authorize?.(db);
     const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
     if (!currentUser || currentUser.status !== 'active') throw new VerifiedUploadError('UPLOAD_OWNER_UNAVAILABLE', '当前账号不可上传', 403);
     const fresh = await db.asset.findUnique({ where: { owner_id_hash: { owner_id: input.ownerId, hash: input.proof.hash } } });
@@ -549,6 +559,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     const receipt = key ? await readVerifiedUploadReceipt(input.ownerId, input.requestId!, fingerprint) : null;
     if (receipt) { await releaseVerifiedUpload(receipt.proof); return { asset: receipt.asset, reused: receipt.reused }; }
     if (key) await prisma.$transaction(async db => {
+      await input.authorize?.(db);
       const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
       const fresh = await db.asset.findUnique({ where: { id: winner.asset.id } });
       if (!currentUser || currentUser.status !== 'active' || !fresh || fresh.owner_id !== input.ownerId || fresh.status !== 'active'

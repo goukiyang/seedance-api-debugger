@@ -4,12 +4,15 @@ import { H3_VIDEO_PROVIDER, getH3TaskStatus } from './h3';
 import { getVideoTaskStatus } from './jimeng';
 import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from './volcengine-ip';
 import { isPrivateMultiviewTask } from '../video/multiview-task-privacy';
+import { apiProviderOptions } from '@/lib/customer-api/admission';
 
 export const VIDEO_TASK_PROVIDER_SEEDANCE = 'seedance';
 export const VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT = 'volcengine_mediakit';
 export const VIDEO_TASK_PROVIDER_H3 = H3_VIDEO_PROVIDER;
 
 export type ProviderStatusTask = {
+  id?: string;
+  source_type?: string | null;
   provider?: string | null;
   provider_task_id: string | null;
   source_metadata_json?: string | null;
@@ -83,6 +86,10 @@ export async function getProviderTaskStatus(
   }
 
   const provider = normalizeProvider(task.provider);
+  if (provider === VOLCENGINE_IP_VIDEO_PROVIDER && !options.fetchers) {
+    const frozen = await apiProviderOptions(task);
+    if (frozen) return getVolcengineIpTaskStatus(providerTaskId, frozen);
+  }
   const fetchers = options.fetchers || defaultFetchers;
   return provider === VIDEO_TASK_PROVIDER_SEEDANCE
     ? fetchers.seedance(providerTaskId, seedanceQueryContext(task))

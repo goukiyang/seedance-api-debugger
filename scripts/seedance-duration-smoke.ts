@@ -194,7 +194,7 @@ function assertRouteWiring() {
   // These are wiring evidence only; authenticated Web/IP route execution needs a Next request context.
   const estimate = fs.readFileSync('src/app/api/tasks/estimate/route.ts', 'utf8');
   assert.match(estimate, /else\s*\{\s*user = await getSessionUser\(request\);\s*assertInternalOnly\(user,/);
-  const ip = fs.readFileSync('src/app/api/ip/tasks/create/route.ts', 'utf8');
+  const ip = fs.readFileSync('src/lib/video/ip-create.ts', 'utf8');
   assert.match(ip, /!Number\.isInteger\(duration\)\s*\|\|\s*duration < 4\s*\|\|\s*duration > 15/);
   const create = fs.readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
   assert.ok(create.includes('isSeedanceVideoDuration(duration, selectedModel)'));

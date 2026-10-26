@@ -143,7 +143,7 @@ assertIncludes(localStorage, 'registerVerifiedUpload', '上传登记必须沿当
 assertIncludes(localStorage, 'siteUploadPathFromUrl', '历史已经写入本站公网 URL，底层恢复逻辑必须兼容新旧站内上传域名。');
 
 const tasksCreate = read('src/app/api/tasks/create/route.ts');
-const ipTasksCreate = read('src/app/api/ip/tasks/create/route.ts');
+const ipTasksCreate = read('src/lib/video/ip-create.ts');
 for (const source of [tasksCreate, ipTasksCreate]) {
   assertIncludes(source, 'sameOriginPublicUrlForLocalUpload', '任务创建本地参考素材必须优先转成本站公网 URL。');
   assertIncludes(source, 'ensureSiteAssetPublicUrl', '任务创建本地参考素材有关联 asset 时必须复用统一补公网 helper。');

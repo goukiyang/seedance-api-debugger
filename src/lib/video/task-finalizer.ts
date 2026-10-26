@@ -437,7 +437,7 @@ async function cacheAndMaybeThumbnail(
         result_last_frame_url: cacheResult.result_last_frame_url || task.result_last_frame_url,
       };
 
-      publicDeliveryResult = await ensurePublicVideoDelivery({
+      if (task.source_type !== 'customer_api') publicDeliveryResult = await ensurePublicVideoDelivery({
         ...taskForThumbnail,
         public_video_url: task.public_video_url,
         public_video_storage_provider: task.public_video_storage_provider,
@@ -445,7 +445,7 @@ async function cacheAndMaybeThumbnail(
         public_video_file_size: task.public_video_file_size,
         public_video_cached_at: task.public_video_cached_at,
       });
-      if (!publicDeliveryResult.success) {
+      if (publicDeliveryResult && !publicDeliveryResult.success) {
         console.warn('[VideoFinalizer] Public video delivery not ready:', {
           taskId: task.id,
           storageProvider: publicDeliveryResult.storage_provider,
@@ -463,7 +463,7 @@ async function cacheAndMaybeThumbnail(
       });
     }
     if (trackIpDelivery) {
-      const ready = publicDeliveryResult?.success === true;
+      const ready = task.source_type === 'customer_api' ? cacheResult?.success === true : publicDeliveryResult?.success === true;
       await prisma.videoTask.update({ where: { id: task.id }, data: {
         delivery_status: ready ? 'succeeded' : 'failed',
         delivery_completed_at: ready ? new Date() : null,
@@ -480,7 +480,7 @@ async function cacheAndMaybeThumbnail(
     }
   }
 
-  if (options.generateThumbnail && taskForThumbnail.local_status === 'succeeded') {
+  if (options.generateThumbnail && taskForThumbnail.local_status === 'succeeded' && taskForThumbnail.source_type !== 'customer_api') {
     thumbnailResult = await ensureTaskThumbnail(taskForThumbnail, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       console.warn('[VideoFinalizer] Thumbnail skipped:', {

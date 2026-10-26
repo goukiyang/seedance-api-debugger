@@ -169,6 +169,8 @@ export async function ingestTaskMediaFromProvider(
   task: MediaIngestTask,
   options: { allowLocalPublic?: boolean; cacheTimeoutMs?: number } = {},
 ): Promise<MediaIngestResult> {
+  const source = await prisma.videoTask.findUnique({ where: { id: task.id }, select: { source_type: true } });
+  if (source?.source_type === 'customer_api') return { success: false, error: 'PRIVATE_API_MEDIA', message: '客户 API 媒体仅通过授权下载。' };
   if (task.public_video_url) {
     return {
       success: true,

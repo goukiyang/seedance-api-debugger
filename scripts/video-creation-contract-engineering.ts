@@ -76,7 +76,7 @@ async function main() {
   await assert.rejects(() => consume({ pricingRevision: 'changed' }), /范围/);
   failCas = true; await assert.rejects(() => consume(), /余量/); assert.equal(writes, 2);
   checks.push('approval_actual_helper_expiry_revoke_scope_cost_cas_and_same_task_once');
-  const acceptanceSources = ['src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts',
+  const acceptanceSources = ['src/app/api/tasks/create/route.ts', 'src/lib/video/ip-create.ts',
     'src/app/api/tasks/enhance-video/create/route.ts', 'src/lib/tasks/seedance-draft-upgrade.ts'];
   for (const file of acceptanceSources) {
     const source = ts.createSourceFile(file, readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true);

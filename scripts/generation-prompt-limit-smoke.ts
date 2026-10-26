@@ -20,7 +20,7 @@ assert.equal(generationPromptLimitMessage('方案提示词'), '方案提示词�
 const promptEditor = read('src/components/PromptEditor.tsx');
 const generationComposer = read('src/components/GenerationComposer.tsx');
 const createRoute = read('src/app/api/tasks/create/route.ts');
-const ipCreateRoute = read('src/app/api/ip/tasks/create/route.ts');
+const ipCreateRoute = read('src/lib/video/ip-create.ts');
 
 for (const [label, source] of [
   ['PromptEditor', promptEditor],

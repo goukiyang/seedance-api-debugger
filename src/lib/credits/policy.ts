@@ -419,13 +419,14 @@ export async function allocateTaskCredits(
   user: CreditPolicyUser,
   amount: number,
   taskId: string,
+  options: { balanceOnly?: boolean } = {},
 ) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('冻结点数必须为有效正数');
   amount = normalizeCredits(amount);
   const now = new Date();
-  await ensureDailyQuotaBucket(tx, user, now);
+  if (!options.balanceOnly) await ensureDailyQuotaBucket(tx, user, now);
   const account = await ensureCreditAccount(tx, user.id);
-  const activeBuckets = await tx.creditBucket.findMany({
+  const activeBuckets = options.balanceOnly ? [] : await tx.creditBucket.findMany({
     where: {
       user_id: user.id,
       source_type: 'daily_quota',

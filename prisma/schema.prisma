@@ -31,6 +31,7 @@ model UsageAttribution {
 }
 
 model VideoTask {
+  api_request           ApiRequest?
   id                   String  @id @default(cuid())
   provider             String
   model                String
@@ -309,6 +310,7 @@ model VideoDeliveryJob {
 // ============================================================================
 
 model User {
+  api_customer          ApiCustomer?
   content_reactions      ContentReaction[]
   content_reaction_events ContentReactionEvent[]
   id                    String    @id @default(cuid())
@@ -389,6 +391,166 @@ model User {
   @@index([status])
   @@index([feishu_union_id])
   @@index([feishu_tenant_key])
+}
+
+// External API contracts are additive; historical web/Codex records are unchanged.
+model ApiConfiguration {
+  id                  String   @id @default("global")
+  enabled             Boolean  @default(false)
+  license_confirmed   Boolean  @default(false)
+  concurrency_limit   Int?
+  storage_limit_bytes BigInt?
+  max_output_bytes    BigInt?
+  revision            Int      @default(1)
+  updated_at          DateTime @updatedAt
+}
+
+model ApiCustomer {
+  id                  String   @id @default(cuid())
+  name                String
+  user_id             String   @unique
+  user                User     @relation(fields: [user_id], references: [id], onDelete: Restrict)
+  project_id          String   @unique
+  project             Project  @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  video_card_id       String   @unique
+  video_card          VideoCard @relation(fields: [video_card_id], references: [id], onDelete: Restrict)
+  create_enabled      Boolean  @default(false)
+  read_enabled        Boolean  @default(true)
+  license_confirmed   Boolean  @default(false)
+  timezone            String
+  models_json         String   @default("[]")
+  points_per_cny      Float?
+  max_task_points     Float?
+  daily_points        Float?
+  monthly_points      Float?
+  concurrency_limit   Int?
+  storage_limit_bytes BigInt?
+  upload_limit_bytes  BigInt?
+  retention_policy    String?
+  revision            Int      @default(1)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  keys                ApiKey[]
+  rates               ApiRate[]
+  quotes              ApiQuote[]
+  requests            ApiRequest[]
+  uploads             ApiUpload[]
+  assets              ApiAsset[]
+}
+
+model ApiKey {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  name                String
+  digest              String   @unique
+  prefix              String
+  active              Boolean  @default(true)
+  expires_at          DateTime
+  scopes_json         String
+  models_json         String
+  requests_per_minute Int
+  window_start        DateTime?
+  window_count        Int      @default(0)
+  last_used_at        DateTime?
+  created_at          DateTime @default(now())
+  @@index([customer_id])
+}
+
+model ApiRate {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  model               String
+  resolution          String
+  cny_per_second      Float
+  revision            Int      @default(1)
+  enabled             Boolean  @default(false)
+  @@unique([customer_id, model, resolution])
+}
+
+model ApiQuote {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  input_json          String
+  input_hash          String
+  asset_versions_json String
+  pricing_json        String
+  customer_revision   Int
+  rate_id             String
+  rate_revision       Int
+  points              Float
+  max_cost_points     Float
+  expires_at          DateTime
+  created_at          DateTime @default(now())
+  @@index([customer_id, created_at])
+}
+
+model ApiProviderCredential {
+  id                  String   @id @default(cuid())
+  digest              String   @unique
+  configuration_json  String
+  created_at          DateTime @default(now())
+  requests            ApiRequest[]
+}
+
+model ApiRequest {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  request_id          String
+  fingerprint         String
+  task_id             String   @unique
+  task                VideoTask @relation(fields: [task_id], references: [id], onDelete: Restrict)
+  quote_id            String
+  reserved_points     Float
+  day_key             String
+  month_key           String
+  timezone            String
+  credential_id       String
+  credential          ApiProviderCredential @relation(fields: [credential_id], references: [id], onDelete: Restrict)
+  output_reserved_bytes BigInt
+  output_bytes        BigInt?
+  output_sha256       String?
+  output_version      String?
+  created_at          DateTime @default(now())
+  @@unique([customer_id, request_id])
+  @@index([customer_id, day_key])
+  @@index([customer_id, month_key])
+}
+
+model ApiUpload {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  request_id          String
+  fingerprint         String
+  sha256              String
+  size_bytes          BigInt
+  mime_type           String
+  file_name           String
+  asset_id            String?
+  private_path        String?
+  created_at          DateTime @default(now())
+  @@unique([customer_id, request_id])
+}
+
+model ApiAsset {
+  id                  String   @id @default(cuid())
+  customer_id         String
+  customer            ApiCustomer @relation(fields: [customer_id], references: [id], onDelete: Restrict)
+  asset_id            String
+  asset               Asset @relation(fields: [asset_id], references: [id], onDelete: Restrict)
+  sha256              String
+  size_bytes          BigInt
+  mime_type           String
+  private_path        String
+  source_version      String
+  active              Boolean  @default(true)
+  created_at          DateTime @default(now())
+  @@unique([customer_id, sha256])
+  @@index([customer_id, asset_id])
 }
 
 model CreditRequest {
@@ -994,6 +1156,7 @@ model UserPreference {
 }
 
 model Project {
+  api_customer  ApiCustomer?
   id            String    @id @default(cuid())
   workspace_id  String?
   name          String
@@ -1039,6 +1202,7 @@ model Project {
 }
 
 model VideoCard {
+  api_customer         ApiCustomer?
   id                   String    @id @default(cuid())
   project_id           String
   title                String
@@ -2269,6 +2433,7 @@ model SeedanceAsset {
 
 // 上传的文件（图片/视频/音频）
 model Asset {
+  api_assets    ApiAsset[]
   id       String @id @default(cuid())
   owner_id String // 固定为 "default-user"，后续支持多用户时扩展
   type     String // image | video | audio
