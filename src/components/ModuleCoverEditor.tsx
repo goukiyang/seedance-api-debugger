@@ -246,6 +246,15 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       return true;
     } finally { if (current()) setReading(false); }
   }
+  // 左右/上下: a generated result picked for the second cell brings its own source image into the empty first cell.
+  async function fillOrigin(resultAssetId: string) {
+    try {
+      const value = await json<{ originAssetId: string | null }>(await fetch(`${endpoint}?originOf=${encodeURIComponent(resultAssetId)}`, { cache: 'no-store' }));
+      if (!current()) return;
+      if (!value.originAssetId) { setError('没找到这张图的生成原图，请手动选择左边（上边）的图'); return; }
+      await choose(value.originAssetId, 0);
+    } catch (cause) { if (current()) setError(cause instanceof Error ? `生成原图没能自动填入：${cause.message}` : '没找到这张图的生成原图，请手动选择'); }
+  }
   function changeLayout(value: ModuleCoverLayout) {
     if (disabled || value === layout) return;
     setLayout(value); setDirty(true);
@@ -277,6 +286,10 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     </>}
     {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片（只能用作者本人的图片）" confirmLabel="使用这张图片" purpose="module-cover" contextTemplateId={moduleId} contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
       onClose={() => setPickerSlot(null)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
-      onConfirm={async ids => { if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false; setPickerSlot(null); return true; }} />}
+      onConfirm={async ids => {
+        if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false;
+        if (pickerSlot === 1 && count === 2 && !slots[0]) void fillOrigin(ids[0]);
+        setPickerSlot(null); return true;
+      }} />}
   </dialog></>, document.body);
 }

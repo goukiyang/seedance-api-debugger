@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { ModuleCoverError, readModuleCoverEditor, readModuleCoverRequest, readModuleCoverSnapshotRequest, saveModuleCover } from '@/lib/image-studio/module-cover';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
+import { studioResultOriginAsset } from '@/lib/image-studio/result-origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,6 +23,9 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
       return NextResponse.json(await readModuleCoverSnapshotRequest(user, params.moduleId, requestId), { headers });
     }
     if (requestId !== null) return NextResponse.json(await readModuleCoverRequest(user, params.moduleId, requestId), { headers });
+    // The direct input image of the user's own generation that produced this result (for 左右/上下 covers).
+    const originOf = request.nextUrl.searchParams.get('originOf');
+    if (originOf !== null) return NextResponse.json({ originAssetId: await studioResultOriginAsset(user.id, originOf) }, { headers });
     const sourceIds = request.nextUrl.searchParams.get('sourceAssetIds');
     return NextResponse.json(await readModuleCoverEditor(user, params.moduleId, sourceIds === null ? undefined : sourceIds.split(',')), { headers });
   } catch (error) { return failure(error); }

@@ -124,6 +124,9 @@ async function targetForModule(actor: ImageStudioIdentity, moduleId: string, cli
           legacyOwner = candidates.length === 1 && candidates[0].id === row.id;
         }
       }
+      // Your own copy of your own shared template (not its publisher) is a separate module: it gets its own
+      // editable cover instead of a read-only projection (2026-10-26, “技能01” copied from “技能02”).
+      if (source.owner_id === actor.id && !legacyOwner) return { target: { kind: 'module', id: row.id }, ownerId: actor.id, canManage: true, shared: false };
       return { ...target, canManage: target.canManage && legacyOwner };
     }
   }

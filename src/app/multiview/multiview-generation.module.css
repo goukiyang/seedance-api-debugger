@@ -141,3 +141,5 @@
 .settingsPickerList li:hover .settingsPickerRowActions, .settingsPickerList li[data-active="true"] .settingsPickerRowActions, .settingsPickerList li:focus-within .settingsPickerRowActions { visibility: visible; }
 .settingsPicker .settingsPickerRowActions button { min-height: 28px; padding: 2px 8px; font-size: 13px; }
 @media (hover: none) { .settingsPickerRowActions { visibility: visible; } }
+.blockedReason { margin: 6px 0 0; font-size: 12px; color: var(--tone-warning-text, #b45309); }
+.summaryActions .primary { background: var(--primary, #2563eb); border-color: var(--primary, #2563eb); color: #fff; font-weight: 650; }

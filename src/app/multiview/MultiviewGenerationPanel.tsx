@@ -608,7 +608,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   }, [ready, allowed, owner, sessionTab]);
   useEffect(() => {
     if (!ready || !allowed || active || accountRequestBlocked || recoveryBlocked || submitting) return;
-    const scope = capture(); const controller = new AbortController();
+    const scope = capture(); const controller = new AbortController(); let retryTimer: number | undefined;
     const binding = draftRef.current?.settingsBinding;
     setPresetState(null); setQuote(null); setPresetError('');
     void (async () => {
@@ -625,7 +625,12 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           ? parsePublicPresetState({ revision: binding.revision, preset: bound?.preset }) : null : parsePublicPresetState(payload);
         if (!response.ok || !value) throw new Error(typeof bound?.error === 'string' && bound.code === 'MULTIVIEW_PRESET_LEGACY' ? bound.error : '模板暂不可读取，请重试；当前图片和补充要求已保留。');
         const scanned = refreshRequests();
-        if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) return;
+        if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) {
+          // Root cause of “生成视频 grey until the settings dropdown is touched”: this skip left the template unread
+          // with no retry. Re-read shortly; the GET is safe to repeat.
+          retryTimer = window.setTimeout(() => setPresetRefresh(count => count + 1), 4000);
+          return;
+        }
         setPresetState(value);
         const previous = draftRef.current;
         if (!binding && awaitingInitialPresetDefaults.current && previous && !previous.settingsBinding) {
@@ -636,7 +641,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         }
       } catch { if (current(scope) && !controller.signal.aborted) setPresetError('模板暂不可读取，请重试；当前图片和补充要求已保留。'); }
     })();
-    return () => controller.abort();
+    return () => { controller.abort(); if (retryTimer) window.clearTimeout(retryTimer); };
     // Only a future, unsubmitted selection adopts the current preset; original receipts stay immutable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, allowed, active, accountRequestBlocked, recoveryBlocked, submitting, presetRefresh, owner, draft?.settingsBinding?.id, draft?.settingsBinding?.revision]);
@@ -1114,6 +1119,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const hdBlocked = draft.resolution === '1080p' && hd?.state !== 'approved';
   const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
     || cardSelectionInvalid || approvalBlocked || hdBlocked || !currentQuote || !presetReady || !seedValid;
+  // Every disabled state says what is missing (no silent grey button).
+  const blockedReason = submitting || active ? '' : recoveryBlocked ? '本机记录读取异常，请刷新页面后再试'
+    : accountRequestBlocked ? '还有一单的提交结果未确认，请先在下方“详情”里处理'
+      : association || working ? '主图正在准备…' : !imageReady ? '请先选择主图' : !currentProject ? '请选择保存到的项目'
+        : cardSelectionInvalid ? '所选视频卡不可用，请重新选择或取消关联' : approvalBlocked || hdBlocked ? '1080p 需要先经管理员同意'
+          : !presetReady ? presetError || '模板正在读取…' : !currentQuote ? quoteError || '正在计算点数…'
+            : !seedValid ? '随机种子无效，请在高级设置里调整' : formDisabled ? '设置正在保存…' : '';
   const sameReady = Boolean(receipt?.phase === 'ready' && receipt.taskId && receipt.taskId === props.currentTaskId);
   const quietReady = sameReady && !props.expanded && !error && !status && saved && !requestStorageFailed && !accountRequestBlocked && !recoveryBlocked;
   const notSubmittedReason = receipt?.rejection?.message || receipt?.observation?.message;
@@ -1131,9 +1143,10 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     <header className={styles.summary}>
       {imageReady && draft.mainImage && <img src={`/api/reference-images/${encodeURIComponent(draft.mainImage.referenceImageId)}/content?variant=thumbnail`} alt="当前生成主图" onError={() => setImageReady(false)} />}
       <div><h2>原图与生成设置</h2><p>{sameReady ? '当前视频已打开 · ' : ''}360°旋转模板 · {selectedModel?.label || draft.model} · {draft.duration}秒 · {draft.resolution}</p>{!props.expanded && working && <small role="status">主图正在准备，尚未生成视频…</small>}</div>
-      <div className={styles.summaryActions}><button type="button" disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />更换图片</button>
+      <div className={styles.summaryActions}>{receipt && !blocksNewRequest(receipt) && <button type="button" className={styles.primary} data-tip="上一单继续在后台生成，这里开始新的一单" disabled={submitting || closing} onClick={startNew}><Plus size={16} />新建</button>}
+        <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />更换图片</button>
         <button type="button" onClick={props.onUseExisting}><FolderOpen size={16} />使用已有视频</button>
-        {receipt && !blocksNewRequest(receipt) && <button type="button" title="上一单继续在后台生成，这里开始新的一单" disabled={submitting || closing} onClick={startNew}><Plus size={16} />新建</button>}
+
         <button type="button" aria-expanded={props.expanded} onClick={() => props.onExpandedChange(!props.expanded)}>{props.expanded ? '收起设置' : '展开设置'}<ChevronDown size={16} /></button></div>
     </header>
     {props.expanded && <div className={styles.body}>
@@ -1209,6 +1222,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         {needsApproval && !creation.context?.v2Available && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
         {needsApproval && !creation.context?.v2Available && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
         <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '正在确认提交…' : receipt?.phase === 'accepted' ? '已提交，生成中' : notSubmitted ? '重新生成' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
+        {blocked && blockedReason && <p className={styles.blockedReason} role="status">{blockedReason}</p>}
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
     </div>}
