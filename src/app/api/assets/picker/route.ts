@@ -4,10 +4,12 @@ import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getAccessibleProjectIds, assertCanViewTask } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
-import { getAlbumAccess } from '@/lib/reference-albums/permissions';
+import { getAlbumAccess, assertCanViewReferenceImage, canDownloadOriginal } from '@/lib/reference-albums/permissions';
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
-import type { PickerAlbum, PickerItem, PickerScope } from '@/lib/assets/picker-types';
+import type { PickerAlbum, PickerItem, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
+import { templateFilterId } from '@/lib/assets/picker-types';
+import { comparisonOriginalVersion } from '@/lib/media/image-comparison-version';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { generationOrigins } from '@/lib/assets/generation-origin';
 import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
@@ -153,12 +155,19 @@ export async function GET(request: NextRequest) {
     const favoriteKeys = new Set(favorites.map(f => f.content_key));
     const keys = p.getAll('keys').flatMap(k => k.split(',')).filter(k => /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(k)).slice(0, 80);
     const source = p.get('source');
-    const templateOptions = new Map<string, string>();
+    const templateOptions = new Map<string, PickerTemplate>();
     for (const item of items) {
       if (item.source === 'generated') item.generationOrigin = item.type === 'video' ? { kind: 'video-generated', label: '视频生成' }
         : item.assetId ? origins.get(item.assetId) || { kind: 'unknown', label: '来源待识别' } : { kind: 'unknown', label: '来源待识别' };
-      if (item.generationOrigin?.templateId && item.generationOrigin.templateName) templateOptions.set(item.generationOrigin.templateId, item.generationOrigin.templateName);
+      const origin = item.generationOrigin;
+      if (!(removed.has(item.identity) && scope === 'mine') && origin?.templateId && origin.templateName) {
+        const aliases = Array.from(new Set([...(templateOptions.get(origin.templateId)?.aliases || []), ...(origin.templateAliases || [])]));
+        templateOptions.set(origin.templateId, { id: origin.templateId, name: origin.templateName, ...(aliases.length ? { aliases } : {}) });
+      }
     }
+    const requestedTemplate = templateFilterId(p.get('template'));
+    const templateId = requestedTemplate && (templateOptions.get(requestedTemplate)?.id
+      || Array.from(templateOptions.values()).find(option => option.aliases?.includes(requestedTemplate))?.id || requestedTemplate);
     const dedup = new Map<string, PickerItem>();
     const albumById = new Map(albums.map(album => [album.id, album.name]));
     const albumNames = new Map<string, string[]>();
@@ -170,7 +179,7 @@ export async function GET(request: NextRequest) {
     for (const item of items) {
       if (removed.has(item.identity) && scope === 'mine') continue;
       if (source && source !== 'all' && item.source !== source && item.generationOrigin?.kind !== source) continue;
-      if (p.get('template') && item.generationOrigin?.templateId !== p.get('template')) continue;
+      if (templateId && item.generationOrigin?.templateId !== templateId) continue;
       if (q && !item.key.startsWith('video_task:') && ![item.fileName, item.generationOrigin?.templateName || '', ...(albumNames.get(item.identity) || [])].some(name => name.toLocaleLowerCase().includes(q.toLocaleLowerCase()))) continue;
       if (p.get('view') === 'favorites' && !favoriteKeys.has(item.key) && !favoriteKeys.has(`reference_image:${item.referenceImageId}`)) continue;
       if (p.has('keys') && !keys.includes(item.key) && !keys.includes(`reference_image:${item.referenceImageId}`)) continue;
@@ -186,7 +195,7 @@ export async function GET(request: NextRequest) {
     const pageItems = sorted.slice(start, start + limit);
     const pageAssets = await prisma.asset.findMany({ where: { id: { in: pageItems.flatMap(i => i.assetId ? [i.assetId] : []) }, status: 'active', ...(hidden.length ? { original_url: { notIn: hidden } } : {}) } });
     const byId = new Map(pageAssets.map(a => [a.id, a]));
-    const projected = pageItems.flatMap(item => {
+    const projected: PickerItem[] = pageItems.flatMap(item => {
       if (!item.assetId) return [item];
       const asset = byId.get(item.assetId!);
       if (!asset) return [];
@@ -197,10 +206,27 @@ export async function GET(request: NextRequest) {
           : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=original`,
         thumbnailUrl: item.referenceImageId ? `/api/reference-images/${item.referenceImageId}/content?variant=thumbnail` : asset.type === 'image' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : asset.thumbnail_url ? url(asset.thumbnail_url) : null }];
     });
+    // Only exact foreground selections get an original stat. Library pages stay lightweight.
+    if (p.get('comparison') === '1' && keys.length === 1) {
+      for (const item of projected) {
+        if (item.type !== 'image') continue;
+        let original: string | undefined;
+        if (item.referenceImageId) {
+          const reference = await assertCanViewReferenceImage(user, item.referenceImageId);
+          if (await canDownloadOriginal(user, reference)) original = reference.url;
+        } else if (item.assetId) {
+          const asset = byId.get(item.assetId);
+          if (asset?.owner_id === user.id) original = asset.original_url;
+        }
+        item.comparison = { schema: 2, kind: item.referenceImageId ? 'reference_image' : 'asset',
+          id: item.referenceImageId || item.assetId || item.id,
+          originalVersion: original ? await comparisonOriginalVersion(original) : null };
+      }
+    }
     const unavailable = sorted.filter(item => item.unavailableReason).length;
     const hasMore = start + limit < sorted.length;
     return NextResponse.json({ items: projected, total: sorted.length, page, hasMore,
-      nextCursor: hasMore ? pageItems[pageItems.length - 1]?.identity || null : null, albums, templates: Array.from(templateOptions, ([id, name]) => ({ id, name })),
+      nextCursor: hasMore ? pageItems[pageItems.length - 1]?.identity || null : null, albums, templates: Array.from(templateOptions.values()),
       ...(unavailable ? { notice: `${unavailable} 个素材暂不能用于此处，原因显示在对应素材下方；其他素材可正常添加` } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {

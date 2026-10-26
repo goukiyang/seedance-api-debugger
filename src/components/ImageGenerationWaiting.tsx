@@ -6,11 +6,11 @@ import styles from './GeneratedImageResults.module.css';
 
 export type { ImageGenerationWait } from '@/lib/image-studio/wait-display';
 
-export function ImageGenerationWaiting({ display, visible, loadingImage = false }: { display: ImageGenerationWaitDisplay; visible: boolean; loadingImage?: boolean }) {
+export function ImageGenerationWaiting({ display, visible, loadingImage = false, inline = false }: { display: ImageGenerationWaitDisplay; visible: boolean; loadingImage?: boolean; inline?: boolean }) {
   const waiting = loadingImage || display.showTrack;
   const status = loadingImage ? '正在加载图片' : display.label;
   const progress = loadingImage ? undefined : display.progress;
-  return <div className={styles.waitExperience} data-sweeping={visible && waiting || undefined} aria-busy={loadingImage || display.busy}>
+  return <div className={`${styles.waitExperience}${inline ? ` ${styles.waitInline}` : ''}`} data-sweeping={visible && waiting || undefined} aria-busy={loadingImage || display.busy}>
     <span className={styles.waitSweep} aria-hidden="true" />
     <div className={styles.waitCopy}>
       <strong role="status">{status}</strong>

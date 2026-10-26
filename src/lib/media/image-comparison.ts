@@ -2,6 +2,7 @@ import type { ContentKey } from '@/lib/content-reactions/types';
 import type { PickerItem, PickerResponse, PickerScope } from '@/lib/assets/picker-types';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { isSafeIdentifier, sourceFingerprint, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
+import { COMPARISON_VERSION_PARAM, validComparisonVersion, type ComparisonImageDescriptor } from './image-comparison-contract';
 
 export type ImageComparisonSource = {
   src: string; alt: string; fileName?: string; thumbnailSrc?: string;
@@ -9,6 +10,8 @@ export type ImageComparisonSource = {
   role?: 'original' | 'generated' | 'reference';
   contentKey?: ContentKey; pickerKey?: string; id?: string; version?: string;
   width?: number; height?: number; fileSize?: number;
+  descriptor?: ComparisonImageDescriptor;
+  previewOnly?: boolean;
 };
 export type ImageView = { scale: number; x: number; y: number; mode: MediaPreviewZoomMode; original?: boolean };
 export type ComparisonPreferences = { linked: boolean; axis: 'horizontal' | 'vertical' };
@@ -46,24 +49,49 @@ export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 
 }
 
 export function sourcePickerKey(source: ImageComparisonSource) {
+  if (source.descriptor?.schema === 2 && validPickerKey(`${source.descriptor.kind}:${source.descriptor.id}`)) return `${source.descriptor.kind}:${source.descriptor.id}`;
   if (validPickerKey(source.pickerKey)) return source.pickerKey;
   if (validPickerKey(source.contentKey)) return source.contentKey;
+  try {
+    const url = new URL(source.src, 'https://sd2.youdooart.com');
+    if (url.origin === 'https://sd2.youdooart.com' && url.pathname === '/api/content-reactions/media' && validPickerKey(url.searchParams.get('key'))) return url.searchParams.get('key')!;
+  } catch { /* Local images have no server identity. */ }
   const match = source.src.match(/^\/api\/(?:image-studio\/(?:assets|template-assets)|reference-images)\/([a-zA-Z0-9_-]+)(?:\/content)?(?:\?|$)/);
   return match ? `${source.src.startsWith('/api/reference-images/') ? 'reference_image' : 'asset'}:${match[1]}` : undefined;
 }
-export function imageSourceIdentity(source: ImageComparisonSource) {
+export function legacyImageSourceIdentity(source: ImageComparisonSource) {
   let canonicalSource = source.src;
-  try { const url = new URL(source.src, 'https://sd2.youdooart.com'); if (url.origin === 'https://sd2.youdooart.com') canonicalSource = url.pathname + url.search; } catch { /* Unknown URLs are not persisted. */ }
+  try { const url = new URL(source.src, 'https://sd2.youdooart.com'); url.searchParams.delete(COMPARISON_VERSION_PARAM);
+    if (url.origin === 'https://sd2.youdooart.com') canonicalSource = url.pathname + url.search; } catch { /* Unknown URLs are not persisted. */ }
   const fingerprint = sourceFingerprint(canonicalSource);
   if (!fingerprint) return source.src; // Temporary object URLs are session-only.
   const id = sourcePickerKey(source) || (isSafeIdentifier(source.id) ? source.id : 'image');
   return `${id}@${fingerprint}`;
 }
+export function imageSourceIdentity(source: ImageComparisonSource) {
+  const key = sourcePickerKey(source);
+  if (key) return `${key}@${source.descriptor?.originalVersion || 'unverified'}`;
+  return legacyImageSourceIdentity(source);
+}
+export function comparisonImageChange(expected: ImageComparisonSource, current: ImageComparisonSource) {
+  if (sourcePickerKey(expected) !== sourcePickerKey(current)) return 'changed';
+  const before = expected.descriptor?.originalVersion, after = current.descriptor?.originalVersion;
+  if (before && after) return before === after ? 'same' : 'changed';
+  return 'unknown';
+}
+function versionedComparisonSource(src: string, version?: string | null) {
+  if (!validComparisonVersion(version)) return src;
+  const url = new URL(src, 'https://sd2.youdooart.com');
+  if (url.origin !== 'https://sd2.youdooart.com') return src;
+  url.searchParams.set(COMPARISON_VERSION_PARAM, version);
+  return url.pathname + url.search;
+}
 export function pickerImageSource(item: PickerItem): ImageComparisonSource {
-  return { src: item.previewUrl || item.originalUrl, thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
+  return { src: versionedComparisonSource(item.previewUrl || item.originalUrl, item.comparison?.originalVersion), thumbnailSrc: item.thumbnailUrl || undefined, alt: '图片预览', fileName: item.fileName,
     width: item.width || undefined, height: item.height || undefined, fileSize: item.fileSize ?? undefined,
     contentKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
-    pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key };
+    pickerKey: item.referenceImageId ? `reference_image:${item.referenceImageId}` : item.key,
+    descriptor: item.comparison, previewOnly: !item.originalUrl };
 }
 function responseFailure(status: number) {
   if (status === 401) return new ComparisonResolveError('transient', '登录状态暂时无法确认，请重新登录后重试');
@@ -83,7 +111,7 @@ export async function resolveComparisonImage(key: string, signal?: AbortSignal):
   if (!validPickerKey(key)) throw new ComparisonResolveError('identity-version-change', '对比图记录已变更，请重新选择');
   try {
     for (const scope of comparisonScopes) {
-      const params = new URLSearchParams({ target: 'workspace', scope, types: 'image', keys: key });
+      const params = new URLSearchParams({ target: 'workspace', scope, types: 'image', keys: key, comparison: '1' });
       const response = await fetch(`/api/assets/picker?${params}`, { signal, cache: 'no-store' });
       if (!response.ok) throw responseFailure(response.status);
       const data = await readJsonResponse<PickerResponse>(response);
@@ -128,10 +156,29 @@ export function saveImageView(user: string, identity: string, pair: string, axis
   const entries = Object.entries(value).slice(-78);
   write(`${prefix}:${encodeURIComponent(user)}:views`, { ...Object.fromEntries(entries), [identity]: persisted, [`${pair}:${axis}:${identity}`]: persisted });
 }
-export type ComparisonSelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string }; storageSnapshot?: string; invalid?: boolean };
-function selectionKey(user: string, anchor: string) { return `${prefix}:${encodeURIComponent(user)}:selection:${encodeURIComponent(anchor)}`; }
-export function readComparisonSelection(user: string, anchor: string, openedIdentity: string): ComparisonSelectionRecord {
-  const key = selectionKey(user, anchor);
+export type ComparisonSelectionRecord = { enabled: boolean; comparison?: { key: string; identity: string; descriptor?: ComparisonImageDescriptor };
+  storageSnapshot?: string; storageKey?: string; invalid?: boolean; needsConfirmation?: boolean };
+function selectionKey(user: string, anchor: string, legacy = false) { return `${legacy ? prefix : 'sd2:media-preview:comparison:v2'}:${encodeURIComponent(user)}:selection:${encodeURIComponent(anchor)}`; }
+export function readComparisonSelection(user: string, anchor: string, openedIdentity: string, legacyAnchor?: string): ComparisonSelectionRecord {
+  let key = selectionKey(user, anchor);
+  try {
+    if (!localStorage.getItem(key) && legacyAnchor) {
+      key = selectionKey(user, legacyAnchor, true);
+      if (!localStorage.getItem(key)) {
+        const legacyPrefix = `${prefix}:${encodeURIComponent(user)}:selection:`;
+        const matches: string[] = [];
+        for (let index = 0; index < localStorage.length; index++) {
+          const storedKey = localStorage.key(index);
+          if (!storedKey?.startsWith(legacyPrefix)) continue;
+          const storedAnchor = decodeURIComponent(storedKey.slice(legacyPrefix.length));
+          if (storedAnchor.startsWith(`${anchor}@`) && /^[a-f0-9]{16}$/.test(storedAnchor.slice(anchor.length + 1))) matches.push(storedKey);
+        }
+        // Multiple historical choices have no ordering proof. Never guess which one wins.
+        if (matches.length === 1) key = matches[0];
+        else if (matches.length > 1) return { enabled: false, invalid: true, needsConfirmation: true };
+      }
+    }
+  } catch { /* Optional persistence. */ }
   let storageSnapshot: string | undefined;
   try { storageSnapshot = localStorage.getItem(key) || undefined; } catch { /* Restricted storage has no restorable selection. */ }
   const value = read(key);
@@ -139,26 +186,34 @@ export function readComparisonSelection(user: string, anchor: string, openedIden
     if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
     const data = v as Record<string, unknown>;
     return validPickerKey(data.key) && typeof data.identity === 'string' && data.identity.length <= 400 && !/[\/?#\\\u0000-\u001f]/.test(data.identity)
-      ? { key: data.key, identity: data.identity } : undefined;
+      ? { key: data.key, identity: data.identity,
+        ...(data.descriptor && typeof data.descriptor === 'object' && !Array.isArray(data.descriptor)
+          && (data.descriptor as ComparisonImageDescriptor).schema === 2
+          && `${(data.descriptor as ComparisonImageDescriptor).kind}:${(data.descriptor as ComparisonImageDescriptor).id}` === data.key
+          && validComparisonVersion((data.descriptor as ComparisonImageDescriptor).originalVersion)
+          ? { descriptor: data.descriptor as ComparisonImageDescriptor } : {}) } : undefined;
   };
   // Legacy selections may have been swapped. Restore only records with a known left/right assignment.
   const anchored = value.sidePolicy === 'anchored-current' || source(value.current)?.identity === openedIdentity;
   const comparison = source(value.comparison);
-  if (!anchored) return { enabled: false, storageSnapshot, invalid: Boolean(storageSnapshot) };
-  return { enabled: value.enabled === true, comparison, storageSnapshot,
+  if (!anchored) return { enabled: false, storageSnapshot, storageKey: key, invalid: Boolean(storageSnapshot) };
+  return { enabled: value.enabled === true, comparison, storageSnapshot, storageKey: key,
+    needsConfirmation: Boolean(comparison && !comparison.descriptor),
     invalid: (value.enabled === true && !comparison) || (value.comparison != null && !comparison) };
 }
 export function saveComparisonSelection(user: string, anchor: string, current: ImageComparisonSource, comparison: ImageComparisonSource | null, enabled: boolean) {
+  if (sourcePickerKey(current) && !validComparisonVersion(current.descriptor?.originalVersion)
+    || comparison && sourcePickerKey(comparison) && !validComparisonVersion(comparison.descriptor?.originalVersion)) return;
   const record = (image: ImageComparisonSource | null) => {
     const key = image && sourcePickerKey(image);
-    return key && image ? { key, identity: imageSourceIdentity(image) } : undefined;
+    return key && image ? { key, identity: imageSourceIdentity(image), descriptor: image.descriptor } : undefined;
   };
   write(selectionKey(user, anchor), { sidePolicy: 'anchored-current', enabled: enabled && Boolean(record(comparison)), current: record(current), comparison: record(comparison) });
 }
 
 export function clearComparisonSelectionIfUnchanged(user: string, anchor: string, expected: ComparisonSelectionRecord) {
   if (!expected.storageSnapshot) return false;
-  const key = selectionKey(user, anchor);
+  const key = expected.storageKey || selectionKey(user, anchor);
   try {
     if (localStorage.getItem(key) !== expected.storageSnapshot) return false;
     localStorage.removeItem(key);

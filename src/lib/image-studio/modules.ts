@@ -118,7 +118,8 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
     throw error;
   }
-  const latestTask = row.id.startsWith('default-') ? null : await prisma.imageStudioTask.findFirst({
+  const fixedCover = saved ? await studioFixedCoverDTO(user, { kind: 'module', id: row.id }) : null;
+  const latestTask = fixedCover || row.id.startsWith('default-') ? null : await prisma.imageStudioTask.findFirst({
     where: { module_id: row.id, owner_id: ownerId, AND: [studioOutputTaskWhere], deleted_at: null, asset_id: { not: null } },
     orderBy: { finished_at: 'desc' },
     select: { asset_id: true, snapshot_json: true, status: true, usage_json: true },
@@ -137,7 +138,6 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     if (isAdmin && typeof representative?.id === 'string') representativeReference = studioTemplateAssetUrl(representative.id, true);
   } catch { representativeReference = null; }
   const banner = row.banner_asset_id ? assets.find(item => item.id === row.banner_asset_id) : null;
-  const fixedCover = saved ? await studioFixedCoverDTO(user, { kind: 'module', id: row.id }) : null;
   const sourceArchived = sourcePreset ? await studioPresetArchived(sourcePreset.id) : false;
   const state = projectSharedStudioCapabilities({ objectKind: row.source_preset_id ? 'legacy-copy' : 'local',
     lifecycle: row.source_preset_id ? sourcePreset ? sourceArchived ? 'archived' : 'active' : 'missing' : 'active',

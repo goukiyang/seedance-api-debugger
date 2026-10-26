@@ -11,6 +11,8 @@ import { hdEncoderStrategy } from './hd-encoder';
 import { previewMime } from './preview-response';
 import { imageEtagMatches, imageStatEtag, isImagePrefetch } from './image-validators';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { comparisonOriginalVersion } from './image-comparison-version';
+import { COMPARISON_VERSION_HEADER, COMPARISON_VERSION_PARAM, validComparisonVersion } from './image-comparison-contract';
 
 export type ImageVariant = 'thumbnail' | 'preview' | 'detail' | 'original' | 'download' | 'hd' | 'hd-description' | 'hd-download';
 export const privateImageHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
@@ -47,6 +49,14 @@ export async function authorizedImageResponse(request: Request, source: string, 
   const prepared = performance.now();
   const statusOnly = request.headers.get('x-image-read-intent') === 'status';
   const readOnly = request.method === 'HEAD' || isImagePrefetch(request) || statusOnly;
+  const expectedComparison = new URL(request.url).searchParams.get(COMPARISON_VERSION_PARAM);
+  const checkComparison = Boolean(expectedComparison && ['original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant));
+  let comparisonVersion: string | null = null;
+  if (checkComparison) {
+    comparisonVersion = await comparisonOriginalVersion(source);
+    if (!validComparisonVersion(expectedComparison) || !comparisonVersion) return Response.json({ error: '暂时无法核对原图版本，请重试读取' }, { status: 503, headers: privateImageHeaders });
+    if (comparisonVersion !== expectedComparison) return Response.json({ error: '原图版本已变化，请主动选择当前图片' }, { status: 409, headers: privateImageHeaders });
+  }
   let response: Response;
   if (['hd', 'hd-description', 'hd-download'].includes(variant)) {
     const token = request.headers.get('x-image-view-token');
@@ -128,6 +138,15 @@ export async function authorizedImageResponse(request: Request, source: string, 
       response = meta ? imageFileResponse(request, meta.file, headers, unchanged) : new Response(unchanged ? null : new Uint8Array(bytes), { status: unchanged ? 304 : 200, headers });
       if (unchanged) response.headers.delete('Content-Length');
     }
+  }
+  if (checkComparison) {
+    const after = await comparisonOriginalVersion(source);
+    if (!after || after !== comparisonVersion) {
+      void response.body?.cancel().catch(() => {});
+      return Response.json({ error: after ? '原图版本已变化，请主动选择当前图片' : '暂时无法核对原图版本，请重试读取' },
+        { status: after ? 409 : 503, headers: privateImageHeaders });
+    }
+    response.headers.set(COMPARISON_VERSION_HEADER, after);
   }
   response.headers.set('Server-Timing', `access;dur=${(prepared - started).toFixed(1)},media;dur=${(performance.now() - prepared).toFixed(1)}`);
   response.headers.set('X-Media-Request-Id', randomUUID());

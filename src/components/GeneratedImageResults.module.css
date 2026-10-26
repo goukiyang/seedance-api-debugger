@@ -37,14 +37,16 @@
 .nextActions p { margin: 5px 0; font-size: 13px; overflow-wrap: anywhere; }
 .nextActions a { margin-left: 8px; color: #a5e5d7; text-decoration: underline; }
 @media (any-pointer: coarse) { .nextActions button { min-height: 40px; } }
-.media { position: relative; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
+.media { position: relative; container-type: inline-size; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
 .media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
 .pending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #adb6bd; }
 .pending[role=button] { cursor: pointer; }
 .pending[aria-pressed=true] { box-shadow: inset 0 0 0 2px #79daca; }
 .pending:focus-visible { outline: 2px solid #79daca; outline-offset: -3px; }
 .waitingImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(2.4px); }
+.waitingImage.inputCover { transform: scale(1.045); filter: blur(5px) brightness(.62); }
 .generationPending .waitingImage { filter: blur(2.4px) brightness(.55); }
+.generationPending .inputCover { filter: blur(5px) brightness(.55); }
 .waitExperience { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: #eef3f1; background: rgb(17 22 20 / 22%); }
 .waitSweep { position: absolute; inset-block: 0; left: -60%; width: 52%; background: linear-gradient(90deg, transparent, rgb(204 235 226 / 18%) 25%, rgb(224 245 239 / 40%) 50%, rgb(204 235 226 / 18%) 75%, transparent); transform: translateX(0); opacity: 0; }
 .waitExperience[data-sweeping=true] .waitSweep { animation: imageWaitSweep 2.4s linear infinite; }
@@ -61,7 +63,23 @@
 @keyframes imageWaitSweep { 0% { transform: translateX(0); opacity: 0; } 8% { opacity: 1; } 66.67% { transform: translateX(320%); opacity: 1; } 67%, 100% { transform: translateX(320%); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .waitExperience[data-sweeping=true] .waitSweep, .waitExperience[data-sweeping=true] .waitTrack > span { animation: none; } .waitTrack > span { transform: translateX(80%); } }
 @media (prefers-reduced-motion: reduce) { .waitTrack[data-progress=true] > span { transform: scaleX(var(--image-wait-ratio, 0)); transition: none; } }
-.phase { position: absolute; bottom: 8px; right: 8px; left: 8px; padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
+.phase { position: absolute; top: 50%; right: 8px; left: 8px; z-index: 2; transform: translateY(-50%); padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
+.pendingStatus { position: absolute; inset: 8px 8px 48px; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; pointer-events: none; overflow-wrap: anywhere; text-align: center; }
+.pendingStatus .phase { position: static; transform: none; max-width: 100%; }
+.pendingStatus .issueTrigger { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 2px 7px; border-radius: 4px; background: #151a1de6; pointer-events: auto; }
+.waitInline { position: relative; inset: auto; width: 100%; background: transparent; }
+.waitInline .waitCopy { position: relative; inset: auto; padding: 0; }
+.waitInline .waitCopy strong { max-width: 100%; line-height: 1.4; overflow-wrap: anywhere; }
+.waitInline .waitSweep { display: none; }
+@media (hover: none), (any-pointer: coarse) {
+  .pendingStatus .issueTrigger { min-height: 40px; padding-inline: 4px; }
+}
+@container (max-width: 160px) {
+  .pendingStatus { inset: 6px 6px 44px; gap: 4px; }
+  .pendingStatus .waitCopy { gap: 4px; }
+  .pendingStatus .waitCopy strong { font-size: 14px; line-height: 18px; }
+  .pendingStatus .waitTrack, .pendingStatus .waitPercent { display: none; }
+}
 .heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; padding: 8px 0; font-size: 13px; overflow-wrap: anywhere; }
 .heading span, .empty { color: #aab8b4; }
 .heading strong { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -76,14 +94,15 @@
 .deleteSlot button:disabled { opacity: .45; cursor: default; }
 .deleteSlot button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .mediaActions[data-cover-context-delete] { max-inline-size: calc(100% - 16px); gap: 3px; padding: 3px; border-radius: 4px; }
-.commonActions, .specialtyActions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
+.commonActions, .specialtyActions, .mediaDetailAction { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
 .commonActions { flex-shrink: 0; }
 .specialtyActions { min-width: 0; }
 .commonActions button { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
 @media (hover: hover) and (pointer: fine) {
   .card [data-result-secondary] { opacity: 0; pointer-events: none; }
   .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
-  .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary] { opacity: 1; pointer-events: auto; }
+  .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary],
+  .card [data-result-secondary][data-has-status-detail] { opacity: 1; pointer-events: auto; }
 }
 .actions button, .mediaActions button, .pagination button, .notice button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
 .actions button:hover, .mediaActions button:hover, .pagination button:hover { background: #303c37; }
@@ -120,11 +139,10 @@
 .issueLayer dt { color: #aab8b4; }
 .issueLayer dd { margin: 0; }
 .issueLayer p, .operationDetail p { margin: 6px 0; }
+.statusDetailText { white-space: pre-wrap; }
+.statusDetailActions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.statusCopyFeedback { display: block; margin-top: 4px; color: #c4d7cd; }
 .issueClose, .operationFeedback button { border: 0; padding: 3px 5px; background: transparent; color: #a5e5d7; font: inherit; cursor: pointer; }
+.issueClose:disabled { opacity: .55; cursor: default; }
 .operationFeedback { padding: 7px 10px; width: max-content; }
 .operationDetail { max-width: 280px; }
-.inputMain { display: flex; align-items: center; gap: 8px; margin-block: 8px; color: #aab8b4; font-size: 12px; }
-.inputMainThumb { width: 48px; height: 48px; position: relative; flex: 0 0 48px; border-radius: 4px; overflow: hidden; border: 1px solid #414b48; }
-.inputMainThumb [data-result-cover] { width: 100%; height: 100%; }
-.inputMainThumb img { object-fit: contain; }
-.inputMainThumb span { font-size: 10px; }

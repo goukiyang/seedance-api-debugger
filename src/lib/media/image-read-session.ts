@@ -1,6 +1,7 @@
 'use client';
 
 import { invalidateHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner } from './hd-source-session';
+import { COMPARISON_VERSION_HEADER, COMPARISON_VERSION_PARAM } from './image-comparison-contract';
 
 export type ImageReadProgress = { phase: 'reading' | 'confirming' | 'decoding' | 'unavailable' | 'unsupported'; loadedBytes: number; totalBytes?: number; percent?: number; message?: string; transferId?: string; bodyComplete?: boolean };
 export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number; width?: number; height?: number; authorizationVersion?: string; representationVersion?: string };
@@ -58,6 +59,11 @@ function reusableSource(source: string) {
 }
 function responseVersion(response: Response) {
   return response.headers.get('X-Image-Source-Version')?.trim() || response.headers.get('etag')?.trim() || '';
+}
+function comparisonResponseMatches(source: string, response: Response) {
+  const url = new URL(source, location.href), expected = url.searchParams.get(COMPARISON_VERSION_PARAM);
+  const preview = ['thumbnail', 'preview', 'detail'].some(mode => url.searchParams.get('variant') === mode || url.searchParams.get(mode) === '1');
+  return !expected || preview || response.headers.get(COMPARISON_VERSION_HEADER) === expected;
 }
 function representationChanged(entry: Entry, response: Response): boolean | null {
   const representation = response.headers.get('X-Image-Representation-Version')?.trim();
@@ -227,6 +233,10 @@ async function transfer(entry: Entry, expectedVersion = '') {
       const response = await fetch(entry.source, { cache: 'no-store', credentials: 'same-origin', headers: entry.consumers.size ? {} : { 'X-Image-Read-Intent': 'prefetch' }, signal: AbortSignal.any([entry.controller.signal, controller.signal, AbortSignal.timeout(60000)]) });
       if (!active()) return;
       if (!response.ok) { fail(entry, '图片未能读取，请重试', [401, 403, 404].includes(response.status), response.status === 409); return; }
+      if (!comparisonResponseMatches(entry.source, response)) {
+        void response.body?.cancel().catch(() => {});
+        fail(entry, '暂时无法核对原图版本，请重试读取'); return;
+      }
       const mime = mimeOf(response);
       if (!mime.startsWith('image/') || !response.body) throw new Error('当前来源不是可读取的图片');
       if (response.status !== 200 || response.headers.has('content-range')) { void response.body.cancel().catch(() => {}); throw new Error('图片响应不完整，请重试'); }
@@ -292,6 +302,7 @@ async function revalidate(entry: Entry) {
       if (expected !== epoch || revision !== entry.revision || entry.controller.signal.aborted) return;
       const mime = mimeOf(response);
       if (response.status === 304) {
+        if (!comparisonResponseMatches(entry.source, response)) { keepStale(entry); return; }
         const tag = response.headers.get('etag')?.trim() || '';
         const sourceVersion = response.headers.get('X-Image-Source-Version')?.trim() || '';
         if (!entry.etag || mime && !mime.startsWith('image/') || tag && !versionsMatch(entry.etag, tag)
@@ -301,6 +312,7 @@ async function revalidate(entry: Entry) {
       if ([401, 403, 404].includes(response.status)) { fail(entry, '图片权限或来源已变化，请重新打开', true); return; }
       if (response.status === 409 && isHdVariant(entry.source)) { fail(entry, '高清图尚未准备好，可查看原图', false, true); return; }
       if (!response.ok || !mime.startsWith('image/')) { keepStale(entry); return; }
+      if (!comparisonResponseMatches(entry.source, response)) { keepStale(entry); return; }
       const version = responseVersion(response);
       if (!version) { keepStale(entry); return; }
       const changed = representationChanged(entry, response);

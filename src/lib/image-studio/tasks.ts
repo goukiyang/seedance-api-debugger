@@ -1413,6 +1413,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
       const asset = assets.get(record.id);
       return {
         id: record.id,
+        comparison: { schema: 2 as const, kind: 'asset' as const, id: record.id, originalVersion: null },
         originalUrl: asset ? studioTemplateAssetUrl(record.id) : null,
         thumbnailUrl: asset ? studioTemplateAssetUrl(record.id, true) : null,
         fileName: typeof record.fileName === 'string' ? record.fileName : null,

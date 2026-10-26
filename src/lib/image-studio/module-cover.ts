@@ -179,18 +179,39 @@ async function recordDTO(actor: ImageStudioIdentity, state: TargetState, record:
     if (record.ownerId !== state.ownerId || !sameTarget(state.target, record.target)) throw new ModuleCoverError('封面归属已变化', 409);
     const sources = await authorizedSources(actor, state, record.recipe.sources.map(source => source.assetId), client);
     if (sources.some((source, index) => source.version !== record.recipe.sources[index].version)) throw new ModuleCoverError('封面原图已变化，请管理者重新选图', 409);
+    await assertCoverFilesPresent(record.files);
   } catch { unavailableReason = '封面原图已不可用或权限已变化，请管理者换图'; }
   return { target: state.target, revision: record.revision, available: !unavailableReason,
     thumbnailUrl: unavailableReason ? null : imageURL(state.target, record.revision, 640), imageUrl: unavailableReason ? null : imageURL(state.target, record.revision, 1280),
     width: coverOutput(record.recipe).width, height: coverOutput(record.recipe).height, updatedAt: record.updatedAt, ...(unavailableReason ? { unavailableReason } : {}) };
 }
 export async function studioFixedCoverDTO(actor: ImageStudioIdentity, target: ModuleCoverTarget, client: SharedStudioClient = prisma): Promise<ModuleCoverDTO | null> {
-  const stored = await readRecord(target, client);
-  if (!stored) return null;
-  try { return await recordDTO(actor, await targetForImage(actor, target, client), stored.record, client); }
-  catch { return { target, revision: stored.record.revision, available: false, thumbnailUrl: null, imageUrl: null,
-    width: coverOutput(stored.record.recipe).width, height: coverOutput(stored.record.recipe).height,
-    updatedAt: stored.record.updatedAt, unavailableReason: '模板已不可用或停止共享' }; }
+  const unavailable = (record: CoverRecord): ModuleCoverDTO => ({ target: record.target, revision: record.revision,
+    available: false, thumbnailUrl: null, imageUrl: null, width: coverOutput(record.recipe).width,
+    height: coverOutput(record.recipe).height, updatedAt: record.updatedAt, unavailableReason: '封面暂不可用或模板已停止共享' });
+  const workspace = target.kind === 'module'
+    ? await client.imageStudioModule.findFirst({ where: { id: target.id, owner_id: actor.id } }) : null;
+  if (target.kind === 'module' && !workspace) throw new ModuleCoverError('模块不存在或无权访问', 404);
+  let state: TargetState;
+  try {
+    // Use exactly the save/editor target resolution, including legacy sources and independent copies.
+    state = target.kind === 'module' ? await targetForModule(actor, target.id, client) : await targetForPreset(actor, target.id, client);
+  } catch (error) {
+    const stored = await readRecord(target, client) || (workspace?.source_preset_id
+      ? await readRecord({ kind: 'preset', id: workspace.source_preset_id }, client) : null);
+    if (stored) return unavailable(stored.record);
+    throw error; // An unconfirmed lookup is not proof that no cover was ever saved.
+  }
+  const stored = await readRecord(state.target, client);
+  if (stored) return recordDTO(actor, state, stored.record, client);
+  if (workspace?.source_preset_id && state.target.kind === 'module') {
+    const source = await client.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
+    if (!source || !canViewStudioPreset(actor, source) || await studioPresetArchived(source.id, client)) {
+      const historical = await readRecord({ kind: 'preset', id: workspace.source_preset_id }, client);
+      if (historical) return unavailable(historical.record);
+    }
+  }
+  return null;
 }
 async function inspectSources(actor: ImageStudioIdentity, state: TargetState, ids: string[], client: SharedStudioClient): Promise<ModuleCoverSourceDTO[]> {
   if (activeJobs >= 2) throw new ModuleCoverError('正在处理其他封面，请稍后重试', 429);

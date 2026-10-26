@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (['preview', 'detail'].includes(variant) && !resolved.summary.previewUrl) throw new ReactionError('无权预览原件', 403);
     if (resolved.source.referenceId) {
       const target = new URL(`/api/reference-images/${resolved.source.referenceId}/content?variant=${variant}`, request.url);
-      for (const key of ['hd-version', 'hd-representation']) if (params.has(key)) target.searchParams.set(key, params.get(key)!);
+      for (const key of ['hd-version', 'hd-representation', 'comparison-version']) if (params.has(key)) target.searchParams.set(key, params.get(key)!);
       return NextResponse.redirect(target, { status: 302, headers });
     }
     if (resolved.summary.category === 'image') {

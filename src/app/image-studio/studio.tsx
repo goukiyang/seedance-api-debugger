@@ -260,14 +260,17 @@ function singleReferenceComparison(task: StudioTask) {
   const references = task.snapshot?.primaryReferenceImages ?? task.snapshot?.transientReferenceImages ?? task.snapshot?.referenceImages ?? [];
   const reference = references[0];
   const src = reference?.originalUrl || reference?.thumbnailUrl;
-  return src ? { src, role: 'original' as const, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, width: reference.width || undefined, height: reference.height || undefined, fileSize: reference.fileSize, ...(reference.id ? { contentKey: `asset:${reference.id}` as const } : {}) } : undefined;
+  return src ? { src, role: 'original' as const, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, width: reference.width || undefined, height: reference.height || undefined, fileSize: reference.fileSize,
+    ...(reference.id ? { contentKey: `asset:${reference.id}` as const,
+      descriptor: { schema: 2 as const, kind: 'asset' as const, id: reference.id, originalVersion: null } } : {}) } : undefined;
 }
 
 function taskComparisonCandidates(task?: StudioTask): ImageComparisonSource[] {
   const snapshot = task?.snapshot;
   const references = [...(snapshot?.primaryReferenceImages ?? snapshot?.transientReferenceImages ?? snapshot?.referenceImages ?? []),
     ...(snapshot?.auxiliaryReferenceImages || []), ...(snapshot?.fixedReferenceImages || [])];
-  return references.flatMap((image, index) => image.originalUrl ? [{ src: image.originalUrl, role: 'reference' as const, thumbnailSrc: image.thumbnailUrl || undefined, alt: `参考图 ${index + 1}`, width: image.width || undefined, height: image.height || undefined, fileSize: image.fileSize, ...(image.id ? { contentKey: `asset:${image.id}` as const } : {}) }] : []);
+  return references.flatMap((image, index) => image.originalUrl ? [{ src: image.originalUrl, role: 'reference' as const, thumbnailSrc: image.thumbnailUrl || undefined, alt: `参考图 ${index + 1}`, width: image.width || undefined, height: image.height || undefined, fileSize: image.fileSize,
+    ...(image.id ? { contentKey: `asset:${image.id}` as const, descriptor: { schema: 2 as const, kind: 'asset' as const, id: image.id, originalVersion: null } } : {}) }] : []);
 }
 
 function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
@@ -1462,13 +1465,19 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>}
       items={coverPages.pageItems.map(entry => {
       const coverModule = modules.find(item => item.id === entry.id);
+      const loadedCover = coverModule?.fixedCover;
+      const sameCoverTarget = loadedCover && entry.fixedCover && loadedCover.target.kind === entry.fixedCover.target.kind
+        && loadedCover.target.id === entry.fixedCover.target.id;
+      const directoryCover = entry.fixedCover && (!coverModule || sameCoverTarget && entry.fixedCover.revision >= loadedCover!.revision)
+        ? entry.fixedCover : null;
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         // A shared template and its source module can carry the same name; the shared copy is labelled.
         badge: entry.presetId ? '共享模板' : undefined,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
         loading: !entry.presetId && !coverModule && !error, error: galleryReadErrors.has(entry.key) || !entry.presetId && !coverModule && Boolean(error),
-        visual: coverModule ? <TemplateCoverVisual key={coverRetry} module={coverModule} onReadError={onReadError} /> : entry.fixedCover
+        visual: directoryCover ? <FixedCoverVisual key={coverRetry} cover={directoryCover} name={entry.name} onReadError={onReadError} />
+          : coverModule ? <TemplateCoverVisual key={coverRetry} module={coverModule} onReadError={onReadError} /> : entry.fixedCover
           ? <FixedCoverVisual key={coverRetry} cover={entry.fixedCover} name={entry.name} onReadError={onReadError} /> : <span className={styles.coverVisual} data-cover-source="模板素材">
             {entry.banner?.thumbnailUrl ? <img decoding="async" src={entry.banner.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>暂无代表图</span>}</span>,
         canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry) };
