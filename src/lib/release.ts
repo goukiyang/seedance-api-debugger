@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板封面选图更清晰，对比自动配原图', outline: [
-  '封面裁剪与预览使用清晰原图',
-  '左右、上下对比自动带入本次生成的输入原图',
+const notice = { title: '生成前确认', outline: [
+  '3D多视图生成前可核对主图、规格和预计点数',
+  '完整设置按需展开，返回修改保留输入',
+  '设置或报价变化后需重新确认',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
