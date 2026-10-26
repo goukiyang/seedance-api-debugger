@@ -136,11 +136,17 @@ export async function mutateApiAdmin(actorId: string, body: Record<string, unkno
         if (!changed.count) throw new CustomerApiError('VERSION_CONFLICT', '客户设置已更新。', 409);
         result = { customer_id: id, saved: true };
       } else if (body.action === 'issue_key') {
-        customerReady(customer);
-        if (!customer.create_enabled) throw new CustomerApiError('CREATION_DISABLED', '先完成此客户配置并显式启用。', 409);
-        const global = await tx.apiConfiguration.findUnique({ where: { id: 'global' } });
-        if (!global?.enabled || !global.license_confirmed) throw new CustomerApiError('CREATION_DISABLED', '全局客户 API 尚未开放。', 409);
-        const scopes = list(body.scopes, API_SCOPES, 'Key 权限'), models = list(body.models, stringList(customer.models_json), 'Key 型号');
+        const scopes = list(body.scopes, API_SCOPES, 'Key 权限');
+        const writable = scopes.includes('video:write') || scopes.includes('assets:write');
+        if (!customer.read_enabled) throw new CustomerApiError('CUSTOMER_BLOCKED', '客户访问已封禁，不能发放 Key。', 409);
+        if (writable) {
+          customerReady(customer);
+          if (!customer.create_enabled) throw new CustomerApiError('CREATION_DISABLED', '可写 Key 需先完成客户配置并显式启用；仅查询历史结果可选择只读权限。', 409);
+          const global = await tx.apiConfiguration.findUnique({ where: { id: 'global' } });
+          if (!global?.enabled || !global.license_confirmed) throw new CustomerApiError('CREATION_DISABLED', '全局客户 API 尚未开放写入。', 409);
+        }
+        // Disabling new generation must not prevent replacement read-only keys for paid history.
+        const models = list(body.models, writable ? stringList(customer.models_json) : [PUBLIC_IP_MODEL], 'Key 型号');
         const expires = new Date(text(body.expires_at, '有效期'));
         if (!Number.isFinite(expires.getTime()) || expires <= new Date() || !scopes.length || !models.length) throw new CustomerApiError('INVALID_SETTING', '有效期、权限或型号范围无效。');
         const rate = positive(body.requests_per_minute, '每分钟请求数', 10000, 0);
