@@ -59,7 +59,10 @@ type AssetGroup = 'date' | 'project' | 'user';
 type AssetCardSize = 'standard' | 'compact';
 type AssetBulkTarget = 'video_project' | 'album';
 type AssetSourceFilter = 'all' | 'multiview-output';
-type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}`;
+type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `reference_image:${string}` | `multiview_work:${string}`;
+function assetContentKey(id: AssetLibraryItemId) {
+  return id.startsWith('multiview_work:') ? null : id as Exclude<AssetLibraryItemId, `multiview_work:${string}`>;
+}
 type EnhanceResolution = '720p' | '1080p' | '2k' | '4k';
 type EnhanceFps = 'none' | '30' | '60';
 type VideoDeliveryStageKey = 'generating' | 'preparing' | 'ready' | 'failed' | 'unavailable';
@@ -115,10 +118,11 @@ type ReferenceAlbumItem = {
 };
 
 type AssetLibraryItem = {
+  multiviewGroup?: { workId: string; revision: number; children: AssetLibraryItem[]; roles: string[]; frameCount: number; missing: number; syncing: boolean };
   generationOrigin?: { kind?: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'multiview-output' | 'unknown'; label: string; templateName?: string };
   id: AssetLibraryItemId;
   kind: 'video' | 'image' | 'audio';
-  source: 'video_task' | 'asset' | 'reference_image';
+  source: 'video_task' | 'asset' | 'reference_image' | 'multiview_work';
   taskId: string | null;
   assetId: string | null;
   referenceImageId: string | null;
@@ -256,6 +260,26 @@ const ASSET_SHOW_UPLOADS_STORAGE_KEY = 'asset_library_show_uploaded_assets';
 const ASSET_BULK_TARGET_STORAGE_KEY = 'asset_library_bulk_target';
 const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
 const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
+
+function MultiviewAssetGroupCard({ item, cardSize, onOpenAsset }: { item: AssetLibraryItem; cardSize: AssetCardSize; onOpenAsset: (item: AssetLibraryItem) => void }) {
+  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { if (open) dialog.current?.showModal(); else dialog.current?.close(); }, [open]);
+  const group = item.multiviewGroup!;
+  return <article className={`asset-card asset-card-${cardSize}`}>
+    <button type="button" className={`asset-card-media ${assetStyles.cardMedia} ${assetStyles.cardMediaImage}`} onClick={() => setOpen(true)} aria-label={`打开整套方案：${item.title}`}>
+      {item.thumbnailUrl && <img src={item.thumbnailUrl} alt={item.title} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+    </button>
+    <div className="asset-card-meta"><strong>{item.title}</strong><div className="asset-card-config-row"><span>{group.frameCount} 张 · 3D多视图{group.missing > 0 ? ` · 缺 ${group.missing} 项` : group.syncing ? ' · 新成品同步中' : ''}</span><button type="button" onClick={() => setOpen(true)}>查看整套</button></div></div>
+    <dialog ref={dialog} className={assetStyles.multiviewGroupDialog} onCancel={() => setOpen(false)}>
+      <header><h2>{item.title}</h2><button type="button" aria-label="关闭整套方案" onClick={() => setOpen(false)}><X size={18} /></button></header>
+      <div className={assetStyles.multiviewGroupGrid}>{group.children.map((child, index) => <button key={`${index}:${child.id}`} type="button" onClick={() => { setOpen(false); onOpenAsset(child); }}>
+        <AssetLibraryThumbnail item={child} /><span>{group.roles[index] === 'collage' ? '完整拼图' : `单图 ${group.roles.slice(0, index + 1).filter(role => role !== 'collage').length}`}</span>
+      </button>)}</div>
+      <footer><Link href={`/multiview?workId=${encodeURIComponent(group.workId)}`}>继续制作</Link><Link href={`/multiview?view=works&workId=${encodeURIComponent(group.workId)}`}>管理方案</Link></footer>
+    </dialog>
+  </article>;
+}
 
 function isAssetType(value: string | null): value is AssetType {
   return value === 'all' || value === 'video' || value === 'image' || value === 'audio' || value === 'reference';
@@ -434,6 +458,7 @@ function AssetLibraryThumbnail({ item }: { item: AssetLibraryItem }) {
 }
 
 function isAssetPreviewItem(item: AssetLibraryItem) {
+  if (item.multiviewGroup) return false;
   if (item.kind === 'video' && item.source === 'video_task') {
     return Boolean(item.taskId && item.previewAvailable);
   }
@@ -905,6 +930,7 @@ function AssetsPageContent() {
       : activeItem?.source === 'asset' && activeItem.assetId && activeItem.previewUrl
         ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${activeItem.assetId}`)}&variant=preview`
         : activeItem?.previewUrl;
+  const activeContentKey = activeItem ? assetContentKey(activeItem.id) : null;
   const activeDetailMediaSrc = activePreviewSrc || activeItem?.thumbnailUrl || null;
   const activePreviewAspectRatio = activeItem?.kind === 'audio'
     ? '16 / 6'
@@ -1196,6 +1222,7 @@ function AssetsPageContent() {
     });
     params.set('include_uploads', showUploadedAssets ? 'true' : 'false');
     params.set('include_generated', 'true');
+    params.set('collapse_multiview', '1');
     if (!isEnhanceView && sourceFilter === 'multiview-output') params.set('source', sourceFilter);
     if (directorySnapshot.current.scope !== pageScope || directorySnapshot.current.reload !== reloadToken) {
       directorySnapshot.current = { scope: pageScope, reload: reloadToken, version: '' };
@@ -1347,7 +1374,7 @@ function AssetsPageContent() {
   };
 
   const selectRange = (id: AssetLibraryItemId) => {
-    const flatIds = items.map((item) => item.id);
+    const flatIds = items.filter(item => !item.multiviewGroup).map((item) => item.id);
     const currentIndex = flatIds.indexOf(id);
     const anchorIndex = anchorId ? flatIds.indexOf(anchorId) : -1;
     if (currentIndex < 0 || anchorIndex < 0) {
@@ -1907,7 +1934,7 @@ function AssetsPageContent() {
       <div><dt>完成时间</dt><dd>{activeItem.completedAt ? <RelativeTime value={activeItem.completedAt} /> : '-'}</dd></div>
     </dl>
     <div className="asset-detail-actions">
-      {withReaction && (activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeItem.id} />}
+      {withReaction && activeContentKey && (activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeContentKey} />}
       {activeItem.taskId && <Link href={taskDetailHref(activeItem.taskId, currentAssetReturnTo())}>打开任务详情</Link>}
       {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
         <button type="button" onClick={() => void prepareStableDownload(activeItem.taskId as string)} disabled={preparingDownloadTaskId === activeItem.taskId}>
@@ -1967,6 +1994,7 @@ function AssetsPageContent() {
         });
         pageParams.set('include_uploads', showUploadedAssets ? 'true' : 'false');
         pageParams.set('include_generated', 'true');
+        pageParams.set('collapse_multiview', '1');
         if (!isEnhanceView && sourceFilter === 'multiview-output') pageParams.set('source', sourceFilter);
         if (directorySnapshot.current.scope === pageScope && directorySnapshot.current.version) pageParams.set('directory_version', directorySnapshot.current.version);
         if (enhanceFilter !== 'none') pageParams.set('enhance', enhanceFilter);
@@ -2423,6 +2451,8 @@ function AssetsPageContent() {
             </h2>
             <div className={`asset-library-grid asset-library-grid-${cardSize}`}>
               {group.items.map((item) => {
+                if (item.multiviewGroup) return <MultiviewAssetGroupCard key={item.id} item={item} cardSize={cardSize} onOpenAsset={selectAssetItem} />;
+                const contentKey = assetContentKey(item.id);
                 const selected = selectedSet.has(item.id);
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
@@ -2506,7 +2536,7 @@ function AssetsPageContent() {
                         </span>
                       )}
                       {duration && <span className="asset-card-duration">{duration}</span>}
-                      {(item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={item.id} overlay />}
+                      {contentKey && (item.status === 'succeeded' || item.source !== 'video_task') && <ContentReactions contentKey={contentKey} overlay />}
                     </span>
                     <div className="asset-card-meta">
                       {item.generationOrigin && <small>{item.generationOrigin.label}{item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}</small>}
@@ -2652,12 +2682,12 @@ function AssetsPageContent() {
                 超分
               </span>
             )}
-            {activeItem.kind === 'video' && activePreviewSrc ? (
+            {activeItem.kind === 'video' && activePreviewSrc && activeContentKey ? (
               <>
                 <AssetPreviewMedia
                   key={`${user?.id || 'anonymous'}:${activeItem.id}:${activePreviewSrc}`}
                   kind="video"
-                  contentKey={activeItem.id}
+                  contentKey={activeContentKey}
                   src={activePreviewSrc}
                   poster={activeItem.thumbnailUrl || undefined}
                   title={activeItem.title}
@@ -2674,13 +2704,13 @@ function AssetsPageContent() {
                   <Maximize2 size={16} aria-hidden="true" />
                 </button>
               </>
-            ) : activeItem.kind === 'audio' && activePreviewSrc ? (
+            ) : activeItem.kind === 'audio' && activePreviewSrc && activeContentKey ? (
               <div className="asset-detail-audio-player">
                 <span>音频素材</span>
                 <AssetPreviewMedia
                   key={`${user?.id || 'anonymous'}:${activeItem.id}:${activePreviewSrc}`}
                   kind="audio"
-                  contentKey={activeItem.id}
+                  contentKey={activeContentKey}
                   src={activePreviewSrc}
                   title={activeItem.title}
                   onClaim={claimDetailPlayback}
@@ -2726,7 +2756,7 @@ function AssetsPageContent() {
         poster={activeItem.source === 'reference_image' && activeItem.referenceImageId
           ? `/api/reference-images/${encodeURIComponent(activeItem.referenceImageId)}/content?variant=thumbnail`
           : activeItem.thumbnailUrl || undefined}
-        contentKey={activeItem.id}
+        contentKey={activeContentKey || undefined}
         previewKey={activeItem.id}
         details={activeItemDetails(false)}
         notice={previewNavigationMessage ? <div role="status">{previewNavigationMessage}{previewNavigationRetryable && <button type="button" onClick={() => void moveActiveItem(1)}>继续查找</button>}</div> : undefined}

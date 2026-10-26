@@ -7,6 +7,7 @@ import { readPricingFixtureInputs } from './pricing-fixture-input.mjs';
 import { MULTIVIEW_SETTINGS_FIXTURE_SOURCES } from './multiview-settings-fixture-inputs.mjs';
 import { HD_CHAIN_CHECKS, HD_CHAIN_CHILDREN, HD_CHAIN_FIXTURE_SOURCES } from './hd-chain-fixture-inputs.mjs';
 import { MULTIVIEW_PRIVATE_BATCH_SOURCES } from './multiview-private-batch-engineering.mjs';
+import { MULTIVIEW_FLOW_SOURCES } from './multiview-flow-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -193,6 +194,8 @@ const publicUsageFixtures = [
     ] },
   { file: 'scripts/multiview-private-batch-engineering.mjs', schema: 'multiview-private-batch-engineering.v1',
     timeoutMs: 540000, databaseFlag: 'applicationDatabaseOpened', sources: MULTIVIEW_PRIVATE_BATCH_SOURCES },
+  { file: 'scripts/multiview-flow-engineering.ts', schema: 'multiview-flow-engineering.v1',
+    timeoutMs: 180000, databaseFlag: 'applicationDatabaseOpened', sources: MULTIVIEW_FLOW_SOURCES },
   { file: 'scripts/role-runtime-engineering.mjs', schema: 'role-runtime-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: ['scripts/role-runtime-engineering.mjs', 'scripts/canvas-role-coordinator.ts'] },
   { file: 'scripts/projects-design-alignment-engineering.mjs', schema: 'projects-design-alignment-engineering.v1',

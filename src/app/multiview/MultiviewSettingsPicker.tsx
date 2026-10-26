@@ -348,7 +348,7 @@ function MultiviewSettingsPickerContent(props: Props) {
       await live.current.onApply(result);
       if (!current(scope)) return;
       setSelected(id); setSelectedRecord(applied); setItems(previous => previous.map(item => item.id === id ? applied : item));
-      setNotice(editing ? '已载入原设置，调整后点击保存设置覆盖。' : '');
+      setNotice(editing ? '已载入原预设。' : '');
     } catch (cause) { if (current(scope)) setNotice(cause instanceof Error ? cause.message : '设置未应用，原输入保留。'); }
     finally { if (current(scope)) { lock.current = false; setBusy(false); } }
   }
@@ -380,7 +380,7 @@ function MultiviewSettingsPickerContent(props: Props) {
         </ul>}
       </div>
       <div className={styles.settingsPickerActions}>
-        <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value || Boolean(selected && !owned)} title={selected && !owned ? '共享设置由创建者维护，可另存为自己的设置' : undefined} onClick={event => void save(false, event.currentTarget)}><Save size={14} />保存设置</button>
+        <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value || Boolean(selected && !owned)} title={selected && !owned ? '共享设置由创建者维护，可另存为自己的设置' : undefined} onClick={event => void save(false, event.currentTarget)}><Save size={14} />存为预设</button>
         <ProductActionMenu label={`管理${label}`} disabled={busy} actions={[
           { id: 'edit', label: '编辑所选设置', icon: <Pencil size={14} />, disabled: props.disabled || !owned || Boolean(pending), onSelect: () => void apply(selected, true) },
           { id: 'overwrite', label: '用当前设置覆盖', icon: <Save size={14} />, disabled: props.disabled || !owned || Boolean(pending) || storageBlocked || !props.value, onSelect: anchor => void save(false, anchor) },

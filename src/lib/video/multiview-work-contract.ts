@@ -1,8 +1,11 @@
 import { candidateFrames, DEFAULT_MULTIVIEW_LAYOUT, validMultiviewLayout,
   type MultiviewInfo, type MultiviewLayout, type MultiviewSlot } from './multiview-contract';
 
+export const MULTIVIEW_SAVE_PROTOCOL = 'explicit-v2';
+export type MultiviewSourceAccess = { kind: 'work'; id: string } | { kind: 'share'; id: string };
+
 export type MultiviewWorkRecipe = {
-  schema: 1; sourceVersion: string; slots: MultiviewSlot[]; reserve: MultiviewSlot[];
+  schema: 1 | 2; sourceVersion: string; slots: MultiviewSlot[]; reserve: MultiviewSlot[];
   restoreOrder: string[]; layout: MultiviewLayout;
 };
 export type MultiviewWorkFileRole = 'thumbnail' | 'collage' | 'zip' | `frame-${string}`;
@@ -15,6 +18,7 @@ export type MultiviewWorkManifest = {
 export type MultiviewWorkStatus = 'waiting_source' | 'queued' | 'rendering' | 'ready' | 'failed' | 'source_changed';
 export type MultiviewWorkDto = {
   id: string; title: string; sourceTaskId: string; sourceVersion: string | null; projectId: string | null;
+  sourceId?: string | null; saveState?: 'legacy' | 'intent' | 'saved';
   projectTitle: string | null; videoCardId: string | null; parentWorkId: string | null;
   revision: number; draftRevision: number; recipe: MultiviewWorkRecipe | null; info: MultiviewInfo | null;
   status: MultiviewWorkStatus; removed: boolean; sourceState: 'current' | 'changed' | 'unavailable';
@@ -38,8 +42,9 @@ export function parseMultiviewWorkRecipe(value: unknown, info: MultiviewInfo): M
   const data = value as MultiviewWorkRecipe;
   const valid = (slots: MultiviewSlot[]) => Array.isArray(slots) && slots.length <= 16 && slots.every(slot => slot
     && /^[a-zA-Z0-9-]{1,80}$/.test(slot.id) && Number.isInteger(slot.frame) && slot.frame >= 0 && slot.frame < info.timestamps.length
-    && typeof slot.name === 'string' && slot.name.length <= 40 && typeof slot.manual === 'boolean');
-  if (data.schema !== 1 || data.sourceVersion !== info.sourceVersion || !/^[a-f0-9]{64}$/.test(data.sourceVersion)
+    && typeof slot.name === 'string' && slot.name.length <= 40 && typeof slot.manual === 'boolean'
+    && (slot.locked === undefined || typeof slot.locked === 'boolean'));
+  if (![1, 2].includes(data.schema) || data.sourceVersion !== info.sourceVersion || !/^[a-f0-9]{64}$/.test(data.sourceVersion)
     || ![3, 4, 8].includes(data.slots?.length) || !valid(data.slots) || !valid(data.reserve)
     || !validMultiviewLayout(data.layout)) return null;
   const all = [...data.slots, ...data.reserve];
@@ -47,8 +52,9 @@ export function parseMultiviewWorkRecipe(value: unknown, info: MultiviewInfo): M
   const order = data.restoreOrder ?? [];
   if (!Array.isArray(order) || order.length > 32 || order.some(id => typeof id !== 'string' || !all.some(slot => slot.id === id))
     || new Set(order).size !== order.length) return null;
-  const clean = (slot: MultiviewSlot): MultiviewSlot => ({ id: slot.id, frame: slot.frame, name: slot.name, manual: slot.manual });
-  return { schema: 1, sourceVersion: data.sourceVersion, slots: data.slots.map(clean), reserve: data.reserve.map(clean),
+  const clean = (slot: MultiviewSlot): MultiviewSlot => ({ id: slot.id, frame: slot.frame, name: slot.name, manual: slot.manual,
+    ...(data.schema === 2 || slot.locked !== undefined ? { locked: slot.locked === true } : {}) });
+  return { schema: data.schema, sourceVersion: data.sourceVersion, slots: data.slots.map(clean), reserve: data.reserve.map(clean),
     restoreOrder: [...order], layout: { columns: data.layout.columns, margin: data.layout.margin, gap: data.layout.gap, background: data.layout.background } };
 }
 export function defaultMultiviewWorkRecipe(info: MultiviewInfo): MultiviewWorkRecipe {
@@ -64,8 +70,8 @@ export function multiviewWorkRecipesEqual(left: MultiviewWorkRecipe, right: Mult
 export function multiviewWorkContentSignature(recipe: MultiviewWorkRecipe | null, title = '') {
   const content = (recipe: MultiviewWorkRecipe) => {
     const all = [...recipe.slots, ...recipe.reserve];
-    return { sourceVersion: recipe.sourceVersion, slots: recipe.slots.map(({ frame, name, manual }) => ({ frame, name, manual })),
-      reserve: recipe.reserve.map(({ frame, name, manual }) => ({ frame, name, manual })),
+    return { sourceVersion: recipe.sourceVersion, slots: recipe.slots.map(({ frame, name, manual, locked }) => ({ frame, name, manual, locked: locked === true })),
+      reserve: recipe.reserve.map(({ frame, name, manual, locked }) => ({ frame, name, manual, locked: locked === true })),
       restoreOrder: recipe.restoreOrder.map(id => all.findIndex(slot => slot.id === id)), layout: recipe.layout };
   };
   return JSON.stringify([recipe ? content(recipe) : null, title]);

@@ -1,0 +1,17 @@
+export const MULTIVIEW_FLOW_SOURCES = Object.freeze([
+  'scripts/multiview-flow-engineering.ts', 'scripts/multiview-flow-fixture-inputs.mjs',
+  'prisma/schema.prisma', 'prisma/migrations/20261026203000_multiview_flow/migration.sql',
+  'scripts/check-multiview-works-schema.py', 'scripts/backup-multiview-works.py',
+  'src/lib/video/multiview-work-contract.ts', 'src/lib/video/multiview-contract.ts',
+  'src/lib/video/multiview-works.ts', 'src/lib/video/multiview-work-render.ts',
+  'src/lib/video/multiview-source.server.ts', 'src/lib/video/multiview-source-cleanup.server.ts',
+  'src/lib/video/multiview-share.server.ts', 'src/lib/video/multiview-source-api.ts',
+  'src/lib/video/multiview-output-groups.server.ts', 'src/lib/video/multiview-output-assets.server.ts',
+  'src/lib/video/multiview-records.server.ts', 'src/lib/video/multiview-works-runtime.ts',
+  'src/lib/video/multiview.ts', 'src/lib/video/multiview-settings.server.ts',
+  'src/app/multiview/multiview-frame-settings-client.ts', 'src/app/multiview/multiview-work-client.ts',
+  'src/app/multiview/useMultiviewWork.ts', 'src/app/multiview/useMultiviewShareOperation.ts',
+  'src/app/multiview/page.tsx', 'src/app/multiview/MultiviewRecords.tsx',
+  'src/app/multiview/MultiviewShareDialog.tsx', 'src/app/api/assets/library/route.ts',
+  'src/app/assets/page.tsx', 'src/lib/notifications/display.ts',
+]);

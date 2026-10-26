@@ -63,7 +63,7 @@ async function main() {
       const headers = new Headers({ Cookie: `session=${tokens[actor]}`, 'x-app-session-user': actor, Host: 'mv17-isolated.invalid',
         ...(body === undefined ? {} : { Origin: 'http://mv17-isolated.invalid', 'Content-Type': 'application/json' }) });
       const request = new NextRequest(`http://mv17-isolated.invalid/api/video/multiview/works${route}`, {
-        method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        method, headers, ...(body === undefined ? {} : { body: JSON.stringify({ ...(body as Record<string, unknown>), protocol: contract.MULTIVIEW_SAVE_PROTOCOL }) }),
       });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       const response = await requestAsyncStorage.run(store, () => route.startsWith('/mutations/')
@@ -73,7 +73,7 @@ async function main() {
           : method === 'GET' ? collection.GET(request) : collection.POST(request));
       return { status: response.status, body: await response.json() };
     };
-    const initial = contract.defaultMultiviewWorkRecipe(info);
+    const initial = contract.parseMultiviewWorkRecipe({ ...contract.defaultMultiviewWorkRecipe(info), schema: 2 }, info)!;
     const created = await invoke(user.id, 'POST', '', { mutationId: randomUUID(), taskId: info.taskId, sourceVersion: version, recipe: initial });
     assert.equal(created.status, 200);
     const baseId: string = created.body.work.id;

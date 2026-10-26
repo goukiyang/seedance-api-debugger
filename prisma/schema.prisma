@@ -556,6 +556,9 @@ model MultiviewWork {
   id                  String   @id @default(cuid())
   owner_id            String
   source_task_id      String
+  source_id           String?
+  save_state          String   @default("legacy")
+  write_epoch         Int      @default(0)
   project_id          String?
   video_card_id       String?
   base_key            String?
@@ -588,6 +591,73 @@ model MultiviewWork {
   @@unique([owner_id, branch_key])
   @@index([owner_id, removed_at, updated_at, id])
   @@index([status, next_attempt_at, lease_until])
+  @@index([owner_id, source_id])
+}
+
+model MultiviewSource {
+  id             String   @id
+  owner_id       String
+  origin_task_id String
+  source_version String
+  info_json      String
+  file_path      String
+  file_sha256    String
+  file_bytes     Int
+  can_reshare     Boolean  @default(false)
+  created_at     DateTime @default(now())
+
+  @@index([owner_id, created_at])
+}
+
+model MultiviewShare {
+  id                  String   @id
+  owner_id            String
+  work_id             String
+  revision            Int
+  source_task_id      String
+  source_id           String?
+  source_version      String
+  title               String
+  recipe_json         String
+  info_json           String
+  manifest_json       String
+  revoked_at          DateTime?
+  created_at          DateTime @default(now())
+
+  recipients MultiviewShareRecipient[]
+  @@index([owner_id, work_id, revision])
+}
+
+model MultiviewShareRecipient {
+  id             String   @id
+  share_id       String
+  user_id        String
+  generation     String
+  revoked_at     DateTime?
+  created_at     DateTime @default(now())
+  share          MultiviewShare @relation(fields: [share_id], references: [id], onDelete: Restrict)
+
+  @@unique([share_id, user_id])
+  @@index([user_id, revoked_at])
+}
+
+model MultiviewShareMutation {
+  id             String   @id
+  actor_id       String
+  mutation_id    String
+  request_hash   String
+  request_json   String
+  action         String
+  state          String
+  receipt_json   String?
+  staging_path   String?
+  attempts       Int      @default(0)
+  lease_until    DateTime?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  @@unique([actor_id, mutation_id])
+  @@index([state, updated_at])
 }
 
 model MultiviewWorkMutation {

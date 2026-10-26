@@ -6,10 +6,10 @@ export type MultiviewInfo = {
   duration: number;
   timestamps: number[];
 };
-export type MultiviewSlot = { id: string; frame: number; name: string; manual: boolean };
+export type MultiviewSlot = { id: string; frame: number; name: string; manual: boolean; locked?: boolean };
 export type MultiviewLayout = { columns: number; margin: number; gap: number; background: string };
 export type MultiviewDraft = {
-  schema: 1;
+  schema: 1 | 2;
   sourceVersion: string;
   slots: MultiviewSlot[];
   reserve: MultiviewSlot[];
@@ -41,11 +41,14 @@ export function parseMultiviewDraft(raw: string | null, info: MultiviewInfo): Mu
     const data = JSON.parse(raw) as MultiviewDraft;
     const valid = (slots: MultiviewSlot[]) => Array.isArray(slots) && slots.length <= 16 && slots.every(slot => slot
       && /^[a-z0-9-]{1,80}$/i.test(slot.id) && Number.isInteger(slot.frame) && slot.frame >= 0 && slot.frame < info.timestamps.length
-      && typeof slot.name === 'string' && slot.name.length <= 40 && typeof slot.manual === 'boolean');
-    if (data.schema !== 1 || data.sourceVersion !== info.sourceVersion || !valid(data.slots) || !valid(data.reserve)
+      && typeof slot.name === 'string' && slot.name.length <= 40 && typeof slot.manual === 'boolean'
+      && (slot.locked === undefined || typeof slot.locked === 'boolean'));
+    if (![1, 2].includes(data.schema) || data.sourceVersion !== info.sourceVersion || !valid(data.slots) || !valid(data.reserve)
       || ![3, 4, 8].includes(data.slots.length) || !validMultiviewLayout(data.layout)) return null;
     if (new Set([...data.slots, ...data.reserve].map(slot => slot.id)).size !== data.slots.length + data.reserve.length) return null;
-    return { ...data, editing: data.slots.some(slot => slot.id === data.editing) ? data.editing : null,
+    return { ...data, slots: data.slots.map(slot => ({ ...slot, locked: slot.locked === true })),
+      reserve: data.reserve.map(slot => ({ ...slot, locked: slot.locked === true })),
+      editing: data.slots.some(slot => slot.id === data.editing) ? data.editing : null,
       restoreOrder: Array.isArray(data.restoreOrder) && data.restoreOrder.length <= 24 && data.restoreOrder.every(id => typeof id === 'string' && [...data.slots, ...data.reserve].some(slot => slot.id === id)) ? Array.from(new Set(data.restoreOrder)) : undefined,
       editorFrame: Number.isInteger(data.editorFrame) && data.editorFrame! >= 0 && data.editorFrame! < info.timestamps.length ? data.editorFrame : undefined };
   } catch { return null; }

@@ -78,6 +78,7 @@ export function notificationStatusLabel(status: string) {
 
 export function notificationTypeLabel(type: string) {
   const labels: Record<string, string> = {
+    multiview_share: '3D多视图分享',
     approval_project_create_approved: '立项审批',
     approval_budget_increase_approved: '预算审批',
     approval_ratio_change_approved: '规格审批',
@@ -99,6 +100,10 @@ export function notificationTone(notification: Pick<AppNotification, 'status' | 
 }
 
 export function notificationHref(notification: AppNotification) {
+  if (notification.type === 'multiview_share') {
+    const value = parseNotificationMetadata(notification.metadata_json).shareId;
+    if (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(value)) return `/multiview?shareId=${encodeURIComponent(value)}`;
+  }
   if (notification.videoCard?.id && notification.videoCard.project_id) {
     return showVideoCardManagementUi
       ? `/projects/${notification.videoCard.project_id}/video-cards/${notification.videoCard.id}`
@@ -118,6 +123,7 @@ export function notificationHref(notification: AppNotification) {
 }
 
 export function notificationActionLabel(notification: AppNotification) {
+  if (notification.type === 'multiview_share') return '打开方案';
   if (notification.videoCard?.id) return showVideoCardManagementUi ? '打开视频卡' : '打开项目';
   if (notification.project?.id) return '打开项目';
   if (notification.approval?.id) return '查看审批';

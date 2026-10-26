@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
-import { assertMultiviewWorkSource, multiviewWorkActor, readMultiviewWorkFile } from './multiview-works';
+import { assertMultiviewWorkReference, multiviewWorkActor, readMultiviewWorkFile } from './multiview-works';
 import { parseMultiviewWorkManifest } from './multiview-work-contract';
 
 const PREFIX = 'multiview_output_registration_v1:';
@@ -106,13 +106,13 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
   const since = await activation();
   if (!since) return false;
   const work = await prisma.multiviewWork.findUnique({ where: { id: workId } });
-  if (!work || work.removed_at || work.ready_revision === null || !work.ready_recipe_json || !work.ready_manifest_json) return false;
+  if (!work || work.save_state === 'intent' || work.removed_at || work.ready_revision === null || !work.ready_recipe_json || !work.ready_manifest_json) return false;
   const key = receiptKey(work.id, work.ready_revision);
   if (await prisma.platformSetting.findUnique({ where: { key }, select: { id: true } })) return false;
   const accepted = await explicitSave(work.id, work.owner_id, work.ready_revision, since);
   if (!accepted) return false; // An automatic waiting_source intent is not an explicit save.
   const user = await multiviewWorkActor(work.owner_id);
-  await assertMultiviewWorkSource(user, work.source_task_id);
+  await assertMultiviewWorkReference(user, work);
   const manifest = parseMultiviewWorkManifest(work.ready_manifest_json, JSON.parse(work.ready_recipe_json), work.ready_revision, sha(work.ready_recipe_json));
   if (!manifest) throw unavailable();
   const root = await uploadsRoot(), prepared: Prepared[] = [];
@@ -153,7 +153,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     const fresh = await db.multiviewWork.findUnique({ where: { id: work.id } });
     if (!fresh || fresh.removed_at || fresh.owner_id !== user.id || fresh.ready_revision !== work.ready_revision
       || fresh.ready_manifest_json !== work.ready_manifest_json || fresh.ready_recipe_json !== work.ready_recipe_json) return false;
-    await assertMultiviewWorkSource(user, work.source_task_id, db);
+    await assertMultiviewWorkReference(user, work, db);
     const mutation = await explicitSave(work.id, user.id, work.ready_revision!, since, db);
     if (!mutation || mutation.id !== accepted.id || mutation.request_hash !== accepted.request_hash) throw unavailable();
     const outputs = [];
@@ -185,6 +185,14 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     await db.platformSetting.create({ data: { key, updated_by: user.id, value_json: JSON.stringify({ schema: 1,
       state: 'registered', ownerId: user.id, workId: work.id, readyRevision: work.ready_revision,
       mutationId: mutation.mutation_id, mutationRowId: mutation.id, mutationRequestHash: mutation.request_hash, outputs }) } });
+    // Switch the group only with an entirely registered revision. A partial
+    // revision never replaces the preceding complete group or resurrects assets.
+    if (outputs.length === manifest.frameCount + 1 && outputs.every(output => output.state === 'registered')) {
+      const groupKey = `multiview_output_group_v1:${work.id}`;
+      const group = { schema: 1, workId: work.id, ownerId: user.id, revision: work.ready_revision, receiptKey: key };
+      await db.platformSetting.upsert({ where: { key: groupKey }, create: { key: groupKey, updated_by: user.id, value_json: JSON.stringify(group) },
+        update: { updated_by: user.id, value_json: JSON.stringify(group) } });
+    }
     await db.multiviewWork.updateMany({ where: { id: work.id, status: 'ready', ready_revision: work.ready_revision,
       last_error: '成品已经就绪，可复制和下载；素材入口暂未同步，后台会核对这次原保存记录后继续同步。' }, data: { last_error: null } });
     return true;
@@ -198,7 +206,7 @@ export async function registerNextSavedMultiviewOutputs(admit: () => Promise<unk
   const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT w.id FROM MultiviewWork w
     LEFT JOIN PlatformSetting p ON p.key = ${PREFIX + 'receipt:'} || w.id || ':' || w.ready_revision
-    WHERE w.status = 'ready' AND w.removed_at IS NULL AND w.ready_revision IS NOT NULL
+    WHERE w.status = 'ready' AND w.save_state != 'intent' AND w.removed_at IS NULL AND w.ready_revision IS NOT NULL
       AND w.next_attempt_at <= ${new Date()} AND p.id IS NULL
       AND EXISTS (SELECT 1 FROM MultiviewWorkMutation m WHERE m.work_id = w.id AND m.actor_id = w.owner_id
         AND m.action IN ('create','save','branch') AND m.created_at >= ${since}

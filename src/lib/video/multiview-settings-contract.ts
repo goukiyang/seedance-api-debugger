@@ -23,7 +23,7 @@ export type MultiviewSettingsSummary = {
 export type MultiviewSettingsDto = MultiviewSettingsSummary & { contentHash: string } & (
   { kind: 'generation'; value: MultiviewGenerationSettingsValue } | { kind: 'frame'; value: MultiviewFrameSettingsValue }
 );
-export type MultiviewSettingsSource = { taskId: string; sourceVersion: string };
+export type MultiviewSettingsSource = { taskId: string; sourceVersion: string; access?: { kind: 'work' | 'share'; id: string } };
 export type MultiviewSettingsReceipt = { state: 'committed'; mutationId: string; action: 'create' | 'save' | 'rename' | 'delete'; settings: MultiviewSettingsDto };
 export type MultiviewSettingsApplyResult = { settings: MultiviewSettingsDto; preset?: MultiviewRotationPresetPublicDto; slots?: MultiviewFrameSettingsSlot[] };
 

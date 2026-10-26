@@ -32,6 +32,7 @@ from urllib.parse import quote, unquote, urlsplit
 PRODUCTION_BASE = Path('/data/video-api-debugger')
 PRODUCTION_WORKS = PRODUCTION_BASE / 'var-lib/storage/multiview-works'
 PRODUCTION_RECIPES = PRODUCTION_BASE / 'var-lib/storage/multiview-recipes'
+PRODUCTION_SOURCES = PRODUCTION_BASE / 'var-lib/storage/multiview-sources'
 PRODUCTION_UPLOADS = PRODUCTION_BASE / 'var-lib/uploads'
 PRODUCTION_BACKUPS = PRODUCTION_BASE / 'backups'
 MINIMUM_FREE = 5 * 1024 ** 3
@@ -261,16 +262,27 @@ def load_ready_works(snapshot):
                                   'ready_manifest_json, removed_at FROM "MultiviewWork" '
                                   'WHERE ready_revision IS NOT NULL OR ready_manifest_json IS NOT NULL OR ready_recipe_json IS NOT NULL '
                                   'ORDER BY owner_id, id').fetchall()
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='MultiviewShare'").fetchone():
+            rows += connection.execute('SELECT work_id AS id, owner_id, source_version, revision AS draft_revision, '
+                                       'revision AS ready_revision, recipe_json AS ready_recipe_json, manifest_json AS ready_manifest_json, '
+                                       'NULL AS removed_at FROM MultiviewShare ORDER BY owner_id, work_id, revision').fetchall()
+        require(len(rows) <= MAXIMUM_READY_WORKS, 'ready_work_inventory_budget_exceeded')
+        seen = {}
         works = []
         for row in rows:
             check_time()
+            identity = (row['owner_id'], row['id'], row['ready_revision'])
+            if identity in seen:
+                require(seen[identity] == row['ready_manifest_json'], 'snapshot_revision_manifest_conflict')
+                continue
+            seen[identity] = row['ready_manifest_json']
             require(isinstance(row['id'], str) and IDENTIFIER.fullmatch(row['id']) and isinstance(row['owner_id'], str)
                     and IDENTIFIER.fullmatch(row['owner_id']) and integer(row['ready_revision']), 'ready_work_identity_invalid')
             require(isinstance(row['ready_recipe_json'], str) and len(row['ready_recipe_json'].encode('utf-8')) <= 100000
                     and isinstance(row['ready_manifest_json'], str) and len(row['ready_manifest_json'].encode('utf-8')) <= 100000, 'ready_work_metadata_missing')
             recipe = json.loads(row['ready_recipe_json'])
             manifest = json.loads(row['ready_manifest_json'])
-            require(isinstance(recipe, dict) and isinstance(manifest, dict) and recipe.get('schema') == 1 and manifest.get('schema') == 1, 'ready_work_schema_invalid')
+            require(isinstance(recipe, dict) and isinstance(manifest, dict) and recipe.get('schema') in (1, 2) and manifest.get('schema') == 1, 'ready_work_schema_invalid')
             slots = recipe.get('slots')
             require(isinstance(slots, list) and len(slots) in (3, 4, 8)
                     and all(isinstance(slot, dict) and isinstance(slot.get('id'), str) and SLOT_ID.fullmatch(slot['id']) for slot in slots), 'ready_work_slots_invalid')
@@ -302,6 +314,27 @@ def load_ready_works(snapshot):
                           'draftRevision': row['draft_revision'], 'removed': row['removed_at'] is not None,
                           'manifest': manifest})
         return total_works, works
+    finally:
+        connection.close()
+
+
+def load_source_inventory(snapshot):
+    connection = readonly_database(snapshot, immutable=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='MultiviewSource'").fetchone():
+            return []
+        rows = connection.execute('SELECT id, owner_id, file_path, file_bytes, file_sha256 FROM MultiviewSource ORDER BY id LIMIT ?',
+                                  (MAXIMUM_PRIVATE_RECORDS + 1,)).fetchall()
+        require(len(rows) <= MAXIMUM_PRIVATE_RECORDS, 'source_inventory_budget_exceeded')
+        result = []
+        for row in rows:
+            require(IDENTIFIER.fullmatch(row['id']) and IDENTIFIER.fullmatch(row['owner_id'])
+                    and re.fullmatch(r'[a-f0-9]{64}\.mp4', row['file_path']) and SHA256.fullmatch(row['file_sha256'])
+                    and integer(row['file_bytes']) and row['file_bytes'] <= 128 * 1024 ** 2, 'source_inventory_invalid')
+            result.append({'id': row['id'], 'ownerId': row['owner_id'], 'file': row['file_path'],
+                           'bytes': row['file_bytes'], 'sha256': row['file_sha256']})
+        return result
     finally:
         connection.close()
 
@@ -641,7 +674,7 @@ def relative_directory(root_fd, components):
 
 def copy_private_media(entries, source_roots, staging_fd, parent_fd):
     file_count, total_bytes = 0, 0
-    for namespace in ('recipes', 'outputs'):
+    for namespace in ('recipes', 'outputs', 'sources'):
         selected = [value for value in entries.values() if value['namespace'] == namespace]
         if not selected:
             continue
@@ -656,7 +689,8 @@ def copy_private_media(entries, source_roots, staging_fd, parent_fd):
                     # Copy under a content name, not an arbitrary source basename.
                     entry = value['entry']
                     copy_verified(source_fd, target_fd, {**entry, 'sourceFile': value['sourceParts'][-1]}, parent_fd, namespace == 'recipes')
-                    verify_image(target_fd, entry)
+                    if namespace != 'sources':
+                        verify_image(target_fd, entry)
                     # Content is stored once, but every active receipt alias must actually exist.
                     for alternative in value['sourcePaths'][1:]:
                         alternative_fd = relative_directory(root_fd, alternative[:-1])
@@ -739,7 +773,7 @@ def verify_backup(directory):
     try:
         require(stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'backup_directory_not_private')
         record = read_private_json(root_fd, 'mapping.json', 256 * 1024 * 1024)
-        require(isinstance(record, dict) and record.get('format') in ('sd2.multiview-works-backup.v1', 'sd2.multiview-works-backup.v2')
+        require(isinstance(record, dict) and record.get('format') in ('sd2.multiview-works-backup.v1', 'sd2.multiview-works-backup.v2', 'sd2.multiview-works-backup.v3')
                 and isinstance(record.get('database'), dict) and record['database'].get('file') == 'database.sqlite3', 'backup_mapping_format_invalid')
         require(digest_file(root_fd, 'database.sqlite3') == {key: record['database'].get(key) for key in ('bytes', 'sha256')},
                 'backup_database_hash_mismatch')
@@ -750,6 +784,8 @@ def verify_backup(directory):
             connection.close()
         total_works, works = load_ready_works(directory / 'database.sqlite3')
         recipes, registrations = load_private_inventory(directory / 'database.sqlite3')
+        sources = load_source_inventory(directory / 'database.sqlite3')
+        require(record.get('sources', []) == sources, 'backup_source_inventory_differs_from_snapshot')
         require(record.get('recipes', []) == recipes and record.get('outputRegistrations', []) == registrations,
                 'backup_private_inventory_differs_from_snapshot')
         stored_works = record.get('works')
@@ -775,13 +811,16 @@ def verify_backup(directory):
             finally:
                 os.close(target_fd)
         entries = private_media_entries(recipes, registrations)
+        for source in sources:
+            entries['sources/' + source['file']] = {'entry': source, 'namespace': 'sources'}
         require(sum(item['entry']['bytes'] for item in entries.values()) + total_bytes <= MAXIMUM_MEDIA_BYTES, 'backup_media_budget_exceeded')
         for value in entries.values():
             target_fd = relative_directory(root_fd, [value['namespace']])
             try:
                 entry = value['entry']
                 require(digest_file(target_fd, entry['file']) == {key: entry[key] for key in ('bytes', 'sha256')}, 'backup_private_media_hash_mismatch')
-                verify_image(target_fd, entry)
+                if value['namespace'] != 'sources':
+                    verify_image(target_fd, entry)
                 file_count += 1
                 total_bytes += entry['bytes']
             finally:
@@ -800,6 +839,7 @@ def main():
     parser.add_argument('--source-root')
     parser.add_argument('--destination')
     parser.add_argument('--recipe-root', default=str(PRODUCTION_RECIPES))
+    parser.add_argument('--private-source-root', default=str(PRODUCTION_SOURCES))
     parser.add_argument('--uploads-root', default=str(PRODUCTION_UPLOADS))
     parser.add_argument('--verify-backup', help='Read-only verification of an isolated backup copy; requires --non-production.')
     parser.add_argument('--non-production', action='store_true', help='Explicit isolated paths; still requires Linux atomic publication.')
@@ -817,11 +857,12 @@ def main():
         require(all((arguments.database, arguments.source_root, arguments.destination)), 'database_source_and_destination_required')
         database, source_root, destination = map(absolute_path, (arguments.database, arguments.source_root, arguments.destination))
         recipe_root, uploads_root = map(absolute_path, (arguments.recipe_root, arguments.uploads_root))
+        private_source_root = absolute_path(arguments.private_source_root)
         require(BACKUP_NAME.fullmatch(destination.name), 'backup_destination_name_invalid')
         require(database != destination and source_root != destination and source_root not in destination.parents
                 and destination not in source_root.parents and destination not in database.parents, 'backup_path_overlap_forbidden')
         require(all(root != destination and root not in destination.parents and destination not in root.parents
-                    and root != database and root not in database.parents for root in (recipe_root, uploads_root)), 'private_media_backup_path_overlap_forbidden')
+                    and root != database and root not in database.parents for root in (recipe_root, uploads_root, private_source_root)), 'private_media_backup_path_overlap_forbidden')
         publish = atomic_publisher()
         data_device = None
         if not arguments.non_production:
@@ -830,7 +871,7 @@ def main():
             require(os.fstat(data_fd).st_dev != os.stat('/').st_dev, 'real_data_mount_required')
             data_device = os.fstat(data_fd).st_dev
             require(source_root == PRODUCTION_WORKS and destination.parent == PRODUCTION_BACKUPS
-                    and recipe_root == PRODUCTION_RECIPES and uploads_root == PRODUCTION_UPLOADS
+                    and recipe_root == PRODUCTION_RECIPES and uploads_root == PRODUCTION_UPLOADS and private_source_root == PRODUCTION_SOURCES
                     and PRODUCTION_BASE / 'var-lib' in database.parents, 'production_backup_paths_invalid')
         parent_fd = open_directory(destination.parent)
         open_descriptors.append(parent_fd)
@@ -861,7 +902,13 @@ def main():
         total_works, works = load_ready_works(staging / 'database.sqlite3')
         recipes, registrations = load_private_inventory(staging / 'database.sqlite3')
         private_entries = private_media_entries(recipes, registrations)
+        sources = load_source_inventory(staging / 'database.sqlite3')
+        for source in sources:
+            private_entries['sources/' + source['file']] = {'entry': source, 'namespace': 'sources',
+                                                          'sourceParts': [source['file']], 'sourcePaths': [[source['file']]]}
         if arguments.non_production:
+            require(not sources or private_source_root != PRODUCTION_BASE and PRODUCTION_BASE not in private_source_root.parents,
+                    'fixture_source_root_must_be_isolated')
             require(not any(value['namespace'] == 'recipes' for value in private_entries.values())
                     or recipe_root != PRODUCTION_BASE and PRODUCTION_BASE not in recipe_root.parents,
                     'fixture_recipe_root_must_be_isolated')
@@ -900,13 +947,13 @@ def main():
             finally:
                 os.close(source_fd)
                 os.close(target_fd)
-        private_count, private_bytes = copy_private_media(private_entries, {'recipes': recipe_root, 'outputs': uploads_root}, staging_fd, parent_fd)
+        private_count, private_bytes = copy_private_media(private_entries, {'recipes': recipe_root, 'outputs': uploads_root, 'sources': private_source_root}, staging_fd, parent_fd)
         file_count += private_count
         total_bytes += private_bytes
-        record = {'format': 'sd2.multiview-works-backup.v2', 'preparedAt': datetime.now(timezone.utc).isoformat(),
+        record = {'format': 'sd2.multiview-works-backup.v3', 'preparedAt': datetime.now(timezone.utc).isoformat(),
                   'database': {'file': 'database.sqlite3', 'integrity': 'ok', **database_info},
                   'totalWorksInSnapshot': total_works, 'readyWorks': len(works), 'mediaFiles': file_count,
-                  'mediaBytes': total_bytes, 'works': mapping, 'recipes': recipes, 'outputRegistrations': registrations}
+                  'mediaBytes': total_bytes, 'works': mapping, 'recipes': recipes, 'outputRegistrations': registrations, 'sources': sources}
         write_private(staging_fd, 'mapping.json', json_bytes(record))
         os.fsync(files_fd)
         os.fsync(staging_fd)

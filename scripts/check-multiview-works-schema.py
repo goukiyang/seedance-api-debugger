@@ -42,9 +42,19 @@ def main():
         reference = sqlite3.connect(":memory:")
         migration = pathlib.Path(__file__).resolve().parent.parent / "prisma/migrations/20261016230000_multiview_works/migration.sql"
         reference.executescript(migration.read_text(encoding="utf-8"))
-        for table, expected in EXPECTED.items():
+        flow_tables = {"MultiviewSource", "MultiviewShare", "MultiviewShareRecipient", "MultiviewShareMutation"}
+        has_flow = bool(names.intersection(flow_tables))
+        if has_flow and not flow_tables.issubset(names):
+            raise ValueError("Partial multiview flow schema")
+        expected_tables = dict(EXPECTED)
+        if has_flow:
+            reference.executescript((migration.parent.parent / "20261026203000_multiview_flow/migration.sql").read_text(encoding="utf-8"))
+            expected_tables = {table: {row[1] for row in reference.execute('PRAGMA table_info("' + table + '")')}
+                               for table in set(EXPECTED) | flow_tables}
+        for table, expected in expected_tables.items():
             actual_info = list(connection.execute('PRAGMA table_info("' + table + '")'))
-            if actual_info != list(reference.execute('PRAGMA table_info("' + table + '")')):
+            expected_info = list(reference.execute('PRAGMA table_info("' + table + '")'))
+            if sorted(row[1:] for row in actual_info) != sorted(row[1:] for row in expected_info):
                 raise ValueError("MV05 column type/default/required/PK differs: " + table)
             columns = {row[1] for row in actual_info}
             if columns != expected:
@@ -54,13 +64,24 @@ def main():
                 if index[2]:
                     index_name = index[1].replace('"', '""')
                     unique.add(tuple(row[2] for row in connection.execute('PRAGMA index_info("' + index_name + '")')))
-            if not UNIQUE[table].issubset(unique):
+            required_unique = set()
+            for index in reference.execute('PRAGMA index_list("' + table + '")'):
+                if index[2]:
+                    required_unique.add(tuple(row[2] for row in reference.execute('PRAGMA index_info("' + index[1] + '")')))
+            if not required_unique.issubset(unique):
                 raise ValueError("Required MV05 uniqueness protection is missing: " + table)
+            if list(connection.execute('PRAGMA foreign_key_list("' + table + '")')) != list(reference.execute('PRAGMA foreign_key_list("' + table + '")')):
+                raise ValueError("Multiview relationship differs: " + table)
+        if has_flow:
+            for name, sql in reference.execute("SELECT name, sql FROM sqlite_master WHERE type='trigger'"):
+                actual = connection.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()
+                if not actual or ' '.join(actual[0].split()) != ' '.join(sql.split()):
+                    raise ValueError("Multiview writer guard differs: " + name)
         fk = list(connection.execute('PRAGMA foreign_key_list("MultiviewWorkMutation")'))
         if not any(row[2] == "MultiviewWork" and row[3] == "work_id" and row[4] == "id" and row[5] == "CASCADE" and row[6] == "RESTRICT" for row in fk):
             raise ValueError("MV05 receipt/work relationship is incompatible")
         reference.close()
-        print(json.dumps({"state": "compatible", "additiveMigrationRequired": False, "writes": 0}))
+        print(json.dumps({"state": "compatible" if has_flow else "legacy", "additiveMigrationRequired": not has_flow, "writes": 0}))
     finally:
         connection.close()
 

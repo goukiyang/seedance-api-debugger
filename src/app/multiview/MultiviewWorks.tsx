@@ -5,15 +5,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { RefreshCw, Search } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
+import { useProductDialog } from '@/components/useProductDialog';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import type { MultiviewWorkDto, MultiviewWorkList, MultiviewWorkMutationResult, MultiviewWorkReceipt } from '@/lib/video/multiview-work-contract';
+import { MULTIVIEW_SAVE_PROTOCOL } from '@/lib/video/multiview-work-contract';
 import { MultiviewWorkViewer } from './MultiviewWorkViewer';
+import { MultiviewShareDialog } from './MultiviewShareDialog';
 import { clearMultiviewWorkFiles, multiviewWorkFile, workFileUrl } from './multiview-work-client';
 import styles from './multiview-works.module.css';
 
 type Pending = { mutationId: string; workId: string; action: 'save' | 'branch' | 'remove' | 'restore' };
 type LibraryPreferences = { projectId: string; q: string; removed: boolean; selected: string; y: number };
 type Props = { owner: string; authority: string; initialWorkId?: string; onEdit: (work: MultiviewWorkDto) => void; onNew: () => void;
+  detailOnly?: boolean; initialAction?: 'rename' | 'branch' | 'remove' | 'restore' | 'retry' | 'share'; onClose?: () => void;
   onUseReference?: (work: MultiviewWorkDto, role: string) => void };
 type ListResult = MultiviewWorkList & { projects: Array<{ id: string; title: string }> };
 const base = '/api/video/multiview/works';
@@ -54,7 +58,7 @@ const messageFor = (status: number) => status === 409 ? '作品已在别处更�
   : status === 401 || status === 403 ? '当前账号暂不能读取此作品，请核对登录和原视频权限。'
     : status === 404 ? '作品或原视频暂不可读取，请返回作品库重新核对。' : '作品读取未完成，请重试；原作品和本机修改保持不变。';
 
-export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew, onUseReference }: Props) {
+export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew, onUseReference, detailOnly = false, initialAction, onClose }: Props) {
   const router = useRouter(), query = useSearchParams();
   const identity = `${owner}:${authority}`;
   const identityRef = useRef(identity); identityRef.current = identity;
@@ -72,6 +76,9 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
   const [notice, setNotice] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
   const [checking, setChecking] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const { prompt, productDialog } = useProductDialog();
+  const actionHandled = useRef(false);
   const listEpoch = useRef(0), detailEpoch = useRef(0);
   const controllers = useRef(new Set<AbortController>());
   const pendingRef = useRef(pending); pendingRef.current = pending;
@@ -107,7 +114,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     return () => { if (activeIdentity.current === captured) activeIdentity.current = ''; controllers.current.forEach(controller => controller.abort()); clearMultiviewWorkFiles(); };
   }, [identity, preferenceKey, mutationKey]);
   const fetchList = useCallback(async (append = false) => {
-    if (!owner || loadedIdentity !== identity || isClientSessionBlocked()) return;
+    if (detailOnly || !owner || loadedIdentity !== identity || isClientSessionBlocked()) return;
     const captured = identity, epoch = ++listEpoch.current;
     const params = new URLSearchParams();
     if (preferences.projectId) params.set('projectId', preferences.projectId);
@@ -126,7 +133,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       return data.works;
     } catch (error) { if (alive(captured) && epoch === listEpoch.current) setNotice(error instanceof Error ? error.message : messageFor(503)); }
     finally { if (alive(captured) && epoch === listEpoch.current) setLoading(false); }
-  }, [owner, loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed, cursor, request, alive]);
+  }, [detailOnly, owner, loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed, cursor, request, alive]);
   const fetchDetail = useCallback(async (id: string, report = false) => {
     const captured = identity, epoch = ++detailEpoch.current, previous = workRef.current?.id === id ? workRef.current.revision : null;
     if (!validId(id)) return;
@@ -169,6 +176,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     return () => clearTimeout(timer);
   }, [search, preferences.q, loadedIdentity, identity, savePreferences]);
   const navigate = (id: string) => {
+    if (detailOnly) { if (id) void fetchDetail(id); else onClose?.(); return; }
     const params = new URLSearchParams(query.toString()); params.set('view', 'works'); params.delete('taskId');
     if (id) params.set('workId', id); else params.delete('workId');
     savePreferences({ ...preferenceRef.current, selected: id, y: id ? window.scrollY : preferenceRef.current.y });
@@ -216,7 +224,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     }
     catch { setNotice('无法保留本次保存回执，请先恢复本机存储；作品与输入保持不变'); return; }
     pendingRef.current = original; setPending(original); setNotice('正在保存…');
-    const payload = { mutationId: original.mutationId, action, baseRevision: target.revision, ...(action === 'save' || action === 'branch' ? { recipe: target.recipe, title: title || target.title } : {}),
+    const payload = { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId: original.mutationId, action, baseRevision: target.revision, ...(action === 'save' || action === 'branch' ? { recipe: { ...target.recipe, schema: 2 }, title: title || target.title } : {}),
       ...(action === 'branch' ? { branchKey: original.mutationId } : {}) };
     try {
       const response = await request(`${base}/${encodeURIComponent(target.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
@@ -237,6 +245,25 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     } catch (error) { if (alive(captured)) setNotice(error instanceof Error ? error.message : '保存结果待确认，请核对原操作'); }
   };
   const rename = useCallback((title: string) => { void mutate('save', title); }, [identity, work?.id, work?.revision, pending, checking]);
+  function namedAction(action: 'save' | 'branch') {
+    const target = workRef.current, captured = identity;
+    if (!target || pendingRef.current || checking) return;
+    void prompt('方案名称', target.title, { title: action === 'branch' ? '另存为' : '修改名称', maxLength: 120,
+      onSubmit: async name => {
+        if (!name.trim()) throw new Error('请填写方案名称。');
+        if (!alive(captured) || workRef.current?.id !== target.id || workRef.current.revision !== target.revision) throw new Error('方案已变化，请重新打开。');
+        await mutate(action, name.trim());
+      } });
+  }
+  useEffect(() => {
+    if (!initialAction || !work || work.id !== initialWorkId || actionHandled.current) return;
+    actionHandled.current = true;
+    if (initialAction === 'share') setSharing(true);
+    else if (initialAction === 'rename' || initialAction === 'branch') namedAction(initialAction === 'rename' ? 'save' : 'branch');
+    else void mutate(initialAction === 'retry' ? 'save' : initialAction);
+    // The action is an explicit record-menu choice, never a URL or a polling update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAction, initialWorkId, work?.id]);
   if (loadedIdentity !== identity || !owner) return <p className={styles.notice}>正在读取当前账号作品…</p>;
   const selectedIndex = work ? items.findIndex(item => item.id === work.id) : -1;
   return <div className={styles.library}>
@@ -249,8 +276,8 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
         const captured = identity, id = work.id;
         void fetchList(true).then(next => { if (alive(captured) && workRef.current?.id === id && next?.[0]) navigate(next[0].id); });
       } : undefined}
-      onEdit={onEdit} onUseReference={onUseReference} onRename={rename} onBranch={() => void mutate('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')}
-      onRefresh={() => { setNotice(''); setChecking(true); void fetchDetail(work.id, true).finally(() => setChecking(false)); }} onRetry={() => void mutate('save', work.title)} /> : <>
+      onEdit={onEdit} onUseReference={onUseReference} onRename={rename} onBranch={() => namedAction('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')} onShare={() => setSharing(true)}
+      onRefresh={() => { setNotice(''); setChecking(true); void fetchDetail(work.id, true).finally(() => setChecking(false)); }} onRetry={() => void mutate('save', work.title)} /> : detailOnly ? <p role="status">{notice || '正在读取方案…'}<button type="button" onClick={onClose}>返回记录</button></p> : <>
       <div className={styles.filters}>
         <label>项目<select value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>
           <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
@@ -273,5 +300,9 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       {(loading || !listReady && !notice) && <p role="status" className={styles.notice}>正在读取作品…</p>}
       {cursor && <button type="button" className={styles.button} disabled={loading} onClick={() => void fetchList(true)}>加载更多作品</button>}
     </>}
+    {productDialog}
+    {sharing && work && <MultiviewShareDialog owner={owner} work={work} onClose={() => setSharing(false)}
+      blockedReason={pending ? '原保存结果待确认。' : work.removed ? '方案已移出，请先恢复。' : work.ready?.revision !== work.draftRevision ? '当前成品尚未就绪。' : ''}
+      recovery={pending ? { label: '查询原操作', run: () => void checkMutation(), disabled: checking } : { label: '重新核对', run: () => void fetchDetail(work.id, true) }} />}
   </div>;
 }

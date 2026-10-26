@@ -9,7 +9,7 @@ import { AuthError } from '@/lib/auth/session';
 import { multiviewDimensions } from './multiview-contract';
 import { MultiviewError, multiviewInfoForWork, multiviewSourceVersion, renderMultiviewWork } from './multiview';
 import { isMultiviewWorkId, parseMultiviewWorkManifest, type MultiviewWorkManifest, type MultiviewWorkFileRole } from './multiview-work-contract';
-import { assertMultiviewWorkSource, claimNextMultiviewWork, completeMultiviewWork, failMultiviewWork,
+import { assertMultiviewWorkSource, assertMultiviewWorkReference, claimNextMultiviewWork, completeMultiviewWork, failMultiviewWork,
   initializeMultiviewWork, multiviewWorkActor, multiviewWorkDirectory, type MultiviewWorkLease } from './multiview-works';
 import { registerNextSavedMultiviewOutputs } from './multiview-output-assets.server';
 
@@ -242,8 +242,9 @@ async function validateDirectory(directory: string, lease: MultiviewWorkLease, s
 }
 async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
   const user = await multiviewWorkActor(lease.ownerId);
-  await assertMultiviewWorkSource(user, lease.sourceTaskId);
-  if (await multiviewSourceVersion(user, lease.sourceTaskId) !== lease.sourceVersion) throw new MultiviewError('原视频已变化，原配方和已保存成果保留。', 409);
+  await assertMultiviewWorkReference(user, { owner_id: lease.ownerId, source_task_id: lease.sourceTaskId, source_id: lease.sourceId || null });
+  const access = lease.sourceId ? { kind: 'work' as const, id: lease.workId } : undefined;
+  if (await multiviewSourceVersion(user, lease.sourceTaskId, access) !== lease.sourceVersion) throw new MultiviewError('原视频已变化，原配方和已保存成果保留。', 409);
   const root = await storageRoot();
   const destination = await multiviewWorkDirectory(lease.ownerId, lease.workId, lease.draftRevision);
   if (!destination.startsWith(`${root}${path.sep}`) || !isMultiviewWorkId(lease.ownerId) || !isMultiviewWorkId(lease.workId)) throw unavailable('作品文件位置校验未完成。');
@@ -252,7 +253,7 @@ async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
   const dimensions = multiviewDimensions(lease.info!, lease.recipe!.slots.length, lease.recipe!.layout);
   const estimate = Math.ceil((dimensions.width * dimensions.height + lease.info!.width * lease.info!.height * lease.recipe!.slots.length * 2) * 4 + 1024 * 1024);
   await assertCapacity(root, estimate);
-  let rendered: Awaited<ReturnType<typeof renderMultiviewWork>> | null = await renderMultiviewWork(user, lease.sourceTaskId, lease.recipe!, signal);
+  let rendered: Awaited<ReturnType<typeof renderMultiviewWork>> | null = await renderMultiviewWork(user, lease.sourceTaskId, lease.recipe!, signal, access);
   const thumbnail = await sharp(rendered.collage, { limitInputPixels: 64000000 }).resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).timeout({ seconds: 60 }).jpeg({ quality: 82 }).toBuffer();
   signal.throwIfAborted();
   const parent = path.dirname(destination);
@@ -281,8 +282,8 @@ async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
     // Release the encoder buffers before rereading the immutable files for full decode/integrity checks.
     images.length = 0; rendered = null;
     await validateDirectory(temporary, lease, signal);
-    await assertMultiviewWorkSource(await multiviewWorkActor(lease.ownerId), lease.sourceTaskId);
-    if (await multiviewSourceVersion(user, lease.sourceTaskId) !== lease.sourceVersion) throw new MultiviewError('原视频已变化，旧选帧未套用新视频。', 409);
+    await assertMultiviewWorkReference(await multiviewWorkActor(lease.ownerId), { owner_id: lease.ownerId, source_task_id: lease.sourceTaskId, source_id: lease.sourceId || null });
+    if (await multiviewSourceVersion(user, lease.sourceTaskId, access) !== lease.sourceVersion) throw new MultiviewError('原视频已变化，旧选帧未套用新视频。', 409);
     signal.throwIfAborted();
     const temporaryHandle = await open(temporary, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try { await temporaryHandle.sync(); } finally { await temporaryHandle.close(); }
@@ -306,27 +307,31 @@ export async function processNextMultiviewWork(): Promise<MultiviewWorkProcessRe
   const signal = AbortSignal.timeout(MULTIVIEW_WORK_RESOURCE_POLICY.renderTimeoutMs);
   try {
     await assertMultiviewWorkConsumerLock();
+    const { cleanAbandonedMultiviewSources } = await import('./multiview-source-cleanup.server');
+    await cleanAbandonedMultiviewSources().catch(() => { console.warn('multiview_source_cleanup_deferred'); });
     const registeredWork = await registerNextSavedMultiviewOutputs(multiviewWorkAdmission);
     if (registeredWork) return { state: 'ready', workId: registeredWork };
     lease = await claimNextMultiviewWork();
     if (!lease) return { state: 'empty' };
     await multiviewWorkAdmission();
     const user = await multiviewWorkActor(lease.ownerId);
-    const source = await assertMultiviewWorkSource(user, lease.sourceTaskId);
-    if (['failed', 'cancelled', 'canceled'].includes(source.local_status)) {
+    await assertMultiviewWorkReference(user, { owner_id: lease.ownerId, source_task_id: lease.sourceTaskId, source_id: lease.sourceId || null });
+    const source = lease.sourceId ? null : await assertMultiviewWorkSource(user, lease.sourceTaskId);
+    const access = lease.sourceId ? { kind: 'work' as const, id: lease.workId } : undefined;
+    if (source && ['failed', 'cancelled', 'canceled'].includes(source.local_status)) {
       await failMultiviewWork(lease, '原视频未完成，本作品未生成成品；原任务历史保留。', { retryable: false });
       return { state: 'failed', workId: lease.workId };
     }
-    if (source.local_status !== 'succeeded') {
+    if (source && source.local_status !== 'succeeded') {
       await failMultiviewWork(lease, '等待原视频完成和归档；不会重新生成或扣费。', { waitingSource: true });
       return { state: 'waiting', workId: lease.workId };
     }
-    if (lease.sourceVersion && await multiviewSourceVersion(user, lease.sourceTaskId) !== lease.sourceVersion) {
+    if (lease.sourceVersion && await multiviewSourceVersion(user, lease.sourceTaskId, access) !== lease.sourceVersion) {
       await failMultiviewWork(lease, '原视频已变化，原配方和已保存成果保留。', { sourceChanged: true, retryable: false });
       return { state: 'failed', workId: lease.workId };
     }
     if (!lease.recipe || !lease.info || !lease.sourceVersion) {
-      const info = await multiviewInfoForWork(user, lease.sourceTaskId, undefined, signal);
+      const info = await multiviewInfoForWork(user, lease.sourceTaskId, undefined, signal, access);
       lease = await initializeMultiviewWork(lease, info);
       if (!lease) return { state: 'superseded' };
     }

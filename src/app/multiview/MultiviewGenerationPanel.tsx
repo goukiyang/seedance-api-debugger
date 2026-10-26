@@ -1213,6 +1213,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         }}>重试原加入</button></div>}
       </div>
       <div className={styles.settings}>
+        <details className={styles.advanced}><summary>生成预设</summary>
         <MultiviewSettingsPicker kind="generation" ownerId={owner} authorityKey={authorityKey} disabled={settingsDisabled}
           value={presetReady ? generationSettingsValue(draft) : null} binding={draft.settingsBinding}
           onApply={applyGenerationSettings} onReset={useCurrentRotationPreset} onSaved={adoptSavedGenerationSettings} onStateChange={setSettingsRisk}
@@ -1222,6 +1223,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           }} />
         <div className={styles.preset}><strong>360°旋转模板</strong>{user.role === 'admin' && <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setPromptOpen(true)}>{draft.settingsBinding ? '默认模板提示词' : '模板提示词'}</button>}</div>
         {draft.settingsBinding && <small>使用这份设置保存时的默认配置。</small>}
+        </details>
         {presetError && !active && <p className={styles.feedback} role="status">{presetError}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
         <div className={styles.parameters}>
           <label>模型<select value={draft.model} disabled={formDisabled} onChange={event => change({ model: event.target.value })}>{!selectedModel && <option value={draft.model}>{draft.model || '未选择'}</option>}{SEEDANCE_VIDEO_MODEL_OPTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>

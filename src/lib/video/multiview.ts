@@ -12,7 +12,7 @@ import { mediaPreviewResponse } from '@/lib/media/preview-response';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isSafeTaskId } from './thumbnail';
 import { multiviewDimensions, validMultiviewLayout, type MultiviewInfo, type MultiviewLayout } from './multiview-contract';
-import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe } from './multiview-work-contract';
+import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe, type MultiviewSourceAccess } from './multiview-work-contract';
 import { buildAllMultiviewPreviews, buildMultiviewPreviewChunk, previewDirectoryMetrics,
   readMultiviewPreviewChunk, readMultiviewPreviewManifest } from './multiview-preview';
 import { MULTIVIEW_PREVIEW_CHUNK_SIZE } from './multiview-preview-contract';
@@ -28,13 +28,18 @@ let previewCount = 0;
 export class MultiviewError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
-type Source = { version: string; source: string; local: string | null };
+type Source = { version: string; source: string; local: string | null; cacheKey?: string; info?: MultiviewInfo };
 // Background work is authorized by its explicit user, never by a fabricated HTTP session.
 // Without an HTTP transport context it waits for the existing delivery worker's local original.
-type MultiviewContext = { signal: AbortSignal; url?: string };
+type MultiviewContext = { signal: AbortSignal; url?: string; access?: MultiviewSourceAccess };
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
-async function authorizedSource(user: SessionUser, id: string): Promise<Source> {
+async function authorizedSource(user: SessionUser, id: string, access?: MultiviewSourceAccess): Promise<Source> {
+  if (access) {
+    const { resolveMultiviewSourceAccess } = await import('./multiview-source.server');
+    const source = await resolveMultiviewSourceAccess(user, id, access);
+    if (source) return source;
+  }
   if (!isSafeTaskId(id)) throw new MultiviewError('视频编号无效');
   const task = await prisma.videoTask.findUnique({ where: { id } });
   if (!task) throw new MultiviewError('视频不存在', 404);
@@ -139,12 +144,12 @@ async function downloadSource(source: Source, dir: string, request: MultiviewCon
 }
 const inputFlags = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi'];
 async function preparation(user: SessionUser, id: string, request: MultiviewContext, expected?: string | null) {
-  const source = await authorizedSource(user, id);
+  const source = await authorizedSource(user, id, request.access);
   if (expected && expected !== source.version) throw new MultiviewError('原视频版本已改变，请重新打开；旧选帧不会覆盖新原片', 409);
   const root = await cacheRoot();
-  const dir = path.join(root, source.version);
+  const dir = path.join(root, source.cacheKey || source.version);
   await mkdir(dir, { recursive: true, mode: 0o700 });
-  let info: MultiviewInfo | undefined;
+  let info: MultiviewInfo | undefined = source.info;
   try {
     const saved = JSON.parse(await readFile(path.join(dir, 'info.json'), 'utf8')) as MultiviewInfo;
     if (saved.sourceVersion === source.version && saved.taskId === id && Number.isInteger(saved.width) && Number.isInteger(saved.height)
@@ -152,8 +157,8 @@ async function preparation(user: SessionUser, id: string, request: MultiviewCont
       && saved.duration > 0 && saved.duration <= 180 && Array.isArray(saved.timestamps) && saved.timestamps.length >= 8 && saved.timestamps.length <= 21600
       && saved.timestamps.every((time, index) => Number.isFinite(time) && time >= 0 && (index === 0 || time >= saved.timestamps[index - 1]))) info = saved;
   } catch {}
-  if (!info) info = await once(`${source.version}:prepare`, async () => {
-    await pruneCache(root, source.version);
+  if (!info) info = await once(`${source.cacheKey || source.version}:prepare`, async () => {
+    await pruneCache(root, source.cacheKey || source.version);
     const file = await downloadSource(source, dir, request);
     const { stdout } = await exec(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', ...inputFlags, '-threads', '1', '-select_streams', 'v:0',
       '-show_frames', '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration:frame=best_effort_timestamp_time', '-of', 'json', file],
@@ -175,25 +180,32 @@ async function preparation(user: SessionUser, id: string, request: MultiviewCont
   });
   return { source, dir, info };
 }
-export async function multiviewInfo(user: SessionUser, id: string, request: Request) {
-  const prepared = await preparation(user, id, request);
-  if ((await authorizedSource(user, id)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+export async function multiviewInfo(user: SessionUser, id: string, request: Request, access?: MultiviewSourceAccess) {
+  const prepared = await preparation(user, id, { signal: request.signal, url: request.url, access });
+  if ((await authorizedSource(user, id, access)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return prepared.info;
 }
-export async function multiviewSourceVersion(user: SessionUser, id: string) {
-  return (await authorizedSource(user, id)).version;
+export async function multiviewSourceVersion(user: SessionUser, id: string, access?: MultiviewSourceAccess) {
+  return (await authorizedSource(user, id, access)).version;
 }
-export async function multiviewInfoForWork(user: SessionUser, id: string, expectedVersion?: string, signal?: AbortSignal) {
-  const context: MultiviewContext = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000) };
+export async function multiviewSourceFile(user: SessionUser, id: string, version: string, access?: MultiviewSourceAccess) {
+  const context: MultiviewContext = { signal: AbortSignal.timeout(90000), access };
+  const prepared = await preparation(user, id, context, version);
+  const file = await downloadSource(prepared.source, prepared.dir, context);
+  if ((await authorizedSource(user, id, access)).version !== version) throw new MultiviewError('来源视频已变化，未继续保存。', 409);
+  return { file, info: prepared.info };
+}
+export async function multiviewInfoForWork(user: SessionUser, id: string, expectedVersion?: string, signal?: AbortSignal, access?: MultiviewSourceAccess) {
+  const context: MultiviewContext = { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90000)]) : AbortSignal.timeout(90000), access };
   const prepared = await preparation(user, id, context, expectedVersion);
-  if ((await authorizedSource(user, id)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  if ((await authorizedSource(user, id, access)).version !== prepared.source.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return prepared.info;
 }
 async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, frame: number, request: MultiviewContext) {
   if (!Number.isInteger(frame) || frame < 0 || frame >= prepared.info.timestamps.length) throw new MultiviewError('帧位置无效');
   const output = path.join(prepared.dir, `frame-${frame}.png`);
   if (await stat(output).then(info => info.isFile() && info.size > 0).catch(() => false)) return output;
-  await once(`${prepared.source.version}:frame:${frame}`, async () => {
+  await once(`${prepared.source.cacheKey || prepared.source.version}:frame:${frame}`, async () => {
     const entries = (await readdir(prepared.dir)).filter(name => /^frame-\d+\.png$/.test(name));
     const cached = await Promise.all(entries.map(async name => ({ name, info: await stat(path.join(prepared.dir, name)).catch(() => null) })));
     let bytes = cached.reduce((sum, item) => sum + (item.info?.size || 0), 0);
@@ -201,7 +213,7 @@ async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, fram
     for (const item of cached.sort((a, b) => (a.info?.mtimeMs || 0) - (b.info?.mtimeMs || 0))) {
       if (count < 48 && bytes < 256 * 1024 * 1024 - prepared.info.width * prepared.info.height * 4) break;
       const number = Number(item.name.slice(6, -4));
-      if (inflight.has(`${prepared.source.version}:frame:${number}`)) continue;
+      if (inflight.has(`${prepared.source.cacheKey || prepared.source.version}:frame:${number}`)) continue;
       await rm(path.join(prepared.dir, item.name), { force: true }); bytes -= item.info?.size || 0; count -= 1;
     }
     const file = await downloadSource(prepared.source, prepared.dir, request);
@@ -217,18 +229,18 @@ async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, fram
   });
   return output;
 }
-export async function multiviewFrame(user: SessionUser, id: string, request: Request, version: string, frame: number) {
-  const prepared = await preparation(user, id, request, version);
+export async function multiviewFrame(user: SessionUser, id: string, request: Request, version: string, frame: number, access?: MultiviewSourceAccess) {
+  const prepared = await preparation(user, id, { signal: request.signal, url: request.url, access }, version);
   const output = await frameFile(prepared, frame, request);
-  if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  if ((await authorizedSource(user, id, access)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return readFile(output);
 }
-export async function multiviewPreviewManifest(user: SessionUser, id: string, request: Request, version: string) {
-  const prepared = await preparation(user, id, request, version);
+export async function multiviewPreviewManifest(user: SessionUser, id: string, request: Request, version: string, access?: MultiviewSourceAccess) {
+  const prepared = await preparation(user, id, { signal: request.signal, url: request.url, access }, version);
   const started = performance.now();
   let manifest = await readMultiviewPreviewManifest(prepared.dir, prepared.info);
   if (manifest.eager && !manifest.chunks.every(chunk => chunk.ready)) {
-    manifest = await oncePreview(`${prepared.source.version}:preview:all`, async () => {
+    manifest = await oncePreview(`${prepared.source.cacheKey || prepared.source.version}:preview:all`, async () => {
       const file = await downloadSource(prepared.source, prepared.dir, request);
       try { return await buildAllMultiviewPreviews({ source: file, dir: prepared.dir, info: prepared.info, signal: request.signal }); }
       catch (error) {
@@ -237,16 +249,16 @@ export async function multiviewPreviewManifest(user: SessionUser, id: string, re
       }
     });
   }
-  if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  if ((await authorizedSource(user, id, access)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return { manifest, duration: performance.now() - started };
 }
-export async function multiviewPreviewAtlas(user: SessionUser, id: string, request: Request, version: string, index: number) {
-  const prepared = await preparation(user, id, request, version);
+export async function multiviewPreviewAtlas(user: SessionUser, id: string, request: Request, version: string, index: number, access?: MultiviewSourceAccess) {
+  const prepared = await preparation(user, id, { signal: request.signal, url: request.url, access }, version);
   const chunkCount = Math.ceil(prepared.info.timestamps.length / MULTIVIEW_PREVIEW_CHUNK_SIZE);
   if (!Number.isInteger(index) || index < 0 || index >= chunkCount) throw new MultiviewError('预览图片位置无效');
   const started = performance.now();
   const cached = await readMultiviewPreviewChunk(prepared.dir, prepared.info, index);
-  const result = cached || await oncePreview(`${prepared.source.version}:preview:${index}`, async () => {
+  const result = cached || await oncePreview(`${prepared.source.cacheKey || prepared.source.version}:preview:${index}`, async () => {
     const file = await downloadSource(prepared.source, prepared.dir, request);
     try { return await buildMultiviewPreviewChunk({ source: file, dir: prepared.dir, info: prepared.info, index, signal: request.signal }); }
     catch (error) {
@@ -254,14 +266,14 @@ export async function multiviewPreviewAtlas(user: SessionUser, id: string, reque
       throw error;
     }
   });
-  if ((await authorizedSource(user, id)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  if ((await authorizedSource(user, id, access)).version !== version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   return { data: result.data, etag: result.etag, duration: performance.now() - started };
 }
-export async function multiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
+export async function multiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>, access?: MultiviewSourceAccess) {
   // Limit the entire export, including cached-frame buffers, not only the final encoder.
   if (exportCount >= 1) throw new MultiviewError('另一个导出正在准备，请稍后重试；当前选帧保持不变', 429);
   exportCount += 1;
-  try { return await createMultiviewExport(user, id, request, body); }
+  try { return await createMultiviewExport(user, id, request, body, access); }
   finally { exportCount -= 1; }
 }
 function composeMultiviewPng(info: MultiviewInfo, files: Buffer[], layout: MultiviewLayout) {
@@ -287,9 +299,9 @@ function packMultiviewFrames(info: MultiviewInfo, files: Buffer[], frames: numbe
   return result;
 }
 /** Same authorized preparation/decoder/export core as HTTP; no fabricated Request or self-call. */
-export async function renderMultiviewWork(user: SessionUser, id: string, recipe: MultiviewWorkRecipe, signal: AbortSignal) {
+export async function renderMultiviewWork(user: SessionUser, id: string, recipe: MultiviewWorkRecipe, signal: AbortSignal, access?: MultiviewSourceAccess) {
   signal.throwIfAborted();
-  const context: MultiviewContext = { signal };
+  const context: MultiviewContext = { signal, access };
   const prepared = await preparation(user, id, context, recipe.sourceVersion);
   const parsed = parseMultiviewWorkRecipe(recipe, prepared.info);
   if (!parsed) throw new MultiviewError('作品选帧设置无效，原配方保持不变');
@@ -305,27 +317,27 @@ export async function renderMultiviewWork(user: SessionUser, id: string, recipe:
   signal.throwIfAborted();
   const zip = await packMultiviewFrames(prepared.info, files, parsed.slots.map(slot => slot.frame), parsed.slots.map(slot => slot.name));
   signal.throwIfAborted();
-  if ((await authorizedSource(user, id)).version !== recipe.sourceVersion) throw new MultiviewError('原视频已改变，请重新打开；旧选帧保持不变', 409);
+  if ((await authorizedSource(user, id, access)).version !== recipe.sourceVersion) throw new MultiviewError('原视频已改变，请重新打开；旧选帧保持不变', 409);
   return { info: prepared.info, frames: parsed.slots.map((slot, index) => ({ slotId: slot.id, data: files[index] })), collage, zip };
 }
-async function createMultiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>) {
+async function createMultiviewExport(user: SessionUser, id: string, request: Request, body: Record<string, unknown>, access?: MultiviewSourceAccess) {
   if (typeof body.version !== 'string' || !/^[a-f0-9]{64}$/.test(body.version) || !Array.isArray(body.frames)
     || !body.frames.length || body.frames.length > 8 || !body.frames.every(Number.isInteger) || !validMultiviewLayout(body.layout)
     || !['png', 'zip'].includes(String(body.format))) throw new MultiviewError('导出设置无效');
-  const prepared = await preparation(user, id, request, body.version);
+  const prepared = await preparation(user, id, { signal: request.signal, url: request.url, access }, body.version);
   const frames = body.frames as number[];
   const layout: MultiviewLayout = body.layout;
   const dimensions = multiviewDimensions(prepared.info, frames.length, layout);
   if (body.format === 'png' && dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白，或下载原尺寸单图包；不会缩小原图');
   const files: Buffer[] = [];
   for (const frame of frames) files.push(await readFile(await frameFile(prepared, frame, request)));
-  if ((await authorizedSource(user, id)).version !== body.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
+  if ((await authorizedSource(user, id, access)).version !== body.version) throw new MultiviewError('原视频已改变，请重新打开', 409);
   if (body.format === 'png') {
-    const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => composeMultiviewPng(prepared.info, files, layout));
+    const data = await once(`${prepared.source.cacheKey || prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => composeMultiviewPng(prepared.info, files, layout));
     return { data, mime: 'image/png', name: `multiview-${id}.png` };
   }
   const names = frames.map((_, index) => Array.isArray(body.names) && typeof body.names[index] === 'string' ? body.names[index].slice(0, 40) : '');
-  const data = await once(`${prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => packMultiviewFrames(prepared.info, files, frames, names));
+  const data = await once(`${prepared.source.cacheKey || prepared.source.version}:export:${digest(JSON.stringify(body))}`, () => packMultiviewFrames(prepared.info, files, frames, names));
   return { data, mime: 'application/zip', name: `multiview-${id}.zip` };
 }
 export function multiviewFailure(error: unknown) {

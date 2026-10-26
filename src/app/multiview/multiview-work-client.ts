@@ -4,10 +4,10 @@ import { isMultiviewWorkId, multiviewWorkContentSignature, type MultiviewWorkDto
 import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe } from '@/lib/video/multiview-work-contract';
 import type { MultiviewInfo } from '@/lib/video/multiview-contract';
 
-type Binding = { schema: 1; owner: string; taskId: string; sourceVersion: string; workId: string };
+type Binding = { schema: 1; owner: string; taskId: string; sourceId?: string; sourceVersion: string; workId: string };
 type Baseline = Binding & { revision: number; signatureHash: string };
 type SafeStorage = Pick<Storage, 'getItem' | 'setItem'>;
-const bindingKey = (owner: string, taskId: string) => `sd2:multiview-work-binding:v1:${owner}:${taskId}`;
+const bindingKey = (owner: string, taskId: string, sourceId?: string | null) => sourceId ? `sd2:multiview-work-binding:v2:${owner}:source:${sourceId}` : `sd2:multiview-work-binding:v1:${owner}:${taskId}`;
 const baselineKey = (owner: string, workId: string, sourceVersion: string) => `sd2:multiview-work-baseline:v1:${owner}:${workId}:${sourceVersion}`;
 function parseBinding(raw: string | null, owner: string, taskId: string): Binding | null {
   if (raw === null) return null;
@@ -17,13 +17,14 @@ function parseBinding(raw: string | null, owner: string, taskId: string): Bindin
     || !/^[a-f0-9]{64}$/.test(value.sourceVersion)) throw new Error('原作品绑定记录无法确认，当前内容保留。');
   return value;
 }
-export function readMultiviewWorkBinding(storage: SafeStorage, owner: string, taskId: string) {
-  return parseBinding(storage.getItem(bindingKey(owner, taskId)), owner, taskId);
+export function readMultiviewWorkBinding(storage: SafeStorage, owner: string, taskId: string, sourceId?: string | null) {
+  const value = parseBinding(storage.getItem(bindingKey(owner, taskId, sourceId)), owner, taskId);
+  return value && (value.sourceId || null) === (sourceId || null) ? value : null;
 }
 export function retainMultiviewWorkBinding(storage: SafeStorage, owner: string, work: MultiviewWorkDto) {
   if (!work.sourceVersion || work.sourceState !== 'current' || work.removed) return;
-  const value: Binding = { schema: 1, owner, taskId: work.sourceTaskId, sourceVersion: work.sourceVersion, workId: work.id };
-  const key = bindingKey(owner, work.sourceTaskId), raw = JSON.stringify(value);
+  const value: Binding = { schema: 1, owner, taskId: work.sourceTaskId, ...(work.sourceId ? { sourceId: work.sourceId } : {}), sourceVersion: work.sourceVersion, workId: work.id };
+  const key = bindingKey(owner, work.sourceTaskId, work.sourceId), raw = JSON.stringify(value);
   storage.setItem(key, raw);
   if (storage.getItem(key) !== raw) throw new Error('当前作品身份无法保存在此设备，请保留页面。');
 }

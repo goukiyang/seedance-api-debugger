@@ -1,0 +1,13 @@
+.dialog { box-sizing: border-box; width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-panel); color: var(--text-primary); }
+.dialog::backdrop { background: #0007; }
+.dialog header, .dialog footer, .actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.dialog h2 { margin: 0; font-size: 18px; }
+.dialog p { overflow-wrap: anywhere; font-size: 13px; }
+.dialog input:not([type=checkbox]) { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px; margin: 8px 0; background: var(--bg-input); color: inherit; border: 1px solid var(--border-color); border-radius: 4px; }
+.dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; min-height: 36px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-tertiary); color: inherit; cursor: pointer; }
+.dialog button:disabled { opacity: .5; cursor: default; }
+.dialog button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.people { display: grid; gap: 4px; max-height: 240px; overflow: auto; margin: 10px 0 18px; }
+.people label { display: flex; gap: 10px; align-items: center; padding: 7px 0; overflow-wrap: anywhere; }
+.dialog details { margin-top: 18px; font-size: 13px; }
+.grant { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border-color); }

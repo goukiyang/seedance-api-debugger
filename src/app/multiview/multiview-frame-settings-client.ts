@@ -11,11 +11,20 @@ export function applyMultiviewFrameSettings(draft: MultiviewDraft, info: Multivi
   createId: () => string = () => crypto.randomUUID()): MultiviewDraft | null {
   const value = parseMultiviewFrameSettingsInput(input);
   if (!value || draft.sourceVersion !== info.sourceVersion || value.slots.some(item => item.frame >= info.timestamps.length)) return null;
+  if (draft.slots.filter(item => item.locked).length > value.slots.length) return null;
   const ids = new Set(draft.reserve.map(item => item.id));
   const slots = value.slots.map((item, index) => {
+    if (draft.slots[index]?.locked) return { ...draft.slots[index] };
     const id = draft.slots[index]?.id || createId();
     return { id, frame: item.frame, name: item.name, manual: true };
   });
+  // Locks beyond a shorter preset keep their slot identity and replace only
+  // unlocked proposed choices. No locked frame is silently sent to reserve.
+  for (const locked of draft.slots.slice(value.slots.length).filter(item => item.locked)) {
+    const index = slots.findIndex(item => !item.locked);
+    if (index < 0) return null;
+    slots[index] = { ...locked };
+  }
   for (const item of slots) {
     if (!/^[a-z0-9-]{1,80}$/i.test(item.id) || ids.has(item.id)) return null;
     ids.add(item.id);

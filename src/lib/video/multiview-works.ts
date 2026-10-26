@@ -10,7 +10,7 @@ import { assertCanViewTask, getTaskWhereForUser } from '@/lib/projects/permissio
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { multiviewInfoForWork, multiviewSourceVersion, MultiviewError } from './multiview';
 import type { MultiviewInfo } from './multiview-contract';
-import { defaultMultiviewWorkRecipe, isMultiviewWorkId, isMultiviewWorkFileRole, parseMultiviewWorkRecipe,
+import { MULTIVIEW_SAVE_PROTOCOL, defaultMultiviewWorkRecipe, isMultiviewWorkId, isMultiviewWorkFileRole, parseMultiviewWorkRecipe,
   parseMultiviewWorkManifest, multiviewWorkRecipesEqual, type MultiviewWorkDto, type MultiviewWorkRecipe, type MultiviewWorkReceipt,
   type MultiviewWorkManifest, type MultiviewWorkList, type MultiviewWorkStatus } from './multiview-work-contract';
 
@@ -30,6 +30,12 @@ export class MultiviewWorkError extends Error {
   constructor(message: string, public status = 400, public code = 'WORK_INVALID', public details: Json = {}) { super(message); }
 }
 const invalid = (message = '作品设置无效，原输入已保留。') => new MultiviewWorkError(message, 400, 'WORK_INVALID', { notCommitted: true });
+function requireExplicitSave(input: Json) {
+  if (process.env.MULTIVIEW_FLOW_READ_ONLY === '1') throw new MultiviewWorkError('方案当前仅可读取，原保存回执与本机修改保留。', 503, 'WORK_READ_ONLY');
+  if (input.protocol !== MULTIVIEW_SAVE_PROTOCOL) throw new MultiviewWorkError('页面已更新，请保留本机修改并刷新后主动保存。原保存仍可查询。',
+    409, 'WORK_PROTOCOL_REQUIRED', { notCommitted: true });
+  if (input.recipe && (!record(input.recipe) || input.recipe.schema !== 2)) throw invalid('选帧设置需要新版保存协议，当前修改保留。');
+}
 const conflict = () => new MultiviewWorkError('作品已在其他页面更新，未覆盖服务器内容；请打开服务器版本或将本机修改另存。', 409, 'WORK_REVISION_CONFLICT', { notCommitted: true });
 function title(value: unknown, fallback = '3D多视图作品') {
   if (value === undefined) return fallback;
@@ -66,7 +72,7 @@ export async function multiviewWorkActor(ownerId: string, db: Db = prisma): Prom
   assertInternalOnly(user, '外部账号无权使用3D多视图作品。');
   return user;
 }
-async function currentActor(user: SessionUser, db: Db = prisma) {
+export async function currentMultiviewActor(user: SessionUser, db: Db = prisma) {
   const current = await multiviewWorkActor(user.id, db);
   if (current.role !== user.role || current.account_type !== user.account_type || current.feature_profile_id !== user.feature_profile_id
     || current.user_profile !== user.user_profile || current.expires_at?.getTime() !== user.expires_at?.getTime()
@@ -75,6 +81,7 @@ async function currentActor(user: SessionUser, db: Db = prisma) {
     || (current.feishu?.union_id || null) !== (user.feishu?.union_id || null)) throw new AuthError('账号或授权已变化，请重新登录核对。', 403);
   return current;
 }
+const currentActor = currentMultiviewActor;
 export async function assertMultiviewWorkSource(user: SessionUser, taskId: string, db: Db = prisma) {
   if (!isMultiviewWorkId(taskId)) throw invalid('来源视频编号无效。');
   await currentActor(user, db);
@@ -97,15 +104,19 @@ async function ownedWork(user: SessionUser, workId: string, db: Db = prisma) {
   if (!isMultiviewWorkId(workId)) throw invalid('作品编号无效。');
   const row = await db.multiviewWork.findFirst({ where: { id: workId, owner_id: user.id } });
   if (!row) throw new AuthError('作品不存在或不可访问。', 404);
-  await assertMultiviewWorkSource(user, row.source_task_id, db);
+  await assertMultiviewWorkReference(user, row, db);
   return row;
 }
+export async function assertMultiviewWorkReference(user: SessionUser, row: Pick<MultiviewWork, 'owner_id' | 'source_task_id' | 'source_id'>, db: Db = prisma) {
+  const { assertMultiviewSourceReference } = await import('./multiview-source.server');
+  return assertMultiviewSourceReference(user, row, db);
+}
 async function dto(user: SessionUser, row: MultiviewWork): Promise<MultiviewWorkDto> {
-  await assertMultiviewWorkSource(user, row.source_task_id);
+  await assertMultiviewWorkReference(user, row);
   let sourceState: MultiviewWorkDto['sourceState'] = 'unavailable';
   if (row.source_version) {
-    try { sourceState = await multiviewSourceVersion(user, row.source_task_id) === row.source_version ? 'current' : 'changed'; }
-    catch (error) { if (!(error instanceof MultiviewError) || ![404, 409, 503].includes(error.status)) throw error; }
+    try { sourceState = await multiviewSourceVersion(user, row.source_task_id, row.source_id ? { kind: 'work', id: row.id } : undefined) === row.source_version ? 'current' : 'changed'; }
+    catch (error) { if (!(error instanceof MultiviewError || error instanceof MultiviewWorkError) || ![404, 409, 503].includes(error.status)) throw error; }
   }
   const recipe = readRecipe(row), readyRecipe = readRecipe(row, true);
   let ready: MultiviewWorkDto['ready'] = null;
@@ -117,18 +128,19 @@ async function dto(user: SessionUser, row: MultiviewWork): Promise<MultiviewWork
         url: `/api/video/multiview/works/${encodeURIComponent(row.id)}/files/${encodeURIComponent(file.role)}?readyRevision=${row.ready_revision}` })) };
   }
   const project = row.project_id ? await prisma.project.findUnique({ where: { id: row.project_id }, select: { name: true } }) : null;
-  await assertMultiviewWorkSource(user, row.source_task_id);
+  await assertMultiviewWorkReference(user, row);
   return { id: row.id, title: row.title, sourceTaskId: row.source_task_id, sourceVersion: row.source_version,
+    sourceId: row.source_id, saveState: row.save_state as MultiviewWorkDto['saveState'],
     projectId: row.project_id, projectTitle: project?.name || null, videoCardId: row.video_card_id, parentWorkId: row.parent_work_id,
     revision: row.revision, draftRevision: row.draft_revision, recipe, info: readInfo(row), status: row.status as MultiviewWorkStatus,
     removed: row.removed_at !== null, sourceState, ready, lastError: row.last_error, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() };
 }
 export async function getMultiviewWork(user: SessionUser, workId: string) { return dto(user, await ownedWork(user, workId)); }
 
-export async function listMultiviewWorks(user: SessionUser, input: { projectId?: string; taskId?: string; q?: string; removed?: boolean; cursor?: string }): Promise<MultiviewWorkList> {
+export async function listMultiviewWorks(user: SessionUser, input: { projectId?: string; taskId?: string; sourceId?: string; q?: string; removed?: boolean; cursor?: string }): Promise<MultiviewWorkList> {
   await currentActor(user);
   if (input.projectId && !isMultiviewWorkId(input.projectId) || input.taskId && !isMultiviewWorkId(input.taskId)
-    || input.q && input.q.length > 120 || input.cursor && input.cursor.length > 512) throw invalid('作品筛选条件无效。');
+    || input.sourceId && !isMultiviewWorkId(input.sourceId) || input.q && input.q.length > 120 || input.cursor && input.cursor.length > 512) throw invalid('作品筛选条件无效。');
   const scope = digest(stable({ owner: user.id, ...input, cursor: undefined }));
   let cursor: { at: string; id: string; scope: string } | null = null;
   if (input.cursor) {
@@ -136,8 +148,8 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
     if (!cursor || cursor.scope !== scope || !isMultiviewWorkId(cursor.id) || !Number.isFinite(Date.parse(cursor.at))) throw invalid('作品翻页位置失效，请重新读取。');
   }
   const taskWhere = await getTaskWhereForUser(user);
-  const where: Prisma.MultiviewWorkWhereInput = { owner_id: user.id, removed_at: input.removed ? { not: null } : null,
-    ...(input.taskId ? { source_task_id: input.taskId } : { source_version: { not: null } }),
+  const where: Prisma.MultiviewWorkWhereInput = { owner_id: user.id, save_state: { not: 'intent' }, removed_at: input.removed ? { not: null } : null,
+    ...(input.sourceId ? { source_id: input.sourceId } : input.taskId ? { source_task_id: input.taskId, source_id: null } : { source_version: { not: null } }),
     ...(input.q ? { title: { contains: input.q } } : {}) };
   let scan: string | undefined, total = 0;
   const selected: Array<{ id: string; updated_at: Date }> = [];
@@ -146,14 +158,16 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
   // only the chosen 24 rows receive recipes/file projections, never all media.
   while (true) {
     const rows = await prisma.multiviewWork.findMany({ where, take: 128, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
-      ...(scan ? { cursor: { id: scan }, skip: 1 } : {}), select: { id: true, source_task_id: true, project_id: true, updated_at: true } });
+      ...(scan ? { cursor: { id: scan }, skip: 1 } : {}), select: { id: true, owner_id: true, source_task_id: true, source_id: true, project_id: true, updated_at: true } });
     if (!rows.length) break;
     const tasks = await prisma.videoTask.findMany({ where: { AND: [taskWhere as Prisma.VideoTaskWhereInput,
       { id: { in: Array.from(new Set(rows.map(row => row.source_task_id))) } }] }, select: { id: true, project: { select: { id: true, name: true } } } });
     const allowed = new Map(tasks.map(task => [task.id, task]));
     for (const row of rows) {
-      const task = allowed.get(row.source_task_id); if (!task) continue;
-      if (task.project) projects.set(task.project.id, task.project.name);
+      const task = allowed.get(row.source_task_id);
+      if (row.source_id) { await assertMultiviewWorkReference(user, row); }
+      else if (!task) continue;
+      if (!row.source_id && task?.project) projects.set(task.project.id, task.project.name);
       if (input.projectId && row.project_id !== input.projectId) continue;
       total += 1;
       if (cursor && (row.updated_at.getTime() > Date.parse(cursor.at) || row.updated_at.getTime() === Date.parse(cursor.at) && row.id >= cursor.id)) continue;
@@ -168,7 +182,7 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
   let preferredWorkId: string | null | undefined;
   if (input.taskId) {
     await assertMultiviewWorkSource(user, input.taskId);
-    const target = { owner_id: user.id, source_task_id: input.taskId, removed_at: null };
+    const target = { owner_id: user.id, source_task_id: input.taskId, source_id: null, removed_at: null, save_state: { not: 'intent' } };
     // Render completion updates updated_at too. Prefer the last real accepted
     // user save/branch receipt, independent of list pagination or background IO.
     const lastEdit = await prisma.multiviewWorkMutation.findFirst({ where: { actor_id: user.id,
@@ -238,51 +252,58 @@ async function mutation(user: SessionUser, input: Json, action: MultiviewWorkRec
 }
 
 export async function createMultiviewWork(user: SessionUser, input: Json) {
-  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title'].includes(key))
+  const prior = await priorMutation(user, input, 'create', null); if (prior) return prior;
+  requireExplicitSave(input);
+  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title', 'protocol', 'branchKey'].includes(key))
     || !isMultiviewWorkId(input.taskId) || typeof input.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(input.sourceVersion)) throw invalid();
   const taskId = input.taskId, version = input.sourceVersion;
-  const prior = await priorMutation(user, input, 'create', null); if (prior) return prior;
   await assertMultiviewWorkSource(user, taskId);
-  const existing = await prisma.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
+  const independent = input.branchKey !== undefined;
+  if (independent && (!mutationValid(input.branchKey) || input.branchKey.length > 100)) throw invalid('另存编号无效。');
+  const existing = independent ? null : await prisma.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
   if (existing?.source_version && existing.source_version !== version) throw new MultiviewWorkError('原视频已变化，已有作品保留，请打开原作品核对。', 409, 'WORK_SOURCE_CHANGED', { workId: existing.id, notCommitted: true });
   const info = await multiviewInfoForWork(user, taskId, version);
   const frozenSourceBinding = sourceBinding(await assertMultiviewWorkSource(user, taskId));
   if (await multiviewSourceVersion(user, taskId) !== version) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
-  const recipe = input.recipe === undefined ? defaultMultiviewWorkRecipe(info) : parseMultiviewWorkRecipe(input.recipe, info);
+  const recipe = parseMultiviewWorkRecipe(input.recipe === undefined ? { ...defaultMultiviewWorkRecipe(info), schema: 2 } : input.recipe, info);
   if (!recipe) throw invalid();
   const recipeHash = multiviewWorkRecipeHash(recipe);
   return mutation(user, input, 'create', null, async db => {
     const source = await assertMultiviewWorkSource(user, taskId, db);
     if (sourceBinding(source) !== frozenSourceBinding) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
-    const previous = await db.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
-    if (previous?.recipe_json) {
+    const previous = independent ? null : await db.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
+    if (previous?.recipe_json && previous.save_state !== 'intent') {
       if (previous.source_version !== version || !multiviewWorkRecipesEqual(readRecipe(previous)!, recipe) || input.title !== undefined && title(input.title) !== previous.title)
         throw new MultiviewWorkError('已有同一来源作品，未覆盖服务器内容；本机修改可以另存一版。', 409, 'WORK_EXISTS', { workId: previous.id, notCommitted: true });
-      return previous;
+      return db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: 2 } });
     }
     const data = { owner_id: user.id, source_task_id: taskId, project_id: source.project_id, video_card_id: source.video_card_id,
+      save_state: 'saved', schema_version: 2,
       source_version: version, source_info_json: JSON.stringify(info), title: title(input.title, previous?.title),
-      draft_revision: 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: 'queued', next_attempt_at: new Date(),
+      draft_revision: previous ? previous.draft_revision + 1 : 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: 'queued', next_attempt_at: new Date(),
       lease_token: null, lease_until: null, attempts: 0, last_error: null };
-    if (previous) return db.multiviewWork.update({ where: { id: previous.id }, data: { ...data, revision: { increment: 1 } } });
-    return db.multiviewWork.create({ data: { id: baseId(user.id, taskId), base_key: 'base', ...data } });
+    if (previous) return db.multiviewWork.update({ where: { id: previous.id }, data: { ...data, revision: { increment: 1 }, write_epoch: { increment: 1 } } });
+    return db.multiviewWork.create({ data: { id: independent ? `mvw_${digest(JSON.stringify([user.id, input.branchKey])).slice(0, 48)}` : baseId(user.id, taskId),
+      base_key: independent ? null : 'base', branch_key: independent ? input.branchKey as string : null, ...data } });
   });
 }
 export async function mutateMultiviewWork(user: SessionUser, workId: string, input: Json) {
+  const prior = await priorMutation(user, input, input.action as MultiviewWorkReceipt['action'], workId); if (prior) return prior;
+  requireExplicitSave(input);
   if (!['save', 'branch', 'remove', 'restore'].includes(String(input.action)) || !Number.isSafeInteger(input.baseRevision)
-    || Number(input.baseRevision) < 1 || Object.keys(input).some(key => !['mutationId', 'baseRevision', 'action', 'recipe', 'title', 'branchKey'].includes(key))) throw invalid();
+    || Number(input.baseRevision) < 1 || Object.keys(input).some(key => !['mutationId', 'baseRevision', 'action', 'recipe', 'title', 'branchKey', 'protocol'].includes(key))) throw invalid();
   const action = input.action as 'save' | 'branch' | 'remove' | 'restore';
-  const prior = await priorMutation(user, input, action, workId); if (prior) return prior;
   const before = await ownedWork(user, workId);
   let info = readInfo(before);
   let frozenSourceBinding: string | null = null;
   if (action === 'save' || action === 'branch') {
     if (!before.source_version || !info) throw invalid('原视频尚未归档，作品配方暂不能修改。');
-    const current = await multiviewSourceVersion(user, before.source_task_id);
+    const access = before.source_id ? { kind: 'work' as const, id: before.id } : undefined;
+    const current = await multiviewSourceVersion(user, before.source_task_id, access);
     if (current !== before.source_version) throw new MultiviewWorkError('原视频已变化，旧选帧未套用到新视频；原作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
-    info = await multiviewInfoForWork(user, before.source_task_id, before.source_version);
-    frozenSourceBinding = sourceBinding(await assertMultiviewWorkSource(user, before.source_task_id));
-    if (await multiviewSourceVersion(user, before.source_task_id) !== before.source_version) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
+    info = await multiviewInfoForWork(user, before.source_task_id, before.source_version, undefined, access);
+    if (!before.source_id) frozenSourceBinding = sourceBinding(await assertMultiviewWorkSource(user, before.source_task_id));
+    if (await multiviewSourceVersion(user, before.source_task_id, access) !== before.source_version) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
   }
   const recipe = input.recipe === undefined ? readRecipe(before) : info && parseMultiviewWorkRecipe(input.recipe, info);
   if ((action === 'save' || action === 'branch') && !recipe) throw invalid();
@@ -301,13 +322,15 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
         return previous;
       }
       return db.multiviewWork.create({ data: { id: `mvw_${digest(JSON.stringify([user.id, branchKey])).slice(0, 48)}`, owner_id: user.id,
+        source_id: row.source_id, save_state: 'saved', schema_version: 2,
         source_task_id: row.source_task_id, project_id: row.project_id, video_card_id: row.video_card_id, parent_work_id: row.id,
         branch_key: branchKey, title: title(input.title, `${row.title.slice(0, 114)}（另存）`), source_version: row.source_version,
         source_info_json: row.source_info_json, draft_revision: 1, recipe_json: JSON.stringify(recipe), recipe_hash: hash, status: 'queued' } });
     }
-    const patch: Prisma.MultiviewWorkUpdateManyMutationInput = { revision: { increment: 1 } };
+    const patch: Prisma.MultiviewWorkUpdateManyMutationInput = { revision: { increment: 1 }, schema_version: 2, write_epoch: { increment: 1 } };
     if (action === 'remove' || action === 'restore') patch.removed_at = action === 'remove' ? new Date() : null;
     else {
+      patch.save_state = 'saved';
       if (row.removed_at) throw new MultiviewWorkError('作品已移出，请先恢复再编辑。', 409, 'WORK_REMOVED', { notCommitted: true });
       patch.title = title(input.title, row.title);
       const hash = multiviewWorkRecipeHash(recipe!);
@@ -325,13 +348,15 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
 export async function registerMultiviewWorkIntent(db: Db, input: { ownerId: string; taskId: string; projectId: string | null; videoCardId: string | null }) {
   return db.multiviewWork.upsert({ where: { owner_id_source_task_id_base_key: { owner_id: input.ownerId, source_task_id: input.taskId, base_key: 'base' } },
     create: { id: baseId(input.ownerId, input.taskId), owner_id: input.ownerId, source_task_id: input.taskId, project_id: input.projectId,
-      video_card_id: input.videoCardId, base_key: 'base', status: 'waiting_source' }, update: {} });
+      video_card_id: input.videoCardId, base_key: 'base', status: 'waiting_source', save_state: 'intent', schema_version: 2 }, update: {} });
 }
 export type MultiviewWorkLease = {
   workId: string; ownerId: string; sourceTaskId: string; sourceVersion: string | null; info: MultiviewInfo | null;
+  sourceId?: string | null;
   recipe: MultiviewWorkRecipe | null; revision: number; draftRevision: number; recipeHash: string | null; token: string;
 };
 const leaseOf = (row: MultiviewWork): MultiviewWorkLease => ({ workId: row.id, ownerId: row.owner_id, sourceTaskId: row.source_task_id,
+  sourceId: row.source_id,
   sourceVersion: row.source_version, info: readInfo(row), recipe: readRecipe(row), revision: row.revision,
   draftRevision: row.draft_revision, recipeHash: row.recipe_hash, token: row.lease_token! });
 const leaseWhere = (lease: MultiviewWorkLease): Prisma.MultiviewWorkWhereInput => ({ id: lease.workId, owner_id: lease.ownerId,
@@ -351,8 +376,8 @@ export async function claimNextMultiviewWork(): Promise<MultiviewWorkLease | nul
 }
 export async function initializeMultiviewWork(lease: MultiviewWorkLease, info: MultiviewInfo): Promise<MultiviewWorkLease | null> {
   if (lease.sourceVersion || lease.recipe || info.taskId !== lease.sourceTaskId) return null;
-  const recipe = defaultMultiviewWorkRecipe(info);
-  if (!parseMultiviewWorkRecipe(recipe, info)) throw invalid('视频初始选帧记录无效。');
+  const recipe = parseMultiviewWorkRecipe({ ...defaultMultiviewWorkRecipe(info), schema: 2 }, info);
+  if (!recipe) throw invalid('视频初始选帧记录无效。');
   const user = await multiviewWorkActor(lease.ownerId);
   await assertMultiviewWorkSource(user, lease.sourceTaskId);
   if (await multiviewSourceVersion(user, lease.sourceTaskId) !== info.sourceVersion) return null;
@@ -360,17 +385,18 @@ export async function initializeMultiviewWork(lease: MultiviewWorkLease, info: M
     await assertMultiviewWorkSource(user, lease.sourceTaskId, db);
     const changed = await db.multiviewWork.updateMany({ where: { ...leaseWhere(lease), source_version: null, recipe_json: null },
       data: { source_version: info.sourceVersion, source_info_json: JSON.stringify(info), recipe_json: JSON.stringify(recipe),
-        recipe_hash: multiviewWorkRecipeHash(recipe), draft_revision: 1, revision: { increment: 1 }, attempts: 1 } });
+        recipe_hash: multiviewWorkRecipeHash(recipe), draft_revision: 1, revision: { increment: 1 }, write_epoch: { increment: 1 }, schema_version: 2, attempts: 1 } });
     return changed.count === 1 ? leaseOf(await db.multiviewWork.findUniqueOrThrow({ where: { id: lease.workId } })) : null;
   });
 }
 export async function completeMultiviewWork(lease: MultiviewWorkLease, manifest: MultiviewWorkManifest): Promise<boolean> {
   if (!lease.recipe || !lease.recipeHash || !parseMultiviewWorkManifest(manifest, lease.recipe, lease.draftRevision, lease.recipeHash)) throw invalid('成品清单不完整，未标记保存成功。');
   const user = await multiviewWorkActor(lease.ownerId);
-  await assertMultiviewWorkSource(user, lease.sourceTaskId);
-  if (await multiviewSourceVersion(user, lease.sourceTaskId) !== lease.sourceVersion) return false;
+  const reference = { owner_id: lease.ownerId, source_task_id: lease.sourceTaskId, source_id: lease.sourceId || null };
+  await assertMultiviewWorkReference(user, reference);
+  if (await multiviewSourceVersion(user, lease.sourceTaskId, lease.sourceId ? { kind: 'work', id: lease.workId } : undefined) !== lease.sourceVersion) return false;
   return prisma.$transaction(async db => {
-    await assertMultiviewWorkSource(user, lease.sourceTaskId, db);
+    await assertMultiviewWorkReference(user, reference, db);
     const changed = await db.multiviewWork.updateMany({ where: leaseWhere(lease), data: { status: 'ready', ready_revision: lease.draftRevision,
       ready_recipe_json: JSON.stringify(lease.recipe), ready_manifest_json: JSON.stringify(manifest), lease_token: null, lease_until: null, last_error: null } });
     return changed.count === 1;

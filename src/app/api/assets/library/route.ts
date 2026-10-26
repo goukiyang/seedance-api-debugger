@@ -16,6 +16,7 @@ import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
+import { multiviewOutputGroups } from '@/lib/video/multiview-output-groups.server';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ const GROUPS = new Set(['date', 'project', 'user']);
 const ENHANCE_FILTERS = new Set(['none', 'all']);
 
 type LibraryItemKind = 'video' | 'image' | 'audio';
-type LibraryItemSource = 'video_task' | 'asset' | 'reference_image';
+type LibraryItemSource = 'video_task' | 'asset' | 'reference_image' | 'multiview_work';
 
 type LibraryUser = {
   id: string;
@@ -47,6 +48,7 @@ type LibraryProject = {
 };
 
 type LibraryItem = {
+  multiviewGroup?: { workId: string; revision: number; children: LibraryItem[]; roles: string[]; frameCount: number; missing: number; syncing: boolean };
   id: string;
   kind: LibraryItemKind;
   source: LibraryItemSource;
@@ -938,9 +940,28 @@ export async function GET(request: NextRequest) {
       includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, directory: true }) : null,
       loadReferenceItems({ ...referenceOptions, directory: true }),
     ]);
-    const directory = sortItems(Array.from(new Map(directoryResults.flatMap(result =>
-      result && 'directory' in result ? result.directory : []).map(item => [item.id, item])).values()), sort);
-    const directoryVersion = createHash('sha256').update(JSON.stringify(directory.map(item => item.id))).digest('hex');
+    const groupProjection = searchParams.get('collapse_multiview') === '1' && user.account_type === 'internal' && enhance === 'none'
+      && ['all', 'image'].includes(type) && ['all', 'succeeded'].includes(status) && (includeGenerated || multiviewOutputsOnly)
+      && (!ownerUserId || ownerUserId === user.id) ? await multiviewOutputGroups(user, removed.asset) : null;
+    const groupItems: LibraryItem[] = (groupProjection?.groups || []).filter(group => (!projectId || group.work.project_id === projectId)
+      && (!keyword || group.work.title.includes(keyword))).map(group => {
+      const children = group.assets.map(serializeAsset);
+      const empty = serializeAsset({ id: group.work.id, original_url: '', thumbnail_url: null, file_name: group.work.title,
+        type: 'image', status: 'active', width: null, height: null, file_size: null, created_at: group.work.created_at, owner_id: user.id, owner: null });
+      return { ...empty, id: `multiview_work:${group.work.id}`, source: 'multiview_work', assetId: null,
+        title: group.work.title, createdAt: group.work.created_at.toISOString(),
+        thumbnailUrl: group.coverAssetId ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${group.coverAssetId}`)}&variant=thumbnail` : null,
+        generationOrigin: { kind: 'multiview-output', label: '3D多视图' },
+        multiviewGroup: { workId: group.work.id, revision: group.revision, children, roles: group.roles, frameCount: group.frameCount, missing: group.missing, syncing: group.syncing } };
+    });
+    const directory = sortItems(Array.from(new Map([...directoryResults.flatMap(result =>
+      result && 'directory' in result ? result.directory : []).filter(item => !item.id.startsWith('asset:') || !groupProjection?.dedicatedIds.has(item.id.slice(6))),
+      ...groupItems].map(item => [item.id, item])).values()), sort);
+    const groupVersions = new Map(groupItems.map(item => [item.id, item.multiviewGroup]));
+    const directoryVersion = createHash('sha256').update(JSON.stringify(directory.map(item => {
+      const group = groupVersions.get(item.id);
+      return group ? [item.id, group.revision, group.children.map(child => child.id), group.missing] : item.id;
+    }))).digest('hex');
     const expectedDirectory = searchParams.get('directory_version');
     if (expectedDirectory && expectedDirectory !== directoryVersion) {
       return NextResponse.json({ error: '素材目录已变化，请刷新后继续翻页；当前内容保留' }, { status: 409, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
@@ -954,7 +975,7 @@ export async function GET(request: NextRequest) {
       includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, ids: ids('asset') }) : null,
       loadReferenceItems({ ...referenceOptions, ids: ids('reference_image') }),
     ]);
-    const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items].map(item => [item.id, item]));
+    const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items, ...groupItems].map(item => [item.id, item]));
     const items = selected.flatMap(item => byId.has(item.id) ? [byId.get(item.id)!] : []);
 
     return NextResponse.json({

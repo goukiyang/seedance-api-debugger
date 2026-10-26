@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { MultiviewDraft, MultiviewInfo } from '@/lib/video/multiview-contract';
-import { isMultiviewWorkId, parseMultiviewWorkRecipe, multiviewWorkRecipesEqual, multiviewWorkContentSignature, type MultiviewWorkDto,
+import { MULTIVIEW_SAVE_PROTOCOL, isMultiviewWorkId, parseMultiviewWorkRecipe, multiviewWorkRecipesEqual, multiviewWorkContentSignature, type MultiviewWorkDto,
   type MultiviewWorkRecipe, type MultiviewWorkReceipt } from '@/lib/video/multiview-work-contract';
 import { readMultiviewWorkBinding, retainMultiviewWorkBinding, hasMultiviewWorkBaseline, retainMultiviewWorkBaseline, prepareMultiviewCurrentWorkSave } from './multiview-work-client';
 
@@ -12,11 +12,11 @@ type Options = { owner: string; authority: string; enabled: boolean; workId: str
   info: MultiviewInfo | null; draft: MultiviewDraft | null; localPresent: boolean; allowCreate: boolean; editRevision: number;
   onSource: (work: MultiviewWorkDto) => void; onRestore: (recipe: MultiviewWorkRecipe) => void; onBound: (work: MultiviewWorkDto) => void };
 type Pending = { schema: 1; owner: string; taskId: string; sourceVersion: string; mutationId: string;
-  action: 'create' | 'save' | 'branch'; workId: string | null; hash: string; result?: 'committed' | 'rejected' };
+  action: 'create' | 'save' | 'branch'; workId: string | null; hash: string; submittedSignature?: string; submittedTitle?: string; localTitle?: string; result?: 'committed' | 'rejected' };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const signature = multiviewWorkContentSignature;
 export function appliedWorkRecipe(draft: MultiviewDraft | null, info: MultiviewInfo | null) {
-  return draft && info ? parseMultiviewWorkRecipe({ ...draft, restoreOrder: draft.restoreOrder || [] }, info) : null;
+  return draft && info ? parseMultiviewWorkRecipe({ ...draft, schema: 2, restoreOrder: draft.restoreOrder || [] }, info) : null;
 }
 function workFrom(value: unknown): MultiviewWorkDto | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -41,22 +41,22 @@ function receiptFrom(value: unknown, pending: Pending): MultiviewWorkReceipt | n
     && Number.isSafeInteger(result.revision) && result.revision >= 0 && Number.isSafeInteger(result.draftRevision) && result.draftRevision >= 0 ? result : null;
 }
 const recordKey = (owner: string, mutationId: string) => `sd2:multiview-work-mutation:v1:${owner}:${mutationId}`;
-const pointerKey = (owner: string, taskId: string) => `sd2:multiview-work-pending:v1:${owner}:${taskId}`;
+const pointerKey = (owner: string, taskId: string, workId: string | null) => `sd2:multiview-work-pending:v2:${owner}:${taskId}:${workId || 'draft'}`;
 function retainPending(value: Pending) {
   const bytes = JSON.stringify(value);
   localStorage.setItem(recordKey(value.owner, value.mutationId), bytes);
   if (localStorage.getItem(recordKey(value.owner, value.mutationId)) !== bytes) throw new Error('原保存编号未能保存，尚未发送。');
-  sessionStorage.setItem(pointerKey(value.owner, value.taskId), value.mutationId);
-  if (sessionStorage.getItem(pointerKey(value.owner, value.taskId)) !== value.mutationId) throw new Error('原保存编号未能保存，尚未发送。');
+  sessionStorage.setItem(pointerKey(value.owner, value.taskId, value.workId), value.mutationId);
+  if (sessionStorage.getItem(pointerKey(value.owner, value.taskId, value.workId)) !== value.mutationId) throw new Error('原保存编号未能保存，尚未发送。');
 }
 function settlePending(value: Pending, result: 'committed' | 'rejected') {
   const bytes = JSON.stringify({ ...value, result });
   localStorage.setItem(recordKey(value.owner, value.mutationId), bytes);
   if (localStorage.getItem(recordKey(value.owner, value.mutationId)) !== bytes) throw new Error('原保存回执未能完整保存在此设备，请保留页面继续查询。');
-  if (sessionStorage.getItem(pointerKey(value.owner, value.taskId)) === value.mutationId) sessionStorage.removeItem(pointerKey(value.owner, value.taskId));
+  if (sessionStorage.getItem(pointerKey(value.owner, value.taskId, value.workId)) === value.mutationId) sessionStorage.removeItem(pointerKey(value.owner, value.taskId, value.workId));
 }
-function readPending(owner: string, taskId: string): Pending | null {
-  let id = sessionStorage.getItem(pointerKey(owner, taskId));
+function readPending(owner: string, taskId: string, workId: string | null): Pending | null {
+  let id = sessionStorage.getItem(pointerKey(owner, taskId, workId));
   if (!id) {
     const length = localStorage.length;
     if (length > 8192) throw new Error('本机原保存记录尚未查全，未按没有保存处理；请保留原页面查询。');
@@ -64,21 +64,21 @@ function readPending(owner: string, taskId: string): Pending | null {
       const key = localStorage.key(index);
       if (!key?.startsWith(`sd2:multiview-work-mutation:v1:${owner}:`)) continue;
       const raw = localStorage.getItem(key);
-      if (!raw || raw.length > 2048) throw new Error('本机原保存记录无法确认，未新建保存。');
+      if (!raw || raw.length > 32768) throw new Error('本机原保存记录无法确认，未新建保存。');
       const record = JSON.parse(raw) as Pending;
       if (record.schema !== 1 || record.owner !== owner || !uuid.test(record.mutationId) || key !== recordKey(owner, record.mutationId)
         || !isMultiviewWorkId(record.taskId) || !/^[a-f0-9]{64}$/.test(record.sourceVersion) || !/^[a-f0-9]{64}$/.test(record.hash)
         || !['create', 'save', 'branch'].includes(record.action) || record.result !== undefined && !['committed', 'rejected'].includes(record.result)) throw new Error('本机原保存记录无法确认，未新建保存。');
-      if (record.owner === owner && record.taskId === taskId && record.result === undefined) { id = record.mutationId; break; }
+      if (record.owner === owner && record.taskId === taskId && record.workId === workId && record.result === undefined) { id = record.mutationId; break; }
     }
     if (length !== localStorage.length) throw new Error('本机原保存记录正在变化，请重新核对。');
     if (!id) return null;
   }
   if (!uuid.test(id)) throw new Error('原保存记录无法确认，未新建保存。');
   const raw = localStorage.getItem(recordKey(owner, id));
-  if (!raw || raw.length > 2048) throw new Error('原保存记录缺失，未按没有保存处理。');
+  if (!raw || raw.length > 32768) throw new Error('原保存记录缺失，未按没有保存处理。');
   const value = JSON.parse(raw) as Pending;
-  if (value.schema !== 1 || value.owner !== owner || value.taskId !== taskId || value.mutationId !== id
+  if (value.schema !== 1 || value.owner !== owner || value.taskId !== taskId || value.workId !== workId || value.mutationId !== id
     || !/^[a-f0-9]{64}$/.test(value.hash) || !/^[a-f0-9]{64}$/.test(value.sourceVersion)
     || !['create', 'save', 'branch'].includes(value.action) || value.workId !== null && !isMultiviewWorkId(value.workId)
     || value.result !== undefined && !['committed', 'rejected'].includes(value.result)) throw new Error('原保存记录无法确认，未新建保存。');
@@ -181,7 +181,7 @@ export function useMultiviewWork(options: Options) {
     initialized.current = ''; acknowledged.current = ''; editedTitle.current = false; initialEditRevision.current = options.editRevision; titleKnown.current = ''; setTitle('');
     if (options.enabled && options.owner && options.taskId) {
       try {
-        const original = readPending(options.owner, options.taskId); pendingRef.current = original; setPending(original);
+        const original = readPending(options.owner, options.taskId, options.workId || null); pendingRef.current = original; setPending(original);
         // A task-wide legacy title must not rename a different branch of that task.
         const savedTitle = options.workId && titleKey ? localStorage.getItem(titleKey) : null;
         if (savedTitle !== null) { if (savedTitle.length > 120) throw new Error('作品名称记录无效。'); setTitle(savedTitle); editedTitle.current = true; }
@@ -256,7 +256,14 @@ export function useMultiviewWork(options: Options) {
     settlePending(original, 'committed'); pendingRef.current = null; setPending(null);
     setWork(next); workRef.current = next; acknowledged.current = signature(next.recipe, next.title);
     setStopped(!retained && next.revision === receipt.revision); setConflict(next.revision !== receipt.revision); setStorageFailed(!retained && next.revision === receipt.revision); setBaselineReady(true);
-    if (original.action !== 'save') { setTitle(next.title); editedTitle.current = false; live.current.onBound(next); }
+    if (original.action !== 'save') {
+      if (original.submittedTitle === undefined || titleRef.current === (original.localTitle ?? original.submittedTitle)) {
+        setTitle(next.title); titleRef.current = next.title; editedTitle.current = false;
+      } else {
+        localStorage.setItem(`sd2:multiview-work-title:v1:${value.owner}:${next.id}`, titleRef.current);
+      }
+      live.current.onBound(next);
+    }
     setMessage(next.revision !== receipt.revision ? '原保存已确认，服务器另有更新；可保存到原作品或打开服务器版本。'
       : retained ? '' : '原作品已保存，本机恢复记录未能完整保存，请保留页面重新核对。');
   }
@@ -274,9 +281,11 @@ export function useMultiviewWork(options: Options) {
     } catch (cause) { if (current(value)) setMessage(cause instanceof Error ? cause.message : '原保存结果待确认，请继续查询原编号。'); }
     finally { if (lock.current === token) { lock.current = null; setBusy(false); } }
   }
-  async function send(action: 'create' | 'save' | 'branch', saveCurrent = false) {
+  async function send(action: 'create' | 'save' | 'branch', saveCurrent = false, titleOverride?: string) {
     const info = live.current.info; const applied = appliedWorkRecipe(live.current.draft, info); let existing = workRef.current;
-    const submittedTitle = titleRef.current;
+    const localTitle = titleRef.current, submittedTitle = titleOverride ?? localTitle;
+    const firstBranch = action === 'branch' && !existing;
+    if (firstBranch) action = 'create';
     if (action === 'create' && existing) action = 'save';
     if (!options.enabled || !info || !applied || lock.current || pendingRef.current || storageFailed || !submittedTitle.trim() && action !== 'create'
       || action !== 'create' && (!existing || existing.removed || existing.sourceVersion !== info.sourceVersion)) return;
@@ -285,7 +294,7 @@ export function useMultiviewWork(options: Options) {
     let original: Pending | null = null; let sent = false;
     let submittedRecipe = applied;
     try {
-      const unresolved = readPending(options.owner, options.taskId);
+      const unresolved = readPending(options.owner, options.taskId, existing?.id || null);
       if (unresolved) { pendingRef.current = unresolved; setPending(unresolved); setMessage('仍有原保存待确认，请先查询原保存。'); return; }
       if (saveCurrent) {
         const fresh = await prepareMultiviewCurrentWorkSave({ workId: existing!.id, taskId: options.taskId, info, recipe: applied,
@@ -296,13 +305,13 @@ export function useMultiviewWork(options: Options) {
         existing = fresh.work; submittedRecipe = fresh.recipe;
       }
       const mutationId = crypto.randomUUID();
-      const body = action === 'create' ? { mutationId, taskId: options.taskId, sourceVersion: info.sourceVersion, recipe: submittedRecipe, ...(submittedTitle.trim() ? { title: submittedTitle } : {}) }
-        : { mutationId, baseRevision: existing!.revision, action, recipe: submittedRecipe, title: submittedTitle,
+      const body = action === 'create' ? { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId, taskId: options.taskId, sourceVersion: info.sourceVersion, recipe: submittedRecipe, ...(firstBranch ? { branchKey: crypto.randomUUID() } : {}), ...(submittedTitle.trim() ? { title: submittedTitle } : {}) }
+        : { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId, baseRevision: existing!.revision, action, recipe: submittedRecipe, title: submittedTitle,
           ...(action === 'branch' ? { branchKey: crypto.randomUUID() } : {}) };
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(body)));
       if (!current(value)) return;
       original = { schema: 1, owner: options.owner, taskId: options.taskId, sourceVersion: info.sourceVersion, mutationId,
-        action, workId: existing?.id || null, hash: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') };
+        action, workId: existing?.id || null, localTitle, submittedTitle, submittedSignature: signature(submittedRecipe, submittedTitle), hash: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') };
       retainPending(original); pendingRef.current = original; setPending(original); sent = true;
       const response = await fetch(action === 'create' ? '/api/video/multiview/works' : `/api/video/multiview/works/${encodeURIComponent(existing!.id)}`, {
         method: action === 'create' ? 'POST' : 'PATCH', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
@@ -330,13 +339,6 @@ export function useMultiviewWork(options: Options) {
     } finally { if (lock.current === token) { lock.current = null; setBusy(false); } }
   }
   const sendRef = useRef(send); sendRef.current = send;
-  const recipeRef = useRef(recipe); recipeRef.current = recipe;
-  useEffect(() => {
-    if (!options.enabled || !hydrated || loadedIdentity !== identity || loading || !recipeRef.current || pending || busy || conflict || stopped || storageFailed || work && !baselineReady || !work && !options.allowCreate
-      || work && (!work.recipe || initialized.current !== `${identity}:${work.id}:${options.info?.sourceVersion}`) || localSignature === acknowledged.current) return;
-    const timer = window.setTimeout(() => void sendRef.current(work ? 'save' : 'create'), 750);
-    return () => window.clearTimeout(timer);
-  }, [options.enabled, options.allowCreate, options.info?.sourceVersion, hydrated, loadedIdentity, baselineReady, loading, localSignature, pending, busy, conflict, stopped, storageFailed, work, identity]);
   useEffect(() => {
     if (!work || !options.enabled || !['waiting_source', 'queued', 'rendering'].includes(work.status)) return;
     const value = scope(); let cancelled = false; let timer: ReturnType<typeof setTimeout>;
@@ -371,14 +373,14 @@ export function useMultiviewWork(options: Options) {
     : changed ? 'local' : work.status === 'ready' && work.ready?.revision === work.draftRevision ? 'saved' : work.status === 'failed' ? 'failed' : 'preparing';
   return { work, title, phase, loading, busy, pending: Boolean(pending), conflict, message, storageFailed, changed,
     unsaved: storageFailed && (editedTitle.current || Boolean(pending)),
-    canBranch: Boolean(work?.recipe && options.info && work.sourceVersion === options.info.sourceVersion && work.sourceState === 'current' && !work.removed && title.trim() && !pending && !busy),
+    canBranch: Boolean(hydrated && recipe && options.info && (!work || work.sourceVersion === options.info.sourceVersion && work.sourceState === 'current' && !work.removed) && !storageFailed && !pending && !busy),
     canSaveCurrent: Boolean(hydrated && work?.recipe && options.info && recipe && work.sourceVersion === options.info.sourceVersion
       && work.sourceState === 'current' && !work.removed && title.trim() && !pending && !busy && !storageFailed),
     saveCurrent: () => send('save', true),
     canRetrySave: Boolean((stopped || work?.status === 'failed') && hydrated && work?.recipe && work.sourceState === 'current'
       && !work.removed && !conflict && !pending && !busy && !storageFailed),
-    setTitle: (value: string) => { editedTitle.current = true; setTitle(value); }, openServer,
-    create: () => send('create'), branch: () => send('branch'), queryOriginal,
+    setTitle: (value: string) => { editedTitle.current = true; titleRef.current = value; setTitle(value); }, openServer,
+    create: () => send('create'), branch: (title?: string) => send('branch', false, title), queryOriginal,
     retry: () => { setRetry(value => value + 1); }, retrySave: () => {
       if (workRef.current?.status === 'failed') void sendRef.current('save');
       else { setStopped(false); setMessage(''); }

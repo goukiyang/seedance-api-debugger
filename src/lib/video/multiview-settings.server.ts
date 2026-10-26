@@ -91,11 +91,25 @@ export async function listMultiviewSettings(user: SessionUser, kind: string | nu
   return { items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 function parseSource(value: unknown): MultiviewSettingsSource {
-  if (!record(value) || Object.keys(value).some(key => !['taskId', 'sourceVersion'].includes(key)) || typeof value.taskId !== 'string'
+  if (!record(value) || Object.keys(value).some(key => !['taskId', 'sourceVersion', 'access'].includes(key)) || typeof value.taskId !== 'string'
     || !/^[A-Za-z0-9_-]{1,160}$/.test(value.taskId) || typeof value.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(value.sourceVersion)) {
     throw invalid('请保留原视频与版本后再保存或套用选帧方案。');
   }
-  return { taskId: value.taskId, sourceVersion: value.sourceVersion };
+  if (value.access !== undefined && (!record(value.access) || Object.keys(value.access).some(key => !['kind', 'id'].includes(key))
+    || !['work', 'share'].includes(String(value.access.kind)) || typeof value.access.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(value.access.id))) throw invalid('来源权限引用无效。');
+  return { taskId: value.taskId, sourceVersion: value.sourceVersion, ...(value.access ? { access: value.access as MultiviewSettingsSource['access'] } : {}) };
+}
+async function checkSourceAuthority(user: SessionUser, source: MultiviewSettingsSource, db: Db) {
+  if (!source.access) { await assertMultiviewWorkSource(user, source.taskId, db); return; }
+  const { assertMultiviewShareAccess, assertMultiviewSourceReference } = await import('./multiview-source.server');
+  if (source.access.kind === 'share') {
+    const { share } = await assertMultiviewShareAccess(user, source.access.id, db);
+    if (share.source_task_id !== source.taskId || share.source_version !== source.sourceVersion) throw invalid('分享来源已变化。');
+  } else {
+    const work = await db.multiviewWork.findUnique({ where: { id: source.access.id } });
+    if (!work || work.removed_at || work.source_task_id !== source.taskId || work.source_version !== source.sourceVersion) throw invalid('方案来源已变化。');
+    await assertMultiviewSourceReference(user, work, db);
+  }
 }
 /** Prove constant cadence against every timestamp, rather than trusting a nominal FPS label. */
 export function multiviewSettingsTiming(info: Pick<MultiviewInfo, 'timestamps' | 'duration'>, slots: Array<{ frame: number }>) {
@@ -123,7 +137,7 @@ export function assertMultiviewFrameSettingsCompatible(value: MultiviewFrameSett
   if (!compatible) throw new MultiviewSettingsError('当前视频帧率或时间轴不同，这份选帧方案不适用；当前拼图保留。', 409, 'FRAME_SETTINGS_INAPPLICABLE');
 }
 async function sourceInfo(user: SessionUser, source: MultiviewSettingsSource, request: Request) {
-  const info = await multiviewInfo(user, source.taskId, request);
+  const info = await multiviewInfo(user, source.taskId, request, source.access);
   if (info.sourceVersion !== source.sourceVersion) throw new MultiviewSettingsError('原视频版本已改变，当前拼图保留。', 409, 'MULTIVIEW_SETTINGS_SOURCE_CHANGED');
   return info;
 }
@@ -238,8 +252,8 @@ export async function saveMultiviewSettings(user: SessionUser, input: unknown, r
       if (current && current.value.ownerId !== user.id) throw new MultiviewSettingsError('只能修改本人保存的设置；可将共享设置另存为自己的方案。', 403, 'MULTIVIEW_SETTINGS_NOT_OWNER');
       if (current && current.value.revision !== input.expectedRevision) throw changed();
       if (source) {
-        await assertMultiviewWorkSource(user, source.taskId, db);
-        if (await multiviewSourceVersion(user, source.taskId) !== source.sourceVersion) throw new MultiviewSettingsError('原视频版本已改变，未保存帧位置。', 409, 'MULTIVIEW_SETTINGS_SOURCE_CHANGED');
+        await checkSourceAuthority(user, source, db);
+        if (await multiviewSourceVersion(user, source.taskId, source.access) !== source.sourceVersion) throw new MultiviewSettingsError('原视频版本已改变，未保存帧位置。', 409, 'MULTIVIEW_SETTINGS_SOURCE_CHANGED');
       } else if (kind === 'generation') {
         const generation = parseMultiviewGenerationSettingsValue(value)!;
         await generationSavePreset(user, generation.presetVersion, input.sourceSettingsBinding, db);
@@ -283,7 +297,8 @@ export async function applyMultiviewSettings(user: SessionUser, id: string, inpu
   // Preparation may await media IO; recheck both source and sharing after that await.
   const fresh = await readMultiviewSettings(user, id);
   if (fresh.revision !== settings.revision || fresh.contentHash !== settings.contentHash) throw changed();
-  if (await multiviewSourceVersion(user, target.taskId) !== target.sourceVersion) throw new MultiviewSettingsError('原视频版本已改变，当前拼图保留。', 409, 'MULTIVIEW_SETTINGS_SOURCE_CHANGED');
+  await checkSourceAuthority(user, target, prisma);
+  if (await multiviewSourceVersion(user, target.taskId, target.access) !== target.sourceVersion) throw new MultiviewSettingsError('原视频版本已改变，当前拼图保留。', 409, 'MULTIVIEW_SETTINGS_SOURCE_CHANGED');
   return { settings: fresh, slots: settings.value.slots.map(slot => ({ ...slot })) };
 }
 /** Only new quote/acceptance calls use this live gate; accepted-request lookup stays before it. */

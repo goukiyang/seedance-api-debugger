@@ -138,3 +138,10 @@
 
 .detailFooter > span { color: oklch(0.75 0.012 245); font-size: 13px; }
 .detailFooter > button { inline-size: 100%; white-space: normal; }
+.multiviewGroupDialog { box-sizing: border-box; width: min(900px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; color: var(--text-primary); background: var(--bg-panel); }
+.multiviewGroupDialog::backdrop { background: #0007; }
+.multiviewGroupDialog header, .multiviewGroupDialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.multiviewGroupDialog h2 { font-size: 18px; overflow-wrap: anywhere; }
+.multiviewGroupGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 12px; margin: 12px 0; }
+.multiviewGroupGrid button { min-width: 0; display: flex; flex-direction: column; gap: 6px; border: 0; background: none; color: inherit; padding: 0; }
+.multiviewGroupGrid img { width: 100%; height: 150px; object-fit: contain; }
