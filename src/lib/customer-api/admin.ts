@@ -73,7 +73,9 @@ export async function mutateApiAdmin(actorId: string, body: Record<string, unkno
     let result: Record<string, unknown>;
     let token: string | undefined;
     if (body.action === 'create') {
-      const name = text(body.name, '客户名称'), timezone = text(body.timezone, '预算时区'); budgetPeriod(timezone);
+      const name = text(body.name, '客户名称'), timezone = text(body.timezone, '预算时区');
+      try { budgetPeriod(timezone); }
+      catch { throw new CustomerApiError('INVALID_SETTING', '预算时区无效，请使用有效的 IANA 时区名称。'); }
       const suffix = randomUUID().replace(/-/g, ''), username = `api_${suffix}`;
       const password = hashPassword(randomBytes(32).toString('base64url'));
       const user = await tx.user.create({ data: { name, username, email: `${username}@api.invalid`,

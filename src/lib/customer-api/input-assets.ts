@@ -62,7 +62,8 @@ export async function resolveProviderMedia(request: Request, id: string) {
   if (!/^[a-f0-9]{64}$/.test(raw) || !Number.isSafeInteger(expires) || expires < Date.now() / 1000 || expires > Date.now() / 1000 + 3600) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
   const row = await prisma.apiAsset.findUnique({ where: { id }, include: { customer: { include: { user: true } } } });
   if (!row || !row.active || !row.customer.read_enabled || row.customer.user.status !== 'active'
-    || row.customer.user.account_type !== 'external' || row.customer.user.role !== 'user') throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
+    || row.customer.user.account_type !== 'external' || row.customer.user.role !== 'user'
+    || row.customer.user.expires_at && row.customer.user.expires_at.getTime() <= Date.now()) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
   const expected = signature(id, row.source_version, expires);
   if (!timingSafeEqual(Buffer.from(expected), Buffer.from(raw))) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
   const source = await prisma.asset.findUnique({ where: { id: row.asset_id } });
