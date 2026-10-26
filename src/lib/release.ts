@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '封面可改、生成按钮会说明原因', outline: [
-  '从共享模板复制出来的本人模块，可以单独设置自己的封面',
-  '左右或上下封面选了生成图后，另一格自动填入它的原图',
-  '3D多视图生成按钮不可用时会写明原因，“新建”移到最前面',
+const notice = { title: '模板封面选图更清晰，对比自动配原图', outline: [
+  '封面裁剪与预览使用清晰原图',
+  '左右、上下对比自动带入本次生成的输入原图',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

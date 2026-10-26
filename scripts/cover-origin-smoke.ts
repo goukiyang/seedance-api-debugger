@@ -1,17 +1,30 @@
 import assert from 'node:assert/strict';
-import { studioResultOriginAsset } from '../src/lib/image-studio/result-origin';
+import { studioResultOrigin, studioResultOriginAsset } from '../src/lib/image-studio/result-origin';
 
-// 左右/上下 covers: the source image of a result is the first primary input of the owner's own task.
+// No provider, HTTP, production database or image encoding: frozen task rows only.
 async function main() {
-  const tasks: Record<string, string | null> = {
-    r1: JSON.stringify({ primaryReferenceImages: [{ id: 'src1' }, { id: 'src2' }] }), r2: JSON.stringify({ primaryReferenceImages: [] }), r3: 'not json',
+  const frozen = (ids: string[]) => ({ snapshot_json: JSON.stringify({
+    referencePolicy: { primaryIds: ids }, primaryReferenceImages: ids.map(id => ({ id, referenceRole: 'primary' })),
+  }), reference_ids: JSON.stringify(ids) });
+  const tasks: Record<string, { snapshot_json: string; reference_ids: string }> = {
+    result1: frozen(['source1']), multiple: frozen(['source1', 'source2']), textonly: frozen([]),
+    legacy: { snapshot_json: JSON.stringify({ primaryReferenceImages: [{ id: 'source1' }] }), reference_ids: '["source1"]' },
+    wrongrole: { snapshot_json: JSON.stringify({ referencePolicy: { primaryIds: ['source1'] },
+      primaryReferenceImages: [{ id: 'source1', referenceRole: 'auxiliary' }] }), reference_ids: '["source1"]' },
+    mismatch: { ...frozen(['source1']), reference_ids: '["other"]' },
   };
-  const fake = { imageStudioTask: { findFirst: async ({ where }: { where: { owner_id: string; asset_id: string } }) =>
-    where.owner_id === 'me' && where.asset_id in tasks ? { snapshot_json: tasks[where.asset_id] } : null } };
-  assert.equal(await studioResultOriginAsset('me', 'r1', fake as never), 'src1');
-  assert.equal(await studioResultOriginAsset('me', 'r2', fake as never), null, 'no input image');
-  assert.equal(await studioResultOriginAsset('me', 'r3', fake as never), null, 'broken snapshot');
-  assert.equal(await studioResultOriginAsset('other', 'r1', fake as never), null, 'only own tasks');
+  const fake = { imageStudioTask: { findFirst: async ({ where }: { where: { owner_id: string; asset_id: string; deleted_at: unknown } }) => {
+    assert.equal(where.deleted_at, null, 'deleted task inputs remain protected');
+    return where.owner_id === 'me' ? tasks[where.asset_id] || null : null;
+  } } };
+  assert.equal(await studioResultOriginAsset('me', 'result1', fake as never), 'source1');
+  assert.deepEqual(await studioResultOrigin('me', 'multiple', fake as never), { state: 'multiple' });
+  assert.equal(await studioResultOriginAsset('me', 'multiple', fake as never), null, 'never guess the first of several inputs');
+  assert.deepEqual(await studioResultOrigin('me', 'textonly', fake as never), { state: 'none' });
+  for (const id of ['legacy', 'wrongrole', 'mismatch']) {
+    assert.deepEqual(await studioResultOrigin('me', id, fake as never), { state: 'unknown' });
+  }
+  assert.equal(await studioResultOriginAsset('other', 'result1', fake as never), null, 'only own tasks');
   assert.equal(await studioResultOriginAsset('me', '../x', fake as never), null, 'bad id');
   console.log('cover origin smoke: ok');
 }

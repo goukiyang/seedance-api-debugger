@@ -16,6 +16,8 @@ export type ModuleCoverDTO = { revision: number; target: ModuleCoverTarget; avai
   thumbnailUrl: string | null; imageUrl: string | null; width: 1280; height: 960 | 1280; updatedAt: string;
   unavailableReason?: string };
 export type ModuleCoverSourceDTO = { assetId: string; version: string; previewUrl: string; width: number; height: number };
+export type ModuleCoverSelection = { source: ModuleCoverSourceDTO; originSource: ModuleCoverSourceDTO | null; originAssetId: string | null;
+  originState: 'ready' | 'not-generated' | 'none' | 'unknown' | 'multiple' | 'unavailable' };
 export type ModuleCoverEditorState = { target: ModuleCoverTarget; revision: number; canManage: boolean;
   fixedCover: ModuleCoverDTO | null; recipe: ModuleCoverRecipe | null; sources: ModuleCoverSourceDTO[];
   sourceError?: string };

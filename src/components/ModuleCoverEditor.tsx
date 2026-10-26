@@ -11,7 +11,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
-import { MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverCrop, type ModuleCoverEditorState, type ModuleCoverLayout, type ModuleCoverSquareRecipe, type ModuleCoverRequestResult, type ModuleCoverSaveInput, type ModuleCoverSaveResult, type ModuleCoverSourceDTO } from '@/lib/image-studio/module-cover-types';
+import { MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverCrop, type ModuleCoverEditorState, type ModuleCoverLayout, type ModuleCoverSquareRecipe, type ModuleCoverRequestResult, type ModuleCoverSaveInput, type ModuleCoverSaveResult, type ModuleCoverSourceDTO, type ModuleCoverSelection } from '@/lib/image-studio/module-cover-types';
 import styles from './ModuleCoverEditor.module.css';
 
 type Slot = { source: ModuleCoverSourceDTO; crop?: ModuleCoverCrop; restore?: ModuleCoverCrop; key: number } | null;
@@ -64,15 +64,10 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
       onCropAreaChange={publishCrop} onInteractionStart={() => { if (ready && !disabled) onInteract(); }}
       onMediaLoaded={media => {
         if (!(media.naturalWidth > 0 && media.naturalHeight > 0)) return;
-        // readStudioPreview fits inside 1600x1600 without enlargement. Compare
-        // dimensions with its at-most-one-pixel resize quantization, not a ratio.
-        const scale = Math.min(1, 1600 / Math.max(slot.source.width, slot.source.height));
-        const rounding = scale < 1 ? 1 : 0;
+        // The protected source URL serves the oriented original, so crop percentages
+        // and the saved Sharp render both refer to these exact pixel dimensions.
         if (!Number.isInteger(slot.source.width) || !Number.isInteger(slot.source.height) || slot.source.width < 1 || slot.source.height < 1
-          || !Number.isInteger(media.naturalWidth) || !Number.isInteger(media.naturalHeight)
-          || media.naturalWidth > Math.min(1600, slot.source.width) || media.naturalHeight > Math.min(1600, slot.source.height)
-          || Math.abs(media.naturalWidth - Math.max(1, slot.source.width * scale)) > rounding
-          || Math.abs(media.naturalHeight - Math.max(1, slot.source.height * scale)) > rounding) {
+          || media.naturalWidth !== slot.source.width || media.naturalHeight !== slot.source.height) {
           loaded.current = false; setFailed(true); setReady(false); onCrop(); return;
         }
         loaded.current = true; setFailed(false);
@@ -136,6 +131,9 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const [retryAllowed, setRetryAllowed] = useState(false);
   const [reading, setReading] = useState(false);
   const busyRef = useRef(false), alive = useRef(true), sequence = useRef(0);
+  const selection = useRef<{ assetId: string; index: number; paired: boolean } | null>(null);
+  const selectionEpoch = useRef(0);
+  const selectionRequest = useRef<AbortController | null>(null);
   const endpoint = `/api/image-studio/modules/${encodeURIComponent(moduleId)}/cover`;
   const count = layout === 'single' ? 1 : 2;
   const legacyDraft = state?.recipe?.version === 1;
@@ -146,7 +144,8 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
 
   const initialize = useCallback(async () => {
     if (!current()) return;
-    setLoading(true); setError(''); setState(null); setPreview(null); setPreviewError('');
+    selectionEpoch.current += 1; selectionRequest.current?.abort(); selection.current = null;
+    setReading(false); setLoading(true); setError(''); setState(null); setPreview(null); setPreviewError('');
     try {
       const value = await json<ModuleCoverEditorState>(await fetch(endpoint, { cache: 'no-store' }));
       if (!current()) return;
@@ -175,7 +174,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   }, [endpoint, moduleId, current]);
   useEffect(() => {
     alive.current = true; dialog.current?.showModal(); void initialize();
-    return () => { alive.current = false; };
+    return () => { alive.current = false; selectionEpoch.current += 1; selectionRequest.current?.abort(); };
   }, [initialize]);
   const dismiss = () => {
     if (busyRef.current || pending || pickerSlot !== null) return;
@@ -233,33 +232,62 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
     catch { if (current()) setError('仍无法确认保存结果，请稍后再次检查；不要重复创建新封面。'); }
     finally { if (current()) { busyRef.current = false; setBusy(false); } }
   }
-  async function choose(assetId: string, index: number) {
-    if (!current()) return;
-    setReading(true);
+  async function choose(assetId: string, index: number, nextLayout = layout) {
+    if (!current()) return false;
+    const epoch = ++selectionEpoch.current;
+    selectionRequest.current?.abort();
+    const controller = new AbortController();
+    selectionRequest.current = controller;
+    const active = () => current() && selectionEpoch.current === epoch && !controller.signal.aborted;
+    setReading(true); setError('');
     try {
-      const value = await json<ModuleCoverEditorState>(await fetch(`${endpoint}?sourceAssetIds=${encodeURIComponent(assetId)}`, { cache: 'no-store' }));
-      if (!current()) return;
-      const source = value.sources.find(item => item.assetId === assetId);
-      if (!source) throw new Error('封面只能用模板作者本人的图片；这张图属于别人或是受保护的模板素材，请在“我的素材”里改选你自己的图片');
-      setSlots(current => current.map((item, i) => i === index ? { source, key: ++sequence.current } : item));
-      setDirty(true); setError('');
+      const value = await json<ModuleCoverSelection>(await fetch(`${endpoint}?originOf=${encodeURIComponent(assetId)}`,
+        { cache: 'no-store', signal: controller.signal }));
+      if (!active()) return false;
+      if (value.source?.assetId !== assetId) throw new Error('未能确认选中的图片，请重新选择');
+      const split = nextLayout !== 'single';
+      const previousPair = selection.current?.paired;
+      setSlots(previous => {
+        const next = [...previous];
+        next[index] = { source: value.source, key: ++sequence.current };
+        if (split && value.originState === 'ready' && value.originSource) {
+          next[1 - index] = { source: value.originSource, key: ++sequence.current };
+        } else if (split && (value.originState !== 'not-generated' || previousPair)) {
+          // A new generated result must never retain the previous result's input.
+          next[1 - index] = null;
+        }
+        return next;
+      });
+      selection.current = { assetId, index, paired: split && value.originState === 'ready' && Boolean(value.originSource) };
+      if (split && value.originState !== 'ready' && value.originState !== 'not-generated') {
+        setError(value.originState === 'multiple' ? '这次生成用了多张输入主图，无法自动确定对比原图。'
+          : value.originState === 'none' ? '这张结果是纯文字生成，没有输入原图可自动对比。'
+          : value.originState === 'unavailable' ? '这张结果的输入原图已不可用或无权用于封面，另一格未填入。'
+          : '这张结果的历史记录无法确认输入原图，另一格未填入。');
+      }
+      setDirty(true);
       return true;
-    } finally { if (current()) setReading(false); }
-  }
-  // 左右/上下: a generated result picked for the second cell brings its own source image into the empty first cell.
-  async function fillOrigin(resultAssetId: string) {
-    try {
-      const value = await json<{ originAssetId: string | null }>(await fetch(`${endpoint}?originOf=${encodeURIComponent(resultAssetId)}`, { cache: 'no-store' }));
-      if (!current()) return;
-      if (!value.originAssetId) { setError('没找到这张图的生成原图，请手动选择左边（上边）的图'); return; }
-      await choose(value.originAssetId, 0);
-    } catch (cause) { if (current()) setError(cause instanceof Error ? `生成原图没能自动填入：${cause.message}` : '没找到这张图的生成原图，请手动选择'); }
+    } catch (cause) {
+      if (active()) setError(cause instanceof Error ? cause.message : '图片未能读取，请重试');
+      return false;
+    } finally {
+      if (active()) { selectionRequest.current = null; setReading(false); }
+    }
   }
   function changeLayout(value: ModuleCoverLayout) {
     if (disabled || value === layout) return;
     setLayout(value); setDirty(true);
-    // 外框比例改变时重新计算合法裁剪，保留人选的两张素材。
-    setSlots(current => current.map(slot => slot ? { source: slot.source, key: ++sequence.current } : null));
+    // A shape change resets crop geometry but preserves the selected identities.
+    setSlots(previous => previous.map(slot => slot ? { source: slot.source, key: ++sequence.current } : null));
+    if (layout === 'single' && value !== 'single') {
+      const source = slots[0]?.source;
+      if (source) void choose(source.assetId, 0, value);
+    } else if (value === 'single') {
+      const selected = slots[selection.current?.index ?? 0];
+      selection.current = selected ? { assetId: selected.source.assetId, index: 0, paired: false } : null;
+      setSlots([selected ? { source: selected.source, key: ++sequence.current } : null, null]);
+      setError('');
+    }
   }
   return createPortal(<>{productDialog}<dialog ref={dialog} className={styles.dialog} aria-label={`设置封面：${moduleName}`} aria-busy={busy || undefined}>
     <header className={styles.header}><div><h2>设置封面</h2><p>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
@@ -268,9 +296,9 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
       {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
       {editing && <><div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
-        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
+        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { if (selection.current) selection.current.index = 1 - selection.current.index; setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
       </div>
-      <p className={styles.hint}>分别选图，拖动或缩放选择局部。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
+      <p className={styles.hint}>选图后拖动或缩放选择局部；左右、上下排版会自动带入所选生成结果的输入原图。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
       <div className={`${styles.editFrame} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <div key={index} className={styles.cell}>
         {slot ? <CropSlot key={`${scopeKey}:${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 1 / 2 : layout === 'vertical' ? 2 : 1} disabled={disabled || !state.canManage}
           onInteract={modified} onCrop={crop => { if (current()) setSlots(previous => previous.map((item, i) => i === index && item?.key === slot.key && !(item.crop && crop && sameCrop(item.crop, crop)) ? { ...item, crop } : item)); }} /> : <span className={styles.empty}>选择图片</span>}
@@ -285,10 +313,9 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       </footer>
     </>}
     {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片（只能用作者本人的图片）" confirmLabel="使用这张图片" purpose="module-cover" contextTemplateId={moduleId} contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
-      onClose={() => setPickerSlot(null)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
+      onClose={() => { selectionEpoch.current += 1; selectionRequest.current?.abort(); selectionRequest.current = null; setReading(false); setPickerSlot(null); }} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
       onConfirm={async ids => {
         if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false;
-        if (pickerSlot === 1 && count === 2 && !slots[0]) void fillOrigin(ids[0]);
         setPickerSlot(null); return true;
       }} />}
   </dialog></>, document.body);
