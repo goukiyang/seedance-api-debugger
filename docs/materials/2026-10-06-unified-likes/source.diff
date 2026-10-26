@@ -1,0 +1,839 @@
+diff --git a/package-lock.json b/package-lock.json
+index cdf892c..6ec8947 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.48.0",
++  "version": "0.49.0",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "video-api-debugger",
+-      "version": "0.48.0",
++      "version": "0.49.0",
+       "dependencies": {
+         "@aws-sdk/client-s3": "^3.1041.0",
+         "@aws-sdk/s3-request-presigner": "^3.1041.0",
+diff --git a/package.json b/package.json
+index 783eaed..c62a40c 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.48.0",
++  "version": "0.49.0",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/public/tools/ultimate-canvas/canvas-styles.js b/public/tools/ultimate-canvas/canvas-styles.js
+index 323ab8e..542cf85 100644
+--- a/public/tools/ultimate-canvas/canvas-styles.js
++++ b/public/tools/ultimate-canvas/canvas-styles.js
+@@ -34,16 +34,16 @@
+                 onFavorite: async (item, active) => {
+                     try {
+                         const result = await hooks.request('/api/content-reactions', {
+-                            method: 'PUT', signal: AbortSignal.timeout(15000), payload: { key: item.key, action: 'favorite', active,
++                            method: 'PUT', signal: AbortSignal.timeout(15000), payload: { key: item.key, action: 'like', active,
+                                 expectedVersion: item.reactionVersion || 0, requestId: crypto.randomUUID() }
+                         });
+                         item.reactionVersion = result.state.version;
+-                        return result.state.favorited;
++                        return Boolean(result.state.liked || result.state.favorited);
+                     } catch (error) {
+                         if (error.status === 409) {
+                             const result = await json('/api/content-reactions/state', { keys: [item.key] });
+                             const state = result.states?.[item.key];
+-                            if (state) { item.reactionVersion = state.version; item.favorited = state.favorited; }
++                            if (state) { item.reactionVersion = state.version; item.favorited = Boolean(state.liked || state.favorited); }
+                         }
+                         throw error;
+                     }
+diff --git a/public/tools/ultimate-canvas/index.html b/public/tools/ultimate-canvas/index.html
+index 411e129..73e709b 100644
+--- a/public/tools/ultimate-canvas/index.html
++++ b/public/tools/ultimate-canvas/index.html
+@@ -10,7 +10,8 @@
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+     <link rel="stylesheet" href="styles.css?v=0.36.1">
+     <link rel="stylesheet" href="/styles/loading.css?v=0.36.1">
+-    <link rel="stylesheet" href="style-gallery.css?v=20261001-canvas-style-gallery">
++    <link rel="stylesheet" href="style-gallery.css?v=20261006-unified-likes">
++    <link rel="stylesheet" href="like-button.css?v=20261006-unified-likes">
+     <link rel="stylesheet" href="document-library.css?v=20260925-canvas-documents">
+     <link rel="stylesheet" href="node-pricing.css?v=20260925-model-price-menu">
+     <link rel="icon" href="data:,">
+@@ -392,8 +393,8 @@
+     <script src="canvas-save-coordinator.js?v=20260712-final-hardening"></script>
+     <script src="document-library.js?v=20260925-canvas-documents"></script>
+     <script src="node-pricing.js?v=20260925-model-price-menu"></script>
+-    <script src="style-gallery.js?v=20261001-canvas-style-gallery"></script>
+-    <script src="canvas-styles.js?v=20261001-canvas-style-gallery"></script>
++    <script src="style-gallery.js?v=20261006-unified-likes"></script>
++    <script src="canvas-styles.js?v=20261006-unified-likes"></script>
+     <script src="app.js?v=0.36.1-loading-ux"></script>
+     <script src="toolflow-workflow.js?v=20260924-canvas-parallel"></script>
+     <script type="module" src="director-3d.js"></script>
+diff --git a/public/tools/ultimate-canvas/like-button.LICENSE.txt b/public/tools/ultimate-canvas/like-button.LICENSE.txt
+new file mode 100644
+index 0000000..0377044
+--- /dev/null
++++ b/public/tools/ultimate-canvas/like-button.LICENSE.txt
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Lorenzo Cabra
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/public/tools/ultimate-canvas/like-button.css b/public/tools/ultimate-canvas/like-button.css
+new file mode 100644
+index 0000000..bfe2234
+--- /dev/null
++++ b/public/tools/ultimate-canvas/like-button.css
+@@ -0,0 +1,48 @@
++/* Adapted from Bencho Like (https://bencho.dev/blocks/like).
++ * MIT License - Copyright (c) 2026 Lorenzo Cabra.
++ * Full notice: like-button.LICENSE.txt. No photographs or branding included. */
++.sd2-like.sd2-like {
++  --lk-on: #e5484d;
++  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
++  flex: 0 0 auto; min-width: 44px; height: 44px; box-sizing: border-box;
++  padding: 0 18px 0 15px; border: 0; border-radius: 22px;
++  background: var(--fill-slab, #262626); color: var(--fill-on, #ededed);
++  font: inherit; font-size: 15px; font-weight: 500; letter-spacing: 0;
++  cursor: pointer; -webkit-tap-highlight-color: transparent;
++  transition: scale 200ms cubic-bezier(.3, .9, .4, 1);
++}
++.sd2-like:not(:has(.lk-count)) { width: 44px; padding: 0; }
++.sd2-like:has(.lk-count) { min-width: 78px; }
++.sd2-like:active:not(:disabled) { scale: .95; }
++.sd2-like:focus-visible { outline: 2px solid var(--signal, #70cfbd); outline-offset: 2px; }
++.sd2-like:disabled { opacity: .55; cursor: default; }
++.sd2-like[aria-pressed="true"] .lk-glyph { color: var(--lk-on); }
++.sd2-like .lk-heart { position: relative; display: grid; place-items: center; width: 20px; height: 20px; }
++.sd2-like .lk-glyph { position: relative; z-index: 1; display: grid; }
++.sd2-like .lk-glyph svg { width: 19px; height: 19px; stroke-width: 2.3; }
++.sd2-like[aria-pressed="true"] .lk-glyph svg { fill: currentColor; }
++.sd2-like[data-bloom] .lk-glyph { animation: lk-heart 760ms cubic-bezier(.3, 1.6, .4, 1) both; }
++.sd2-like .lk-burst { --fly: .5; position: absolute; left: 50%; top: 50%; pointer-events: none; }
++.sd2-like .lk-bloom { position: absolute; left: -17px; top: -17px; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; border: 17px solid #cc8ef5; animation: lk-bloom 560ms cubic-bezier(.25, .8, .35, 1) both; }
++.sd2-like .lk-spoke { position: absolute; left: 0; top: 0; rotate: var(--a); }
++.sd2-like .lk-spoke i { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--c); animation: lk-dot 620ms cubic-bezier(.2, .8, .3, 1) 200ms both; }
++.sd2-like .lk-spoke i:first-child { --side: -4px; --far: 0px; }
++.sd2-like .lk-spoke i:last-child { --side: 4px; --far: -5px; width: 4px; height: 4px; margin: -2px 0 0 -2px; }
++.sd2-like .lk-count { display: flex; font-variant-numeric: tabular-nums; line-height: 1; }
++.sd2-like .lk-wheel { position: relative; display: inline-block; width: 1ch; height: 1.25em; overflow: hidden; }
++.sd2-like .lk-digit { display: block; line-height: 1.25em; }
++.sd2-like .lk-comma { line-height: 1.25em; }
++.sd2-like .lk-digit-in, .sd2-like .lk-digit-out { animation-duration: 420ms; animation-timing-function: cubic-bezier(.22, 1, .36, 1); animation-delay: var(--delay); animation-fill-mode: both; }
++.sd2-like .lk-digit-in { animation-name: lk-digit-in; }
++.sd2-like .lk-digit-out { position: absolute; inset: 0; animation-name: lk-digit-out; }
++@keyframes lk-heart { 0%, 28% { scale: 0; } 62% { scale: 1.25; } 100% { scale: 1; } }
++@keyframes lk-bloom { 0% { scale: .15; border-width: 17px; border-color: #e5484d; } 40% { scale: 1; border-width: 17px; border-color: #cc8ef5; } 75% { border-width: 2px; opacity: 1; } 100% { scale: 1.12; border-width: 0; opacity: 0; border-color: #cc8ef5; } }
++@keyframes lk-dot { 0% { translate: 12px var(--side); scale: 1; opacity: 0; } 12% { opacity: 1; } 100% { translate: calc(18px + var(--fly) * 14px + var(--far)) calc(var(--side) * 1.6); scale: 0; opacity: 1; } }
++@keyframes lk-digit-in { from { translate: 0 var(--from); opacity: 0; } to { translate: 0 0; opacity: 1; } }
++@keyframes lk-digit-out { from { translate: 0 0; opacity: 1; } to { translate: 0 var(--to); opacity: 0; } }
++@media (prefers-reduced-motion: reduce) {
++  .sd2-like { transition: none; }
++  .sd2-like:active:not(:disabled) { scale: 1; }
++  .sd2-like[data-bloom] .lk-glyph, .sd2-like .lk-bloom, .sd2-like .lk-spoke i, .sd2-like .lk-digit { animation: none; }
++  .sd2-like .lk-burst, .sd2-like .lk-digit-out { display: none; }
++}
+diff --git a/public/tools/ultimate-canvas/style-gallery.css b/public/tools/ultimate-canvas/style-gallery.css
+index 4ac93b0..a8f516d 100644
+--- a/public/tools/ultimate-canvas/style-gallery.css
++++ b/public/tools/ultimate-canvas/style-gallery.css
+@@ -442,34 +442,7 @@
+     color: var(--accent-teal, #4ecdc4);
+ }
+ 
+-.uc-sg-favorite {
+-    display: grid;
+-    flex: 0 0 30px;
+-    width: 30px;
+-    height: 30px;
+-    place-items: center;
+-    padding: 0;
+-    border: 1px solid transparent;
+-    border-radius: 5px;
+-    background: transparent;
+-    color: var(--text-secondary, #a3a3a3);
+-    cursor: pointer;
+-}
+-
+-.uc-sg-favorite:hover:not(:disabled) {
+-    border-color: var(--border-default, #363636);
+-    background: var(--bg-hover, rgb(255 255 255 / 6%));
+-    color: var(--text-primary, #f7f7f7);
+-}
+-
+-.uc-sg-favorite.is-favorited {
+-    color: #ef8b9b;
+-}
+-
+-.uc-sg-favorite .uc-sg-icon {
+-    width: 17px;
+-    height: 17px;
+-}
++.uc-sg-favorite .uc-sg-icon { width: 19px; height: 19px; }
+ 
+ .uc-sg-favorite.is-favorited .uc-sg-icon svg {
+     fill: currentColor;
+diff --git a/public/tools/ultimate-canvas/style-gallery.js b/public/tools/ultimate-canvas/style-gallery.js
+index d9dfe1a..4e9f0e5 100644
+--- a/public/tools/ultimate-canvas/style-gallery.js
++++ b/public/tools/ultimate-canvas/style-gallery.js
+@@ -6,7 +6,7 @@
+     const MAX_RESTORE_PAGES = 3;
+     const TABS = [
+         { id: 'gallery', label: '风格广场' },
+-        { id: 'favorites', label: '我的收藏' },
++        { id: 'favorites', label: '我的喜欢' },
+         { id: 'recent', label: '最近使用' }
+     ];
+     const FALLBACKS = {
+@@ -277,13 +277,41 @@
+     }
+ 
+     function syncFavoriteButton(button, item, active, pending) {
+-        setIcon(button, 'Heart');
++        if (!button.querySelector('.lk-heart')) {
++            const heart = element('span', 'lk-heart');
++            const glyph = element('span', 'lk-glyph');
++            setIcon(glyph, 'Heart');
++            heart.append(glyph);
++            button.replaceChildren(heart);
++        }
+         button.classList.toggle('is-favorited', active);
+         button.setAttribute('aria-pressed', String(active));
+-        button.setAttribute('aria-label', active ? '取消收藏' : '加入收藏');
+-        button.title = active ? '取消收藏' : '加入收藏';
++        button.setAttribute('aria-label', active ? '取消喜欢' : '喜欢');
++        button.title = active ? '取消喜欢' : '喜欢';
+         button.disabled = Boolean(pending || typeof options?.onFavorite !== 'function');
+-        if (typeof options?.onFavorite !== 'function') button.title = '收藏功能暂不可用';
++        if (typeof options?.onFavorite !== 'function') button.title = '喜欢暂不可用';
++    }
++
++    // Bencho Like, MIT (c) 2026 Lorenzo Cabra; geometry matches shared like-button.css.
++    function bloomFavorite(button) {
++        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
++        const heart = button.querySelector('.lk-heart');
++        if (!heart) return;
++        const colors = ['#f48ea7', '#cc8ef5', '#8ce8c3', '#91d2fa', '#f5a524', '#e5484d', '#9fc7fa'];
++        const burst = element('span', 'lk-burst');
++        burst.setAttribute('aria-hidden', 'true');
++        burst.append(element('span', 'lk-bloom'));
++        colors.forEach(function (color, index) {
++            const spoke = element('span', 'lk-spoke');
++            spoke.style.setProperty('--a', `${index * (360 / 7) - 90}deg`);
++            [color, colors[(index + 3) % colors.length]].forEach(function (dotColor) {
++                const dot = element('i'); dot.style.setProperty('--c', dotColor); spoke.append(dot);
++            });
++            burst.append(spoke);
++        });
++        heart.append(burst);
++        button.dataset.bloom = 'true';
++        setTimeout(function () { burst.remove(); delete button.dataset.bloom; }, 900);
+     }
+ 
+     function buildCard(item) {
+@@ -322,7 +350,7 @@
+         title.dataset.sgSelect = id;
+         title.title = displayName(item);
+         title.setAttribute('aria-label', '查看“' + displayName(item) + '”详情');
+-        const favorite = element('button', 'uc-sg-favorite');
++        const favorite = element('button', 'uc-sg-favorite sd2-like');
+         favorite.type = 'button';
+         favorite.dataset.sgFavorite = id;
+         syncFavoriteButton(favorite, item, isFavorited(item), state.favoritePending.has(id));
+@@ -351,7 +379,7 @@
+         ui.empty.textContent = state.query
+             ? '没有找到匹配的风格，试试缩短名称或作者关键词。'
+             : state.tab === 'favorites'
+-                ? '还没有收藏的风格。'
++                ? '还没有喜欢的风格。'
+                 : state.tab === 'recent'
+                     ? '最近用过的风格会显示在这里。'
+                     : '当前类别还没有可用风格。';
+@@ -660,18 +688,19 @@
+         if (!item) return;
+         const previous = isFavorited(item);
+         const desired = !previous;
+-        state.favoriteStates[id] = desired;
+         state.favoritePending.add(id);
+-        syncFavoriteButton(button, item, desired, true);
++        syncFavoriteButton(button, item, previous, true);
+         try {
+             const result = await options.onFavorite(item, desired);
+             if (!root || state !== capturedState) return;
+             let confirmed = desired;
+             if (typeof result === 'boolean') confirmed = result;
+-            else if (result && typeof result.favorited === 'boolean') confirmed = result.favorited;
++            else if (result && typeof result.favorited === 'boolean') confirmed = Boolean(result.liked || result.favorited);
+             else if (result && typeof result.active === 'boolean') confirmed = result.active;
+             else if (result && typeof result.state === 'boolean') confirmed = result.state;
+             state.favoriteStates[id] = confirmed;
++            syncFavoriteButton(button, item, confirmed, true);
++            if (desired && confirmed && !previous) bloomFavorite(button);
+             if (!confirmed && state.tab === 'favorites') {
+                 state.items = state.items.filter(entry => identity(entry) !== id);
+                 if (state.selectedId === id) state.selectedId = '';
+@@ -680,7 +709,7 @@
+         } catch (error) {
+             if (!root || state !== capturedState) return;
+             state.favoriteStates[id] = previous;
+-            showNotice(error?.message || '收藏没有保存，请重试。');
++            showNotice(error?.message || '喜欢没有保存，请重试。');
+         } finally {
+             if (root && state === capturedState) {
+                 state.favoritePending.delete(id);
+diff --git a/src/app/api/assets/picker/route.ts b/src/app/api/assets/picker/route.ts
+index 0b46665..4ce2a8a 100644
+--- a/src/app/api/assets/picker/route.ts
++++ b/src/app/api/assets/picker/route.ts
+@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
+       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
+       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
+       prisma.imageStudioTask.findMany({ where: { owner_id: user.id, status: 'succeeded', asset_id: { not: null } }, select: { asset_id: true } }),
+-      p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, favorited: true }, select: { content_key: true } }) : Promise.resolve([]),
++      p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
+       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
+         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
+         OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
+diff --git a/src/app/api/tools/ultimate-canvas/styles/route.ts b/src/app/api/tools/ultimate-canvas/styles/route.ts
+index 8a50db6..40e9e06 100644
+--- a/src/app/api/tools/ultimate-canvas/styles/route.ts
++++ b/src/app/api/tools/ultimate-canvas/styles/route.ts
+@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
+         for (let index = 0; index < keys.length; index += REACTION_CHUNK_SIZE) {
+           rows.push(...await prisma.contentReaction.findMany({
+             where: { user_id: user.id, content_key: { in: keys.slice(index, index + REACTION_CHUNK_SIZE) } },
+-            select: { content_key: true, favorited: true, version: true },
++            select: { content_key: true, liked: true, favorited: true, version: true },
+           }));
+         }
+         return rows;
+@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
+         model: preset.model,
+         coverUrl,
+         author: { name: displayUserName(owner), avatarUrl: owner?.avatar_url || null },
+-        favorited: reaction?.favorited || false,
++        favorited: Boolean(reaction?.liked || reaction?.favorited),
+         reactionVersion: reaction?.version || 0,
+         commercialAllowed: null,
+         ...(preset.prompt.trim() ? { description: preset.prompt.trim().slice(0, 400) } : {}),
+diff --git a/src/app/assets/page.tsx b/src/app/assets/page.tsx
+index f61d31e..b6e46e8 100644
+--- a/src/app/assets/page.tsx
++++ b/src/app/assets/page.tsx
+@@ -191,8 +191,7 @@ type AssetCardRectSnapshot = {
+ const assetViewTabs: Array<{ id: AssetView; label: string; adminOnly?: boolean; tone?: 'enhance' }> = [
+   { id: 'history', label: '生产历史' },
+   { id: 'project', label: '按项目' },
+-  { id: 'favorites', label: '我的收藏' },
+-  { id: 'likes', label: '我赞过的' },
++  { id: 'favorites', label: '我的喜欢' },
+   { id: 'user', label: '按用户查看', adminOnly: true },
+   { id: 'enhance', label: '视频超分', tone: 'enhance' },
+ ];
+@@ -704,7 +703,7 @@ function AssetsPageContent() {
+   useEffect(() => {
+     if (!user?.id) { setAssetView('history'); return; }
+     if (hasExplicitView) {
+-      const tab = assetViewTabs.find(item => item.id === explicitView && (!item.adminOnly || user.role === 'admin'));
++      const tab = assetViewTabs.find(item => item.id === (explicitView === 'likes' ? 'favorites' : explicitView) && (!item.adminOnly || user.role === 'admin'));
+       const nextView = tab?.id || 'history';
+       setAssetView(nextView); rememberReactionView(nextView);
+       return;
+@@ -713,7 +712,7 @@ function AssetsPageContent() {
+     if (!hasExplicitContent) {
+       try {
+         const saved = JSON.parse(localStorage.getItem(reactionEntryStorageKey(user.id)) || 'null');
+-        if (saved?.version === 1 && (saved.view === 'favorites' || saved.view === 'likes')) nextView = saved.view;
++        if (saved?.version === 1 && (saved.view === 'favorites' || saved.view === 'likes')) nextView = 'favorites';
+       } catch {}
+     }
+     setAssetView(nextView);
+@@ -1909,7 +1908,7 @@ function AssetsPageContent() {
+       </section>
+ 
+       <ContentLookup />
+-      {isReactionView && <ContentCollections key={assetView} action={assetView === 'favorites' ? 'favorite' : 'like'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
++      {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails />}
+       {!isReactionView && <>
+       <section className="asset-library-filter-bar">
+         {isEnhanceView ? (
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index c460459..5789f0d 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -7,7 +7,7 @@ import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import Link from 'next/link';
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+-import { Bookmark, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
++import { Heart, ChevronDown, ChevronRight, Clipboard, Copy, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
+ import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
+ import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+ import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+@@ -399,7 +399,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+       const requested = new URLSearchParams(window.location.search).get('presetId');
+       const sorted = [...result.presets].sort((a, b) => Number(b.id === requested) - Number(a.id === requested));
+       setPresets(sorted);
+-      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('收藏的模板已不可用或不再共享');
++      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('喜欢的模板已不可用或不再共享');
+     }
+     catch (e) { setPresetsError(e instanceof Error ? e.message : '模板读取失败'); }
+     finally { setPresetsLoading(false); }
+@@ -631,7 +631,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
+       {templateWorkbench ? <>
+         <div className={styles.moduleRailTitle}>模板工作台</div>
+-        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
++        <Link className={styles.moduleRailMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
+         <section className={styles.moduleRailMajor} aria-label="图片生成">
+           <div className={styles.moduleRailMajorHeader}>
+             <a className={`${styles.moduleRailMajorLink} ${styles.moduleRailMajorCurrent}`} href="#image-generation" aria-current="page" onClick={navigateToImageSection}>
+@@ -681,7 +681,7 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
+       <div className={styles.mobileMajorLinks}>
+         <a className={styles.mobileMajorLink} href="#image-generation" aria-current="page" onClick={navigateToImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}</a>
+-        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Bookmark size={16} /><span>我的收藏</span></Link>
++        <Link className={styles.mobileMajorLink} href="/assets?view=favorites"><Heart size={16} /><span>我的喜欢</span></Link>
+       </div>
+       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
+         const group = event.target.value;
+diff --git a/src/components/ResourceLibraryPicker.tsx b/src/components/ResourceLibraryPicker.tsx
+index 5313ae7..ea1e62f 100644
+--- a/src/components/ResourceLibraryPicker.tsx
++++ b/src/components/ResourceLibraryPicker.tsx
+@@ -314,7 +314,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
+         <button type="button" aria-label="关闭素材库" title="关闭素材库" onClick={close}><X size={20} /></button>
+       </div></header>
+       <input hidden ref={input} type="file" accept={types.map(t => `${t}/*`).join(',')} multiple={maxSelection !== 1} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void upload(files); }} />
+-      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的收藏'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => setQuery(e.target.value)} /></label></div>
++      <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => setQuery(e.target.value)} /></label></div>
+       <div className={styles.layout}><aside className={`${styles.sidebar} ${navigationOpen ? styles.navigationOpen : ''}`} aria-label="图集和项目">
+         <label className={`${styles.scopeControl} ${styles.sidebarScope}`}><span>素材范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
+         <button type="button" className={!prefs.album && !prefs.project ? styles.active : ''} onClick={() => { change({ album: '', project: '' }); setNavigationOpen(false); }}><Grid2X2 size={18} />全部素材</button>
+@@ -339,7 +339,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
+             <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${item.fileName}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
+             <button type="button" className={styles.preview} title={item.type === 'image' ? '放大图片' : `播放${labels[item.type]}`} aria-label={`${item.type === 'image' ? '放大' : '播放'}${item.fileName}`} onClick={() => setPreview(item)}>{item.type === 'image' ? <ZoomIn size={17} /> : <Play size={20} fill="currentColor" />}</button>
+             {item.type !== 'image' && <span className={styles.duration}>{item.duration != null ? durationText(item.duration) : '时长未知'}</span>}
+-            <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={(_state, action) => { if (action === 'favorite' && prefs.view === 'favorites') setEpoch(v => v + 1); }} />
++            <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} />
+             </div>
+             <div className={styles.meta}><div className={styles.cardTools}><span>{item.type === 'image' ? <ImageIcon size={14} /> : item.type === 'video' ? <Video size={14} /> : <Music size={14} />}{labels[item.type]}</span></div><strong title={item.fileName}>{item.fileName}</strong><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}</div>
+             {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={15} />删除</button>}
+diff --git a/src/components/content-reactions/ContentCollections.tsx b/src/components/content-reactions/ContentCollections.tsx
+index 6ea6734..c1dbc55 100644
+--- a/src/components/content-reactions/ContentCollections.tsx
++++ b/src/components/content-reactions/ContentCollections.tsx
+@@ -47,7 +47,7 @@ function CollectionThumbnail({ content, preferPreviewImage }: { content: Content
+     : content.thumbnailUrl;
+   const [failed, setFailed] = useState(false);
+   useEffect(() => setFailed(false), [thumbnailUrl]);
+-  if (failed) return <span>预览暂不可用，收藏仍保留</span>;
++  if (failed) return <span>预览暂不可用，喜欢仍保留</span>;
+   if (thumbnailUrl) return <img src={thumbnailUrl} loading="lazy" alt={content.title} onError={() => setFailed(true)} />;
+   return content.category === 'audio' ? <Music size={30} /> : <ImageIcon size={30} />;
+ }
+@@ -162,7 +162,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+     let savedCategory: ContentCategory | 'all' = 'all';
+     let savedQuery = '';
+     try {
+-      const saved = JSON.parse(localStorage.getItem(`reaction-filters:${scope}`) || 'null');
++      const fallbackScope = `${encodeURIComponent(userId)}:${action === 'like' ? 'favorite' : 'like'}`;
++      const saved = JSON.parse(localStorage.getItem(`reaction-filters:${scope}`) || localStorage.getItem(`reaction-filters:${fallbackScope}`) || 'null');
+       if (saved?.version === 1) {
+         if (categories.some(([id]) => id === saved.category)) savedCategory = saved.category;
+         if (typeof saved.query === 'string' && saved.query.length <= 160) savedQuery = saved.query;
+@@ -174,7 +175,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+     if (urlQuery !== null) savedQuery = urlQuery.slice(0, 160);
+     setCategory(savedCategory); setQuery(savedQuery); setSearch(savedQuery.trim());
+     setPreferencesReady(true);
+-  }, [scope, urlCategory, urlQuery, hasContent]);
++  }, [scope, userId, action, urlCategory, urlQuery, hasContent]);
+   useEffect(() => {
+     if (!preferencesReady) return;
+     try { localStorage.setItem(`reaction-filters:${scope}`, JSON.stringify({ version: 1, category, query })); }
+@@ -385,10 +386,10 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+       router.push('/generate');
+     } catch (e) { if (current()) setError(e instanceof Error ? e.message : '操作失败'); }
+   }
+-  function changed(item: ReactionListItem, state: ReactionState, changedAction: ReactionAction, active: boolean) {
++  function changed(item: ReactionListItem, state: ReactionState, changedAction: ReactionAction, active: boolean, previous?: ReactionState) {
+     if (!mounted.current || currentIdentity.current !== identity) return;
+-    if (changedAction === action && !active) {
+-      setUndo({ item, state }); setItems(current => current.filter(row => row.key !== item.key));
++    if (!active && !(state.liked || state.favorited)) {
++      setUndo({ item: { ...item, state: previous || item.state }, state }); setItems(current => current.filter(row => row.key !== item.key));
+       setTotal(current => Math.max(0, current - 1)); setCounts(current => ({ ...current, all: Math.max(0, current.all - 1), [item.category]: Math.max(0, current[item.category] - 1) }));
+     }
+   }
+@@ -414,19 +415,19 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+     setStorageWarning(cleared ? '' : '筛选已重置，但浏览器未允许清除全部保存记录。');
+   }
+   if (!preferencesReady) return <p role="status">正在读取…</p>;
+-  return <section aria-label={action === 'favorite' ? '我的收藏' : '我赞过的'}>
+-    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索收藏内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>{action === 'favorite' ? '最近收藏' : '最近点赞'} · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留收藏）" title="重置筛选和浏览位置（保留收藏）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
++  return <section aria-label="我的喜欢">
++    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索喜欢的内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>最近喜欢 · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留喜欢）" title="重置筛选和浏览位置（保留喜欢）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
+     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
+     {storageWarning && <p role="status">{storageWarning}</p>}
+     {message && <p role="status">{message}</p>}
+     <div className={styles.grid}>{items.map((item, index) => <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
+       <div className="media-reaction-cover" data-reaction-surface>
+         <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
+-        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active) => changed(item, state, act, active)} />}
++        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
+       </div>
+-      <div className={styles.body}>{item.category === 'template' && action === 'favorite' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
++      <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
+         {item.content?.versionLabel && <span className={styles.muted}>版本：{item.content.versionLabel}</span>}
+-        <div className={styles.actions}>{!['image', 'video', 'audio'].includes(item.category) && !(item.category === 'template' && action === 'favorite') && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active) => changed(item, state, act, active)} />}
++        <div className={styles.actions}>{!['image', 'video', 'audio', 'template'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
+           {item.content && <button className={styles.command} type="button" onClick={() => void open(item)}><ExternalLink size={15} /> {item.content.actionLabel}</button>}
+           {item.content?.downloadUrl && <a className={styles.command} title="下载" aria-label="下载" href={item.content.downloadUrl}><Download size={16} /></a>}
+           {item.content && item.category === 'prompt' && <button className={styles.command} title="复制文案" aria-label="复制文案" type="button" onClick={() => void open(item, true)}><Copy size={16} /></button>}
+@@ -436,12 +437,12 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
+     </article>)}</div>
+     {!loading && loaded && !items.length && !error && <p className={styles.status}>暂无符合条件的内容</p>}
+     <div ref={sentinel} className={styles.status}>{loading ? '正在读取…' : cursor ? <button className={styles.command} type="button" onClick={() => void load(cursor)}>加载更多</button> : loaded && items.length ? '已显示全部' : null}</div>
+-    {undo && <div className={styles.undo} role="status">已取消{action === 'favorite' ? '收藏' : '点赞'}<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
++    {undo && <div className={styles.undo} role="status">已取消喜欢<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
+       const response = await fetch('/api/content-reactions/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: [undo.item.key] }) });
+       const data = await response.json();
+       if (!current()) return;
+       if (!response.ok) throw new Error(data.error || '撤销失败');
+-      await writeReaction(userId, undo.item.key, action, true, data.states[undo.item.key]); if (!current()) return; setUndo(null); void load(); } catch (e) { if (current()) setError(e instanceof Error ? e.message : '撤销失败'); } }}><Undo2 size={15} /> 撤销</button><button className={styles.command} type="button" aria-label="关闭撤销提示" onClick={() => setUndo(null)}><X size={14} /></button></div>}
++      const restored = await writeReaction(userId, undo.item.key, undo.item.state.liked ? 'like' : 'favorite', true, data.states[undo.item.key]); if (!restored || !current()) return; if (!(restored.liked || restored.favorited)) throw new Error('撤销尚未确认，请重试'); setUndo(null); void load(); } catch (e) { if (current()) setError(e instanceof Error ? e.message : '撤销失败'); } }}><Undo2 size={15} /> 撤销</button><button className={styles.command} type="button" aria-label="关闭撤销提示" onClick={() => setUndo(null)}><X size={14} /></button></div>}
+     {preview && (() => {
+       const index = items.findIndex(item => item.key === preview.key);
+       const canPrevious = index > 0 && items.slice(0, index).some(isPreviewableItem);
+diff --git a/src/components/content-reactions/ContentReactions.tsx b/src/components/content-reactions/ContentReactions.tsx
+index 42dba45..04bf01f 100644
+--- a/src/components/content-reactions/ContentReactions.tsx
++++ b/src/components/content-reactions/ContentReactions.tsx
+@@ -1,11 +1,12 @@
+ 'use client';
+ 
+-import { useEffect, useState } from 'react';
+-import { Heart, Bookmark, RefreshCw } from 'lucide-react';
++import { useEffect, useRef, useState } from 'react';
++import { RefreshCw } from 'lucide-react';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+ import type { ContentKey, ReactionAction, ReactionMutation, ReactionState } from '@/lib/content-reactions/types';
+ import styles from './reactions.module.css';
+ import ImageShareButton from './ImageShareButton';
++import LikeButton from './LikeButton';
+ 
+ type Entry = { state?: ReactionState; error?: string; busy?: boolean };
+ const entries = new Map<string, Entry>();
+@@ -96,11 +97,22 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
+   overlay?: boolean;
+   imageSharing?: boolean;
+   favoriteOnly?: boolean;
+-  onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
++  onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
+ }) {
+   const { user } = useAppSession();
+   const [, render] = useState(0);
+   const userId = user?.id;
++  const identity = `${userId}:${contentKey}`;
++  const currentIdentity = useRef(identity);
++  currentIdentity.current = identity;
++  const mounted = useRef(false);
++  const [pulse, setPulse] = useState<{ identity: string; version: number; beat: number; active: boolean; count: number | null } | null>(null);
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
++  useEffect(() => {
++    if (!pulse) return;
++    const timer = setTimeout(() => setPulse(null), 900);
++    return () => clearTimeout(timer);
++  }, [pulse]);
+   useEffect(() => {
+     if (!userId) return;
+     installChannel();
+@@ -115,19 +127,27 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
+   const entry = entries.get(cacheKey(userId, contentKey)) || {};
+   const state = entry.state;
+   const uncertain = Boolean(state && pending.has(cacheKey(userId, state.key)));
+-  async function act(action: ReactionAction) {
++  function confirmed(next: ReactionState, active: boolean) {
++    if (!mounted.current || currentIdentity.current !== identity) return;
++    if (active === Boolean(next.liked || next.favorited)) setPulse({ identity, version: next.version, beat: next.version, active, count: next.likeCount });
++    else setPulse(null);
++    onChange?.(next, 'like', active, state);
++  }
++  async function act() {
+     if (!state || !userId) return;
+-    const active = action === 'like' ? !state.liked : !state.favorited;
+-    try { const next = await writeReaction(userId, contentKey, action, active, state); if (next) onChange?.(next, action, active); } catch { /* Error is retained with a retry action. */ }
++    const active = !(state.liked || state.favorited);
++    try { const next = await writeReaction(userId, contentKey, 'like', active, state); if (next) confirmed(next, active); } catch { /* Error is retained with a retry action. */ }
+   }
+   return <span className={`${styles.controls} ${overlay ? styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
+-    {!favoriteOnly && <button type="button" data-reaction-action="like" title={state?.liked ? '取消点赞' : '点赞'} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={state?.liked || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.liked)} onClick={() => void act('like')}><Heart size={16} fill={state?.liked ? 'currentColor' : 'none'} />{state?.likeCount !== null && state?.likeCount !== undefined && <span>{state.likeCount}</span>}</button>}
+-    <button type="button" data-reaction-action="favorite" title={state?.favorited ? '取消收藏' : '收藏'} aria-label={state?.favorited ? '取消收藏' : '收藏'} aria-pressed={state?.favorited || false} disabled={disabled || entry.busy || uncertain || !state || (!state.available && !state.favorited)} onClick={() => void act('favorite')}><Bookmark size={16} fill={state?.favorited ? 'currentColor' : 'none'} /></button>
++    <LikeButton key={identity} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
++      disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
++      animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
++      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} onClick={() => void act()} />
+     {imageSharing && !favoriteOnly && <ImageShareButton key={`${userId}:${contentKey}`} contentKey={contentKey} userId={userId} disabled={disabled} />}
+     {entry.busy && <span className={styles.busy} role="status"><RefreshCw size={13} className={styles.busyIcon} />保存中</span>}
+-    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label={favoriteOnly ? '重试收藏' : '重试点赞收藏'} title="重试" onClick={() => {
++    {(entry.error || uncertain && !entry.busy) && <span className={styles.error} role="status">{entry.error || '上次操作尚未确认，请重试'}<button type="button" disabled={entry.busy} aria-label="重试喜欢" title="重试" onClick={() => {
+       const retry = state && pending.get(cacheKey(userId, state.key));
+-      if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) onChange?.(next, retry.action, retry.active); }).catch(() => {}); else schedule(userId, contentKey);
++      if (retry && state) void writeReaction(userId, contentKey, retry.action, retry.active, state).then(next => { if (next) confirmed(next, retry.active); }).catch(() => {}); else schedule(userId, contentKey);
+     }}><RefreshCw size={14} /></button></span>}
+   </span>;
+ }
+diff --git a/src/components/content-reactions/LikeButton.tsx b/src/components/content-reactions/LikeButton.tsx
+new file mode 100644
+index 0000000..ae54061
+--- /dev/null
++++ b/src/components/content-reactions/LikeButton.tsx
+@@ -0,0 +1,45 @@
++'use client';
++
++import { useEffect, useState, type CSSProperties } from 'react';
++import { Heart } from 'lucide-react';
++import '../../../public/tools/ultimate-canvas/like-button.css';
++
++// Bencho Like, MIT (c) 2026 Lorenzo Cabra. Notice shipped beside shared CSS.
++const colors = ['#f48ea7', '#cc8ef5', '#8ce8c3', '#91d2fa', '#f5a524', '#e5484d', '#9fc7fa'];
++const format = (value: number) => value.toLocaleString('en-US');
++
++function Roll({ value, animate }: { value: number; animate: boolean }) {
++  const [snapshot, setSnapshot] = useState({ value, previous: value, revision: 0 });
++  if (snapshot.value !== value) setSnapshot({ value, previous: snapshot.value, revision: snapshot.revision + 1 });
++  const [settled, setSettled] = useState(0);
++  useEffect(() => {
++    const timer = setTimeout(() => setSettled(snapshot.revision), 1000);
++    return () => clearTimeout(timer);
++  }, [snapshot.revision]);
++  const chars = format(value).split('');
++  const previous = format(snapshot.previous).split('').reverse();
++  const up = value > snapshot.previous;
++  return <span className="lk-count" aria-hidden="true">{chars.map((char, index) => {
++    const place = chars.length - 1 - index;
++    if (char === ',') return <span className="lk-comma" key={`c${place}`}>,</span>;
++    const old = previous[place];
++    const changed = animate && settled !== snapshot.revision && char !== old;
++    return <span className="lk-wheel" key={`p${place}`} style={{ '--delay': `${place * 40}ms`, '--from': up ? '100%' : '-100%', '--to': up ? '-100%' : '100%' } as CSSProperties}>
++      {changed && old && old !== ',' && <span key={`out-${snapshot.revision}`} className="lk-digit lk-digit-out">{old}</span>}
++      <span key={changed ? `in-${snapshot.revision}` : char} className={`lk-digit${changed ? ' lk-digit-in' : ''}`}>{char}</span>
++    </span>;
++  })}</span>;
++}
++
++export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, onClick }: {
++  active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; onClick: () => void;
++}) {
++  const label = active ? '取消喜欢' : '喜欢';
++  return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={active && bloom || undefined}
++    title={count == null ? label : `${label} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
++    <span className="lk-heart"><span key={active && bloom ? bloom : 'still'} className="lk-glyph"><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>
++      {active && bloom > 0 && <span className="lk-burst" key={bloom} aria-hidden="true"><span className="lk-bloom" />{colors.map((color, index) => <span key={index} className="lk-spoke" style={{ '--a': `${index * (360 / 7) - 90}deg` } as CSSProperties}><i style={{ '--c': color } as CSSProperties} /><i style={{ '--c': colors[(index + 3) % colors.length] } as CSSProperties} /></span>)}</span>}
++    </span>
++    {showCount && (count != null ? <Roll value={count} animate={animateCount} /> : <span className="lk-count" aria-hidden="true">-</span>)}
++  </button>;
++}
+diff --git a/src/components/content-reactions/TemplateFavoriteTitle.tsx b/src/components/content-reactions/TemplateFavoriteTitle.tsx
+index 78b611a..ff7ce12 100644
+--- a/src/components/content-reactions/TemplateFavoriteTitle.tsx
++++ b/src/components/content-reactions/TemplateFavoriteTitle.tsx
+@@ -9,7 +9,7 @@ export default function TemplateFavoriteTitle({ children, contentKey, initialSta
+   children: ReactNode;
+   contentKey?: ContentKey;
+   initialState?: ReactionState;
+-  onChange?: (state: ReactionState, action: ReactionAction, active: boolean) => void;
++  onChange?: (state: ReactionState, action: ReactionAction, active: boolean, previous?: ReactionState) => void;
+   className?: string;
+ }) {
+   return <div className={`${styles.favoriteTitleRow} ${className}`}>
+diff --git a/src/components/content-reactions/reactions.module.css b/src/components/content-reactions/reactions.module.css
+index b11c1a3..44d7a8e 100644
+--- a/src/components/content-reactions/reactions.module.css
++++ b/src/components/content-reactions/reactions.module.css
+@@ -3,9 +3,8 @@
+ .favoriteTitleRow > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .favoriteOnly { position: relative; flex: 0 0 auto; flex-wrap: nowrap; }
+ .favoriteOnly :is(.busy, .error) { position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; width: max-content; max-width: min(260px, 65vw); padding: 6px 8px; border: 1px solid #465057; border-radius: 5px; background: #1c2529; box-shadow: 0 3px 12px #10141680; white-space: normal; overflow-wrap: anywhere; }
+-.controls button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
+-.controls button[aria-pressed="true"] { color: #ff6677; background: #ff66771c; border-color: #ff66775c; }
+-.favoriteOnly button[data-reaction-action="favorite"][aria-pressed="true"] { color: #79daca; background: #79daca1c; border-color: #79daca5c; }
++.controls button:not([data-reaction-action]) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
++.controls button:not([data-reaction-action])[aria-pressed="true"] { color: #ff6677; background: #ff66771c; border-color: #ff66775c; }
+ .controls button:disabled { opacity: .45; cursor: default; }
+ .controls button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
+ .error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #ffb3a7; }
+@@ -43,6 +42,7 @@
+   .controls.overlayControls button:disabled { opacity: .45; }
+ }
+ @keyframes reaction-busy-spin { to { transform: rotate(360deg); } }
++@media (prefers-reduced-motion: reduce) { .busyIcon { animation: none; } }
+ .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+ .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+ .toolbar input { min-width: 180px; max-width: 100%; padding: 8px; background: transparent; color: inherit; border: 1px solid #394449; border-radius: 5px; }
+diff --git a/src/components/template-studio/TemplateStudioShell.tsx b/src/components/template-studio/TemplateStudioShell.tsx
+index 208ae3f..bea9596 100644
+--- a/src/components/template-studio/TemplateStudioShell.tsx
++++ b/src/components/template-studio/TemplateStudioShell.tsx
+@@ -3,7 +3,7 @@
+ import { useEffect, useMemo, useRef, useState } from 'react';
+ import { useRouter, useSearchParams } from 'next/navigation';
+ import Link from 'next/link';
+-import { Bookmark, RotateCcw } from 'lucide-react';
++import { Heart, RotateCcw } from 'lucide-react';
+ import ImageStudio from '@/app/image-studio/studio';
+ import { StudioBatchHistory } from '@/app/image-studio/batch-results';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+@@ -261,7 +261,7 @@ export default function TemplateStudioShell({
+         </div>
+         <div className={styles.headerActions}>
+           {activeType === 'image' && <StudioBatchHistory key={userId} userId={userId} />}
+-          <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Bookmark size={16} />我的收藏</Link>
++          <Link className={styles.quietButton} href="/assets?view=favorites&category=template"><Heart size={16} />我的喜欢</Link>
+           {hasRememberedLocation && (
+             <button
+               className={styles.quietButton}
+diff --git a/src/lib/content-reactions/http.ts b/src/lib/content-reactions/http.ts
+index 7646fc9..7581f77 100644
+--- a/src/lib/content-reactions/http.ts
++++ b/src/lib/content-reactions/http.ts
+@@ -19,5 +19,5 @@ export function reactionError(error: unknown) {
+   if (error instanceof ReactionError || error instanceof AuthError) return reactionJson({ error: error.message }, error.status);
+   if (error instanceof SyntaxError) return reactionJson({ error: '请求格式无效' }, 400);
+   console.error('[content-reactions]', error instanceof Error ? error.name : 'unknown');
+-  return reactionJson({ error: '点赞收藏暂时不可用，请稍后重试' }, 503);
++  return reactionJson({ error: '喜欢暂时不可用，请稍后重试' }, 503);
+ }
+diff --git a/src/lib/content-reactions/service.ts b/src/lib/content-reactions/service.ts
+index 56dc16c..4d30c8d 100644
+--- a/src/lib/content-reactions/service.ts
++++ b/src/lib/content-reactions/service.ts
+@@ -8,6 +8,7 @@ import type { ContentCategory, ContentKey, ReactionAction, ReactionListResponse,
+ 
+ export async function getReactionState(user: SessionUser, key: ContentKey, available: boolean): Promise<ReactionState> {
+   const row = await prisma.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
++  // Legacy private favorites affect only the viewer's active state, never this public count.
+   const likeCount = available ? await prisma.contentReaction.count({ where: { content_key: key, liked: true } }) : null;
+   return { key, liked: row?.liked || false, favorited: row?.favorited || false, version: row?.version || 0, available, likeCount };
+ }
+@@ -35,18 +36,26 @@ export async function setReaction(user: SessionUser, input: ReactionMutation) {
+     return { state: await getReactionState(user, previous.content_key as ContentKey, Boolean(resolved)) };
+   }
+   if (input.active && !resolved) throw new ReactionError('内容已不可用或你已无权访问', 404);
+-  const field = input.action === 'like' ? 'liked' : 'favorited';
+-  const timeField = input.action === 'like' ? 'liked_at' : 'favorited_at';
+   try {
+     await prisma.$transaction(async tx => {
+       const current = await tx.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
+       if ((current?.version || 0) !== input.expectedVersion) throw new ReactionError('状态已变化，请按最新状态重试', 409);
+       if (!current && !resolved) throw new ReactionError('标记不存在', 404);
++      // New likes switch both fields. A cached legacy bookmark must remain private.
++      const now = new Date();
++      const data = input.action === 'favorite' ? {
++        favorited: input.active,
++        favorited_at: input.active ? (current?.favorited_at || now) : null,
++      } : {
++        liked: input.active, favorited: input.active,
++        liked_at: input.active ? (current?.liked_at || current?.favorited_at || now) : null,
++        favorited_at: input.active ? (current?.favorited_at || current?.liked_at || now) : null,
++      };
+       if (current) {
+-        const updated = await tx.contentReaction.updateMany({ where: { id: current.id, version: input.expectedVersion }, data: { [field]: input.active, [timeField]: input.active ? (current[field] ? current[timeField] : new Date()) : null, version: { increment: 1 } } });
++        const updated = await tx.contentReaction.updateMany({ where: { id: current.id, version: input.expectedVersion }, data: { ...data, version: { increment: 1 } } });
+         if (!updated.count) throw new ReactionError('状态已变化，请重试', 409);
+       } else {
+-        await tx.contentReaction.create({ data: { user_id: user.id, content_key: key, category: resolved!.summary.category, [field]: input.active, [timeField]: input.active ? new Date() : null } });
++        await tx.contentReaction.create({ data: { user_id: user.id, content_key: key, category: resolved!.summary.category, ...data } });
+       }
+       await tx.contentReactionEvent.create({ data: { user_id: user.id, content_key: key, request_id: input.requestId, fingerprint, action: input.action, active: input.active } });
+     });
+@@ -60,15 +69,15 @@ export async function setReaction(user: SessionUser, input: ReactionMutation) {
+ }
+ 
+ export async function listReactions(user: SessionUser, params: URLSearchParams): Promise<ReactionListResponse> {
+-  const action = params.get('action') || 'favorite';
++  const action = params.get('action') || 'like';
+   if (action !== 'favorite' && action !== 'like') throw new ReactionError('列表类型无效');
+   const category = params.get('category') || 'all';
+   if (!['all', 'image', 'video', 'audio', 'template', 'prompt'].includes(category)) throw new ReactionError('分类无效');
+   const search = (params.get('q') || '').trim().toLocaleLowerCase().slice(0, 160);
+   const limit = Math.min(40, Math.max(1, Number(params.get('limit')) || 24));
+-  const field = action === 'like' ? 'liked' : 'favorited';
+-  const timeField = action === 'like' ? 'liked_at' : 'favorited_at';
+-  const rows = await prisma.contentReaction.findMany({ where: { user_id: user.id, [field]: true }, orderBy: [{ [timeField]: 'desc' }, { id: 'desc' }] });
++  const rows = await prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] } });
++  const markedAt = (row: typeof rows[number]) => new Date(Math.max(row.liked_at?.getTime() || 0, row.favorited_at?.getTime() || 0) || row.created_at.getTime()).toISOString();
++  rows.sort((a, b) => markedAt(a) === markedAt(b) ? (a.id < b.id ? 1 : a.id > b.id ? -1 : 0) : markedAt(a) < markedAt(b) ? 1 : -1);
+   const counts = { all: 0, image: 0, video: 0, audio: 0, template: 0, prompt: 0 };
+   const matches: Array<{ row: typeof rows[number]; resolved: Awaited<ReturnType<typeof resolveContent>> }> = [];
+   // Search only current, authorized projections. Unavailable entries never retain searchable private text.
+@@ -86,12 +95,12 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
+       if (!cursor || typeof cursor.time !== 'string' || typeof cursor.id !== 'string' || !Number.isFinite(Date.parse(cursor.time))) throw new Error();
+     } catch { throw new ReactionError('加载位置已失效，请刷新列表'); }
+   }
+-  const after = matches.filter(({ row }) => !cursor || row[timeField]!.toISOString() < cursor.time || (row[timeField]!.toISOString() === cursor.time && row.id < cursor.id));
++  const after = matches.filter(({ row }) => !cursor || markedAt(row) < cursor.time || (markedAt(row) === cursor.time && row.id < cursor.id));
+   const page = after.slice(0, limit);
+   const items: ReactionListResponse['items'] = [];
+   for (const { row, resolved } of page) {
+-    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: row[timeField]!.toISOString(), state: await getReactionState(user, row.content_key as ContentKey, Boolean(resolved)), content: resolved?.summary || null });
++    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: markedAt(row), state: await getReactionState(user, row.content_key as ContentKey, Boolean(resolved)), content: resolved?.summary || null });
+   }
+   const last = page.at(-1)?.row;
+-  return { items, total: matches.length, counts, nextCursor: after.length > limit && last ? Buffer.from(JSON.stringify({ time: last[timeField]!.toISOString(), id: last.id })).toString('base64url') : null };
++  return { items, total: matches.length, counts, nextCursor: after.length > limit && last ? Buffer.from(JSON.stringify({ time: markedAt(last), id: last.id })).toString('base64url') : null };
+ }
+diff --git a/src/lib/content-reactions/types.ts b/src/lib/content-reactions/types.ts
+index 90b225e..fd43d0b 100644
+--- a/src/lib/content-reactions/types.ts
++++ b/src/lib/content-reactions/types.ts
+@@ -6,8 +6,10 @@ export type ReactionAction = 'like' | 'favorite';
+ 
+ export type ReactionState = {
+   key: ContentKey;
++  // Keep legacy flags distinct for private undo and cached clients; UI active = either flag.
+   liked: boolean;
+   favorited: boolean;
++  // Existing public likes only; private favorites must never be added here.
+   likeCount: number | null;
+   version: number;
+   available: boolean;
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index e7c6ce2..02f179d 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '管理中心新增视频、超分和图片的生成耗时统计，可按日期查看平均和较慢任务用时，展开模型与线路明细并导出；缺失时间记录明确标注，不与视频时长混淆。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '点赞和收藏合并为一个“喜欢”按钮，原有记录统一到“我的喜欢”；旧收藏保留且仍私密，不加入公开喜欢人数。点击喜欢采用新的心形绽放反馈。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

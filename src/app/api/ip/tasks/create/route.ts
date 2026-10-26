@@ -1,13 +1,44 @@
+import { CreationError, isCreationV2 } from '@/lib/creation/contract';
+import { assertVideoCreationReady } from '@/lib/creation/context';
+import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
+import { isActiveBranchStatus } from '@/lib/video-branches';
 import { NextRequest, NextResponse } from 'next/server';
+import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
+import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
+  assertCanvasVideoBatchDedupe, recordCanvasVideoBatchRejection, canvasVideoBatchTaskResponse,
+  CanvasVideoBatchError, type CanvasVideoAdmission } from '@/lib/canvas-video-batches-guards';
+import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
+import { parseCanvasPromptMentions, compileCanvasPromptReferences, CanvasPromptReferenceError } from '@/lib/canvas-prompt-references';
+import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
 import { Prisma } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
+import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
+import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { calculateEstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
+import { videoPricingBusinessFingerprint } from '@/lib/pricing/video-context';
+import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
+import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
+import {
+  SEEDANCE_2_5_IP_MODEL_ID,
+  seedanceRatioFollowsFirstFrame,
+  seedanceVideoMaxDuration,
+} from '@/lib/provider/seedance-models';
+import {
+  isVolcengineIpModelId,
+  volcengineIpModelResolutions,
+} from '@/lib/integrations/volcengine-ip-models';
+import {
+  exceedsGenerationPromptLimit,
+  GENERATION_PROMPT_LIMIT_MESSAGE,
+  generationPromptLimitMessage,
+} from '@/lib/prompt/limits';
 import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
   VolcengineIpConfigurationError,
@@ -17,12 +48,28 @@ import {
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
 import {
+  PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+  ensureProviderSafeReferenceImageUrl,
+  getProviderSafeImageResizeDimensions,
+  isProviderReferenceImageSizeError,
+  providerReferenceImageSizeMessage,
+} from '@/lib/provider/reference-image-safety';
+import {
+  validateSeedanceReferenceMediaPreflight,
+  seedanceReferenceMediaCapabilities,
+  type SeedanceReferenceMediaItem,
+} from '@/lib/provider/reference-media-policy';
+import { probeIpReferenceMedia } from '@/lib/provider/ip-reference-media-metadata';
+import { validateRequestCostCeiling } from '@/lib/provider/seedance-video-edit';
+import {
   getVolcengineIpApiSettings,
   isVolcengineIpApiReady,
 } from '@/lib/integrations/volcengine-ip';
-import { AuthError } from '@/lib/auth/session';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { AuthError, type SessionUser } from '@/lib/auth/session';
+import { getProjectForGeneration, assertCanViewTask } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
+import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import {
   authenticateCodexVideoApi,
   CodexApiAuthError,
@@ -47,6 +94,8 @@ import {
   importReferenceImageUrlsToSite,
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
+import { ensureSiteAssetPublicUrl, sameOriginPublicUrlForLocalUpload } from '@/lib/assets/site-upload';
+import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import {
   allocateProjectTaskBudget,
@@ -65,8 +114,20 @@ const VALID_GENERATION_MODES: GenerationMode[] = [
   'smart_multi_frame',
 ];
 const VALID_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
-const VALID_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const VALID_RESOLUTIONS = ['480p', '720p', '1080p'];
+const RATIO_DIMENSIONS: Record<string, [number, number]> = {
+  '21:9': [21, 9],
+  '16:9': [16, 9],
+  '4:3': [4, 3],
+  '1:1': [1, 1],
+  '3:4': [3, 4],
+  '9:16': [9, 16],
+};
+
+function imageMatchesRatio(width: number, height: number, ratio: string) {
+  const dimensions = RATIO_DIMENSIONS[ratio];
+  return Boolean(dimensions && Math.abs(width * dimensions[1] - height * dimensions[0]) <= Math.max(...dimensions));
+}
 
 function cleanSourceMetadata(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -95,8 +156,113 @@ function parseJsonRecord(value: string | null | undefined) {
   }
 }
 
+function normalizeReferenceMediaUrlList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function firstNonPublicReferenceMediaUrl(urls: string[]) {
+  return urls.find((url) => !isPubliclyReachableUrl(url)) || null;
+}
+
+function safeUrlHost(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'invalid-url';
+  }
+}
+
+function inferMimeTypeFromUrl(url: string | null | undefined) {
+  if (!url) return null;
+  const pathname = url.split('?')[0]?.toLowerCase() || '';
+  if (pathname.endsWith('.mp4')) return 'video/mp4';
+  if (pathname.endsWith('.mov')) return 'video/quicktime';
+  if (pathname.endsWith('.webm')) return 'video/webm';
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg';
+  if (pathname.endsWith('.wav')) return 'audio/wav';
+  if (pathname.endsWith('.ogg')) return 'audio/ogg';
+  if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.png')) return 'image/png';
+  if (pathname.endsWith('.webp')) return 'image/webp';
+  return null;
+}
+
+function seedanceImageItemsFromUrls(
+  preparedImages: PreparedRefImage[],
+  imageUrls: string[],
+): SeedanceReferenceMediaItem[] {
+  const preparedByUrl = new Map(preparedImages.map((image) => [image.originalUrl, image]));
+  return imageUrls.map((url, index) => {
+    const prepared = preparedByUrl.get(url) ?? null;
+    return {
+      url,
+      index,
+      name: prepared?.name || `图片${index + 1}`,
+      width: prepared?.width ?? null,
+      height: prepared?.height ?? null,
+    };
+  });
+}
+
+function seedanceMediaItemsFromUrls(
+  kind: 'video' | 'audio',
+  urls: string[],
+): SeedanceReferenceMediaItem[] {
+  return urls.map((url, index) => ({
+    url,
+    index,
+    name: `${kind === 'video' ? '视频' : '音频'}${index + 1}`,
+  }));
+}
+
+function buildReferenceMediaFailureSummary(input: {
+  preparedImages: PreparedRefImage[];
+  imageUrls: string[];
+  referenceVideoUrls: string[];
+  referenceAudioUrls: string[];
+}) {
+  const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
+  return {
+    images: {
+      count: input.imageUrls.length,
+      items: input.imageUrls.slice(0, 20).map((url, index) => {
+        const prepared = preparedImageByUrl.get(url) ?? null;
+        return {
+          index,
+          name: prepared?.name || `图片${index + 1}`,
+          host: safeUrlHost(url),
+          width: prepared?.width ?? null,
+          height: prepared?.height ?? null,
+          source_type: prepared?.sourceType ?? null,
+          resized: Boolean(prepared?.providerSafeResize),
+        };
+      }),
+    },
+    videos: {
+      count: input.referenceVideoUrls.length,
+      items: input.referenceVideoUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+    audios: {
+      count: input.referenceAudioUrls.length,
+      items: input.referenceAudioUrls.slice(0, 20).map((url, index) => ({
+        index,
+        host: safeUrlHost(url),
+        mime_type: inferMimeTypeFromUrl(url),
+      })),
+    },
+  };
+}
+
 type IpIdempotentTask = {
   id: string;
+  provider: string | null;
   local_status: string;
   estimated_cost: number | null;
   frozen_cost: number | null;
@@ -104,6 +270,9 @@ type IpIdempotentTask = {
   source_type: string | null;
   source_label: string | null;
   source_request_id: string | null;
+  provider_task_id: string | null;
+  error_code: string | null;
+  params_json: string | null;
   project_id: string | null;
   video_card_id: string | null;
   template_id: string | null;
@@ -117,6 +286,9 @@ function ipDeduplicatedTaskResponse(existing: IpIdempotentTask) {
   return NextResponse.json({
     id: existing.id,
     status: existing.local_status,
+    provider_task_id: existing.provider_task_id,
+    error_code: existing.error_code,
+    submission_unconfirmed: existing.error_code === 'IP_SUBMISSION_UNCONFIRMED',
     estimated_cost: existing.estimated_cost,
     frozen_cost: existing.frozen_cost,
     created_at: existing.created_at,
@@ -136,6 +308,71 @@ function ipDeduplicatedTaskResponse(existing: IpIdempotentTask) {
 
 function isPrismaUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+function ipIdempotencyDecision(
+  existing: IpIdempotentTask,
+  requestFingerprint: string,
+  videoCardId: string | null,
+): 'deduplicated' | 'provider_mismatch' | 'video_card_mismatch' | 'legacy_unverifiable' | 'payload_mismatch' {
+  if (existing.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) return 'provider_mismatch';
+  if (existing.video_card_id && existing.video_card_id !== videoCardId) return 'video_card_mismatch';
+  const savedFingerprint = parseJsonRecord(existing.params_json)?.request_fingerprint;
+  if (typeof savedFingerprint !== 'string' || !savedFingerprint) return 'legacy_unverifiable';
+  return savedFingerprint === requestFingerprint ? 'deduplicated' : 'payload_mismatch';
+}
+
+function ipIdempotencyConflict(existing: IpIdempotentTask, decision: Exclude<ReturnType<typeof ipIdempotencyDecision>, 'deduplicated'>) {
+  const conflict = {
+    provider_mismatch: {
+      code: 'IDEMPOTENCY_PROVIDER_MISMATCH',
+      message: '同一个请求号已绑定到其他生成服务，不能用于 IP 生成。',
+    },
+    video_card_mismatch: {
+      code: 'IDEMPOTENCY_VIDEO_CARD_MISMATCH',
+      message: '同一个请求号已绑定其他视频卡，请查询已有任务，不要用该请求号重新提交。',
+    },
+    legacy_unverifiable: {
+      code: 'IDEMPOTENCY_LEGACY_UNVERIFIABLE',
+      message: '已找到同请求号的历史任务，但缺少内容指纹。请先查询该任务状态，不要盲目重新提交。',
+    },
+    payload_mismatch: {
+      code: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      message: '同一个请求号已对应不同模型或生成参数。请查询已有任务；如确需再生成，应由用户明确发起新请求。',
+    },
+  }[decision];
+  return NextResponse.json({ ...conflict, error: conflict.code, existing_task_id: existing.id }, { status: 409 });
+}
+
+function hasUnsupportedIpTaskMode(body: Record<string, unknown>) {
+  const hasValue = (value: unknown) => value !== undefined && value !== null && value !== false && value !== '';
+  if (body.draft === true || (body.draft !== undefined && body.draft !== null && typeof body.draft !== 'boolean' && hasValue(body.draft))) {
+    return 'IP 生成暂不支持 Draft，请移除 Draft 参数后再提交。';
+  }
+  if (hasValue(body.draft_task_id) || hasValue(body.provider_draft_task_id) || hasValue(body.source_draft_task_id)) {
+    return 'IP 生成暂不支持从 Draft 升级，请移除 Draft 参数后再提交。';
+  }
+  const omniReferenceTaskType = body.omni_reference_task_type;
+  if (omniReferenceTaskType !== undefined && omniReferenceTaskType !== 'reference') {
+    if (omniReferenceTaskType === 'edit') return 'IP 生成暂不支持视频编辑，请移除编辑参数后再提交。';
+    if (omniReferenceTaskType === 'extend') return 'IP 生成暂不支持视频延长，请移除延长参数后再提交。';
+    return 'IP 生成仅支持 omni_reference_task_type=reference；如使用普通生成，请省略此参数。';
+  }
+  if (hasValue(body.seedance_edit_reference) || body.video_edit === true) {
+    return 'IP 生成暂不支持视频编辑，请移除编辑参数后再提交。';
+  }
+  const taskType = String(body.task_type || '').toLowerCase();
+  if (taskType === 'draft') {
+    return 'IP 生成暂不支持 Draft，请移除 Draft 参数后再提交。';
+  }
+  if (taskType === 'edit') {
+    return 'IP 生成暂不支持视频编辑，请移除编辑参数后再提交。';
+  }
+  const extensionKeys = ['extend', 'extension', 'extend_task_id', 'extension_task_id', 'extend_video_id', 'extension_video_id', 'extend_video_url', 'extension_video_url'];
+  if (extensionKeys.some((key) => hasValue(body[key])) || ['extend', 'extension'].includes(taskType)) {
+    return 'IP 生成暂不支持视频延长，请移除延长参数后再提交。';
+  }
+  return null;
 }
 
 function volcengineProviderErrorMessage(error: unknown) {
@@ -189,7 +426,7 @@ function volcengineProviderHttpStatus(error: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  let user;
+  let user: SessionUser;
   let requestSource: GenerationRequestSource = webRequestSource(request);
 
   if (hasCodexApiAuthSignal(request)) {
@@ -215,20 +452,70 @@ export async function POST(request: NextRequest) {
     return errorJson('账号已被禁用，无法生成', 403);
   }
 
-  const volcengineSettings = await getVolcengineIpApiSettings();
-  if (!isVolcengineIpApiReady(volcengineSettings)) {
-    return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
+  const receivedBody = await request.json();
+  if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
+    const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
+    if (original?.request_fingerprint?.startsWith('pricing-v2:')
+      && receivedBody.canvas_video_batch === undefined && !receivedBody.idempotency_key.startsWith('cvb:')) {
+      await assertCanViewTask(user, original);
+      if (original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      return NextResponse.json(canvasVideoBatchTaskResponse(original));
+    }
   }
+  const volcengineSettings = await getVolcengineIpApiSettings();
+  if (!isVolcengineIpApiReady(volcengineSettings)) return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
+  let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
+  try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip'); }
+  catch (error) {
+    if (error instanceof CanvasVideoBatchError) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+    throw error;
+  }
+  if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
+  const body = restoredBatch.body as typeof receivedBody;
+  const creationBody = structuredClone(body);
+  let creationV2 = false;
+  try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
+  catch (error) { if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status }); throw error; }
+  const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
+  let response: NextResponse;
+  try { response = await runCanvasAdmission(); }
+  catch (error) {
+    if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
+    if (!(error instanceof CanvasVideoBatchError)) throw error;
+    response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
+  }
+  if (canvasAdmission && response.status >= 400) {
+    await recordCanvasVideoBatchRejection(user, canvasAdmission, response.status, await response.clone().json().catch(() => null));
+  }
+  return response;
 
-  const body = await request.json();
+  async function runCanvasAdmission() {
+  try { await resolveImageInputUrls(user, body); }
+  catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
+  if (body.model !== undefined && body.model !== null && typeof body.model !== 'string') {
+    return errorJson('IP model 无效', 400);
+  }
   const requestedModel = typeof body.model === 'string' && body.model.trim()
-    ? body.model.trim().slice(0, 160)
+    ? body.model.trim()
     : null;
+  if (requestedModel && requestedModel.length > 160) return errorJson('IP model 无效', 400);
   const selectedModel = requestedModel || volcengineSettings.default_model;
+  if (!selectedModel || (!isVolcengineIpModelId(selectedModel) && selectedModel !== volcengineSettings.default_model)) {
+    return errorJson('model 必须是已注册的火山 IP 模型；仅省略 model 时兼容使用 API 管理页的默认模型', 400);
+  }
+  const referenceMediaCapabilities = seedanceReferenceMediaCapabilities(selectedModel);
+  const unsupportedTaskModeMessage = hasUnsupportedIpTaskMode(body);
+  if (unsupportedTaskModeMessage) return errorJson(unsupportedTaskModeMessage, 400);
+  if (body.output_format !== undefined && body.output_format !== 'mp4') {
+    return errorJson('火山 IP 视频输出格式仅支持 mp4，请移除或修正 output_format 参数。', 400);
+  }
 
   // --- Validation ---
   if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
     return errorJson('提示词不能为空', 400);
+  }
+  if (exceedsGenerationPromptLimit(body.prompt)) {
+    return errorJson(GENERATION_PROMPT_LIMIT_MESSAGE, 400);
   }
 
   const generationMode: GenerationMode = body.generation_mode || 'all_in_one_reference';
@@ -236,9 +523,12 @@ export async function POST(request: NextRequest) {
     return errorJson(`generation_mode 必须是 ${VALID_GENERATION_MODES.join(', ')}`, 400);
   }
 
-  const ratio = body.ratio || '16:9';
-  const duration: VideoDuration = body.duration || 5;
+  const requestedRatio = body.ratio || '16:9';
+  const duration: VideoDuration = body.duration ?? 5;
   const resolution: VideoResolution = body.resolution || '720p';
+  const ratioFollowsFirstFrame = selectedModel === SEEDANCE_2_5_IP_MODEL_ID
+    && seedanceRatioFollowsFirstFrame(selectedModel, generationMode);
+  const providerRatio = ratioFollowsFirstFrame ? 'adaptive' : requestedRatio;
   const resolutionApprovalConfirmed = body.resolution_approval_confirmed === true || body.resolutionApprovalConfirmed === true;
   const requestedTemplateId = typeof body.template_id === 'string' && body.template_id.trim() ? body.template_id.trim() : null;
   const requestedAgentRunId = typeof body.agent_run_id === 'string' && body.agent_run_id.trim() ? body.agent_run_id.trim() : null;
@@ -246,16 +536,26 @@ export async function POST(request: NextRequest) {
     ? body.selected_agent_plan_key.trim().slice(0, 16)
     : null;
   const agentPromptSnapshot = typeof body.agent_prompt_snapshot === 'string' && body.agent_prompt_snapshot.trim()
-    ? body.agent_prompt_snapshot.trim().slice(0, 12000)
+    ? body.agent_prompt_snapshot.trim()
     : null;
   const finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
-    ? body.final_prompt_snapshot.trim().slice(0, 12000)
+    ? body.final_prompt_snapshot.trim()
     : body.prompt.trim();
+  if (exceedsGenerationPromptLimit(agentPromptSnapshot)) {
+    return errorJson(generationPromptLimitMessage('方案提示词'), 400);
+  }
+  if (exceedsGenerationPromptLimit(finalPromptSnapshot)) {
+    return errorJson(generationPromptLimitMessage('最终提示词'), 400);
+  }
   const promptUserEdited = body.prompt_user_edited === true;
 
-  if (!VALID_RATIOS.includes(ratio)) return errorJson('ratio 无效', 400);
-  if (!VALID_DURATIONS.includes(duration)) return errorJson('duration 必须是 4-15', 400);
-  if (!VALID_RESOLUTIONS.includes(resolution)) return errorJson('resolution 无效', 400);
+  if (!VALID_RATIOS.includes(requestedRatio)) return errorJson('ratio 无效', 400);
+  if (!Number.isInteger(duration) || duration < 4 || duration > seedanceVideoMaxDuration(selectedModel)) {
+    return errorJson(`当前 IP 模型生成时长必须是 4-${seedanceVideoMaxDuration(selectedModel)} 秒的整数`, 400);
+  }
+  if (!VALID_RESOLUTIONS.includes(resolution) || !volcengineIpModelResolutions(selectedModel).includes(resolution)) {
+    return errorJson(`当前 IP 模型不支持 ${resolution} 分辨率`, 400);
+  }
 
   const paidGenerationGuard = evaluatePaidGenerationGuard({ request, body, requestSource });
   if (!paidGenerationGuard.allowed) {
@@ -281,31 +581,63 @@ export async function POST(request: NextRequest) {
       ? body.videoBranchId.trim()
       : null;
 
-  if (!requestedVideoCardId) {
+  if (!requestedVideoCardId && !creationV2) {
     return errorJson('必须先选择视频卡，生成任务才能写入项目成本闭环', 400);
   }
 
-  const requestedVideoCard = await prisma.videoCard.findUnique({
+  const requestedVideoCard = requestedVideoCardId ? await prisma.videoCard.findUnique({
     where: { id: requestedVideoCardId },
     select: { id: true, project_id: true },
-  });
-  if (!requestedVideoCard) {
+  }) : null;
+  if (requestedVideoCardId && !requestedVideoCard) {
     return errorJson('视频卡不存在', 404);
   }
-  if (requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
+  if (requestedVideoCard && requestedProjectId && requestedProjectId !== requestedVideoCard.project_id) {
     return errorJson('视频卡不属于当前项目', 400);
   }
 
   let project;
-  let videoCard;
+  let videoCard: NonNullable<Awaited<ReturnType<typeof assertCanGenerateInVideoCard>>['videoCard']> | null = null;
   try {
-    project = await getProjectForGeneration(user, requestedVideoCard.project_id);
-    const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
-    videoCard = videoCardAccess.videoCard;
+    const projectId = requestedVideoCard?.project_id || requestedProjectId;
+    if (!projectId) throw new AuthError('请选择保存到的项目', 400);
+    project = await getProjectForGeneration(user, projectId);
+    if (requestedVideoCard) videoCard = (await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id)).videoCard;
+    const canvasDocumentIds = new Set([
+      body.canvas_document_id,
+      cleanSourceMetadata(body.source_metadata).canvas_document_id,
+      requestSource.source_metadata?.canvas_document_id,
+    ].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).map(value => value.trim()));
+    if (canvasDocumentIds.size > 1) throw new AuthError('画布归属信息不一致', 400);
+    if (body.roleMediaContext !== undefined) {
+      roleMediaFingerprint(body.roleMediaContext);
+      const context = body.roleMediaContext;
+      if (hasCodexApiAuthSignal(request) || context.ownerId !== user.id || context.kind !== 'video'
+        || canvasDocumentIds.size !== 1 || !canvasDocumentIds.has(context.documentId)
+        || context.generationNodeId !== (cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id)
+        || body.client_name !== 'ultimate_canvas') throw new AuthError('角色视频必须由本人在原画布生成器确认', 403);
+    }
+    for (const canvasDocumentId of Array.from(canvasDocumentIds)) {
+      const document = await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
+      const nodeId = cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id;
+      const node = JSON.parse(document.document_json).canvas.nodes.find((item: { id: string }) => item.id === nodeId);
+      if (node?.data?.roleMediaOrigin && body.roleMediaContext === undefined) throw new AuthError('此视频节点属于固定角色工作，请从原岗位重新打开生成器', 409);
+    }
+    for (const canvasDocumentId of Array.from(canvasDocumentIds)) await assertCanvasPromptCompatibility(user, canvasDocumentId,
+      cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id || null, body.prompt, body.promptMentions);
+    if (body.promptMentions != null) {
+      if (canvasDocumentIds.size !== 1 || body.client_name !== 'ultimate_canvas') throw new AuthError('图片绑定仅用于合法画布请求', 400);
+      try { compileCanvasPromptReferences({ prompt: body.prompt, promptMentions: body.promptMentions, referenceImageIds: body.reference_image_ids ?? [] }); } catch (error) {
+        if (error instanceof CanvasPromptReferenceError) throw new AuthError(error.message, 400); throw error;
+      }
+    }
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     throw error;
   }
+
+  const videoCardId = videoCard?.id || null;
+  if (!videoCardId && requestedVideoBranchId) return errorJson('没有原视频卡时不能指定方向', 400);
 
   let generationTemplate: { id: string; status: string } | null = null;
   if (requestedTemplateId) {
@@ -328,20 +660,21 @@ export async function POST(request: NextRequest) {
     if (!agentRun) return errorJson('Agent 执行链路不存在', 404);
     if (agentRun.user_id !== user.id && user.role !== 'admin') return errorJson('Agent 执行链路不属于当前用户', 403);
     if (generationTemplate && agentRun.template_id !== generationTemplate.id) return errorJson('Agent 执行链路与当前模板不一致', 400);
-    if (agentRun.video_card_id && agentRun.video_card_id !== videoCard.id) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
+    if (agentRun.video_card_id && agentRun.video_card_id !== videoCardId) return errorJson('Agent 执行链路与当前视频卡不一致', 400);
     if (!generationTemplate) {
       generationTemplate = { id: agentRun.template_id, status: 'active' };
     }
   }
 
-  if (project.type !== 'personal' && resolution === '1080p') {
+  if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
+    if (!videoCard) return errorJson('原高清创作需要视频卡', 403);
     if (!resolutionApprovalConfirmed) {
       return errorJson('1080p 生成需要先确认审批通过', 403);
     }
     const baselineTaskId = videoCard.final_task_id || videoCard.current_best_task_id;
     const candidateCount = await prisma.videoTask.count({
       where: {
-        video_card_id: videoCard.id,
+        video_card_id: videoCardId,
         version_role: { in: ['candidate', 'current_best', 'final'] },
       },
     });
@@ -355,13 +688,13 @@ export async function POST(request: NextRequest) {
             type: 'resolution_1080p',
             status: 'approved',
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
           },
         })
       : await prisma.$transaction((tx) => findUsableApproval(tx, {
           type: 'resolution_1080p',
           projectId: project.id,
-          videoCardId: videoCard.id,
+          videoCardId: videoCardId,
         }));
     if (!approval) {
       const rejectedApproval = await prisma.approvalRecord.findFirst({
@@ -369,7 +702,7 @@ export async function POST(request: NextRequest) {
           type: 'resolution_1080p',
           status: 'rejected',
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
         },
         orderBy: [{ rejected_at: 'desc' }, { created_at: 'desc' }],
         select: { decision_reason: true, reason: true },
@@ -380,7 +713,7 @@ export async function POST(request: NextRequest) {
       }
       return errorJson('未找到有效的 1080p 审批记录，请先在审批中心申请并通过审批', 403);
     }
-    if (approval.video_card_id !== videoCard.id) {
+    if (approval.video_card_id !== videoCardId) {
       return errorJson('1080p 审批必须绑定当前视频卡，不能跨视频卡或使用项目级通配审批', 403);
     }
     if (approval.usage_limit !== null && approval.used_count >= approval.usage_limit) {
@@ -398,14 +731,14 @@ export async function POST(request: NextRequest) {
     });
     if (
       !approvalBaseTask
-      || approvalBaseTask.video_card_id !== videoCard.id
+      || approvalBaseTask.video_card_id !== videoCardId
       || !['candidate', 'current_best', 'final'].includes(approvalBaseTask.version_role)
     ) {
       return errorJson('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版', 403);
     }
   }
 
-  if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio) {
+  if (videoCard?.ratio_locked && videoCard.ratio && !ratioFollowsFirstFrame && requestedRatio !== videoCard.ratio) {
     return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
   }
 
@@ -415,37 +748,27 @@ export async function POST(request: NextRequest) {
       where: { id: requestedVideoBranchId },
       select: { id: true, video_card_id: true, title: true, status: true, is_primary: true },
     });
-    if (!branch || branch.video_card_id !== videoCard.id) {
+    if (!branch || branch.video_card_id !== videoCardId) {
       return errorJson('方向分支不属于当前视频卡', 400);
     }
-    if (['closed', 'merged', 'promoted'].includes(branch.status)) {
+    if (!isActiveBranchStatus(branch.status)) {
       return errorJson('方向分支已关闭、合并或升格，不能继续生成', 403);
     }
     videoBranch = branch;
   }
 
   // --- Pricing ---
-  const pricing = calculateEstimatedCost(resolution, duration);
-  const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
 
   // --- Idempotency ---
-  const idempotencyKey: string | undefined = body.idempotency_key || undefined;
-  if (idempotencyKey) {
-    const existing = await prisma.videoTask.findUnique({
-      where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
-    });
-    if (existing) {
-      if (existing.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) {
-        return errorJson('同一个幂等键已绑定到普通生成任务，不能用于 IP 生成', 409);
-      }
-      if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
-        return errorJson('同一个幂等键已绑定到其他视频卡', 409);
-      }
-      return ipDeduplicatedTaskResponse(existing);
-    }
+  const idempotencyKey = typeof body.idempotency_key === 'string' && body.idempotency_key.trim()
+    ? body.idempotency_key.trim()
+    : undefined;
+  if (body.idempotency_key !== undefined && (!idempotencyKey || idempotencyKey.length > 200)) {
+    return errorJson('idempotency_key 无效', 400);
   }
+  if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
 
   // --- Workspace + Reference Image Preparation ---
   const tabId = request.headers.get('x-tab-id') || 'default';
@@ -459,7 +782,7 @@ export async function POST(request: NextRequest) {
   const clientName = cleanClientName(body.client_name);
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
-  const effectiveSourceLabel = isUltimateCanvasRequest ? '无线画布' : requestSource.source_label;
+  const effectiveSourceLabel = isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
   const sourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,
@@ -472,6 +795,28 @@ export async function POST(request: NextRequest) {
     requested_model: requestedModel,
     selected_model: selectedModel,
     admin_default_model: volcengineSettings.default_model,
+    requested_parameters: {
+      model: requestedModel,
+      generation_mode: generationMode,
+      ratio: requestedRatio,
+      duration,
+      resolution,
+      seed: body.seed ?? -1,
+      generate_audio: body.generate_audio ?? true,
+      return_last_frame: body.return_last_frame ?? false,
+      watermark: body.watermark ?? false,
+    },
+    effective_parameters: {
+      model: selectedModel,
+      generation_mode: generationMode,
+      ratio: providerRatio,
+      duration,
+      resolution,
+      seed: body.seed ?? -1,
+      generate_audio: body.generate_audio ?? true,
+      return_last_frame: body.return_last_frame ?? false,
+      watermark: body.watermark ?? false,
+    },
     paid_generation_guard: paidGenerationGuard.metadata,
   };
   const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
@@ -491,10 +836,93 @@ export async function POST(request: NextRequest) {
         ? body.referenceImageUrls
         : [],
   );
+  const referenceVideoUrls = normalizeReferenceMediaUrlList(body.reference_video_urls);
+  const referenceAudioUrls = normalizeReferenceMediaUrlList(body.reference_audio_urls);
+  const requestedFrameImageUrls = normalizeReferenceMediaUrlList(body.frame_image_urls);
 
-  if (requestedReferenceImageIds.length + requestedReferenceImageUrls.length > 9) {
-    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  if (requestedReferenceImageIds.length > 0 && requestedReferenceImageUrls.length > 0) {
+    return errorJson('参考图编号与参考图链接请只使用一种列表，避免其中一组素材被忽略。', 400);
   }
+
+  if (requestedReferenceImageIds.length + requestedReferenceImageUrls.length > referenceMediaCapabilities.imageLimit) {
+    return NextResponse.json({ error: `单次生成最多选择 ${referenceMediaCapabilities.imageLimit} 张参考图` }, { status: 400 });
+  }
+
+  const implicitWorkspaceImages = requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length === 0
+    ? await prisma.workspaceAsset.findMany({
+        where: { workspace_id: workspaceId, asset: { type: 'image' } },
+        orderBy: { sort_order: 'asc' },
+        select: { asset_id: true, reference_image_id: true },
+      })
+    : [];
+  const fingerprintPayload = {
+    prompt: body.prompt.trim(),
+    ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
+    provider: VOLCENGINE_IP_VIDEO_PROVIDER,
+    requestedModel,
+    model: selectedModel,
+    generationMode,
+    requestedRatio,
+    providerRatio,
+    duration,
+    resolution,
+    seed: body.seed ?? -1,
+    generateAudio: body.generate_audio ?? true,
+    returnLastFrame: body.return_last_frame ?? false,
+    watermark: body.watermark ?? false,
+    priceCeiling: body.max_estimated_cost ?? null,
+    ...(typeof body.pricing_revision === 'string' ? { pricingRevision: body.pricing_revision } : {}),
+    projectId: project.id,
+    videoCardId: videoCardId,
+    videoBranchId: requestedVideoBranchId,
+    referenceImageIds: requestedReferenceImageIds,
+    referenceImageUrls: requestedReferenceImageUrls,
+    implicitWorkspaceImages: implicitWorkspaceImages.map((item) => ({
+      assetId: item.asset_id,
+    })),
+    referenceVideoUrls: referenceVideoUrls,
+    referenceAudioUrls: referenceAudioUrls,
+    frameImageUrls: requestedFrameImageUrls,
+    firstFrameUrl: typeof body.first_frame_url === 'string' ? body.first_frame_url.trim() : null,
+    lastFrameUrl: typeof body.last_frame_url === 'string' ? body.last_frame_url.trim() : null,
+    omniReferenceTaskType: body.omni_reference_task_type ?? null,
+    outputFormat: body.output_format ?? null,
+    templateId: requestedTemplateId,
+    agentRunId: requestedAgentRunId,
+    selectedAgentPlanKey,
+    agentPromptSnapshot,
+    finalPromptSnapshot,
+    promptUserEdited,
+    resolutionApprovalId: requestedResolutionApprovalId,
+    resolutionApprovalConfirmed,
+    workspaceId,
+    sourceType: requestSource.source_type,
+    ...(body.roleMediaContext === undefined ? {} : { roleMediaContext: roleMediaFingerprint(body.roleMediaContext) }),
+  };
+  const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
+  sourceMetadata.request_fingerprint = requestFingerprint;
+  if (idempotencyKey) {
+    const existing = await prisma.videoTask.findUnique({
+      where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
+    });
+    if (existing) await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
+    if (existing) {
+      const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCardId);
+      if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
+      return ipDeduplicatedTaskResponse(existing);
+    }
+  }
+  let priceQuote: VideoPricingQuote;
+  try {
+    priceQuote = await quoteVideoPricing({ provider: 'volcengine_ip', model: selectedModel, resolution, duration });
+    requireVideoPricingRevision(priceQuote, body.pricing_revision);
+  } catch (error) {
+    const failure = videoPricingError(error);
+    return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
+  }
+  const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
+  const costCeilingError = validateRequestCostCeiling(body.max_estimated_cost, estimatedCost);
+  if (costCeilingError) return errorJson(costCeilingError, 400);
 
   if (requestSource.source_type === 'codex_api' && requestedReferenceImageUrls.length > 0) {
     try {
@@ -505,6 +933,7 @@ export async function POST(request: NextRequest) {
         sourceRequestId,
         sourceLabel: effectiveSourceLabel,
         urls: requestedReferenceImageUrls,
+        maxImages: referenceMediaCapabilities.imageLimit,
       });
       requestedReferenceImageIds = uniquePreserveOrder([
         ...requestedReferenceImageIds,
@@ -599,8 +1028,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length > 9) {
-    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  if (requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length > referenceMediaCapabilities.imageLimit) {
+    return NextResponse.json({ error: `单次生成最多选择 ${referenceMediaCapabilities.imageLimit} 张参考图` }, { status: 400 });
   }
 
   const generationReferenceImageIds = requestedReferenceImageIds.length > 0
@@ -608,8 +1037,13 @@ export async function POST(request: NextRequest) {
     : requestedReferenceImageUrls.length > 0
       ? []
       : workspaceReferenceImageIds;
-  if (generationReferenceImageIds.length > 9) {
-    return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
+  if (!(body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt)) && /图\d+/.test(body.prompt) && generationReferenceImageIds.length > 0
+    && (generationReferenceImageIds.length !== workspaceReferenceImageIds.length
+      || generationReferenceImageIds.some((id, index) => id !== workspaceReferenceImageIds[index]))) {
+    return errorJson('提示词引用了工作台图号，但本次图片列表或顺序与工作台不同。请先在工作台整理素材后再提交，避免图号错位。', 400);
+  }
+  if (generationReferenceImageIds.length > referenceMediaCapabilities.imageLimit) {
+    return NextResponse.json({ error: `单次生成最多选择 ${referenceMediaCapabilities.imageLimit} 张参考图` }, { status: 400 });
   }
   let generationReferenceImages: Awaited<ReturnType<typeof getAuthorizedReferenceImagesForUse>> = [];
   try {
@@ -622,15 +1056,31 @@ export async function POST(request: NextRequest) {
   }
   const generationReferenceAlbumIds = uniquePreserveOrder(generationReferenceImages.map((image) => image.album_id));
 
-  const { preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
-    workspaceId,
-    generationReferenceImageIds,
-    requestedReferenceImageUrls,
-  );
-
-  if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
+  let preparedImages: PreparedRefImage[];
+  let prepareErrors: string[];
+  let prepSummary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
+  try {
+    ({ preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
+      workspaceId,
+      generationReferenceImageIds,
+      requestedReferenceImageUrls,
+      user.id,
+    ));
+  } catch (error) {
+    console.error('[IpTasksCreate] Reference image preparation failed:', error);
     return NextResponse.json(
-      { error: 'REFERENCE_IMAGE_NOT_PUBLIC', message: '参考图无法生成公网 URL', details: { errors: prepareErrors } },
+      {
+        error: 'REFERENCE_IMAGE_PREP_FAILED',
+        message: `参考图处理失败：${error instanceof Error ? error.message : '服务临时异常'}`,
+      },
+      { status: 400 },
+    );
+  }
+
+  if (prepSummary.skipped > 0) {
+    const referenceImageFailure = buildReferenceImagePreparationFailure(prepareErrors);
+    return NextResponse.json(
+      { error: referenceImageFailure.error, message: referenceImageFailure.message, details: { errors: prepareErrors } },
       { status: 400 },
     );
   }
@@ -639,34 +1089,159 @@ export async function POST(request: NextRequest) {
   let referenceImageUrls: string[] = [];
   let firstFrameUrl: string | undefined = body.first_frame_url;
   let lastFrameUrl: string | undefined = body.last_frame_url;
-  let frameImageUrls: string[] = body.frame_image_urls ? [...body.frame_image_urls] : [];
-  const referenceVideoUrls: string[] = body.reference_video_urls ? [...body.reference_video_urls].slice(0, 3) : [];
-  const referenceAudioUrls: string[] = body.reference_audio_urls ? [...body.reference_audio_urls].slice(0, 3) : [];
+  let frameImageUrls: string[] = requestedFrameImageUrls;
 
   switch (generationMode) {
     case 'all_in_one_reference':
-      referenceImageUrls = preparedImages.map((img) => img.originalUrl).slice(0, 9);
+      if (firstFrameUrl || lastFrameUrl || frameImageUrls.length > 0) {
+        return errorJson('全能参考模式请使用参考图列表，不要同时传入首尾帧或多帧参数。', 400);
+      }
+      referenceImageUrls = preparedImages.map((img) => img.originalUrl);
       break;
-    case 'first_last_frame':
+    case 'first_last_frame': {
       if (!firstFrameUrl) firstFrameUrl = preparedImages[0]?.originalUrl;
       if (!lastFrameUrl) lastFrameUrl = preparedImages[1]?.originalUrl;
       if (!firstFrameUrl) return errorJson('首尾帧模式必须提供首帧图片', 400);
+      if (frameImageUrls.length > 0) {
+        return errorJson('首尾帧模式不接受额外的多帧图片；请改用智能多帧模式后再提交。', 400);
+      }
+      const unusedPreparedImages = preparedImages.filter((image) => (
+        image.originalUrl !== firstFrameUrl && image.originalUrl !== lastFrameUrl
+      ));
+      if (unusedPreparedImages.length > 0) {
+        return errorJson(
+          `首尾帧模式只会提交首帧和尾帧；当前还有 ${unusedPreparedImages.length} 张参考图未对应到帧位。请改用全能参考或智能多帧，避免素材被忽略。`,
+          400,
+        );
+      }
+      if (videoCard?.ratio_locked && videoCard.ratio && ratioFollowsFirstFrame) {
+        let firstFrameDimensions = preparedImages.find((image) => image.originalUrl === firstFrameUrl) || null;
+        if (!firstFrameDimensions) {
+          const firstFrameAsset = await prisma.asset.findFirst({
+            where: { original_url: firstFrameUrl, type: 'image' },
+            select: { width: true, height: true },
+          });
+          if (firstFrameAsset?.width && firstFrameAsset.height) {
+            firstFrameDimensions = {
+              name: '首帧',
+              originalUrl: firstFrameUrl,
+              sourceType: 'external',
+              order: 0,
+              width: firstFrameAsset.width,
+              height: firstFrameAsset.height,
+            };
+          }
+        }
+        if (!firstFrameDimensions?.width || !firstFrameDimensions.height) {
+          return errorJson(
+            `此视频卡已锁定比例 ${videoCard.ratio}。Seedance 2.5 首尾帧比例跟随首帧，但目前无法确认首帧尺寸；请先将首帧素材加入工作台后再提交。`,
+            403,
+          );
+        }
+        if (!imageMatchesRatio(firstFrameDimensions.width, firstFrameDimensions.height, videoCard.ratio)) {
+          return errorJson(
+            `此视频卡已锁定比例 ${videoCard.ratio}，但首帧尺寸 ${firstFrameDimensions.width}x${firstFrameDimensions.height} 的比例不匹配。请更换首帧或先通过比例变更审批。`,
+            403,
+          );
+        }
+      }
       break;
+    }
     case 'smart_multi_frame':
+      if (firstFrameUrl || lastFrameUrl) return errorJson('智能多帧模式请使用多帧列表，不要同时传入首尾帧参数。', 400);
       if (frameImageUrls.length === 0) frameImageUrls = preparedImages.map((img) => img.originalUrl);
+      if (preparedImages.some((image) => !frameImageUrls.includes(image.originalUrl))) {
+        return errorJson('当前有参考图未包含在多帧列表中，请统一素材列表后再提交，避免遗漏图片。', 400);
+      }
       if (frameImageUrls.length < 2) return errorJson('智能多帧模式至少需要 2 张图片', 400);
       break;
   }
 
+  if (generationMode !== 'all_in_one_reference' && (referenceVideoUrls.length > 0 || referenceAudioUrls.length > 0)) {
+    return errorJson('首尾帧和智能多帧模式不支持参考视频或音频，请切换到全能参考模式。', 400);
+  }
+
+  const nonPublicReferenceMediaUrl = firstNonPublicReferenceMediaUrl([
+    ...referenceVideoUrls,
+    ...referenceAudioUrls,
+  ]);
+  if (nonPublicReferenceMediaUrl) {
+    return errorJson('参考视频/音频必须是公网可访问 URL，请重新上传素材或配置 R2/TOS 存储。', 400);
+  }
+  const hasVisualReference = referenceImageUrls.length > 0
+    || Boolean(firstFrameUrl)
+    || Boolean(lastFrameUrl)
+    || frameImageUrls.length > 0
+    || referenceVideoUrls.length > 0;
+  if (!referenceMediaCapabilities.audioOnly && referenceAudioUrls.length > 0 && !hasVisualReference) {
+    return errorJson('音频参考不能单独使用，至少还需要 1 个图片或视频参考素材。', 400);
+  }
+
+  const finalReferenceImageUrls = uniquePreserveOrder([
+    ...referenceImageUrls,
+    ...(firstFrameUrl ? [firstFrameUrl] : []),
+    ...(lastFrameUrl ? [lastFrameUrl] : []),
+    ...frameImageUrls,
+  ]);
+  if (finalReferenceImageUrls.length > referenceMediaCapabilities.imageLimit) {
+    return errorJson(`当前 IP 模型单次生成最多支持 ${referenceMediaCapabilities.imageLimit} 张参考图。`, 400);
+  }
+  if (referenceVideoUrls.length > referenceMediaCapabilities.videoLimit
+    || referenceAudioUrls.length > referenceMediaCapabilities.audioLimit) {
+    return errorJson(`当前 IP 模型最多支持 ${referenceMediaCapabilities.videoLimit} 个参考视频和 ${referenceMediaCapabilities.audioLimit} 个参考音频。`, 400);
+  }
+
+  let preflightVideos = seedanceMediaItemsFromUrls('video', referenceVideoUrls);
+  let preflightAudios = seedanceMediaItemsFromUrls('audio', referenceAudioUrls);
+  if (selectedModel === SEEDANCE_2_5_IP_MODEL_ID) {
+    try {
+      [preflightVideos, preflightAudios] = await Promise.all([
+        probeIpReferenceMedia(referenceVideoUrls, 'video'),
+        probeIpReferenceMedia(referenceAudioUrls, 'audio'),
+      ]);
+    } catch (error) {
+      return NextResponse.json({
+        error: 'REFERENCE_MEDIA_METADATA_UNAVAILABLE',
+        message: error instanceof Error
+          ? error.message
+          : '无法核对参考视频或音频的真实信息，请重新上传后再试。尚未扣点。',
+      }, { status: 400 });
+    }
+  }
+
+  const referenceMediaPreflightIssue = validateSeedanceReferenceMediaPreflight({
+    model: selectedModel,
+    images: seedanceImageItemsFromUrls(preparedImages, finalReferenceImageUrls),
+    videos: preflightVideos,
+    audios: preflightAudios,
+  });
+  if (referenceMediaPreflightIssue) {
+    return NextResponse.json(
+      {
+        error: referenceMediaPreflightIssue.code,
+        message: referenceMediaPreflightIssue.message,
+      },
+      { status: 400 },
+    );
+  }
+
   // --- Prompt validation + rendering ---
-  const promptValidation = await validatePromptReferences(body.prompt, workspaceId);
+  const hasCanvasBindings = body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt);
+  const promptValidation = hasCanvasBindings ? { valid: true, missing: [] } : await validatePromptReferences(body.prompt, workspaceId);
   if (!promptValidation.valid) {
     return NextResponse.json(
       { error: 'PROMPT_REFERENCE_ERROR', message: `prompt 中引用的图号不存在: ${promptValidation.missing.join(', ')}` },
       { status: 400 },
     );
   }
-  const { promptRendered, assetMapping } = await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
+  let promptRendered: string, assetMapping: Record<string, string>;
+  try {
+    const rendered = hasCanvasBindings
+      ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
+      : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
+    ({ promptRendered, assetMapping } = rendered);
+    if ('canvasPromptFingerprint' in rendered) sourceMetadata.canvas_prompt_fingerprint = rendered.canvasPromptFingerprint;
+  } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
   // --- Build provider input ---
   const seed = body.seed ?? -1;
@@ -677,7 +1252,7 @@ export async function POST(request: NextRequest) {
   const providerInput: CreateVideoInput = {
     prompt: promptRendered,
     generation_mode: generationMode,
-    ratio: ratio as CreateVideoInput['ratio'],
+    ratio: providerRatio as CreateVideoInput['ratio'],
     duration: duration as CreateVideoInput['duration'],
     resolution: resolution as CreateVideoInput['resolution'],
     seed,
@@ -695,29 +1270,47 @@ export async function POST(request: NextRequest) {
   };
 
   // --- Create snapshot ---
-  const content = buildVolcengineIpCreatePayload({
+  const providerPayload = buildVolcengineIpCreatePayload({
     ...providerInput,
     model: selectedModel,
-  }).content;
+  });
+  const content = providerPayload.content;
   const snapshot = await createTaskSnapshot({
     workspaceId,
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
-    providerPayloadJson: JSON.stringify({ content_item_count: content.length, referenceCount: preparedImages.length }),
+    providerPayloadJson: JSON.stringify({
+      ...providerPayload,
+      requested_parameters: sourceMetadata.requested_parameters,
+      effective_parameters: sourceMetadata.effective_parameters,
+      reference_count: preparedImages.length,
+    }),
+    contentOverride: content,
   });
   const taskParams = {
-    ratio, duration, resolution, seed,
+    requestedModel,
+    model: selectedModel,
+    requestedParameters: sourceMetadata.requested_parameters,
+    effectiveParameters: sourceMetadata.effective_parameters,
+    request_fingerprint: requestFingerprint,
+    max_estimated_cost: body.max_estimated_cost ?? null,
+    ratio: requestedRatio, duration, resolution, seed,
     generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
     referenceAlbumIds: generationReferenceAlbumIds,
     referenceImageIds: generationReferenceImageIds,
-    videoCardId: videoCard.id,
+    videoCardId: videoCardId,
     videoBranchId: videoBranch?.id || null,
     templateId: generationTemplate?.id || null,
     agentRunId: agentRun?.id || null,
     selectedAgentPlanKey,
     promptUserEdited,
-    preparedImages: preparedImages.map((img) => ({ name: img.name, originalUrl: img.originalUrl, sourceType: img.sourceType })),
+    preparedImages: preparedImages.map((img) => ({
+      name: img.name,
+      originalUrl: img.originalUrl,
+      sourceType: img.sourceType,
+      providerSafeResize: img.providerSafeResize,
+    })),
     prepSummary,
     source: {
       type: requestSource.source_type,
@@ -748,6 +1341,12 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
+      await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
+        videoCardId: videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
+      await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: VOLCENGINE_IP_VIDEO_PROVIDER,
@@ -758,7 +1357,7 @@ export async function POST(request: NextRequest) {
           source_label: effectiveSourceLabel,
           source_request_id: sourceRequestId,
           source_metadata_json: JSON.stringify(sourceMetadata),
-          ratio,
+          ratio: requestedRatio,
           duration,
           resolution,
           seed,
@@ -777,7 +1376,7 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
           video_branch_id: videoBranch?.id || null,
           template_id: generationTemplate?.id || null,
           agent_run_id: agentRun?.id || null,
@@ -799,7 +1398,18 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      if (project.type !== 'personal' && resolution === '1080p') {
+      await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost, pricingRevision: priceQuote.revision,
+        ...(canvasAdmission ? { batchChildId: canvasAdmission.reference.child_id } : {}) });
+
+      const usageAttribution = { sourceKind: 'video_task' as const, sourceId: task.id,
+        actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
+        billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
+        projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'ip-video-create' };
+      if (body.roleMediaContext && typeof body.roleMediaContext === 'object' && 'runId' in body.roleMediaContext) {
+        await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
+      } else await recordUsageAttribution(tx, usageAttribution);
+
+      if (!creationV2 && project.type !== 'personal' && resolution === '1080p') {
         const approval = requestedResolutionApprovalId
           ? await tx.approvalRecord.findFirst({
               where: {
@@ -807,16 +1417,16 @@ export async function POST(request: NextRequest) {
                 type: 'resolution_1080p',
                 status: 'approved',
                 project_id: project.id,
-                video_card_id: videoCard.id,
+                video_card_id: videoCardId,
               },
             })
           : await findUsableApproval(tx, {
               type: 'resolution_1080p',
               projectId: project.id,
-              videoCardId: videoCard.id,
+              videoCardId: videoCardId,
             });
         if (!approval) throw new Error('未找到可用的 1080p 审批额度');
-        if (approval.video_card_id !== videoCard.id) throw new Error('1080p 审批必须绑定当前视频卡');
+        if (approval.video_card_id !== videoCardId) throw new Error('1080p 审批必须绑定当前视频卡');
         if (!approval.task_id) throw new Error('1080p 审批缺少基准任务');
         const baseTask = await tx.videoTask.findUnique({
           where: { id: approval.task_id },
@@ -824,7 +1434,7 @@ export async function POST(request: NextRequest) {
         });
         if (
           !baseTask
-          || baseTask.video_card_id !== videoCard.id
+          || baseTask.video_card_id !== videoCardId
           || !['candidate', 'current_best', 'final'].includes(baseTask.version_role)
         ) {
           throw new Error('1080p 审批基准任务不属于当前视频卡候选/当前最佳/最终版');
@@ -835,7 +1445,7 @@ export async function POST(request: NextRequest) {
           userId: user.id,
           metadata: {
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             baseline_task_id: approval.task_id,
             resolution,
             estimated_cost: estimatedCost,
@@ -900,6 +1510,11 @@ export async function POST(request: NextRequest) {
         data: { credit_freeze_snapshot: freezeSnapshot },
       });
 
+      if (body.roleMediaContext !== undefined) await bindRoleMediaTask(tx, { user, context: body.roleMediaContext,
+        generationNodeId: String(cleanSourceMetadata(body.source_metadata).canvas_node_id || body.canvas_node_id) },
+      { kind: 'video', taskId: task.id, requestId: idempotencyKey || task.id, ordinal: 1,
+        model: selectedModel, providerId: VOLCENGINE_IP_VIDEO_PROVIDER, reservedPoints: estimatedCost });
+
       await tx.operationLog.create({
         data: {
           operator_id: user.id,
@@ -908,7 +1523,7 @@ export async function POST(request: NextRequest) {
           target_id: task.id,
           detail: JSON.stringify({
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             template_id: generationTemplate?.id || null,
             agent_run_id: agentRun?.id || null,
             selected_agent_plan_key: selectedAgentPlanKey,
@@ -934,7 +1549,7 @@ export async function POST(request: NextRequest) {
           where: { id: agentRun.id },
           data: {
             video_task_id: task.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             status: 'submitted',
             selected_plan_key: selectedAgentPlanKey || undefined,
             final_prompt_snapshot: finalPromptSnapshot,
@@ -957,26 +1572,34 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      await bindCanvasVideoBatchTask(tx, canvasAdmission, task.id, estimatedCost);
       return task;
     });
 
     taskId = result.id;
     createdTask = result;
   } catch (err) {
+    if (err instanceof CanvasVideoBatchError) {
+      if (canvasAdmission && err.code === 'canvas_video_batch_child_accepted') {
+        const original = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip');
+        if (original.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(original.existingTask));
+      }
+      return NextResponse.json({ error: err.message, code: err.code, ...err.details }, { status: err.status });
+    }
     if (idempotencyKey && isPrismaUniqueConstraintError(err)) {
       const existing = await prisma.videoTask.findUnique({
         where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
       });
       if (existing) {
-        if (existing.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) {
-          return errorJson('同一个幂等键已绑定到普通生成任务，不能用于 IP 生成', 409);
-        }
-        if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
-          return errorJson('同一个幂等键已绑定到其他视频卡', 409);
-        }
+        await assertCanvasVideoBatchDedupe(user, canvasAdmission, existing);
+        const decision = ipIdempotencyDecision(existing, requestFingerprint, videoCardId);
+        if (decision !== 'deduplicated') return ipIdempotencyConflict(existing, decision);
         return ipDeduplicatedTaskResponse(existing);
       }
     }
+    const pricingFailure = videoPricingError(err);
+    if (pricingFailure) return NextResponse.json({ error: pricingFailure.message, code: pricingFailure.code }, { status: pricingFailure.status });
+    if (err instanceof AuthError) return errorJson(err.message, err.status);
     if (err instanceof CreditError) {
       if (err.code === 'INSUFFICIENT_PROJECT_BUDGET') {
         await prisma.$transaction((tx) => notifyProjectOwner(tx, {
@@ -987,7 +1610,7 @@ export async function POST(request: NextRequest) {
           body: err.message,
           metadata: {
             attempted_cost: estimatedCost,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
           },
         })).catch((notificationError) => {
           console.error('[TasksCreate] Failed to notify project budget shortage:', notificationError);
@@ -1000,6 +1623,9 @@ export async function POST(request: NextRequest) {
 
   // --- Call Volcengine Ark provider DIRECTLY (no internal HTTP) ---
   let providerRequestId: string | null = null;
+  let submissionStarted = false;
+  let providerTaskId: string | null = null;
+  let providerResult: Awaited<ReturnType<typeof createVolcengineIpVideoTask>> | null = null;
   try {
     providerInput.clientRequestId = taskId;
     providerInput.client_request_id = taskId;
@@ -1014,8 +1640,8 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       idempotencyKey: idempotencyKey || null,
       requestPayload: {
-        ...providerInput,
-        model: selectedModel,
+        ...providerPayload,
+        client_request_id: taskId,
         source: {
           type: requestSource.source_type,
           label: effectiveSourceLabel,
@@ -1026,28 +1652,31 @@ export async function POST(request: NextRequest) {
     });
     providerRequestId = providerRequest.id;
 
-    const providerResult = await createVolcengineIpVideoTask({
+    submissionStarted = true;
+    const acceptedProviderResult = await createVolcengineIpVideoTask({
       ...providerInput,
       model: selectedModel,
     });
+    providerResult = acceptedProviderResult;
+    providerTaskId = acceptedProviderResult.provider_task_id || null;
 
     await prisma.videoTask.update({
       where: { id: taskId },
       data: {
-        provider_task_id: providerResult.provider_task_id,
-        raw_create_response: JSON.stringify(providerResult.raw),
+        provider_task_id: acceptedProviderResult.provider_task_id,
+        raw_create_response: JSON.stringify(acceptedProviderResult.raw),
         local_status: 'submitted',
       },
     });
 
     await markProviderApiRequestAccepted({
       requestId: providerRequest.id,
-      task: { ...createdTask, provider_task_id: providerResult.provider_task_id },
-      providerTaskId: providerResult.provider_task_id,
+      task: { ...createdTask, provider_task_id: acceptedProviderResult.provider_task_id },
+      providerTaskId: acceptedProviderResult.provider_task_id,
       responseSummary: {
-        provider_task_id: providerResult.provider_task_id,
-        response_keys: providerResult.raw && typeof providerResult.raw === 'object'
-          ? Object.keys(providerResult.raw as Record<string, unknown>)
+        provider_task_id: acceptedProviderResult.provider_task_id,
+        response_keys: acceptedProviderResult.raw && typeof acceptedProviderResult.raw === 'object'
+          ? Object.keys(acceptedProviderResult.raw as Record<string, unknown>)
           : [],
       },
     });
@@ -1069,7 +1698,7 @@ export async function POST(request: NextRequest) {
             step_key: 'volcengine_ip_submit',
             title: '火山 IP 执行',
             input_json: JSON.stringify({ task_id: taskId, template_id: generationTemplate?.id || null }),
-            output_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id, status: 'submitted' }),
+            output_json: JSON.stringify({ provider_task_id: acceptedProviderResult.provider_task_id, status: 'submitted' }),
             sort_order: 6,
           },
         });
@@ -1082,24 +1711,25 @@ export async function POST(request: NextRequest) {
             memory_type: 'task_result',
             signal: 'neutral',
             summary: '任务已提交火山 IP 生成接口，等待生成结果回写',
-            metadata_json: JSON.stringify({ provider_task_id: providerResult.provider_task_id }),
+            metadata_json: JSON.stringify({ provider_task_id: acceptedProviderResult.provider_task_id }),
           },
         });
       });
     }
 
     startTaskLocalization(taskId);
+    const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
     return NextResponse.json({
       id: taskId,
-      provider_task_id: providerResult.provider_task_id,
+      provider_task_id: acceptedProviderResult.provider_task_id,
       status: 'submitted',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,
-      pricing,
+      pricing: publicVideoPricing(priceQuote),
       workspace_id: workspaceId,
       project_id: project.id,
-      video_card_id: videoCard.id,
+      video_card_id: videoCardId,
       template_id: generationTemplate?.id || null,
       agent_run_id: agentRun?.id || null,
       selected_agent_plan_key: selectedAgentPlanKey,
@@ -1110,6 +1740,10 @@ export async function POST(request: NextRequest) {
       asset_mapping: assetMapping,
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
+      reference_image_notice: referenceImageResizeSummary
+        ? `已自动把 ${referenceImageResizeSummary.resized_count} 张过大的参考图压缩到平台允许尺寸，原图不会被修改。`
+        : null,
+      reference_image_resize_summary: referenceImageResizeSummary,
       source_type: requestSource.source_type,
       source_label: effectiveSourceLabel,
       source_request_id: sourceRequestId,
@@ -1119,11 +1753,101 @@ export async function POST(request: NextRequest) {
     const providerErrorMessage = volcengineProviderErrorMessage(err);
     const providerErrorCode = volcengineProviderErrorCode(err);
     const providerHttpStatus = volcengineProviderHttpStatus(err);
+    const explicitProviderRejection = !providerTaskId && err instanceof VolcengineIpRequestError
+      && typeof err.statusCode === 'number'
+      && err.statusCode >= 400
+      && err.statusCode < 500
+      && ![408, 409, 425].includes(err.statusCode);
+
+    if (submissionStarted && !explicitProviderRejection) {
+      const unconfirmedMessage = providerTaskId
+        ? '火山已返回任务编号，但本地记录尚未确认完成。点数冻结保留，请勿重复提交；可查询任务状态或联系管理员核对。'
+        : '上游提交结果尚未确认，点数冻结保留。请勿重复提交，可用原请求号查询状态或联系管理员核对。';
+      const unconfirmedParams = {
+        ...taskParams,
+        submission_unconfirmed: true,
+        provider_request_id: providerRequestId,
+        provider_task_id: providerTaskId,
+      };
+      if (providerRequestId) {
+        if (providerTaskId) {
+          await markProviderApiRequestAccepted({
+            requestId: providerRequestId,
+            task: { ...createdTask, provider_task_id: providerTaskId },
+            providerTaskId,
+            responseSummary: {
+              provider_task_id: providerTaskId,
+              response_keys: providerResult?.raw && typeof providerResult.raw === 'object'
+                ? Object.keys(providerResult.raw as Record<string, unknown>)
+                : [],
+              local_recording_unconfirmed: true,
+            },
+          }).catch(() => {});
+        } else {
+          await markProviderApiRequestFailed({
+            requestId: providerRequestId,
+            errorCode: 'IP_SUBMISSION_UNCONFIRMED',
+            errorMessage: unconfirmedMessage,
+            responseSummary: {
+              error: { code: 'IP_SUBMISSION_UNCONFIRMED', http_status: providerHttpStatus },
+              reference_media: buildReferenceMediaFailureSummary({
+                preparedImages,
+                imageUrls: finalReferenceImageUrls,
+                referenceVideoUrls,
+                referenceAudioUrls,
+              }),
+            },
+          }).catch(() => {});
+        }
+      }
+      await prisma.videoTask.update({
+        where: { id: taskId },
+        data: {
+          provider_task_id: providerTaskId,
+          ...(providerResult ? { raw_create_response: JSON.stringify(providerResult.raw) } : {}),
+          local_status: 'submitted',
+          error_code: 'IP_SUBMISSION_UNCONFIRMED',
+          error_message: unconfirmedMessage,
+          params_json: JSON.stringify(unconfirmedParams),
+        },
+      }).catch((recordError) => {
+        console.error('[IpTasksCreate] Failed to persist unconfirmed submission state:', recordError);
+      });
+      if (providerTaskId) startTaskLocalization(taskId);
+      return NextResponse.json({
+        error: 'IP_SUBMISSION_UNCONFIRMED',
+        error_code: 'IP_SUBMISSION_UNCONFIRMED',
+        submission_unconfirmed: true,
+        message: unconfirmedMessage,
+        id: taskId,
+        task_id: taskId,
+        idempotency_key: idempotencyKey || null,
+        provider_task_id: providerTaskId,
+        status: 'submitted',
+      }, { status: 202 });
+    }
+
+    const userFacingProviderMessage = isProviderReferenceImageSizeError(providerErrorMessage)
+      ? `${providerReferenceImageSizeMessage(providerErrorMessage)} 已返还冻结点数。`
+      : `${providerErrorMessage}，已返还冻结点数`;
     if (providerRequestId) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
         errorCode: providerErrorCode,
         errorMessage: providerErrorMessage,
+        responseSummary: {
+          error: {
+            code: providerErrorCode,
+            user_message: userFacingProviderMessage,
+            http_status: providerHttpStatus,
+          },
+          reference_media: buildReferenceMediaFailureSummary({
+            preparedImages,
+            imageUrls: finalReferenceImageUrls,
+            referenceVideoUrls,
+            referenceAudioUrls,
+          }),
+        },
       }).catch(() => {});
     }
     await handleProviderFailure(
@@ -1169,7 +1893,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'PROVIDER_CREATE_FAILED',
-        message: `${providerErrorMessage}，已返还冻结点数`,
+        message: userFacingProviderMessage,
         task_id: taskId,
       },
       { status: providerHttpStatus },
@@ -1177,6 +1901,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
+  }
 // --- Failure handler: release frozen credits in a single transaction ---
 async function handleProviderFailure(
   taskId: string,
@@ -1197,11 +1922,11 @@ async function handleProviderFailure(
     if (!taskBeforeSettlement) return;
 
     const consumedApprovals = await tx.approvalUsage.findMany({
-      where: { task_id: taskId },
+      where: { task_id: taskId, creation_intent_id: null },
       select: { approval_id: true },
     });
     if (consumedApprovals.length > 0) {
-      await tx.approvalUsage.deleteMany({ where: { task_id: taskId } });
+      await tx.approvalUsage.deleteMany({ where: { task_id: taskId, creation_intent_id: null } });
       for (const usage of consumedApprovals) {
         await tx.approvalRecord.updateMany({
           where: { id: usage.approval_id, used_count: { gt: 0 } },
@@ -1289,23 +2014,77 @@ interface PreparedRefImage {
   originalUrl: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
+  width?: number | null;
+  height?: number | null;
+  providerSafeResize?: {
+    originalWidth?: number;
+    originalHeight?: number;
+    outputWidth?: number;
+    outputHeight?: number;
+    originalPixels?: number;
+    maxPixels?: number;
+  };
+}
+
+function buildReferenceImageResizeSummary(preparedImages: PreparedRefImage[]) {
+  const resizedItems = preparedImages.filter((image) => image.providerSafeResize);
+  if (resizedItems.length === 0) return null;
+  return {
+    resized_count: resizedItems.length,
+    max_pixels: PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    items: resizedItems.map((image) => ({
+      name: image.name,
+      original_width: image.providerSafeResize?.originalWidth ?? null,
+      original_height: image.providerSafeResize?.originalHeight ?? null,
+      output_width: image.providerSafeResize?.outputWidth ?? null,
+      output_height: image.providerSafeResize?.outputHeight ?? null,
+      original_pixels: image.providerSafeResize?.originalPixels ?? null,
+      max_pixels: image.providerSafeResize?.maxPixels ?? PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
+    })),
+  };
+}
+
+function buildReferenceImagePreparationFailure(prepareErrors: string[]) {
+  const joinedErrors = prepareErrors.join('；');
+  if (isProviderReferenceImageSizeError(joinedErrors)) {
+    return {
+      error: 'REFERENCE_IMAGE_TOO_LARGE',
+      message: '参考图尺寸过大，系统已尝试自动压缩到合规尺寸，但这张图处理失败。请换一张更小的图，或先压缩后再提交。',
+    };
+  }
+  return {
+    error: 'REFERENCE_IMAGE_NOT_PUBLIC',
+    message: '参考图无法生成公网 URL，请换一张可访问的图片后重试。',
+  };
 }
 
 async function prepareReferenceImages(
   workspaceId: string,
   preferredReferenceImageIds: string[] = [],
   preferredReferenceImageUrls: string[] = [],
+  ownerId: string,
 ): Promise<{
   preparedImages: PreparedRefImage[];
   prepareErrors: string[];
   summary: { total: number; publicUrl: number; r2Uploaded: number; skipped: number; hasLocalPath: boolean };
 }> {
-  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds).slice(0, 9);
-  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls).slice(0, 9);
+  const selectedIds = uniquePreserveOrder(preferredReferenceImageIds);
+  const selectedReferenceImageUrls = uniquePreserveOrder(preferredReferenceImageUrls);
   const prepareErrors: string[] = [];
   let skipped = 0;
 
-  let imageItems: Array<{ asset: { id: string; file_name: string | null; original_url: string; type: string } | null; originalUrl: string }> = [];
+  let imageItems: Array<{
+    asset: {
+      id: string;
+      file_name: string | null;
+      original_url: string;
+      type: string;
+      width: number | null;
+      height: number | null;
+      mime_type: string | null;
+    } | null;
+    originalUrl: string;
+  }> = [];
 
   const workspaceReferenceAssets = await prisma.workspaceAsset.findMany({
     where: { workspace_id: workspaceId },
@@ -1355,6 +2134,9 @@ async function prepareReferenceImages(
         file_name: asset.file_name,
         original_url: asset.original_url,
         type: asset.type,
+        width: asset.width,
+        height: asset.height,
+        mime_type: asset.mime_type,
       } : null, originalUrl: rawUrl });
     }
   } else {
@@ -1365,10 +2147,11 @@ async function prepareReferenceImages(
         file_name: item.asset.file_name,
         original_url: item.asset.original_url,
         type: item.asset.type,
+        width: item.asset.width,
+        height: item.asset.height,
+        mime_type: item.asset.mime_type,
       }, originalUrl: item.asset.original_url }));
   }
-
-  imageItems = imageItems.slice(0, 9);
 
   const preparedImages: PreparedRefImage[] = [];
   let publicUrl = 0;
@@ -1383,12 +2166,49 @@ async function prepareReferenceImages(
     const isLocalPath = originalUrl.startsWith('/');
 
     if (isPublicUrl) {
+      let providerUrl = originalUrl;
+      let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
+      let providerSafeResize: PreparedRefImage['providerSafeResize'];
+      let safeWidth = item.asset?.width ?? null;
+      let safeHeight = item.asset?.height ?? null;
+      if (item.asset) {
+        const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
+        try {
+          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
+          providerUrl = safeReference.providerUrl;
+          safeWidth = safeReference.outputWidth ?? safeReference.width ?? safeWidth;
+          safeHeight = safeReference.outputHeight ?? safeReference.height ?? safeHeight;
+          if (safeReference.resized) {
+            r2Uploaded += 1;
+            sourceType = 'upload';
+            providerSafeResize = {
+              originalWidth: safeReference.width,
+              originalHeight: safeReference.height,
+              outputWidth: safeReference.outputWidth,
+              outputHeight: safeReference.outputHeight,
+              originalPixels: safeReference.originalPixels,
+              maxPixels: safeReference.maxPixels,
+            };
+          }
+        } catch (error) {
+          skipped += 1;
+          const rawMessage = error instanceof Error ? error.message : String(error);
+          const message = shouldResize || isProviderReferenceImageSizeError(rawMessage)
+            ? providerReferenceImageSizeMessage(rawMessage)
+            : `参考图处理失败: ${rawMessage}`;
+          prepareErrors.push(`[${i + 1}] ${message}`);
+          continue;
+        }
+      }
       publicUrl += 1;
       preparedImages.push({
         name: item.asset?.file_name || `图${i + 1}`,
-        originalUrl,
-        sourceType: isR2 ? 'upload' : 'external',
+        originalUrl: providerUrl,
+        sourceType,
         order: i,
+        width: safeWidth,
+        height: safeHeight,
+        providerSafeResize,
       });
       continue;
     }
@@ -1402,43 +2222,29 @@ async function prepareReferenceImages(
         continue;
       }
 
-      const buffer = fs.readFileSync(localFilePath);
-      const ext = path.extname(localFilePath).slice(1).toLowerCase();
-      const mimeMap: Record<string, string> = {
-        jpg: 'image/jpeg',
-        jpeg: 'image/jpeg',
-        png: 'image/png',
-        gif: 'image/gif',
-        webp: 'image/webp',
-        bmp: 'image/bmp',
-      };
-      const mimeType = mimeMap[ext] || 'image/jpeg';
-
-      let r2PublicUrl: string | null = null;
+      let providerUrl: string | null = null;
       try {
-        const { uploadPublicAsset } = await import('@/lib/assets/public-storage');
-        const fileName = item.asset?.file_name || path.basename(originalUrl) || `image.${ext}`;
-        const pubResult = await uploadPublicAsset(buffer, fileName, mimeType);
-        r2PublicUrl = pubResult.publicUrl;
+        if (item.asset?.id) {
+          const result = await ensureSiteAssetPublicUrl(item.asset.id);
+          providerUrl = result.asset.original_url;
+        } else {
+          providerUrl = sameOriginPublicUrlForLocalUpload(originalUrl);
+          if (!providerUrl) throw new Error(`本地素材没有可用公网地址: ${originalUrl}`);
+        }
       } catch (err) {
         skipped += 1;
-        prepareErrors.push(`[${i + 1}] R2 上传失败: ${err instanceof Error ? err.message : String(err)}`);
+        prepareErrors.push(`[${i + 1}] 本地素材公网链接准备失败: ${err instanceof Error ? err.message : String(err)}`);
         continue;
-      }
-
-      if (item.asset?.id) {
-        await prisma.asset.update({
-          where: { id: item.asset.id },
-          data: { original_url: r2PublicUrl },
-        }).catch(() => {});
       }
 
       r2Uploaded += 1;
       preparedImages.push({
         name: item.asset?.file_name || `图${i + 1}`,
-        originalUrl: r2PublicUrl,
+        originalUrl: providerUrl,
         sourceType: 'upload',
         order: i,
+        width: item.asset?.width ?? null,
+        height: item.asset?.height ?? null,
       });
       continue;
     }

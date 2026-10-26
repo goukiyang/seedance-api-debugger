@@ -1,199 +1,1053 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent, PointerEvent, WheelEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import * as Popper from '@radix-ui/react-popper';
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Download, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { copyImage } from '@/lib/media/copy-image';
 import styles from './ZoomableImagePreview.module.css';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
+import type { ContentKey } from '@/lib/content-reactions/types';
+import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
+import { beginImageForegroundPreparation, captureImageReadSessionScope, resetImageReadForRetry, type ImageReadProgress } from '@/lib/media/image-read-session';
+import type { HdDescription } from '@/lib/media/hd-source-session';
+import { prepareImagePreview, type ImagePreviewPreparation, type PreparedImagePreviewState } from '@/lib/media/image-preview-session';
+import { handHdImageDownloadToBrowser } from '@/lib/media/native-download';
+import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, type HdDisplayKind } from '@/lib/media/hd-display-policy';
+import { useImageNeighbors, type ImageReadCandidate } from '@/lib/hooks/use-image-neighbors';
+import { versionedHdSource } from '@/lib/hooks/use-hd-image-source';
+import { isTopmostDialogLayer, useDialogDismiss } from '@/components/useDialogDismiss';
+import { RelativeTime } from '@/components/RelativeTime';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useImagePreviewHistoryDismiss } from './useImagePreviewHistoryDismiss';
+import { ImageComparisonPicker } from './ImageComparisonPicker';
+import {
+  clearComparisonSelectionIfUnchanged, comparisonResolveFailure, fittedImageView, imageSourceIdentity,
+  imageDisplaySource as displaySource, sourcePickerKey, resolveComparisonImage,
+  readComparisonPreferences, saveComparisonPreferences, readImageView, saveImageView,
+  readComparisonSelection, saveComparisonSelection,
+  ComparisonResolveError, type ComparisonResolveFailureKind, type ComparisonSelectionRecord, type ImageComparisonSource, type ImageView,
+} from '@/lib/media/image-comparison';
 
-type ZoomableImagePreviewProps = {
+export type { ImageComparisonSource } from '@/lib/media/image-comparison';
+
+export type ImagePreviewMetadata = {
+  /** Legacy input only. Never rendered by the preview. */
+  context?: string;
+  model?: string;
+  quality?: string;
+  ratio?: string;
+  resolution?: string;
+  supplier?: string;
+  time?: string;
+};
+
+export type SafeImagePreviewDetails = Omit<ImagePreviewMetadata, 'context'> & { width?: number; height?: number; fileSize?: number };
+
+export type ZoomableImagePreviewProps = {
   src: string;
+  thumbnailSrc?: string;
   alt: string;
   fileName?: string;
+  title?: string;
+  previewKey?: string;
+  contentKey?: ContentKey;
+  /** Explicit successful generated sources supplied by the result host only. */
+  nextActionSources?: ContentKey[];
+  nextActionResultId?: string;
+  imageSharing?: boolean;
+  /** View/like-only sources must never request originals, HD downloads or copying. */
+  previewOnly?: boolean;
+  metadata?: ImagePreviewMetadata;
+  safeDetails?: SafeImagePreviewDetails;
+  comparison?: ImageComparisonSource;
+  comparisonCandidates?: ImageComparisonSource[];
+  sourceRole?: ImageComparisonSource['role'];
+  sourceVersion?: string;
+  imageNeighbors?: ImageReadCandidate[];
+  /** Same-session first-click lease, adopted before the initiating lease ends. */
+  preparation?: ImagePreviewPreparation;
+  /** Caller-provided status/reactions/file metadata only; remove prompts before passing. */
+  details?: ReactNode;
+  notice?: ReactNode;
+  hasNavigation?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  onImageLoaded?: (src: string) => void;
+  resolveDownload?: (src: string) => (() => void | Promise<unknown>) | undefined;
   onClose: () => void;
 };
 
 const MIN_SCALE = 0.5;
-const MAX_SCALE = 6;
+const MAX_SCALE = 24;
 const SCALE_STEP = 1.2;
 
-function clampScale(value: number) {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+type IntrinsicSize = { width: number; height: number };
+type DecodedImage = { source: string; fullSize: boolean; displayKind: HdDisplayKind; hd?: HdDescription; mime?: string; bytes?: number; account: string; authorizationVersion?: string; representationVersion?: string };
+
+function safeImageLabel(title?: string, fileName?: string) {
+  const trimmedTitle = title?.trim();
+  if (trimmedTitle && /^(?:生成结果|图片预览)\s+\d{1,5}$/.test(trimmedTitle)) return trimmedTitle;
+  const trimmedFileName = fileName?.trim();
+  if (trimmedFileName && /^(?:IMG[_-]\d{3,10}|(?:image|output|result)[_-]\d{1,8})\.(?:png|jpe?g|webp|avif|gif)$/i.test(trimmedFileName)) return trimmedFileName;
+  return '图片预览';
 }
 
-export function ZoomableImagePreview({ src, alt, fileName, onClose }: ZoomableImagePreviewProps) {
-  const stageRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageError, setImageError] = useState(false);
+function safeMetadataValue(value?: string) {
+  const text = value?.trim();
+  if (!text || text.length > 32 || /[<>\r\n,;!?]/.test(text) || text.split(/\s+/).length > 3) return undefined;
+  return text;
+}
 
-  const resetView = useCallback(() => {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
-  }, []);
+function safeMetadataTime(value?: string) {
+  const text = value?.trim();
+  if (!text || text.length > 32 || !/^[\d年月日时分秒TtZz:./+\- ]+$/.test(text)) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}T/i.test(text)) {
+    const date = new Date(text);
+    return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : undefined;
+  }
+  return text;
+}
 
-  const zoomAtCenter = useCallback((factor: number) => {
-    setScale((current) => clampScale(current * factor));
-  }, []);
+function clampScale(value: number, maximum = MAX_SCALE) {
+  return Math.min(maximum, Math.max(MIN_SCALE, value));
+}
 
+
+function formatImageBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; value >= 1024 && index < units.length; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
+}
+
+function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', preparation, className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; preparation?: ImagePreviewPreparation; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
+  const image = useRef<HTMLImageElement>(null);
+  const thumbnailImage = useRef<HTMLImageElement>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const onThumbnailReadyRef = useRef(onThumbnailReady);
+  onThumbnailReadyRef.current = onThumbnailReady;
+  const onUnavailableRef = useRef(onUnavailable); onUnavailableRef.current = onUnavailable;
+  const [attempt, setAttempt] = useState(0);
+  const [loadedKey, setLoadedKey] = useState('');
+  const [failedKey, setFailedKey] = useState('');
+  const [visible, setVisible] = useState(true);
+  const identity = JSON.stringify([account, src, version, previewOnly, original, attempt]);
+  const [prepared, setPrepared] = useState<{ identity: string; handle: ImagePreviewPreparation; state: PreparedImagePreviewState } | null>(null);
   useEffect(() => {
-    setPortalRoot(document.body);
+    const change = () => setVisible(!document.hidden); change();
+    document.addEventListener('visibilitychange', change);
+    return () => document.removeEventListener('visibilitychange', change);
   }, []);
-
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-      if (event.key === '+' || event.key === '=') zoomAtCenter(SCALE_STEP);
-      if (event.key === '-') zoomAtCenter(1 / SCALE_STEP);
-      if (event.key === '0') resetView();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [onClose, resetView, zoomAtCenter]);
-
+    if (!account) return;
+    const reusable = !attempt && preparation?.account === account && preparation.source === src && preparation.sourceVersion === version
+      && preparation.previewOnly === previewOnly && preparation.original === original && preparation.isCurrent();
+    const handle = reusable && preparation ? preparation : prepareImagePreview({ account, source: src, sourceVersion: version, previewOnly, original });
+    handle.confirmOpen();
+    // Subscribe first: closing the click's lease must never abort and relaunch
+    // the already accepted foreground read between the card and this dialog.
+    const unsubscribe = handle.subscribe(state => setPrepared({ identity, handle, state }));
+    handle.release();
+    return unsubscribe;
+  }, [account, identity, src, version, previewOnly, original, attempt, preparation]);
+  const current = prepared?.identity === identity && visible ? prepared : null;
+  const state = current?.state;
+  const readResult = state?.result;
+  const readProgress: ImageReadProgress = readResult?.progress || { phase: 'reading', loadedBytes: 0 };
+  const displayKind = state?.displayKind || 'pending';
+  const displaySrc = state?.readSource || '';
+  const imageSrc = readResult?.imageSrc || undefined;
+  const thumbnail = thumbnailSrc || displaySource(src, 'thumbnail');
+  const hasThumbnail = thumbnail !== src && thumbnail !== displaySource(src, 'original') && thumbnail !== displaySource(src, 'preview');
+  const [thumbnailLoaded, setThumbnailLoaded] = useState('');
+  const imageIdentity = `${identity}:${displaySrc}:${imageSrc || ''}`;
+  const currentKeyRef = useRef(imageIdentity); currentKeyRef.current = imageIdentity;
+  const readyKeyRef = useRef('');
   useEffect(() => {
-    resetView();
-    setImageLoaded(false);
-    setImageError(false);
-  }, [resetView, src]);
-
-  const handleWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    const rect = stage.getBoundingClientRect();
-    const cursorX = event.clientX - rect.left - rect.width / 2;
-    const cursorY = event.clientY - rect.top - rect.height / 2;
-    const factor = event.deltaY < 0 ? SCALE_STEP : 1 / SCALE_STEP;
-    const nextScale = clampScale(scale * factor);
-    const ratio = nextScale / scale;
-
-    setScale(nextScale);
-    setOffset((current) => ({
-      x: cursorX - (cursorX - current.x) * ratio,
-      y: cursorY - (cursorY - current.y) * ratio,
-    }));
-  }, [scale]);
-
-  const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 && event.button !== 1) return;
-    event.preventDefault();
-    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    setDragging(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
-
-  const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-
-    const deltaX = event.clientX - drag.x;
-    const deltaY = event.clientY - drag.y;
-    dragRef.current = { ...drag, x: event.clientX, y: event.clientY };
-    setOffset((current) => ({ x: current.x + deltaX, y: current.y + deltaY }));
-  }, []);
-
-  const finishDrag = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (drag && event.currentTarget.hasPointerCapture(drag.pointerId)) {
-      event.currentTarget.releasePointerCapture(drag.pointerId);
+    if (!hasThumbnail) return;
+    if (thumbnailImage.current?.complete) {
+      if (thumbnailImage.current.naturalWidth > 0) {
+        setThumbnailLoaded(thumbnail);
+        onThumbnailReadyRef.current?.({ width: thumbnailImage.current.naturalWidth, height: thumbnailImage.current.naturalHeight });
+      }
     }
-    dragRef.current = null;
-    setDragging(false);
+  }, [hasThumbnail, thumbnail, onThumbnailReady]);
+  const unsupported = readProgress.phase === 'unsupported';
+  const failed = failedKey === imageIdentity || unsupported || readProgress.phase === 'unavailable' || readResult?.unconfirmed === true;
+  const blocked = !account || state?.denied || readResult?.denied;
+  const loaded = !failed && !blocked && Boolean(imageSrc) && loadedKey === imageIdentity;
+  const latestSnapshot = current?.handle.getSnapshot();
+  const retained = !loaded && !blocked && current?.handle.isCurrent() && !latestSnapshot?.denied
+    && latestSnapshot?.retained === state?.retained ? state?.retained : undefined;
+  const retainedSrc = retained?.result.decoded && !retained.result.denied && !retained.result.unconfirmed ? retained.result.imageSrc : null;
+  useEffect(() => { if (!loaded) onUnavailableRef.current?.(); }, [loaded, imageIdentity]);
+  useEffect(() => {
+    if (!imageSrc || failed || blocked || !current) return;
+    if (image.current?.complete && image.current.naturalWidth > 0 && image.current.getAttribute('src') === imageSrc) {
+      const target = image.current;
+      void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => {
+        if (currentKeyRef.current === imageIdentity && current.handle.isCurrent()) setLoadedKey(imageIdentity);
+      }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); });
+    }
+  }, [imageIdentity, failed, blocked, imageSrc, current, readResult?.decoded]);
+  useEffect(() => {
+    if (!loaded || !current || !readResult || !imageSrc) return;
+    const readyIdentity = `${imageIdentity}:${displayKind}:${state?.description?.sourceVersion || ''}:${state?.description?.status || ''}:${state?.description?.representationVersion || ''}:${state?.description?.reason || ''}`;
+    if (readyKeyRef.current === readyIdentity) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
+      const target = image.current;
+      if (document.hidden || currentKeyRef.current !== imageIdentity || !current.handle.isCurrent() || !target?.complete || !target.naturalWidth || target.getAttribute('src') !== imageSrc) return;
+      const latest = current.handle.getSnapshot();
+      if (latest.denied || latest.readSource !== state?.readSource || latest.version !== state?.version || latest.result.imageSrc !== imageSrc) return;
+      readyKeyRef.current = readyIdentity;
+      // At least one committed visible frame, not merely a downloaded Blob or
+      // an image decoded off-screen, unlocks speculative neighboring bytes.
+      current.handle.markDisplayed();
+      onReadyRef.current?.({ width: readResult.width || target.naturalWidth, height: readResult.height || target.naturalHeight },
+        { source: imageSrc, fullSize: Boolean(state?.fullSize), displayKind, hd: state?.description, mime: readResult.mime, bytes: readResult.bytes, account,
+          authorizationVersion: readResult.authorizationVersion, representationVersion: readResult.representationVersion });
+    }); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, [loaded, imageIdentity, current, readResult, imageSrc, displayKind, state?.description, state?.fullSize, state?.readSource, state?.version, account]);
+  const progressLabel = readProgress.phase === 'unsupported'
+    ? readProgress.message || '该来源不是图片，未读取文件内容'
+    : readProgress.phase === 'unavailable'
+      ? readProgress.message || '当前来源无法提供读取进度'
+      : readProgress.phase === 'confirming' ? '正在确认图片完整性'
+        : readProgress.phase === 'decoding' ? '正在显示图片' : `正在读取${displayKind === 'original' ? '原图' : displayKind === 'hd' ? '高清' : '图片'}`;
+  return <>
+    {retainedSrc && <img key={`retained:${identity}:${retainedSrc}`} src={retainedSrc} alt={alt} className={className} style={style} draggable={false} data-image-preview-retained />}
+    {hasThumbnail && !loaded && !blocked && !retainedSrc && <img ref={thumbnailImage} key={`thumbnail:${account}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
+      onLoad={event => { setThumbnailLoaded(thumbnail); onThumbnailReadyRef.current?.({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }} />}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image
+      onLoad={event => { const target = event.currentTarget; void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === imageIdentity && current?.handle.isCurrent()) setLoadedKey(imageIdentity); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
+    {(!loaded || displayKind === 'original' || state?.descriptorPending || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
+      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `${displayKind === 'original' ? '原图' : displayKind === 'hd' ? '高清' : '预览图'}已显示` : progressLabel}</span>
+      {state?.description && !state.error && !blocked && <span>{hdAvailabilityLabel(state.description)}</span>}
+      {state?.error && !blocked && <span>暂时无法确认压缩状态</span>}
+      {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
+      {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
+        <progress className={styles.imageProgress} max={100} value={readProgress.percent} aria-label={`${alt}读取进度 ${readProgress.percent}%`} />
+        {readProgress.totalBytes != null && <span>{readProgress.percent}% · {formatImageBytes(readProgress.loadedBytes)} / {formatImageBytes(readProgress.totalBytes)}</span>}
+      </>}
+      {!loaded && !failed && displaySrc && readProgress.phase === 'reading' && readProgress.percent == null && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {!loaded && !failed && readProgress.phase === 'decoding' && <span>已读取 {formatImageBytes(readProgress.loadedBytes)}</span>}
+      {failed && !blocked && <button type="button" title="重试读取" aria-label="重试读取图片" onPointerDown={event => event.stopPropagation()} onClick={event => {
+        event.stopPropagation();
+        if (displaySrc) resetImageReadForRetry(displaySrc, account);
+        setAttempt(value => value + 1);
+      }}><RotateCcw size={16} /></button>}
+    </div>}
+  </>;
+}
+
+
+type Side = 'current' | 'comparison';
+type Point = { x: number; y: number };
+type Frames = Record<Side, IntrinsicSize>;
+type ImageRequest = { token: number; controller: AbortController; releasePriority: () => void; resolve: (applied: boolean) => void; reject: (error: Error) => void };
+type SelectionWriteGuard = { context: string; phase: 'pending' | 'dormant' | 'applying' | 'writable' | 'cleared';
+  current?: string; comparison?: string; enabled?: boolean };
+type ComparisonRecovery = { kind: 'dormant' | 'retry' | 'reselect'; saved?: ComparisonSelectionRecord; message?: string; affectedIdentity?: string };
+type ComparisonNotice = { kind: 'retry' | 'reselect'; message: string; saved?: ComparisonSelectionRecord };
+const sides: Side[] = ['current', 'comparison'];
+const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
+
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+  const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
+  const owner = user?.id || '';
+  const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
+  const readScopeRef = useRef({ account, preparation, previewOnly }); readScopeRef.current = { account, preparation, previewOnly };
+  const internalPreparations = useRef<Partial<Record<Side, ImagePreviewPreparation>>>({});
+  const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const paneRefs = useRef<Partial<Record<Side, HTMLDivElement>>>({});
+  const blankPress = useRef<{ surface: HTMLElement; pointerId: number; x: number; y: number; cancelled: boolean; released: boolean } | null>(null);
+  const portalAnchorRef = useRef<HTMLSpanElement>(null);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const incoming: ImageComparisonSource = { src, thumbnailSrc, alt, fileName, id: previewKey, version: sourceVersion, role: sourceRole, contentKey, width: safeDetails?.width, height: safeDetails?.height, fileSize: safeDetails?.fileSize };
+  const [currentImage, setCurrentImage] = useState<ImageComparisonSource>(incoming);
+  const [comparisonImage, setComparisonImage] = useState<ImageComparisonSource | null>(comparison || null);
+  const sources = { current: currentImage, comparison: comparisonImage };
+  // Keep the opened result's slot on the right. Picking another image never swaps slots.
+  const currentOnRight = sourceRole === 'generated';
+  const paneOrder: Side[] = currentOnRight ? ['comparison', 'current'] : sides;
+  const linkSide: Side = currentOnRight ? 'current' : 'comparison';
+  const sideLabel = (side: Side) => sources[side]?.role === 'generated' ? '生成图' : sources[side]?.role === 'original' ? '原图' : sources[side]?.role === 'reference' ? '参考图' : side === 'current' ? '当前图' : '对比图';
+  const sourcesRef = useRef(sources); sourcesRef.current = sources;
+  const [comparisonMode, setComparisonMode] = useState(false), [linked, setLinked] = useState(false);
+  const [axis, setAxis] = useState<'horizontal' | 'vertical'>('horizontal'), [activeSide, setActiveSide] = useState<Side>('current');
+  const [pickerSide, setPickerSide] = useState<Side | null>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null), compareToggleRef = useRef<HTMLButtonElement | null>(null);
+  const requests = useRef<Partial<Record<Side, ImageRequest>>>({}), sequence = useRef(0);
+  const comparisonResolveRequest = useRef<AbortController | null>(null);
+  const [views, setViews] = useState<Record<string, ImageView>>({});
+  const viewsRef = useRef(views); viewsRef.current = views;
+  const [sizes, setSizes] = useState<Record<string, IntrinsicSize>>({});
+  const [originalSizes, setOriginalSizes] = useState<Record<string, IntrinsicSize>>({});
+  const [thumbnailFrames, setThumbnailFrames] = useState<Record<string, IntrinsicSize>>({});
+  const [originals, setOriginals] = useState<Record<string, boolean>>({});
+  const [decodedImages, setDecodedImages] = useState<Record<string, DecodedImage>>({});
+  const [displayedCurrent, setDisplayedCurrent] = useState('');
+  const currentDisplayKey = JSON.stringify([account, imageSourceIdentity(currentImage), currentImage.src, currentImage.version, originals[viewIdentity('current', currentImage)] || false]);
+  useImageNeighbors(imageNeighbors, Boolean(portalRoot && hasNavigation && !comparisonMode && currentImage.src === src && displayedCurrent === currentDisplayKey), currentImage.src);
+  const [frames, setFrames] = useState<Frames>({ current: { width: 1, height: 1 }, comparison: { width: 1, height: 1 } });
+  const [message, setMessage] = useState(''), [copyState, setCopyState] = useState<{ src: string; busy?: boolean; success?: boolean; message?: string } | null>(null);
+  const [comparisonRecovery, setComparisonRecovery] = useState<ComparisonRecovery | null>(null);
+  const [comparisonNotice, setComparisonNotice] = useState<ComparisonNotice | null>(null);
+  const comparisonFeedbackEpoch = useRef(0);
+  const clearComparisonFeedback = useCallback(() => {
+    comparisonFeedbackEpoch.current++;
+    setComparisonNotice(null);
   }, []);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const downloadLock = useRef(false);
+  const points = useRef<Record<Side, Map<number, Point>>>({ current: new Map(), comparison: new Map() });
+  const zoomPoints = useRef<Partial<Record<Side, Point>>>({});
+  const localUrls = useRef(new Set<string>());
+  const alive = useRef(true), userAction = useRef(0);
+  const [initializedOwner, setInitializedOwner] = useState<string | null>(null);
+  const controlsId = useId();
+  const [controlsOpen, setControlsOpen] = useState<'zoom' | 'more' | null>(null);
+  const controlsRef = useRef<HTMLDivElement>(null), zoomTriggerRef = useRef<HTMLButtonElement>(null), moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const controlsAnchorRef = controlsOpen === 'zoom' ? zoomTriggerRef : moreTriggerRef;
+  const closeControls = () => { setControlsOpen(null); controlsAnchorRef.current?.focus({ preventScroll: true }); };
+  const dismissPreview = useImagePreviewHistoryDismiss(Boolean(portalRoot), controlsOpen ? controlsRef : backdropRef, () => {
+    clearComparisonFeedback();
+    comparisonResolveRequest.current?.abort();
+    onClose();
+  });
+  const safeSide = comparisonMode && comparisonImage ? activeSide : 'current';
+  const safeSideRef = useRef(safeSide); safeSideRef.current = safeSide;
+  const selectedImage = sources[safeSide] || currentImage;
+  const downloadSelectedSource = !account || previewOnly ? undefined : resolveDownload?.(selectedImage.src);
+  const originalDownloadSource = displaySource(selectedImage.src, 'download');
+  const hasOriginalDownloadUrl = Boolean(account) && !previewOnly && originalDownloadSource !== selectedImage.src;
+  function downloadOriginal() {
+    if (!downloadSelectedSource || downloadLock.current) return;
+    const selected = selectedImage, expectedAccount = account, expectedScope = captureImageReadSessionScope(account);
+    const current = () => alive.current && expectedScope() && readScopeRef.current.account === expectedAccount && sourcesRef.current[safeSide] === selected;
+    downloadLock.current = true; setDownloadBusy(true);
+    void Promise.resolve().then(() => { if (current()) return downloadSelectedSource(); }).catch(error => { if (current()) setMessage(error instanceof Error ? error.message : '下载未完成，请重试'); }).finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+  }
+  function downloadHd() {
+    const selected = selectedImage, hd = decodedImages[viewIdentity(safeSide, selected)]?.hd;
+    if (previewOnly || !account || hd?.status !== 'ready' || !hd.sourceVersion || hdDescriptionUsesOriginal(hd) || downloadLock.current) return;
+    const side = safeSide, expectedAccount = account;
+    const isCurrent = () => alive.current && readScopeRef.current.account === expectedAccount && !readScopeRef.current.previewOnly && sourcesRef.current[side] === selected;
+    downloadLock.current = true; setDownloadBusy(true);
+    void handHdImageDownloadToBrowser({ account, source: selected.src, sourceVersion: hd.sourceVersion, representationVersion: hd.representationVersion, fileName: selected.fileName || 'image', isCurrent })
+      .then(result => { if (isCurrent()) setMessage(`高清文件已交给浏览器 · ${formatImageBytes(result.bytes)}（未确认落盘）`); })
+      .catch(error => { if (isCurrent()) setMessage(error instanceof Error ? error.message : '高清下载准备失败，请重试'); })
+      .finally(() => { downloadLock.current = false; if (alive.current) setDownloadBusy(false); });
+  }
+  const identity = (image: ImageComparisonSource) => imageSourceIdentity(image);
+  const selectedId = identity(selectedImage);
+  const selectedView = views[viewIdentity(safeSide, selectedImage)] || fittedImageView;
+  const imageTitle = safeImageLabel(title, fileName);
+  const isOriginalSubject = selectedImage.src === src && selectedImage.contentKey === contentKey;
+  const anchor = isSafeIdentifier(previewKey) ? previewKey : contentKey || sourcePickerKey(incoming);
+  const selectionAnchor = anchor ? anchor + '@' + imageSourceIdentity(incoming) : null;
+  const selectionContext = JSON.stringify([owner, selectionAnchor, imageSourceIdentity(incoming)]);
+  const selectionWriteGuard = useRef<SelectionWriteGuard>({ context: selectionContext, phase: 'pending' });
+  if (selectionWriteGuard.current.context !== selectionContext) selectionWriteGuard.current = { context: selectionContext, phase: 'pending' };
+  const pair = [identity(currentImage), comparisonImage ? identity(comparisonImage) : 'single'].sort().join('|');
+  const legacyState = useMediaPreviewState(previewKey, contentKey, src);
+  const configRef = useRef({ linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext });
+  configRef.current = { linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext };
 
-  const handleBackdropClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    if (event.target === event.currentTarget) onClose();
-  }, [onClose]);
+  const beginComparisonFeedback = useCallback(() => {
+    const epoch = ++comparisonFeedbackEpoch.current;
+    setComparisonNotice(null);
+    return epoch;
+  }, []);
+  const beginSelectionWrite = useCallback((current: ImageComparisonSource, compared: ImageComparisonSource | null, enabled: boolean) => {
+    selectionWriteGuard.current = { context: selectionContext, phase: 'applying', current: imageSourceIdentity(current),
+      comparison: compared ? imageSourceIdentity(compared) : undefined, enabled: enabled && Boolean(compared) };
+  }, [selectionContext]);
 
-  const preview = (
-    <div
-      className={styles.backdrop}
-      role="dialog"
-      aria-modal="true"
-      aria-label="参考图预览"
-      onClick={handleBackdropClick}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <div className={styles.toolbar}>
-        <div className={styles.title}>
-          <strong>{fileName || alt}</strong>
-          <span>{imageError ? '加载失败' : imageLoaded ? `${Math.round(scale * 100)}%` : '加载中...'}</span>
-        </div>
-        <div className={styles.actions}>
-          <button type="button" onClick={() => zoomAtCenter(1 / SCALE_STEP)} title="缩小" aria-label="缩小图片">
-            <ZoomOut size={16} />
-          </button>
-          <button type="button" onClick={() => zoomAtCenter(SCALE_STEP)} title="放大" aria-label="放大图片">
-            <ZoomIn size={16} />
-          </button>
-          <button type="button" onClick={resetView} title="还原" aria-label="还原图片大小">
-            <RotateCcw size={16} />
-          </button>
-          <button type="button" onClick={onClose} title="关闭" aria-label="关闭预览">
-            <X size={16} />
-          </button>
-        </div>
+  const stopGestures = useCallback(() => {
+    for (const side of sides) {
+      const pane = paneRefs.current[side];
+      for (const id of Array.from(points.current[side].keys())) { if (pane?.hasPointerCapture(id)) pane.releasePointerCapture(id); }
+      points.current[side].clear();
+    }
+  }, []);
+  const cancelRequests = useCallback(() => {
+    comparisonResolveRequest.current?.abort();
+    comparisonResolveRequest.current = null;
+    for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.releasePriority(); request?.resolve(false); }
+    requests.current = {};
+  }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; stopGestures(); comparisonResolveRequest.current?.abort(); comparisonResolveRequest.current = null;
+      for (const request of Object.values(requests.current)) { request?.controller.abort(); request?.releasePriority(); request?.resolve(false); }
+      for (const handle of Object.values(internalPreparations.current)) handle?.release(); internalPreparations.current = {};
+      for (const url of Array.from(localUrls.current)) URL.revokeObjectURL(url); localUrls.current.clear(); };
+  }, [stopGestures]);
+
+  const requestImage = useCallback((side: Side, image: ImageComparisonSource, verify = true, persistSelection = false, expectedAction?: number): Promise<boolean> => {
+    const scope = readScopeRef.current, isSameScope = captureImageReadSessionScope(scope.account);
+    // The foreground click wins even while fresh picker authorization is read.
+    const releasePriority = scope.account ? beginImageForegroundPreparation(scope.account) : () => {};
+    stopGestures();
+    const previous = requests.current[side]; previous?.controller.abort(); previous?.releasePriority(); previous?.resolve(false);
+    const token = ++sequence.current, controller = new AbortController();
+    return new Promise((resolve, reject) => {
+      const request = { token, controller, releasePriority, resolve, reject }; requests.current[side] = request;
+      void (async () => {
+        const key = sourcePickerKey(image);
+        const refreshed = verify && key ? await resolveComparisonImage(key, controller.signal) : image;
+        if (!alive.current || requests.current[side] !== request || scope.account !== readScopeRef.current.account || !isSameScope()
+          || expectedAction !== undefined && userAction.current !== expectedAction) {
+          if (requests.current[side] === request) delete requests.current[side];
+          releasePriority(); resolve(false); return;
+        }
+        if (verify && key && imageSourceIdentity(refreshed) !== imageSourceIdentity(image)) {
+          throw new ComparisonResolveError('identity-version-change', '这张图片已更新，不能自动替换，请重新选择');
+        }
+        // Keep caller metadata for the same version, but always use the freshly authorized URL.
+        const next = { ...image, ...refreshed, alt: image.alt, ...(image.version ? { version: image.version } : {}) };
+        const existing = sourcesRef.current[side];
+        if (side === 'current' && existing?.src === next.src && existing.version === next.version && imageSourceIdentity(existing) === imageSourceIdentity(next)) {
+          if (persistSelection) {
+            beginSelectionWrite(existing, sourcesRef.current.comparison, configRef.current.comparisonMode);
+            selectionWriteGuard.current.phase = 'writable';
+          }
+          delete requests.current[side]; releasePriority(); resolve(true); return;
+        }
+        const provided = readScopeRef.current.preparation;
+        const handle = side === 'current' && provided?.isCurrent() && provided.account === scope.account && provided.source === next.src && provided.sourceVersion === (next.version || '') && provided.previewOnly === scope.previewOnly && !provided.original
+          ? provided : prepareImagePreview({ account: scope.account, source: next.src, sourceVersion: next.version, previewOnly: scope.previewOnly });
+        const oldHandle = internalPreparations.current[side]; internalPreparations.current[side] = handle;
+        oldHandle?.release(); releasePriority();
+        setMessage('');
+        delete requests.current[side];
+        if (persistSelection) beginSelectionWrite(side === 'current' ? next : sourcesRef.current.current,
+          side === 'comparison' ? next : sourcesRef.current.comparison, side === 'comparison' ? true : configRef.current.comparisonMode);
+        if (side === 'current') setCurrentImage(next);
+        else { setComparisonImage(next); setComparisonMode(true); }
+        setActiveSide(side); resolve(true);
+      })().catch(error => {
+        releasePriority();
+        if (requests.current[side] !== request || !alive.current || scope.account !== readScopeRef.current.account || !isSameScope()
+          || expectedAction !== undefined && userAction.current !== expectedAction) { resolve(false); return; }
+        delete requests.current[side];
+        const failure = error instanceof Error ? error : new Error('图片无法加载，原图保留');
+        reject(failure);
+      });
+    });
+  }, [beginSelectionWrite, stopGestures]);
+  useEffect(() => {
+    if (!comparisonMode) { internalPreparations.current.comparison?.release(); delete internalPreparations.current.comparison; }
+  }, [comparisonMode]);
+  useEffect(() => {
+    const guard = selectionWriteGuard.current;
+    if (guard.context !== selectionContext || guard.phase !== 'applying') return;
+    const currentMatches = guard.current === imageSourceIdentity(currentImage);
+    const comparisonMatches = guard.comparison === (comparisonImage ? imageSourceIdentity(comparisonImage) : undefined);
+    if (currentMatches && comparisonMatches && guard.enabled === (comparisonMode && Boolean(comparisonImage))) guard.phase = 'writable';
+  }, [comparisonImage, comparisonMode, currentImage, selectionContext]);
+
+  function storedComparisonFailure(saved: ComparisonSelectionRecord, kind: ComparisonResolveFailureKind, failureMessage: string,
+    active: boolean, feedbackEpoch: number) {
+    if (kind === 'cancelled') return;
+    if (kind === 'transient') {
+      selectionWriteGuard.current = { context: selectionContext, phase: 'dormant' };
+      setComparisonRecovery({ kind: 'retry', saved, affectedIdentity: saved.comparison?.identity });
+      if (active && comparisonFeedbackEpoch.current === feedbackEpoch) setComparisonNotice({ kind: 'retry', message: failureMessage, saved });
+      return;
+    }
+    const cleared = Boolean(owner && selectionAnchor && clearComparisonSelectionIfUnchanged(owner, selectionAnchor, saved));
+    selectionWriteGuard.current = { context: selectionContext, phase: cleared ? 'cleared' : 'dormant' };
+    setComparisonMode(false);
+    setActiveSide('current');
+    setComparisonRecovery({ kind: 'reselect', message: failureMessage, affectedIdentity: saved.comparison?.identity });
+    if (active && comparisonFeedbackEpoch.current === feedbackEpoch) setComparisonNotice({ kind: 'reselect', message: failureMessage });
+  }
+
+  async function resolveStoredComparison(saved: ComparisonSelectionRecord, active: boolean, action: number) {
+    if (!saved.comparison) return false;
+    comparisonResolveRequest.current?.abort();
+    const controller = new AbortController();
+    comparisonResolveRequest.current = controller;
+    const feedbackEpoch = active ? beginComparisonFeedback() : comparisonFeedbackEpoch.current;
+    selectionWriteGuard.current = { context: selectionContext, phase: 'pending' };
+    try {
+      const restored = await resolveComparisonImage(saved.comparison.key, controller.signal);
+      if (!alive.current || controller.signal.aborted || comparisonResolveRequest.current !== controller
+        || userAction.current !== action || selectionWriteGuard.current.context !== selectionContext) return false;
+      if (imageSourceIdentity(restored) !== saved.comparison.identity) {
+        storedComparisonFailure(saved, 'identity-version-change', '这张对比图已更新，不能自动替换，请重新选择', active, feedbackEpoch);
+        return false;
+      }
+      const knownSource = [comparison, ...comparisonCandidates].find(image => image && imageSourceIdentity(image) === imageSourceIdentity(restored));
+      const restoredImage = { ...restored, role: knownSource?.role };
+      const assignmentError = selectionError('comparison', restoredImage);
+      if (assignmentError) {
+        storedComparisonFailure(saved, 'identity-version-change', '上次对比图不再符合当前左右顺序，请重新选择', active, feedbackEpoch);
+        return false;
+      }
+      const applied = await requestImage('comparison', restoredImage, false, true, action);
+      if (!applied || !alive.current || controller.signal.aborted || userAction.current !== action
+        || selectionWriteGuard.current.context !== selectionContext) return false;
+      setComparisonRecovery(null);
+      clearComparisonFeedback();
+      return true;
+    } catch (error) {
+      if (!alive.current || controller.signal.aborted || userAction.current !== action
+        || selectionWriteGuard.current.context !== selectionContext) return false;
+      const failure = comparisonResolveFailure(error);
+      storedComparisonFailure(saved, failure.kind, failure.message, active, feedbackEpoch);
+      return false;
+    } finally {
+      if (comparisonResolveRequest.current === controller) comparisonResolveRequest.current = null;
+    }
+  }
+
+  const originalOwner = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hasLoadedUser || !portalRoot) return;
+    if (originalOwner.current !== null && originalOwner.current !== owner) { clearComparisonFeedback(); cancelRequests(); onClose(); return; }
+    originalOwner.current = owner;
+    const preferences = owner ? readComparisonPreferences(owner) : {};
+    setLinked(preferences.linked ?? false);
+    setAxis(preferences.axis || (window.matchMedia('(max-width: 640px)').matches ? 'vertical' : 'horizontal'));
+    setInitializedOwner(owner);
+    selectionWriteGuard.current = { context: selectionContext, phase: 'pending' };
+    setComparisonRecovery(null);
+    clearComparisonFeedback();
+    if (!owner || !selectionAnchor) { selectionWriteGuard.current.phase = 'writable'; return; }
+    const saved = readComparisonSelection(owner, selectionAnchor, imageSourceIdentity(incoming)), action = userAction.current;
+    if (saved.invalid) {
+      const cleared = clearComparisonSelectionIfUnchanged(owner, selectionAnchor, saved);
+      selectionWriteGuard.current.phase = cleared ? 'cleared' : 'dormant';
+      setComparisonRecovery({ kind: 'reselect', message: '上次对比图记录已失效，请重新选择' });
+      return;
+    }
+    if (!saved.comparison) { selectionWriteGuard.current.phase = 'writable'; return; }
+    if (!saved.enabled) {
+      selectionWriteGuard.current.phase = 'dormant';
+      setComparisonRecovery({ kind: 'dormant', saved });
+      return;
+    }
+    void resolveStoredComparison(saved, false, action);
+    return () => { comparisonResolveRequest.current?.abort(); comparisonResolveRequest.current = null; };
+  // Restore once per account/opening; explicit navigation must not replay an old selection.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, hasLoadedUser, portalRoot]);
+
+  const incomingIdentity = JSON.stringify([src, previewKey, sourceVersion, sourceRole, contentKey, thumbnailSrc]);
+  const lastIncoming = useRef(incomingIdentity);
+  useLayoutEffect(() => {
+    if (lastIncoming.current === incomingIdentity) return;
+    lastIncoming.current = incomingIdentity; userAction.current++;
+    clearComparisonFeedback();
+    setComparisonRecovery(null);
+    comparisonResolveRequest.current?.abort();
+    selectionWriteGuard.current = { context: selectionContext, phase: 'pending' };
+    void requestImage('current', incoming, false, true, userAction.current).catch(() => {});
+  // The reference supplied for a new current image must not replace the chosen comparison.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingIdentity, requestImage]);
+
+  useEffect(() => {
+    const nativeDialog = portalAnchorRef.current?.closest('dialog[open]');
+    try { setPortalRoot(nativeDialog?.matches(':modal') ? nativeDialog as HTMLElement : document.body); }
+    catch { setPortalRoot(document.body); }
+  }, []);
+  useDialogDismiss({ open: Boolean(portalRoot), dialogRef: backdropRef, dismissSurfaceRef: backdropRef,
+    onDismiss: dismissPreview, initialFocusRef: backdropRef, dismissOnOutside: false });
+  useDialogDismiss({ open: Boolean(controlsOpen && portalRoot), dialogRef: controlsRef, modal: false,
+    branchRefs: [zoomTriggerRef, moreTriggerRef], restoreFocus: false, onDismiss: closeControls });
+  useEffect(() => {
+    if (!controlsOpen) return;
+    stopGestures();
+    const frame = window.requestAnimationFrame(() => controlsRef.current?.querySelector<HTMLElement>('button:not(:disabled),select,input')?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [controlsOpen, stopGestures]);
+  useEffect(() => {
+    const elements = [document.documentElement, document.body];
+    const previous = elements.map(element => ({ overflow: element.style.overflow, overscrollBehavior: element.style.overscrollBehavior }));
+    elements.forEach(element => { element.style.overflow = 'hidden'; element.style.overscrollBehavior = 'none'; });
+    return () => elements.forEach((element, index) => { element.style.overflow = previous[index].overflow; element.style.overscrollBehavior = previous[index].overscrollBehavior; });
+  }, []);
+  useEffect(() => {
+    const toolbar = toolbarRef.current, root = backdropRef.current, stage = stageRef.current;
+    if (!toolbar || !root || !stage) return;
+    const measure = () => {
+      root.style.setProperty('--image-toolbar-height', Math.ceil(toolbar.getBoundingClientRect().height) + 'px');
+      setFrames(value => {
+        const next = { ...value }; let changed = false;
+        for (const side of sides) { const pane = paneRefs.current[side]; if (!pane) continue;
+          const size = { width: Math.max(1, pane.clientWidth), height: Math.max(1, pane.clientHeight) };
+          if (size.width !== value[side].width || size.height !== value[side].height) { next[side] = size; changed = true; }
+        }
+        return changed ? next : value;
+      });
+    };
+    const observer = new ResizeObserver(measure); observer.observe(toolbar); observer.observe(stage);
+    for (const pane of Object.values(paneRefs.current)) if (pane) observer.observe(pane);
+    measure(); return () => observer.disconnect();
+  }, [portalRoot, comparisonMode, axis]);
+
+  function baseSize(side: Side, image = sourcesRef.current[side]): IntrinsicSize {
+    const frame = frames[side], size = image && (originalSizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined) || thumbnailFrames[imageSourceIdentity(image)] || sizes[imageSourceIdentity(image)]);
+    if (!size) return { width: Math.max(1, frame.width), height: Math.max(1, frame.height) };
+    const fit = Math.min(frame.width / size.width, frame.height / size.height, 1);
+    return { width: Math.max(1, size.width * fit), height: Math.max(1, size.height * fit) };
+  }
+  const geometryRef = useRef({ frames, baseSize }); geometryRef.current = { frames, baseSize };
+  useEffect(() => {
+    // Representation upgrades retain normalized centres. Pixel/width modes
+    // follow original dimensions and the current viewport, never preview pixels.
+    setViews(value => {
+      let next = value;
+      for (const side of sides) {
+        const image = sourcesRef.current[side]; if (!image) continue;
+        const id = viewIdentity(side, image), view = value[id];
+        if (!view || view.mode !== 'actual' && view.mode !== 'width') continue;
+        const size = originalSizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined);
+        if (view.mode === 'actual' && !size) continue;
+        const base = geometryRef.current.baseSize(side);
+        const scale = Math.max(MIN_SCALE, view.mode === 'width' ? frames[side].width / base.width : size!.width / base.width);
+        if (Math.abs(view.scale - scale) > 0.000001) {
+          if (next === value) next = { ...value };
+          const ratio = scale / view.scale;
+          next[id] = { ...view, scale, x: view.x * ratio, y: view.y * ratio };
+        }
+      }
+      viewsRef.current = next; return next;
+    });
+  }, [frames, originalSizes, thumbnailFrames, sizes, currentImage, comparisonImage, views]);
+  useEffect(() => {
+    if (initializedOwner !== owner || !owner) return;
+    setViews(value => {
+      const next = { ...value }; let changed = false;
+      for (const side of sides) {
+        const image = sourcesRef.current[side];
+        if (!image) continue; const id = viewIdentity(side, image); if (next[id]) continue;
+        next[id] = readImageView(owner, id, pair, axis) || readImageView(owner, imageSourceIdentity(image), pair, axis) || { ...fittedImageView }; changed = true;
+      }
+      return changed ? next : value;
+    });
+  }, [axis, comparisonImage, currentImage, initializedOwner, owner, pair]);
+  const legacyRestored = useRef(false);
+  useEffect(() => {
+    if (legacyRestored.current || !legacyState.ready || initializedOwner !== owner || !owner) return;
+    const id = imageSourceIdentity(incoming);
+    if (readImageView(owner, id, pair, axis) || userAction.current) { legacyRestored.current = true; return; }
+    const size = sizes[id]; if (!size) return;
+    legacyRestored.current = true;
+    const base = baseSize('current', incoming), saved = legacyState.value;
+    setViews(value => ({ ...value, [viewIdentity('current', incoming)]: { scale: saved.scale, x: saved.offsetX / base.width, y: saved.offsetY / base.height, mode: saved.zoomMode } }));
+  // The existing single-image pixel record is converted once after its image/frame is known.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacyState.ready, initializedOwner, owner, sizes]);
+
+  const sceneRef = useRef({ currentImage, comparisonImage, comparisonMode, initializedOwner }); sceneRef.current = { currentImage, comparisonImage, comparisonMode, initializedOwner };
+  const flush = useCallback(() => {
+    const config = configRef.current, scene = sceneRef.current;
+    if (!config.owner || scene.initializedOwner !== config.owner) return;
+    saveComparisonPreferences(config.owner, { linked: config.linked, axis: config.axis });
+    for (const side of sides) {
+      const image = side === 'current' ? scene.currentImage : scene.comparisonImage;
+      if (!image) continue; const id = viewIdentity(side, image), view = viewsRef.current[id]; if (!view) continue;
+      saveImageView(config.owner, id, config.pair.includes('blob:') ? 'session' : config.pair, config.axis, view);
+      if (side === safeSideRef.current) saveImageView(config.owner, imageSourceIdentity(image), config.pair.includes('blob:') ? 'session' : config.pair, config.axis, view);
+    }
+    const selection = selectionWriteGuard.current;
+    if (config.selectionAnchor && selection.context === config.selectionContext && selection.phase === 'writable') {
+      saveComparisonSelection(config.owner, config.selectionAnchor, scene.currentImage, scene.comparisonImage, scene.comparisonMode);
+    }
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(flush, 250); return () => window.clearTimeout(timer); }, [views, linked, axis, currentImage, comparisonImage, comparisonMode, initializedOwner, flush]);
+  useEffect(() => {
+    const visibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush); document.addEventListener('visibilitychange', visibility);
+    return () => { flush(); window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', visibility); };
+  }, [flush]);
+
+  const transform = useCallback((side: Side, factor: number, from: Point, to: Point = from) => {
+    userAction.current++; setActiveSide(side);
+    setViews(current => {
+      const next = { ...current }, config = configRef.current;
+      const targets = config.linked && config.comparisonMode ? sides : [side];
+      for (const target of targets) {
+        const image = sourcesRef.current[target]; if (!image) continue;
+        const id = viewIdentity(target, image), value = current[id] || fittedImageView;
+        const frame = geometryRef.current.frames[target], base = geometryRef.current.baseSize(target);
+        const scale = clampScale(value.scale * factor, value.mode === 'actual' || value.scale > MAX_SCALE ? 1_000_000 : MAX_SCALE);
+        const ratio = scale / value.scale;
+        next[id] = { scale, x: to.x * frame.width / base.width - (from.x * frame.width / base.width - value.x) * ratio,
+          y: to.y * frame.height / base.height - (from.y * frame.height / base.height - value.y) * ratio, mode: 'custom' };
+      }
+      viewsRef.current = next; return next;
+    });
+  }, []);
+  const pointInPane = useCallback((side: Side, point: Point): Point => {
+    const rect = paneRefs.current[side]!.getBoundingClientRect();
+    return { x: (point.x - rect.left) / Math.max(1, rect.width) - 0.5, y: (point.y - rect.top) / Math.max(1, rect.height) - 0.5 };
+  }, []);
+  const reset = useCallback((both = false) => {
+    userAction.current++; stopGestures();
+    setViews(value => {
+      const next = { ...value };
+      for (const side of both ? sides : [safeSide]) { const image = sourcesRef.current[side]; if (image) next[viewIdentity(side, image)] = { ...fittedImageView }; }
+      viewsRef.current = next; return next;
+    });
+  }, [safeSide, stopGestures]);
+  const zoomFromControls = useCallback((factor: number) => transform(safeSide, factor, zoomPoints.current[safeSide] || { x: 0, y: 0 }), [safeSide, transform]);
+  function applyMode(mode: MediaPreviewZoomMode) {
+    if (mode === 'custom') return;
+    userAction.current++; stopGestures();
+    const targets = linked && comparisonMode ? sides : [safeSide];
+    const actualSize = (image: ImageComparisonSource) => originalSizes[imageSourceIdentity(image)] || (image.width && image.height ? { width: image.width, height: image.height } : undefined);
+    if (mode === 'actual' && targets.some(side => { const image = sourcesRef.current[side]; return image && !actualSize(image); })) {
+      setMessage('原图像素尺寸未知，请先加载完整原图'); return;
+    }
+    setViews(value => {
+      const next = { ...value };
+      for (const side of targets) {
+        const image = sourcesRef.current[side]; if (!image) continue;
+        const id = viewIdentity(side, image), base = baseSize(side), size = actualSize(image);
+        const scale = mode === 'fit' ? 1 : mode === 'width' ? frames[side].width / base.width : size ? size.width / base.width : 1;
+        next[id] = { scale: Math.max(MIN_SCALE, scale), x: 0, y: 0, mode };
+      }
+      viewsRef.current = next; return next;
+    });
+  }
+  useEffect(() => {
+    const wheel = (event: WheelEvent) => {
+      if (!isTopmostDialogLayer(backdropRef.current) || !event.deltaY || !(event.target instanceof Element)) return;
+      blankPress.current = null;
+      const pane = event.target.closest<HTMLElement>('[data-image-preview-pane]'); if (!pane || !stageRef.current?.contains(pane)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      const side = pane.dataset.imagePreviewPane as Side, point = pointInPane(side, { x: event.clientX, y: event.clientY });
+      zoomPoints.current[side] = point; transform(side, event.deltaY < 0 ? SCALE_STEP : 1 / SCALE_STEP, point);
+    };
+    window.addEventListener('wheel', wheel, { capture: true, passive: false });
+    return () => window.removeEventListener('wheel', wheel, true);
+  }, [pointInPane, transform]);
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (!isTopmostDialogLayer(backdropRef.current) || event.target instanceof Element && event.target.closest('select, input, textarea, button, a[href], summary, [contenteditable]')) return;
+      const key = event.key;
+      if (!['ArrowLeft', 'ArrowRight', '+', '=', '-', '0'].includes(key)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (key === 'ArrowLeft' && hasNavigation) onPrevious?.();
+      if (key === 'ArrowRight' && hasNavigation) onNext?.();
+      if (key === '+' || key === '=') zoomFromControls(SCALE_STEP);
+      if (key === '-') zoomFromControls(1 / SCALE_STEP);
+      if (key === '0') reset();
+    };
+    window.addEventListener('keydown', handle, true); return () => window.removeEventListener('keydown', handle, true);
+  }, [hasNavigation, onNext, onPrevious, reset, zoomFromControls]);
+
+  function blankSurface(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return null;
+    return target === backdropRef.current || target === stageRef.current || target === frameRef.current
+      || sides.some(side => target === paneRefs.current[side]) ? target : null;
+  }
+  function blankPointerDown(event: PointerEvent<HTMLDivElement>) {
+    blankPress.current = null;
+    if (!isTopmostDialogLayer(backdropRef.current) || !event.isPrimary
+      || event.pointerType !== 'touch' && event.button !== 0
+      || sides.some(side => points.current[side].size > 0)) return;
+    const surface = blankSurface(event.target);
+    if (!surface) return;
+    blankPress.current = { surface, pointerId: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, released: false };
+  }
+  function blankPointerMove(event: PointerEvent<HTMLDivElement>) {
+    const press = blankPress.current;
+    if (!press || press.pointerId !== event.pointerId || press.released) return;
+    // Remember any drag, including one that returns to its starting point.
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) press.cancelled = true;
+  }
+  function blankPointerUp(event: PointerEvent<HTMLDivElement>) {
+    const press = blankPress.current;
+    if (!press || press.pointerId !== event.pointerId) return;
+    // Pane capture retargets pointerup; inspect the actual surface under the release.
+    const target = event.currentTarget.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+    press.released = !press.cancelled && event.isPrimary && isTopmostDialogLayer(backdropRef.current)
+      && Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 5
+      && sides.reduce((total, side) => total + points.current[side].size, 0) <= 1
+      && blankSurface(target) === press.surface;
+    if (!press.released) blankPress.current = null;
+  }
+  function pointerDown(side: Side, event: PointerEvent<HTMLDivElement>) {
+    if (!isTopmostDialogLayer(backdropRef.current) || event.target instanceof Element && event.target.closest('button, a[href], input, select') || event.pointerType !== 'touch' && event.button !== 0) return;
+    event.preventDefault(); userAction.current++; setActiveSide(side);
+    points.current[side].set(event.pointerId, { x: event.clientX, y: event.clientY });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function pointerMove(side: Side, event: PointerEvent<HTMLDivElement>) {
+    const map = points.current[side];
+    const nextPoint = { x: event.clientX, y: event.clientY };
+    zoomPoints.current[side] = pointInPane(side, nextPoint);
+    const previous = map.get(event.pointerId); if (!previous) return;
+    const before = Array.from(map.values()).slice(0, 2);
+    map.set(event.pointerId, nextPoint);
+    const after = Array.from(map.values()).slice(0, 2);
+    const centroid = (values: Point[]) => ({ x: values.reduce((sum, p) => sum + p.x, 0) / values.length, y: values.reduce((sum, p) => sum + p.y, 0) / values.length });
+    const from = pointInPane(side, centroid(before)), to = pointInPane(side, centroid(after));
+    const distance = (values: Point[]) => Math.max(1, Math.hypot(values[0].x - values[1].x, values[0].y - values[1].y));
+    transform(side, before.length === 2 ? distance(after) / distance(before) : 1, from, to);
+  }
+  function pointerEnd(side: Side, event: PointerEvent<HTMLDivElement>) {
+    points.current[side].delete(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  function ready(side: Side, image: ImageComparisonSource, size: IntrinsicSize, decoded: DecodedImage) {
+    if (!alive.current) return;
+    if (sourcesRef.current[side] !== image) return;
+    const id = imageSourceIdentity(image);
+    setSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
+    setDecodedImages(value => ({ ...value, [viewIdentity(side, image)]: decoded }));
+    if (side === 'current') setDisplayedCurrent(currentDisplayKey);
+    if (decoded.fullSize) setOriginalSizes(value => value[id]?.width === size.width && value[id]?.height === size.height ? value : { ...value, [id]: size });
+    else {
+      const width = decoded.hd?.width, height = decoded.hd?.height;
+      if (Number.isSafeInteger(width) && Number.isSafeInteger(height) && width! > 0 && height! > 0) {
+        setOriginalSizes(value => value[id]?.width === width && value[id]?.height === height ? value : { ...value, [id]: { width: width!, height: height! } });
+      } else thumbnailReady(side, image, size);
+    }
+    onImageLoaded?.(image.src);
+  }
+  function thumbnailReady(side: Side, image: ImageComparisonSource, size: IntrinsicSize) {
+    if (!alive.current || sourcesRef.current[side] !== image || image.width && image.height || size.width <= 0 || size.height <= 0) return;
+    const id = imageSourceIdentity(image), frame = frames[side];
+    if (frame.width <= 0 || frame.height <= 0) return;
+    // Only the display frame is inferred; actual-pixel controls still use the decoded full image.
+    const fit = Math.min(Math.max(1, frame.width) / size.width, Math.max(1, frame.height) / size.height);
+    setThumbnailFrames(value => value[id] ? value : { ...value, [id]: { width: size.width * fit, height: size.height * fit } });
+  }
+  function selectionError(side: Side, image: ImageComparisonSource) {
+    if (sourceRole === 'generated' || sourceRole === 'original') {
+      const generatedSide: Side = currentOnRight ? 'current' : 'comparison';
+      if (image.role === 'generated' && side !== generatedSide) return '生成图固定在右侧，请在右侧选择';
+      if (image.role === 'original' && side === generatedSide) return '原图固定在左侧，请在左侧选择';
+    }
+  }
+  async function choose(side: Side, image: ImageComparisonSource) {
+    clearComparisonFeedback();
+    const assignmentError = selectionError(side, image);
+    if (assignmentError) throw new ComparisonResolveError('identity-version-change', assignmentError);
+    const action = ++userAction.current;
+    const applied = await requestImage(side, image, true, true, action);
+    if (applied && action === userAction.current) {
+      setComparisonRecovery(null);
+      clearComparisonFeedback();
+    }
+    return applied;
+  }
+  async function chooseLocal(side: Side, file: File) {
+    if (!file.type.startsWith('image/') || file.size > 64 * 1024 * 1024) throw new Error('请选择64MB以内的图片');
+    const url = URL.createObjectURL(file); localUrls.current.add(url);
+    try { const applied = await choose(side, { src: url, alt: '本机图片', fileName: file.name, fileSize: file.size });
+      if (!applied) { URL.revokeObjectURL(url); localUrls.current.delete(url); }
+      else setMessage('本机图片仅本次预览，不上传、不跨重开保存');
+      return applied;
+    } catch (error) { URL.revokeObjectURL(url); localUrls.current.delete(url); throw error; }
+  }
+  function openComparisonPicker(trigger: HTMLButtonElement | null) {
+    clearComparisonFeedback();
+    comparisonResolveRequest.current?.abort();
+    comparisonResolveRequest.current = null;
+    pickerTriggerRef.current = trigger;
+    trigger?.focus({ preventScroll: true });
+    stopGestures();
+    setControlsOpen(null);
+    setPickerSide('comparison');
+  }
+  function toggleComparison() {
+    if (comparisonMode) {
+      userAction.current++;
+      clearComparisonFeedback();
+      stopGestures();
+      setComparisonRecovery(null);
+      beginSelectionWrite(currentImage, comparisonImage, false);
+      setComparisonMode(false);
+      setActiveSide('current');
+      return;
+    }
+    const recoveryAffectsCurrent = Boolean(comparisonImage && comparisonRecovery?.kind !== 'dormant'
+      && comparisonRecovery?.affectedIdentity === imageSourceIdentity(comparisonImage));
+    if (comparisonImage && !recoveryAffectsCurrent) {
+      userAction.current++;
+      comparisonResolveRequest.current?.abort();
+      comparisonResolveRequest.current = null;
+      clearComparisonFeedback();
+      stopGestures();
+      setComparisonRecovery(null);
+      beginSelectionWrite(currentImage, comparisonImage, true);
+      setComparisonMode(true);
+      return;
+    }
+    const saved = comparisonRecovery?.saved;
+    if (saved) {
+      const action = ++userAction.current;
+      stopGestures();
+      void resolveStoredComparison(saved, true, action);
+      return;
+    }
+    userAction.current++;
+    comparisonResolveRequest.current?.abort();
+    comparisonResolveRequest.current = null;
+    beginComparisonFeedback();
+    stopGestures();
+    setComparisonNotice({ kind: 'reselect', message: comparisonRecovery?.message || '请先选择对比图' });
+  }
+  function actOnComparisonNotice() {
+    if (!comparisonNotice) return;
+    if (comparisonNotice.kind === 'retry' && comparisonNotice.saved) {
+      const action = ++userAction.current;
+      stopGestures();
+      void resolveStoredComparison(comparisonNotice.saved, true, action);
+      return;
+    }
+    userAction.current++;
+    openComparisonPicker(compareToggleRef.current);
+  }
+  function pane(side: Side) {
+    const image = sources[side];
+    return <div key={side} ref={element => { if (element) paneRefs.current[side] = element; else delete paneRefs.current[side]; }}
+      className={styles.comparePane} data-image-preview-pane={side} data-image-role={image?.role} data-active={safeSide === side} role="group" aria-label={sideLabel(side)} tabIndex={0}
+      onFocus={() => setActiveSide(side)} onPointerDown={event => pointerDown(side, event)} onPointerMove={event => pointerMove(side, event)}
+      onPointerUp={event => pointerEnd(side, event)} onPointerCancel={event => pointerEnd(side, event)} onLostPointerCapture={event => pointerEnd(side, event)}
+      onDoubleClick={() => { setActiveSide(side); userAction.current++; setViews(value => ({ ...value, ...(image ? { [viewIdentity(side, image)]: { ...fittedImageView } } : {}) })); }}>
+      {comparisonMode && <span className={styles.compareLabel}>{sideLabel(side)}</span>}
+      {comparisonMode && side === linkSide && <button type="button" className={styles.paneLink} title={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-label={linked ? '关闭两图联动，独立调整' : '开启两图联动'} aria-pressed={linked} onClick={() => { userAction.current++; stopGestures(); setLinked(value => !value); }}>{linked ? <Lock size={16} /> : <Unlock size={16} />}</button>}
+      {image && (() => {
+        const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
+        const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
+        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}:${originals[viewIdentity(side, image)] === undefined ? 'auto' : originals[viewIdentity(side, image)] ? 'original' : 'hd'}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly} original={!previewOnly && (originals[viewIdentity(side, image)] ?? readImageView(owner, viewIdentity(side, image), pair, axis)?.original ?? false)}
+          preparation={side === 'current' && preparation?.source === image.src && preparation.sourceVersion === (image.version || '') ? preparation : internalPreparations.current[side]}
+          className={styles.compareImage}
+          style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
+            transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
+          onThumbnailReady={size => thumbnailReady(side, image, size)} onReady={(size, decoded) => ready(side, image, size, decoded)}
+          onUnavailable={() => { if (side === 'current' && sourcesRef.current.current === image) setDisplayedCurrent(''); setDecodedImages(current => { const key = viewIdentity(side, image); if (!current[key]) return current; const next = { ...current }; delete next[key]; return next; }); }} />;
+      })()}
+    </div>;
+  }
+  const activeOriginal = originals[viewIdentity(safeSide, selectedImage)] ?? readImageView(owner, viewIdentity(safeSide, selectedImage), pair, axis)?.original ?? false;
+  const candidateDecoded = decodedImages[viewIdentity(safeSide, selectedImage)];
+  const decoded = account && candidateDecoded?.account === account ? candidateDecoded : undefined;
+  const copySource = !previewOnly && decoded?.fullSize ? decoded.source : '';
+  const visibleMetadata = isOriginalSubject ? { model: safeMetadataValue(safeDetails?.model ?? metadata?.model), quality: safeMetadataValue(safeDetails?.quality ?? metadata?.quality),
+    supplier: safeMetadataValue(safeDetails?.supplier ?? metadata?.supplier),
+    ratio: safeMetadataValue(safeDetails?.ratio ?? metadata?.ratio), resolution: safeMetadataValue(safeDetails?.resolution ?? metadata?.resolution), time: safeMetadataTime(safeDetails?.time ?? metadata?.time) } : {};
+  const visibleSize = originalSizes[selectedId] || (selectedImage.width && selectedImage.height ? { width: selectedImage.width, height: selectedImage.height } : undefined);
+  const previewSize = sizes[selectedId];
+  const fileSize = selectedImage.fileSize;
+  const knownFileSize = typeof fileSize === 'number' && Number.isFinite(fileSize) && fileSize > 0;
+  const rawTime = safeDetails?.time ?? metadata?.time;
+  const candidates = Array.from(new Map([incoming, ...(comparison ? [comparison] : []), ...comparisonCandidates].filter(image => image.src).map(image => [identity(image), image])).values());
+  function thumbnail(side: Side) {
+    const image = sources[side];
+    return <button type="button" className={styles.sourceThumb} data-active={safeSide === side} title={`选择或更换${sideLabel(side)}`} aria-label={`选择或更换${sideLabel(side)}${safeSide === side ? '，当前选中' : ''}`} aria-haspopup="dialog" aria-expanded={pickerSide === side} onClick={event => { clearComparisonFeedback(); comparisonResolveRequest.current?.abort(); comparisonResolveRequest.current = null; pickerTriggerRef.current = event.currentTarget; event.currentTarget.focus({ preventScroll: true }); userAction.current++; stopGestures(); setControlsOpen(null); setPickerSide(side); }}>
+      {image ? <img src={image.thumbnailSrc || displaySource(image.src, 'thumbnail')} alt="" draggable={false} /> : <Plus size={20} />}
+      <span className={styles.srOnly}>{sideLabel(side)}</span>
+    </button>;
+  }
+  return <><span ref={portalAnchorRef} hidden />{portalRoot && createPortal(<div ref={backdropRef} className={styles.backdrop} data-media-preview="sd2-media-preview" role="dialog" aria-modal="true" aria-label={imageTitle} tabIndex={-1}
+    onClick={event => {
+      event.stopPropagation();
+      const press = blankPress.current; blankPress.current = null;
+      // Consume the original click before closing, so it cannot reach a lower layer.
+      if (press?.released && !event.defaultPrevented && event.detail > 0 && blankSurface(event.target) === press.surface && isTopmostDialogLayer(backdropRef.current)) dismissPreview();
+    }}
+    onPointerDownCapture={blankPointerDown} onPointerMoveCapture={blankPointerMove} onPointerUpCapture={blankPointerUp}
+    onPointerCancelCapture={() => { blankPress.current = null; }}
+    onLostPointerCaptureCapture={() => { if (!blankPress.current?.released) blankPress.current = null; }}
+    onPointerDown={event => event.stopPropagation()} onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
+    onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
+    <div ref={toolbarRef} className={styles.toolbar} onClickCapture={event => {
+      // Keep nested shared confirmations tied to the real clicked control, including Safari.
+      if (event.target instanceof Element) event.target.closest<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+    }}>
+      <div className={styles.sourceGroup}>
+        {hasNavigation && <div className={styles.desktopNavigation}><button type="button" title="当前图上一张" aria-label="当前图上一张" onClick={onPrevious}><ArrowLeft size={16} /></button><button type="button" title="当前图下一张" aria-label="当前图下一张" onClick={onNext}><ArrowRight size={16} /></button></div>}
+        <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
+        <button type="button" className={styles.fitButton} aria-pressed={selectedView.mode === 'fit'} title={`让${sideLabel(safeSide)}适合窗口`} onClick={() => applyMode('fit')}>适合窗口</button>
       </div>
-      <div
-        ref={stageRef}
-        className={`${styles.stage} ${dragging ? styles.stageDragging : ''}`}
-        title="滚轮缩放，拖动查看"
-        aria-busy={!imageLoaded && !imageError}
-        onWheel={handleWheel}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
-        onAuxClick={(event) => event.preventDefault()}
-        onDoubleClick={() => {
-          if (scale > 1) resetView();
-          else zoomAtCenter(2);
-        }}
-      >
-        {/* 参考图来源可能是本地、远程或临时地址，这里保留原生 img 以支持原图缩放查看。 */}
-        {(!imageLoaded || imageError) && (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            {!imageError && <span className={styles.loadingSpinner} />}
-            <strong>{imageError ? '图片加载失败' : '图片加载中...'}</strong>
-            <small>{imageError ? '请关闭后重试，或检查图片地址。' : '原图较大时可能需要几秒。'}</small>
+      <div className={styles.compareSources} role="group" aria-label="图片对比">{thumbnail(paneOrder[0])}<button ref={compareToggleRef} type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode}
+          title={comparisonMode ? '退出对比' : '开启对比'}
+          aria-label={comparisonMode ? '退出对比' : '开启对比'}
+          onClick={toggleComparison}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
+      <div className={styles.actions}>
+        {hasOriginalDownloadUrl ? <a className={styles.downloadAction} href={originalDownloadSource} download={selectedImage.fileName || 'original-image'} title={`下载${sideLabel(safeSide)}原图`} aria-label={`下载${sideLabel(safeSide)}原图`}><Download size={16} /><span>下载原图</span></a>
+          : downloadSelectedSource && <button type="button" className={styles.downloadAction} disabled={downloadBusy} title={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-label={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-busy={downloadBusy} onClick={downloadOriginal}><Download size={16} /><span>{downloadBusy ? '准备下载' : '下载原图'}</span></button>}
+        <button ref={moreTriggerRef} type="button" title="图片与对比更多操作" aria-label="图片与对比更多操作" aria-expanded={controlsOpen === 'more'} aria-controls={controlsOpen === 'more' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'more' ? null : 'more')}><MoreHorizontal size={18} /></button>
+        <button type="button" className={styles.closeButton} onClick={dismissPreview} title="关闭大图" aria-label="关闭大图"><X size={18} /></button>
+      </div>
+      {controlsOpen && <Popper.Root key={controlsOpen}><Popper.Anchor virtualRef={controlsAnchorRef} /><Popper.Content ref={controlsRef} id={controlsId} className={styles.controlsPopover} role="dialog" aria-label={controlsOpen === 'zoom' ? '缩放选中图' : '图片与对比更多操作'} side="bottom" align={controlsOpen === 'zoom' ? 'start' : 'end'} sideOffset={6} collisionPadding={8} sticky="always" hideWhenDetached>
+        <header><strong>{sideLabel(safeSide)}{controlsOpen === 'zoom' ? '缩放' : '操作'}</strong><button type="button" title="收起操作" aria-label="收起操作" onClick={closeControls}><X size={16} /></button></header>
+        {controlsOpen === 'zoom' ? <>
+          <label className={styles.zoomMode}><span>显示比例</span><select aria-label="选中图显示比例" value={selectedView.mode} onChange={event => applyMode(event.target.value as MediaPreviewZoomMode)}><option value="fit">适合窗口</option><option value="width">适合宽度</option><option value="actual">实际像素</option><option value="custom" disabled>手动缩放</option></select></label>
+          <div className={styles.popoverRow}><button type="button" onClick={() => zoomFromControls(1 / SCALE_STEP)} title="缩小选中图" aria-label="缩小选中图"><ZoomOut size={16} /></button><span>{Math.round(selectedView.scale * 100)}%</span><button type="button" onClick={() => zoomFromControls(SCALE_STEP)} title="放大选中图" aria-label="放大选中图"><ZoomIn size={16} /></button><button type="button" onClick={() => reset()} title="还原选中图" aria-label="还原选中图"><RotateCcw size={16} /></button></div>
+        </> : <>
+          {selectedImage.contentKey && <ContentReactions key={`reactions:${owner}:${selectedImage.contentKey}`} contentKey={selectedImage.contentKey} imageSharing={imageSharing} />}
+          {!previewOnly && <button type="button" className={styles.menuAction} disabled={copyState?.busy || !copySource} onClick={() => {
+            const copying = decoded?.displayKind === 'original' ? '原图画面已复制' : '高清画面已复制';
+            const expectedAccount = account, expectedSource = selectedImage, expectedScope = captureImageReadSessionScope(account);
+            const current = () => alive.current && expectedScope() && readScopeRef.current.account === expectedAccount && !readScopeRef.current.previewOnly && sourcesRef.current[safeSide] === expectedSource;
+            const authorizationSource = decoded?.displayKind === 'hd' ? versionedHdSource(selectedImage.src, 'hd', decoded.hd?.sourceVersion, decoded.hd?.representationVersion)
+              : displaySource(selectedImage.src, 'original');
+            setCopyState({ src: copySource, busy: true }); void copyImage(copySource, { isCurrent: current, authorizationSource,
+              expectedVersion: decoded?.authorizationVersion, representationVersion: decoded?.representationVersion }).then(() => { if (current()) setCopyState({ src: copySource, success: true, message: copying }); }).catch(error => { if (current()) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
+          }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
+          {!previewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => {
+            userAction.current++; stopGestures();
+            const nextOriginal = !(activeOriginal || decoded?.displayKind === 'original');
+            setOriginals(value => ({ ...value, [viewIdentity(safeSide, selectedImage)]: nextOriginal }));
+            if (owner) saveImageView(owner, viewIdentity(safeSide, selectedImage), pair, axis, { ...selectedView, original: nextOriginal });
+          }}><ZoomIn size={16} />{activeOriginal || decoded?.displayKind === 'original' ? '切换高清预览' : '加载完整原图'}</button>}
+          {hasOriginalDownloadUrl && <>
+            {decoded?.hd?.status === 'ready' && !hdDescriptionUsesOriginal(decoded.hd) ? <button type="button" className={styles.menuAction} disabled={downloadBusy} onClick={downloadHd}><Download size={16} />{downloadBusy ? '正在准备下载' : `下载高清 ${decoded.hd.format?.toUpperCase() || ''}${decoded.hd.bytes ? ` · ${formatImageBytes(decoded.hd.bytes)}` : ''}`}</button> : <span className={styles.menuAction}>{hdAvailabilityLabel(decoded?.hd)}</span>}
+          </>}
+          {hasNavigation && <div className={styles.mobileNavigation}><button type="button" className={styles.menuAction} onClick={onPrevious}><ArrowLeft size={16} />当前图上一张</button><button type="button" className={styles.menuAction} onClick={onNext}><ArrowRight size={16} />当前图下一张</button></div>}
+          {comparisonMode && <div className={styles.compareOptions}>
+            <button type="button" className={styles.menuAction} onClick={() => { userAction.current++; stopGestures(); setAxis(value => value === 'horizontal' ? 'vertical' : 'horizontal'); }}>{axis === 'horizontal' ? <ArrowUpDown size={16} /> : <ArrowLeftRight size={16} />}{axis === 'horizontal' ? '切换上下对比' : '切换左右对比'}</button>
+            <button type="button" className={styles.menuAction} onClick={() => reset(true)}><RotateCcw size={16} />还原两图</button>
+          </div>}
+          <div className={styles.metadata}>{visibleMetadata.model && <span>模型：{visibleMetadata.model}</span>}{visibleMetadata.quality && <span>质量：{visibleMetadata.quality}</span>}{visibleMetadata.supplier && <span>供应商：{visibleMetadata.supplier}</span>}{visibleMetadata.ratio && <span>比例：{visibleMetadata.ratio}</span>}{visibleMetadata.resolution && <span>分辨率：{visibleMetadata.resolution}</span>}
+            <span>原图尺寸：{visibleSize ? `${visibleSize.width} × ${visibleSize.height} 像素` : '未知'}</span>
+            <span>原文件大小：{knownFileSize ? formatImageBytes(fileSize) : '未知'}</span>
+            {decoded?.mime && <span>当前显示：{hdDisplayLabel(decoded.displayKind, decoded.hd)} · {decoded.mime.replace('image/', '').toUpperCase()}{decoded.bytes ? ` · ${formatImageBytes(decoded.bytes)}` : ''}</span>}
+            {!visibleSize && previewSize && <span>当前预览：{previewSize.width} × {previewSize.height} 像素（非原图尺寸）</span>}
+            {visibleMetadata.time && <span>{rawTime && Number.isFinite(Date.parse(rawTime)) ? <RelativeTime value={rawTime} /> : visibleMetadata.time}</span>}
           </div>
-        )}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={src}
-          alt={alt}
-          className={`${styles.image} ${imageLoaded ? styles.imageReady : styles.imageLoading}`}
-          draggable={false}
-          onLoad={() => {
-            setImageLoaded(true);
-            setImageError(false);
-          }}
-          onError={() => {
-            setImageLoaded(false);
-            setImageError(true);
-          }}
-          style={{
-            transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`,
-          }}
-        />
+          {isOriginalSubject && details != null && <details className={styles.detailDisclosure}><summary>详情</summary><div className={styles.detailContent}>{details}</div></details>}
+        </>}
+      </Popper.Content></Popper.Root>}
+    </div>
+    <div ref={stageRef} className={styles.stage} data-image-preview-stage onAuxClick={event => event.preventDefault()}>
+      {(comparisonNotice || message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.noticeStack}>
+        {comparisonNotice && <div className={styles.comparisonNotice} role="status"><span>{comparisonNotice.message}</span><div className={styles.noticeActions}><button type="button" onClick={actOnComparisonNotice}>{comparisonNotice.kind === 'retry' ? '重试' : '选择对比图'}</button><button type="button" title="关闭对比提示" aria-label="关闭对比提示" onClick={clearComparisonFeedback}><X size={16} /></button></div></div>}
+        {(message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.notice} role="status">{message || (copyState?.src === copySource ? copyState.message : null)}{isOriginalSubject && notice}</div>}
+      </div>}
+      <div ref={frameRef} className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
+        {comparisonMode ? paneOrder.map(side => pane(side)) : pane('current')}
       </div>
     </div>
-  );
-
-  if (!portalRoot) return null;
-  return createPortal(preview, portalRoot);
+  </div>, portalRoot)}
+  {portalRoot && pickerSide && <ImageComparisonPicker side={pickerSide} container={portalRoot} anchorRef={pickerTriggerRef} candidates={candidates}
+    onSelect={image => choose(pickerSide, image)} onLocal={file => chooseLocal(pickerSide, file)}
+    onClose={() => { clearComparisonFeedback(); cancelRequests(); setPickerSide(null); }} />}
+  </>;
 }

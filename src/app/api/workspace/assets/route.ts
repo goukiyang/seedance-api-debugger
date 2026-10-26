@@ -6,32 +6,87 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import type { Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import {
   attachAssetToSiteReferenceImage,
   ReferenceImportError,
 } from '@/lib/assets/reference-import';
+import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
+import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { assertUploadOwner, uploadDigest, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+
+function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
+  if (type === 'video') return 'reference_video';
+  if (type === 'audio') return 'reference_audio';
+  if (requestedRole === 'first_frame' || requestedRole === 'last_frame' || requestedRole === 'reference_image') {
+    return requestedRole;
+  }
+  return 'reference_image';
+}
+
+async function ensureNonImageAssetReadyForGeneration(assetId: string, type: string | null | undefined) {
+  if (type !== 'video' && type !== 'audio') return;
+  const result = await ensureSiteAssetPublicUrl(assetId);
+  if (!result.isPubliclyReachable) {
+    throw new ReferenceImportError(
+      '参考视频/音频必须是公网可访问 URL，请重新上传素材或配置 R2/TOS 存储。',
+      400,
+      'reference_media_url_not_public',
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
+  let userId: string | null = null;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    userId = user.id;
 
     const body = await request.json();
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
+    assertUploadOwner(body.ownerId, user.id);
+    const requestId = uploadRequestId(body.requestId);
+    const selection: Array<{ assetId?: string; referenceImageId?: string }> | null = body.selection === undefined ? null : body.selection;
+    if (body.selection !== undefined && (!Array.isArray(selection) || selection.length > 80 || selection.some(item => !item ||
+      Boolean(item.assetId) === Boolean(item.referenceImageId) ||
+      typeof (item.assetId || item.referenceImageId) !== 'string' ||
+      !/^[a-zA-Z0-9_-]+$/.test((item.assetId || item.referenceImageId)!)))) {
+      return NextResponse.json({ error: '所选素材编号无效' }, { status: 400 });
+    }
     const { assetId, role } = body;
     const shouldReplace = body.replace === true;
+    const recoveryClear = body.recoveryClear as { workspaceId: string; expectedWorkspaceAssets: Array<{ id: string; assetId: string; role: string; sortOrder: number }> } | undefined;
+    if (body.recoveryClear !== undefined) {
+      const validId = (value: unknown) => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+      if (!recoveryClear || typeof recoveryClear !== 'object' || Array.isArray(recoveryClear)
+        || !requestId || !shouldReplace || !selection || selection.length !== 0
+        || !validId(recoveryClear.workspaceId) || !Array.isArray(recoveryClear.expectedWorkspaceAssets)
+        || recoveryClear.expectedWorkspaceAssets.length > 80
+        || recoveryClear.expectedWorkspaceAssets.some(item => !item || !validId(item.id) || !validId(item.assetId)
+          || typeof item.role !== 'string' || item.role.length > 64 || !Number.isSafeInteger(item.sortOrder))
+        || new Set(recoveryClear.expectedWorkspaceAssets.map(item => item.id)).size !== recoveryClear.expectedWorkspaceAssets.length) {
+        throw new VerifiedUploadError('UPLOAD_RECOVERY_INVALID', '恢复现场无效，当前素材未改变', 400);
+      }
+      if (request.headers.get('x-upload-owner-id') !== user.id || body.ownerId !== user.id) {
+        throw new VerifiedUploadError('SESSION_CHANGED', '当前账号已变化，未恢复素材');
+      }
+    }
     const assetIds = uniquePreserveOrder(
-      Array.isArray(body.assetIds)
+      selection ? selection.flatMap(item => item.assetId ? [item.assetId] : []) : Array.isArray(body.assetIds)
         ? body.assetIds
         : Array.isArray(body.asset_ids)
           ? body.asset_ids
           : (assetId ? [assetId] : []),
     );
     const referenceImageIds = uniquePreserveOrder(
-      Array.isArray(body.referenceImageIds)
+      selection ? selection.flatMap(item => item.referenceImageId ? [item.referenceImageId] : []) : Array.isArray(body.referenceImageIds)
         ? body.referenceImageIds
         : Array.isArray(body.reference_image_ids)
           ? body.reference_image_ids
@@ -40,105 +95,177 @@ export async function POST(request: NextRequest) {
 
     const tabId = request.headers.get('x-tab-id') || 'default';
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+    const receiptKey = requestId ? `upload_association_v1:${uploadDigest(user.id)}:${uploadDigest(JSON.stringify([workspaceId, requestId]))}` : null;
+    if (recoveryClear && recoveryClear.workspaceId !== workspaceId) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '工作区已变化，未恢复素材');
+    const fingerprint = uploadDigest(JSON.stringify([workspaceId, assetIds, referenceImageIds, selection, role || null, shouldReplace, ...(recoveryClear ? [recoveryClear] : [])]));
 
     if (shouldReplace && assetIds.length === 0 && referenceImageIds.length === 0) {
-      await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
-      return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
+      if (requestId && !recoveryClear) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_EMPTY', '上传关联请求缺少素材，未清空工作区', 400);
+      if (!requestId) {
+        await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+        return NextResponse.json({ success: true, workspaceAssetIds: [], workspaceId });
+      }
     }
 
-    if (assetIds.length === 0 && referenceImageIds.length === 0) {
+    if (assetIds.length === 0 && referenceImageIds.length === 0 && !recoveryClear) {
       return NextResponse.json({ error: 'assetId required' }, { status: 400 });
     }
 
-    if (referenceImageIds.length > 0) {
-      if (shouldReplace) {
-        await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+    // Validate the complete selection and prepare external URLs before taking
+    // the write lock. No workspace changes happen until every input is ready.
+    const references: Array<Awaited<ReturnType<typeof assertCanUseReferenceImage>>> = [];
+    for (const referenceImageId of referenceImageIds) {
+      const image = await assertCanUseReferenceImage(user, referenceImageId);
+      if (!image.asset_id || !image.asset || image.asset.status === 'deleted') {
+        throw new ReferenceImportError(`参考素材不可用: ${referenceImageId}`, 400, 'reference_asset_unavailable');
       }
-      const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
-      if (existingCount + referenceImageIds.length > 9) {
-        return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
-      }
-
-      const workspaceAssetIds: string[] = [];
-      for (const referenceImageId of referenceImageIds) {
-        const image = await assertCanUseReferenceImage(user, referenceImageId);
-        if (!image.asset_id) {
-          return NextResponse.json({ error: `参考图缺少资产记录: ${referenceImageId}` }, { status: 400 });
-        }
-        const waId = await addAssetToWorkspace(
-          workspaceId,
-          image.asset_id,
-          role || 'reference_image',
-          user.id,
-          { referenceImageId: image.id, allowSharedAsset: true },
-        );
-        workspaceAssetIds.push(waId);
-      }
-
-      return NextResponse.json({ success: true, workspaceAssetIds, workspaceId });
+      await ensureNonImageAssetReadyForGeneration(image.asset_id, image.asset.type);
+      references.push(image);
     }
-
-    if (shouldReplace) {
-      await prisma.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
-    }
-
-    const existingWorkspaceAssets = await prisma.workspaceAsset.findMany({
-      where: { workspace_id: workspaceId, asset_id: { in: assetIds } },
-      select: { asset_id: true },
-    });
-    const existingAssetIdSet = new Set(existingWorkspaceAssets.map((item) => item.asset_id));
-    const existingCount = await prisma.workspaceAsset.count({ where: { workspace_id: workspaceId } });
-    const newAssetCount = assetIds.filter((id) => !existingAssetIdSet.has(id)).length;
-    if (existingCount + newAssetCount > 9) {
-      return NextResponse.json({ error: '单次生成最多选择 9 张参考图' }, { status: 400 });
-    }
-
-    const workspaceAssetIds: string[] = [];
-    const referenceImageIdsFromAssets: string[] = [];
-
+    const assets: Asset[] = [];
     for (const currentAssetId of assetIds) {
       const asset = await prisma.asset.findFirst({
         where: { id: currentAssetId, status: { not: 'deleted' } },
-        select: { id: true, type: true },
       });
       if (!asset) {
-        return NextResponse.json({ error: 'Asset not found or permission denied' }, { status: 404 });
+        throw new ReferenceImportError('素材不存在或已删除', 404, 'reference_asset_not_found');
       }
-
-      if (asset.type === 'image') {
-        const reference = await attachAssetToSiteReferenceImage(
-          {
-            user,
-            workspaceId,
-            sourceLabel: 'Web UI',
-            role: role || 'reference_image',
-            albumName: '生成工作台参考图',
-            albumDescription: '生成工作台自动归档的参考图',
-            metadataSource: 'workspace_upload',
-          },
-          asset.id,
-        );
-        workspaceAssetIds.push(reference.workspaceAssetId);
-        referenceImageIdsFromAssets.push(reference.referenceImageId);
-      } else {
-        const waId = await addAssetToWorkspace(workspaceId, asset.id, role, user.id);
-        workspaceAssetIds.push(waId);
+      const canUseOwnedAsset = asset.owner_id === user.id || (asset.type === 'image' && user.role === 'admin');
+      if (!canUseOwnedAsset || !await canReadStudioAsset(user, asset)) {
+        throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
       }
+      await ensureNonImageAssetReadyForGeneration(asset.id, asset.type);
+      assets.push(asset);
     }
 
+    const { workspaceAssetIds, referenceImageIdsFromAssets } = await prisma.$transaction(async (tx) => {
+      const currentUser = await tx.user.findUnique({ where: { id: user.id } });
+      const currentWorkspace = await tx.workspace.findUnique({ where: { id: workspaceId } });
+      if (!currentUser || currentUser.status !== 'active' || !currentWorkspace || currentWorkspace.owner_id !== user.id) throw new VerifiedUploadError('SESSION_CHANGED', '当前账号或工作区已变化，未关联素材');
+      for (const expected of assets) {
+        const fresh = await tx.asset.findUnique({ where: { id: expected.id } });
+        if (!fresh || fresh.status === 'deleted' || fresh.original_url !== expected.original_url || fresh.owner_id !== expected.owner_id || !await canReadStudioAsset(currentUser, fresh, tx)) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_UNAVAILABLE', '所选素材已变化，未关联');
+      }
+      if (receiptKey) {
+        const receipt = await tx.platformSetting.findUnique({ where: { key: receiptKey } });
+        if (receipt) {
+          const saved = JSON.parse(receipt.value_json) as { fingerprint: string; workspaceAssetIds: string[]; referenceImageIdsFromAssets: string[] };
+          if (saved.fingerprint !== fingerprint) throw new VerifiedUploadError('UPLOAD_REQUEST_CONFLICT', '关联编号已用于其它操作');
+          const mounted = await tx.workspaceAsset.count({ where: { workspace_id: workspaceId, id: { in: saved.workspaceAssetIds } } });
+          if (mounted !== saved.workspaceAssetIds.length) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '原关联已被修改，未自动恢复');
+          return saved;
+        }
+      }
+      if (recoveryClear) {
+        // First application clears only the exact associations the user saw.
+        // A receipt replay above never clears later additions or edits again.
+        const mounted = await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, select: { id: true, asset_id: true, role: true, sort_order: true } });
+        const expected = new Map(recoveryClear.expectedWorkspaceAssets.map(item => [item.id, item]));
+        if (mounted.length !== expected.size || mounted.some(item => {
+          const seen = expected.get(item.id);
+          return !seen || seen.assetId !== item.asset_id || seen.role !== item.role || seen.sortOrder !== item.sort_order;
+        })) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '素材已在其他操作中变化，当前素材保留，请重新核对');
+      }
+      const saveResult = async (result: { workspaceAssetIds: string[]; referenceImageIdsFromAssets: string[] }) => {
+        if (receiptKey) await tx.platformSetting.create({ data: { key: receiptKey, value_json: JSON.stringify({ fingerprint, ...result }), updated_by: user.id } });
+        return result;
+      };
+      const previous = selection && !shouldReplace ? await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId }, select: { id: true, asset_id: true, sort_order: true } }) : [];
+      const previouslyMounted = new Map(previous.map(item => [item.asset_id, item.id]));
+      if (shouldReplace) await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+      const workspaceAssetIds: string[] = [];
+      const referenceImageIdsFromAssets: string[] = [];
+      const mountedAssetIds = new Set<string>();
+      for (const image of references) {
+        const currentAssetId = image.asset_id!;
+        if (mountedAssetIds.has(currentAssetId)) continue;
+        if (selection && previouslyMounted.has(currentAssetId)) { workspaceAssetIds.push(previouslyMounted.get(currentAssetId)!); mountedAssetIds.add(currentAssetId); continue; }
+        workspaceAssetIds.push(await addAssetToWorkspace(
+          workspaceId, currentAssetId, referenceRoleForAssetType(image.asset?.type, role), user.id,
+          { referenceImageId: image.id, allowSharedAsset: true, db: tx },
+        ));
+        mountedAssetIds.add(currentAssetId);
+      }
+      for (const asset of assets) {
+        if (mountedAssetIds.has(asset.id)) continue;
+        if (selection && previouslyMounted.has(asset.id)) { workspaceAssetIds.push(previouslyMounted.get(asset.id)!); mountedAssetIds.add(asset.id); continue; }
+        if (asset.type === 'image') {
+          const reference = await attachAssetToSiteReferenceImage({
+            user, workspaceId, sourceLabel: 'Web UI',
+            role: referenceRoleForAssetType(asset.type, role),
+            albumName: '生成工作台参考图', albumDescription: '生成工作台自动归档的参考图',
+            metadataSource: 'workspace_upload', db: tx,
+          }, asset.id);
+          workspaceAssetIds.push(reference.workspaceAssetId);
+          referenceImageIdsFromAssets.push(reference.referenceImageId);
+        } else {
+          workspaceAssetIds.push(await addAssetToWorkspace(
+            workspaceId, asset.id, referenceRoleForAssetType(asset.type, role), user.id, { db: tx },
+          ));
+        }
+        mountedAssetIds.add(asset.id);
+      }
+      if (selection) {
+        const beforeIds = new Set(previous.map(item => item.id));
+        const referenceAssets = new Map(references.map(image => [image.id, image.asset_id!]));
+        const attached = await tx.workspaceAsset.findMany({ where: { workspace_id: workspaceId, id: { in: workspaceAssetIds } }, select: { id: true, asset_id: true } });
+        const byAsset = new Map(attached.map(item => [item.asset_id, item.id]));
+        const ordered = uniquePreserveOrder(selection.map(item => byAsset.get(item.referenceImageId ? referenceAssets.get(item.referenceImageId)! : item.assetId!) || ''));
+        let nextOrder = previous.reduce((max, item) => Math.max(max, item.sort_order), 0) + 1;
+        for (const id of ordered) if (!beforeIds.has(id)) await tx.workspaceAsset.update({ where: { id }, data: { sort_order: nextOrder++ } });
+        return saveResult({ workspaceAssetIds: ordered, referenceImageIdsFromAssets });
+      }
+      return saveResult({ workspaceAssetIds, referenceImageIdsFromAssets });
+    });
+
+    await recordAssetUploadLog({
+      operatorId: user.id,
+      stage: 'mount',
+      status: 'succeeded',
+      assetId: assetIds[0] || referenceImageIds[0] || null,
+      durationMs: Date.now() - startedAt,
+      uploadMode: 'single',
+      totalParts: workspaceAssetIds.length,
+    });
     return NextResponse.json({
       success: true,
+      ...(requestId ? { association: { requestId, associated: true, workspaceId } } : {}),
       workspaceAssetId: workspaceAssetIds[0] || null,
       workspaceAssetIds,
       referenceImageId: referenceImageIdsFromAssets[0] || null,
       referenceImageIds: referenceImageIdsFromAssets,
       workspaceId,
+      count: workspaceAssetIds.length,
     });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof ReferenceImportError) {
+      if (userId) {
+        await recordAssetUploadLog({
+          operatorId: userId,
+          stage: 'mount',
+          status: 'failed',
+          durationMs: Date.now() - startedAt,
+          errorCode: error.code,
+          errorMessage: error.message,
+        });
+      }
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
     console.error('[AddAssetToWorkspace] Error:', error);
+    if (userId) {
+      await recordAssetUploadLog({
+        operatorId: userId,
+        stage: 'mount',
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        errorCode: 'workspace_mount_failed',
+        errorMessage: error instanceof Error ? error.message : 'Failed',
+      });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },
       { status: 500 }

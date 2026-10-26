@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace, removeAssetFromWorkspace } from '@/lib/assets/workspace';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import { assertUploadOwner, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 
 export async function DELETE(
   _request: NextRequest,
@@ -39,6 +40,7 @@ export async function PATCH(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
 
     const body = await request.json();
     const { role } = body;
@@ -63,6 +65,7 @@ export async function PATCH(
 
     return NextResponse.json({ success: true, role });
   } catch (error) {
+    if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     console.error('[UpdateWorkspaceAssetRole] Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },

@@ -1,13 +1,16 @@
 'use client';
+import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import CreationAvailability from '@/components/creation/CreationAvailability';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles } from 'lucide-react';
-import { calculateEnhanceVideoEstimatedCostClient } from '@/lib/pricing-client';
+import { Sparkles, RefreshCcw } from 'lucide-react';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 
 type EnhanceVideoActionTask = {
   id: string;
+  project_id?: string | null;
   provider: string;
   generation_mode: string;
   local_status: string;
@@ -63,23 +66,24 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     };
   }, [shouldRender]);
 
-  const estimatedCost = useMemo(() => {
-    if (!task.duration) return null;
-    return calculateEnhanceVideoEstimatedCostClient({
-      duration: task.duration,
-      resolution,
-      toolVersion,
-      fps: fps === 'none' ? null : Number(fps),
-    });
-  }, [fps, resolution, task.duration, toolVersion]);
+  const pricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration: task.duration || 0,
+    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps) }, shouldRender && configured === true);
+  const estimatedCost = pricing.quote?.estimatedCost ?? null;
+  const [destination, setDestination] = useState(task.project_id || '');
+  const [destinationConfirmed, setDestinationConfirmed] = useState(Boolean(task.project_id));
+  const creation = useCreationContext({ ownerId: pricing.actorId, entry: 'enhance', draftId: task.id, projectId: destination, legacyCardId: task.video_card_id, onProjectChange: setDestination, enabled: shouldRender });
+  const [destinations, setDestinations] = useState<Array<{id:string;name:string}>>([]);
+  useEffect(() => { let active = true; if (!shouldRender || task.project_id) return; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setDestinations(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [shouldRender, task.project_id]);
 
   if (!shouldRender) return null;
 
   const disabledReason = (() => {
     if (configured === null) return '正在检查 AI MediaKit 配置';
     if (!configured) return 'AI MediaKit 未启用或缺少 API Key';
-    if (!task.video_card_id) return '当前任务没有视频卡，不能写入成本闭环';
+    if (!creation.context || creation.loading || creation.error) return creation.error || '正在确认保存位置';
+    if (!destinationConfirmed) return '请明确选择本次超分结果保存到的项目';
     if (!task.duration) return '当前任务缺少视频时长，不能估算冻结点数';
+    if (!pricing.quote) return pricing.error || '正在读取报价';
     return '';
   })();
 
@@ -90,30 +94,31 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     setError('');
     try {
       const selectedFps = fps === 'none' ? null : Number(fps);
-      const res = await fetch('/api/tasks/enhance-video/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_task_id: task.id,
-          video_card_id: task.video_card_id,
-          tool_version: toolVersion,
-          scene: toolVersion === 'standard' ? 'aigc' : undefined,
-          resolution,
-          fps: selectedFps || undefined,
-          duration: task.duration,
-          idempotency_key: [
-            'enhance',
-            task.id,
-            toolVersion,
-            resolution,
-            selectedFps || 'source_fps',
-          ].join(':'),
-        }),
-      });
+      const key = ['enhance', task.id, toolVersion, resolution, selectedFps || 'source_fps'].join(':');
+      const pendingKey = `sd2-enhance-acceptance:${pricing.actorId}:${key}`;
+      if (sessionStorage.getItem(pendingKey)) {
+        const response = await fetch(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(key)}`, { cache: 'no-store' });
+        const original = await response.json();
+        if (response.ok && original.task?.id) { sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, `/tasks/${task.id}`)); return; }
+        throw new Error('原超分提交待确认，请查询原任务；不会再次发送');
+      }
+      const body = { provider: 'volcengine_mediakit', model: 'enhance-video', action: 'enhance', entry: 'enhance',
+        ...(pricing.quote?.pricing_revision ? { pricing_revision: pricing.quote.pricing_revision } : {}),
+        source_task_id: task.id, project_id: destination, video_card_id: task.video_card_id, video_branch_id: null,
+        continuation: { mode: 'continue', parent_task_id: task.id }, tool_version: toolVersion,
+        scene: toolVersion === 'standard' ? 'aigc' : undefined, resolution, fps: selectedFps, duration: task.duration,
+        creation_contract_version: 2, idempotency_key: key };
+      const prepared = await creation.prepare(body, key);
+      if (!prepared.availability?.canSubmit) throw new Error('原创作链当前不可继续，请查看下方原因');
+      sessionStorage.setItem(pendingKey, key);
+      const res = await fetch('/api/tasks/enhance-video/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, intent_id: prepared.id, intent_revision: prepared.revision }) });
       const data = await res.json();
       if (!res.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_') || typeof data.error === 'string' && data.error.startsWith('pricing_')) pricing.refresh();
         throw new Error(data.message || data.error || '创建超分任务失败');
       }
+      sessionStorage.removeItem(pendingKey);
       setMessage('已创建超分任务');
       router.push(taskDetailHref(data.id, `/tasks/${task.id}`));
     } catch (err) {
@@ -132,6 +137,8 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
         </span>
         <strong>{estimatedCost !== null ? `预估冻结 ${estimatedCost} 点` : '待估算'}</strong>
       </summary>
+      {!task.project_id && <label>本次保存到<select className="input" value={destinationConfirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setDestinationConfirmed(Boolean(event.target.value)); }}><option value="">选择项目</option>{destinations.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+      <CreationAvailability controller={creation} />
 
       <div className="enhance-video-action-body">
         <label>
@@ -169,6 +176,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       {disabledReason && (
         <div className="enhance-video-action-warning">{disabledReason}</div>
       )}
+      {pricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={pricing.refresh}><RefreshCcw size={16} aria-hidden="true" /></button>}
       {error && <div className="enhance-video-action-error">{error}</div>}
       {message && <div className="enhance-video-action-success">{message}</div>}
 

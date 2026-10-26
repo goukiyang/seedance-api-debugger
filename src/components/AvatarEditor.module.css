@@ -1,0 +1,21 @@
+.dialog { position: fixed; inset: 0; margin: auto; height: fit-content; max-height: calc(100vh - 32px); overflow: auto; width: min(640px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-panel); color: var(--text-primary); }
+.dialog::backdrop { background: oklch(0 0 0 / 0.55); }
+.header, .footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 18px; }
+.header h2 { margin: 0; font-size: 17px; }
+.header button { border: 0; background: transparent; color: inherit; cursor: pointer; }
+.body { display: grid; grid-template-columns: 1fr 180px; gap: 16px; padding: 0 18px; }
+.stage { position: relative; height: 320px; border-radius: 10px; overflow: hidden; background: var(--bg-input); }
+.pick { display: grid; place-items: center; align-content: center; gap: 6px; width: 100%; height: 100%; border: 1px dashed var(--border-color); border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.side { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.previewLabel { color: var(--text-secondary); font-size: 12px; }
+.previews { display: flex; align-items: flex-end; gap: 12px; }
+.previews canvas { border-radius: 50%; background: var(--bg-input); }
+.zoom { display: grid; gap: 4px; }
+.hint { margin: 0; color: var(--text-secondary); font-size: 12px; }
+.restore { display: flex; flex-wrap: wrap; gap: 8px; }
+.side button, .footer button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary, transparent); color: inherit; cursor: pointer; }
+.footer { justify-content: flex-end; }
+.footer .primary { background: var(--primary, #2563eb); border-color: var(--primary, #2563eb); color: #fff; font-weight: 650; }
+.error { margin: 10px 18px 0; color: var(--tone-danger-text, #dc2626); font-size: 13px; }
+.dialog button:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 560px) { .body { grid-template-columns: 1fr; } .stage { height: 260px; } }

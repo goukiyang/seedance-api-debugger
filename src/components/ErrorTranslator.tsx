@@ -9,6 +9,9 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { useProductDialog } from './useProductDialog';
+import { getPageExitRisk, refreshPage } from '@/lib/hooks/page-exit-guard';
+import { isProviderFirstFrameRatioError, providerReferenceNumberFromError } from '@/lib/provider/error-message';
 
 // ---- Types ----
 
@@ -65,20 +68,460 @@ interface TranslatedError {
   code: string;
   title: string;
   reasons: string[];
-  actions: Array<{ label: string; action?: 'retry' | 'copy' | 'debug' }>;
+  actions: Array<{ label: string; action?: 'retry' | 'reload' | 'copy' | 'debug' }>;
   showDiagnostics?: boolean;
   debugInfo?: DebugInfo;
 }
 
-function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
+function hasStatusCodeToken(error: string, code: number) {
+  const pattern = new RegExp(`(^|\\D)${code}(?!\\d)`);
+  return pattern.test(error);
+}
+
+export function translateError(error: string, debugInfo?: DebugInfo): TranslatedError | null {
+  if (isProviderFirstFrameRatioError(error)) {
+    return {
+      code: 'FIRST_FRAME_RATIO_REQUIRED',
+      title: '画面比例需跟随首帧',
+      reasons: ['当前首帧或首尾帧模式不接受固定画面比例。', '请使用“跟随首帧”后重新提交；需要固定比例时，请先调整首帧图片的比例。'],
+      actions: [{ label: '重新提交', action: 'retry' }, { label: '复制错误', action: 'copy' }],
+    };
+  }
   const lower = error.toLowerCase();
   const ctx = debugInfo?.providerContext;
   const diags = debugInfo?.referenceImageDiagnostics;
   const hasLocalUrls = debugInfo?.hasLocalUrls;
   const hasNonPublic = debugInfo?.hasNonPublicUrls;
+  const referenceNumber = providerReferenceNumberFromError(error);
+  const referenceItem = referenceNumber ? `第${referenceNumber}项参考素材` : '参考素材';
+  const referenceImage = referenceNumber ? `第${referenceNumber}张参考图` : '参考图';
+
+  if (
+    lower.includes('reference_media_too_small')
+    || (
+      lower.includes('pixel count')
+      && lower.includes('greater than or equal to')
+      && (lower.includes('409600') || lower.includes('content['))
+    )
+    || lower.includes('参考素材分辨率太低')
+  ) {
+    return {
+      code: 'REFERENCE_MEDIA_TOO_SMALL',
+      title: `${referenceItem}分辨率太低`,
+      reasons: [
+        `这不是系统整体故障，是${referenceItem}分辨率低于生成服务要求`,
+        '请换更清晰的素材，或先放大、重新导出后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_video_duration_unsupported')
+    || (lower.includes('参考视频') && lower.includes('时长'))
+  ) {
+    return {
+      code: 'REFERENCE_VIDEO_DURATION_UNSUPPORTED',
+      title: '参考视频时长不符合要求',
+      reasons: [
+        '这不是 API Key 或点数问题，是当前参考视频时长超过了生成服务允许范围',
+        'Seedance 2.0 参考视频需要 2-15 秒；请把视频裁到 15 秒以内后重新上传',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_audio_duration_unsupported')
+    || (lower.includes('参考音频') && lower.includes('时长'))
+  ) {
+    return {
+      code: 'REFERENCE_AUDIO_DURATION_UNSUPPORTED',
+      title: '参考音频时长不符合要求',
+      reasons: [
+        '这不是 API Key 或点数问题，是当前参考音频时长超过了生成服务允许范围',
+        'Seedance 2.0 参考音频需要 2-15 秒；请裁剪后重新上传',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_video_format_unsupported')
+    || (lower.includes('参考视频') && lower.includes('格式'))
+  ) {
+    return {
+      code: 'REFERENCE_VIDEO_FORMAT_UNSUPPORTED',
+      title: '参考视频格式不符合要求',
+      reasons: [
+        '当前参考视频格式不适合直接用于 Seedance 2.0 生成',
+        '请转成 MP4 或 MOV 后重新上传',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_image_too_large')
+    || lower.includes('参考图尺寸过大')
+    || lower.includes('图片尺寸过大')
+    || lower.includes('maximum allowed total pixels')
+    || lower.includes('image exceeds the maximum allowed')
+  ) {
+    return {
+      code: 'REFERENCE_IMAGE_TOO_LARGE',
+      title: `${referenceItem}尺寸过大`,
+      reasons: [
+        `这不是系统整体故障，是${referenceItem}超过了视频生成服务允许的图片大小`,
+        '系统会优先自动压缩到合规尺寸；如果自动处理仍失败，需要换一张更小的图或先压缩后再提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_image_privacy_sensitive')
+    || lower.includes('inputimagesensitivecontentdetected.privacyinformation')
+    || (lower.includes('input image') && lower.includes('may contain real person'))
+    || lower.includes('参考图可能包含真实人物')
+    || lower.includes('参考图包含真实人物隐私')
+  ) {
+    return {
+      code: 'REFERENCE_IMAGE_PRIVACY_SENSITIVE',
+      title: `${referenceImage}未通过人像检查`,
+      reasons: [
+        `${referenceImage}上传服务方人像库失败，服务方判断它可能包含真实人物或隐私信息`,
+        '这不是网站整体故障；请更换为非真人、已授权或隐私风险更低的参考图',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_resource_unavailable')
+    || lower.includes('resource download failed')
+    || lower.includes('resource not found')
+    || lower.includes('timeout while fetching resource')
+    || lower.includes('素材链接无法读取')
+    || lower.includes('素材链接已失效')
+  ) {
+    return {
+      code: 'REFERENCE_RESOURCE_UNAVAILABLE',
+      title: `${referenceItem}无法读取`,
+      reasons: [
+        `${referenceItem}的链接已失效、无法访问，或视频生成服务读取超时`,
+        '请重新上传这项素材后再提交；这不是提示词或点数问题',
+      ],
+      actions: [
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('reference_total_duration_too_long')
+    || (lower.includes('video total duration') && lower.includes('less than or equal to'))
+    || lower.includes('参考素材总时长超过')
+  ) {
+    return {
+      code: 'REFERENCE_TOTAL_DURATION_TOO_LONG',
+      title: '参考素材总时长超限',
+      reasons: [
+        '参考视频或音频总时长超过视频生成服务允许的上限（15.2 秒）',
+        '请裁短或减少参考素材后重新提交',
+      ],
+      actions: [
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_model_not_open')
+    || lower.includes('modelnotopen')
+    || lower.includes('model not exist')
+    || lower.includes('has not activated the model')
+    || lower.includes('当前账号未开通所选模型')
+  ) {
+    return {
+      code: 'PROVIDER_MODEL_NOT_OPEN',
+      title: '所选视频模型未开通',
+      reasons: [
+        '当前生成服务账号没有开通所选模型，或该模型已不可用',
+        '这不是素材问题；请切换可用模型，或联系管理员开通模型权限',
+      ],
+      actions: [
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_audio_copyright_restricted')
+    || lower.includes('outputaudiosensitivecontentdetected.policyviolation')
+    || (lower.includes('output audio') && lower.includes('copyright restriction'))
+    || lower.includes('输出音频可能涉及版权限制')
+  ) {
+    return {
+      code: 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED',
+      title: '输出音频可能涉及版权限制',
+      reasons: [
+        '这不是网站上传失败，是视频生成服务拒绝了本次要生成的音频内容',
+        '请关闭音频生成，或避开歌曲、歌词、知名旋律、影视配乐、歌手/乐队名称、版权音乐风格等描述',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_transaction_conflict')
+    || lower.includes('transaction api error')
+    || lower.includes('transaction not found')
+    || lower.includes('系统保存任务时发生数据冲突')
+  ) {
+    return {
+      code: 'PROVIDER_TRANSACTION_CONFLICT',
+      title: '任务保存发生短暂冲突',
+      reasons: [
+        '系统保存任务时发生数据冲突，本次请求没有正常完成',
+        '请刷新页面后重试；如果连续出现，请联系管理员按提交时间排查',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('missing_provider_task_id')
+    || lower.includes('missing task id')
+    || lower.includes('no task id in create response')
+    || lower.includes('任务提交后没有拿到外部任务号')
+  ) {
+    return {
+      code: 'MISSING_PROVIDER_TASK_ID',
+      title: '生成服务没有返回任务号',
+      reasons: [
+        '系统无法确认任务是否创建成功，请先刷新任务列表确认',
+        '确认任务列表里没有这条任务后再重新提交，避免重复创建',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_video_copyright_restricted')
+    || lower.includes('outputvideosensitivecontentdetected.policyviolation')
+    || (lower.includes('output video') && lower.includes('copyright restriction'))
+    || lower.includes('输出视频可能涉及版权限制')
+  ) {
+    return {
+      code: 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED',
+      title: '输出视频可能涉及版权限制',
+      reasons: [
+        '这不是网站上传失败，是视频生成服务拒绝了本次要生成的视频画面',
+        '请替换参考素材，或避开影视 IP、知名角色、品牌标识、受版权保护的画面风格等描述',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_audio_sensitive')
+    || lower.includes('outputaudiosensitivecontentdetected')
+    || (lower.includes('output audio') && lower.includes('sensitive information'))
+    || lower.includes('输出音频可能包含敏感内容')
+  ) {
+    return {
+      code: 'OUTPUT_AUDIO_SENSITIVE',
+      title: '输出音频可能包含敏感内容',
+      reasons: [
+        '视频生成服务认为本次要生成的音频存在敏感风险',
+        '请调整音频相关提示词，避开危险、违规、隐私或不适合公开生成的声音内容',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('output_video_sensitive')
+    || lower.includes('outputvideosensitivecontentdetected')
+    || (lower.includes('output video') && lower.includes('sensitive information'))
+    || lower.includes('输出视频可能包含敏感内容')
+  ) {
+    return {
+      code: 'OUTPUT_VIDEO_SENSITIVE',
+      title: '输出视频可能包含敏感内容',
+      reasons: [
+        '视频生成服务认为本次要生成的画面存在敏感风险',
+        '请调整提示词或参考素材，避开违规、敏感、隐私或不适合公开生成的画面内容',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_content_policy_violation')
+    || lower.includes('policyviolation')
+    || lower.includes('sensitivecontentdetected')
+    || lower.includes('content safety')
+    || lower.includes('copyright restriction')
+  ) {
+    return {
+      code: 'PROVIDER_CONTENT_POLICY_VIOLATION',
+      title: '内容安全或版权审核未通过',
+      reasons: [
+        '视频生成服务认为本次提示词、参考素材或输出内容存在合规风险',
+        '请调整提示词、参考素材和授权信息后重新提交',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('h3_gpu_out_of_memory')
+    || lower.includes('gpu out of memory')
+    || lower.includes('显存不足')
+    || lower.includes('显存风险高')
+  ) {
+    return {
+      code: 'H3_GPU_OUT_OF_MEMORY',
+      title: 'H3 机器显存不足',
+      reasons: [
+        '本次视频参数对当前 H3 机器来说太重，没有生成成功',
+        '请降低分辨率、缩短时长、换低显存预设，或稍后再试',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('provider_html_response')
+    || lower.includes('服务临时返回了异常页面')
+    || lower.includes('生成服务临时返回了异常页面')
+    || lower.includes('<!doctype')
+    || lower.includes('<html')
+    || lower.includes('<!--[if ')
+  ) {
+    return {
+      code: 'PROVIDER_HTML_RESPONSE',
+      title: '生成服务临时异常',
+      reasons: [
+        '生成服务或中间网关返回了异常页面，系统没有拿到有效创建结果',
+        '这类问题通常需要稍后重试；如果连续出现，需要管理员查看生成服务状态',
+      ],
+      actions: [
+        { label: '重新提交', action: 'retry' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
+
+  if (
+    lower.includes('page_version_mismatch')
+    || lower.includes('failed to find server action')
+    || lower.includes('request might be from an older or newer deployment')
+    || lower.includes('页面版本已更新')
+    || lower.includes('页面版本和服务器版本不一致')
+  ) {
+    return {
+      code: 'PAGE_VERSION_MISMATCH',
+      title: '页面版本已更新',
+      reasons: [
+        '这不是素材或点数问题，是当前浏览器页面还停留在旧版本，和服务器新版本对不上',
+        '请刷新页面后重新提交；刷新前不要重复点击提交，避免产生重复请求',
+      ],
+      actions: [
+        { label: '刷新页面', action: 'reload' },
+        { label: '复制错误', action: 'copy' },
+      ],
+      showDiagnostics: !!debugInfo,
+      debugInfo,
+    };
+  }
 
   // 524 超时 — 重点处理
-  if (error.includes('524') || lower.includes('524') || ctx?.httpStatus === 524) {
+  if (
+    lower.includes('provider_gateway_timeout')
+    || hasStatusCodeToken(error, 524)
+    || ctx?.httpStatus === 524
+  ) {
     const reasons: string[] = [];
     if (hasLocalUrls) {
       reasons.push('参考图中包含本地图片（需转 base64），大图导致 JSON payload 过大 → 网关超时');
@@ -98,10 +541,10 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
 
     return {
       code: '524',
-      title: '创建失败：Seedance 服务响应超时',
+      title: '视频生成服务响应超时',
       reasons,
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
         { label: '查看诊断', action: 'debug' },
       ],
@@ -111,17 +554,21 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 554 错误
-  if (error.includes('554') || lower.includes('554')) {
+  if (
+    lower.includes('provider_gateway_error')
+    || hasStatusCodeToken(error, 554)
+    || ctx?.httpStatus === 554
+  ) {
     return {
       code: '554',
-      title: '服务返回错误 (554)',
+      title: '视频生成服务网关异常',
       reasons: [
         '当前参数组合不被服务支持',
         'API 限流、额度不足或服务异常',
         '服务端处理超时或内部错误',
       ],
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
         { label: '查看调试信息', action: 'debug' },
       ],
@@ -131,7 +578,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 401 未授权
-  if (error.includes('401') || lower.includes('unauthorized') || lower.includes('未授权')) {
+  if (hasStatusCodeToken(error, 401) || ctx?.httpStatus === 401 || lower.includes('unauthorized') || lower.includes('未授权')) {
     return {
       code: '401',
       title: 'API 认证失败',
@@ -146,7 +593,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 403 禁止
-  if (error.includes('403') || lower.includes('forbidden') || lower.includes('禁止')) {
+  if (hasStatusCodeToken(error, 403) || ctx?.httpStatus === 403 || lower.includes('forbidden') || lower.includes('禁止')) {
     return {
       code: '403',
       title: 'API 访问被拒绝',
@@ -161,7 +608,7 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // 429 限流
-  if (error.includes('429') || lower.includes('rate limit') || lower.includes('限流')) {
+  if (hasStatusCodeToken(error, 429) || ctx?.httpStatus === 429 || lower.includes('rate limit') || lower.includes('限流')) {
     return {
       code: '429',
       title: '请求过于频繁',
@@ -193,23 +640,40 @@ function translateError(error: string, debugInfo?: DebugInfo): TranslatedError |
   }
 
   // JSON 解析错误
-  if (lower.includes('json') || lower.includes('unexpected end')) {
+  if (
+    lower.includes('provider_response_format_error')
+    || lower.includes('json')
+    || lower.includes('unexpected end')
+  ) {
     return {
       code: 'JSON',
       title: '服务响应格式错误',
       reasons: [
-        'API 服务返回了非 JSON 格式的响应',
-        '服务临时异常',
+        '服务返回的数据格式不符合系统预期',
+        '请刷新后重试；如果连续出现，需要管理员查看接口日志',
       ],
       actions: [
-        { label: '重新提交', action: 'retry' },
+        { label: '刷新页面', action: 'reload' },
         { label: '复制错误', action: 'copy' },
       ],
     };
   }
 
   // 默认未知错误
-  return null;
+  return {
+    code: 'UNCLASSIFIED_ERROR',
+    title: '本次提交没有正常完成',
+    reasons: [
+      '系统收到了尚未归类的原始错误，目前不能准确判断是素材、服务还是网络问题',
+      '请先刷新页面，再复制错误交给管理员；不要仅凭这条提示反复换素材或连续提交',
+    ],
+    actions: [
+      { label: '刷新页面', action: 'reload' },
+      { label: '复制错误', action: 'copy' },
+    ],
+    showDiagnostics: !!debugInfo,
+    debugInfo,
+  };
 }
 
 // ---- Diagnostics Panel ----
@@ -239,19 +703,19 @@ function DiagnosticsPanel({ debugInfo }: { debugInfo: DebugInfo }) {
                 <span className="ml-2">· base64 估算 ~{debugInfo.base64EstimateKb} KB</span>
               )}
               {debugInfo.hasLocalUrls && <span className="ml-2 text-yellow-500">⚠ 含本地图片</span>}
-              {debugInfo.hasNonPublicUrls && <span className="ml-2 text-red-400">⚠ 含不可公网访问的 URL</span>}
+              {debugInfo.hasNonPublicUrls && <span className="ml-2 text-gray">⚠ 含不可公网访问的 URL</span>}
             </div>
           )}
 
           {diags?.map((d) => (
-            <div key={d.index} className={`text-xs p-1.5 rounded ${d.status === 'ok' ? 'bg-gray-800' : d.status === 'warning' ? 'bg-yellow-900/30 border border-yellow-700' : 'bg-red-900/30 border border-red-700'}`}>
+            <div key={d.index} className={`text-xs p-1.5 rounded ${d.status === 'ok' ? 'bg-gray-800' : d.status === 'warning' ? 'bg-yellow-900/30 border border-yellow-700' : 'bg-gray-800 border border-gray-600'}`}>
               <div className="flex items-center gap-2">
                 <span className="font-medium text-gray-300">[{d.index}] {d.label}</span>
                 <span className="text-gray-500">{d.urlType}</span>
                 <span className="text-gray-400">{d.urlHost}</span>
                 <span className="text-gray-500">{d.mimeType}</span>
                 {d.fileSizeBytes > 0 && <span className="text-gray-500">{formatBytes(d.fileSizeBytes)}</span>}
-                <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${d.status === 'ok' ? 'bg-green-900 text-green-400' : d.status === 'warning' ? 'bg-yellow-900 text-yellow-400' : 'bg-red-900 text-red-400'}`}>
+                <span className={`ml-auto text-xs px-1.5 py-0.5 rounded ${d.status === 'ok' ? 'bg-green-900 text-green-400' : d.status === 'warning' ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray'}`}>
                   {d.status}
                 </span>
               </div>
@@ -269,6 +733,17 @@ function DiagnosticsPanel({ debugInfo }: { debugInfo: DebugInfo }) {
 // ---- Main Component ----
 
 export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }: Props) {
+  const { confirm, productDialog } = useProductDialog();
+  const [refreshError, setRefreshError] = useState('');
+  const reload = async () => {
+    const risk = getPageExitRisk();
+    if (risk.busy.length) {
+      setRefreshError(`${risk.busy.join('、')}，请完成后再刷新。`);
+      return;
+    }
+    if (risk.unsaved.length && !await confirm(`${risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。`, { title: '未保存内容', confirmLabel: '放弃修改并刷新', danger: true })) return;
+    if (!refreshPage(risk.signature)) setRefreshError('内容状态已变化，请重新确认后刷新。');
+  };
   const translated = translateError(error, debugInfo);
   const [showAllDebug, setShowAllDebug] = useState(false);
 
@@ -285,7 +760,7 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
         <div className="text-xs">{error}</div>
         <div className="mt-2 flex gap-2">
           {onRetry && (
-            <button className="btn btn-sm btn-danger" onClick={onRetry}>重新提交</button>
+            <button className="btn btn-sm btn-primary" onClick={onRetry}>重新提交</button>
           )}
           <button className="btn btn-sm btn-secondary" onClick={handleCopy}>复制错误</button>
         </div>
@@ -303,6 +778,8 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
 
   return (
     <div className="error-translate">
+      {productDialog}
+      {refreshError && <p role="alert">{refreshError}</p>}
       <div className="error-translate-title">{translated.title}</div>
       <div className="error-translate-reasons">
         <div>可能原因：</div>
@@ -315,8 +792,16 @@ export function ErrorTranslator({ error, rawError, debugInfo, onRetry, onCopy }:
       <div className="error-translate-actions">
         {translated.actions.map((action, i) => {
           if (action.action === 'retry') {
+            if (!onRetry) return null;
             return (
               <button key={i} className="btn btn-sm btn-primary" onClick={() => { onRetry?.(); }}>
+                {action.label}
+              </button>
+            );
+          }
+          if (action.action === 'reload') {
+            return (
+              <button key={i} className="btn btn-sm btn-primary" onClick={() => { void reload(); }}>
                 {action.label}
               </button>
             );

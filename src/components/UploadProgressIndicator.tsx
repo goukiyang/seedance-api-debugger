@@ -1,0 +1,61 @@
+'use client';
+
+type UploadProgressIndicatorProps = {
+  label: string;
+  detail?: string;
+  percent?: number;
+  variant?: 'dark' | 'light';
+  className?: string;
+  busy?: boolean;
+};
+
+function formatPercent(percent: number | undefined) {
+  if (percent == null || !Number.isFinite(percent)) return null;
+  return `${Math.max(0, Math.min(100, Math.round(percent)))}%`;
+}
+
+export function UploadProgressIndicator({
+  label,
+  detail,
+  percent,
+  variant = 'dark',
+  className = '',
+  busy = false,
+}: UploadProgressIndicatorProps) {
+  const percentText = formatPercent(percent);
+  const percentValue = percentText ? Math.max(0, Math.min(100, Math.round(percent || 0))) : undefined;
+  const classNames = ['upload-progress-indicator', `upload-progress-indicator-${variant}`, busy ? 'sd2-loading-surface' : '', className]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div
+      className={classNames}
+      data-busy={busy}
+      role={percentText ? 'progressbar' : 'status'}
+      aria-live="polite"
+      {...(percentText
+        ? {
+          'aria-valuemin': 0,
+          'aria-valuemax': 100,
+          'aria-valuenow': percentValue,
+        }
+        : {})}
+    >
+      <div className="upload-progress-indicator-head">
+        <span>{label}</span>
+        {percentText ? <strong>{percentText}</strong> : <em>处理中</em>}
+      </div>
+      {percentText ? (
+        <div className="upload-progress-indicator-track">
+          <span style={{ transform: `scaleX(${(percentValue ?? 0) / 100})` }} />
+        </div>
+      ) : (
+        <div className="upload-progress-indicator-stage">
+          <span className="loading" />
+        </div>
+      )}
+      {detail && <p>{detail}</p>}
+    </div>
+  );
+}

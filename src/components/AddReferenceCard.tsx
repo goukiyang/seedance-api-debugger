@@ -12,7 +12,7 @@ export function AddReferenceCard({ onClick, disabled = false }: Props) {
       className="ref-add-card"
       onClick={onClick}
       disabled={disabled}
-      title="添加参考图"
+      title="添加参考素材"
     >
       <span className="ref-add-icon">+</span>
       <span className="ref-add-label">参考</span>

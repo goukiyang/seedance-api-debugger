@@ -1,16 +1,30 @@
 /**
- * Seedance 2.0 Video Generation API Provider
+ * Seedance Video Generation API Provider
  * 
  * 按官方 Step1/Step2 结构设计：
  * - Step1: create task → 只返回 id
  * - Step2: query status → 返回完整结果含 video_url
  * 
- * Model: dreamina-seedance-2-0-260128
+ * Default model: dreamina-seedance-2-0-260128
  * Docs: https://docs.byteplus.com/en/docs/ModelArk/1520757
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
-import { normalizeProviderErrorMessage } from './error-message';
+import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
+import {
+  DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+  SEEDANCE_VIDEO_MODEL_OPTIONS,
+  resolveSeedanceVideoModel,
+  seedanceRatioFollowsFirstFrame,
+  seedanceVideoDurationOptions,
+  isSeedanceVideoDuration,
+  seedanceVideoDurationError,
+  type SeedanceVideoModelOption,
+} from './seedance-models';
+import { buildSeedanceDraftContent } from './seedance-draft';
+import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
+import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
+import { privateMultiviewFailure } from '../video/multiview-task-privacy';
 
 // ============================================================================
 // Environment Configuration
@@ -23,9 +37,8 @@ const SEEDANCE_BASE_URL = process.env.SEEDANCE_BASE_URL || 'https://etc.seedance
 // Utilities
 // ============================================================================
 
-function maskKey(key: string): string {
-  if (!key || key.length < 12) return '***';
-  return `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+function maskKey(_key: string): string {
+  return '***';
 }
 
 function pickString(record: Record<string, unknown>, keys: string[]): string | undefined {
@@ -49,6 +62,58 @@ function pickNumber(record: Record<string, unknown>, keys: string[]): number | u
   }
 
   return undefined;
+}
+
+const sensitiveProviderStatuses = new Set([
+  'created', 'init', 'submitted', 'pending', 'queued', 'waiting', 'running', 'processing',
+  'generating', 'in_progress', 'progress', 'succeeded', 'success', 'completed', 'done', 'finished',
+  'ready', 'failed', 'error', 'failure', 'cancelled', 'canceled', 'aborted', 'rejected', 'expired',
+  'timeout', 'unknown',
+]);
+
+function sensitiveProviderStatus(data: Record<string, unknown>): string {
+  const status = pickString(data, ['status', 'state'])?.trim().toLowerCase();
+  return status && sensitiveProviderStatuses.has(status) ? status : 'unknown';
+}
+
+function sensitiveCreateFailureState(diagnostic: ProviderCreateDiagnostic): 'failed' | 'unknown' {
+  return diagnostic.phase === 'response_validation'
+    && diagnostic.http_status !== null
+    && (diagnostic.http_status < 200 || diagnostic.http_status >= 300)
+    ? 'failed'
+    : 'unknown';
+}
+
+type SeedanceStatusConsole = Pick<Console, 'log' | 'warn' | 'error'>;
+export type SeedanceStatusQueryOptions = {
+  sensitiveRecipe?: boolean;
+  fetch?: typeof fetch;
+  console?: SeedanceStatusConsole;
+};
+
+function sensitiveStatusSummary(httpStatus: number, data: Record<string, unknown>) {
+  const content = data.content && typeof data.content === 'object' && !Array.isArray(data.content)
+    ? data.content as Record<string, unknown>
+    : null;
+  const billingFields = ['actual_cost', 'actualCost', 'currency_or_credit_type', 'currencyOrCreditType',
+    'currency', 'billing_status', 'billingStatus', 'billing_time', 'billingTime'];
+  return {
+    http_status: httpStatus,
+    provider_status: sensitiveProviderStatus(data),
+    response_field_count: Object.keys(data).length,
+    content_field_count: content ? Object.keys(content).length : 0,
+    billing_field_count: billingFields.filter((key) => Object.prototype.hasOwnProperty.call(data, key)).length,
+  };
+}
+
+function sensitiveStatusQueryError(error: unknown) {
+  const failure = privateMultiviewFailure(
+    error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
+    'unknown',
+  ) || privateMultiviewFailure('unknown', 'unknown')!;
+  const safe = new Error(failure.message) as Error & { code?: string };
+  safe.code = failure.code;
+  return safe;
 }
 
 function redactProviderResponseForLog(value: unknown): unknown {
@@ -77,6 +142,52 @@ function redactProviderResponseForLog(value: unknown): unknown {
   }, {});
 }
 
+function createNonJsonProviderError(response: Response, responseText: string) {
+  const contentType = response.headers.get('content-type') || 'unknown content-type';
+  const compactBody = responseText.replace(/\s+/g, ' ').trim().slice(0, 160);
+  const lowerBody = compactBody.toLowerCase();
+  const looksHtml = contentType.toLowerCase().includes('text/html')
+    || lowerBody.startsWith('<!doctype')
+    || lowerBody.startsWith('<html')
+    || lowerBody.includes('<html')
+    || lowerBody.includes('<!--[if ');
+
+  if (looksHtml) {
+    return new Error(`Seedance 创建任务返回异常页面（HTTP ${response.status}，${contentType}）`);
+  }
+
+  return new Error(`Seedance 创建任务返回非 JSON 响应（HTTP ${response.status}，${contentType}）：${compactBody}`);
+}
+
+export function buildProviderHttpErrorStatus(
+  providerTaskId: string,
+  httpStatus: number,
+  data: Record<string, unknown>,
+): ProviderStatusResponse | null {
+  const isTransientProviderError = httpStatus === 401
+    || httpStatus === 403
+    || httpStatus === 408
+    || httpStatus === 409
+    || httpStatus === 425
+    || httpStatus === 429
+    || httpStatus >= 500;
+  if (isTransientProviderError) return null;
+
+  const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+  if (!errorMessage) return null;
+  const userFacingError = providerFailureUserMessage(errorMessage, {
+    fallbackCode: 'PROVIDER_TASK_FAILED',
+  });
+
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: 'failed',
+    local_status: 'failed',
+    error_message: userFacingError.message,
+    raw: data,
+  };
+}
+
 // ============================================================================
 // Provider Config
 // ============================================================================
@@ -84,13 +195,15 @@ function redactProviderResponseForLog(value: unknown): unknown {
 export interface SeedanceConfig {
   baseUrl: string;
   model: string;
+  model_options: SeedanceVideoModelOption[];
   apiKeyMasked: string;
 }
 
 export function getProviderConfig(): SeedanceConfig {
   return {
     baseUrl: SEEDANCE_BASE_URL,
-    model: 'dreamina-seedance-2-0-260128',
+    model: DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+    model_options: SEEDANCE_VIDEO_MODEL_OPTIONS.map(option => ({ ...option, durations: seedanceVideoDurationOptions(option.id) })),
     apiKeyMasked: maskKey(SEEDANCE_API_KEY),
   };
 }
@@ -107,7 +220,10 @@ export function isApiKeyConfigured(): boolean {
  * 将官方 status 映射为本地 local_status
  * 注意：未知状态按 running 处理，不要直接判 failed
  */
-export function mapProviderStatus(status?: string): LocalStatus {
+export function mapProviderStatus(
+  status?: string,
+  options: { sensitiveRecipe?: boolean; console?: Pick<Console, 'warn'> } = {},
+): LocalStatus {
   switch (status) {
     case 'succeeded':
       return 'succeeded';
@@ -126,7 +242,9 @@ export function mapProviderStatus(status?: string): LocalStatus {
       return 'submitted';
     default:
       // 未知状态按 running 处理，保留 raw_status_response 用于调试
-      console.warn(`[mapProviderStatus] Unknown status: ${status}, treating as 'running'`);
+      (options.console || console).warn(options.sensitiveRecipe
+        ? "[mapProviderStatus] Protected task has an unknown provider status; treating as 'running'"
+        : `[mapProviderStatus] Unknown status: ${status}, treating as 'running'`);
       return 'running';
   }
 }
@@ -259,15 +377,11 @@ export function buildContentArray(input: CreateVideoInput & { generation_mode: G
 // Step1: Create Video Task (只返回 id)
 // ============================================================================
 
-export async function createVideoTask(
-  input: CreateVideoInput & { generation_mode: GenerationMode }
-): Promise<ProviderCreateResponse> {
-  if (!isApiKeyConfigured()) {
-    throw new Error('API key not configured');
+export function buildSeedanceVideoPayload(input: SeedanceProviderInput & { generation_mode: GenerationMode }): Record<string, unknown> {
+  const model = resolveSeedanceVideoModel(input.model);
+  if (input.duration !== undefined && !isSeedanceVideoDuration(input.duration, model)) {
+    throw new Error(seedanceVideoDurationError(model));
   }
-
-  const endpoint = `${SEEDANCE_BASE_URL}/call`;
-  const model = 'dreamina-seedance-2-0-260128';
 
   // 构建 content 数组
   const content = buildContentArray(input);
@@ -287,12 +401,15 @@ export async function createVideoTask(
   if (input.duration) {
     payload.duration = input.duration;
   }
-  if (input.ratio) {
+  if (seedanceRatioFollowsFirstFrame(model, input.generation_mode)) {
+    payload.ratio = 'adaptive';
+  } else if (input.ratio) {
     payload.ratio = input.ratio;
   }
   if (input.resolution) {
     payload.resolution = input.resolution;
   }
+  Object.assign(payload, seedanceVideoEditParameters(input));
   if (input.seed !== undefined) {
     payload.seed = input.seed;
   }
@@ -305,20 +422,54 @@ export async function createVideoTask(
   if (input.watermark !== undefined) {
     payload.watermark = input.watermark;
   }
+  if (input.draft === true) {
+    payload.draft = true;
+  }
   if (input.callback_url) {
     payload.callback_url = input.callback_url;
   }
   if (input.execution_expires_after) {
     payload.execution_expires_after = input.execution_expires_after;
   }
+  return payload;
+}
+
+export const SEEDANCE_INLINE_REQUEST_MAX_BYTES = 64_000_000;
+
+export function redactInlineImageTransport(value: unknown): unknown {
+  if (typeof value === 'string') return value.replace(/data:[^,\s"'<>]*;base64,[A-Za-z0-9+/=\r\n]+/gi, '[inline image omitted]');
+  if (Array.isArray(value)) return value.map(redactInlineImageTransport);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+    key.toLowerCase().includes('base64') ? '[inline image omitted]' : redactInlineImageTransport(item)]));
+}
+
+export async function createVideoTask(
+  input: SeedanceProviderInput & { generation_mode: GenerationMode },
+  onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void,
+  options: { sensitiveRecipe?: boolean } = {},
+): Promise<ProviderCreateResponse> {
+  if (!isApiKeyConfigured()) throw new Error('API key not configured');
+  const endpoint = `${SEEDANCE_BASE_URL}/call`;
+  const payload = buildSeedanceVideoPayload(input);
+  const model = payload.model;
+  const content = payload.content as ContentItem[];
+  const clientRequestId = input.clientRequestId || input.client_request_id;
+  const requestBody = JSON.stringify(payload);
+  const encodedJsonBytes = Buffer.byteLength(requestBody);
+  const hasInlineImages = content.some(item => item.image_url?.url.startsWith('data:'));
+  if (hasInlineImages
+    && encodedJsonBytes > SEEDANCE_INLINE_REQUEST_MAX_BYTES) {
+    throw new Error('原图编码后的请求超过64MB，未发送给视频服务');
+  }
 
   console.log('\n========== Step1: Create Video Task ==========');
   console.log(`Endpoint:  ${endpoint}`);
   console.log(`Model:     ${model}`);
   console.log(`Mode:      ${input.generation_mode}`);
-  console.log(`Prompt:    ${input.prompt?.slice(0, 100)}...`);
+  console.log(`Prompt:    ${options.sensitiveRecipe ? '[protected multiview recipe]' : `${input.prompt?.slice(0, 100)}...`}`);
   console.log(`Duration:  ${input.duration || 'default'}s`);
-  console.log(`Ratio:     ${input.ratio || 'default'}`);
+  console.log(`Ratio:     ${payload.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
   console.log(`Seed:      ${input.seed ?? 'random'}`);
   console.log(`ClientReq: ${clientRequestId || '(none)'}`);
@@ -326,50 +477,140 @@ export async function createVideoTask(
   console.log(`API Key:   ${maskKey(SEEDANCE_API_KEY)}`);
   console.log('================================================\n');
 
+  const startedAt = Date.now();
+  let phase: ProviderCreatePhase = 'fetch';
+  let httpStatus: number | null = null;
+  const capture = (error?: unknown) => {
+    const diagnostic = providerCreateDiagnostic({ phase, startedAt, encodedJsonBytes, httpStatus, error });
+    try { onDiagnostic?.(diagnostic); } catch { /* Capture must not change task or refund handling. */ }
+    return diagnostic;
+  };
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: requestBody,
     });
 
+    httpStatus = response.status;
+    phase = 'response_body';
     const responseText = await response.text();
     
     // 处理空响应或非 JSON 响应
     let data: Record<string, unknown> = {};
+    phase = 'response_parse';
     if (responseText.trim()) {
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error(`Invalid JSON response: ${responseText.slice(0, 200)}`);
+        throw createNonJsonProviderError(response, hasInlineImages ? String(redactInlineImageTransport(responseText)) : responseText);
       }
     }
+    if (hasInlineImages) data = redactInlineImageTransport(data) as Record<string, unknown>;
 
     console.log(`[Create] HTTP Status: ${response.status}`);
-    console.log(`[Create] Response:`, JSON.stringify(data, null, 2));
+    console.log(`[Create] Response:`, JSON.stringify(options.sensitiveRecipe
+      ? { http_status: response.status, accepted: Boolean(response.ok && data.id),
+          provider_status: sensitiveProviderStatus(data), response_key_count: Object.keys(data).length }
+      : data, null, 2));
 
+    phase = 'response_validation';
     if (!response.ok) {
-      throw new Error(`Create video task failed: ${response.status} ${JSON.stringify(data)}`);
+      const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+      throw new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`);
     }
 
     // 关键：只解析 id
     const providerTaskId = data.id as string;
     if (!providerTaskId) {
-      throw new Error(`Create video task missing id: ${JSON.stringify(data)}`);
+      const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+      throw new Error(providerErrorMessage || 'Seedance 创建任务响应缺少任务 ID');
     }
 
-    console.log(`\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
+    console.log(options.sensitiveRecipe
+      ? '\n✅ Step1 Complete: protected provider task accepted\n'
+      : `\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
 
+    phase = 'complete';
+    capture();
     return {
       provider_task_id: providerTaskId,
-      raw: data,
+      raw: options.sensitiveRecipe
+        ? { id: providerTaskId, status: sensitiveProviderStatus(data) }
+        : data,
     };
   } catch (error) {
-    console.error('\n❌ Step1 Create failed:', error);
-    throw error;
+    const diagnostic = capture(error);
+    const safeError = options.sensitiveRecipe ? (() => {
+      const failure = privateMultiviewFailure(
+        error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
+        sensitiveCreateFailureState(diagnostic),
+      ) || privateMultiviewFailure('unknown', 'unknown')!;
+      const sanitized = new Error(failure.message) as Error & { code?: string };
+      sanitized.code = failure.code;
+      return sanitized;
+    })() : hasInlineImages
+      ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败')))
+      : error;
+    console.error('\n❌ Step1 Create failed:', safeError instanceof Error ? safeError.message : 'Seedance 创建任务失败', diagnostic);
+    throw safeError;
   }
+}
+
+export async function createSeedanceDraftUpgradeTask(input: {
+  model: string;
+  providerDraftTaskId: string;
+  clientRequestId: string;
+}): Promise<ProviderCreateResponse> {
+  if (!isApiKeyConfigured()) {
+    throw new Error('API key not configured');
+  }
+
+  const endpoint = `${SEEDANCE_BASE_URL}/call`;
+  const payload = {
+    apiKey: SEEDANCE_API_KEY,
+    model: input.model,
+    content: buildSeedanceDraftContent(input.providerDraftTaskId),
+    resolution: '1080p',
+    clientRequestId: input.clientRequestId,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('Seedance Draft 升级请求超时');
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+  const responseText = await response.text();
+  let data: Record<string, unknown> = {};
+  if (responseText.trim()) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw createNonJsonProviderError(response, responseText);
+    }
+  }
+  if (!response.ok) {
+    const message = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+    throw new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`);
+  }
+  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
+  if (!providerTaskId) {
+    throw new Error('Seedance Draft 升级响应缺少任务 ID');
+  }
+  return { provider_task_id: providerTaskId, raw: data };
 }
 
 // ============================================================================
@@ -377,22 +618,31 @@ export async function createVideoTask(
 // ============================================================================
 
 export async function getVideoTaskStatus(
-  providerTaskId: string
+  providerTaskId: string,
+  options: SeedanceStatusQueryOptions = {},
 ): Promise<ProviderStatusResponse> {
   const endpoint = `${SEEDANCE_BASE_URL}/getResult`;
+  const output = options.console || console;
+  const request = options.fetch || fetch;
 
   const payload = {
     id: providerTaskId,
   };
 
-  console.log('\n---------- Step2: Query Task Status ----------');
-  console.log(`Endpoint:    ${endpoint}`);
-  console.log(`Task ID:     ${providerTaskId}`);
-  console.log(`API Key:     ${maskKey(SEEDANCE_API_KEY)}`);
-  console.log('-------------------------------------------\n');
+  if (options.sensitiveRecipe) {
+    output.log('\n---------- Step2: Query Protected Task Status ----------');
+    output.log('Protected query context: active');
+    output.log('------------------------------------------------------\n');
+  } else {
+    output.log('\n---------- Step2: Query Task Status ----------');
+    output.log(`Endpoint:    ${endpoint}`);
+    output.log(`Task ID:     ${providerTaskId}`);
+    output.log(`API Key:     ${maskKey(SEEDANCE_API_KEY)}`);
+    output.log('-------------------------------------------\n');
+  }
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await request(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -408,20 +658,32 @@ export async function getVideoTaskStatus(
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error(`Invalid JSON response: ${responseText.slice(0, 200)}`);
+        throw new Error(`Invalid JSON response: ${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
       }
     }
+    data = redactInlineImageTransport(data) as Record<string, unknown>;
 
-    console.log(`[Status] HTTP Status: ${response.status}`);
-    console.log(`[Status] Response:`, JSON.stringify(redactProviderResponseForLog(data), null, 2));
+    output.log(`[Status] HTTP Status: ${response.status}`);
+    output.log(`[Status] Response:`, JSON.stringify(options.sensitiveRecipe
+      ? sensitiveStatusSummary(response.status, data)
+      : redactProviderResponseForLog(data), null, 2));
 
     if (!response.ok) {
+      const failedStatus = buildProviderHttpErrorStatus(providerTaskId, response.status, data);
+      if (failedStatus) {
+        output.log(`\n❌ Step2 Complete: status = failed`);
+        if (!options.sensitiveRecipe) output.log(`   Error: ${failedStatus.error_message || 'Unknown error'}\n`);
+        return failedStatus;
+      }
       throw new Error(`Get video task failed: ${response.status} ${JSON.stringify(data)}`);
     }
 
     // 解析官方返回结构
     const officialStatus = data.status as string | undefined;
-    const localStatus = mapProviderStatus(officialStatus);
+    const localStatus = mapProviderStatus(officialStatus, {
+      sensitiveRecipe: options.sensitiveRecipe,
+      console: output,
+    });
     const content = data.content as Record<string, unknown> | undefined;
 
     // 提取视频地址
@@ -432,6 +694,9 @@ export async function getVideoTaskStatus(
 
     // 提取错误信息
     const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message);
+    const userFacingErrorMessage = errorMessage
+      ? providerFailureUserMessage(errorMessage, { fallbackCode: 'PROVIDER_TASK_FAILED' }).message
+      : undefined;
 
     // 提取扩展字段
     const providerModel = data.model as string | undefined;
@@ -451,21 +716,23 @@ export async function getVideoTaskStatus(
     const providerTaskIdFromRaw = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']) || providerTaskId;
 
     // 状态日志
-    if (localStatus === 'succeeded') {
-      console.log(`\n✅ Step2 Complete: status = succeeded`);
-      console.log(`   Video URL: ${resultVideoUrl ? maskVideoUrl(resultVideoUrl) : '(none)'}`);
-      console.log(`   Model:     ${providerModel || '(none)'}`);
-      console.log(`   Seed:      ${seed ?? 'N/A'}`);
-      console.log(`   Resolution: ${resolution || '(none)'}`);
-      console.log(`   Ratio:     ${ratio || '(none)'}`);
-      console.log(`   Duration:  ${duration ?? 'N/A'}s`);
-      console.log(`   FPS:       ${framesPerSecond ?? 'N/A'}\n`);
-      console.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
+    if (options.sensitiveRecipe) {
+      output.log(`[Status] Protected query complete: provider_status=${sensitiveProviderStatus(data)}; local_status=${localStatus}`);
+    } else if (localStatus === 'succeeded') {
+      output.log(`\n✅ Step2 Complete: status = succeeded`);
+      output.log(`   Video URL: ${resultVideoUrl ? maskVideoUrl(resultVideoUrl) : '(none)'}`);
+      output.log(`   Model:     ${providerModel || '(none)'}`);
+      output.log(`   Seed:      ${seed ?? 'N/A'}`);
+      output.log(`   Resolution: ${resolution || '(none)'}`);
+      output.log(`   Ratio:     ${ratio || '(none)'}`);
+      output.log(`   Duration:  ${duration ?? 'N/A'}s`);
+      output.log(`   FPS:       ${framesPerSecond ?? 'N/A'}\n`);
+      output.log(`   Billing:   ${actualCost ?? 'N/A'} ${currencyOrCreditType || ''} (${billingStatus || 'unknown'})\n`);
     } else if (localStatus === 'failed') {
-      console.log(`\n❌ Step2 Complete: status = failed`);
-      console.log(`   Error: ${errorMessage || 'Unknown error'}\n`);
+      output.log(`\n❌ Step2 Complete: status = failed`);
+      output.log(`   Error: ${userFacingErrorMessage || 'Unknown error'}\n`);
     } else {
-      console.log(`\n⏳ Step2 Complete: status = ${officialStatus || 'unknown'} (${localStatus})\n`);
+      output.log(`\n⏳ Step2 Complete: status = ${officialStatus || 'unknown'} (${localStatus})\n`);
     }
 
     return {
@@ -474,7 +741,7 @@ export async function getVideoTaskStatus(
       local_status: localStatus,
       result_video_url: resultVideoUrl,
       result_last_frame_url: resultLastFrameUrl,
-      error_message: errorMessage,
+      error_message: userFacingErrorMessage,
       // 扩展字段
       provider_model: providerModel,
       seed: seed,
@@ -493,9 +760,51 @@ export async function getVideoTaskStatus(
       raw: data,
     };
   } catch (error) {
-    console.error('\n❌ Step2 Query failed:', error);
+    if (options.sensitiveRecipe) {
+      const safeError = sensitiveStatusQueryError(error);
+      output.error('\n❌ Step2 protected query failed:', safeError.message, { code: safeError.code });
+      throw safeError;
+    }
+    output.error('\n❌ Step2 Query failed:', error);
     throw error;
   }
+}
+
+export async function getVideoTaskStatusByClientRequestId(
+  clientRequestId: string,
+): Promise<ProviderStatusResponse> {
+  const endpoint = `${SEEDANCE_BASE_URL}/getResult`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientRequestId }),
+  });
+  const responseText = await response.text();
+  let data: Record<string, unknown> = {};
+  if (responseText.trim()) {
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Seedance 查询返回非 JSON 响应：${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
+    }
+  }
+  data = redactInlineImageTransport(data) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(`Seedance 按 clientRequestId 查询失败（HTTP ${response.status}）`);
+  }
+  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']) || clientRequestId;
+  const officialStatus = typeof data.status === 'string' ? data.status : 'unknown';
+  const content = data.content as Record<string, unknown> | undefined;
+  return {
+    provider_task_id: providerTaskId,
+    provider_status: officialStatus,
+    local_status: mapProviderStatus(officialStatus),
+    result_video_url: typeof content?.video_url === 'string' ? content.video_url : undefined,
+    result_last_frame_url: typeof content?.last_frame_url === 'string' ? content.last_frame_url : undefined,
+    error_message: normalizeProviderErrorMessage(data.error ?? data.message) || undefined,
+    client_request_id: pickString(data, ['clientRequestId', 'client_request_id', 'client_requestId']),
+    raw: data,
+  };
 }
 
 // ============================================================================

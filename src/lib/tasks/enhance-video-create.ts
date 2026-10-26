@@ -20,6 +20,7 @@ export type NormalizedEnhanceVideoCreateBody = {
   durationSeconds: number | null;
   videoCardId: string | null;
   idempotencyKey: string | null;
+  pricingRevision: string | null;
 };
 
 export type BuildEnhanceVideoProviderInputArgs = {
@@ -120,6 +121,7 @@ export function normalizeEnhanceVideoCreateBody(input: unknown): NormalizedEnhan
     durationSeconds,
     videoCardId: cleanString(body.video_card_id ?? body.videoCardId),
     idempotencyKey: cleanString(body.idempotency_key ?? body.idempotencyKey),
+    pricingRevision: cleanString(body.pricing_revision),
   };
 }
 

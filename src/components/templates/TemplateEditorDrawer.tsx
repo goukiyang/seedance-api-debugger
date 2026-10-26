@@ -1,6 +1,9 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type {
   SerializedGenerationTemplate,
   SerializedTemplateAsset,
@@ -18,7 +21,7 @@ type Props = {
   variant?: 'drawer' | 'inline' | 'card';
   cardId?: string | null;
   onClose: () => void;
-  onSave: (payload: Record<string, unknown>) => Promise<void>;
+  onSave: (payload: Record<string, unknown>) => Promise<boolean>;
 };
 
 type ContextCardsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -92,6 +95,7 @@ function promptBlockToString(value: unknown) {
 }
 
 export function TemplateEditorDrawer({ open, template, saving = false, error, variant = 'drawer', cardId = null, onClose, onSave }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('draft');
@@ -100,6 +104,11 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
   const [contextCardsSaveStatus, setContextCardsSaveStatus] = useState<ContextCardsSaveStatus>('idle');
   const [contextCardsSaveError, setContextCardsSaveError] = useState('');
   const initialCardsJsonRef = useRef('');
+  const dialogRef = useRef<HTMLElement>(null);
+  const shellRef = useRef<HTMLElement | null>(null);
+  const backdropRef = useRef<HTMLButtonElement>(null);
+  const saveLock = useRef(false);
+  const [manualSaving, setManualSaving] = useState(false);
 
   useEffect(() => {
     if (!template) return;
@@ -194,6 +203,40 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
     return draftText || cleanText(data.draft?.summary) || cleanText(userInput);
   };
 
+  const requestClose = async () => {
+    if (saving || saveLock.current) return;
+    const cardsDirty = JSON.stringify(contextCards) !== initialCardsJsonRef.current;
+    const fieldsDirty = Boolean(template && (
+      name !== template.name
+      || description !== (template.description || '')
+      || status !== template.status
+      || version !== template.version
+    ));
+    if ((cardsDirty || fieldsDirty) && !(await confirm('模板修改尚未全部保存，确定关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+    onClose();
+  };
+  const save = async () => {
+    if (!payload || saving || saveLock.current || contextCardsSaveStatus === 'saving') return;
+    saveLock.current = true;
+    setManualSaving(true);
+    try {
+      if (await onSave(payload)) {
+        initialCardsJsonRef.current = JSON.stringify(contextCards);
+        if (variant !== 'inline') onClose();
+      }
+    } finally { saveLock.current = false; setManualSaving(false); }
+  };
+
+  useDialogDismiss({
+    open: open && variant !== 'inline' && Boolean(template && payload),
+    dialogRef,
+    dismissSurfaceRef: shellRef,
+    isDismissTarget: (target) => target === backdropRef.current || target === shellRef.current,
+    onDismiss: requestClose,
+    dismissOnOutside: !saving && !manualSaving,
+    dismissOnEscape: !saving && !manualSaving,
+  });
+
   if (!open || !template || !payload) return null;
 
   const editorActions = (
@@ -207,8 +250,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
               ? '卡片保存失败'
               : '卡片修改会自动保存'}
       </span>
-      <button type="button" className="is-primary" onClick={() => onSave(payload)} disabled={saving || !name.trim()}>
-        {saving ? '保存中...' : '保存模板版本'}
+      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving || manualSaving} onClick={() => void save()} disabled={saving || manualSaving || contextCardsSaveStatus === 'saving' || !name.trim()}>
+        {saving || manualSaving ? '保存中...' : '保存模板版本'}
       </button>
     </>
   );
@@ -221,7 +264,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
             <span>模板工作台</span>
             <h2>{template.name}</h2>
           </div>
-          {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
+          {variant === 'drawer' && <button type="button" disabled={saving || manualSaving} onClick={requestClose}>关闭</button>}
           {variant === 'inline' && (
             <div className="template-drawer-head-actions">
               {editorActions}
@@ -232,6 +275,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
 
       {error && <div className="template-drawer-error">{error}</div>}
 
+      <fieldset disabled={saving || manualSaving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <TemplateContextCardsPanel
         cards={contextCards}
         saveStatus={contextCardsSaveStatus}
@@ -241,46 +285,47 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
         editorMode={variant === 'card' ? 'card-page' : 'overview'}
         editingCardId={cardId}
         backHref={`/admin/templates/${template.id}`}
-        onChange={setContextCards}
+        onChange={cards => { if (!saveLock.current && !saving) setContextCards(cards); }}
         onRewriteCard={rewriteContextCard}
       />
+      </fieldset>
     </>
   );
 
   if (variant === 'inline') {
-    return (
+    return <>{productDialog}{((
       <section className="template-inline-workspace" aria-label="模板上下文卡片编辑">
         {workspaceContent}
       </section>
-    );
+    ))}</>;
   }
 
   if (variant === 'card') {
-    return (
-      <section className="template-card-modal-shell" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
-        <button type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" onClick={onClose} />
-        <aside className="template-card-modal">
+    return <>{productDialog}{((
+      <section ref={(element) => { shellRef.current = element; }} className="template-card-modal-shell">
+        <button ref={backdropRef} type="button" className="template-card-modal-backdrop" aria-label="关闭卡片编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
+        <aside ref={dialogRef} className="template-card-modal" role="dialog" aria-modal="true" aria-label="上下文卡片三级编辑弹窗">
           <header className="template-card-modal-head">
             <div>
               <span>上下文卡片三级弹窗</span>
               <h2>{template.name}</h2>
             </div>
-            <button type="button" onClick={onClose}>关闭</button>
+            <button type="button" onClick={requestClose}>关闭</button>
           </header>
           <section className="template-card-route-workspace" aria-label="上下文卡片编辑">
             {workspaceContent}
           </section>
         </aside>
       </section>
-    );
+    ))}</>;
   }
 
-  return (
-    <div className="template-drawer-shell" role="dialog" aria-modal="true" aria-label="模板上下文卡片编辑">
-      <button type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" onClick={onClose} />
-      <aside className="template-drawer">
+  return <>{productDialog}{((
+    <div ref={(element) => { shellRef.current = element; }} className="template-drawer-shell">
+      <button ref={backdropRef} type="button" className="template-drawer-backdrop" aria-label="关闭模板编辑" data-dialog-dismiss-surface onClick={(event) => { if (event.detail === 0) requestClose(); }} />
+      <aside ref={dialogRef} className="template-drawer" role="dialog" aria-modal="true" aria-label="模板上下文卡片编辑">
         {workspaceContent}
       </aside>
     </div>
-  );
+  ))}</>;
 }

@@ -1,0 +1,30 @@
+// Browser-safe contract. Percent crops refer to the EXIF-oriented original image.
+export const MODULE_COVER_OUTPUT = { width: 1280, height: 1280, thumbnailWidth: 640, thumbnailHeight: 640 } as const;
+export const LEGACY_MODULE_COVER_OUTPUT = { width: 1280, height: 960, thumbnailWidth: 640, thumbnailHeight: 480 } as const;
+export type ModuleCoverLayout = 'single' | 'horizontal' | 'vertical';
+export type ModuleCoverTarget = { kind: 'module' | 'preset'; id: string };
+export type ModuleCoverCrop = { x: number; y: number; width: number; height: number };
+export type ModuleCoverSource = { assetId: string; version: string; crop: ModuleCoverCrop };
+type ModuleCoverRecipeContent = { layout: ModuleCoverLayout; sources: ModuleCoverSource[] };
+export type ModuleCoverLegacyRecipe = ModuleCoverRecipeContent & { version: 1; output: { width: 1280; height: 960 } };
+export type ModuleCoverSquareRecipe = ModuleCoverRecipeContent & { version: 2; output: { width: 1280; height: 1280 } };
+export type ModuleCoverContainRecipe = Omit<ModuleCoverRecipeContent, 'layout' | 'sources'> & {
+  version: 3; layout: 'single'; fit: 'contain'; output: { width: 1280; height: 1280 }; sources: [ModuleCoverSource];
+};
+export type ModuleCoverRecipe = ModuleCoverLegacyRecipe | ModuleCoverSquareRecipe | ModuleCoverContainRecipe;
+export type ModuleCoverDTO = { revision: number; target: ModuleCoverTarget; available: boolean;
+  thumbnailUrl: string | null; imageUrl: string | null; width: 1280; height: 960 | 1280; updatedAt: string;
+  unavailableReason?: string };
+export type ModuleCoverSourceDTO = { assetId: string; version: string; previewUrl: string; width: number; height: number };
+export type ModuleCoverSelection = { source: ModuleCoverSourceDTO; originSource: ModuleCoverSourceDTO | null; originAssetId: string | null;
+  originState: 'ready' | 'not-generated' | 'none' | 'unknown' | 'multiple' | 'unavailable' };
+export type ModuleCoverEditorState = { target: ModuleCoverTarget; revision: number; canManage: boolean;
+  fixedCover: ModuleCoverDTO | null; recipe: ModuleCoverRecipe | null; sources: ModuleCoverSourceDTO[];
+  sourceError?: string };
+export type ModuleCoverSaveInput = { requestId: string; expectedRevision: number; target: ModuleCoverTarget; recipe: ModuleCoverRecipe };
+export type ModuleCoverSaveResult = { status: 'saved'; requestId: string; revision: number; fixedCover: ModuleCoverDTO; superseded?: boolean };
+export type ModuleCoverRequestResult = ModuleCoverSaveResult | { status: 'pending' | 'failed' | 'not-found'; requestId: string; error?: string };
+
+// Pure original-request projection: never exposes the frozen source or private files.
+export type ModuleCoverSnapshotRequestResult = { intent: 'shared-snapshot'; requestId: string;
+  status: 'preparing' | 'prepared' | 'committed' | 'failed' | 'not-found'; error?: string };

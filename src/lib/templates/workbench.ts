@@ -1,3 +1,5 @@
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+
 export type TemplateRuleType = 'must' | 'forbid' | 'suggest' | 'context';
 export type TemplateAssetType = 'character' | 'logo' | 'style' | 'product' | 'negative' | 'other';
 export type TemplatePromptBlockType =
@@ -54,6 +56,10 @@ export type TemplateModuleUsage = 'required' | 'reference';
 export type TemplateModuleUsageMap = Partial<Record<TemplateModuleKey, TemplateModuleUsage>>;
 
 const TEMPLATE_MODULE_KEYS: TemplateModuleKey[] = ['character', 'logo', 'style', 'camera'];
+
+function publicAssetUrl(url: string | null) {
+  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
+}
 
 export type TemplateTemporalConfig = {
   enabled: boolean;
@@ -494,8 +500,8 @@ function findBoundImageForBlock(blockType: TemplatePromptBlockType, assets: Seri
     reference_image_id: asset.reference_image_id,
     asset_id: null,
     label: asset.label,
-    url: asset.url,
-    thumbnail_url: asset.thumbnail_url,
+    url: publicAssetUrl(asset.url),
+    thumbnail_url: publicAssetUrl(asset.thumbnail_url),
   };
 }
 
@@ -560,8 +566,8 @@ export function serializeGenerationTemplate(template: TemplateRecord): Serialize
     id: asset.id,
     asset_type: normalizeAssetType(asset.asset_type),
     label: asset.label,
-    url: asset.url,
-    thumbnail_url: asset.thumbnail_url,
+    url: publicAssetUrl(asset.url),
+    thumbnail_url: publicAssetUrl(asset.thumbnail_url),
     reference_image_id: asset.reference_image_id,
     sort_order: asset.sort_order,
     status: asset.status,

@@ -18,6 +18,9 @@ assert.match(appSource, /data-context-rules-modal/);
 assert.match(appSource, /contextRules,/);
 assert.match(appSource, /context_rules: contextRules/);
 assert.match(appSource, /scheduleCanvasSave\('context_rules_change'\)/);
+assert.match(appSource, /video_branch_id/);
+assert.match(appSource, /data-video-branch-prompt-select/);
+assert.match(appSource, /videoBranchId/);
 
 assert.match(cssSource, /\.context-rules-button\s*\{/);
 assert.match(cssSource, /\.node-context-rules-row\s*\{/);
@@ -26,9 +29,9 @@ assert.match(cssSource, /\.is-canvas-admin \.node-type-text \.context-rules-butt
 assert.match(cssSource, /\.context-rules-button\.has-rules/);
 assert.match(cssSource, /\.context-rules-modal/);
 
-assert.match(indexSource, /styles\.css\?v=20260620-rules-visible/);
-assert.match(indexSource, /canvas-engine\.js\?v=20260620-rules-visible/);
-assert.match(indexSource, /app\.js\?v=20260620-rules-visible/);
+assert.match(indexSource, /styles\.css\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /canvas-engine\.js\?v=20260826-canvas-module-refresh/);
+assert.match(indexSource, /app\.js\?v=20260826-canvas-module-refresh/);
 
 assert.match(routeSource, /const rawContextRules =/);
 assert.match(routeSource, /const contextRules = user\.role === 'admin' \? rawContextRules : ''/);

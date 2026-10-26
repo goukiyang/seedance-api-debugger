@@ -88,12 +88,10 @@ export async function loadCollectionIntoWorkspace(
 
   if (!collection) throw new Error('Collection not found');
 
-  // 清空现有工作区
-  await prisma.workspaceAsset.deleteMany({
-    where: { workspace_id: workspaceId },
-  });
+  if (collection.items.some((item) => item.asset.status === 'deleted')) {
+    throw new Error('图集中有已删除素材，原参考区已保留');
+  }
 
-  // 导入素材到工作区
   const items = collection.items.map((item, idx) => ({
     id: uuidv4(),
     workspace_id: workspaceId,
@@ -102,23 +100,31 @@ export async function loadCollectionIntoWorkspace(
     role: item.role,
   }));
 
-  if (items.length > 0) {
-    await prisma.workspaceAsset.createMany({ data: items });
-  }
+  await prisma.$transaction(async (tx) => {
+    await tx.workspaceAsset.deleteMany({ where: { workspace_id: workspaceId } });
+    if (items.length > 0) await tx.workspaceAsset.createMany({ data: items });
+  });
 
   return { count: items.length };
 }
 
-export async function deleteCollection(id: string) {
-  await prisma.assetCollection.delete({ where: { id } });
+export async function deleteCollection(id: string, ownerId = 'default-user') {
+  const where = ownerId === 'default-user' ? { id } : { id, owner_id: ownerId };
+  const collection = await prisma.assetCollection.findFirst({ where, select: { id: true } });
+  if (!collection) throw new Error('Collection not found');
+  await prisma.assetCollection.delete({ where: { id: collection.id } });
 }
 
 export async function updateCollection(
   id: string,
-  data: { name?: string; description?: string; visibility?: string; cover_asset_id?: string }
+  data: { name?: string; description?: string; visibility?: string; cover_asset_id?: string },
+  ownerId = 'default-user'
 ) {
+  const where = ownerId === 'default-user' ? { id } : { id, owner_id: ownerId };
+  const collection = await prisma.assetCollection.findFirst({ where, select: { id: true } });
+  if (!collection) throw new Error('Collection not found');
   return prisma.assetCollection.update({
-    where: { id },
+    where: { id: collection.id },
     data,
   });
 }

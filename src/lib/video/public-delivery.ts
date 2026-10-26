@@ -1,19 +1,26 @@
-import { readFile, stat } from 'fs/promises';
+import { stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
-import { uploadPublicAsset, type PublicUploadResult } from '@/lib/assets/public-storage';
+import { uploadPublicVideoFile, type PublicUploadResult } from '@/lib/assets/public-storage';
 import { prisma } from '@/lib/prisma';
 import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult } from './local-cache';
 import { localPublicVideoPath } from './thumbnail';
+import { isVideoDeliveryFastPathTask } from './delivery-policy';
+import { ingestTaskMediaFromProvider } from './media-ingest';
 
 const VIDEO_MIME_TYPE = 'video/mp4';
 const LOCAL_FALLBACK_PROVIDER = 'not_configured';
 
 type PublicVideoDeliveryTask = CacheableVideoTask & {
+  generation_mode?: string | null;
   public_video_url?: string | null;
   public_video_storage_provider?: string | null;
   public_video_storage_key?: string | null;
   public_video_file_size?: number | null;
   public_video_cached_at?: Date | null;
+};
+
+type ProviderVideoDeliveryTask = PublicVideoDeliveryTask & {
+  generation_mode?: string | null;
 };
 
 export type PublicVideoDeliveryResult = {
@@ -105,6 +112,13 @@ function uploadResultIsUsableForVideo(result: PublicUploadResult, allowLocalPubl
   return result.isPubliclyReachable && isAcceleratedVideoDeliveryProvider(result.storageProvider, { allowLocalPublic });
 }
 
+export async function ensurePublicVideoDeliveryFromProvider(
+  task: ProviderVideoDeliveryTask | VideoTask,
+  options: { allowLocalPublic?: boolean } = {},
+): Promise<PublicVideoDeliveryResult> {
+  return ingestTaskMediaFromProvider(task, options);
+}
+
 export async function ensurePublicVideoDelivery(
   task: PublicVideoDeliveryTask | VideoTask,
   options: { allowLocalPublic?: boolean } = {},
@@ -150,8 +164,12 @@ export async function ensurePublicVideoDelivery(
     return markLocalFallback(task.id, localVideo.size, '未配置 R2/TOS 视频分发，当前使用本站慢速备用播放。');
   }
 
-  const buffer = await readFile(localVideo.absolutePath);
-  const uploadResult = await uploadPublicAsset(buffer, `seedance-video-${task.id}.mp4`, VIDEO_MIME_TYPE);
+  const uploadResult = await uploadPublicVideoFile({
+    filePath: localVideo.absolutePath,
+    fileName: `seedance-video-${task.id}.mp4`,
+    mimeType: VIDEO_MIME_TYPE,
+    size: localVideo.size,
+  });
   const cachedAt = new Date();
   const usableForVideo = uploadResultIsUsableForVideo(uploadResult, allowLocalPublic);
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import {
   assertCanEditAlbum,
   assertCanViewAlbum,
@@ -27,7 +28,7 @@ export async function GET(
         })
       : null;
     const images = await prisma.referenceImage.findMany({
-      where: { album_id: album.id, status: 'active' },
+      where: { album_id: album.id, status: 'active', AND: [await studioVisibleReferenceWhere(user)] },
       orderBy: { sort_order: 'asc' },
       include: { asset: { select: { id: true, type: true, file_name: true, width: true, height: true, file_size: true, mime_type: true } } },
     });
@@ -53,7 +54,7 @@ export async function GET(
         description: album.description,
         album_type: album.album_type,
         visibility: album.visibility,
-        cover_image_id: album.cover_image_id,
+        cover_image_id: coverImageId,
         cover_image_url: coverImageId ? `/api/reference-images/${coverImageId}/content?variant=thumbnail` : null,
         status: album.status,
         created_at: album.created_at,
@@ -61,7 +62,7 @@ export async function GET(
         owner: album.owner,
         project: album.project,
         public_folder: publicFolder,
-        image_count: album._count.images,
+        image_count: images.length,
         permissions: access.permissions,
         can_share: access.canShare,
         active_share_count: activeShareCount,

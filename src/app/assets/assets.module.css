@@ -1,0 +1,140 @@
+:global(.asset-library-page) .cardMedia.cardMedia {
+  max-block-size: min(360px, 60vh);
+}
+
+:global(.asset-library-page) .cardMedia.cardMediaImage > img,
+:global(.asset-library-page) .cardMedia.cardMediaImage > video,
+:global(.asset-library-page) .cardMedia.cardMediaVideo img,
+:global(.asset-library-page) .cardMedia.cardMediaVideo video:not([hidden]),
+:global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > img,
+:global(.asset-library-page) .cardMedia.cardMediaUnknownRatio > video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
+  object-position: center;
+}
+
+:global(.asset-library-page) .cardMedia.cardMediaImage {
+  aspect-ratio: 1 / 1;
+  background: oklch(0.08 0.004 250);
+}
+
+:global(.asset-library-page) .cardMedia.cardMediaVideo,
+:global(.asset-library-page) .cardMedia.cardMediaUnknownRatio {
+  aspect-ratio: 16 / 9;
+  background: oklch(0.08 0.004 250);
+}
+
+:global(.asset-library-page) .collectionMedia {
+  position: relative;
+  max-block-size: min(360px, 60vh);
+}
+
+:global(.asset-library-page) .collectionMedia > img,
+:global(.asset-library-page) .collectionMedia > video {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+:global(.asset-detail-preview).detailPreview {
+  min-block-size: 140px;
+  max-block-size: min(360px, 42vh);
+}
+
+:global(.asset-detail-preview).detailPreview > video,
+:global(.asset-detail-preview).detailPreview > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
+}
+
+.detailPreviewImageButton {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.detailPreview.detailPreview .detailPreviewImageButton > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
+}
+
+.detailPreviewExpand {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 8px;
+  inset-inline-end: 8px;
+  display: grid;
+  place-items: center;
+  inline-size: 34px;
+  block-size: 34px;
+  padding: 0;
+  border: 1px solid oklch(0.95 0.01 245 / 0.24);
+  border-radius: 6px;
+  color: oklch(0.96 0.01 245);
+  background: oklch(0.12 0.008 250 / 0.9);
+  cursor: zoom-in;
+}
+
+.detailPreviewExpand:focus-visible,
+.detailPreviewImageButton:focus-visible {
+  outline: 2px solid oklch(0.76 0.12 188);
+  outline-offset: 2px;
+}
+
+:global(.asset-detail-drawer).detailDrawer {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.detailBody {
+  min-block-size: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-block-end: 8px;
+  scrollbar-gutter: stable;
+}
+
+.detailBody > * { flex-shrink: 0; }
+
+.detailFooter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding-block-start: 12px;
+  padding-block-end: env(safe-area-inset-bottom, 0px);
+  border-block-start: 1px solid oklch(0.3 0.018 245);
+}
+
+.detailFooter > span { color: oklch(0.75 0.012 245); font-size: 13px; }
+.detailFooter > button { inline-size: 100%; white-space: normal; }

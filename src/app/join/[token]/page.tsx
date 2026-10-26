@@ -45,7 +45,7 @@ export default function JoinProjectPage() {
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 12 }}>
-            {error && <p className="text-red">{error}</p>}
+            {error && <p className="text-gray">{error}</p>}
             {error.includes('登录') && <Link href="/login" className="btn btn-secondary">去登录</Link>}
             <button className="btn btn-primary" type="button" onClick={joinProject} disabled={joining}>
               {joining ? '加入中...' : '确认加入项目'}

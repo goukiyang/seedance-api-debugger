@@ -1,0 +1,24 @@
+{
+  "kind": "isolated fixed regression; not authenticated production evidence",
+  "passed": [
+    "CMP independent position, <1 drag, cursor wheel, linked no jump, navigation preserves comparison",
+    "CMP failed selection keeps image; late requests do not override; internal blank and topmost Escape",
+    "CMP swap/layout retain view; selected reset vs both reset; phone Back closes only top layer",
+    "CMP mobile controls and temporary local selection without upload",
+    "CMP same-image independence, cursor anchor, single-frame pinch and cross-frame isolation",
+    "PASTE full replacement, caret end, same value clean, whole length rejection, empty and denied clipboard",
+    "PASTE asynchronous changes, lost permission and unmount never overwrite",
+    "BUX local folder preparation and cancel cause zero upload/task; actual number-price confirmation",
+    "BUX changed quote refuses before upload, old text mode remains, unknown receipt preserves original request",
+    "BUX download failure never regenerates; result previews and batch asset link available",
+    "B6 ratio information quiet by default and visible on focus/explicit info control",
+    "SIDE actual header tracks preceding layout shift and topbar; scroll settled",
+    "CUT account-specific unavailable/history message, no task; ResourceLibraryPicker success and failed selection preserve source",
+    "CUT namespace SAM respects available; invalid acceptance retains parameters/key on retry"
+  ],
+  "failures": [],
+  "externalRequests": [],
+  "productionUploads": 0,
+  "productionTasks": 0,
+  "fees": 0
+}

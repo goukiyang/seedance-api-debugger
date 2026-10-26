@@ -1,22 +1,46 @@
 'use client';
+import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import CreationAvailability from '@/components/creation/CreationAvailability';
+
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Check, ChevronDown, Folder, Plus } from 'lucide-react';
+import { Check, ChevronDown, Folder, Plus, Trash2 } from 'lucide-react';
 import type { AssetCollection, GenerationMode, VideoDuration, VideoRatio, VideoResolution } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
+import { notifyVideoPricingChanged, requestVideoPricing, requireVideoPricingWithinCeiling, validVideoPricingAmount, videoPricingBusinessInput } from '@/lib/pricing-client';
+import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
+import type { ComposerSelectOption } from '@/components/ComposerActionBar';
+import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
+import {
+  H3_AUTO_CHECK_MIN_GAP_MS,
+  buildH3MachineStatus,
+  h3DisabledReason,
+  isH3HealthCheckDue,
+  normalizeH3VideoConfig,
+  type H3VideoConfig,
+} from '@/components/H3MachineStatus';
 import type { AccountMenuUser } from '@/components/AccountMenu';
 import ComposerTopbar from '@/components/ComposerTopbar';
+import ProjectCreateOperationNotice from '@/components/ProjectCreateOperationNotice';
+import { useProjectCreateOperation, type ProjectCreateResult } from '@/lib/projects/client-operations';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatProviderUsdCharge } from '@/lib/costs/currency';
+import { readJsonResponse } from '@/lib/http/json-response';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
 
 type CreateResponse = {
   id: string;
+  provider?: string;
   provider_task_id: string;
+  model?: string;
   status: string;
   created_at: string;
   project_id?: string;
@@ -25,6 +49,14 @@ type CreateResponse = {
   agent_run_id?: string | null;
   selected_agent_plan_key?: string | null;
   prompt_rendered?: string;
+  reference_image_notice?: string | null;
+};
+
+type CreateTaskResponse = CreateResponse & {
+  code?: string;
+  error?: string;
+  message?: string;
+  _debug?: object | null;
 };
 
 type CreditSummary = {
@@ -34,6 +66,9 @@ type CreditSummary = {
   monthly_used: number;
   total_used: number;
 };
+
+type GenerationProvider = 'seedance' | 'h3';
+const H3_INLINE_MODEL_ID = 'h3';
 
 type ProjectOption = {
   id: string;
@@ -59,10 +94,21 @@ type VideoCardOption = {
 type TaskItem = {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  error_message?: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  retry_after_ms?: number | null;
+  play_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
   provider_cost_currency: string | null;
   provider_official_amount_minor: number | null;
   provider_final_amount_minor: number | null;
@@ -76,18 +122,29 @@ type TaskItem = {
   selected_agent_plan_key?: string | null;
   prompt_user_edited?: boolean;
   generation_template?: { id: string; name: string; template_key: string; version: string } | null;
+  can_delete?: boolean;
   created_at: string;
-};
-
-type TaskPreviewModel = {
-  kind: 'image' | 'empty';
-  src?: string;
 };
 
 const PROJECT_STORAGE_KEY = 'template_generate_project_id';
 const VIDEO_CARD_STORAGE_KEY = 'template_generate_video_card_by_project_v1';
 const RECENT_TASK_PAGE_SIZE = 12;
+const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
+const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
+const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+
+function shouldContinuePollingStableDelivery(task: {
+  local_status?: string | null;
+  delivery_stage?: { key?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  retry_after_ms?: number | null;
+}) {
+  if (task.local_status !== 'succeeded') return false;
+  if (task.delivery_stage?.key === 'ready' || task.delivery_stage?.key === 'failed') return false;
+  return task.delivery_stage?.key === 'preparing'
+    || (task.stable_download_ready === false && Boolean(task.retry_after_ms));
+}
 
 function projectDisplayName(project: ProjectOption): string {
   return project.type === 'personal' ? '个人空间' : project.name;
@@ -106,6 +163,28 @@ function projectMetaLabel(project: ProjectOption): string {
 
 function formatRecentTaskChargeText(chargeText: string): string {
   return chargeText.replace(/\s*USD(?=（|$)/g, '');
+}
+
+function collectPollableTaskIds(
+  tasks: Pick<TaskItem, 'id' | 'local_status' | 'delivery_stage' | 'stable_download_ready' | 'retry_after_ms'>[],
+): string[] {
+  return tasks
+    .filter((task) => task.id && (
+      POLLABLE_TASK_STATUSES.has(task.local_status)
+      || shouldContinuePollingStableDelivery(task)
+    ))
+    .map((task) => task.id);
+}
+
+function mergePollingTaskIds(incomingIds: string[], currentIds: string[]): string[] {
+  const seen = new Set<string>();
+  return [...incomingIds, ...currentIds]
+    .filter((taskId) => {
+      if (!taskId || seen.has(taskId)) return false;
+      seen.add(taskId);
+      return true;
+    })
+    .slice(0, MAX_ACTIVE_POLLING_TASKS);
 }
 
 function formatRecentTaskTime(dateStr: string): string {
@@ -135,13 +214,6 @@ function truncatePrompt(prompt: string, maxLen = 64): string {
   return clean.length > maxLen ? `${clean.slice(0, maxLen)}...` : clean;
 }
 
-function getRecentTaskPreview(task: TaskItem, failedSrcs: string[] = []): TaskPreviewModel {
-  const thumbnailSrc = `/api/video/thumbnail/${task.id}`;
-  const hasThumbnailSource = Boolean(task.local_video_path || task.result_video_url || task.result_last_frame_url);
-  if (hasThumbnailSource && !failedSrcs.includes(thumbnailSrc)) return { kind: 'image', src: thumbnailSrc };
-  return { kind: 'empty' };
-}
-
 function readRememberedVideoCards(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   try {
@@ -160,36 +232,24 @@ function rememberVideoCard(projectId: string, videoCardId: string) {
   }));
 }
 
-function TemplateTaskPreview({ task }: { task: TaskItem }) {
-  const [failedSrcs, setFailedSrcs] = useState<string[]>([]);
-  const preview = getRecentTaskPreview(task, failedSrcs);
-  return (
-    <div className={`composer-task-card-preview composer-task-card-preview-${preview.kind}`}>
-      {preview.kind === 'image' && preview.src ? (
-        <img
-          src={preview.src}
-          alt="任务截图"
-          loading="lazy"
-          onError={() => setFailedSrcs((current) => preview.src && !current.includes(preview.src) ? [...current, preview.src] : current)}
-        />
-      ) : (
-        <span>暂无截图</span>
-      )}
-    </div>
-  );
-}
-
 export function TemplateGenerateClient() {
+  const { confirm, productDialog } = useProductDialog();
   const searchParams = useSearchParams();
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const recentTasksSentinelRef = useRef<HTMLDivElement | null>(null);
   const recentTasksLoadingRef = useRef(false);
   const recentTasksPageRef = useRef(0);
   const recentTasksHasMoreRef = useRef(false);
+  const lastH3AutoCheckAtRef = useRef(0);
 
   const [currentUser, setCurrentUser] = useState<TemplateGenerateUser | null>(null);
+  const projectCreate = useProjectCreateOperation(currentUser?.id, 'template-generate');
   const [loadingUser, setLoadingUser] = useState(true);
   const [credits, setCredits] = useState<CreditSummary | null>(null);
+  const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [h3StatusChecking, setH3StatusChecking] = useState(false);
+  const [selectedH3LoraId, setSelectedH3LoraId] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<GenerationProvider>('seedance');
   const [collections, setCollections] = useState<AssetCollection[]>([]);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -198,6 +258,7 @@ export function TemplateGenerateClient() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
+  useEffect(() => { if (projectCreate.pending) setProjectName(projectCreate.pending.input.name); }, [projectCreate.pending]);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectMessage, setProjectMessage] = useState<{ type: 'info' | 'error' | 'success'; text: string } | null>(null);
 
@@ -212,6 +273,25 @@ export function TemplateGenerateClient() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRequestKey, setPendingRequestKey] = useState<string | null>(null);
+  const submitLock = useRef(false);
+  const submissionScope = useRef('');
+  const creation = useCreationContext({ ownerId: currentUser?.id, entry: 'template', draftId: 'template-generate', projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
+  const [creationBaselineId, setCreationBaselineId] = useState('');
+  const creationDraftBody = useRef<Record<string, unknown> | null>(null);
+  submissionScope.current = JSON.stringify([currentUser?.id, selectedProjectId]);
+  const submissionCard = useRef(selectedVideoCardId); submissionCard.current = selectedVideoCardId;
+  const requestStorageKey = currentUser ? `sd2-template-generation-request-v2:${currentUser.id}` : null;
+  useEffect(() => {
+    if (!requestStorageKey) { setPendingRequestKey(null); return; }
+    try {
+      const raw = sessionStorage.getItem(requestStorageKey);
+      if (!raw) { setPendingRequestKey(null); return; }
+      const pending = JSON.parse(raw) as { key?: unknown };
+      if (typeof pending.key !== 'string' || !pending.key) throw new Error();
+      setPendingRequestKey(pending.key);
+    } catch { setPendingRequestKey('unreadable'); setError('原请求记录无法读取，请先核对原任务；不会新建请求'); }
+  }, [requestStorageKey]);
   const [errorDebug, setErrorDebug] = useState<object | null>(null);
   const [polledResult, setPolledResult] = useState<{
     id: string;
@@ -234,6 +314,102 @@ export function TemplateGenerateClient() {
   const [recentTasksLoadingInitial, setRecentTasksLoadingInitial] = useState(true);
   const [recentTasksLoadingMore, setRecentTasksLoadingMore] = useState(false);
   const [recentTasksError, setRecentTasksError] = useState('');
+  const [deletingRecentTaskId, setDeletingRecentTaskId] = useState<string | null>(null);
+
+  const h3Ready = h3VideoConfig?.ready === true && h3VideoConfig.preset_options.length > 0;
+  const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
+    || h3VideoConfig?.preset_options[0]
+    || null;
+  const selectedH3Lora = h3VideoConfig?.lora_options.find((option) => option.id === selectedH3LoraId)
+    || h3VideoConfig?.lora_options.find((option) => option.id === h3VideoConfig.default_lora_id)
+    || h3VideoConfig?.lora_options[0]
+    || null;
+  const activeH3LoraOptions = selectedProvider === 'h3' && h3Ready
+    ? h3VideoConfig?.lora_options || []
+    : [];
+  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
+    const options = [...SEEDANCE_VIDEO_MODEL_OPTIONS];
+    const canSeeH3 = h3Ready || currentUser?.role === 'admin';
+    if (canSeeH3) {
+      options.push({
+        id: H3_INLINE_MODEL_ID,
+        label: h3Ready ? 'H3 本地模型' : 'H3 待检查',
+        detail: h3Ready
+          ? `本地处理 · ${selectedH3Preset?.label || h3VideoConfig?.default_preset_id || '默认预设'} · ${selectedH3Lora?.label || h3VideoConfig?.default_lora_id || '默认 LoRA'}`
+          : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
+      });
+    }
+    return options;
+  }, [currentUser?.role, h3Ready, h3VideoConfig, selectedH3Lora?.label, selectedH3Preset?.label]);
+  const activeModelLabel = 'Seedance 2.0';
+  const activeProviderLabel = 'Seedance 视频';
+  const refreshH3VideoConfig = useCallback(async () => {
+    try {
+      const response = await fetch('/api/config', { cache: 'no-store' });
+      const data = response.ok ? await response.json() : null;
+      const nextConfig = normalizeH3VideoConfig(data?.h3_video);
+      setH3VideoConfig(nextConfig);
+      return nextConfig;
+    } catch {
+      setH3VideoConfig(null);
+      return null;
+    }
+  }, []);
+  const checkH3MachineStatus = useCallback(async (options?: { silent?: boolean }) => {
+    if (h3StatusChecking) return;
+    setH3StatusChecking(true);
+    if (!options?.silent) setError(null);
+    try {
+      const response = currentUser?.role === 'admin'
+        ? await fetch('/api/admin/integrations/h3', { method: 'POST', cache: 'no-store' })
+        : await fetch('/api/config', { cache: 'no-store' });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || `H3 状态检查失败 (HTTP ${response.status})`);
+      }
+      setH3VideoConfig(normalizeH3VideoConfig(currentUser?.role === 'admin' ? data?.config : data?.h3_video));
+    } catch (error) {
+      if (!options?.silent) {
+        setError(error instanceof Error ? error.message : 'H3 状态检查失败');
+      }
+    } finally {
+      setH3StatusChecking(false);
+    }
+  }, [currentUser?.role, h3StatusChecking]);
+  const h3MachineStatus = useMemo(() => {
+    const status = buildH3MachineStatus({
+      config: h3VideoConfig,
+      selectedProvider,
+    });
+    if (!status) return null;
+    if (currentUser?.role !== 'admin') return status;
+    return {
+      ...status,
+      actionLabel: '刷新',
+      actionTitle: '状态会自动刷新；这里用于手动立即刷新 H3 API、Worker、队列和免费计费状态',
+      actionBusy: h3StatusChecking,
+      onAction: checkH3MachineStatus,
+    };
+  }, [checkH3MachineStatus, currentUser?.role, h3StatusChecking, h3VideoConfig, selectedProvider]);
+  const handleGenerationModelChange = useCallback((model: string) => {
+    if (model === H3_INLINE_MODEL_ID) {
+      setSelectedProvider('h3');
+      void refreshH3VideoConfig();
+      return;
+    }
+    setSelectedProvider('seedance');
+  }, [refreshH3VideoConfig]);
+
+  useEffect(() => {
+    const options = h3VideoConfig?.lora_options || [];
+    if (options.length === 0) {
+      if (selectedH3LoraId) setSelectedH3LoraId('');
+      return;
+    }
+    if (!options.some((option) => option.id === selectedH3LoraId)) {
+      setSelectedH3LoraId(h3VideoConfig?.default_lora_id || options[0]?.id || '');
+    }
+  }, [h3VideoConfig, selectedH3LoraId]);
 
   const projectNameCounts = useMemo(() => {
     return projects.reduce<Record<string, number>>((acc, project) => {
@@ -256,7 +432,7 @@ export function TemplateGenerateClient() {
   const scopeSummaryText = selectedVideoCard
     ? `保存到 ${selectedProjectLabel} / ${selectedVideoCard.title}`
     : selectedProject
-      ? `保存到 ${selectedProjectLabel}，提交时自动创建视频卡`
+      ? `保存到 ${selectedProjectLabel}`
       : selectedProjectLabel;
 
   useEffect(() => {
@@ -293,10 +469,48 @@ export function TemplateGenerateClient() {
       })
       .catch(() => {});
 
+    fetch('/api/config', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!cancelled) setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+      })
+      .catch(() => {
+        if (!cancelled) setH3VideoConfig(null);
+      });
+
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const triggerH3AutoCheck = useCallback(() => {
+    if (selectedProvider !== 'h3' || currentUser?.role !== 'admin') return;
+    if (h3StatusChecking || !isH3HealthCheckDue(h3VideoConfig)) return;
+    const now = Date.now();
+    if (now - lastH3AutoCheckAtRef.current < H3_AUTO_CHECK_MIN_GAP_MS) return;
+    lastH3AutoCheckAtRef.current = now;
+    void checkH3MachineStatus({ silent: true });
+  }, [
+    checkH3MachineStatus,
+    currentUser?.role,
+    h3StatusChecking,
+    h3VideoConfig,
+    selectedProvider,
+  ]);
+
+  useEffect(() => {
+    triggerH3AutoCheck();
+  }, [triggerH3AutoCheck]);
+
+  useEffect(() => {
+    if (selectedProvider !== 'h3' || currentUser?.role !== 'admin') return;
+    const timer = window.setInterval(triggerH3AutoCheck, H3_AUTO_CHECK_MIN_GAP_MS);
+    window.addEventListener('focus', triggerH3AutoCheck);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', triggerH3AutoCheck);
+    };
+  }, [currentUser?.role, selectedProvider, triggerH3AutoCheck]);
 
   const loadProjects = useCallback(async (preferredProjectId?: string | null) => {
     setLoadingProjects(true);
@@ -306,17 +520,14 @@ export function TemplateGenerateClient() {
         window.location.href = '/login?next=/template-generate';
         return;
       }
-      const data = await response.json();
+      const data = await readJsonResponse<{ projects?: ProjectOption[] }>(response);
       const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
       setProjects(list);
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
-      const rememberedProjectId = window.localStorage.getItem(PROJECT_STORAGE_KEY);
+      const rememberedProjectId = window.localStorage.getItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`);
       const preferredId = preferredProjectId || requestedProjectId || rememberedProjectId || '';
-      const nextProject = (preferredId ? list.find((project) => project.id === preferredId) : null)
-        || list.find((project) => project.type === 'personal')
-        || list[0]
-        || null;
-      setSelectedProjectId(nextProject?.id || '');
+      const nextProject = preferredId || list.find((project) => project.type === 'personal' && project.owner_user_id === currentUser?.id)?.id || '';
+      setSelectedProjectId(nextProject);
     } catch {
       setProjectMessage({ type: 'error', text: '项目列表加载失败，请刷新后重试' });
     } finally {
@@ -330,7 +541,7 @@ export function TemplateGenerateClient() {
 
   useEffect(() => {
     if (!selectedProjectId) return;
-    window.localStorage.setItem(PROJECT_STORAGE_KEY, selectedProjectId);
+    window.localStorage.setItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`, selectedProjectId);
   }, [selectedProjectId]);
 
   const loadVideoCards = useCallback(async (projectId: string, preferredVideoCardId?: string | null) => {
@@ -343,18 +554,13 @@ export function TemplateGenerateClient() {
     setVideoCardMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/video-cards`, { cache: 'no-store' });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_cards?: VideoCardOption[]; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡列表加载失败');
       const list: VideoCardOption[] = data.video_cards || [];
       setVideoCards(list);
       const requestedVideoCardId = new URLSearchParams(window.location.search).get('video_card_id');
-      const rememberedVideoCardId = readRememberedVideoCards()[projectId] || '';
-      const preferredId = preferredVideoCardId || requestedVideoCardId || rememberedVideoCardId || '';
-      const nextCard = (preferredId ? list.find((card) => card.id === preferredId) : null)
-        || list.find((card) => card.status !== 'sealed' && card.status !== 'archived')
-        || list[0]
-        || null;
-      setSelectedVideoCardId(nextCard?.id || '');
+      const preferredId = preferredVideoCardId || requestedVideoCardId || '';
+      setSelectedVideoCardId(preferredId);
     } catch (error) {
       setVideoCards([]);
       setSelectedVideoCardId('');
@@ -402,23 +608,63 @@ export function TemplateGenerateClient() {
     if (mode === 'append') setRecentTasksLoadingMore(true);
     setRecentTasksError('');
     try {
-      const response = await fetch(`/api/video/list?page=${page}&limit=${RECENT_TASK_PAGE_SIZE}`, { cache: 'no-store' });
-      if (response.status === 401) {
-        window.location.href = '/login?next=/template-generate';
-        return;
+      const fetchPage = async (targetPage: number) => {
+        const response = await fetch(`/api/video/list?page=${targetPage}&limit=${RECENT_TASK_PAGE_SIZE}`, { cache: 'no-store' });
+        if (response.status === 401) {
+          window.location.href = '/login?next=/template-generate';
+          return null;
+        }
+        const data = await readJsonResponse<{
+          tasks?: TaskItem[];
+          pagination?: { page?: number; total_pages?: number };
+          error?: string;
+          message?: string;
+        }>(response);
+        if (!response.ok) throw new Error(data.message || data.error || '最近任务加载失败');
+        const pagination = data.pagination || {};
+        const currentPage = Number(pagination.page || targetPage);
+        return {
+          tasks: Array.isArray(data.tasks) ? data.tasks as TaskItem[] : [],
+          currentPage,
+          totalPages: Number(pagination.total_pages || currentPage),
+        };
+      };
+
+      const firstPage = await fetchPage(page);
+      if (!firstPage) return;
+      let tasks = firstPage.tasks;
+      let currentPage = firstPage.currentPage;
+      let totalPages = firstPage.totalPages;
+      if (mode === 'replace') {
+        let visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+        let fetchedPages = 1;
+        while (
+          visualCount < RECENT_TASK_INITIAL_MIN_VISUALS
+          && fetchedPages < RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES
+          && currentPage < totalPages
+        ) {
+          const nextPage = await fetchPage(currentPage + 1);
+          if (!nextPage) return;
+          tasks = [
+            ...tasks,
+            ...nextPage.tasks.filter((task) => !tasks.some((item) => item.id === task.id)),
+          ];
+          currentPage = nextPage.currentPage;
+          totalPages = nextPage.totalPages;
+          visualCount = tasks.filter(recentTaskHasVisualPreview).length;
+          fetchedPages += 1;
+        }
       }
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || data.error || '最近任务加载失败');
-      const tasks = Array.isArray(data.tasks) ? data.tasks as TaskItem[] : [];
-      const pagination = data.pagination || {};
-      const currentPage = Number(pagination.page || page);
-      const totalPages = Number(pagination.total_pages || currentPage);
       const hasMore = currentPage < totalPages;
+      const pollableTaskIds = collectPollableTaskIds(tasks);
       setRecentTasks((current) => mode === 'append' ? [...current, ...tasks.filter((task) => !current.some((item) => item.id === task.id))] : tasks);
       setRecentTasksPage(currentPage);
       setRecentTasksHasMore(hasMore);
       recentTasksPageRef.current = currentPage;
       recentTasksHasMoreRef.current = hasMore;
+      if (pollableTaskIds.length > 0) {
+        setActivePollingTaskIds((current) => mergePollingTaskIds(pollableTaskIds, current));
+      }
     } catch (error) {
       setRecentTasksError(error instanceof Error ? error.message : '最近任务加载失败');
     } finally {
@@ -436,6 +682,31 @@ export function TemplateGenerateClient() {
     if (recentTasksLoadingRef.current || !recentTasksHasMoreRef.current) return;
     void loadRecentTasksPage(recentTasksPageRef.current + 1, 'append');
   }, [loadRecentTasksPage]);
+
+  const deleteRecentTask = useCallback(async (task: TaskItem) => {
+    if (task.can_delete === false || deletingRecentTaskId) return;
+    const confirmed = (await confirm('从最近生成移除此记录？视频文件不会物理删除，管理员仍可在留存区审计和恢复。', { title: '移除记录', confirmLabel: '移除记录', danger: true }));
+    if (!confirmed) return;
+
+    setDeletingRecentTaskId(task.id);
+    setRecentTasksError('');
+    try {
+      const response = await fetch(`/api/tasks/${task.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: '用户从最近生成移除' }),
+      });
+      const data = await readJsonResponse<{ error?: string; message?: string }>(response);
+      if (!response.ok) throw new Error(data.message || data.error || '最近生成删除失败');
+      setRecentTasks((current) => current.filter((item) => item.id !== task.id));
+      setActivePollingTaskIds((current) => current.filter((taskId) => taskId !== task.id));
+      setPolledResult((current) => current?.id === task.id ? null : current);
+    } catch (error) {
+      setRecentTasksError(error instanceof Error ? error.message : '最近生成删除失败');
+    } finally {
+      setDeletingRecentTaskId(null);
+    }
+  }, [deletingRecentTaskId, confirm]);
 
   useEffect(() => {
     const sentinel = recentTasksSentinelRef.current;
@@ -455,14 +726,19 @@ export function TemplateGenerateClient() {
       try {
         const settled: string[] = [];
         for (const taskId of activePollingTaskIds) {
-          const response = await fetch(`/api/video/status/${taskId}`);
+          const response = await fetch(`/api/video/status/${taskId}?refresh=true`);
           if (!response.ok) continue;
           const data = await response.json();
           if (cancelled) return;
           const task = data.task || data;
           setPolledResult(task);
           setRecentTasks((current) => current.map((item) => item.id === taskId ? { ...item, ...task } : item));
-          if (['succeeded', 'failed', 'cancelled'].includes(task.local_status)) settled.push(taskId);
+          if (
+            ['failed', 'cancelled'].includes(task.local_status)
+            || (task.local_status === 'succeeded' && !shouldContinuePollingStableDelivery(task))
+          ) {
+            settled.push(taskId);
+          }
         }
         if (settled.length > 0) {
           setActivePollingTaskIds((current) => current.filter((id) => !settled.includes(id)));
@@ -486,24 +762,27 @@ export function TemplateGenerateClient() {
     setProjectBusy(true);
     setProjectMessage(null);
     try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: projectName.trim() }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || data.error || '项目创建失败');
+      const data = await projectCreate.create({ name: projectName });
+      if (data.operation.state !== 'accepted') return;
       setProjectName('');
       setProjectCreateOpen(false);
       setProjectPickerOpen(false);
-      setProjectMessage({ type: 'success', text: '项目已创建' });
-      await loadProjects(data.project?.id || null);
+      setProjectMessage({ type: 'success', text: data.project ? '项目已创建' : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+      if (data.project) await loadProjects(data.project.id);
     } catch (error) {
-      setProjectMessage({ type: 'error', text: error instanceof Error ? error.message : '项目创建失败' });
+      setProjectMessage({ type: 'info', text: error instanceof Error ? error.message : '项目创建失败，输入已保留' });
     } finally {
       setProjectBusy(false);
     }
-  }, [loadProjects, projectName]);
+  }, [loadProjects, projectName, projectCreate.create]);
+
+  const recoverCreatedProject = async (result: ProjectCreateResult) => {
+    if (result.operation.state !== 'accepted') return;
+    setProjectCreateOpen(false); setProjectPickerOpen(false);
+    setProjectName('');
+    setProjectMessage({ type: 'info', text: result.project ? '已找到原创建项目' : '原创建已受理，当前项目已不可访问，没有重新创建。' });
+    if (result.project) await loadProjects(result.project.id);
+  };
 
   const handleCreateVideoCard = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -516,7 +795,7 @@ export function TemplateGenerateClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: videoCardTitle.trim(), objective: videoCardObjective.trim() || null }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡创建失败');
       setVideoCardTitle('');
       setVideoCardObjective('');
@@ -546,7 +825,7 @@ export function TemplateGenerateClient() {
           objective: videoCardObjective.trim() || '模板生成自动创建的视频卡',
         }),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<{ video_card?: VideoCardOption; error?: string; message?: string }>(response);
       if (!response.ok) throw new Error(data.message || data.error || '视频卡创建失败');
       const createdCard = data.video_card as VideoCardOption | undefined;
       if (!createdCard?.id) throw new Error('视频卡创建成功但没有返回 ID');
@@ -555,7 +834,7 @@ export function TemplateGenerateClient() {
       rememberVideoCard(selectedProjectId, createdCard.id);
       setVideoCardTitle('');
       setVideoCardObjective('');
-      setVideoCardMessage({ type: 'success', text: '已自动创建视频卡并保存本次生成' });
+      setVideoCardMessage({ type: 'success', text: '视频卡已创建，尚未提交生成' });
       return createdCard;
     } finally {
       setVideoCardBusy(false);
@@ -583,7 +862,31 @@ export function TemplateGenerateClient() {
     setCollections((current) => [data.collection, ...current]);
   }, []);
 
+  const checkPendingRequest = useCallback(async () => {
+    if (!requestStorageKey) throw new Error('请先登录后核对原请求');
+    const scope = submissionScope.current;
+    const raw = sessionStorage.getItem(requestStorageKey);
+    if (!raw) return false;
+    const pending = JSON.parse(raw) as { key?: unknown };
+    if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
+    setPendingRequestKey(pending.key);
+    const response = await fetch(`/api/tasks/request-status?${new URLSearchParams({ idempotency_key: pending.key })}`, { cache: 'no-store', headers: { 'x-app-session-user': currentUser!.id } });
+    const data = await readJsonResponse<{ task?: { id: string } | null; error?: string; message?: string }>(response);
+    if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请回到原账号核对原请求');
+    if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认，请继续查询原号');
+    if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+    sessionStorage.removeItem(requestStorageKey);
+    setPendingRequestKey(null);
+    setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+    void loadRecentTasksPage(1, 'replace');
+    setError('原请求已受理，已恢复原任务；本次没有再次生成');
+    return true;
+  }, [currentUser, requestStorageKey, loadRecentTasksPage]);
+
   const handleSubmit = useCallback(async (params: {
+    pricingRevision?: string | null;
+    pricingQuoteToken?: string;
+    quotedEstimatedCost?: number;
     prompt: string;
     generationMode: GenerationMode;
     ratio: VideoRatio;
@@ -595,43 +898,80 @@ export function TemplateGenerateClient() {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds?: string[];
+    referenceVideoUrls?: string[];
+    referenceAudioUrls?: string[];
     templateId?: string | null;
     agentRunId?: string | null;
     selectedAgentPlanKey?: string | null;
     agentPromptSnapshot?: string | null;
     finalPromptSnapshot?: string | null;
     promptUserEdited?: boolean;
+    provider?: string | null;
+    model?: string | null;
+    h3LoraId?: string | null;
+    draft?: boolean;
   }) => {
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSubmitting(true);
     setError(null);
     setResult(null);
+    const scope = submissionScope.current;
     let selectedCard: VideoCardOption | null = null;
     try {
-      selectedCard = await ensureVideoCardForSubmit();
+      if (!requestStorageKey) throw new Error('请先登录后生成');
+      if (await checkPendingRequest()) { setSubmitting(false); submitLock.current = false; return; }
+      if (!validVideoPricingAmount(params.quotedEstimatedCost)) throw new Error('请重新获取报价；尚未生成');
+      if (!selectedProjectId) throw new Error('请选择保存到的项目');
+      selectedCard = videoCards.find(card => card.id === selectedVideoCardId) || null;
+      if (selectedVideoCardId && !selectedCard) throw new Error('原视频卡暂不可用，未改变原归属');
+      if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
     } catch (ensureError) {
       setError(ensureError instanceof Error ? ensureError.message : '请先选择项目和视频卡');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
-    if (!selectedCard) {
-      setError('请先选择项目和视频卡');
+    if (selectedCard && !['draft','active','reviewing'].includes(selectedCard.status)) { setError('原视频卡当前不可继续创作，请先处理原锁定状态'); setSubmitting(false); submitLock.current = false; return; }
+    const selectedH3Model = params.model === H3_INLINE_MODEL_ID;
+    const requestedProvider: GenerationProvider = selectedH3Model ? 'h3' : 'seedance';
+    const requestedModel = selectedH3Model
+      ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id || ''
+      : params.model || '';
+    const requestedH3LoraId = selectedH3Model
+      ? h3VideoConfig?.lora_options.find((option) => option.id === params.h3LoraId)?.id
+        || selectedH3Lora?.id
+        || h3VideoConfig?.default_lora_id
+        || ''
+      : '';
+    if (selectedH3Model && (!h3Ready || !requestedModel)) {
+      setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
-    if (selectedCard.status === 'sealed' || selectedCard.status === 'archived') {
-      setError('当前视频卡已封板或归档，不能继续生成');
+    if (selectedH3Model && !requestedH3LoraId) {
+      setError('H3 LoRA 配置缺失，请刷新页面后重试。');
       setSubmitting(false);
+      submitLock.current = false;
       return;
     }
 
     try {
-      const response = await fetch('/api/tasks/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default',
-        },
-        body: JSON.stringify({
+      const draft = requestedProvider === 'seedance' && requestedModel === SEEDANCE_2_5_MODEL_ID && params.draft === true;
+      const quote = requireVideoPricingWithinCeiling(await requestVideoPricing({ provider: requestedProvider,
+        model: requestedModel, resolution: params.resolution, duration: params.duration,
+        context: { project_id: selectedProjectId, video_card_id: selectedCard?.id || null, ratio: params.ratio, draft,
+          reference_video_urls: params.referenceVideoUrls || [] } }, undefined, currentUser!.id), params.quotedEstimatedCost);
+      if (scope !== submissionScope.current || (selectedVideoCardId
+        ? submissionCard.current !== (selectedCard?.id || '')
+        : submissionCard.current && submissionCard.current !== (selectedCard?.id || ''))) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
+      const previous = creation.intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(creation.intent.state) ? creation.intent : null;
+      const requestBody = {
+          creation_contract_version: 2, entry: 'template', continuation: { mode: 'new' }, baseline_task_id: creationBaselineId || null, video_branch_id: null,
+          pricing_revision: quote.pricing_revision,
+          ...(quote.pricing_quote_token ? { pricing_quote_token: quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}),
+          max_estimated_cost: params.quotedEstimatedCost,
           prompt: params.prompt,
           generation_mode: params.generationMode,
           ratio: params.ratio,
@@ -642,23 +982,51 @@ export function TemplateGenerateClient() {
           return_last_frame: params.returnLastFrame,
           watermark: params.watermark,
           resolution_approval_confirmed: params.resolutionApprovalConfirmed,
-          idempotency_key: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          idempotency_key: previous?.request_id || crypto.randomUUID(),
           project_id: selectedProjectId,
-          video_card_id: selectedCard.id,
+          video_card_id: selectedCard?.id || null,
           reference_image_ids: params.referenceImageIds || [],
+          reference_video_urls: params.referenceVideoUrls || [],
+          reference_audio_urls: params.referenceAudioUrls || [],
           template_id: params.templateId || null,
           agent_run_id: params.agentRunId || null,
           selected_agent_plan_key: params.selectedAgentPlanKey || null,
           agent_prompt_snapshot: params.agentPromptSnapshot || null,
           final_prompt_snapshot: params.finalPromptSnapshot || params.prompt,
           prompt_user_edited: params.promptUserEdited === true,
-        }),
+          provider: requestedProvider,
+          model: requestedModel || undefined,
+          draft,
+          lora_id: selectedH3Model ? requestedH3LoraId : undefined,
+      };
+      if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
+      creationDraftBody.current = requestBody;
+      const prepared = await creation.prepare(requestBody, requestBody.idempotency_key, previous);
+      if (!prepared.availability?.canSubmit) { setError('请完成下方本次创作条件'); return; }
+      const acceptedBody = { ...requestBody, idempotency_key: prepared.request_id, intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
+        ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
+      sessionStorage.setItem(requestStorageKey!, JSON.stringify({ key: prepared.request_id,
+        fingerprint: stableGenerationPayloadJson(videoPricingBusinessInput(requestBody)) }));
+      setPendingRequestKey(prepared.request_id);
+      const response = await fetch('/api/tasks/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': currentUser!.id,
+          'x-tab-id': sessionStorage.getItem('workspace_tab_id') || 'default' },
+        body: JSON.stringify(acceptedBody),
       });
-      const data = await response.json();
+      const data = await readJsonResponse<CreateTaskResponse>(response);
+      if (response.ok && data.id) creation.setIntent({ ...prepared, state: 'accepted', accepted_task_id: data.id });
+      if (scope !== submissionScope.current) return;
       if (!response.ok) {
+        if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
         setErrorDebug(data._debug || null);
+        if (response.status < 500 && !(response.status === 409 && data.code?.startsWith('IDEMPOTENCY_'))) {
+          sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
+        }
         throw new Error(data.message || data.error || `创建失败 (HTTP ${response.status})`);
       }
+      if (!data.id) throw new Error('受理结果待确认，请查询原请求；不会重新生成');
+      sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
       setResult(data);
       setErrorDebug(null);
       setPolledResult(null);
@@ -667,29 +1035,41 @@ export function TemplateGenerateClient() {
         {
           id: data.id,
           prompt: params.prompt,
+          provider: requestedProvider,
+          generation_mode: params.generationMode,
           local_status: data.status || 'submitted',
+          public_video_url: null,
           result_video_url: null,
           result_last_frame_url: null,
           local_video_path: null,
+          error_message: null,
+          delivery_stage: null,
+          stable_download_ready: false,
+          preview_available: false,
+          retry_after_ms: null,
+          play_url: null,
+          download_url: null,
+          thumbnail_url: null,
           provider_cost_currency: null,
           provider_official_amount_minor: null,
           provider_final_amount_minor: null,
           provider_official_amount_micros: null,
           provider_final_amount_micros: null,
           project_id: data.project_id || selectedProjectId,
-          video_card_id: data.video_card_id || selectedCard.id,
+          video_card_id: data.video_card_id || selectedCard?.id || null,
           template_id: data.template_id || params.templateId || null,
           agent_run_id: data.agent_run_id || params.agentRunId || null,
           selected_agent_plan_key: data.selected_agent_plan_key || params.selectedAgentPlanKey || null,
           prompt_user_edited: params.promptUserEdited === true,
           generation_template: null,
-          video_card: {
+          can_delete: true,
+          video_card: selectedCard ? {
             id: selectedCard.id,
             title: selectedCard.title,
             objective: selectedCard.objective,
             status: selectedCard.status,
             project_id: selectedCard.project_id,
-          },
+          } : null,
           created_at: data.created_at,
         },
         ...current.filter((task) => task.id !== data.id),
@@ -702,15 +1082,34 @@ export function TemplateGenerateClient() {
       if (error instanceof Error) setError(error.message);
     } finally {
       setSubmitting(false);
+      submitLock.current = false;
     }
-  }, [ensureVideoCardForSubmit, selectedProjectId]);
+  }, [
+    ensureVideoCardForSubmit,
+    h3Ready,
+    h3VideoConfig,
+    selectedH3Lora?.id,
+    selectedH3Preset?.id,
+    selectedProjectId,
+    selectedVideoCardId,
+    currentUser,
+    requestStorageKey,
+    checkPendingRequest,
+  ]);
 
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
+  const displayRecentTasks = useMemo(() => orderRecentTaskCards(recentTasks), [recentTasks]);
 
-  return (
+  return <>{productDialog}{((
     <div className="composer-page template-generate-page">
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
       <main className="composer-main template-generate-main">
+        {pendingRequestKey && <div className="composer-prefill-notice" role="status">
+          提交结果待确认，当前输入已保留。
+          <button type="button" disabled={submitting} onClick={() => {
+            setSubmitting(true); void checkPendingRequest().catch(cause => setError(cause instanceof Error ? cause.message : '原请求暂时无法确认')).finally(() => setSubmitting(false));
+          }}>查询原请求</button>
+        </div>}
         <section className="template-generate-hero" aria-label="模板生成工作台">
           <div>
             <span className="template-generate-kicker">模板生成</span>
@@ -778,12 +1177,13 @@ export function TemplateGenerateClient() {
                     <input
                       className="composer-project-input"
                       value={projectName}
+                      disabled={projectCreate.busy || Boolean(projectCreate.pending)}
                       onChange={(event) => setProjectName(event.currentTarget.value)}
                       placeholder="输入项目名称"
                       maxLength={40}
                       autoFocus
                     />
-                    <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy}>
+                    <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
                       {projectBusy ? '创建中...' : '创建'}
                     </button>
                   </form>
@@ -830,7 +1230,8 @@ export function TemplateGenerateClient() {
 
           <div className="template-generate-video-card">
             <div className="template-generate-video-card-picker">
-              <span>视频卡</span>
+              <span>视频卡（可选）</span>
+              <button type="button" disabled={submitting || videoCardBusy} onClick={() => setSelectedVideoCardId('')}>新作直接保存到项目</button>
               <div className="template-video-card-list" role="listbox" aria-label="选择视频卡">
                 {loadingVideoCards ? (
                   <span className="template-video-card-empty">正在加载视频卡...</span>
@@ -862,7 +1263,7 @@ export function TemplateGenerateClient() {
                 })}
               </div>
             </div>
-            {selectedVideoCard && (
+            {showVideoCardManagementUi && selectedVideoCard && (
               <Link href={`/projects/${selectedVideoCard.project_id || selectedProjectId}/video-cards/${selectedVideoCard.id}`}>查看视频卡</Link>
             )}
             <form onSubmit={handleCreateVideoCard}>
@@ -887,6 +1288,7 @@ export function TemplateGenerateClient() {
           </div>
           </section>
 
+        <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverCreatedProject} />
         {(projectMessage || videoCardMessage) && (
           <div className={`composer-project-message ${(projectMessage || videoCardMessage)?.type || 'info'}`}>
             {(projectMessage || videoCardMessage)?.text}
@@ -894,14 +1296,17 @@ export function TemplateGenerateClient() {
         )}
         </details>
 
-        <GenerationComposer
+        <CreationAvailability controller={creation} onBaselineChange={id => { setCreationBaselineId(id); if (creation.intent && creationDraftBody.current) void creation.prepare({ ...creationDraftBody.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message)); }} />
+      <GenerationComposer
           collections={collections}
           selectedVideoCardId={selectedVideoCardId}
+          pricingProjectId={selectedProjectId}
           canManageTemplates={currentUser?.role === 'admin'}
           templateMode="workbench"
           initialTemplateId={initialTemplateId}
           resultReturnTo={templateReturnTo}
-          require1080pApproval={Boolean(selectedProject && selectedProject.type !== 'personal')}
+          require1080pApproval={false}
+            creationContextKey={creation.contextKey}
           onCollectionLoad={handleCollectionLoad}
           onCollectionSave={handleCollectionSave}
           onCollectionNew={handleCollectionSave}
@@ -912,6 +1317,19 @@ export function TemplateGenerateClient() {
           result={result}
           polledResult={polledResult}
           isPolling={isPolling}
+          providerLabel={activeProviderLabel}
+          providerOptions={[]}
+          selectedProvider={selectedProvider}
+          pricingProvider={selectedProvider}
+          pricingModelId={selectedProvider === 'h3' ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id : undefined}
+          providerStatus={h3MachineStatus}
+          modelLabel={activeModelLabel}
+          modelOptions={activeModelOptions}
+          onModelChange={handleGenerationModelChange}
+          auxiliaryLabel="LoRA"
+          auxiliaryOptions={activeH3LoraOptions}
+          selectedAuxiliary={selectedH3LoraId}
+          onAuxiliaryChange={setSelectedH3LoraId}
           onReset={() => {
             setResult(null);
             setError(null);
@@ -924,22 +1342,54 @@ export function TemplateGenerateClient() {
             <div className="composer-recent-title">最近任务</div>
             {recentTasks.length > 0 && (
               <div className="composer-recent-grid">
-                {recentTasks.map((task) => {
+                {displayRecentTasks.map((task) => {
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
+                  const taskErrorMessage = task.error_message?.trim();
                   return (
                     <article key={task.id} className="composer-task-card">
-                      <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-link">
-                        <TemplateTaskPreview task={task} />
-                        <div className="composer-task-card-body">
+                      {task.can_delete !== false && (
+                        <button
+                          type="button"
+                          className="composer-task-card-delete"
+                          disabled={deletingRecentTaskId === task.id}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            void deleteRecentTask(task);
+                          }}
+                          aria-label="从最近生成移除"
+                          title="从最近生成移除"
+                        >
+                          <Trash2 size={14} aria-hidden="true" />
+                        </button>
+                      )}
+                      <div className="composer-task-card-link">
+                        <TaskVideoThumbnail
+                          taskId={task.id}
+                          thumbnailUrl={task.thumbnail_url}
+                          publicVideoUrl={task.public_video_url}
+                          localVideoPath={task.local_video_path}
+                          resultVideoUrl={task.result_video_url}
+                          resultLastFrameUrl={task.result_last_frame_url}
+                          status={task.local_status}
+                          deliveryStage={task.delivery_stage}
+                          previewAvailable={task.preview_available}
+                          stableDownloadReady={task.stable_download_ready}
+                          retryAfterMs={task.retry_after_ms}
+                          provider={task.provider}
+                          generationMode={task.generation_mode}
+                          size="card"
+                          className="composer-task-card-preview"
+                          href={taskDetailHref(task.id, '/template-generate')}
+                          reactions={task.local_status === 'succeeded'}
+                        />
+                        <Link href={taskDetailHref(task.id, '/template-generate')} className="composer-task-card-body">
                           <div className="composer-task-card-prompt" title={`${formatAbsoluteTime(task.created_at)} · ${task.prompt}`}>
                             <time className="composer-task-card-prompt-time" dateTime={task.created_at}>
                               {formatRecentTaskTime(task.created_at)}
                             </time>
                             <span className="composer-task-card-prompt-text">{truncatePrompt(task.prompt)}</span>
-                          </div>
-                          <div className="composer-task-card-video-card">
-                            {task.video_card ? task.video_card.title : '未归档视频卡'}
                           </div>
                           <div className="composer-task-card-template">
                             {task.generation_template ? `${task.generation_template.name} ${task.generation_template.version}` : '模板生成'}
@@ -956,8 +1406,13 @@ export function TemplateGenerateClient() {
                                       : task.local_status}
                             </span>
                           </div>
-                        </div>
-                      </Link>
+                          {task.local_status === 'failed' && taskErrorMessage && (
+                            <div className="composer-task-card-error" title={taskErrorMessage}>
+                              {taskErrorMessage}
+                            </div>
+                          )}
+                        </Link>
+                      </div>
                       {currentUser?.role === 'admin' && task.agent_run_id && (
                         <Link className="composer-task-card-trace" href={`/admin/agent-runs/${task.agent_run_id}`}>
                           查看链路
@@ -990,5 +1445,5 @@ export function TemplateGenerateClient() {
         )}
       </main>
     </div>
-  );
+  ))}</>;
 }

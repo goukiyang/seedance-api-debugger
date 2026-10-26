@@ -1,0 +1,19 @@
+.item { position: relative; min-width: 0; }
+.item[data-dragging] { z-index: 5; opacity: .88; }
+.handle { display: inline-flex; flex: 0 0 24px; align-items: center; justify-content: center; width: 24px; min-height: 32px; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: #8d9c99; cursor: grab; touch-action: pan-y; }
+.handle:hover, .handle:focus-visible { color: #baf5e9; background: #ffffff0c; }
+.handle:focus-visible { outline: 2px solid #79daca; outline-offset: -2px; }
+.handle:active { cursor: grabbing; }
+.handle:disabled { opacity: .35; cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .handle, .handle:disabled { opacity: 0; pointer-events: none; }
+  /* A group row contains its nested list: do not reveal every child handle on group hover. */
+  .item:hover > :first-child > :first-child > .handle,
+  .item:focus-within > :first-child > :first-child > .handle,
+  .item:hover > :first-child > .handle,
+  .item:focus-within > :first-child > .handle,
+  .item[data-dragging] > :first-child > .handle,
+  .handle:focus-visible { opacity: 1; pointer-events: auto; }
+}
+@media (hover: none), (pointer: coarse) { .handle { min-width: 32px; min-height: 40px; } }
+@media (prefers-reduced-motion: reduce) { .item { transition: none !important; } }

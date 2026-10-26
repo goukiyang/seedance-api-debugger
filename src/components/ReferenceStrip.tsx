@@ -2,25 +2,53 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
 import { AddReferenceCard } from '@/components/AddReferenceCard';
-
-const MAX_REFS = 9;
+import type { UploadProgressHandler, UploadProgressSnapshot } from '@/lib/http/file-upload';
+import {
+  seedanceReferenceMediaCapabilities,
+  validateSeedanceReferenceMediaPreflight,
+} from '@/lib/provider/reference-media-policy';
 
 interface Props {
   assets: WorkspaceAssetItem[];
   uploadStatuses: Record<string, UploadStatus>;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   onRemove: (assetId: string) => Promise<void>;
   onReorder: (newOrder: Array<{ assetId: string; sortOrder: number }>) => Promise<void>;
-  onReplace: (assetId: string, file: File) => Promise<void>;
-  onPreview: (url: string) => void;
+  onReplace: (assetId: string, file: File, onProgress?: UploadProgressHandler) => Promise<void>;
+  onPreview: (url: string, type?: WorkspaceAssetItem['type']) => void;
   onOpenHistory?: () => void;
+  /** When given, “替换” opens the shared picker for this asset instead of a raw file input. */
+  onReplaceFromLibrary?: (assetId: string) => void;
   generationMode?: string;
+  model?: string | null;
   loading?: boolean;
 }
 
+type ReferenceUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
+function buildUploadProgress(
+  file: File,
+  fileIndex: number,
+  fileCount: number,
+  progress: UploadProgressSnapshot,
+): ReferenceUploadProgress {
+  const filePrefix = fileCount > 1 ? `${fileIndex + 1}/${fileCount} ` : '';
+  return {
+    label: `${filePrefix}${progress.label}`,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
+}
+
 function getFrameRole(asset: WorkspaceAssetItem, idx: number, assets: WorkspaceAssetItem[], mode?: string): FrameRole {
+  if (asset.type !== 'image') return null;
   if (asset.role === 'first_frame') return 'first_frame';
   if (asset.role === 'last_frame') return 'last_frame';
   if (mode === 'first_last_frame') {
@@ -70,14 +98,18 @@ export function ReferenceStrip({
   onReplace,
   onPreview,
   onOpenHistory,
+  onReplaceFromLibrary,
   generationMode,
+  model,
   loading = false,
 }: Props) {
+  const mediaLimits = seedanceReferenceMediaCapabilities(model);
   const [orderedAssets, setOrderedAssets] = useState<WorkspaceAssetItem[]>(assets);
   const [draggedKey, setDraggedKey] = useState<string | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const [dropReplaceKey, setDropReplaceKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<ReferenceUploadProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetAssetIdRef = useRef<string | null>(null);
@@ -224,22 +256,38 @@ export function ReferenceStrip({
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setUploading(true);
+    setUploadProgress(null);
     try {
       for (let i = 0; i < files.length; i++) {
-        await onUpload(files[i]);
+        const file = files[i];
+        setUploadProgress({
+          label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
+          detail: file.name,
+        });
+        await onUpload(file, (progress) => {
+          setUploadProgress(buildUploadProgress(file, i, files.length, progress));
+        });
       }
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [onUpload]);
 
   const replaceAssetWithFile = useCallback(async (assetId: string, file: File) => {
     setUploading(true);
+    setUploadProgress({
+      label: '准备替换',
+      detail: file.name,
+    });
     try {
-      await onReplace(assetId, file);
+      await onReplace(assetId, file, (progress) => {
+        setUploadProgress(buildUploadProgress(file, 0, 1, progress));
+      });
     } finally {
       setUploading(false);
+      setUploadProgress(null);
       setDropReplaceKey(null);
     }
   }, [onReplace]);
@@ -258,9 +306,10 @@ export function ReferenceStrip({
 
   const handleReplaceClick = useCallback((assetId: string) => {
     if (uploading || loading) return;
+    if (onReplaceFromLibrary) { onReplaceFromLibrary(assetId); return; }
     replaceTargetAssetIdRef.current = assetId;
     replaceInputRef.current?.click();
-  }, [loading, uploading]);
+  }, [loading, onReplaceFromLibrary, uploading]);
 
   const handleAddClick = useCallback(() => {
     if (onOpenHistory) {
@@ -277,12 +326,21 @@ export function ReferenceStrip({
     );
     if (files.length === 0) return;
     setUploading(true);
+    setUploadProgress(null);
     try {
-      for (const file of files) {
-        await onUpload(file);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress({
+          label: files.length > 1 ? `${i + 1}/${files.length} 准备上传` : '准备上传',
+          detail: file.name,
+        });
+        await onUpload(file, (progress) => {
+          setUploadProgress(buildUploadProgress(file, i, files.length, progress));
+        });
       }
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }, [onUpload]);
 
@@ -297,8 +355,16 @@ export function ReferenceStrip({
     await replaceAssetWithFile(asset.assetId, files[0]);
   }, [replaceAssetWithFile]);
 
-  const displayAssets = orderedAssets.slice(0, MAX_REFS);
-  const hasMore = assets.length > MAX_REFS;
+  const displayAssets = orderedAssets;
+  const referenceCounts = orderedAssets.reduce(
+    (counts, asset) => {
+      if (asset.type === 'video') counts.video += 1;
+      else if (asset.type === 'audio') counts.audio += 1;
+      else counts.image += 1;
+      return counts;
+    },
+    { image: 0, video: 0, audio: 0 },
+  );
 
   // ============================================================================
   // Render
@@ -337,6 +403,15 @@ export function ReferenceStrip({
           const isDragging = draggedKey === itemKey;
           const isInsertBefore = dragInsertIndex === idx && !isDragging;
           const isInsertAfter = dragInsertIndex === displayAssets.length && idx === displayAssets.length - 1;
+          const mediaItem = { name: asset.fileName, width: asset.width, height: asset.height, index: idx };
+          const mediaIssue = asset.type === 'image' || asset.type === 'video'
+            ? validateSeedanceReferenceMediaPreflight({
+                model: model || undefined, metadataValidation: 'known-only',
+                ...(asset.type === 'image' ? { images: [mediaItem] } : { videos: [mediaItem] }),
+              })
+            : null;
+          const isLowResolution = Boolean(mediaIssue);
+          const lowResolutionTitle = mediaIssue?.message;
 
           return (
             <div
@@ -368,7 +443,9 @@ export function ReferenceStrip({
                 isInsertBefore ? 'ref-thumb-insert-before' : '',
                 isInsertAfter ? 'ref-thumb-insert-after' : '',
                 dropReplaceKey === itemKey ? 'ref-thumb-replace-target' : '',
+                isLowResolution ? 'ref-thumb-low-resolution' : '',
               ].filter(Boolean).join(' ')}
+              title={lowResolutionTitle}
             >
               <ReferenceThumb
                 asset={asset}
@@ -379,33 +456,39 @@ export function ReferenceStrip({
                 onReplace={handleReplaceClick}
                 onPreview={onPreview}
               />
+              {isLowResolution && <span className="ref-thumb-warning-badge">低清</span>}
             </div>
           );
         })}
 
-        {assets.length < MAX_REFS && (
-          <AddReferenceCard
-            onClick={handleAddClick}
-            disabled={uploading || loading}
-          />
-        )}
+        <AddReferenceCard
+          onClick={handleAddClick}
+          disabled={uploading || loading}
+        />
       </div>
 
       {/* 上传中状态 */}
       {(uploading || loading) && (
         <span className="ref-strip-uploading">
-          <span className="loading" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+          {uploadProgress ? (
+            <UploadProgressIndicator
+              label={uploadProgress.label}
+              detail={uploadProgress.detail}
+              percent={uploadProgress.percent}
+              variant="dark"
+              className="ref-strip-upload-progress"
+            />
+          ) : (
+            <span className="loading" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+          )}
         </span>
-      )}
-
-      {/* 超出提示 */}
-      {hasMore && (
-        <span className="ref-strip-more">+{assets.length - MAX_REFS} 张</span>
       )}
 
       {/* 图号说明 */}
       <span className="ref-strip-count">
-        {assets.length === 0 ? '最多 9 张' : `${assets.length}/${MAX_REFS} 张`}
+        {assets.length === 0
+          ? `参考图最多 ${mediaLimits.imageLimit} 张，视频/音频各最多 ${mediaLimits.videoLimit}/${mediaLimits.audioLimit} 个`
+          : `图 ${referenceCounts.image}/${mediaLimits.imageLimit} · 视频 ${referenceCounts.video}/${mediaLimits.videoLimit} · 音频 ${referenceCounts.audio}/${mediaLimits.audioLimit}`}
       </span>
     </div>
   );

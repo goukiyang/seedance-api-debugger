@@ -1,0 +1,107 @@
+.node-type-image .video-model-info.has-canvas-node-price {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    gap: 6px;
+}
+
+.node-type-image select[data-generation-image-model][hidden] { display: none !important; }
+.node-type-image .canvas-model-trigger[hidden] { display: none; }
+.node-type-image .canvas-model-trigger {
+    display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%;
+    border: 0; background: transparent; color: inherit; cursor: pointer;
+    font: inherit; padding: 0; letter-spacing: 0;
+}
+.canvas-model-trigger > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-model-trigger > i { margin-left: auto; font-style: normal; }
+.canvas-model-menu {
+    position: fixed; inset: auto; margin: 0; padding: 4px;
+    max-width: calc(100vw - 16px); max-height: min(320px, calc(100vh - 16px));
+    overflow: auto; border: 1px solid #505555; border-radius: 6px;
+    background: #262a2a; color: #f3f5f5; box-shadow: 0 8px 24px #0006;
+    font: 13px/1.4 var(--font-family, sans-serif); letter-spacing: 0;
+}
+.canvas-model-menu button {
+    display: flex; align-items: center; gap: 16px; width: 100%; min-height: 34px;
+    border: 0; border-radius: 4px; padding: 8px 10px; background: transparent;
+    color: inherit; cursor: pointer; text-align: left; font: inherit; letter-spacing: 0;
+}
+.canvas-model-menu button:not(:disabled):hover, .canvas-model-menu button:focus-visible { background: #3a4444; outline: none; }
+.canvas-model-menu button:focus-visible { outline: 1px solid var(--accent-blue, #8ca8c0); outline-offset: -1px; }
+.canvas-model-menu button:disabled { cursor: not-allowed; color: #b9c5c3; }
+.canvas-model-menu button[aria-checked="true"] { background: #304b48; }
+.canvas-model-menu button > span { min-width: 0; overflow-wrap: anywhere; }
+.canvas-model-menu button > span { flex: 1 1 45%; }
+.canvas-model-menu small { margin-left: auto; flex: 0 1 55%; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; font-size: 11px; color: #aebcba; font-variant-numeric: tabular-nums; }
+
+.node-type-image .has-canvas-node-price select[data-generation-image-model] {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+    text-overflow: ellipsis;
+}
+
+.node-type-image .canvas-node-price-slot {
+    margin-left: auto;
+    flex: 0 0 auto;
+    max-width: 50%;
+    text-align: right;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-secondary, #a8b4b4);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+}
+
+.node-type-image [data-canvas-node-price]:focus-visible {
+    outline: 1px solid var(--accent-blue, #8ca8c0);
+    outline-offset: 2px;
+}
+
+.toolflow-template-settings .toolflow-model-price-field {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+
+.toolflow-model-price-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.toolflow-model-price-row select[data-toolflow-node-field="model"] {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    text-overflow: ellipsis;
+}
+
+.toolflow-model-price {
+    flex: 0 0 auto;
+    max-width: 50%;
+    margin-left: auto;
+    text-align: right;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+}
+.generated-reference-card { position: relative; }
+.canvas-image-billing {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    max-width: calc(100% - 16px);
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #333;
+    font-size: 11px;
+    line-height: 16px;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+}

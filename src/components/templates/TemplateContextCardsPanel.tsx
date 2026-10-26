@@ -1,5 +1,7 @@
 'use client';
 
+import { useProductDialog } from '@/components/useProductDialog';
+
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -86,6 +88,7 @@ export function TemplateContextCardsPanel({
   onChange,
   onRewriteCard,
 }: Props) {
+  const { confirm, productDialog } = useProductDialog();
   const [internalEditingCardId, setInternalEditingCardId] = useState<string | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -160,10 +163,10 @@ export function TemplateContextCardsPanel({
     updateCard(cardId, { bound_image: null });
   };
 
-  const deleteCard = (cardId: string) => {
+  const deleteCard = async (cardId: string) => {
     const card = sortedCards.find((item) => item.id === cardId);
     if (!card) return;
-    const confirmed = window.confirm(`删除「${card.title}」这张上下文卡片？删除后会自动保存。`);
+    const confirmed = (await confirm(`删除「${card.title}」这张上下文卡片？删除后会自动保存。`, { title: '删除上下文卡', confirmLabel: '删除卡片', danger: true }));
     if (!confirmed) return;
 
     const nextCards = reorderCards(sortedCards.filter((item) => item.id !== cardId));
@@ -376,7 +379,7 @@ export function TemplateContextCardsPanel({
   };
 
   if (showCardEditorPage) {
-    return (
+    return <>{productDialog}{((
       <section className="template-context-card-edit-page" aria-label="上下文卡片弹窗编辑内容">
         <div className="template-card-edit-statusbar">
           <span>{saveStatusText(saveStatus, saveError)}</span>
@@ -389,10 +392,10 @@ export function TemplateContextCardsPanel({
           onSelect={bindImage}
         />
       </section>
-    );
+    ))}</>;
   }
 
-  return (
+  return <>{productDialog}{((
     <section className="template-context-workspace" aria-label="模板上下文卡片">
       <div className={`template-context-edit-row ${showInlineEditor && editingCard ? 'is-editing' : ''}`}>
         <div className="template-context-main">
@@ -588,5 +591,5 @@ export function TemplateContextCardsPanel({
         onSelect={bindImage}
       />
     </section>
-  );
+  ))}</>;
 }

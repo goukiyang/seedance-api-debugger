@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import CreditRequestDialog from '@/components/CreditRequestDialog';
 
 export default function PointsPage() {
-  redirect('/generate');
+  return <main style={{ padding: 24 }}><h1>我的积分</h1><CreditRequestDialog autoOpen /></main>;
 }

@@ -2,6 +2,85 @@
  * Canvas Engine – Panning, zooming, node drag, connections
  * Nodes rendered with label OUTSIDE card, connectors always visible
  */
+const CanvasReferenceSelection = Object.freeze({
+    start({ targetNodeId, previousSelectedNodeId = null, maximumReferences, references = [], multiple = false }) {
+        const maximum = Math.max(0, Number(maximumReferences) || 0);
+        const durableReferences = references
+            .filter(item => item?.nodeId && item?.referenceImageId)
+            .slice(0, maximum);
+        return {
+            active: durableReferences.length < maximum,
+            targetNodeId,
+            previousSelectedNodeId,
+            multiple: multiple === true,
+            maximumReferences: maximum,
+            references: durableReferences,
+            startedAt: Date.now()
+        };
+    },
+
+    add(session, candidate) {
+        if (!session?.active || !candidate?.nodeId || !candidate?.referenceImageId) {
+            return { session, accepted: false, finished: !session?.active };
+        }
+        if (session.references.some(item => item.referenceImageId === candidate.referenceImageId)) {
+            return { session, accepted: false, finished: false };
+        }
+        if (session.references.length >= session.maximumReferences) {
+            return { session: { ...session, active: false }, accepted: false, finished: true };
+        }
+        const references = [...session.references, {
+            nodeId: candidate.nodeId,
+            referenceImageId: candidate.referenceImageId
+        }];
+        const finished = !session.multiple || references.length >= session.maximumReferences;
+        return {
+            session: { ...session, active: !finished, references },
+            accepted: true,
+            finished
+        };
+    },
+
+    sync(session, references = []) {
+        if (!session) return null;
+        const durableReferences = references.filter(item => item?.nodeId && item?.referenceImageId);
+        return { ...session, references: durableReferences };
+    },
+
+    transition(session, action) {
+        if (!session) return { session: null, selectedNodeId: null };
+        if (action === 'return') return { session, selectedNodeId: session.targetNodeId };
+        if (action === 'exit') return { session: { ...session, active: false }, selectedNodeId: session.targetNodeId };
+        return { session, selectedNodeId: null };
+    },
+
+    deleteNode(session, nodeId) {
+        if (!session) return null;
+        if (nodeId === session.targetNodeId) return { ...session, active: false };
+        return {
+            ...session,
+            references: session.references.filter(item => item.nodeId !== nodeId)
+        };
+    },
+
+    pendingTargetId(session) {
+        return session?.active ? session.targetNodeId : null;
+    }
+});
+
+const TOOLFLOW_CONNECTIONS = Object.freeze({
+    'flow-input': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-template': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-select': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-confirm': new Set(['flow-template', 'flow-select', 'flow-confirm', 'flow-output']),
+    'flow-output': new Set()
+});
+
+function cloneCanvasValue(value) {
+    if (typeof structuredClone === 'function') return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
 class CanvasEngine {
     constructor(containerId, canvasId, svgId) {
         this.container = document.getElementById(containerId);
@@ -31,12 +110,38 @@ class CanvasEngine {
 
         this.nodes = new Map();
         this.connections = [];
+        this.flowTemplateOptions = [];
+        this.flowSystemSettings = { model: 'gpt-image-2', quality: 'auto', providerReady: false };
+        this.flowInputUploadState = new Map();
         this.selectedNodeId = null;
+        this.selectedNodeIds = new Set();
         this.nextNodeId = 1;
 
         this.onNodeSelected = null;
         this.onNodeDeselected = null;
         this.onConnectionCreated = null;
+        this.onConnectionDeleted = null;
+        this.onConnectionRejected = null;
+        this.onNodeDeleted = null;
+        this.onViewportChanged = null;
+        this.onCanvasGeometryChanged = null;
+        this._commandCreateConnection = this._createConnection.bind(this);
+
+        this.connectionResizeFrame = null;
+        this.nodeResizeObserver = typeof ResizeObserver === 'function'
+            ? new ResizeObserver(() => {
+                if (this.connectionResizeFrame !== null) return;
+                this.connectionResizeFrame = requestAnimationFrame(() => {
+                    this.connectionResizeFrame = null;
+                    this._updateConnections();
+                    this.refreshGroupFrames();
+                });
+            })
+            : null;
+        this.nodeGeometryObserver = typeof MutationObserver === 'function' ? new MutationObserver(records => {
+            if (records.some(record => record.target?.closest?.('.canvas-node'))) this.scheduleGroupFrames();
+        }) : null;
+        this.nodeGeometryObserver?.observe(this.canvas, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] });
 
         this.isSnapEnabled = true; // Snap to grid by default
         this.isSpacePressed = false;
@@ -49,8 +154,31 @@ class CanvasEngine {
     }
 
     _initEvents() {
+        if (!this.container.hasAttribute('tabindex')) this.container.tabIndex = -1;
+        // Capture before node handlers can select, pick a reference, or start a drag.
+        this.container.addEventListener('mousedown', (e) => {
+            this.spacePanClickPending = false;
+            if (e.defaultPrevented || this._isInteractiveTarget(e.target)) return;
+            if (e.target !== this.container && e.target !== this.canvas && !e.target.closest('.canvas-node')) return;
+            if (this._canvasInputBlocked()) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+            if (e.button === 0) this.container.focus({ preventScroll: true });
+            if (e.button === 0 && (this.isSpacePressed || this.interactionMode === 'hand')) {
+                this.spacePanClickPending = true;
+                this._onMouseDown(e);
+                e.stopImmediatePropagation();
+            }
+        }, true);
+        this.container.addEventListener('click', (e) => {
+            if (!this.spacePanClickPending || e.detail === 0) return;
+            this.spacePanClickPending = false;
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }, true);
         this.container.addEventListener('mousedown', (e) => this._onMouseDown(e));
         window.addEventListener('mousemove', (e) => this._onMouseMove(e));
+        window.addEventListener('mouseup', () => {
+            if (this._canvasInputBlocked()) this._cancelInputGesture();
+        }, true);
         window.addEventListener('mouseup', (e) => this._onMouseUp(e));
         this.container.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
         this.container.addEventListener('dblclick', (e) => this._onDoubleClick(e));
@@ -60,43 +188,121 @@ class CanvasEngine {
             if (e.target === this.container || e.target === this.canvas) {
                 this._deselectAll();
                 this._hideContextMenu();
-                this._hideAddMenu();
             }
         });
 
         document.addEventListener('keydown', (e) => {
+            if (e.defaultPrevented || this._canvasInputBlocked()) return;
             if (e.key === 'Escape') {
+                this._cancelInputGesture();
                 this._hideContextMenu();
                 this._hideAddMenu();
-                if (this.isDrawingConnection) this._cancelConnection();
             }
-            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodeId
-                && !['TEXTAREA','INPUT'].includes(document.activeElement.tagName)
-                && !document.activeElement.isContentEditable) {
-                this.deleteNode(this.selectedNodeId);
+            if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedNodeId && !e.isComposing
+                && this.container.contains(document.activeElement)
+                && !this._isInteractiveTarget(e.target)
+                && !this._isInteractiveTarget(document.activeElement)) {
+                e.preventDefault();
+                this.requestDeleteNodes(this.getSelectedNodeIds());
             }
         });
 
         window.addEventListener('keydown', (e) => {
-            if (e.key === ' ' && !['TEXTAREA', 'INPUT'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
+            if (e.defaultPrevented || e.isComposing || this._canvasInputBlocked()) return;
+            if (e.key === ' ' && !this._isInteractiveTarget(e.target)
+                && !this._isInteractiveTarget(document.activeElement)) {
                 this.isSpacePressed = true;
                 this.container.style.cursor = 'grab';
-                if (document.activeElement === document.body) {
-                    e.preventDefault();
-                }
+                e.preventDefault();
             }
         });
         window.addEventListener('keyup', (e) => {
             if (e.key === ' ') {
                 this.isSpacePressed = false;
-                this.container.style.cursor = 'default';
+                this.container.style.cursor = this.isPanning ? 'grabbing' : this.interactionMode === 'hand' ? 'grab' : 'default';
             }
+        }, true);
+        window.addEventListener('blur', () => this._cancelInputGesture());
+        window.addEventListener('pagehide', () => this._cancelInputGesture());
+        window.addEventListener('pagehide', () => {
+            this.nodeGeometryObserver?.disconnect(); this.nodeResizeObserver?.disconnect();
+            if (this.groupFrameRequest != null) cancelAnimationFrame(this.groupFrameRequest);
+            this.groupFrameRequest = null;
         });
+        window.addEventListener('pageshow', event => {
+            if (!event.persisted) return;
+            this.nodeGeometryObserver?.observe(this.canvas, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+            this.canvas.querySelectorAll('.canvas-node').forEach(element => this.nodeResizeObserver?.observe(element));
+            this.scheduleGroupFrames();
+        });
+        window.addEventListener('pointercancel', () => this._cancelInputGesture(), true);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._cancelInputGesture();
+        });
+    }
+
+    _isInteractiveTarget(target) {
+        return Boolean(target?.isContentEditable || target?.closest?.(
+            'input, textarea, select, button, a, label, details, summary, video, audio, iframe, '
+            + '[contenteditable], [role="button"], [role="link"], '
+            + '[role="dialog"], [role="menu"], [role="listbox"], .side-panel, .add-node-menu, '
+            + '.context-menu, .generation-popover, .node-action-row, .video-props-tab, '
+            + '.video-tool-btn, .image-props-tools, .model-selector, .director-actor, .director-shot-chip, '
+            + '[data-canvas-inline-video], [data-canvas-media-preview], [data-video-loop], '
+            + '[data-video-play], [data-video-read-retry]'
+        ));
+    }
+
+    _canvasInputBlocked() {
+        if (document.body.classList.contains('canvas-document-busy')
+            || document.body.classList.contains('canvas-document-readonly')
+            || this.container.closest('[inert]')) return true;
+        return [...document.querySelectorAll('dialog[open], [aria-modal="true"]')].some(layer =>
+            !layer.closest('[hidden], .hidden, [aria-hidden="true"]')
+            && layer.getClientRects().length > 0
+            && window.getComputedStyle(layer).visibility !== 'hidden'
+        );
+    }
+
+    _cancelInputGesture() {
+        // A cancelled preview is not mouseup: do not notify, save, connect, or clear selection.
+        const wasDragging = this.isDraggingNode;
+        if (wasDragging) {
+            this.dragNodeStarts?.forEach((start, id) => {
+                const node = this.nodes.get(id);
+                const element = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                if (!node || node !== start.node || node.x !== start.previewX || node.y !== start.previewY) return;
+                node.x = start.x; node.y = start.y;
+                if (element) { element.style.left = start.x + 'px'; element.style.top = start.y + 'px'; }
+            });
+        }
+        this.dragNode?.classList.remove('dragging');
+        this.isSpacePressed = false;
+        this.isPanning = false;
+        this.isSelecting = false;
+        this.isDraggingNode = false;
+        this.dragNode = null;
+        this.dragNodeStarts = null;
+        this.pendingDuplicateDrag = false;
+        this.hasPannedDuringRightClick = false;
+        this.spacePanClickPending = false;
+        this.container.style.cursor = this.interactionMode === 'hand' ? 'grab' : 'default';
+        document.getElementById('selection-marquee')?.classList.add('hidden');
+        this._cancelConnection();
+        const pointer = this.nodeDragPointer;
+        this.nodeDragPointer = null;
+        if (pointer?.target.hasPointerCapture(pointer.id)) pointer.target.releasePointerCapture(pointer.id);
+        if (wasDragging) {
+            this._updateConnections();
+            this.onEditGestureCancel?.();
+        }
     }
 
     // --- Mouse Handlers ---
     _onMouseDown(e) {
-        const isSpace = this.isSpacePressed;
+        if (e.defaultPrevented || this._canvasInputBlocked()) return;
+        if (e.button === 0 && this._isInteractiveTarget(e.target)) return;
+        const isSpace = this.isSpacePressed || this.interactionMode === 'hand';
         // Panning: Middle click (1), Right click (2), or Space + Left click (0)
         if (e.button === 1 || e.button === 2 || (e.button === 0 && isSpace)) {
             this.isPanning = true;
@@ -118,6 +324,8 @@ class CanvasEngine {
     }
 
     _onMouseMove(e) {
+        if (!this.isPanning && !this.isSelecting && !this.isDraggingNode && !this.isDrawingConnection) return;
+        if (this._canvasInputBlocked()) { this._cancelInputGesture(); return; }
         if (this.isPanning) {
             // Track if we actually moved the mouse during right-click panning
             this.hasPannedDuringRightClick = true;
@@ -144,6 +352,7 @@ class CanvasEngine {
                 // Select overlapping nodes
                 const mRect = marquee.getBoundingClientRect();
                 let selectedAny = false;
+                const selectedNodeIds = [];
                 this.nodes.forEach((nd, id) => {
                     const el = document.querySelector(`[data-node-id="${id}"]`);
                     if (el) {
@@ -156,6 +365,7 @@ class CanvasEngine {
                         if (overlap) {
                             el.classList.add('selected');
                             this.selectedNodeId = id;
+                            selectedNodeIds.push(id);
                             selectedAny = true;
                         } else {
                             el.classList.remove('selected');
@@ -166,9 +376,24 @@ class CanvasEngine {
                 if (!selectedAny) {
                     this.selectedNodeId = null;
                 }
+                this.selectedNodeIds = new Set(selectedNodeIds);
             }
         }
         if (this.isDraggingNode && this.dragNode) {
+            if (this.pendingDuplicateDrag) {
+                if (Math.hypot(e.clientX - this.dragStartX, e.clientY - this.dragStartY) < 5) return;
+                this.pendingDuplicateDrag = false;
+                const sourceId = this.dragNode.dataset.nodeId;
+                const copiedId = this.onDuplicateDrag?.(sourceId);
+                const copied = copiedId && this.nodes.get(copiedId);
+                const element = copied && this.canvas.querySelector(`[data-node-id="${CSS.escape(copiedId)}"]`);
+                if (!element) { this._cancelInputGesture(); return; }
+                this.dragNode.classList.remove('dragging');
+                this.dragNode = element;
+                element.classList.add('dragging');
+                this.nodeStartX = copied.x; this.nodeStartY = copied.y;
+                this._selectDragNodes(copiedId, null, false);
+            }
             const dx = (e.clientX - this.dragStartX) / this.scale;
             const dy = (e.clientY - this.dragStartY) / this.scale;
             let newX = this.nodeStartX + dx;
@@ -184,7 +409,20 @@ class CanvasEngine {
             this.dragNode.style.top = newY + 'px';
             const nd = this.nodes.get(this.dragNode.dataset.nodeId);
             if (nd) { nd.x = newX; nd.y = newY; }
+            const dragStart = this.dragNodeStarts?.get(this.dragNode.dataset.nodeId);
+            if (dragStart) { dragStart.previewX = newX; dragStart.previewY = newY; }
+            this.dragNodeStarts?.forEach((start, id) => {
+                if (id === this.dragNode.dataset.nodeId) return;
+                const member = this.nodes.get(id);
+                const element = document.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                if (!member || !element) return;
+                member.x = start.x + newX - this.nodeStartX;
+                member.y = start.y + newY - this.nodeStartY;
+                start.previewX = member.x; start.previewY = member.y;
+                element.style.left = member.x + 'px'; element.style.top = member.y + 'px';
+            });
             this._updateConnections();
+            this.scheduleGroupFrames();
         }
         if (this.isDrawingConnection && this.tempConnectionLine) {
             const cr = this.container.getBoundingClientRect();
@@ -198,35 +436,54 @@ class CanvasEngine {
     _onMouseUp(e) {
         if (this.isPanning) {
             this.isPanning = false;
-            this.container.style.cursor = this.isSpacePressed ? 'grab' : 'default';
+            this.container.style.cursor = this.isSpacePressed || this.interactionMode === 'hand' ? 'grab' : 'default';
         }
         if (this.isSelecting) {
             this.isSelecting = false;
             document.getElementById('selection-marquee')?.classList.add('hidden');
+            if (this.selectedNodeId) this.onNodeSelected?.(this.selectedNodeId, this.nodes.get(this.selectedNodeId));
+            else this.onNodeDeselected?.();
         }
         if (this.isDraggingNode) {
             this.isDraggingNode = false;
+            this.pendingDuplicateDrag = false;
+            const nodeId = this.dragNode?.dataset.nodeId;
+            const node = nodeId ? this.nodes.get(nodeId) : null;
+            const moved = Boolean(node && (node.x !== this.nodeStartX || node.y !== this.nodeStartY));
             if (this.dragNode) this.dragNode.classList.remove('dragging');
             this.dragNode = null;
+            this.dragNodeStarts = null;
+            if (moved) this._notifyCanvasGeometryChanged('node-move', { nodeIds: [nodeId] });
+            this.onEditGestureEnd?.();
         }
         if (this.isDrawingConnection) {
             const target = document.elementFromPoint(e.clientX, e.clientY);
-            const conn = target?.closest('.node-connector');
+            const conn = this._connectorFromPoint(e.clientX, e.clientY);
             const startConnector = this.connectionStartConnector;
             if (conn && conn !== startConnector) {
                 const pair = this._connectionPair(startConnector, conn);
-                if (pair && pair.fromId !== pair.toId) this._createConnection(pair.fromId, pair.toId);
-            } else if (!target?.closest('.canvas-node')) {
+                if (pair && pair.fromId !== pair.toId) this.performUserEdit('连接节点', () => this._createConnection(pair.fromId, pair.toId));
+            } else if (conn === startConnector || !target?.closest('.canvas-node')) {
                 const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;
                 if (startId) {
                     this._showAddMenu(e.clientX, e.clientY, {
                         connectNodeId: startId,
-                        connectRole: startConnector.classList.contains('input') ? 'input' : 'output'
+                        connectRole: startConnector.classList.contains('input') ? 'input' : 'output',
+                        anchor: startConnector
                     });
                 }
             }
             this._cancelConnection();
         }
+    }
+
+    _connectorFromPoint(x, y) {
+        const elements = typeof document.elementsFromPoint === 'function'
+            ? document.elementsFromPoint(x, y)
+            : [document.elementFromPoint(x, y)];
+        return elements
+            .map(element => element?.closest?.('.node-connector'))
+            .find(Boolean) || null;
     }
 
     _onWheel(e) {
@@ -251,6 +508,7 @@ class CanvasEngine {
     }
 
     _onContextMenu(e) {
+        if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
         e.preventDefault();
         const nodeEl = e.target.closest('.canvas-node');
         this._showContextMenu(e.clientX, e.clientY, nodeEl ? nodeEl.dataset.nodeId : null);
@@ -261,6 +519,7 @@ class CanvasEngine {
         const t = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.scale})`;
         this.canvas.style.transform = t;
         this.svg.style.transform = t;
+        this.onViewportChanged?.({ scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY });
     }
     _updateZoom() {
         const el = document.getElementById('zoom-level');
@@ -278,10 +537,30 @@ class CanvasEngine {
         this._updateConnections();
     }
 
+    setViewport(viewport = {}) {
+        const nextScale = Number(viewport.scale);
+        this.scale = Number.isFinite(nextScale) ? Math.max(0.15, Math.min(3, nextScale)) : this.scale;
+        if (Number.isFinite(Number(viewport.offsetX))) this.offsetX = Number(viewport.offsetX);
+        if (Number.isFinite(Number(viewport.offsetY))) this.offsetY = Number(viewport.offsetY);
+        this._applyTransform();
+        this._updateZoom();
+        this._updateConnections();
+        return { scale: this.scale, offsetX: this.offsetX, offsetY: this.offsetY };
+    }
+
+    centerAt(x, y) {
+        const rect = this.container.getBoundingClientRect();
+        return this.setViewport({
+            offsetX: rect.width / 2 - Number(x) * this.scale,
+            offsetY: rect.height / 2 - Number(y) * this.scale
+        });
+    }
+
     // --- Add-node Menu ---
     _showAddMenu(clientX, clientY, options = {}) {
         this._hideAddMenu();
         const menu = document.getElementById('add-node-menu');
+        if (!menu) return;
         menu.style.left = clientX + 'px';
         menu.style.top = clientY + 'px';
         menu.classList.remove('hidden');
@@ -294,6 +573,26 @@ class CanvasEngine {
             role: options.connectRole || 'output'
         } : null;
         menu.classList.toggle('connection-mode', Boolean(menu._pendingConnection));
+        menu._anchor = options.anchor || document.activeElement;
+        this.onAddMenuOpening?.(menu);
+        const bounds = menu.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8)) + 'px';
+        if (menu._pendingConnection) {
+            const connector = this.canvas.querySelector(`[data-node-id="${CSS.escape(options.connectNodeId)}"] .node-connector.${options.connectRole === 'input' ? 'input' : 'output'}`);
+            if (connector) {
+                const point = this._getConnectorPos(connector);
+                const menuBox = menu.getBoundingClientRect();
+                const endX = ((options.connectRole === 'input' ? menuBox.right : menuBox.left) - rect.left - this.offsetX) / this.scale;
+                const endY = (menuBox.top + 26 - rect.top - this.offsetY) / this.scale;
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.classList.add('connection-line', 'menu-connection-preview');
+                this._setPath(path, point.x, point.y, endX, endY);
+                this.svg.appendChild(path);
+                this.menuConnectionPreview = path;
+            }
+        }
+        menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
     }
     _hideAddMenu() {
         const menu = document.getElementById('add-node-menu');
@@ -301,10 +600,21 @@ class CanvasEngine {
         menu.classList.add('hidden');
         menu.classList.remove('connection-mode');
         menu._pendingConnection = null;
+        this.menuConnectionPreview?.remove();
+        this.menuConnectionPreview = null;
+        if (menu.contains(document.activeElement)) menu._anchor?.focus?.({ preventScroll: true });
     }
 
     // --- Nodes ---
-    addNode(type, x, y, data = {}) {
+    addNode(type, x, y, data = {}, options = {}) {
+        return this._addNodeCore(type, x, y, data, options);
+    }
+
+    addNodeForCommand(type, x, y, data = {}) {
+        return this._addNodeCore(type, x, y, data, { select: false, notify: false });
+    }
+
+    _addNodeCore(type, x, y, data = {}, options = {}) {
         const requestedId = typeof data?.id === 'string' && data.id.trim() ? data.id.trim() : '';
         const id = requestedId || 'node-' + this.nextNodeId++;
         const match = id.match(/^node-(\d+)$/);
@@ -315,14 +625,21 @@ class CanvasEngine {
         this.nodes.set(id, nodeData);
         const el = this._buildNode(nodeData);
         this.canvas.appendChild(el);
+        this.nodeResizeObserver?.observe(el);
         document.getElementById('canvas-welcome')?.classList.add('hidden');
-        this._selectNode(id);
+        if (options.select !== false) this._selectNode(id);
+        if (options.notify !== false) this._notifyCanvasGeometryChanged('node-add', { nodeIds: [id] });
         return id;
     }
 
     serialize() {
+        const collaboration = (this.roleWorkflows || []).some(flow => Array.isArray(flow.relations))
+            || [...this.nodes.values()].some(node => node.type === 'role-requirement');
         return {
             version: 1,
+            ...(collaboration ? { schemaVersion: 5, requiredCapabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2'] } : {}),
+            planSplits: this.planSplits || window.UltimateCanvasPlanSplit?.empty(),
+            roleWorkflows: this.roleWorkflows || [],
             viewport: {
                 scale: this.scale,
                 offsetX: this.offsetX,
@@ -345,11 +662,17 @@ class CanvasEngine {
     }
 
     restore(snapshot = {}) {
-        this.canvas.querySelectorAll('.canvas-node').forEach(node => node.remove());
-        this.svg.querySelectorAll('.connection-line').forEach(line => line.remove());
+        this.roleWorkflows = cloneCanvasValue(snapshot.roleWorkflows || []);
+        this.planSplits = snapshot.planSplits || window.UltimateCanvasPlanSplit?.empty();
+        this.canvas.querySelectorAll('.canvas-node').forEach(node => {
+            this.nodeResizeObserver?.unobserve(node);
+            node.remove();
+        });
+        this.svg.querySelectorAll('.connection-line, .connection-delete-control').forEach(line => line.remove());
         this.nodes.clear();
         this.connections = [];
         this.selectedNodeId = null;
+        this.selectedNodeIds.clear();
         this.nextNodeId = 1;
 
         const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : [];
@@ -376,43 +699,192 @@ class CanvasEngine {
         this._applyTransform();
         this._updateZoom();
         this._updateConnections();
+        if (snapshot.selectedNodeId && this.nodes.has(snapshot.selectedNodeId)) this._selectNode(snapshot.selectedNodeId);
+        else this._deselectAll();
         document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
+        this._notifyCanvasGeometryChanged('restore');
+    }
+
+    applyCommandSnapshot(snapshot = {}) {
+        if (!Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.connections)) return false;
+        const nextNodes = new Map();
+        snapshot.nodes.forEach(node => {
+            if (!node?.id || !node?.type || nextNodes.has(node.id)) return;
+            nextNodes.set(node.id, {
+                id: String(node.id), type: String(node.type),
+                x: Number.isFinite(Number(node.x)) ? Number(node.x) : 0,
+                y: Number.isFinite(Number(node.y)) ? Number(node.y) : 0,
+                data: node.data && typeof node.data === 'object' && !Array.isArray(node.data)
+                    ? cloneCanvasValue(node.data) : {}
+            });
+        });
+
+        const nextConnections = [];
+        for (const edge of snapshot.connections) {
+            if (!edge?.from || !edge?.to) return false;
+            const issue = this._connectionValidationError(String(edge.from), String(edge.to), nextNodes, nextConnections);
+            if (issue) return false;
+            nextConnections.push({ from: String(edge.from), to: String(edge.to) });
+        }
+
+        const previousNodes = this.nodes;
+        const previousNodeIds = new Set(previousNodes.keys());
+        const nextNodeIds = new Set(nextNodes.keys());
+        const removedNodeIds = [...previousNodeIds].filter(id => !nextNodeIds.has(id));
+        const addedNodeIds = [...nextNodeIds].filter(id => !previousNodeIds.has(id));
+        const changedNodeIds = [];
+
+        nextNodes.forEach((next, id) => {
+            const previous = previousNodes.get(id);
+            if (!previous) return;
+            const changed = previous.type !== next.type || previous.x !== next.x || previous.y !== next.y
+                || JSON.stringify(previous.data || {}) !== JSON.stringify(next.data || {});
+            if (changed) changedNodeIds.push(id);
+            previous.type = next.type;
+            previous.x = next.x;
+            previous.y = next.y;
+            previous.data = next.data;
+            nextNodes.set(id, previous);
+        });
+
+        this.canvas.querySelectorAll('.canvas-node').forEach(element => {
+            const id = element.dataset.nodeId;
+            if (!nextNodeIds.has(id) || changedNodeIds.includes(id)) {
+                this.nodeResizeObserver?.unobserve(element);
+                element.remove();
+            }
+        });
+        this.svg.querySelectorAll('.connection-line, .connection-delete-control').forEach(line => line.remove());
+
+        this.nodes = nextNodes;
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'roleWorkflows')) this.roleWorkflows = cloneCanvasValue(snapshot.roleWorkflows || []);
+        nextNodes.forEach((node, id) => {
+            const previous = previousNodes.get(id);
+            const existingElement = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+            if (existingElement) return;
+            if (previous && !changedNodeIds.includes(id)) changedNodeIds.push(id);
+            const element = this._buildNode(node);
+            this.canvas.appendChild(element);
+            this.nodeResizeObserver?.observe(element);
+        });
+
+        this.connections = [];
+        nextConnections.forEach(edge => this._commandCreateConnection(edge.from, edge.to, { notify: false, showError: false }));
+        if (Object.prototype.hasOwnProperty.call(snapshot, 'planSplits')) {
+            this.planSplits = snapshot.planSplits ? cloneCanvasValue(snapshot.planSplits) : null;
+        }
+        this.nextNodeId = Math.max(this.nextNodeId, Number(snapshot.nextNodeId) || 1);
+
+        const survivingSelection = [...this.selectedNodeIds].filter(id => nextNodeIds.has(id));
+        const primary = this.selectedNodeId && nextNodeIds.has(this.selectedNodeId)
+            ? this.selectedNodeId : survivingSelection[survivingSelection.length - 1];
+        this.selectNodes(survivingSelection, primary);
+        this._updateConnections();
+        document.getElementById('canvas-welcome')?.classList.toggle('hidden', this.nodes.size > 0);
+        const result = { removedNodeIds, addedNodeIds, changedNodeIds };
+        this._notifyCanvasGeometryChanged('command-restore', result);
+        return result;
     }
 
     deleteNode(nodeId) {
-        document.querySelector(`[data-node-id="${nodeId}"]`)?.remove();
+        const nodeEl = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (nodeEl) {
+            this.nodeResizeObserver?.unobserve(nodeEl);
+            nodeEl.remove();
+        }
         this.connections = this.connections.filter(c => {
             if (c.from === nodeId || c.to === nodeId) {
                 document.getElementById(c.lineId)?.remove();
+                document.getElementById(`conn-delete-${c.lineId}`)?.remove();
+                this.onConnectionDeleted?.(c.from, c.to);
                 return false;
             }
             return true;
         });
-        this.nodes.delete(nodeId);
+        const deleted = this.nodes.delete(nodeId);
+        this.selectedNodeIds.delete(nodeId);
         if (this.selectedNodeId === nodeId) {
-            this.selectedNodeId = null;
-            this.onNodeDeselected?.();
+            const nextSelected = [...this.selectedNodeIds].at(-1) || null;
+            this.selectedNodeId = nextSelected;
+            if (nextSelected) this.onNodeSelected?.(nextSelected, this.nodes.get(nextSelected));
+            else this.onNodeDeselected?.();
         }
         if (this.nodes.size === 0)
             document.getElementById('canvas-welcome')?.classList.remove('hidden');
+        if (deleted) this.onNodeDeleted?.(nodeId);
+        if (deleted) this._notifyCanvasGeometryChanged('node-delete', { nodeIds: [nodeId] });
     }
 
     _buildNode(nd) {
         const { id, type, x, y } = nd;
         const wrap = document.createElement('div');
-        wrap.className = `canvas-node node-type-${type}`;
+        wrap.className = `canvas-node node-type-${type}${type === 'image' || type === 'video' ? ' generation-node' : ''}${type.startsWith('flow-') ? ' toolflow-node' : ''}`;
         wrap.dataset.nodeId = id;
+        if (type === 'role' || type === 'role-requirement') { wrap.tabIndex = 0; wrap.setAttribute('aria-label', nd.data?.roleConfig?.snapshot?.name || nd.data?.title || '需求'); }
         wrap.style.left = x + 'px';
         wrap.style.top = y + 'px';
 
         const labelIcon = this._icon(type);
-        const label = this._label(type, id);
-        const body = this._body(type, id);
+        const label = typeof nd.data?.title === 'string' && nd.data.title.trim()
+            ? this._escapeHtml(nd.data.title.trim().slice(0, 160)) : this._label(type, id);
+        const editableText = ['text', 'script'].includes(type) && (typeof nd.data?.authoredText === 'string'
+            ? nd.data.authoredText : !nd.data?.generatedText && nd.data?.prompt ? nd.data.prompt : null);
+        const role = nd.data?.roleConfig?.snapshot;
+        const roleFlow = (this.roleWorkflows || []).find(flow => flow.nodeIds.includes(id));
+        const roleBody = type === 'role' ? `<div class="role-node-summary">
+            <strong>${this._escapeHtml(role?.name || nd.data?.title || '角色')}</strong>
+            ${roleFlow ? `<small>${this._escapeHtml(roleFlow.name)}</small>` : ''}
+            <span>${this._escapeHtml(role?.executor?.kind === 'ai' ? 'AI · ' + (role.executor.model || '未指定模型') : role?.executor?.kind === 'person' ? '人员' : '稍后指定')}</span>
+            ${role?.contextGaps?.length ? `<small>岗位要求待补齐（${role.contextGaps.length}项）</small>` : ''}
+            <p data-role-current-work>尚未选择本次任务</p>
+            <span data-role-current-phase>待安排</span>
+            <small data-role-current-reason></small>
+            <button type="button" data-role-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('ClipboardList')}工作</button>
+            <button type="button" data-role-instance-settings="${this._escapeHtml(id)}" aria-label="角色实例配置" title="角色实例配置">${window.UltimateCanvasIcons('SlidersHorizontal')}</button>
+        </div>` : null;
+        const requirementBody = type === 'role-requirement' ? `<div class="role-requirement-summary">
+            <strong>${this._escapeHtml(nd.data?.title || '本次需求')}</strong>
+            <p data-role-goal>${nd.data?.roleRequirement?.runId ? '正在读取已保存需求' : '未绑定草稿'}</p>
+            <span data-role-run-status>待读取</span>
+            <div class="role-requirement-actions"><button type="button" data-role-requirement-open="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('Pencil')}需求</button>
+            <button type="button" data-role-requirement-start="${this._escapeHtml(id)}">${window.UltimateCanvasIcons('Play')}开始协作</button></div>
+        </div>` : null;
+        const body = requirementBody || roleBody || (editableText !== false && editableText !== null
+            ? `<div class="node-text-content" contenteditable="true" style="white-space:pre-wrap" data-placeholder="在这里输入你的故事...">${this._escapeHtml(editableText)}</div>`
+            : this._body(type, id));
+        const generationBody = type === 'image' || type === 'video' ? `
+            <div class="generation-quick-modes generation-empty-state" data-generation-quick-modes>
+                <div class="generation-empty-icon" aria-hidden="true">
+                    ${type === 'image'
+                        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>'
+                        : '<svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>'}
+                </div>
+                ${type === 'image' ? `<div class="generation-empty-references">
+                    <button type="button" data-generation-command="import-reference">${window.UltimateCanvasIcons('ImagePlus')}参考图</button>
+                    <span data-import-reference-count></span>
+                </div>` : ''}
+                <div class="generation-empty-actions">
+                    <span class="generation-empty-label">尝试</span>
+                    ${type === 'image' ? `
+                        <button type="button" data-generation-quick-mode="image-to-image">图生图</button>
+                        <button type="button" data-generation-quick-mode="upscale-image">图片高清</button>` : `
+                        <button type="button" data-generation-quick-mode="first-last-frame-video">首尾帧生成</button>
+                        <button type="button" data-generation-quick-mode="first-frame-video">首帧生成</button>`}
+                </div>
+            </div>
+            <div class="generation-result-region" data-generation-result-region></div>` : body;
 
         wrap.innerHTML = `
+            ${type === 'text' ? `<div class="text-creation-toolbar" role="toolbar" aria-label="文本快捷创作">
+                <button type="button" data-text-create="character">${window.UltimateCanvasIcons('ImagePlus')}生成角色图</button>
+                <button type="button" data-text-create="scene">${window.UltimateCanvasIcons('Image')}生成场景图</button>
+                <button type="button" data-text-create="video">${window.UltimateCanvasIcons('Video')}生成视频</button>
+                <button type="button" data-text-create="write">${window.UltimateCanvasIcons('Sparkles')}创作</button>
+                <button type="button" data-prompt-expand title="展开编辑" aria-label="展开编辑">${window.UltimateCanvasIcons('Maximize2')}</button>
+            </div>` : ''}
             <div class="node-label">${labelIcon} ${label}</div>
             <div class="node-card">
-                <div class="node-body">${body}</div>
+                <div class="node-body">${generationBody}</div>
                 <div class="node-connector input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
                 <div class="node-connector output"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
             </div>
@@ -422,7 +894,10 @@ class CanvasEngine {
         // Drag via label
         const lbl = wrap.querySelector('.node-label');
         lbl.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
             e.stopPropagation();
+            if (this.onReferenceNodePick?.(id, e)) { e.preventDefault(); return; }
+            if (this._toggleSelectionGesture(id, e)) { e.preventDefault(); return; }
             this.isDraggingNode = true;
             this.dragNode = wrap;
             this.dragStartX = e.clientX;
@@ -430,18 +905,39 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectNode(id);
+            this._selectDragNodes(id, e);
         });
+        if (type === 'role' || type === 'role-requirement') {
+            lbl.addEventListener('pointerdown', event => {
+                if (event.pointerType === 'mouse' || this.roleCollaboration?.hasPending()) return;
+                if (event.defaultPrevented || this._canvasInputBlocked()) return;
+                event.preventDefault(); event.stopPropagation();
+                this.nodeDragPointer = { id: event.pointerId, target: lbl };
+                lbl.setPointerCapture(event.pointerId);
+                this.isDraggingNode = true; this.dragNode = wrap; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
+                this.nodeStartX = nd.x; this.nodeStartY = nd.y; this._selectDragNodes(id, event); wrap.classList.add('dragging');
+            });
+            lbl.addEventListener('pointermove', event => { if (event.pointerId === this.nodeDragPointer?.id) this._onMouseMove(event); });
+            lbl.addEventListener('pointerup', event => {
+                if (event.pointerId !== this.nodeDragPointer?.id) return;
+                if (this._canvasInputBlocked()) { this._cancelInputGesture(); return; }
+                this.nodeDragPointer = null;
+                this._onMouseUp(event);
+            });
+            lbl.addEventListener('lostpointercapture', event => {
+                if (event.pointerId === this.nodeDragPointer?.id) this._cancelInputGesture();
+            });
+        }
 
         // Also drag via card header area (but not inputs/buttons inside)
         wrap.querySelector('.node-card').addEventListener('mousedown', (e) => {
-            if (e.target.closest('.node-connector') || e.target.closest('textarea')
-                || e.target.closest('button') || e.target.closest('.node-action-row')
-                || e.target.closest('[contenteditable]') || e.target.closest('.video-props-tab')
-                || e.target.closest('.video-tool-btn') || e.target.closest('.image-props-tools')
-                || e.target.closest('.model-selector') || e.target.closest('.director-actor')
-                || e.target.closest('.director-shot-chip')) return;
+            if (e.button !== 0) return;
+            if (type === 'role' || type === 'role-requirement') return;
+            if (e.target.closest('.node-connector') || this._isInteractiveTarget(e.target)) return;
+            e.preventDefault();
             e.stopPropagation();
+            if (this.onReferenceNodePick?.(id, e)) return;
+            if (this._toggleSelectionGesture(id, e)) return;
             this.isDraggingNode = true;
             this.dragNode = wrap;
             this.dragStartX = e.clientX;
@@ -449,17 +945,40 @@ class CanvasEngine {
             this.nodeStartX = parseFloat(wrap.style.left);
             this.nodeStartY = parseFloat(wrap.style.top);
             wrap.classList.add('dragging');
-            this._selectNode(id);
+            this._selectDragNodes(id, e);
         });
 
         // Select
         wrap.addEventListener('mousedown', (e) => {
-            if (!e.target.closest('.node-connector')) this._selectNode(id);
+            if (e.button !== 0 || e.target.closest('.node-connector,video,audio') || this.isDraggingNode) return;
+            if (!this._isInteractiveTarget(e.target) && this.onReferenceNodePick?.(id, e)) { e.preventDefault(); e.stopPropagation(); return; }
+            if (!this._isInteractiveTarget(e.target) && this._toggleSelectionGesture(id, e)) return;
+            if (!this.selectedNodeIds.has(id)) this._selectNode(id);
         });
 
         // Connectors
         wrap.querySelectorAll('.node-connector').forEach(c => {
+            if (type === 'role-requirement' || (type === 'role' && roleFlow)) {
+                c.classList.add('role-relation-handle');
+                c.dataset.roleRelationHandle = id;
+                c.dataset.roleRelationSide = c.classList.contains('input') ? 'input' : 'output';
+            }
+            c.tabIndex = 0;
+            c.setAttribute('role', 'button');
+            c.setAttribute('aria-label', c.classList.contains('input') ? '添加上下文' : '引用该节点生成');
+            if (c.classList.contains('role-relation-handle')) c.setAttribute('aria-label', '连接协作关系');
+            c.title = c.getAttribute('aria-label');
+            c.addEventListener('keydown', e => {
+                if (c.classList.contains('role-relation-handle') && this.roleCollaboration) return;
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = c.getBoundingClientRect();
+                this._showAddMenu(rect.right + 8, rect.top, { connectNodeId: id,
+                    connectRole: c.classList.contains('input') ? 'input' : 'output', anchor: c });
+            });
             c.addEventListener('mousedown', (e) => {
+                if (c.classList.contains('role-relation-handle') && this.roleCollaboration) { e.stopPropagation(); return; }
                 e.stopPropagation();
                 this.isDrawingConnection = true;
                 this.connectionStartConnector = c;
@@ -475,11 +994,13 @@ class CanvasEngine {
 
     _label(type, id) {
         const n = { text:'文本节点', image:'图片节点', video:'视频', audio:'音频',
-                    'video-compose':'视频合成', director:'导演台', script:'脚本' }[type] || '节点';
+                    'video-compose':'视频合成', director:'导演台', script:'脚本', role:'角色', 'role-requirement':'需求' }[type] || '节点';
         const num = id.replace('node-','');
         return `${n} ${num}`;
     }
     _icon(type) {
+        if (type === 'role') return window.UltimateCanvasIcons('UserRound');
+        if (type === 'role-requirement') return window.UltimateCanvasIcons('ClipboardList');
         const map = {
             text: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>`,
             image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
@@ -565,7 +1086,7 @@ class CanvasEngine {
                         <span class="action-icon">🖼</span>图片及推理提示词
                     </div>
                     <div class="node-action-row" data-action="txt2music" data-nid="${id}">
-                        <span class="action-icon">🔊</span>文字生音乐
+                        <span class="action-icon">🔊</span>添加音频素材
                     </div>
                 </div>
                 <div class="node-context-rules-row">
@@ -610,11 +1131,13 @@ class CanvasEngine {
                     </div>
                 </div>`;
             case 'audio': return `
+                <div class="generation-result-region" data-generation-result-region>
                 <div class="audio-waveform">
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
                     <div class="audio-bar"></div><div class="audio-bar"></div>
+                </div>
                 </div>`;
             case 'director': {
                 return `
@@ -651,11 +1174,21 @@ class CanvasEngine {
                     </div>
                 </div>`;
             }
+            case 'flow-input': return this._flowInputCard(id);
+            case 'flow-template': return this._flowTemplateCard(id);
+            case 'flow-select': return `<div class="toolflow-node-summary"><span class="flow-icon">✓</span><strong>结果筛选</strong><small>可单选或多选继续结果</small></div>`;
+            case 'flow-confirm': return `<div class="toolflow-node-summary"><span class="flow-icon">?</span><strong>人工确认</strong><small>确认后才会继续下游节点</small></div>`;
+            case 'flow-output': return `<div class="toolflow-node-summary"><span class="flow-icon">OUT</span><strong>流程输出</strong><small>结果已归档到资产库</small></div>`;
             default: return `<div class="image-placeholder"><span>${this._label(type, id)}</span></div>`;
         }
     }
 
     _propsPanel(type, id) {
+        if (type === 'flow-input') return `<div class="toolflow-node-properties"><small>已上传的 assetId 会随工作流保存，运行时仍由服务器重新校验权限。</small></div>`;
+        if (type === 'flow-template') return `<div class="toolflow-node-properties"><small>节点内的模板与配置会写入工作流快照，运行前服务器会重新校验权限和模板版本。</small></div>`;
+        if (type === 'flow-select') return `<div class="toolflow-node-properties"><small>运行时暂停并等待你选择一个或多个结果。</small></div>`;
+        if (type === 'flow-confirm') return `<div class="toolflow-node-properties"><small>运行时暂停，点击确认后继续。</small></div>`;
+        if (type === 'flow-output') return `<div class="toolflow-node-properties"><small>成功图片会进入资产库，并带流程、版本和节点标记。</small></div>`;
         if (type === 'text') return `
             <div class="node-input-bar">
                 <button class="video-props-expand" data-prompt-expand title="展开提示词">
@@ -665,9 +1198,8 @@ class CanvasEngine {
                 <div class="node-input-footer">
                     <div class="node-input-left">
                         <div class="model-selector">
-                            <span class="model-icon">🧠</span>
-                            <span>gpt5.4</span>
-                            <span class="chevron">▾</span>
+                            ${window.UltimateCanvasIcons('Sparkles')}
+                            <select data-text-model aria-label="文案模型"><option value="">加载模型</option></select>
                         </div>
                         <button class="context-rules-button" data-context-rules-open title="编辑影响本节点 LLM 上下文的规则">
                             <span>规则</span>
@@ -686,39 +1218,37 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'video') return `
-            <div class="node-video-props">
-                <button class="video-props-expand" data-prompt-expand title="展开提示词">
+            <div class="node-video-props node-generation-expanded generation-editor" data-generation-editor="video">
+                <button class="video-props-expand" data-prompt-expand title="展开提示词" aria-label="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="video-props-tabs">
-                    <div class="video-props-tab active">文生视频</div>
-                    <div class="video-props-tab">全部参考</div>
-                    <div class="video-props-tab">图生视频</div>
-                    <div class="video-props-tab">首尾帧</div>
-                    <div class="video-props-tab">图片参考</div>
+                <div class="generation-node-toolbar generation-editor-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="select-reference">${window.UltimateCanvasIcons('Plus')}参考</button>
+                    <button type="button" class="generation-command" disabled title="当前版本尚未接入画面标记">${window.UltimateCanvasIcons('MapPin')}标记</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="disconnect-references" title="清空参考" aria-label="清空参考">${window.UltimateCanvasIcons('Trash2')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="optimize-prompt" title="优化提示词" aria-label="优化提示词">${window.UltimateCanvasIcons('WandSparkles')}</button>
+                    <button type="button" class="generation-command" data-generation-command="camera-presets" data-generation-popover="camera" aria-expanded="false">运镜</button>
                 </div>
-                <div class="video-props-tools">
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>智记</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg><span>运镜</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span>角色库</span></button>
-                    <button class="video-tool-btn active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg><span>更多</span><span class="tool-badge-new">新功能</span></button>
-                </div>
-                <textarea class="video-props-textarea" placeholder="根据文字描述生成视频。"></textarea>
-                <div class="video-props-footer">
+                <div class="generation-reference-list" data-generation-reference-list hidden></div>
+                <textarea class="video-props-textarea" placeholder="描述想要生成的画面，@ 引用素材"></textarea>
+                <div class="generation-editor-footer video-props-footer">
                     <div class="video-model-info">
-                        <span class="model-icon">📊</span>
-                        <span>默认视频 API</span>
-                        <span style="color:var(--accent-orange)">💎</span>
+                        <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H3v-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V3h4v.1a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+                        <button type="button" class="canvas-model-trigger" data-generation-popover="spec" data-generation-model-trigger aria-expanded="false" aria-haspopup="dialog" title="选择视频模型">
+                            <span data-generation-model-label>待选择模型</span>${window.UltimateCanvasIcons('ChevronDown')}
+                        </button>
                     </div>
-                    <div class="video-res-info">
-                        <span>📐 16:9 · 720P · 5s · 🔊</span>
+                    <div class="generation-summary-row">
+                        <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                            <span data-generation-mode-label>文生视频</span>
+                        </button>
+                        <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="video" data-generation-popover="spec" aria-expanded="false">
+                            <span data-generation-spec>16:9 · 720p · 5s</span>
+                        </button>
                     </div>
                     <div class="video-footer-right">
-                        <button class="footer-icon-btn" title="翻译"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/></svg></button>
-                        <button class="footer-icon-btn" title="反转"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg></button>
-                        <button class="footer-icon-btn" title="设置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg></button>
-                        <span class="cost-label">⚡ 135</span>
-                        <button class="submit-btn" title="生成">
+                        <button type="button" class="cost-label" data-generation-cost title="重新读取当前模型报价">报价待确认</button>
+                        <button class="submit-btn" data-generation-submit title="生成视频">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>
@@ -726,37 +1256,41 @@ class CanvasEngine {
             </div>`;
 
         if (type === 'image') return `
-            <div class="node-image-props">
-                <button class="video-props-expand" data-prompt-expand title="展开提示词">
+            <div class="node-image-props node-generation-expanded generation-editor" data-generation-editor="image">
+                <button class="video-props-expand" data-prompt-expand title="展开提示词" aria-label="展开提示词">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/></svg>
                 </button>
-                <div class="image-props-tools">
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.73 12.73l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><span>高端</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span>标记</span></button>
-                    <button class="video-tool-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg><span>裁切</span></button>
+                <div class="generation-node-toolbar generation-editor-toolbar image-generation-toolbar">
+                    <button type="button" class="generation-command" data-generation-command="select-reference">${window.UltimateCanvasIcons('Plus')}参考</button>
+                    <button type="button" class="generation-command" disabled title="当前版本尚未接入画面标记">${window.UltimateCanvasIcons('MapPin')}标记</button>
+                    <button type="button" class="generation-command" data-generation-command="style-gallery" title="风格广场">${window.UltimateCanvasIcons('Palette')}<span data-generation-style-label>风格</span></button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="clear-style" title="移除风格" aria-label="移除风格" hidden>${window.UltimateCanvasIcons('X')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="refresh-style" title="查看生成状态" aria-label="查看生成状态" hidden>${window.UltimateCanvasIcons('RotateCcw')}</button>
+                    <button type="button" class="generation-command generation-icon-command" data-generation-command="disconnect-references" title="清空参考" aria-label="清空参考">${window.UltimateCanvasIcons('Trash2')}</button>
                 </div>
-                <div class="image-mode-segment" data-image-mode-segment>
-                    <button class="image-mode-btn active" data-image-mode="text-to-image">文生图</button>
-                    <button class="image-mode-btn" data-image-mode="image-to-image">图生图</button>
-                    <button class="image-mode-btn" data-image-mode="upscale-image">高清修复</button>
-                    <button class="image-mode-btn" data-image-mode="first-frame-draft">首帧草图</button>
-                    <button class="image-mode-btn" data-image-mode="last-frame-draft">尾帧草图</button>
-                </div>
-                <textarea class="image-props-textarea" placeholder="描述你想要生成的画面内容。描述越详细,效果越好。"></textarea>
-                <div class="image-props-footer">
+                <div class="generation-reference-list" data-generation-reference-list hidden></div>
+                <textarea class="image-props-textarea" placeholder="描述想要生成的图像，@ 引用素材"></textarea>
+                <div class="generation-editor-footer image-props-footer">
                     <div class="video-model-info">
-                        <span class="model-icon">✨</span>
-                        <span>gmini 图形生成</span>
-                        <span class="chevron" style="color:var(--text-dim)">▾</span>
+                        <svg class="model-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+                        <select data-generation-image-channel aria-label="生图供应商" title="选择生图供应商"><option value="original">原接口</option></select>
+                        <select data-generation-image-model aria-label="生成图片模型"><option value="">加载模型中</option></select>
+                    </div>
+                    <div class="generation-summary-row">
+                        <button type="button" class="generation-summary-button" data-generation-popover="mode" aria-expanded="false">
+                            <span data-generation-mode-label>文生图</span>
+                        </button>
+                        <button type="button" class="generation-summary-button" data-generation-command="toggle-settings" data-generation-settings="image" data-generation-popover="spec" aria-expanded="false">
+                            <span data-generation-spec>16:9 · 1K · 1张</span>
+                        </button>
                     </div>
                     <div class="video-footer-right">
-                        <span class="video-res-info">📐 16:9 · </span>
-                        <span class="cost-label">⚡ 40</span>
-                        <button class="submit-btn" title="生成">
+                        <button class="submit-btn" data-generation-submit title="生成图片">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                         </button>
                     </div>
                 </div>
+                <div class="canvas-node-price-slot" data-canvas-node-price role="status" aria-live="polite">费用待估算</div>
             </div>`;
 
         if (type === 'director') return `
@@ -832,20 +1366,252 @@ class CanvasEngine {
         return '';
     }
 
+    _escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = String(value ?? '');
+        return div.innerHTML;
+    }
+
+    _flowTemplateFor(node) {
+        if (!node) return null;
+        const source = node.data?.templateId || node.data?.template_id ? 'preset' : node.data?.moduleId || node.data?.module_id ? 'module' : '';
+        const id = source === 'preset'
+            ? node.data.templateId || node.data.template_id
+            : node.data?.moduleId || node.data?.module_id;
+        return this.flowTemplateOptions.find(item => item.source === source && item.id === id) || null;
+    }
+
+    _flowTemplateOptionValue(item) { return `${item.source === 'module' ? 'module' : 'preset'}:${item.id}`; }
+
+    _flowModelLabel(model) {
+        return {
+            'gemini-3.1-flash-image-preview': 'Banana 2',
+            'gemini-3-pro-image-preview': 'Banana Pro',
+            'gpt-image-2': 'GPT Image 2',
+            'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
+            'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst'
+        }[model] || model || '当前模型';
+    }
+
+    _flowQualityOptions(model) {
+        const options = {
+            'gemini-3.1-flash-image-preview': ['auto'],
+            'gemini-3-pro-image-preview': ['auto'],
+            'gpt-image-2': ['auto', 'low', 'medium', 'high'],
+            'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+            'gpt-image-2.5-sunburst': ['medium', 'max']
+        };
+        return options[model] || ['auto'];
+    }
+
+    _flowQualityLabel(value) { return ({ auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' }[value] || value); }
+
+    _flowInputCard(id) {
+        const node = this.nodes.get(id);
+        const assets = Array.isArray(node?.data?.assetPreviews) ? node.data.assetPreviews : [];
+        const ids = Array.isArray(node?.data?.assetIds) ? node.data.assetIds : [];
+        const upload = this.flowInputUploadState.get(id);
+        const cards = assets.length
+            ? assets.map(asset => `<div class="toolflow-input-asset" data-toolflow-input-asset="${this._escapeHtml(asset.id || asset.assetId)}"><span class="toolflow-input-thumb">${asset.thumbnailUrl || asset.originalUrl ? `<img src="${this._escapeHtml(asset.thumbnailUrl || asset.originalUrl)}" alt="">` : '<span>图</span>'}</span><span class="toolflow-input-asset-copy"><strong>${this._escapeHtml(asset.title || asset.fileName || '已上传图片')}</strong><small>已上传 · ${this._escapeHtml(asset.id || asset.assetId)}</small></span><button type="button" data-toolflow-input-remove="${this._escapeHtml(asset.id || asset.assetId)}" aria-label="移除图片">×</button></div>`).join('')
+            : ids.map(assetId => `<div class="toolflow-input-asset"><span class="toolflow-input-thumb"><span>图</span></span><span class="toolflow-input-asset-copy"><strong>已保存图片</strong><small>assetId · ${this._escapeHtml(assetId)}</small></span><button type="button" data-toolflow-input-remove="${this._escapeHtml(assetId)}" aria-label="移除图片">×</button></div>`).join('');
+        const status = upload?.status === 'uploading'
+            ? `上传中${Number.isFinite(upload.progress) ? ` · ${Math.round(upload.progress * 100)}%` : ' · 正在保存'}`
+            : upload?.status === 'error' ? `上传失败：${this._escapeHtml(upload.message || '请重试')}`
+                : ids.length ? `已选 ${ids.length} 张，运行前仍会检查权限` : '点击选择，或把图片拖入此节点，也可直接粘贴';
+        return `<div class="toolflow-input-card" data-toolflow-input-node="${this._escapeHtml(id)}" data-drop-target="toolflow-input">
+            <div class="toolflow-node-summary"><span class="flow-icon">IN</span><strong>输入图片</strong><small>${this._escapeHtml(status)}</small></div>
+            <button type="button" class="toolflow-input-pick" data-toolflow-input-choose="${this._escapeHtml(id)}">选择图片</button>
+            <input type="file" accept="image/*" multiple hidden data-toolflow-input-file="${this._escapeHtml(id)}">
+            <div class="toolflow-input-assets">${cards || '<div class="toolflow-input-empty">尚未加入图片</div>'}</div>
+            ${upload?.status === 'error' ? `<button type="button" class="toolflow-input-retry" data-toolflow-input-retry="${this._escapeHtml(id)}">重试上次上传</button>` : ''}
+        </div>`;
+    }
+
+    _flowTemplateCard(id) {
+        const node = this.nodes.get(id);
+        const data = node?.data || {};
+        const template = this._flowTemplateFor(node);
+        const selected = template ? this._flowTemplateOptionValue(template) : '';
+        const options = this.flowTemplateOptions.map(item => `<option value="${this._escapeHtml(this._flowTemplateOptionValue(item))}"${this._flowTemplateOptionValue(item) === selected ? ' selected' : ''}>${this._escapeHtml(item.name)}${item.source === 'module' ? ' · 我的模块' : ' · 授权模板'}</option>`).join('');
+        const model = data.model || template?.model || this.flowSystemSettings.model || 'gpt-image-2';
+        const modelOptions = template?.allowedModels || [template?.model].filter(Boolean);
+        const systemModels = Object.entries(this.flowSystemSettings.prices || {}).filter(([, price]) => price !== null && price !== undefined).map(([name]) => name);
+        const availableModels = (template ? modelOptions : systemModels.length ? systemModels : [model]).filter(Boolean);
+        const quality = data.quality || template?.quality || this.flowSystemSettings.quality || this._flowQualityOptions(model)[0];
+        const ratio = data.ratio || data.aspectRatio || template?.aspectRatio || 'auto';
+        const count = Number(data.count) || Number(template?.count) || 1;
+        const qualityOptions = this._flowQualityOptions(model).map(value => `<option value="${this._escapeHtml(value)}"${value === quality ? ' selected' : ''}>${this._escapeHtml(this._flowQualityLabel(value))}</option>`).join('');
+        const ratios = [...new Set(['auto', '1:1', '16:9', '9:16', '4:3', '3:4', template?.aspectRatio || 'auto'])];
+        const ratioOptions = ratios.map(value => `<option value="${this._escapeHtml(value)}"${value === ratio ? ' selected' : ''}>${this._escapeHtml(value === 'auto' ? '自动' : value)}</option>`).join('');
+        const sourceLabel = template ? `${template.name} · 当前生效` : '系统默认生图 · 当前生效';
+        const contextState = template && (template.contextConfigured || String(template.context || '').trim())
+            ? '读取模板上下文与通用规则'
+            : '读取已生效通用规则';
+        const fixedReferences = template && Array.isArray(template.images) ? template.images.length : 0;
+        const referenceLimit = template ? Number(template.referenceLimit) || 10 : 9;
+        const nodeContext = String(data.context ?? data.moduleContext ?? '');
+        const savedContext = String(data.savedContext ?? nodeContext);
+        const contextDirty = nodeContext !== savedContext;
+        const contextStatus = contextDirty ? '有未保存修改' : '已保存到此节点';
+        return `<div class="toolflow-template-card" data-toolflow-template-node="${this._escapeHtml(id)}">
+            <div class="toolflow-node-summary"><span class="flow-icon">T</span><strong>生图模板</strong><small>${this._escapeHtml(sourceLabel)}</small></div>
+            <label class="toolflow-card-field"><span>来源</span><select data-toolflow-node-template-select="${this._escapeHtml(id)}"><option value="">系统默认生图</option>${options}</select></label>
+            <div class="toolflow-template-effective">${this._escapeHtml(contextState)} · 固定参考图 ${fixedReferences} 张 · 输入参考图上限 ${referenceLimit} 张</div>
+            <details class="toolflow-template-advanced">
+                <summary>展开设置 <span>${this._escapeHtml(contextStatus)}</span></summary>
+                <div class="toolflow-template-settings">
+                    <label class="toolflow-card-field toolflow-model-price-field"><span>模型</span><select data-toolflow-node-field="model" data-toolflow-node-id="${this._escapeHtml(id)}">${availableModels.map(value => `<option value="${this._escapeHtml(value)}"${value === model ? ' selected' : ''}>${this._escapeHtml(this._flowModelLabel(value))}</option>`).join('')}</select></label>
+                    <label class="toolflow-card-field"><span>质量</span><select data-toolflow-node-field="quality" data-toolflow-node-id="${this._escapeHtml(id)}">${qualityOptions}</select></label>
+                    <label class="toolflow-card-field"><span>比例</span><select data-toolflow-node-field="ratio" data-toolflow-node-id="${this._escapeHtml(id)}">${ratioOptions}</select></label>
+                    <label class="toolflow-card-field"><span>生成张数</span><input type="number" min="1" max="8" step="1" value="${Math.min(8, Math.max(1, count))}" data-toolflow-node-field="count" data-toolflow-node-id="${this._escapeHtml(id)}"></label>
+                </div>
+                <label class="toolflow-card-field"><span>提示词补充</span><textarea data-toolflow-node-field="prompt" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，补充本次画面要求">${this._escapeHtml(data.prompt || '')}</textarea></label>
+                <label class="toolflow-card-field"><span>节点上下文</span><textarea data-toolflow-node-field="context" data-toolflow-node-id="${this._escapeHtml(id)}" placeholder="可选，只写入当前模板节点，不覆盖通用上下文">${this._escapeHtml(nodeContext)}</textarea></label>
+                <div class="toolflow-context-save-row"><small data-toolflow-context-status="${this._escapeHtml(id)}">${this._escapeHtml(contextStatus)}</small><button type="button" class="toolflow-context-save" data-toolflow-context-save="${this._escapeHtml(id)}"${contextDirty ? '' : ' disabled'}>${contextDirty ? '保存节点上下文' : '已保存'}</button></div>
+            </details>
+        </div>`;
+    }
+
+    setFlowTemplateOptions(options = []) {
+        this.flowTemplateOptions = Array.isArray(options) ? options : [];
+        this.nodes.forEach(node => { if (node.type === 'flow-template') this.refreshToolflowNode(node.id); });
+    }
+
+    setFlowSystemSettings(settings = {}) {
+        this.flowSystemSettings = { ...this.flowSystemSettings, ...settings };
+        this.refreshToolflowNodes();
+    }
+
+    setFlowInputUploadState(nodeId, state) {
+        if (state) this.flowInputUploadState.set(nodeId, state);
+        else this.flowInputUploadState.delete(nodeId);
+        this.refreshToolflowNode(nodeId);
+    }
+
+    refreshToolflowNode(nodeId) {
+        const node = this.nodes.get(nodeId);
+        const wrap = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!node || !wrap || !node.type.startsWith('flow-')) return;
+        const body = wrap.querySelector('.node-body');
+        if (body) body.innerHTML = this._body(node.type, nodeId);
+        const props = wrap.querySelector('.toolflow-node-properties');
+        if (props) props.outerHTML = this._propsPanel(node.type, nodeId);
+    }
+
+    refreshToolflowNodes() {
+        this.nodes.forEach(node => {
+            if (node.type.startsWith('flow-')) this.refreshToolflowNode(node.id);
+        });
+    }
+
     // --- Selection ---
+    selectNode(nodeId) {
+        if (!this.nodes.has(nodeId)) return false;
+        this._selectNode(nodeId);
+        return true;
+    }
+
+    getSelectedNodeIds() {
+        return [...this.selectedNodeIds].filter(id => this.nodes.has(id));
+    }
+
+    _selectDragNodes(id, event, begin = true) {
+        const ids = this.selectedNodeIds.has(id) ? this.getSelectedNodeIds() : [id];
+        this.selectNodes(ids, id);
+        this.dragNodeStarts = new Map(ids.map(key => {
+            const node = this.nodes.get(key);
+            return [key, { x: node.x, y: node.y, previewX: node.x, previewY: node.y, node }];
+        }));
+        if (begin) {
+            this.pendingDuplicateDrag = Boolean(event?.altKey && !event.ctrlKey && !event.metaKey);
+            this.onEditGestureStart?.(this.pendingDuplicateDrag);
+        }
+    }
+
+    performUserEdit(label, operation, options = {}) {
+        return this.onUserEdit ? this.onUserEdit(label, operation, options) : operation();
+    }
+
+    requestDeleteNodes(nodeIds) {
+        const ids = [...new Set(nodeIds)].filter(id => this.nodes.has(id));
+        if (!ids.length) return false;
+        return this.onDeleteNodes ? this.onDeleteNodes(ids) : this.performUserEdit('删除节点', () => {
+            ids.forEach(id => this.deleteNode(id));
+            return true;
+        });
+    }
+
+    _toggleSelectionGesture(id, event) {
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) return false;
+        const ids = this.getSelectedNodeIds();
+        this.selectNodes(ids.includes(id) ? ids.filter(key => key !== id) : [...ids, id], id);
+        return true;
+    }
+
+    selectNodes(nodeIds = [], primaryNodeId = null) {
+        const ids = [...new Set(nodeIds)].filter(id => this.nodes.has(id));
+        const previousSelection = this.selectedNodeIds.size > 0;
+        this.canvas.querySelectorAll('.canvas-node.selected').forEach(element => element.classList.remove('selected'));
+        this.selectedNodeIds = new Set(ids);
+        this.selectedNodeId = ids.includes(primaryNodeId) ? primaryNodeId : (ids[ids.length - 1] || null);
+        if (previousSelection && !this.selectedNodeId) this.onNodeDeselected?.();
+        ids.forEach(id => this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`)?.classList.add('selected'));
+        if (this.selectedNodeId) this.onNodeSelected?.(this.selectedNodeId, this.nodes.get(this.selectedNodeId));
+        return ids;
+    }
+
     _selectNode(id) {
         this._deselectAll();
         this.selectedNodeId = id;
+        this.selectedNodeIds = new Set([id]);
         document.querySelector(`[data-node-id="${id}"]`)?.classList.add('selected');
         this.onNodeSelected?.(id, this.nodes.get(id));
     }
     _deselectAll() {
-        document.querySelectorAll('.canvas-node.selected').forEach(n => n.classList.remove('selected'));
-        if (this.selectedNodeId) this.onNodeDeselected?.();
+        this.canvas.querySelectorAll('.canvas-node.selected').forEach(n => n.classList.remove('selected'));
+        const selected = Boolean(this.selectedNodeId || this.selectedNodeIds.size);
         this.selectedNodeId = null;
+        this.selectedNodeIds.clear();
+        if (selected) this.onNodeDeselected?.();
     }
 
     // --- Connections ---
+    connectNodes(fromId, toId) {
+        return this._connectNodes(fromId, toId, false);
+    }
+
+    connectNodesForCommand(fromId, toId) {
+        return this._connectNodes(fromId, toId, true);
+    }
+
+    _connectNodes(fromId, toId, commandOnly) {
+        if (!this.nodes.has(fromId) || !this.nodes.has(toId)) return false;
+        const before = this.connections.length;
+        if (commandOnly) this._commandCreateConnection(fromId, toId, { notify: false });
+        else this._createConnection(fromId, toId);
+        return this.connections.length > before;
+    }
+
+    disconnectNodes(fromId, toId) {
+        const removed = this.connections.filter(item => item.from === fromId && item.to === toId);
+        if (!removed.length) return false;
+        removed.forEach(item => {
+            document.getElementById(item.lineId)?.remove();
+            document.getElementById(`conn-delete-${item.lineId}`)?.remove();
+        });
+        this.connections = this.connections.filter(item => !(item.from === fromId && item.to === toId));
+        removed.forEach(item => this.onConnectionDeleted?.(item.from, item.to));
+        this._updateConnections();
+        this._notifyCanvasGeometryChanged('connection-delete', { connections: removed.map(({ from, to }) => ({ from, to })) });
+        return true;
+    }
+
+    disconnectIncoming(nodeId) {
+        const incoming = this.connections.filter(item => item.to === nodeId);
+        incoming.forEach(item => this.disconnectNodes(item.from, item.to));
+        return incoming.length;
+    }
+
     _getConnectorPos(el) {
         let x = 0;
         let y = 0;
@@ -865,21 +1631,124 @@ class CanvasEngine {
             y: y
         };
     }
-    _createConnection(fromId, toId) {
-        if (this.connections.find(c => c.from === fromId && c.to === toId)) return;
+    _connectionValidationError(fromId, toId, nodes = this.nodes, connections = this.connections) {
+        const source = nodes.get(fromId);
+        const target = nodes.get(toId);
+        if (!source || !target) return { message: '节点不存在', reason: 'missing-node' };
+        if (fromId === toId) return { message: '不能连接到自己', reason: 'self-connection' };
+        if (connections.some(connection => connection.from === fromId && connection.to === toId)) {
+            return { message: '这条连接已存在', reason: 'duplicate-connection' };
+        }
+        const sourceIsFlow = source.type.startsWith('flow-');
+        const targetIsFlow = target.type.startsWith('flow-');
+        if (source.type === 'role' || target.type === 'role') {
+            const sourceGroup = (this.roleWorkflows || []).find(f => f.nodeIds.includes(fromId));
+            const targetGroup = (this.roleWorkflows || []).find(f => f.nodeIds.includes(toId));
+            if (source.type === 'role' && target.type === 'role' && (sourceGroup || targetGroup)) {
+                if (sourceGroup?.id !== targetGroup?.id) return { message: '请在同一工作流中配置岗位关系', reason: 'workflow-scope' };
+                if ([fromId, toId].some(id => sourceGroup.participants.find(p => p.nodeId === id)?.participation === 'excluded')) {
+                    return { message: '请先在任务与关系中将这两个岗位设为参与', reason: 'workflow-participation' };
+                }
+            }
+            const seen = new Set(), stack = [toId];
+            while (stack.length) {
+                const current = stack.pop();
+                if (current === fromId) return { message: '材料流向不能循环；检查和退回在任务中配置', reason: 'role-material-cycle' };
+                if (seen.has(current)) continue;
+                seen.add(current); connections.filter(e => e.from === current).forEach(e => stack.push(e.to));
+            }
+        }
+        if (sourceIsFlow || targetIsFlow) {
+            const allowed = sourceIsFlow && targetIsFlow && Boolean(TOOLFLOW_CONNECTIONS[source.type]?.has(target.type));
+            const createsCycle = (() => {
+                const seen = new Set([toId]);
+                const stack = [toId];
+                while (stack.length) {
+                    const current = stack.pop();
+                    if (current === fromId) return true;
+                    connections.filter(item => item.from === current).forEach(item => {
+                        if (!seen.has(item.to)) { seen.add(item.to); stack.push(item.to); }
+                    });
+                }
+                return false;
+            })();
+            if (!allowed) return { message: '不能连接这个节点类型', reason: 'incompatible-toolflow-edge' };
+            if (createsCycle) return { message: '不能形成循环', reason: 'toolflow-cycle' };
+        }
+        return null;
+    }
+
+    _createConnection(fromId, toId, options = {}) {
+        const issue = this._connectionValidationError(fromId, toId);
+        if (issue) {
+            if (options.showError !== false) this._showNodeIssue(toId, issue.message);
+            if (options.notify !== false) this.onConnectionRejected?.(fromId, toId, issue.reason);
+            return false;
+        }
         const lineId = `conn-${fromId}-${toId}`;
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         line.id = lineId;
         line.classList.add('connection-line');
+        line.setAttribute('tabindex', '0');
+        line.setAttribute('aria-label', '删除这条连接');
         this.svg.appendChild(line);
 
-        this.connections.push({ from: fromId, to: toId, lineId });
+        const connection = { from: fromId, to: toId, lineId };
+        connection.deleteControl = this._createConnectionDeleteControl(connection);
+        this.connections.push(connection);
         this._updateConnections();
         // Deferred updates: CSS nodeAppear animation takes 0.3s,
         // getBoundingClientRect() returns intermediate values during animation
         requestAnimationFrame(() => this._updateConnections());
         setTimeout(() => this._updateConnections(), 350);
-        this.onConnectionCreated?.(fromId, toId);
+        if (options.notify !== false) this.onConnectionCreated?.(fromId, toId);
+        if (options.notify !== false) this._notifyCanvasGeometryChanged('connection-add', { connections: [{ from: fromId, to: toId }] });
+        return true;
+    }
+    _createConnectionDeleteControl(connection) {
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.id = `conn-delete-${connection.lineId}`;
+        group.classList.add('connection-delete-control');
+        group.setAttribute('role', 'button');
+        group.setAttribute('tabindex', '0');
+        group.setAttribute('aria-label', '删除这条连接');
+        group.innerHTML = '<circle r="10"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3"></path>';
+        const setVisible = visible => group.classList.toggle('is-visible', visible);
+        const hideSoon = () => window.setTimeout(() => {
+            if (!group.matches(':hover') && !document.getElementById(connection.lineId)?.matches(':hover')) setVisible(false);
+        }, 100);
+        group.addEventListener('mouseenter', () => setVisible(true));
+        group.addEventListener('mouseleave', hideSoon);
+        group.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));
+        });
+        group.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));
+            }
+        });
+        document.getElementById(connection.lineId)?.addEventListener('mouseenter', () => setVisible(true));
+        document.getElementById(connection.lineId)?.addEventListener('mouseleave', hideSoon);
+        this.svg.appendChild(group);
+        return group;
+    }
+
+    _showNodeIssue(nodeId, message) {
+        const node = document.querySelector(`[data-node-id="${nodeId}"]`);
+        if (!node) return;
+        let issue = node.querySelector('.toolflow-node-issue');
+        if (!issue) {
+            issue = document.createElement('div');
+            issue.className = 'toolflow-node-issue';
+            node.appendChild(issue);
+        }
+        issue.textContent = message;
+        issue.classList.add('is-visible');
+        window.clearTimeout(issue._hideTimer);
+        issue._hideTimer = window.setTimeout(() => issue.classList.remove('is-visible'), 3600);
     }
     _connectionPair(startConnector, endConnector) {
         const startId = startConnector?.closest('.canvas-node')?.dataset.nodeId;
@@ -893,6 +1762,15 @@ class CanvasEngine {
         return { fromId: startId, toId: endId };
     }
     _updateConnections() {
+        // Tool-flow rebuilding can replace the in-memory connection list while
+        // an old SVG path is still mounted. Remove those orphan paths here so
+        // every visible line remains owned by the live connection list and
+        // continues to follow drag/zoom/restore updates.
+        const liveLineIds = new Set(this.connections.map(connection => connection.lineId));
+        this.svg.querySelectorAll('.connection-line:not(.temp), .connection-delete-control').forEach(line => {
+            const lineId = line.classList.contains('connection-delete-control') ? line.id.replace('conn-delete-', '') : line.id;
+            if (!liveLineIds.has(lineId)) line.remove();
+        });
         this.connections.forEach(c => {
             const fEl = document.querySelector(`[data-node-id="${c.from}"] .node-connector.output`);
             const tEl = document.querySelector(`[data-node-id="${c.to}"] .node-connector.input`);
@@ -902,6 +1780,8 @@ class CanvasEngine {
                 const t = this._getConnectorPos(tEl);
                 const d = this._bezier(f.x, f.y, t.x, t.y);
                 line.setAttribute('d', d);
+                const control = document.getElementById(`conn-delete-${c.lineId}`);
+                if (control) control.setAttribute('transform', `translate(${(f.x + t.x) / 2} ${(f.y + t.y) / 2})`);
             }
         });
     }
@@ -925,9 +1805,10 @@ class CanvasEngine {
         m.style.left = x+'px'; m.style.top = y+'px';
         if (nodeId) {
             m.innerHTML = `
+                ${['text', 'script'].includes(this.nodes.get(nodeId)?.type) ? '<div class="context-menu-item" data-action="split-plans" data-nid="' + nodeId + '">拆分视频方案</div><div class="context-menu-divider"></div>' : ''}
                 <div class="context-menu-item" data-action="dup" data-nid="${nodeId}">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    复制节点</div>
+                    ${window.UltimateCanvasIcons('Copy')}
+                    创建副本</div>
                 <div class="context-menu-divider"></div>
                 <div class="context-menu-item danger" data-action="del" data-nid="${nodeId}">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -947,12 +1828,12 @@ class CanvasEngine {
             const rect = this.container.getBoundingClientRect();
             const cx = (x - rect.left - this.offsetX)/this.scale;
             const cy = (y - rect.top - this.offsetY)/this.scale;
-            if (a==='del') this.deleteNode(nid);
-            else if (a==='dup') { const d = this.nodes.get(nid); if(d) this.addNode(d.type,d.x+30,d.y+30); }
-            else if (a==='add-text') this.addNode('text',cx,cy);
-            else if (a==='add-image') this.addNode('image',cx,cy);
-            else if (a==='add-video') this.addNode('video',cx,cy);
-            else if (a==='add-audio') this.addNode('audio',cx,cy);
+            if (a==='del') this.requestDeleteNodes(this.selectedNodeIds.has(nid) ? this.getSelectedNodeIds() : [nid]);
+            else if (a==='split-plans') this.onPlanSplit?.(nid);
+            else if (a==='dup') this.onDuplicateNode?.(nid);
+            else if (['add-text', 'add-image', 'add-video', 'add-audio'].includes(a)) {
+                this.performUserEdit('新增节点', () => this.addNode(a.slice(4), cx, cy));
+            }
             this._hideContextMenu();
         });
     }
@@ -960,13 +1841,162 @@ class CanvasEngine {
 
     fitView() {
         if (!this.nodes.size) { this.scale=1; this.offsetX=0; this.offsetY=0; this._applyTransform(); this._updateZoom(); this._updateConnections(); return; }
-        let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-        this.nodes.forEach(n => { minX=Math.min(minX,n.x); minY=Math.min(minY,n.y); maxX=Math.max(maxX,n.x+640); maxY=Math.max(maxY,n.y+500); });
-        const r = this.container.getBoundingClientRect(), p = 80;
-        const w = maxX-minX+p*2, h = maxY-minY+p*2;
-        this.scale = Math.min(r.width/w, r.height/h, 1.5);
-        this.offsetX = (r.width - w*this.scale)/2 - minX*this.scale + p*this.scale;
-        this.offsetY = (r.height - h*this.scale)/2 - minY*this.scale + p*this.scale;
+        const boxes = [...this.nodes.values()].map(node => this.measureNodeBounds(node));
+        this.refreshGroupFrames();
+        boxes.push(...(this.groupBounds || []));
+        const minX = Math.min(...boxes.map(box => box.x)), minY = Math.min(...boxes.map(box => box.y));
+        const maxX = Math.max(...boxes.map(box => box.x + box.width)), maxY = Math.max(...boxes.map(box => box.y + box.height));
+        const r = this.container.getBoundingClientRect(), p = Math.min(64, r.width / 8, r.height / 8);
+        const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+        this.scale = Math.min((r.width - p * 2) / w, (r.height - p * 2) / h, 1.5);
+        this.offsetX = (r.width - w * this.scale) / 2 - minX * this.scale;
+        this.offsetY = (r.height - h * this.scale) / 2 - minY * this.scale;
         this._applyTransform(); this._updateZoom(); this._updateConnections();
     }
+
+    measureNodeBounds(node) {
+        const element = this.canvas.querySelector(`[data-node-id="${CSS.escape(node.id)}"]`);
+        if (!element) return { x: node.x, y: node.y, width: 624, height: 440 };
+        const origin = this.canvas.getBoundingClientRect();
+        const parts = [element, ...element.querySelectorAll(':scope > .node-label, :scope > [class*="props"], :scope > .text-creation-toolbar')];
+        const rects = parts.filter(part => part.getClientRects().length).map(part => part.getBoundingClientRect());
+        if (!rects.length) return { x: node.x, y: node.y, width: element.offsetWidth || 624, height: element.offsetHeight || 440 };
+        const left = Math.min(...rects.map(rect => rect.left)), top = Math.min(...rects.map(rect => rect.top));
+        return { x: (left - origin.left) / this.scale, y: (top - origin.top) / this.scale,
+            width: (Math.max(...rects.map(rect => rect.right)) - left) / this.scale,
+            height: (Math.max(...rects.map(rect => rect.bottom)) - top) / this.scale };
+    }
+
+    scheduleGroupFrames() {
+        if (this.groupFrameRequest != null) return;
+        this.groupFrameRequest = requestAnimationFrame(() => {
+            this.groupFrameRequest = null;
+            this.refreshGroupFrames();
+        });
+    }
+
+    refreshGroupFrames() {
+        if (!window.UltimateCanvasGroups || !this.canvas) return;
+        const groups = window.UltimateCanvasGroups.listGroups(this);
+        const live = new Set(groups.map(group => group.id));
+        this.canvas.querySelectorAll('.canvas-group-frame').forEach(frame => {
+            if (!live.has(frame.dataset.groupId)) frame.remove();
+        });
+        this.groupBounds = [];
+        for (const group of groups) {
+            const boxes = group.nodeIds.map(id => this.measureNodeBounds(this.nodes.get(id)));
+            const left = Math.min(...boxes.map(box => box.x)) - 24;
+            const top = Math.min(...boxes.map(box => box.y)) - 50;
+            const right = Math.max(...boxes.map(box => box.x + box.width)) + 24;
+            const bottom = Math.max(...boxes.map(box => box.y + box.height)) + 24;
+            this.groupBounds.push({ x: left, y: top, width: right - left, height: bottom - top });
+            let frame = this.canvas.querySelector(`.canvas-group-frame[data-group-id="${CSS.escape(group.id)}"]`);
+            if (!frame) {
+                frame = document.createElement('div');
+                frame.className = 'canvas-group-frame'; frame.dataset.groupId = group.id;
+                const title = document.createElement('button');
+                title.type = 'button'; title.className = 'canvas-group-title'; frame.append(title);
+                for (const side of ['top', 'right', 'bottom', 'left']) {
+                    const edge = document.createElement('div'); edge.className = `canvas-group-edge ${side}`; frame.append(edge);
+                }
+                title.addEventListener('click', event => {
+                    if (event.detail) return;
+                    const current = window.UltimateCanvasGroups.listGroups(this).find(item => item.id === frame.dataset.groupId);
+                    if (current) { this.selectNodes(current.nodeIds); this.container.focus({ preventScroll: true }); }
+                });
+                frame.addEventListener('mousedown', event => {
+                    if (event.button !== 0 || this._canvasInputBlocked()) return;
+                    event.preventDefault(); event.stopPropagation();
+                    this.container.focus({ preventScroll: true });
+                    if (this.isSpacePressed || this.interactionMode === 'hand') {
+                        this.isPanning = true;
+                        this.panStartX = event.clientX - this.offsetX; this.panStartY = event.clientY - this.offsetY;
+                        this.container.style.cursor = 'grabbing'; return;
+                    }
+                    const current = window.UltimateCanvasGroups.listGroups(this).find(item => item.id === frame.dataset.groupId);
+                    if (!current?.nodeIds.length) return;
+                    this.selectNodes(current.nodeIds);
+                    const id = current.nodeIds[0], node = this.nodes.get(id);
+                    this.dragNode = this.canvas.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+                    this.isDraggingNode = true; this.dragStartX = event.clientX; this.dragStartY = event.clientY;
+                    this.nodeStartX = node.x; this.nodeStartY = node.y;
+                    this._selectDragNodes(id, event);
+                });
+                this.canvas.prepend(frame);
+            }
+            frame.querySelector('button').textContent = group.name || '组合';
+            frame.querySelector('button').setAttribute('aria-label', `选择组合：${group.name || '组合'}`);
+            frame.style.left = `${left}px`; frame.style.top = `${top}px`;
+            frame.style.width = `${right - left}px`; frame.style.height = `${bottom - top}px`;
+            frame.classList.toggle('is-selected', group.nodeIds.every(id => this.selectedNodeIds.has(id)));
+        }
+    }
+
+    arrangeToolflowNodes() {
+        const flowNodes = [...this.nodes.values()].filter(node => String(node.type || '').startsWith('flow-'));
+        if (flowNodes.length < 2) return false;
+        const ids = new Set(flowNodes.map(node => node.id));
+        const outgoing = new Map(flowNodes.map(node => [node.id, []]));
+        const incoming = new Map(flowNodes.map(node => [node.id, []]));
+        this.connections.forEach(connection => {
+            if (!ids.has(connection.from) || !ids.has(connection.to)) return;
+            outgoing.get(connection.from).push(connection.to);
+            incoming.get(connection.to).push(connection.from);
+        });
+        const indegree = new Map(flowNodes.map(node => [node.id, incoming.get(node.id).length]));
+        const queue = flowNodes.filter(node => indegree.get(node.id) === 0).map(node => node.id);
+        const topo = [];
+        while (queue.length) {
+            const id = queue.shift();
+            topo.push(id);
+            outgoing.get(id).forEach(next => {
+                indegree.set(next, indegree.get(next) - 1);
+                if (indegree.get(next) === 0) queue.push(next);
+            });
+        }
+        if (topo.length !== flowNodes.length) return false;
+        const depth = new Map(flowNodes.map(node => [node.id, 0]));
+        topo.forEach(id => outgoing.get(id).forEach(next => depth.set(next, Math.max(depth.get(next), depth.get(id) + 1))));
+        const distance = new Map(flowNodes.map(node => [node.id, 0]));
+        [...topo].reverse().forEach(id => outgoing.get(id).forEach(next => distance.set(id, Math.max(distance.get(id), distance.get(next) + 1))));
+        const mainPath = new Set();
+        let current = flowNodes.find(node => node.type === 'flow-input')?.id || topo[0];
+        while (current && !mainPath.has(current)) {
+            mainPath.add(current);
+            const next = outgoing.get(current) || [];
+            current = next.slice().sort((a, b) => distance.get(b) - distance.get(a))[0];
+        }
+        const byDepth = new Map();
+        flowNodes.forEach(node => {
+            const level = depth.get(node.id) || 0;
+            if (!byDepth.has(level)) byDepth.set(level, []);
+            byDepth.get(level).push(node);
+        });
+        const order = { 'flow-input': 0, 'flow-template': 1, 'flow-select': 2, 'flow-confirm': 3, 'flow-output': 4 };
+        byDepth.forEach((nodes, level) => {
+            nodes.sort((a, b) => Number(mainPath.has(b.id)) - Number(mainPath.has(a.id)) || (order[a.type] || 9) - (order[b.type] || 9) || String(a.id).localeCompare(String(b.id)));
+            nodes.forEach((node, index) => {
+                node.x = 100 + level * 440;
+                node.y = 120 + index * 360;
+                const element = document.querySelector(`[data-node-id="${node.id}"]`);
+                if (element) {
+                    element.style.left = `${node.x}px`;
+                    element.style.top = `${node.y}px`;
+                    element.classList.toggle('toolflow-main-path', mainPath.has(node.id));
+                }
+            });
+        });
+        this._updateConnections();
+        this._notifyCanvasGeometryChanged('toolflow-arrange', { nodeIds: flowNodes.map(node => node.id) });
+        return true;
+    }
+
+    _notifyCanvasGeometryChanged(kind, details = {}) {
+        this.scheduleGroupFrames();
+        this.onCanvasGeometryChanged?.({ kind, ...details });
+    }
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { CanvasEngine, CanvasReferenceSelection };
 }

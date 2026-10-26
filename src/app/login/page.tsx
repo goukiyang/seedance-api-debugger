@@ -13,11 +13,11 @@ const LOGIN_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function defaultLanding(user?: LoginUser | null) {
-  return '/generate';
+  return '/';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return fallback;
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
   return value;
 }
 
@@ -213,10 +213,10 @@ export default function LoginPage({
         {error && (
           <div style={{
             padding: '10px 12px',
-            background: 'rgba(255,80,80,0.1)',
-            border: '1px solid rgba(255,80,80,0.3)',
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.18)',
             borderRadius: 8,
-            color: '#ff6060',
+            color: '#cbd5e1',
             fontSize: 13,
             marginTop: 16,
             marginBottom: passwordLoginOpen ? 16 : 0,

@@ -4,6 +4,16 @@ import {
   CodexApiAuthError,
   codexVideoApiStatus,
 } from '@/lib/integrations/codex';
+import {
+  DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+  SEEDANCE_VIDEO_MODEL_OPTIONS,
+  seedanceVideoModelInternalMultiplier,
+  seedanceVideoDurationOptions,
+  seedanceVideoDurationCapabilities,
+} from '@/lib/provider/seedance-models';
+import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
+import { normalizeSeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
+import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +21,7 @@ export async function GET(request: NextRequest) {
   try {
     const context = await authenticateCodexVideoApi(request);
     const status = await codexVideoApiStatus();
+    const editPilot = normalizeSeedanceEditPilot(context.settings.video_edit_pilot);
 
     return NextResponse.json({
       ok: true,
@@ -24,20 +35,68 @@ export async function GET(request: NextRequest) {
         username: context.user.username,
         email: context.user.email,
         role: context.user.role,
+        account_type: context.user.account_type,
+        user_profile: context.user.user_profile,
+        feature_profile_id: context.user.feature_profile_id,
       },
       endpoints: {
         upload_asset: '/api/codex/assets/upload',
         create_video: '/api/codex/video/create',
+        create_ip_video: '/api/ip/tasks/create',
+        draft_upgrade: '/api/codex/video/draft-upgrade',
         create_video_direct: '/api/tasks/create',
+        estimate_video: '/api/tasks/estimate',
+        draft_upgrade_quote_template: '/api/tasks/:id/draft-upgrade',
       },
       auth: {
         type: 'bearer',
         header: 'Authorization',
       },
       supported_settings: {
+        ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false },
+        omni_reference_task_type: editPilot.enabled ? ['edit'] : [],
+        request_cost_ceiling: { field: 'max_estimated_cost', unit: 'credits', enforced_before_freeze: true },
+        video_pricing: {
+          endpoint: '/api/tasks/estimate', method: 'POST', legacy_method: 'GET',
+          protocol: 'video-scope-v1', fingerprint_version: 2,
+          context_fields: ['provider', 'model', 'resolution', 'duration', 'project_id', 'video_card_id', 'ratio', 'draft',
+            'reference_video_urls', 'template_studio_run_id', 'template_studio_assets'],
+          receipt_fields: ['estimatedCost', 'pricing_revision', 'pricing_quote_token'],
+          create_fields: ['pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost'],
+          server_derived_purpose: ['standard', 'draft', 'draft_upgrade'],
+          token_ttl_seconds: 300, reprice_on_context_change: true,
+          token_in_business_fingerprint: false, unknown_request: 'lookup_original_only',
+          legacy_context_required_code: 'pricing_context_required',
+          original_request_lookup: { method: 'GET', endpoint: '/api/tasks/request-status',
+            query_field: 'idempotency_key', auth: 'same_account_bearer_or_session', read_only: true,
+            missing_record_safe_to_resubmit: false, bearer_post: false },
+          draft_upgrade_quote: { method: 'GET', endpoint_template: '/api/tasks/:id/draft-upgrade',
+            accepted_field: 'accepted', context: 'saved_local_draft' },
+          ip: { estimate_method: 'GET', create_endpoint: '/api/ip/tasks/create', template_context: false },
+        },
+        video_edit_constraints: {
+          status: editPilot.enabled ? 'restricted_pilot' : 'disabled',
+          provider_verified: false,
+          scope: 'admin_configured_project_allowlist',
+          model: 'dreamina-seedance-2-5-260628',
+          generation_mode: 'all_in_one_reference',
+          reference_video_count: 1,
+          duration_source: 'server_probed_reference_video',
+          provider_ratio: 'adaptive',
+          provider_duration: -1,
+          business_duration_range: [4, 15],
+        },
+        seedance_draft: seedanceDraftCapability(),
         generation_mode: ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'],
+        model: SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => ({
+          ...option,
+          default: option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
+          internal_credit_multiplier: seedanceVideoModelInternalMultiplier(option.id),
+          durations: seedanceVideoDurationOptions(option.id),
+        })),
         ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
         duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        duration_by_model: seedanceVideoDurationCapabilities(),
         resolution: ['480p', '720p', '1080p'],
         reference_fields: [
           'reference_image_ids',

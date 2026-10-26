@@ -1,12 +1,31 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import PageBanner from '@/components/PageBanner';
+import Link from 'next/link';
+import { useProductDialog } from '@/components/useProductDialog';
+import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
+import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton } from '@/components/LoadingState';
+import ImageModelApiSettings from './ImageModelApiSettings';
+import ImageQualityRoutingSettings from './ImageQualityRoutingSettings';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import dialogStyles from '@/components/ProductDialog.module.css';
+import { Settings, X } from 'lucide-react';
+import { STUDIO_TEXT_MODELS } from '@/lib/template-studio/text-models';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { displayUserSubtitle } from '@/lib/users/display';
 import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
+import { IMAGE_API_GROUPS } from '@/lib/integrations/image-generation-channel';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import workbenchStyles from './workbench.module.css';
 
 type UserSelectorType = 'id' | 'email' | 'username';
+const INTEGRATION_OBJECTS = [
+  ['image', '图片模型'], ['h3-video', '视频服务 · H3'], ['volcengine-ip', '视频服务 · 火山 IP'],
+  ['aimediakit-enhance-video', '视频超分 · AI MediaKit'], ['text', '文字服务 · Musk'], ['codex', '外部接入 · Codex 视频'],
+] as const;
 
 type CodexConfig = {
   enabled: boolean;
@@ -38,21 +57,6 @@ type MuskConfig = {
   api_key_configured: boolean;
 };
 
-type ImageGenerationConfig = {
-  enabled: boolean;
-  ready: boolean;
-  provider: 'musk';
-  base_url: string;
-  default_model: string;
-  api_key_configured: boolean;
-  timeout_ms: number;
-  max_outputs_per_request: number;
-  default_ratio: string;
-  supports_text_to_image: boolean;
-  supports_image_to_image: boolean;
-  supports_async_task: boolean;
-};
-
 type VolcengineIpConfig = {
   enabled: boolean;
   ready: boolean;
@@ -78,6 +82,41 @@ type AiMediaKitConfig = {
   missing: Array<'api_key'>;
 };
 
+type H3Config = {
+  enabled: boolean;
+  ready: boolean;
+  configured: boolean;
+  admin_queue_ready: boolean;
+  provider: 'h3_video';
+  base_url: string;
+  health_path: string;
+  presets_path: string;
+  generate_path: string;
+  default_preset_id: 'lightx2v_4step_turbo' | 'larry_v4_6step' | 'larry_v4_8step';
+  default_lora_id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
+  preset_options: Array<{
+    id: 'lightx2v_4step_turbo' | 'larry_v4_6step' | 'larry_v4_8step';
+    label: string;
+    detail: string;
+  }>;
+  lora_options: Array<{
+    id: 'lightx2v_turbo_lora' | 'larry_v4_turbo_lora';
+    label: string;
+    detail: string;
+  }>;
+  api_token_configured: boolean;
+  admin_token_configured: boolean;
+  health: {
+    api: string | null;
+    worker: string | null;
+    comfyui: string | null;
+    worker_url: string | null;
+    preset_count: number | null;
+    checked_at: string | null;
+  } | null;
+  missing: Array<'api_token' | 'preset'>;
+};
+
 type SubmitState = {
   type: 'success' | 'error';
   message: string;
@@ -89,6 +128,15 @@ type MuskTestState = {
   model?: string;
   latency_ms?: number;
   tested_at?: string;
+} | null;
+
+type H3TestState = {
+  type: 'success' | 'error';
+  message: string;
+  tested_at?: string;
+  health_api?: string;
+  worker?: string;
+  comfyui?: string;
 } | null;
 
 const EMPTY_CONFIG: CodexConfig = {
@@ -108,23 +156,8 @@ const EMPTY_MUSK_CONFIG: MuskConfig = {
   enabled: false,
   ready: false,
   base_url: 'https://api.muskapis.com/',
-  default_model: 'gpt-5.4',
+  default_model: 'gpt-5.5',
   api_key_configured: false,
-};
-
-const EMPTY_IMAGE_GENERATION_CONFIG: ImageGenerationConfig = {
-  enabled: false,
-  ready: false,
-  provider: 'musk',
-  base_url: 'https://api.muskapis.com/',
-  default_model: 'gemini-3.1-flash-image-preview',
-  api_key_configured: false,
-  timeout_ms: 90000,
-  max_outputs_per_request: 1,
-  default_ratio: '16:9',
-  supports_text_to_image: true,
-  supports_image_to_image: true,
-  supports_async_task: false,
 };
 
 const EMPTY_VOLCENGINE_IP_CONFIG: VolcengineIpConfig = {
@@ -152,6 +185,48 @@ const EMPTY_AIMEDIAKIT_CONFIG: AiMediaKitConfig = {
   missing: ['api_key'],
 };
 
+const EMPTY_H3_CONFIG: H3Config = {
+  enabled: false,
+  ready: false,
+  configured: false,
+  admin_queue_ready: false,
+  provider: 'h3_video',
+  base_url: 'http://127.0.0.1:8893',
+  health_path: '/health',
+  presets_path: '/api/h3/presets',
+  generate_path: '/api/h3/generate',
+  default_preset_id: 'lightx2v_4step_turbo',
+  default_lora_id: 'lightx2v_turbo_lora',
+  preset_options: [
+    { id: 'lightx2v_4step_turbo', label: '推荐', detail: '默认 · 速度优先，显存风险更低' },
+    { id: 'larry_v4_6step', label: '质量增强', detail: '质量更好但更慢，720P 长秒数有显存风险' },
+    { id: 'larry_v4_8step', label: '画质优先', detail: '更多步数，更慢，适合谨慎测试' },
+  ],
+  lora_options: [
+    { id: 'lightx2v_turbo_lora', label: 'LightX2V 快速 LoRA', detail: '默认 · 4-step turbo，显存压力更低，适合先跑通' },
+    { id: 'larry_v4_turbo_lora', label: 'Larry 高质量 LoRA', detail: '画质优先，15 秒 16:9 场景显存风险更高' },
+  ],
+  api_token_configured: false,
+  admin_token_configured: false,
+  health: null,
+  missing: ['api_token'],
+};
+
+function normalizeH3Config(value: unknown): H3Config {
+  const input = value && typeof value === 'object' ? value as Partial<H3Config> : {};
+  return {
+    ...EMPTY_H3_CONFIG,
+    ...input,
+    preset_options: Array.isArray(input.preset_options) && input.preset_options.length > 0
+      ? input.preset_options
+      : EMPTY_H3_CONFIG.preset_options,
+    lora_options: Array.isArray(input.lora_options) && input.lora_options.length > 0
+      ? input.lora_options
+      : EMPTY_H3_CONFIG.lora_options,
+    default_lora_id: input.default_lora_id || EMPTY_H3_CONFIG.default_lora_id,
+  };
+}
+
 function selectorLabel(type: UserSelectorType) {
   if (type === 'id') return '用户 ID';
   if (type === 'username') return '用户名';
@@ -164,31 +239,250 @@ function linkedUserSubtitle(config: CodexConfig) {
   return `${displayUserSubtitle(user) || user.id.slice(0, 8)} · ${user.status}`;
 }
 
+type RoleTextPolicyDto = {
+  revision: number; enabled: boolean; allowUnpricedText: boolean; allowedModels: string[];
+  maxInputBytes: number; maxOutputTokens: number; consentValid: boolean; needsConsent: boolean;
+  pointsPerUsd: 35; riskNoticeVersion: string;
+};
+type RoleTextPolicyDraft = Pick<RoleTextPolicyDto, 'enabled' | 'allowUnpricedText' | 'allowedModels' | 'maxInputBytes' | 'maxOutputTokens'>;
+
+function isRoleTextPolicyDto(value: unknown): value is RoleTextPolicyDto {
+  if (!value || typeof value !== 'object') return false;
+  const policy = value as RoleTextPolicyDto;
+  return Number.isSafeInteger(policy.revision) && policy.revision >= 0 && policy.pointsPerUsd === 35
+    && typeof policy.enabled === 'boolean' && typeof policy.allowUnpricedText === 'boolean'
+    && typeof policy.consentValid === 'boolean' && typeof policy.needsConsent === 'boolean'
+    && typeof policy.riskNoticeVersion === 'string' && Array.isArray(policy.allowedModels)
+    && policy.allowedModels.every(id => STUDIO_TEXT_MODELS.some(model => model.id === id))
+    && Number.isSafeInteger(policy.maxInputBytes) && policy.maxInputBytes > 0 && policy.maxInputBytes <= 131072
+    && Number.isSafeInteger(policy.maxOutputTokens) && policy.maxOutputTokens > 0 && policy.maxOutputTokens <= 4096;
+}
+
+function policyDraft(policy: RoleTextPolicyDto): RoleTextPolicyDraft {
+  return { enabled: policy.enabled, allowUnpricedText: policy.allowUnpricedText, allowedModels: policy.allowedModels,
+    maxInputBytes: policy.maxInputBytes, maxOutputTokens: policy.maxOutputTokens };
+}
+
+function RoleTextPolicySettings({ accountId, onClose, onDirtyChange, onSavingChange, confirm }: {
+  accountId: string; onClose: () => void; onDirtyChange: (dirty: boolean) => void;
+  onSavingChange: (saving: boolean) => void; confirm: ReturnType<typeof useProductDialog>['confirm'];
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const lock = useRef(false);
+  const alive = useRef(false);
+  const generation = useRef(0);
+  const dismissing = useRef(false);
+  const [policy, setPolicy] = useState<RoleTextPolicyDto | null>(null);
+  const [draft, setDraft] = useState<RoleTextPolicyDraft | null>(null);
+  const [baseline, setBaseline] = useState('');
+  const [providerReady, setProviderReady] = useState(false);
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  const [reading, setReading] = useState(true);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [needsRead, setNeedsRead] = useState(false);
+  const [error, setError] = useState('');
+  const dirty = Boolean(draft && (JSON.stringify(draft) !== baseline || riskAcknowledged));
+
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  async function read(preserve = false) {
+    if (lock.current) return;
+    const epoch = generation.current;
+    lock.current = true; setReading(true); setError('');
+    try {
+      const response = await fetch('/api/admin/integrations/musk', { cache: 'no-store' });
+      const data = await response.json();
+      if (!alive.current || generation.current !== epoch) return;
+      if (!response.ok || data.ok !== true || !isRoleTextPolicyDto(data.role_text_policy)) {
+        throw new Error(data.role_text_policy_error || data.error || '未读取到有效角色文字政策，未按默认启用处理。');
+      }
+      const next: RoleTextPolicyDto = data.role_text_policy;
+      setPolicy(next); setNeedsRead(false); setRiskAcknowledged(false);
+      setProviderReady(data.config?.enabled === true && data.config?.api_key_configured === true
+        && typeof data.config.base_url === 'string' && new URL(data.config.base_url).origin === 'https://api.muskapis.com');
+      if (!preserve) { const values = policyDraft(next); setDraft(values); setBaseline(JSON.stringify(values)); }
+    } catch (cause) {
+      if (alive.current && generation.current === epoch) { setNeedsRead(true); setError(cause instanceof Error ? cause.message : '读取角色文字政策失败'); }
+    } finally {
+      if (alive.current && generation.current === epoch) { lock.current = false; setReading(false); }
+    }
+  }
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: () => { void dismiss(); } });
+  useEffect(() => {
+    generation.current++; alive.current = true; lock.current = false; dialog.current?.showModal(); void read();
+    return () => { generation.current++; alive.current = false; onDirtyChange(false); onSavingChange(false); };
+  }, [accountId]);
+
+  async function dismiss() {
+    if (savingPolicy || dismissing.current) return;
+    dismissing.current = true;
+    try {
+      if (dirty && !await confirm('角色文字设置尚未保存，放弃本次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })) return;
+      if (alive.current) onClose();
+    } finally { dismissing.current = false; }
+  }
+  function change(patch: Partial<RoleTextPolicyDraft>) {
+    setDraft(current => current ? { ...current, ...patch } : current);
+    setRiskAcknowledged(false);
+  }
+  async function savePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!policy || !draft || lock.current || needsRead) return;
+    if (!draft.allowedModels.length) { setError('至少选择一个可用模型。'); return; }
+    if (draft.enabled && (!providerReady || !draft.allowUnpricedText || !riskAcknowledged)) {
+      setError('请先保存可用的主文字配置，并明确确认无报价费用风险。'); return;
+    }
+    const epoch = generation.current;
+    let definiteFailure = false;
+    lock.current = true; setSavingPolicy(true); onSavingChange(true); setError('');
+    try {
+      const response = await fetch('/api/admin/integrations/musk', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role_text_policy: { ...draft, riskAcknowledged }, base_revision: policy.revision }) });
+      const data = await response.json();
+      if (!alive.current || generation.current !== epoch) return;
+      if (!response.ok || data.ok !== true) {
+        definiteFailure = !response.ok && response.status < 500;
+        if (response.status >= 500 || response.status === 409) setNeedsRead(true);
+        throw new Error(data.error || '保存结果未确认，输入已保留。');
+      }
+      if (!isRoleTextPolicyDto(data.role_text_policy) || data.role_text_policy.revision !== policy.revision + 1
+        || JSON.stringify(policyDraft(data.role_text_policy)) !== JSON.stringify(draft)
+        || draft.enabled && !data.role_text_policy.consentValid) {
+        setNeedsRead(true); throw new Error('未收到匹配的保存回执，输入已保留，请重新读取。');
+      }
+      onDirtyChange(false); onClose();
+    } catch (cause) {
+      if (alive.current && generation.current === epoch) { setError(cause instanceof Error ? cause.message : '保存结果未确认，输入已保留。');
+        if (!definiteFailure) setNeedsRead(true); }
+    } finally {
+      if (alive.current && generation.current === epoch) { lock.current = false; setSavingPolicy(false); onSavingChange(false); }
+    }
+  }
+
+  return createPortal(<dialog ref={dialog} className={dialogStyles.dialog} aria-modal="true" aria-labelledby="role-text-policy-title">
+    <form onSubmit={savePolicy} aria-busy={reading || savingPolicy}>
+      <header className={dialogStyles.header}><h2 id="role-text-policy-title">角色文字</h2>
+        <button type="button" className={dialogStyles.close} title="关闭" aria-label="关闭" disabled={savingPolicy} onClick={() => void dismiss()}><X size={18} /></button></header>
+      <p className={dialogStyles.message}>仅控制角色协作的文字调用，不代替本人任务授权。启用后仍须本人明确确认模型、期限和预算，保存不会调用模型。</p>
+      {reading && <p role="status">正在读取已保存政策</p>}
+      {draft && <fieldset disabled={reading || savingPolicy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <label className={dialogStyles.checkbox}><input type="checkbox" checked={draft.enabled} onChange={event => change({ enabled: event.target.checked })} />允许角色文字调用</label>
+        {!providerReady && <p className={dialogStyles.message}>主文字配置尚未就绪；请先在Musk API区域保存已启用、已设置Key的配置。角色开关不会代开主配置。</p>}
+        {policy?.needsConsent && <p className={dialogStyles.message}>尚无有效风险同意，或账号范围已变化；启用须重新确认。</p>}
+        <div className="form-group"><span className="form-label">允许模型</span>
+          {STUDIO_TEXT_MODELS.map(model => <label key={model.id} className={dialogStyles.checkbox}>
+            <input type="checkbox" checked={draft.allowedModels.includes(model.id)} onChange={event => change({
+              allowedModels: STUDIO_TEXT_MODELS.filter(item => item.id === model.id ? event.target.checked : draft.allowedModels.includes(item.id)).map(item => item.id),
+            })} />{model.label}</label>)}</div>
+        <div className="form-group"><label className="form-label" htmlFor="role-text-input-limit">单次输入上限（字节）</label>
+          <input id="role-text-input-limit" type="number" className={dialogStyles.input} min={1} max={131072} step={1} required value={draft.maxInputBytes || ''} onChange={event => change({ maxInputBytes: Number(event.target.value) })} /></div>
+        <div className="form-group"><label className="form-label" htmlFor="role-text-output-limit">单次输出上限（Token）</label>
+          <input id="role-text-output-limit" type="number" className={dialogStyles.input} min={1} max={4096} step={1} required value={draft.maxOutputTokens || ''} onChange={event => change({ maxOutputTokens: Number(event.target.value) })} /></div>
+        <label className={dialogStyles.checkbox}><input type="checkbox" checked={draft.allowUnpricedText} onChange={event => change({ allowUnpricedText: event.target.checked })} />允许没有预先报价的文字调用</label>
+        <p className={dialogStyles.message}>实际美元账单按1美元＝35点结算，预留点数向上取整。本人授权预留不是供应商报价，也不保证封顶；没有可匹配账单时费用保持待确认，超出预留须本人另行授权差额。</p>
+        {draft.enabled && <label className={dialogStyles.checkbox}><input type="checkbox" checked={riskAcknowledged} onChange={event => setRiskAcknowledged(event.target.checked)} />我已了解无报价调用可能产生超出预留的供应商费用，确认本次模型及限制。</label>}
+      </fieldset>}
+      {error && <p role="alert" className={dialogStyles.message}>{error}</p>}
+      {needsRead && <p className={dialogStyles.message}>输入仍保留。重新读取只更新设置版本，不代表此前保存成功；请核对后再决定是否保存。</p>}
+      <footer className={dialogStyles.actions}>
+        {(needsRead || !draft) && <button type="button" className={dialogStyles.secondary} disabled={reading || savingPolicy} onClick={() => void read(Boolean(draft))}>重新读取</button>}
+        <button type="button" className={dialogStyles.secondary} disabled={savingPolicy} onClick={() => void dismiss()}>取消</button>
+        <button type="submit" className={dialogStyles.primary} disabled={!draft || reading || savingPolicy || needsRead
+          || draft.enabled && (!providerReady || !draft.allowUnpricedText || !riskAcknowledged)}>{savingPolicy ? '正在保存' : '保存'}</button>
+      </footer>
+    </form>
+  </dialog>, document.body);
+}
+
 export default function AdminIntegrationsClient() {
+  const { confirm, productDialog } = useProductDialog();
+  const { user: currentUser, hasLoadedUser, refreshUser } = useAppSession();
   const [config, setConfig] = useState<CodexConfig>(EMPTY_CONFIG);
   const [muskConfig, setMuskConfig] = useState<MuskConfig>(EMPTY_MUSK_CONFIG);
-  const [imageConfig, setImageConfig] = useState<ImageGenerationConfig>(EMPTY_IMAGE_GENERATION_CONFIG);
   const [volcengineConfig, setVolcengineConfig] = useState<VolcengineIpConfig>(EMPTY_VOLCENGINE_IP_CONFIG);
   const [aiMediaKitConfig, setAiMediaKitConfig] = useState<AiMediaKitConfig>(EMPTY_AIMEDIAKIT_CONFIG);
+  const [h3Config, setH3Config] = useState<H3Config>(EMPTY_H3_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [muskSaving, setMuskSaving] = useState(false);
   const [muskTesting, setMuskTesting] = useState(false);
-  const [imageSaving, setImageSaving] = useState(false);
   const [volcengineSaving, setVolcengineSaving] = useState(false);
   const [aiMediaKitSaving, setAiMediaKitSaving] = useState(false);
+  const [h3Saving, setH3Saving] = useState(false);
+  const [h3Testing, setH3Testing] = useState(false);
   const [token, setToken] = useState('');
   const [clearToken, setClearToken] = useState(false);
   const [muskApiKey, setMuskApiKey] = useState('');
   const [clearMuskApiKey, setClearMuskApiKey] = useState(false);
-  const [imageApiKey, setImageApiKey] = useState('');
-  const [clearImageApiKey, setClearImageApiKey] = useState(false);
   const [volcengineApiKey, setVolcengineApiKey] = useState('');
   const [clearVolcengineApiKey, setClearVolcengineApiKey] = useState(false);
   const [aiMediaKitApiKey, setAiMediaKitApiKey] = useState('');
   const [clearAiMediaKitApiKey, setClearAiMediaKitApiKey] = useState(false);
+  const [h3ApiToken, setH3ApiToken] = useState('');
+  const [h3AdminToken, setH3AdminToken] = useState('');
+  const [clearH3ApiToken, setClearH3ApiToken] = useState(false);
+  const [clearH3AdminToken, setClearH3AdminToken] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
   const [muskTestState, setMuskTestState] = useState<MuskTestState>(null);
+  const [h3TestState, setH3TestState] = useState<H3TestState>(null);
+  const [h3QueueOpen, setH3QueueOpen] = useState(false);
+  const [h3QueueLoading, setH3QueueLoading] = useState(false);
+  const [h3QueueState, setH3QueueState] = useState<unknown>(null);
+  const [h3QueueAction, setH3QueueAction] = useState<'pause' | 'resume' | 'cancel' | 'stop' | 'move'>('pause');
+  const [h3QueueJobId, setH3QueueJobId] = useState('');
+  const [h3QueueDirection, setH3QueueDirection] = useState<'top' | 'up' | 'down' | 'bottom'>('top');
+  const [h3QueueReason, setH3QueueReason] = useState('');
+  const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
+  const [imageDrafts, setImageDrafts] = useState<Record<string, boolean>>({});
+  const [selectedObject, setSelectedObject] = useState('image');
+  const [objectReady, setObjectReady] = useState(false);
+  const [rolePolicyOpen, setRolePolicyOpen] = useState(false);
+  const [rolePolicyDirty, setRolePolicyDirty] = useState(false);
+  const [rolePolicySaving, setRolePolicySaving] = useState(false);
+  const rolePolicyAccount = useRef(currentUser?.id);
+  const onImageDraftChange = useCallback((drafts: Record<string, boolean>) => setImageDrafts(drafts), []);
+  const imageDraftSnapshot = Object.fromEntries([...IMAGE_API_GROUPS, 'model'].map(group => [`imageGroup:${group}`, Boolean(imageDrafts[group])]));
+  const settingsSubmit = useSettingsPageSubmit({
+    codex: { config, entered: Boolean(token), clearToken },
+    musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
+    volcengine: { config: volcengineConfig, entered: Boolean(volcengineApiKey), clearVolcengineApiKey },
+    mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
+    h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
+    roleText: rolePolicyDirty,
+    ...imageDraftSnapshot,
+  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading || rolePolicySaving);
+
+  useEffect(() => {
+    if (rolePolicyAccount.current === currentUser?.id) return;
+    rolePolicyAccount.current = currentUser?.id;
+    setRolePolicyOpen(false); setRolePolicyDirty(false); setRolePolicySaving(false); setImageDrafts({});
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const restore = () => {
+      const url = new URL(window.location.href);
+      let value = url.searchParams.get('object') || url.hash.slice(1);
+      if (!value && url.pathname === '/admin/integrations/aimediakit') value = 'aimediakit-enhance-video';
+      if (!value) {
+        try { value = localStorage.getItem(`sd2-admin-integration-object-v1:${currentUser.id}`) || 'image'; } catch { value = 'image'; }
+      }
+      setSelectedObject(INTEGRATION_OBJECTS.some(([id]) => id === value) ? value : 'image'); setObjectReady(true);
+    };
+    restore(); window.addEventListener('popstate', restore); window.addEventListener('hashchange', restore);
+    return () => { window.removeEventListener('popstate', restore); window.removeEventListener('hashchange', restore); };
+  }, [currentUser?.id]);
+  function selectObject(value: string) {
+    setSelectedObject(value);
+    const url = new URL(window.location.href); url.searchParams.set('object', value); url.hash = '';
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`);
+    if (currentUser?.id && objectReady) {
+      try { localStorage.setItem(`sd2-admin-integration-object-v1:${currentUser.id}`, value); } catch { /* Only the selected object is persisted. */ }
+    }
+  }
+
+  useEffect(() => {
+    if (!hasLoadedUser) void refreshUser();
+  }, [hasLoadedUser, refreshUser]);
 
   const statusText = useMemo(() => {
     if (config.ready) return '已启用，可被 Codex 调用';
@@ -207,15 +501,6 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [muskConfig]);
 
-  const imageStatusText = useMemo(() => {
-    if (imageConfig.ready) return '已启用';
-    if (!imageConfig.enabled) return '未启用';
-    if (!imageConfig.base_url) return '缺少 API 地址';
-    if (!imageConfig.default_model) return '缺少默认模型';
-    if (!imageConfig.api_key_configured) return '缺少 API Key';
-    return '配置未就绪';
-  }, [imageConfig]);
-
   const volcengineStatusText = useMemo(() => {
     if (volcengineConfig.ready) return '已启用';
     if (!volcengineConfig.enabled) return '未启用';
@@ -233,21 +518,31 @@ export default function AdminIntegrationsClient() {
     return '配置未就绪';
   }, [aiMediaKitConfig]);
 
+  const h3StatusText = useMemo(() => {
+    if (h3Config.ready) return '已启用';
+    if (!h3Config.enabled) return '未启用';
+    if (!h3Config.base_url) return '缺少 API 地址';
+    if (!h3Config.api_token_configured) return '缺少用户 token';
+    if (!h3Config.configured) return '配置未就绪';
+    if (!h3Config.health) return '待测试连接';
+    return '健康检查未通过';
+  }, [h3Config]);
+
   const loadConfig = async () => {
     try {
-      const [codexRes, muskRes, imageRes, volcengineRes, aiMediaKitRes] = await Promise.all([
+      const [codexRes, muskRes, volcengineRes, aiMediaKitRes, h3Res] = await Promise.all([
         fetch('/api/admin/integrations/codex', { cache: 'no-store' }),
         fetch('/api/admin/integrations/musk', { cache: 'no-store' }),
-        fetch('/api/admin/integrations/image-generation', { cache: 'no-store' }),
         fetch('/api/admin/integrations/volcengine-ip', { cache: 'no-store' }),
         fetch('/api/admin/integrations/aimediakit', { cache: 'no-store' }),
+        fetch('/api/admin/integrations/h3', { cache: 'no-store' }),
       ]);
-      const [codexData, muskData, imageData, volcengineData, aiMediaKitData] = await Promise.all([
+      const [codexData, muskData, volcengineData, aiMediaKitData, h3Data] = await Promise.all([
         codexRes.json(),
         muskRes.json(),
-        imageRes.json(),
         volcengineRes.json(),
         aiMediaKitRes.json(),
+        h3Res.json(),
       ]);
 
       if (!codexRes.ok) {
@@ -258,10 +553,6 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: muskData.error || '读取 Musk API 配置失败' });
         return;
       }
-      if (!imageRes.ok) {
-        setSubmitState({ type: 'error', message: imageData.error || '读取图形生成 API 配置失败' });
-        return;
-      }
       if (!volcengineRes.ok) {
         setSubmitState({ type: 'error', message: volcengineData.error || '读取火山 IP 生成配置失败' });
         return;
@@ -270,11 +561,15 @@ export default function AdminIntegrationsClient() {
         setSubmitState({ type: 'error', message: aiMediaKitData.error || '读取 AI MediaKit 配置失败' });
         return;
       }
+      if (!h3Res.ok) {
+        setSubmitState({ type: 'error', message: h3Data.error || '读取 H3 配置失败' });
+        return;
+      }
       setConfig(codexData.config || EMPTY_CONFIG);
       setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
-      setImageConfig(imageData.config || EMPTY_IMAGE_GENERATION_CONFIG);
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
+      setH3Config(normalizeH3Config(h3Data.config));
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
@@ -284,6 +579,8 @@ export default function AdminIntegrationsClient() {
 
   const saveMuskConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setMuskSaving(true);
     setSubmitState(null);
     setMuskTestState(null);
@@ -301,7 +598,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -309,10 +606,12 @@ export default function AdminIntegrationsClient() {
       setMuskApiKey('');
       setClearMuskApiKey(false);
       setSubmitState({ type: 'success', message: 'Musk API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setMuskSaving(false);
+      settingsSubmit.finish('musk', saved);
     }
   };
 
@@ -352,48 +651,10 @@ export default function AdminIntegrationsClient() {
     }
   };
 
-  const saveImageConfig = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setImageSaving(true);
-    setSubmitState(null);
-
-    try {
-      const res = await fetch('/api/admin/integrations/image-generation', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          enabled: imageConfig.enabled,
-          provider: imageConfig.provider,
-          base_url: imageConfig.base_url,
-          default_model: imageConfig.default_model,
-          api_key: imageApiKey,
-          clear_api_key: clearImageApiKey,
-          timeout_ms: imageConfig.timeout_ms,
-          max_outputs_per_request: imageConfig.max_outputs_per_request,
-          default_ratio: imageConfig.default_ratio,
-          supports_text_to_image: imageConfig.supports_text_to_image,
-          supports_image_to_image: imageConfig.supports_image_to_image,
-          supports_async_task: imageConfig.supports_async_task,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
-        return;
-      }
-      setImageConfig(data.config || imageConfig);
-      setImageApiKey('');
-      setClearImageApiKey(false);
-      setSubmitState({ type: 'success', message: '图形生成 API 配置已保存到后台配置。' });
-    } catch (error) {
-      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
-    } finally {
-      setImageSaving(false);
-    }
-  };
-
   const saveVolcengineConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setVolcengineSaving(true);
     setSubmitState(null);
 
@@ -410,7 +671,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -418,15 +679,19 @@ export default function AdminIntegrationsClient() {
       setVolcengineApiKey('');
       setClearVolcengineApiKey(false);
       setSubmitState({ type: 'success', message: '火山 IP 生成 API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setVolcengineSaving(false);
+      settingsSubmit.finish('volcengine', saved);
     }
   };
 
   const saveAiMediaKitConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setAiMediaKitSaving(true);
     setSubmitState(null);
 
@@ -442,7 +707,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -450,10 +715,150 @@ export default function AdminIntegrationsClient() {
       setAiMediaKitApiKey('');
       setClearAiMediaKitApiKey(false);
       setSubmitState({ type: 'success', message: 'AI MediaKit 视频超分 API 配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setAiMediaKitSaving(false);
+      settingsSubmit.finish('mediakit', saved);
+    }
+  };
+
+  const saveH3Config = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
+    setH3Saving(true);
+    setSubmitState(null);
+    setH3TestState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/h3', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: h3Config.enabled,
+          base_url: h3Config.base_url,
+          default_preset_id: h3Config.default_preset_id,
+          default_lora_id: h3Config.default_lora_id,
+          api_token: h3ApiToken,
+          admin_token: h3AdminToken,
+          clear_api_token: clearH3ApiToken,
+          clear_admin_token: clearH3AdminToken,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.config) {
+        setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+        return;
+      }
+      setH3Config(normalizeH3Config(data.config || h3Config));
+      setH3ApiToken('');
+      setH3AdminToken('');
+      setClearH3ApiToken(false);
+      setClearH3AdminToken(false);
+      setSubmitState({ type: 'success', message: 'H3 本地生成服务配置已保存。' });
+      saved = true;
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+    } finally {
+      setH3Saving(false);
+      settingsSubmit.finish('h3', saved);
+    }
+  };
+
+  const testH3Config = async () => {
+    setH3Testing(true);
+    setSubmitState(null);
+    setH3TestState(null);
+
+    try {
+      const res = await fetch('/api/admin/integrations/h3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3TestState({
+          type: 'error',
+          message: data.error || data.message || 'H3 连接测试失败',
+        });
+        return;
+      }
+      const health = data.test?.health || {};
+      setH3Config(normalizeH3Config(data.config || h3Config));
+      setH3TestState({
+        type: 'success',
+        message: 'H3 连接测试通过。',
+        tested_at: data.test?.tested_at,
+        health_api: typeof health.api === 'string' ? health.api : undefined,
+        worker: typeof health.worker?.worker === 'string' ? health.worker.worker : undefined,
+        comfyui: typeof health.worker?.comfyui === 'string' ? health.worker.comfyui : undefined,
+      });
+    } catch (error) {
+      setH3TestState({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'H3 连接测试失败',
+      });
+    } finally {
+      setH3Testing(false);
+    }
+  };
+
+  const loadH3Queue = async () => {
+    setH3QueueLoading(true);
+    setH3QueueMessage(null);
+    try {
+      const res = await fetch('/api/admin/integrations/h3/queue', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3QueueMessage({ type: 'error', message: data.error || data.message || '读取 H3 队列失败' });
+        return;
+      }
+      setH3QueueState(data.queue || null);
+      setH3QueueMessage({ type: 'success', message: 'H3 队列状态已刷新。' });
+    } catch (error) {
+      setH3QueueMessage({ type: 'error', message: error instanceof Error ? error.message : '读取 H3 队列失败' });
+    } finally {
+      setH3QueueLoading(false);
+    }
+  };
+
+  const submitH3QueueAction = async () => {
+    setH3QueueMessage(null);
+    const needsJobId = h3QueueAction === 'cancel' || h3QueueAction === 'stop' || h3QueueAction === 'move';
+    const trimmedJobId = h3QueueJobId.trim();
+    if (needsJobId && !trimmedJobId) {
+      setH3QueueMessage({ type: 'error', message: '请先填写 H3 job_id。' });
+      return;
+    }
+    if ((h3QueueAction === 'cancel' || h3QueueAction === 'stop')
+      && !await confirm(`确认执行 H3 ${h3QueueAction === 'cancel' ? '取消排队任务' : '停止运行任务'}？`, { title: '确认停止', confirmLabel: '确认' })) {
+      return;
+    }
+    setH3QueueLoading(true);
+    try {
+      const res = await fetch('/api/admin/integrations/h3/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: h3QueueAction,
+          job_id: trimmedJobId || undefined,
+          direction: h3QueueAction === 'move' ? h3QueueDirection : undefined,
+          reason: h3QueueReason.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setH3QueueMessage({ type: 'error', message: data.error || data.message || 'H3 队列操作失败' });
+        return;
+      }
+      setH3QueueMessage({ type: 'success', message: 'H3 队列操作已提交，并已写入操作日志。' });
+      await loadH3Queue();
+    } catch (error) {
+      setH3QueueMessage({ type: 'error', message: error instanceof Error ? error.message : 'H3 队列操作失败' });
+    } finally {
+      setH3QueueLoading(false);
     }
   };
 
@@ -463,6 +868,8 @@ export default function AdminIntegrationsClient() {
 
   const saveConfig = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!settingsSubmit.start()) return;
+    let saved = false;
     setSaving(true);
     setSubmitState(null);
 
@@ -479,7 +886,7 @@ export default function AdminIntegrationsClient() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.config) {
         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
         return;
       }
@@ -487,10 +894,12 @@ export default function AdminIntegrationsClient() {
       setToken('');
       setClearToken(false);
       setSubmitState({ type: 'success', message: 'Codex 接口配置已保存到后台配置。' });
+      saved = true;
     } catch (error) {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
     } finally {
       setSaving(false);
+      settingsSubmit.finish('codex', saved);
     }
   };
 
@@ -513,71 +922,328 @@ export default function AdminIntegrationsClient() {
           description="统一维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用 sd2 的后端配置。"
         />
         <div className="card">
-          <p className="text-gray">正在读取配置...</p>
+          <LoadingSkeleton label="正在读取配置" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="admin-integrations-page">
+    <fieldset disabled={settingsSubmit.busy} className={`admin-integrations-page ${workbenchStyles.surface}`} style={{ border: 0, margin: 0, minWidth: 0 }}>
+      {productDialog}
+      {settingsSubmit.notice && <p role="status">{settingsSubmit.notice}</p>}
       <PageBanner
         eyebrow="管理后台"
         title="API 设置"
-        description="在这里维护火山 IP 生成、AI MediaKit 超分、Musk API、图形生成 API、Codex API 和外部工具调用配置，生成任务才能进入同一套扣费与后台留痕。"
+        description="按模型或服务维护供应商与调用配置。"
+        actions={<Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>}
       />
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <span className="stat-label">Codex 接口</span>
-          <strong className="stat-value">{statusText}</strong>
-          <span className="stat-sub">{config.ready ? '鉴权、用户和 token 均已就绪' : '保存配置后再走接口自测'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">来源标识</span>
-          <strong className="stat-value">{config.source_label || '-'}</strong>
-          <span className="stat-sub">会写入任务、成本导出和产出留存。</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">扣费用户</span>
-          <strong className="stat-value">
-            {config.linked_user ? (
-              <UserIdentityBadge user={config.linked_user} size="sm" subtitle={linkedUserSubtitle(config)} />
-            ) : '-'}
-          </strong>
-          <span className="stat-sub">{config.linked_user ? '生成任务会归属并扣费到该用户' : linkedUserSubtitle(config)}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Musk API</span>
-          <strong className="stat-value">{muskStatusText}</strong>
-          <span className="stat-sub">{muskConfig.default_model || 'gpt-5.4'} · {muskConfig.base_url || '未配置地址'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">图形生成 API</span>
-          <strong className="stat-value">{imageStatusText}</strong>
-          <span className="stat-sub">{imageConfig.provider} · {imageConfig.default_model || 'gemini-3.1-flash-image-preview'}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">火山 IP 生成</span>
-          <strong className="stat-value">{volcengineStatusText}</strong>
-          <span className="stat-sub">
-            {volcengineConfig.default_model || '未设置 Model ID'} · {volcengineConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}
-          </span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">AI MediaKit 超分</span>
-          <strong className="stat-value">{aiMediaKitStatusText}</strong>
-          <span className="stat-sub">{aiMediaKitConfig.base_url || '未设置 API 地址'} · {aiMediaKitConfig.api_key_configured ? 'API Key 已设置' : 'API Key 未设置'}</span>
-        </div>
-      </div>
+      <label className="form-group" style={{ display: 'block', maxWidth: 640 }}><span className="form-label">模型或服务</span>
+        <select className="input" value={selectedObject} onChange={event => selectObject(event.target.value)}>
+          {INTEGRATION_OBJECTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+      <p className="text-gray text-sm">保存只影响所选对象未来的新请求；已报价、已受理或结果未知的请求继续使用原配置。切换对象不会提交或丢弃当前输入。</p>
 
       {submitState && (
-        <div className={`alert ${submitState.type === 'success' ? 'alert-success' : 'alert-error'} mt-4`}>
+        <div className="outputs-message mt-4" role="status">
           {submitState.message}
         </div>
       )}
 
-      <form id="aimediakit-enhance-video" className="card codex-config-form" onSubmit={saveAiMediaKitConfig}>
+      <section hidden={selectedObject !== 'h3-video'}>
+      <p>H3 · {h3StatusText} · {h3Config.api_token_configured ? '用户 token 已设置' : '用户 token 未设置'}</p>
+      <details><summary>具体配置与队列管理</summary>
+      <form id="h3-video" className="codex-config-form" onSubmit={saveH3Config}>
+        <div className="codex-config-head">
+          <div>
+            <h2 className="section-title mb-0">H3 本地生成服务</h2>
+            <p className="text-gray text-sm mt-2">
+              保存 H3 API 网关地址、用户 token 和管理员 token。普通生成只走服务端转发，不把 token 暴露给浏览器。
+            </p>
+          </div>
+          <label className="toggle-switch" aria-label="启用 H3 本地生成服务">
+            <input
+              type="checkbox"
+              checked={h3Config.enabled}
+              onChange={(event) => setH3Config((prev) => ({ ...prev, enabled: event.target.checked }))}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="codex-config-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-base-url">API 地址</label>
+            <input
+              id="h3-base-url"
+              className="input"
+              value={h3Config.base_url}
+              onChange={(event) => setH3Config((prev) => ({ ...prev, base_url: event.target.value }))}
+              placeholder="https://h3-api.example.com"
+              autoComplete="off"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-default-preset">默认预设</label>
+            <select
+              id="h3-default-preset"
+              className="input"
+              value={h3Config.default_preset_id}
+              onChange={(event) => setH3Config((prev) => ({
+                ...prev,
+                default_preset_id: event.target.value as H3Config['default_preset_id'],
+              }))}
+            >
+              {h3Config.preset_options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} · {option.detail}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-default-lora">默认 LoRA</label>
+            <select
+              id="h3-default-lora"
+              className="input"
+              value={h3Config.default_lora_id}
+              onChange={(event) => setH3Config((prev) => ({
+                ...prev,
+                default_lora_id: event.target.value as H3Config['default_lora_id'],
+              }))}
+            >
+              {h3Config.lora_options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} · {option.detail}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-api-token">用户 token</label>
+            <input
+              id="h3-api-token"
+              className="input"
+              type="password"
+              value={h3ApiToken}
+              onChange={(event) => {
+                setH3ApiToken(event.target.value);
+                if (event.target.value.trim()) setClearH3ApiToken(false);
+              }}
+              placeholder={h3Config.api_token_configured ? '当前已设置，留空不变' : '输入 H3_API_TOKEN'}
+              autoComplete="new-password"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="h3-admin-token">管理员 token</label>
+            <input
+              id="h3-admin-token"
+              className="input"
+              type="password"
+              value={h3AdminToken}
+              onChange={(event) => {
+                setH3AdminToken(event.target.value);
+                if (event.target.value.trim()) setClearH3AdminToken(false);
+              }}
+              placeholder={h3Config.admin_token_configured ? '当前已设置，留空不变' : '输入 H3_ADMIN_TOKEN'}
+              autoComplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div className="codex-config-status">
+          <div>
+            <span className="info-label">当前状态</span>
+            <strong>{h3StatusText}</strong>
+          </div>
+          <div>
+            <span className="info-label">健康检查</span>
+            <strong>
+              {h3Config.health
+                ? `API ${h3Config.health.api || '-'} · Worker ${h3Config.health.worker || '-'} · ComfyUI ${h3Config.health.comfyui || '-'}`
+                : h3Config.health_path}
+            </strong>
+          </div>
+          <div>
+            <span className="info-label">最近测试</span>
+            <strong>{h3Config.health?.checked_at ? <RelativeTime value={h3Config.health.checked_at} /> : '未测试'}</strong>
+          </div>
+          <div>
+            <span className="info-label">提交任务</span>
+            <strong>{h3Config.generate_path}</strong>
+          </div>
+          <div>
+            <span className="info-label">队列管理</span>
+            <strong>{h3Config.admin_queue_ready ? '已可用' : '未就绪'}</strong>
+          </div>
+          <div>
+            <span className="info-label">用户 token</span>
+            <strong>{h3Config.api_token_configured ? '已设置' : '未设置'}</strong>
+          </div>
+          <div>
+            <span className="info-label">管理员 token</span>
+            <strong>{h3Config.admin_token_configured ? '已设置' : '未设置'}</strong>
+          </div>
+        </div>
+
+        <details
+          className="h3-queue-panel"
+          open={h3QueueOpen}
+          onToggle={(event) => setH3QueueOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <div>
+              <strong>H3 队列管理</strong>
+              <span>{h3Config.admin_queue_ready ? '可读取队列并执行管理员操作' : '需要健康检查通过并配置管理员 token'}</span>
+            </div>
+          </summary>
+          <div className="h3-queue-body">
+            <div className="h3-queue-toolbar">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={loadH3Queue}
+                disabled={h3QueueLoading || !h3Config.admin_queue_ready}
+              >
+                {h3QueueLoading ? '正在刷新' : '刷新队列'}
+              </button>
+              {!h3Config.admin_queue_ready && (
+                <span className="text-gray text-sm">队列操作只在 H3 健康检查通过且管理员 token 就绪后开放。</span>
+              )}
+            </div>
+
+            {h3QueueMessage && (
+              <div className={`codex-config-test-result ${h3QueueMessage.type === 'success' ? 'is-success' : ''}`}>
+                <strong>{h3QueueMessage.message}</strong>
+              </div>
+            )}
+
+            <div className="h3-queue-action-grid">
+              <label className="form-group">
+                <span className="form-label">动作</span>
+                <select
+                  className="input"
+                  value={h3QueueAction}
+                  onChange={(event) => setH3QueueAction(event.target.value as typeof h3QueueAction)}
+                  disabled={!h3Config.admin_queue_ready}
+                >
+                  <option value="pause">暂停新任务启动</option>
+                  <option value="resume">恢复队列</option>
+                  <option value="cancel">取消排队任务</option>
+                  <option value="stop">停止运行任务</option>
+                  <option value="move">调整排队顺序</option>
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="form-label">job_id</span>
+                <input
+                  className="input"
+                  value={h3QueueJobId}
+                  onChange={(event) => setH3QueueJobId(event.target.value)}
+                  placeholder="cancel / stop / move 时填写"
+                  disabled={!h3Config.admin_queue_ready || h3QueueAction === 'pause' || h3QueueAction === 'resume'}
+                  autoComplete="off"
+                />
+              </label>
+              <label className="form-group">
+                <span className="form-label">移动方向</span>
+                <select
+                  className="input"
+                  value={h3QueueDirection}
+                  onChange={(event) => setH3QueueDirection(event.target.value as typeof h3QueueDirection)}
+                  disabled={!h3Config.admin_queue_ready || h3QueueAction !== 'move'}
+                >
+                  <option value="top">置顶</option>
+                  <option value="up">上移</option>
+                  <option value="down">下移</option>
+                  <option value="bottom">置底</option>
+                </select>
+              </label>
+              <label className="form-group">
+                <span className="form-label">原因</span>
+                <input
+                  className="input"
+                  value={h3QueueReason}
+                  onChange={(event) => setH3QueueReason(event.target.value)}
+                  placeholder="会写入操作日志"
+                  disabled={!h3Config.admin_queue_ready}
+                  maxLength={240}
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={submitH3QueueAction}
+                disabled={h3QueueLoading || !h3Config.admin_queue_ready}
+              >
+                执行队列操作
+              </button>
+            </div>
+
+            <pre className="h3-queue-json">
+              {h3QueueState ? JSON.stringify(h3QueueState, null, 2) : '暂未读取队列。'}
+            </pre>
+          </div>
+        </details>
+
+        <div className="codex-config-actions">
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearH3ApiToken}
+              disabled={!h3Config.api_token_configured || Boolean(h3ApiToken.trim())}
+              onChange={(event) => setClearH3ApiToken(event.target.checked)}
+            />
+            清除当前用户 token
+          </label>
+          <label className="codex-clear-token">
+            <input
+              type="checkbox"
+              checked={clearH3AdminToken}
+              disabled={!h3Config.admin_token_configured || Boolean(h3AdminToken.trim())}
+              onChange={(event) => setClearH3AdminToken(event.target.checked)}
+            />
+            清除当前管理员 token
+          </label>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={testH3Config}
+            disabled={h3Testing || h3Saving || !h3Config.base_url}
+          >
+            {h3Testing ? '正在测试' : '测试连接'}
+          </button>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={h3Saving} type="submit" disabled={h3Saving}>
+            {h3Saving ? '正在保存' : '保存 H3 本地生成服务'}
+          </button>
+        </div>
+
+        {h3TestState && (
+          <div className={`codex-config-test-result ${h3TestState.type === 'success' ? 'is-success' : ''}`}>
+            <strong>{h3TestState.message}</strong>
+            {h3TestState.type === 'success' && (
+              <span>
+                API {h3TestState.health_api || '-'} · Worker {h3TestState.worker || '-'} · ComfyUI {h3TestState.comfyui || '-'}
+                {h3TestState.tested_at && <> · <RelativeTime value={h3TestState.tested_at} /></>}
+              </span>
+            )}
+            {h3TestState.type === 'error' && <span>请确认 H3 API 公网地址、用户 token 和工作站服务状态。</span>}
+          </div>
+        )}
+      </form>
+
+      </details></section>
+      <section hidden={selectedObject !== 'aimediakit-enhance-video'}>
+      <p>AI MediaKit · {aiMediaKitStatusText} · {aiMediaKitConfig.api_key_configured ? 'Key 已设置' : 'Key 未设置'}</p>
+      <details><summary>具体配置</summary>
+      <form id="aimediakit-enhance-video" className="codex-config-form" onSubmit={saveAiMediaKitConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">AI MediaKit 视频超分 API</h2>
@@ -659,13 +1325,17 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
-          <button className="btn btn-primary" type="submit" disabled={aiMediaKitSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={aiMediaKitSaving} type="submit" disabled={aiMediaKitSaving}>
             {aiMediaKitSaving ? '正在保存' : '保存 AI MediaKit 视频超分 API'}
           </button>
         </div>
       </form>
 
-      <form id="volcengine-ip" className="card codex-config-form" onSubmit={saveVolcengineConfig}>
+      </details></section>
+      <section hidden={selectedObject !== 'volcengine-ip'}>
+      <p>火山 IP · {volcengineStatusText} · {volcengineConfig.default_model || '未设置型号'}</p>
+      <details><summary>具体配置</summary>
+      <form id="volcengine-ip" className="codex-config-form" onSubmit={saveVolcengineConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">火山 IP 生成 API</h2>
@@ -786,13 +1456,17 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 API Key
           </label>
-          <button className="btn btn-primary" type="submit" disabled={volcengineSaving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={volcengineSaving} type="submit" disabled={volcengineSaving}>
             {volcengineSaving ? '正在保存' : '保存火山 IP 生成 API'}
           </button>
         </div>
       </form>
 
-      <form className="card codex-config-form" onSubmit={saveMuskConfig}>
+      </details></section>
+      <section hidden={selectedObject !== 'text'}>
+      <p>Musk · {muskStatusText} · {muskConfig.default_model || '未设置型号'}</p>
+      <details><summary>具体配置与角色文字设置</summary>
+      <form className="codex-config-form" onSubmit={saveMuskConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">Musk API</h2>
@@ -831,7 +1505,7 @@ export default function AdminIntegrationsClient() {
               className="input"
               value={muskConfig.default_model}
               onChange={(event) => setMuskConfig((prev) => ({ ...prev, default_model: event.target.value }))}
-              placeholder="gpt-5.4"
+              placeholder="gpt-5.5"
               autoComplete="off"
               maxLength={80}
               required
@@ -892,19 +1566,22 @@ export default function AdminIntegrationsClient() {
           >
             {muskTesting ? '正在测试' : '测试连接'}
           </button>
-          <button className="btn btn-primary" type="submit" disabled={muskSaving}>
+          <button type="button" className="btn btn-secondary" title="角色文字设置" onClick={() => setRolePolicyOpen(true)} disabled={!currentUser?.id}>
+            <Settings size={16} aria-hidden="true" /> 角色文字
+          </button>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={muskSaving} type="submit" disabled={muskSaving}>
             {muskSaving ? '正在保存' : '保存 Musk API'}
           </button>
         </div>
 
         {muskTestState && (
-          <div className={`codex-config-test-result ${muskTestState.type === 'success' ? 'is-success' : 'is-error'}`}>
+          <div className={`codex-config-test-result ${muskTestState.type === 'success' ? 'is-success' : ''}`}>
             <strong>{muskTestState.message}</strong>
             {muskTestState.type === 'success' && (
               <span>
                 {muskTestState.model || muskConfig.default_model}
                 {typeof muskTestState.latency_ms === 'number' ? ` · ${muskTestState.latency_ms}ms` : ''}
-                {muskTestState.tested_at ? ` · ${new Date(muskTestState.tested_at).toLocaleString('zh-CN')}` : ''}
+                {muskTestState.tested_at && <> · <RelativeTime value={muskTestState.tested_at} /></>}
               </span>
             )}
             {muskTestState.type === 'error' && <span>请先确认地址、模型和 API Key 已保存。</span>}
@@ -912,171 +1589,17 @@ export default function AdminIntegrationsClient() {
         )}
       </form>
 
-      <form className="card codex-config-form" onSubmit={saveImageConfig}>
-        <div className="codex-config-head">
-          <div>
-            <h2 className="section-title mb-0">图形生成 API</h2>
-            <p className="text-gray text-sm mt-2">
-              保存文生图、图生图和首尾帧草图服务配置；普通生成页和无线画布后续都从这里读取。
-            </p>
-          </div>
-          <label className="toggle-switch" aria-label="启用图形生成 API">
-            <input
-              type="checkbox"
-              checked={imageConfig.enabled}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, enabled: event.target.checked }))}
-            />
-            <span className="toggle-slider"></span>
-          </label>
-        </div>
+      </details></section>
+      <section hidden={selectedObject !== 'image'}>
+      <ImageModelApiSettings accountId={currentUser?.id || null} onDraftChange={onImageDraftChange}
+        onSaveStart={settingsSubmit.start} onSaveFinish={(group, saved) => settingsSubmit.finish(`imageGroup:${group}`, saved)} />
+      <details><summary>Image 2.5 质量分档路由</summary><ImageQualityRoutingSettings accountId={currentUser?.id || null} /></details>
+      </section>
 
-        <div className="codex-config-grid">
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-provider">Provider</label>
-            <select
-              id="image-provider"
-              className="input"
-              value={imageConfig.provider}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, provider: event.target.value as 'musk' }))}
-            >
-              <option value="musk">Musk APIs / Gemini Image</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-base-url">API 地址</label>
-            <input
-              id="image-base-url"
-              className="input"
-              value={imageConfig.base_url}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, base_url: event.target.value }))}
-              placeholder="https://api.muskapis.com/"
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-default-model">默认模型</label>
-            <input
-              id="image-default-model"
-              className="input"
-              value={imageConfig.default_model}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, default_model: event.target.value }))}
-              placeholder="gemini-3.1-flash-image-preview"
-              autoComplete="off"
-              maxLength={80}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-api-key">API Key</label>
-            <input
-              id="image-api-key"
-              className="input"
-              type="password"
-              value={imageApiKey}
-              onChange={(event) => {
-                setImageApiKey(event.target.value);
-                if (event.target.value.trim()) setClearImageApiKey(false);
-              }}
-              placeholder={imageConfig.api_key_configured ? '当前已设置，留空不变' : '输入图形生成 API Key'}
-              autoComplete="new-password"
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-timeout">超时时间 ms</label>
-            <input
-              id="image-timeout"
-              className="input"
-              type="number"
-              min={5000}
-              max={300000}
-              step={1000}
-              value={imageConfig.timeout_ms}
-              onChange={(event) => setImageConfig((prev) => ({
-                ...prev,
-                timeout_ms: Number(event.target.value) || EMPTY_IMAGE_GENERATION_CONFIG.timeout_ms,
-              }))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-max-outputs">单次最大张数</label>
-            <input
-              id="image-max-outputs"
-              className="input"
-              type="number"
-              min={1}
-              max={8}
-              value={imageConfig.max_outputs_per_request}
-              onChange={(event) => setImageConfig((prev) => ({
-                ...prev,
-                max_outputs_per_request: Number(event.target.value) || EMPTY_IMAGE_GENERATION_CONFIG.max_outputs_per_request,
-              }))}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label" htmlFor="image-default-ratio">默认比例</label>
-            <input
-              id="image-default-ratio"
-              className="input"
-              value={imageConfig.default_ratio}
-              onChange={(event) => setImageConfig((prev) => ({ ...prev, default_ratio: event.target.value }))}
-              placeholder="16:9"
-              maxLength={20}
-            />
-          </div>
-        </div>
-
-        <div className="codex-config-status">
-          <div>
-            <span className="info-label">当前状态</span>
-            <strong>{imageStatusText}</strong>
-          </div>
-          <div>
-            <span className="info-label">Provider</span>
-            <strong>{imageConfig.provider}</strong>
-          </div>
-          <div>
-            <span className="info-label">默认模型</span>
-            <strong>{imageConfig.default_model || '-'}</strong>
-          </div>
-          <div>
-            <span className="info-label">能力</span>
-            <strong>
-              {[
-                imageConfig.supports_text_to_image ? '文生图' : null,
-                imageConfig.supports_image_to_image ? '图生图' : null,
-                imageConfig.supports_async_task ? '异步任务' : null,
-              ].filter(Boolean).join(' / ') || '-'}
-            </strong>
-          </div>
-          <div>
-            <span className="info-label">API Key</span>
-            <strong>{imageConfig.api_key_configured ? '已设置' : '未设置'}</strong>
-          </div>
-        </div>
-
-        <div className="codex-config-actions">
-          <label className="codex-clear-token">
-            <input
-              type="checkbox"
-              checked={clearImageApiKey}
-              disabled={!imageConfig.api_key_configured || Boolean(imageApiKey.trim())}
-              onChange={(event) => setClearImageApiKey(event.target.checked)}
-            />
-            清除当前 API Key
-          </label>
-          <button className="btn btn-primary" type="submit" disabled={imageSaving}>
-            {imageSaving ? '正在保存' : '保存图形生成 API'}
-          </button>
-        </div>
-      </form>
-
-      <form className="card codex-config-form" onSubmit={saveConfig}>
+      <section hidden={selectedObject !== 'codex'}>
+      <p>Codex 视频接口 · {statusText} · {config.source_label}</p>
+      <details><summary>具体配置与扣费用户</summary>
+      <form className="codex-config-form" onSubmit={saveConfig}>
         <div className="codex-config-head">
           <div>
             <h2 className="section-title mb-0">Codex 视频接口</h2>
@@ -1182,12 +1705,15 @@ export default function AdminIntegrationsClient() {
             />
             清除当前 token
           </label>
-          <button className="btn btn-primary" type="submit" disabled={saving}>
+          <button className="btn btn-primary sd2-loading-surface" data-busy={saving} type="submit" disabled={saving}>
             {saving ? '正在保存' : '保存配置'}
           </button>
         </div>
 
       </form>
-    </div>
+      </details></section>
+      {rolePolicyOpen && currentUser?.id && <RoleTextPolicySettings key={currentUser.id} accountId={currentUser.id}
+        onClose={() => setRolePolicyOpen(false)} onDirtyChange={setRolePolicyDirty} onSavingChange={setRolePolicySaving} confirm={confirm} />}
+    </fieldset>
   );
 }

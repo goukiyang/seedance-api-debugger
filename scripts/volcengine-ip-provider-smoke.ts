@@ -6,6 +6,15 @@ import {
   getVolcengineIpTaskStatus,
   listVolcengineIpTasks,
 } from '@/lib/provider/volcengine-ip';
+import { SEEDANCE_2_5_IP_MODEL_ID } from '@/lib/provider/seedance-models';
+import { prisma } from '@/lib/db';
+
+// Keep both configuration lookup and HTTP on fixtures: never read a real key or database.
+const originalSettingReader = prisma.platformSetting.findUnique;
+prisma.platformSetting.findUnique = (async () => ({ value_json: JSON.stringify({
+  enabled: true, api_key: 'fixture-not-a-real-key',
+  default_model: 'doubao-seedance-2-0-fast-test', base_url: 'https://ark.example.com/api/v3',
+}) })) as unknown as typeof originalSettingReader;
 
 type CapturedRequest = {
   url: string;
@@ -132,10 +141,31 @@ async function main() {
   assert.equal(deleted.deleted, true);
   assert.equal(captured[3].init.method, 'DELETE');
 
+  await createVolcengineIpVideoTask({
+    model: SEEDANCE_2_5_IP_MODEL_ID,
+    prompt: '保持授权角色特征，完成一个简短转身动作。',
+    generation_mode: 'all_in_one_reference',
+    reference_image_urls: ['https://static.example.com/reference.jpg'],
+    reference_video_urls: ['https://static.example.com/reference.mp4'],
+    reference_audio_urls: ['https://static.example.com/reference.mp3'],
+    ratio: '16:9',
+    resolution: '720p',
+    duration: 5,
+    seed: -1,
+  }, options);
+  const ip25CreateBody = JSON.parse(String(captured[4].init.body));
+  assert.equal(ip25CreateBody.model, 'doubao-seedance-2-5-260628');
+  assert.equal(ip25CreateBody.model, SEEDANCE_2_5_IP_MODEL_ID);
+  assert.deepEqual(ip25CreateBody.content.slice(1).map((item: { type: string; role: string }) => [item.type, item.role]), [
+    ['image_url', 'reference_image'], ['video_url', 'reference_video'], ['audio_url', 'reference_audio'],
+  ]);
+
   console.log('volcengine-ip-provider smoke passed');
 }
 
-main().catch((error) => {
+main().finally(() => {
+  prisma.platformSetting.findUnique = originalSettingReader;
+}).catch((error) => {
   console.error(error);
   process.exit(1);
 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { addCredits, assertCreditWriteback } from '@/lib/credits/precision';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
 
@@ -75,12 +76,13 @@ export async function POST(request: NextRequest) {
         }
 
         const balanceBefore = account.balance;
-        const balanceAfter = balanceBefore + amount;
+        const balanceAfter = addCredits(balanceBefore, amount);
 
-        await tx.creditAccount.update({
+        const written = await tx.creditAccount.update({
           where: { user_id: userId },
           data: { balance: balanceAfter },
         });
+        assertCreditWriteback(written, { balance: balanceAfter });
 
         await tx.creditLedger.create({
           data: {

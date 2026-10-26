@@ -10,6 +10,8 @@ export const APPROVAL_TYPES = [
   'resolution_1080p',
   'ratio_change',
   'video_card_reopen',
+  'video_creation_1080p',
+  'video_delivery_reopen',
 ] as const;
 
 export type ApprovalType = typeof APPROVAL_TYPES[number];
@@ -513,6 +515,36 @@ export async function decideApproval(
   }
   if (approved && approval.type === 'video_card_reopen') {
     effectProjectId = await applyVideoCardReopenApproval(tx, approval, input.approverUserId);
+  }
+  if (approval.type === 'video_creation_1080p' || approval.type === 'video_delivery_reopen') {
+    const expires = input.expiresAt === undefined ? approval.expires_at || defaultExpiresAt() : input.expiresAt;
+    if (approved && (!expires || expires.getTime() <= Date.now())) throw new Error('批准必须有有效期限');
+    if (approved && approval.type === 'video_creation_1080p') {
+      const intent = approval.creation_intent_id ? await tx.videoCreationIntent.findUnique({ where: { id: approval.creation_intent_id } }) : null;
+      if (!intent || intent.revision !== approval.intent_revision || !intent.batch_id && intent.quote_business_hash !== approval.scope_hash
+        || !['prepared', 'ready', 'awaiting_approval', 'batch_active'].includes(intent.state)) throw new Error('原规格已变化，不能批准旧申请');
+      if (intent.batch_id) {
+        const scope = JSON.parse(approval.scope_json || '{}');
+        const batch = await tx.canvasVideoBatch.findUnique({ where: { id: intent.batch_id }, include: { children: true } });
+        const pending = batch?.children.filter(child => child.state === 'prepared' && !child.task_id) || [];
+        if (!batch || batch.revision !== scope.batch_revision || batch.authorization_round + 1 !== scope.authorization_round
+          || pending.length !== scope.child_keys?.length || pending.some(child => !scope.child_keys.includes(`intent:${intent.id}:${child.ordinal}`))) throw new Error('未受理子项已变化，旧申请不能作用于新授权');
+      }
+    }
+    if (approved && approval.type === 'video_delivery_reopen') {
+      const { applyVideoDeliveryReopen } = await import('@/lib/creation/delivery');
+      await applyVideoDeliveryReopen(tx, approval, input.approverUserId);
+    }
+    const changed = await tx.approvalRecord.updateMany({ where: { id: approval.id, status: 'pending', revision: approval.revision },
+      data: { status: approved ? 'approved' : 'rejected', approver_user_id: input.approverUserId,
+        revision: { increment: 1 }, effect_status: approved ? 'applied' : 'skipped', decision_reason: input.reason || null,
+        approved_at: approved ? new Date() : null, rejected_at: approved ? null : new Date(), expires_at: expires } });
+    if (changed.count !== 1) throw new Error('此审批已被另一操作处理，请重新读取');
+    await createInAppNotification(tx, { targetUserId: approval.requester_user_id, actorUserId: input.approverUserId,
+      type: `approval_${approval.type}_${approved ? 'approved' : 'rejected'}`, title: approved ? '申请已通过' : '申请未通过',
+      body: input.reason || (approved ? '可返回原请求继续操作，不会自动生成。' : '请查看审批原因并保留当前输入。'),
+      projectId: approval.project_id, approvalId: approval.id });
+    return tx.approvalRecord.findUniqueOrThrow({ where: { id: approval.id } });
   }
 
   if (!approved) {

@@ -1,0 +1,1 @@
+PASS scoped CUT models/receipt/unknown-key and batch receipt contracts; all fetches mocked, zero external calls/tasks/fees

@@ -1,0 +1,9 @@
+active
+active
+545d9d6f3bbf9d0299fc1d34ac136b02958536aa
+KbJIPWhOPLhIslbk70m-aMainPID=1043189
+WorkingDirectory=/srv/video-api-debugger/app
+User=gouki
+cf0f1db5c2a0e49435395480a7b828de29f7bcabf9df48d6fba0d5d5c512febd  /srv/video-api-debugger/app/scripts/process-image-studio.ts
+7a38bcd66539d05b1342a6698f673d071c317c5f90f92e6882ce1f7bcbd17354  /srv/video-api-debugger/app/src/lib/image-studio/batches.ts
+{"version":"0.45.0","channel":"production","summary":""}

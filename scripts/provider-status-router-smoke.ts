@@ -44,6 +44,18 @@ const fetchers: ProviderStatusFetchers = {
       raw: { provider: 'volcengine_mediakit' },
     };
   },
+  h3: async (providerTaskId) => {
+    calls.push(`h3:${providerTaskId}`);
+    return {
+      provider_task_id: providerTaskId,
+      provider_status: 'done',
+      local_status: 'succeeded',
+      result_video_url: `h3-internal-output://${providerTaskId}/0`,
+      provider_model: 'larry_v4_6step',
+      seed: 123456,
+      raw: { provider: 'h3_video' },
+    };
+  },
 };
 
 async function main() {
@@ -80,6 +92,23 @@ async function main() {
     'aimediakit:enhance-task-001',
   ]);
 
+  const h3 = await getProviderTaskStatus(
+    { provider: 'h3', provider_task_id: 'h3-job-001' },
+    { fetchers },
+  );
+  assert.equal(h3.provider_task_id, 'h3-job-001');
+  assert.equal(h3.provider_status, 'done');
+  assert.equal(h3.local_status, 'succeeded');
+  assert.equal(h3.result_video_url, 'h3-internal-output://h3-job-001/0');
+  assert.equal(h3.provider_model, 'larry_v4_6step');
+  assert.equal(h3.seed, 123456);
+  assert.deepEqual(calls, [
+    'seedance:seedance-task-001',
+    'volcengine-ip:volcengine-ip-task-001',
+    'aimediakit:enhance-task-001',
+    'h3:h3-job-001',
+  ]);
+
   const refreshed = await refreshProviderTaskResultUrl(
     {
       id: 'task-local-001',
@@ -98,6 +127,7 @@ async function main() {
     'seedance:seedance-task-001',
     'volcengine-ip:volcengine-ip-task-001',
     'aimediakit:enhance-task-001',
+    'h3:h3-job-001',
     'aimediakit:enhance-task-002',
   ]);
 
@@ -112,6 +142,7 @@ async function main() {
     'seedance:seedance-task-001',
     'volcengine-ip:volcengine-ip-task-001',
     'aimediakit:enhance-task-001',
+    'h3:h3-job-001',
     'aimediakit:enhance-task-002',
   ]);
 

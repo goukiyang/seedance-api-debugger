@@ -1,9 +1,14 @@
 import path from 'path';
-import type { Asset } from '@prisma/client';
+import { createHash } from 'node:crypto';
+import type { Asset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { addAssetToWorkspace } from '@/lib/assets/workspace';
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
+import { isPrivateNetworkHost } from '@/lib/media/public-url';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { originalImageInputUrl } from './original-image-input';
 
 const CODEX_REFERENCE_ALBUM_NAME = 'Codex API 参考图';
 const WORKSPACE_REFERENCE_ALBUM_NAME = '生成工作台参考图';
@@ -37,6 +42,7 @@ type ReferenceImportContext = {
   albumDescription?: string;
   metadataSource?: string;
   allowSharedAsset?: boolean;
+  db?: Prisma.TransactionClient;
 };
 
 function normalizeReferenceUrl(rawUrl: string) {
@@ -52,23 +58,12 @@ function normalizeReferenceUrl(rawUrl: string) {
     throw new ReferenceImportError(`参考图必须是公网 HTTPS URL: ${rawUrl}`, 400, 'reference_url_not_https');
   }
 
-  const hostname = parsed.hostname.toLowerCase();
-  const isPrivateHost = hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname === '0.0.0.0'
-    || hostname === '::1'
-    || hostname.startsWith('10.')
-    || hostname.startsWith('127.')
-    || hostname.startsWith('169.254.')
-    || hostname.startsWith('192.168.')
-    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
-    || hostname.endsWith('.local');
-  if (isPrivateHost) {
+  if (isPrivateNetworkHost(parsed.hostname)) {
     throw new ReferenceImportError(`参考图不能使用本地或内网地址: ${rawUrl}`, 400, 'reference_url_not_public');
   }
 
   parsed.hash = '';
-  return parsed.toString();
+  return sameOriginPublicUrlForSiteUpload(parsed.toString()) || parsed.toString();
 }
 
 function inferImageMimeType(url: string) {
@@ -96,8 +91,9 @@ async function getOrCreateReferenceAlbum(
   user: SessionUser,
   albumName = CODEX_REFERENCE_ALBUM_NAME,
   albumDescription = 'Codex 接口上传或导入的生成参考图',
+  db: Prisma.TransactionClient = prisma,
 ) {
-  const existing = await prisma.referenceAlbum.findFirst({
+  const existing = await db.referenceAlbum.findFirst({
     where: {
       owner_user_id: user.id,
       project_id: null,
@@ -108,9 +104,11 @@ async function getOrCreateReferenceAlbum(
     orderBy: { updated_at: 'desc' },
   });
   if (existing) return existing;
-
-  return prisma.referenceAlbum.create({
-    data: {
+  const id = `upload_album_${createHash('sha256').update(JSON.stringify([user.id, albumName])).digest('hex')}`;
+  const album = await db.referenceAlbum.upsert({
+    where: { id }, update: {},
+    create: {
+      id,
       owner_user_id: user.id,
       name: albumName,
       description: albumDescription,
@@ -119,61 +117,59 @@ async function getOrCreateReferenceAlbum(
       status: 'active',
     },
   });
+  if (album.owner_user_id !== user.id || album.status !== 'active' || album.name !== albumName || album.album_type !== 'personal' || album.project_id !== null) throw new ReferenceImportError('原参考图集不可用，未恢复或覆盖', 409, 'reference_album_conflict');
+  return album;
 }
 
 async function ensureReferenceImageRecord(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ) {
+  const db = context.db || prisma;
   if (asset.type !== 'image') {
     throw new ReferenceImportError(`素材不是图片: ${asset.id}`, 400, 'reference_asset_not_image');
   }
 
   const metadataSource = context.metadataSource || 'codex_api';
+  const originalUrl = sameOriginPublicUrlForSiteUpload(asset.original_url) || asset.original_url;
+  const thumbnailUrl = asset.thumbnail_url
+    ? sameOriginPublicUrlForSiteUpload(asset.thumbnail_url) || asset.thumbnail_url
+    : null;
   const album = await getOrCreateReferenceAlbum(
     context.user,
     context.albumName,
     context.albumDescription,
+    db,
   );
-  const existing = await prisma.referenceImage.findFirst({
+  const existing = await db.referenceImage.findFirst({
     where: {
       album_id: album.id,
       asset_id: asset.id,
+      workspace_id: context.workspaceId,
+      project_id: context.projectId || null,
       status: 'active',
     },
     orderBy: { updated_at: 'desc' },
   });
 
   let referenceImage = existing;
-  if (referenceImage) {
-    referenceImage = await prisma.referenceImage.update({
-      where: { id: referenceImage.id },
-      data: {
-        workspace_id: context.workspaceId,
-        project_id: context.projectId || referenceImage.project_id,
-        url: asset.original_url,
-        thumbnail_url: asset.thumbnail_url,
-        metadata_json: JSON.stringify({
-          source: metadataSource,
-          source_request_id: context.sourceRequestId || null,
-          source_label: context.sourceLabel || null,
-        }),
-      },
-    });
-  } else {
-    const currentMax = await prisma.referenceImage.aggregate({
+  if (!referenceImage) {
+    const currentMax = await db.referenceImage.aggregate({
       where: { album_id: album.id },
       _max: { sort_order: true },
     });
-    referenceImage = await prisma.referenceImage.create({
-      data: {
+    const id = `upload_ref_${createHash('sha256').update(JSON.stringify([context.user.id, album.id, context.workspaceId, asset.id, context.projectId || null])).digest('hex')}`;
+    referenceImage = await db.referenceImage.upsert({
+      where: { id }, update: {},
+      create: {
+        id,
         album_id: album.id,
         workspace_id: context.workspaceId,
         project_id: context.projectId || null,
         owner_user_id: context.user.id,
         asset_id: asset.id,
-        url: asset.original_url,
-        thumbnail_url: asset.thumbnail_url,
+        url: originalUrl,
+        thumbnail_url: thumbnailUrl,
         source_type: 'upload',
         source_content_id: context.sourceRequestId || null,
         sort_order: (currentMax._max.sort_order ?? -1) + 1,
@@ -186,14 +182,16 @@ async function ensureReferenceImageRecord(
       },
     });
   }
+  if (referenceImage.owner_user_id !== context.user.id || referenceImage.status !== 'active' || referenceImage.asset_id !== asset.id
+    || referenceImage.workspace_id !== context.workspaceId || referenceImage.album_id !== album.id) throw new ReferenceImportError('原参考图关联不可用，未恢复或覆盖', 409, 'reference_image_conflict');
 
   if (!album.cover_image_id) {
-    await prisma.referenceAlbum.update({
+    await db.referenceAlbum.update({
       where: { id: album.id },
       data: { cover_image_id: referenceImage.id },
     });
   } else {
-    await prisma.referenceAlbum.update({
+    await db.referenceAlbum.update({
       where: { id: album.id },
       data: { updated_at: new Date() },
     });
@@ -206,20 +204,27 @@ async function ensureReferenceImageForAsset(
   context: ReferenceImportContext,
   asset: Pick<Asset, 'id' | 'type' | 'original_url' | 'thumbnail_url' | 'file_name'>,
 ): Promise<ImportedReferenceImage> {
+  if (!context.db) return prisma.$transaction(db => ensureReferenceImageForAsset({ ...context, db }, asset));
+  const fresh = await context.db.asset.findUnique({ where: { id: asset.id } });
+  if (!fresh || fresh.status === 'deleted' || fresh.original_url !== asset.original_url) throw new ReferenceImportError('素材已变化，未关联', 409, 'reference_asset_changed');
+  const currentUser = await context.db.user.findUnique({ where: { id: context.user.id } });
+  if (!currentUser || currentUser.status !== 'active') throw new ReferenceImportError('账号不可使用', 403, 'reference_asset_forbidden');
+  if (!context.allowSharedAsset && fresh.owner_id !== context.user.id && currentUser.role !== 'admin') throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
+  if (!await canReadStudioAsset(currentUser, fresh, context.db)) throw new ReferenceImportError('无权使用此素材', 403, 'reference_asset_forbidden');
   const { referenceImage } = await ensureReferenceImageRecord(context, asset);
   const workspaceAssetId = await addAssetToWorkspace(
     context.workspaceId,
     asset.id,
     context.role || 'reference_image',
     context.user.id,
-    { referenceImageId: referenceImage.id, allowSharedAsset: true },
+    { referenceImageId: referenceImage.id, allowSharedAsset: true, db: context.db },
   );
 
   return {
     assetId: asset.id,
     referenceImageId: referenceImage.id,
     workspaceAssetId,
-    originalUrl: asset.original_url,
+    originalUrl: sameOriginPublicUrlForSiteUpload(asset.original_url) || asset.original_url,
     fileName: asset.file_name,
   };
 }
@@ -240,8 +245,8 @@ export async function attachAssetToSiteReferenceImage(
   context: ReferenceImportContext,
   assetId: string,
 ): Promise<ImportedReferenceImage> {
-  const asset = await prisma.asset.findUnique({ where: { id: assetId } });
-  if (!asset) {
+  const asset = await (context.db || prisma).asset.findUnique({ where: { id: assetId } });
+  if (!asset || asset.status === 'deleted') {
     throw new ReferenceImportError(`素材不存在: ${assetId}`, 404, 'reference_asset_not_found');
   }
   if (!context.allowSharedAsset && asset.owner_id !== context.user.id && context.user.role !== 'admin') {
@@ -288,7 +293,7 @@ export async function ensureWorkspaceImageAssetsHaveReferenceImages(
       assetId: workspaceAsset.asset.id,
       referenceImageId: referenceImage.id,
       workspaceAssetId: updatedWorkspaceAsset.id,
-      originalUrl: workspaceAsset.asset.original_url,
+      originalUrl: sameOriginPublicUrlForSiteUpload(workspaceAsset.asset.original_url) || workspaceAsset.asset.original_url,
       fileName: workspaceAsset.asset.file_name,
     });
   }
@@ -297,13 +302,17 @@ export async function ensureWorkspaceImageAssetsHaveReferenceImages(
 }
 
 export async function importReferenceImageUrlsToSite(
-  context: ReferenceImportContext & { urls: string[] },
+  context: ReferenceImportContext & { urls: string[]; maxImages?: number },
 ): Promise<ImportedReferenceImage[]> {
-  const urls = uniquePreserveOrder(context.urls).slice(0, 9);
+  const maxImages = context.maxImages ?? 9;
+  const urls = uniquePreserveOrder(context.urls);
+  if (urls.length > maxImages) {
+    throw new ReferenceImportError(`单次生成最多选择 ${maxImages} 张参考图`, 400, 'reference_image_count_exceeded');
+  }
   const imported: ImportedReferenceImage[] = [];
 
   for (let index = 0; index < urls.length; index += 1) {
-    const normalizedUrl = normalizeReferenceUrl(urls[index]);
+    const normalizedUrl = normalizeReferenceUrl(await originalImageInputUrl(context.user, urls[index]));
     let asset = await prisma.asset.findFirst({
       where: {
         original_url: normalizedUrl,

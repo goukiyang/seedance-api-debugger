@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import {
   buildTemplateWritePayload,
   serializeGenerationTemplate,
@@ -13,6 +14,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权访问动画模板。');
 
     const includeInactive = user.role === 'admin' && request.nextUrl.searchParams.get('include_inactive') === 'true';
     const templates = await prisma.generationTemplate.findMany({
@@ -23,6 +25,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ templates: templates.map(serializeGenerationTemplate) });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[Templates] List error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },

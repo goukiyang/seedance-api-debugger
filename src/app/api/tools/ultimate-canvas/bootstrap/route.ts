@@ -1,6 +1,8 @@
+import { videoCreationSchemaReady } from '@/lib/creation/context';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
 import { canGenerateInVideoCardStatus } from '@/lib/video-cards/permissions';
 import {
@@ -8,32 +10,170 @@ import {
   isMuskApiReady,
 } from '@/lib/integrations/musk';
 import {
-  getImageGenerationApiSettings,
+  DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+  ImageGenerationChannelError,
+  type ImageGenerationResolvedSettings,
+  getImageGenerationChannelOptions,
+  getImageGenerationChannels,
+  selectImageGenerationSettings,
   isImageGenerationApiReady,
 } from '@/lib/integrations/image-generation';
+import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getCreditSummary } from '@/lib/credits/policy';
+import { getPricingImageChannelOptions } from '@/lib/pricing/image';
+import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
+import {
+  projectDisplayName,
+  projectMetaLabel,
+  projectRemovalAction,
+  projectRemovalReason,
+} from '@/lib/projects/display';
+import {
+  videoCardRemovalAction,
+  videoCardRemovalReason,
+  videoCardSpecLabel,
+  videoCardStatusLabel,
+} from '@/lib/video-cards/display';
+import { DURATION_OPTIONS, RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
+import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
+import { defaultImageResolution, imageResolutionOptions } from '@/lib/image-generation/resolution';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, imageStudioModelForNewSelection } from '@/lib/image-studio/model-catalog';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+import { STUDIO_TEXT_MODELS, isStudioTextModel } from '@/lib/template-studio/text-models';
+import { AUDIO_CAPABILITY } from '@/lib/provider/audio-contract';
+import { USD_TO_CNY_RATE, usdToCnyRateText } from '@/lib/costs/currency';
+import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
+import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
+import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality, imageStudioNewQualityOptions } from '@/lib/image-studio/model-catalog';
+import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const PROJECT_TAKE = 20;
-const VIDEO_CARD_TAKE = 30;
+const PROJECT_TAKE = 100;
+const VIDEO_CARD_TAKE = 60;
+
+function unavailableImageSettings(model: string, channelId: string): ImageGenerationResolvedSettings {
+  return {
+    ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+    enabled: false,
+    provider: 'managed',
+    base_url: '',
+    default_model: model,
+    api_key: null,
+    channelId,
+    configRevision: 'unavailable',
+    supplierName: '',
+    supplierKind: 'other',
+    protocol: 'openai_images',
+    modelCapabilities: {},
+    managedChannel: true,
+    label: '默认图片供应商不可用',
+    deleted: true,
+  };
+}
+
+async function imageSettingsForModel(channels: Awaited<ReturnType<typeof getImageGenerationChannels>>, model: string) {
+  if (!IMAGE_STUDIO_MODELS.includes(model as typeof IMAGE_STUDIO_MODELS[number])) return selectImageGenerationSettings(channels, model);
+  const channelId = await resolveImageGenerationRequestChannel(model as typeof IMAGE_STUDIO_MODELS[number]);
+  let settings;
+  try {
+    settings = selectImageGenerationSettings(channels, model, channelId || 'original');
+  } catch (error) {
+    if (error instanceof ImageGenerationChannelError && error.status === 404) {
+      return unavailableImageSettings(model, channelId || 'original');
+    }
+    throw error;
+  }
+  return { ...settings, default_model: model };
+}
+
+function imageModelLabel(provider: string, model: string) {
+  if (provider === 'seedream') return 'Seedream 5.0 Pro';
+  if (provider === 'musk') return 'Gemini Image (Musk)';
+  return model || provider || '图片模型';
+}
+
+function imageModelCapabilities(provider: string, model: string, unavailable = false) {
+  if (unavailable) {
+    return {
+      reference_image_limit: 0,
+      max_outputs_per_request: 1,
+      size_options: [],
+      default_resolution: null,
+      output_formats: [],
+      supports_stream: false,
+      supports_sequential_generation: false,
+      notes: ['默认图片供应商不可用，参数范围未知'],
+    };
+  }
+  const sizeOptions = imageResolutionOptions(model, provider);
+  if (provider === 'seedream') {
+    return {
+      reference_image_limit: 10,
+      max_outputs_per_request: 1,
+      size_options: sizeOptions,
+      default_resolution: defaultImageResolution(model, provider),
+      output_formats: ['png', 'jpeg'],
+      supports_stream: false,
+      supports_sequential_generation: false,
+      notes: ['最多 10 张参考图', '单张输出', '生成 URL 会立即入库'],
+    };
+  }
+  return {
+    reference_image_limit: model === 'gemini-nano-banana-2.1' ? MAX_REFERENCE_IMAGES : 9,
+    ...(model === 'gemini-nano-banana-2.1' ? { supplier_reference_image_limit: null } : {}),
+    max_outputs_per_request: 8,
+    size_options: sizeOptions,
+    default_resolution: defaultImageResolution(model, provider),
+    output_formats: ['png'],
+    supports_stream: false,
+    supports_sequential_generation: false,
+    quality_options: model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(model)
+      : IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [],
+    default_quality: defaultImageStudioQuality(model),
+    notes: model === 'gemini-nano-banana-2.1' ? ['本站最多使用 10 张参考图；供应商上限尚未确认', '质量与分辨率为本站可选项，供应商支持情况尚未确认'] : ['通用草图', '兼容现有图片生成流程'],
+  };
+}
 
 function safeDate(value: Date | string | null | undefined) {
   if (!value) return null;
   return value instanceof Date ? value.toISOString() : value;
 }
 
+function savedVideoCardId(documentJson: string | null | undefined) {
+  if (!documentJson) return '';
+  try {
+    const parsed = JSON.parse(documentJson);
+    return typeof parsed?.context?.video_card_id === 'string' ? parsed.context.video_card_id.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+  try {
+    assertInternalOnly(user, '外部账号无权使用无限画布。');
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 
-  const [muskSettings, imageSettings] = await Promise.all([
+  const [muskSettings, imageChannels, h3Settings] = await Promise.all([
     getMuskApiSettings(),
-    getImageGenerationApiSettings(),
+    getImageGenerationChannels(),
+    getH3ApiSettings(),
   ]);
+  const newDefaultImageModel = imageChannels.shared.default_model === 'gemini-3.1-flash-image-preview'
+    ? imageStudioModelForNewSelection(imageChannels.shared.default_model) : imageChannels.shared.default_model;
+  const imageSettings = await imageSettingsForModel(imageChannels, newDefaultImageModel);
   const videoConfig = getProviderConfig();
+  const h3VideoConfig = safeH3ConfigDto(h3Settings);
   const creditSummary = await prisma.$transaction((tx) => getCreditSummary(tx, user));
 
   await ensureDefaultProjectForUser(user.id);
@@ -50,7 +190,7 @@ export async function GET(request: NextRequest) {
           { owner_user_id: user.id },
           {
             type: { in: ['team', 'public'] },
-            members: { some: { user_id: user.id, status: 'active' } },
+            members: { some: { user_id: user.id, status: 'active', role: { not: 'viewer' } } },
           },
         ],
       };
@@ -60,26 +200,63 @@ export async function GET(request: NextRequest) {
     orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
     take: PROJECT_TAKE,
     include: {
-      members: user.role === 'admin'
-        ? { where: { status: 'active' }, select: { user_id: true, role: true, status: true } }
-        : { where: { user_id: user.id }, select: { user_id: true, role: true, status: true } },
+      owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+      members: {
+        where: { user_id: user.id, status: 'active' },
+        take: 1,
+        select: { user_id: true, role: true, status: true },
+      },
+      _count: {
+        select: {
+          tasks: user.role === 'admin'
+            ? true
+            : { where: { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } } },
+          reference_albums: { where: { status: { not: 'deleted' } } },
+        },
+      },
     },
   });
 
   const projectSummaries = projects.map((project) => {
-    const myRole = user.role === 'admin'
-      ? 'admin'
-      : (project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null);
-    const canGenerate = project.status === 'active' && myRole !== null && myRole !== 'viewer';
-    return {
+    const explicitRole = project.owner_user_id === user.id ? 'project_owner' : project.members[0]?.role || null;
+    const myRole = explicitRole || (user.role === 'admin' ? 'admin' : null);
+    const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
+    const canGenerate = isActiveNonSystem && (user.role === 'admin' || (explicitRole !== null && explicitRole !== 'viewer'));
+    const canManageProject = user.role === 'admin' || explicitRole === 'project_owner';
+    const canManageAssets = isActiveNonSystem
+      && (user.role === 'admin' || explicitRole === 'project_owner' || explicitRole === 'editor');
+    const base = {
       id: project.id,
       name: project.name,
+      original_name: project.name,
       type: project.type,
       status: project.status,
+      owner_user_id: project.owner_user_id,
+      owner: project.owner,
+      _count: project._count,
       my_role: myRole,
       can_generate: canGenerate,
+      can_manage_project: canManageProject,
+      can_manage_assets: canManageAssets,
+      group: project.owner_user_id === user.id ? 'owned' : explicitRole ? 'joined' : 'other',
       updated_at: safeDate(project.updated_at),
     };
+    return {
+      ...base,
+      display_name: projectDisplayName(base),
+      meta_label: projectMetaLabel(base),
+      removal_action: projectRemovalAction(base),
+      removal_reason: projectRemovalReason(base),
+    };
+  });
+
+  projectSummaries.sort((a, b) => {
+    const groupOrder: Record<string, number> = { owned: 0, joined: 1, other: 2 };
+    const groupDelta = groupOrder[a.group] - groupOrder[b.group];
+    if (groupDelta !== 0) return groupDelta;
+    if (a.type === 'personal' && b.type !== 'personal') return -1;
+    if (b.type === 'personal' && a.type !== 'personal') return 1;
+    return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
   });
 
   const requestedProjectId = request.nextUrl.searchParams.get('project_id')?.trim() || '';
@@ -87,46 +264,8 @@ export async function GET(request: NextRequest) {
   const requestedProject = requestedProjectId
     ? projectSummaries.find((project) => project.id === requestedProjectId && project.can_generate) || null
     : null;
-  const selectedProject = requestedProject || projectSummaries.find((project) => project.can_generate) || null;
-  const videoCards = selectedProject
-    ? await prisma.videoCard.findMany({
-        where: {
-          project_id: selectedProject.id,
-          status: { in: ['draft', 'active', 'reviewing'] },
-        },
-        orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
-        take: VIDEO_CARD_TAKE,
-        select: {
-          id: true,
-          project_id: true,
-          title: true,
-          status: true,
-          platform: true,
-          ratio: true,
-          duration: true,
-          target_resolution: true,
-          updated_at: true,
-        },
-      })
-    : [];
-
-  const videoCardSummaries = videoCards.map((card) => ({
-    id: card.id,
-    project_id: card.project_id,
-    title: card.title,
-    status: card.status,
-    can_generate: canGenerateInVideoCardStatus(card.status),
-    platform: card.platform,
-    ratio: card.ratio,
-    duration: card.duration,
-    target_resolution: card.target_resolution,
-    updated_at: safeDate(card.updated_at),
-  }));
-  const requestedVideoCard = requestedVideoCardId
-    ? videoCardSummaries.find((card) => card.id === requestedVideoCardId && card.can_generate) || null
-    : null;
-  const selectedVideoCard = requestedVideoCard || videoCardSummaries.find((card) => card.can_generate) || null;
-
+  if (requestedProjectId && !requestedProject) return NextResponse.json({ error: '原项目当前不可创作，未更改保存位置', code: 'creation_project_unavailable' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
+  const selectedProject = requestedProjectId ? requestedProject : projectSummaries.find((project) => project.type === 'personal' && project.owner_user_id === user.id && project.can_generate) || null;
   const latestCanvasDocument = selectedProject
     ? await prisma.canvasDocument.findFirst({
         where: {
@@ -135,18 +274,129 @@ export async function GET(request: NextRequest) {
           status: 'active',
         },
         orderBy: { updated_at: 'desc' },
-        select: { id: true, title: true, project_id: true, updated_at: true },
+        select: { id: true, title: true, project_id: true, document_json: true, updated_at: true },
       })
     : null;
 
+  const videoCards = selectedProject
+    ? await prisma.videoCard.findMany({
+        where: {
+          project_id: selectedProject.id,
+          status: { not: 'discarded' },
+        },
+        orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
+        take: VIDEO_CARD_TAKE,
+        select: {
+          id: true,
+          project_id: true,
+          title: true,
+          objective: true,
+          status: true,
+          owner_user_id: true,
+          owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
+          platform: true,
+          ratio: true,
+          duration: true,
+          target_resolution: true,
+          is_fallback: true,
+          current_best_task_id: true,
+          final_task_id: true,
+          updated_at: true,
+        },
+      })
+    : [];
+
+  const videoCardIds = videoCards.map((card) => card.id);
+  const [taskCountRows, branchCountRows] = videoCardIds.length
+    ? await Promise.all([
+        prisma.videoTask.groupBy({
+          by: ['video_card_id'],
+          where: {
+            video_card_id: { in: videoCardIds },
+            ...(user.role === 'admin'
+              ? {}
+              : { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } }),
+          },
+          _count: { _all: true },
+        }),
+        prisma.videoBranch.groupBy({
+          by: ['video_card_id'],
+          where: { video_card_id: { in: videoCardIds } },
+          _count: { _all: true },
+        }),
+      ])
+    : [[], []];
+  const taskCountByCard = new Map(taskCountRows.map((row) => [row.video_card_id, row._count._all]));
+  const branchCountByCard = new Map(branchCountRows.map((row) => [row.video_card_id, row._count._all]));
+  const videoCardSummaries = videoCards.map((card) => {
+    const summary = { task_count: taskCountByCard.get(card.id) || 0 };
+    const canManage = Boolean(selectedProject?.can_manage_project);
+    const canGenerate = Boolean(selectedProject?.can_generate) && canGenerateInVideoCardStatus(card.status);
+    const base = {
+      id: card.id,
+      project_id: card.project_id,
+      title: card.title,
+      objective: card.objective,
+      status: card.status,
+      owner_user_id: card.owner_user_id,
+      owner: card.owner,
+      can_generate: canGenerate,
+      can_manage: canManage,
+      platform: card.platform,
+      ratio: card.ratio,
+      duration: card.duration,
+      target_resolution: card.target_resolution,
+      is_fallback: card.is_fallback,
+      current_best_task_id: card.current_best_task_id,
+      final_task_id: card.final_task_id,
+      branch_count: branchCountByCard.get(card.id) || 0,
+      summary,
+      updated_at: safeDate(card.updated_at),
+    };
+    return {
+      ...base,
+      status_label: videoCardStatusLabel(card.status),
+      spec_label: videoCardSpecLabel(base),
+      removal_action: videoCardRemovalAction(base, canManage),
+      removal_reason: videoCardRemovalReason(base, canManage),
+    };
+  });
+  const requestedVideoCard = requestedVideoCardId
+    ? videoCardSummaries.find((card) => card.id === requestedVideoCardId) || null
+    : null;
+  if (requestedVideoCardId && !requestedVideoCard) return NextResponse.json({ error: '原视频卡暂不可用，未清除原归属', code: 'creation_legacy_card_unavailable' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
+  const restoredVideoCardId = requestedVideoCardId ? '' : savedVideoCardId(latestCanvasDocument?.document_json);
+  const restoredVideoCard = restoredVideoCardId
+    ? videoCardSummaries.find((card) => card.id === restoredVideoCardId) || null
+    : null;
+  const selectedVideoCard = requestedVideoCard
+    || restoredVideoCard
+    || null;
+
   const textReady = isMuskApiReady(muskSettings);
-  const imageReady = isImageGenerationApiReady(imageSettings);
-  const videoReady = isApiKeyConfigured();
+  const imageModels = imageChannels.shared.provider === 'seedream'
+    ? [imageChannels.shared.default_model, 'gemini-nano-banana-2.1', 'gemini-3-pro-image-preview']
+    : Array.from(new Set([...IMAGE_STUDIO_NEW_REQUEST_MODELS,
+      ...(imageChannels.shared.default_model === 'gemini-3.1-flash-image-preview' ? [] : [imageChannels.shared.default_model])]));
+  const imageSettingsByModel = new Map(await Promise.all(imageModels.map(async model => [model, await imageSettingsForModel(imageChannels, model)] as const)));
+  const imageReady = imageModels.some(model => isImageGenerationApiReady(imageSettingsByModel.get(model)!));
+  const imageLabel = imageSettings.label || imageModelLabel(imageSettings.provider, imageSettings.default_model);
+  const seedanceVideoReady = isApiKeyConfigured();
+  const ipReady = isVolcengineIpApiReady(await getVolcengineIpApiSettings());
+  const videoModels = [
+    ...videoConfig.model_options.map(item => ({ ...item, value: item.id, provider: 'seedance', ready: seedanceVideoReady,
+      label: item.id.includes('2-5') ? '普通视频 2.5' : '普通视频 2.0', resolutions: [...RESOLUTION_OPTIONS] })),
+    ...volcengineIpCapabilities().map(item => ({ ...item, value: item.id, provider: 'volcengine_ip', ready: ipReady,
+      label: item.id.includes('2-5') ? 'IP 视频 2.5' : item.id.includes('fast') ? 'IP 视频 2.0 · 快速版' : item.id.includes('mini') ? 'IP 视频 2.0 · 轻量版' : 'IP 视频 2.0' })),
+  ];
+  const videoReady = seedanceVideoReady || ipReady || h3VideoConfig.ready;
 
   return NextResponse.json({
+    backend: { mode: 'sd2', transport: 'same-origin', mock: false },
+    money_display: { usd_to_cny_rate: USD_TO_CNY_RATE, rate_text: usdToCnyRateText() },
     tool: {
       id: 'ultimate-canvas',
-      name: '无线画布',
+      name: '无限画布',
       mode: 'formal',
       billing: 'unified_sd2',
     },
@@ -186,36 +436,150 @@ export async function GET(request: NextRequest) {
         updated_at: safeDate(latestCanvasDocument.updated_at),
       } : null,
       needs_project_selection: !selectedProject,
-      needs_video_card_selection: !selectedVideoCard,
+      needs_video_card_selection: false,
+      selected_video_card_can_generate: selectedVideoCard ? Boolean(selectedVideoCard.can_generate) : true,
+      creation_contract_version: 2,
+      video_creation_v2_available: process.env.VIDEO_CREATION_FLOW_V2_ENABLED === '1' && await videoCreationSchemaReady(),
+      generation_blocked_reason: selectedVideoCard && !selectedVideoCard.can_generate
+        ? `视频卡${selectedVideoCard.status_label}，不能继续生成`
+        : null,
     },
     capabilities: {
+      audio: AUDIO_CAPABILITY,
       text: {
         enabled: textReady,
-        label: 'gpt5.4 文本能力',
-        model: muskSettings.default_model || 'gpt-5.4',
+        label: 'GPT-5.5 文本能力',
+        model: isStudioTextModel(muskSettings.default_model) ? muskSettings.default_model : 'gpt-5.5',
+        model_options: STUDIO_TEXT_MODELS.map(model => ({ value: model.id, label: model.label })),
         endpoint: '/api/tools/ultimate-canvas/generate',
         billing: 'operation_log',
-        message: textReady ? '可用' : '后台 Musk API 未启用或缺少 API Key',
+        message: textReady ? '可用' : '文本生成能力暂不可用，请稍后联系管理员',
       },
       image: {
         enabled: imageReady,
-        label: 'gmini 图形生成',
+        imageChannels: await getPricingImageChannelOptions(),
+        label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
+        model_options: imageModels.map(model => ({
+          value: model,
+          label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
+          capabilities: imageModelCapabilities(imageSettingsByModel.get(model)!.provider, model, imageSettingsByModel.get(model)!.deleted === true),
+          ready: isImageGenerationApiReady(imageSettingsByModel.get(model)!),
+        })),
+        size: imageSettings.default_size,
+        output_format: imageSettings.output_format,
+        response_format: imageSettings.response_format,
+        watermark: imageSettings.watermark,
+        capabilities: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true),
+        interaction: {
+          modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
+          ratios: ['auto', ...RATIO_OPTIONS],
+          size_options: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true).size_options,
+          max_outputs_per_request: imageModelCapabilities(imageSettings.provider, imageSettings.default_model, imageSettings.deleted === true).max_outputs_per_request,
+          max_reference_images: imageModelCapabilities(imageSettings.provider, imageSettings.default_model).reference_image_limit,
+        },
         endpoint: '/api/assets/generate',
         billing: 'site_asset_generation',
-        requires: ['project_id', 'video_card_id'],
-        message: imageReady ? '可用' : '后台图形生成 API 未启用或缺少配置',
+        requires: ['project_id'],
+        message: imageReady ? '可用' : '图片生成能力暂不可用，请稍后联系管理员',
       },
       video: {
         enabled: videoReady,
         label: '默认视频 API',
+        providers: [
+          {
+            id: 'seedance',
+            label: 'Seedance 视频',
+            enabled: seedanceVideoReady,
+            ready: seedanceVideoReady,
+            model_options: videoConfig.model_options,
+          },
+          {
+            id: 'volcengine_ip', label: 'IP 视频', enabled: ipReady, ready: ipReady,
+            model_options: videoModels.filter(item => item.provider === 'volcengine_ip'),
+          },
+          {
+            id: 'h3',
+            label: 'H3 本地工作站',
+            enabled: h3VideoConfig.enabled,
+            ready: h3VideoConfig.ready,
+            configured: h3VideoConfig.configured,
+            model_options: h3VideoConfig.preset_options,
+            default_model: h3VideoConfig.default_preset_id,
+            lora_options: h3VideoConfig.lora_options,
+            default_lora_id: h3VideoConfig.default_lora_id,
+          },
+        ],
+        h3_video: {
+          enabled: h3VideoConfig.enabled,
+          ready: h3VideoConfig.ready,
+          configured: h3VideoConfig.configured,
+          default_preset_id: h3VideoConfig.default_preset_id,
+          default_lora_id: h3VideoConfig.default_lora_id,
+          preset_options: h3VideoConfig.preset_options,
+          lora_options: h3VideoConfig.lora_options,
+          admin_queue_ready: h3VideoConfig.admin_queue_ready,
+          health: h3VideoConfig.health
+            ? {
+                api: h3VideoConfig.health.api,
+                worker: h3VideoConfig.health.worker,
+                comfyui: h3VideoConfig.health.comfyui,
+                preset_count: h3VideoConfig.health.preset_count,
+                checked_at: h3VideoConfig.health.checked_at,
+              }
+            : null,
+        },
         model: videoConfig.model,
+        model_options: videoModels,
+        interaction: {
+          modes: [
+            'text-to-video',
+            'all-reference-video',
+            'image-to-video',
+            'first-frame-video',
+            'first-last-frame-video',
+            'image-reference-video',
+            'smart-multi-frame-video',
+          ],
+          ratios: RATIO_OPTIONS,
+          durations: DURATION_OPTIONS,
+          // Legacy canvas requests still use the default model; do not widen it.
+          duration_by_model: { ...seedanceVideoDurationCapabilities(), ...Object.fromEntries(volcengineIpCapabilities().map(item => [item.id, item.durations])) },
+          resolutions: RESOLUTION_OPTIONS,
+          supports_audio: true,
+          supports_last_frame: true,
+          supports_watermark: true,
+          model_options: videoModels,
+          provider_options: ['seedance', 'volcengine_ip', ...(h3VideoConfig.ready ? ['h3'] : [])],
+          h3_notes: [
+            '首帧和尾帧会由后端转交给 H3',
+            '多余参考图、参考视频和音频第一版只作为可见上下文',
+            'H3 可通过 lora_id 选择 LoRA；未传时使用 default_lora_id',
+          ],
+          max_reference_images: 9,
+        },
         endpoint: '/api/tasks/create',
+        pricing: {
+          endpoint: '/api/tasks/estimate', method: 'POST', legacy_method: 'GET',
+          protocol: 'video-scope-v1', fingerprint_version: 2,
+          context_fields: ['provider', 'model', 'resolution', 'duration', 'project_id', 'video_card_id', 'ratio', 'draft',
+            'reference_video_urls', 'template_studio_run_id', 'template_studio_assets'],
+          receipt_fields: ['estimatedCost', 'pricing_revision', 'pricing_quote_token'],
+          create_fields: ['pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost'],
+          server_derived_purpose: ['standard', 'draft', 'draft_upgrade'],
+          reprice_on_context_change: true, token_in_business_fingerprint: false,
+          unknown_request: 'lookup_original_only',
+          legacy_context_required_code: 'pricing_context_required',
+          original_request_lookup: { method: 'GET', endpoint: '/api/tasks/request-status',
+            query_field: 'idempotency_key', auth: 'same_account_bearer_or_session', read_only: true,
+            missing_record_safe_to_resubmit: false, bearer_post: false },
+          ip: { estimate_method: 'GET', create_endpoint: '/api/ip/tasks/create', template_context: false },
+        },
         status_endpoint_template: '/api/video/status/:taskId?refresh=true',
         billing: 'credits_and_project_budget',
-        requires: ['project_id', 'video_card_id'],
-        message: videoReady ? '可用' : 'SEEDANCE_API_KEY 未配置',
+        requires: ['project_id'],
+        message: videoReady ? '可用' : '视频生成能力暂不可用，请稍后联系管理员',
       },
     },
   });

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import {
   assertCanGenerateInProject,
   assertCanViewProject,
-  logProjectAction,
+  assertProjectActiveInTransaction,
+  logProjectActionInTransaction,
 } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { normalizeVideoCardStatus } from '@/lib/video-cards/permissions';
@@ -15,6 +17,8 @@ import {
   findSimilarVideoCards,
   getVideoCardArchiveAnomalies,
 } from '@/lib/video-cards/suggestions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,21 +34,33 @@ function asOptionalNumber(value: unknown) {
 
 function serializeTaskPreview(task: null | {
   id: string;
+  source_metadata_json: string | null;
   prompt: string;
+  provider?: string | null;
+  generation_mode?: string | null;
   local_status: string;
+  public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
   created_at: Date;
 }) {
   if (!task) return null;
-  return {
+  return projectSelectedMultiviewTask({
     id: task.id,
+    source_metadata_json: task.source_metadata_json,
     prompt: task.prompt,
+    provider: task.provider ?? null,
+    generation_mode: task.generation_mode ?? null,
     local_status: task.local_status,
+    public_video_url: task.public_video_url,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
+    result_last_frame_url: task.result_last_frame_url ?? null,
+    ...taskThumbnailProjection(task),
     created_at: task.created_at,
-  };
+  });
 }
 
 function serializeDeliverySpecs(card: {
@@ -119,11 +135,11 @@ export async function GET(
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        current_best_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+      current_best_task: {
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
@@ -144,7 +160,7 @@ export async function GET(
         can_generate: access.canGenerate,
         can_manage_project: access.canManageProject,
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -201,7 +217,10 @@ export async function POST(
         { status: 409 },
       );
     }
-    const card = await prisma.videoCard.create({
+    const card = await prisma.$transaction(async (tx) => {
+    const projectAccess = await assertProjectActiveInTransaction(tx, user, params.id);
+    if (projectAccess?.project?.type !== 'personal') assertFeatureAllowed(user, 'team_project_manage');
+    const created = await tx.videoCard.create({
       data: {
         project_id: params.id,
         title,
@@ -227,24 +246,26 @@ export async function POST(
       },
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        current_best_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+      current_best_task: {
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
         final_task: {
-          select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+          select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
       },
     });
 
-    await logProjectAction(user.id, 'video_card_create', 'video_card', card.id, {
+    await logProjectActionInTransaction(tx, user.id, 'video_card_create', 'video_card', created.id, {
       project_id: params.id,
-      title: card.title,
+      title: created.title,
+    });
+    return created;
     });
 
     const summaryMap = await getVideoCardSummaryMap([card.id]);
     return NextResponse.json(
       { video_card: serializeVideoCard(card, summaryMap.get(card.id)) },
-      { status: 201 },
+      { status: 201, headers: { 'Cache-Control': 'private, no-store' } },
     );
   } catch (error) {
     if (error instanceof AuthError) {

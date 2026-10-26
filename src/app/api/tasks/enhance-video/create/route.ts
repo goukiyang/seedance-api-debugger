@@ -1,13 +1,20 @@
+import { CreationError, isCreationV2 } from '@/lib/creation/contract';
+import { assertVideoCreationReady } from '@/lib/creation/context';
+import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
+import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanViewTask, getProjectForGeneration } from '@/lib/projects/permissions';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { assertCanViewTask, getProjectForGeneration, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
-import { calculateEnhanceVideoEstimatedCost } from '@/lib/pricing';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import {
   allocateProjectTaskBudget,
@@ -39,6 +46,7 @@ import {
   validateEnhanceVideoUrl,
 } from '@/lib/tasks/enhance-video-create';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
+import { isPrivateMultiviewTask, readMultiviewPrivateTaskMarker, MULTIVIEW_PUBLIC_TASK_TITLE } from '@/lib/video/multiview-task-privacy';
 
 const LOCAL_UPLOAD_SAFE_MAX_BYTES = 512 * 1024 * 1024;
 
@@ -48,6 +56,7 @@ type SourceTask = Pick<VideoTask,
   | 'provider_task_id'
   | 'generation_mode'
   | 'prompt'
+  | 'source_metadata_json'
   | 'local_status'
   | 'result_video_url'
   | 'local_video_path'
@@ -124,16 +133,23 @@ async function resolveSourceVideoUrl(
   task: SourceTask,
   providerOptions: { apiKey?: string; baseUrl?: string },
 ) {
+  let localUploadError: unknown = null;
+  try {
+    const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);
+    if (uploaded) return uploaded;
+  } catch (error) {
+    localUploadError = error;
+  }
+
   if (task.result_video_url) {
     try {
       return validateEnhanceVideoUrl(task.result_video_url);
     } catch {
-      // Provider 临时 URL 不可用时，继续尝试本地缓存上传。
+      // Provider 临时 URL 不可用时，继续返回本地缓存上传时的真实错误。
     }
   }
 
-  const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);
-  if (uploaded) return uploaded;
+  if (localUploadError instanceof Error) throw localUploadError;
 
   throw new Error('源任务没有可用于超分的视频 URL 或本地缓存文件');
 }
@@ -227,18 +243,35 @@ export async function POST(request: NextRequest) {
   if (user.status !== 'active') {
     return errorJson('账号已被禁用，无法创建超分任务', 403);
   }
+  try {
+    assertInternalOnly(user, '外部账号无权使用视频超分。');
+  } catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
+    throw error;
+  }
+
+  const creationBody = await request.json() as Record<string, unknown>;
+  if (typeof creationBody.idempotency_key === 'string') {
+    const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: creationBody.idempotency_key } } });
+    if (original) { await assertCanViewTask(user, original); return NextResponse.json({ id: original.id, status: original.local_status, deduplicated: true, project_id: original.project_id, video_card_id: original.video_card_id }, { headers: { 'Cache-Control': 'private, no-store' } }); }
+  }
+  let body, creationV2 = false;
+  try {
+    creationV2 = isCreationV2(creationBody);
+    if (creationV2) await assertVideoCreationReady();
+    body = normalizeEnhanceVideoCreateBody(creationBody);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : '请求参数无效', error instanceof CreationError ? error.status : 400, error instanceof CreationError ? error.code : 'INVALID_REQUEST');
+  }
+  if (!body.sourceTaskId && body.videoUrl && user.role !== 'admin') {
+    return jsonError('普通用户请从资产页选择已有视频发起超分', 403, 'RAW_VIDEO_URL_FORBIDDEN');
+  }
+
   const aiMediaKitSettings = await getAiMediaKitApiSettings();
   if (!isAiMediaKitApiReady(aiMediaKitSettings)) {
     return errorJson('请先到 API 设置启用 AI MediaKit 并保存 API Key', 500);
   }
   const aiMediaKitRequestOptions = aiMediaKitSettingsToRequestOptions(aiMediaKitSettings);
-
-  let body;
-  try {
-    body = normalizeEnhanceVideoCreateBody(await request.json());
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : '请求参数无效', 400, 'INVALID_REQUEST');
-  }
 
   let sourceTask: SourceTask | null = null;
   let sourceVideoUrl = body.videoUrl;
@@ -251,6 +284,7 @@ export async function POST(request: NextRequest) {
         provider_task_id: true,
         generation_mode: true,
         prompt: true,
+        source_metadata_json: true,
         local_status: true,
         result_video_url: true,
         local_video_path: true,
@@ -286,25 +320,15 @@ export async function POST(request: NextRequest) {
   }
 
   const videoCardId = body.videoCardId || sourceTask?.video_card_id || null;
-  if (!videoCardId) {
-    return jsonError('必须提供 video_card_id，超分任务需要写入项目和视频卡成本闭环', 400, 'VIDEO_CARD_REQUIRED');
-  }
-
-  const requestedVideoCard = await prisma.videoCard.findUnique({
-    where: { id: videoCardId },
-    select: { id: true, project_id: true },
-  });
-  if (!requestedVideoCard) return jsonError('视频卡不存在', 404, 'VIDEO_CARD_NOT_FOUND');
-  if (sourceTask?.project_id && sourceTask.project_id !== requestedVideoCard.project_id) {
-    return jsonError('首版不支持把其他项目的源任务超分到当前视频卡', 400, 'CROSS_PROJECT_ENHANCE_UNSUPPORTED');
-  }
-
+  if (!videoCardId && !creationV2) return jsonError('原超分请求需要视频卡', 400, 'VIDEO_CARD_REQUIRED');
+  const requestedVideoCard = videoCardId ? await prisma.videoCard.findUnique({ where: { id: videoCardId }, select: { id: true, project_id: true } }) : null;
+  if (videoCardId && !requestedVideoCard) return jsonError('视频卡不存在', 404, 'VIDEO_CARD_NOT_FOUND');
+  const projectId = requestedVideoCard?.project_id || (typeof creationBody.project_id === 'string' ? creationBody.project_id : null) || sourceTask?.project_id;
+  if (!projectId || sourceTask?.project_id && sourceTask.project_id !== projectId) return jsonError('请保持源任务原项目，历史无项目结果请明确新目的地', 409, 'SOURCE_PROJECT_REQUIRED');
   let project;
-  let videoCard;
   try {
-    project = await getProjectForGeneration(user, requestedVideoCard.project_id);
-    const videoCardAccess = await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
-    videoCard = videoCardAccess.videoCard;
+    project = await getProjectForGeneration(user, projectId);
+    if (requestedVideoCard) await assertCanGenerateInVideoCard(user, project.id, requestedVideoCard.id);
   } catch (error) {
     if (error instanceof AuthError) return jsonError(error.message, error.status, 'PROJECT_FORBIDDEN');
     throw error;
@@ -315,28 +339,34 @@ export async function POST(request: NextRequest) {
     return jsonError('无法确认源视频时长，请传入 duration 后再创建超分任务', 400, 'DURATION_REQUIRED');
   }
 
-  const pricing = calculateEnhanceVideoEstimatedCost({
-    duration,
-    resolution: body.resolution,
-    toolVersion: body.toolVersion,
-    fps: body.fps,
-  });
-  const estimatedCost = pricing.estimatedCost;
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : user.id;
   const idempotencyKey = body.idempotencyKey || undefined;
+  let privateSourceMarker: ReturnType<typeof readMultiviewPrivateTaskMarker> = null;
+  try {
+    if (sourceTask && isPrivateMultiviewTask(sourceTask)) privateSourceMarker = readMultiviewPrivateTaskMarker(sourceTask);
+  } catch {
+    return jsonError('源任务的私有配方记录暂时无法确认，请保留原任务并联系管理员。', 409, 'SOURCE_RECIPE_UNAVAILABLE');
+  }
 
   if (idempotencyKey) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
     });
     if (existing) {
-      if (existing.video_card_id && existing.video_card_id !== videoCard.id) {
+      if (privateSourceMarker) {
+        let existingMarker: ReturnType<typeof readMultiviewPrivateTaskMarker> = null;
+        try { existingMarker = readMultiviewPrivateTaskMarker(existing); } catch { /* Preserve the original operation on corrupt metadata. */ }
+        if (!existingMarker || existingMarker.recipeVersion !== privateSourceMarker.recipeVersion) {
+          return jsonError('原操作已绑定其他任务，请核对原任务；未重新提交。', 409, 'IDEMPOTENCY_CONFLICT');
+        }
+      }
+      if (existing.video_card_id && existing.video_card_id !== videoCardId) {
         return jsonError('同一个幂等键已绑定到其他视频卡', 409, 'IDEMPOTENCY_CONFLICT');
       }
       return NextResponse.json({
         id: existing.id,
-        provider_task_id: existing.provider_task_id,
+        ...(!isPrivateMultiviewTask(existing) ? { provider_task_id: existing.provider_task_id } : {}),
         status: existing.local_status,
         estimated_cost: existing.estimated_cost,
         frozen_cost: existing.frozen_cost,
@@ -346,10 +376,20 @@ export async function POST(request: NextRequest) {
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
         created_at: existing.created_at,
-      });
+      }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
   }
 
+  let priceQuote: VideoPricingQuote;
+  try {
+    priceQuote = await quoteVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration,
+      resolution: body.resolution, toolVersion: body.toolVersion, fps: body.fps });
+    requireVideoPricingRevision(priceQuote, body.pricingRevision);
+  } catch (error) {
+    const failure = videoPricingError(error);
+    return jsonError(failure?.message || '报价暂不可用，原参数和视频已保留', failure?.status || 503, failure?.code || 'pricing_unavailable');
+  }
+  const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
   if (sourceTask) {
     try {
       sourceVideoUrl = await resolveSourceVideoUrl(sourceTask, aiMediaKitRequestOptions);
@@ -364,18 +404,23 @@ export async function POST(request: NextRequest) {
   let createdTask: VideoTask;
   try {
     createdTask = await prisma.$transaction(async (tx) => {
+      await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
+      await assertProjectActiveInTransaction(tx, user, project.id);
+      await assertLegacyCreationSourceLocks(tx, user, { ...creationBody, action: 'enhance', source_task_id: sourceTask?.id }, project.id);
+      await assertVideoPricingAcceptance(priceQuote, body.pricingRevision, tx);
       const task = await tx.videoTask.create({
         data: {
           provider: 'volcengine_mediakit',
           model: 'enhance-video',
           generation_mode: 'enhance_video',
-          prompt: sourceTask
+          prompt: privateSourceMarker ? `${MULTIVIEW_PUBLIC_TASK_TITLE} · 视频超分/画质增强` : sourceTask
             ? `视频超分/画质增强：${sourceTask.prompt.slice(0, 80) || sourceTask.id}`
             : '视频超分/画质增强：外部视频 URL',
           source_type: 'web',
           source_label: 'AI MediaKit 视频超分',
           source_request_id: idempotencyKey || null,
           source_metadata_json: JSON.stringify({
+            ...(privateSourceMarker ? { protected_module: privateSourceMarker } : {}),
             source_task_id: sourceTask?.id || null,
             source_provider: sourceTask?.provider || null,
             source_provider_task_id: sourceTask?.provider_task_id || null,
@@ -391,7 +436,7 @@ export async function POST(request: NextRequest) {
           user_id: user.id,
           owner_user_id: user.id,
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId,
           visibility: project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
@@ -408,11 +453,16 @@ export async function POST(request: NextRequest) {
             resolution: body.resolution,
             fps: body.fps,
             duration,
-            pricing,
+            pricing: publicVideoPricing(priceQuote),
           }),
         },
       });
 
+      await recordUsageAttribution(tx, { sourceKind: 'video_task', sourceId: task.id,
+        actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
+        billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
+        projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'enhance-video-create',
+        parentSourceKind: sourceTask ? 'video_task' : null, parentSourceId: sourceTask?.id || null });
       let freezeSnapshot: string;
       try {
         if (billingScope === 'project') {
@@ -466,17 +516,23 @@ export async function POST(request: NextRequest) {
           target_id: task.id,
           detail: JSON.stringify({
             project_id: project.id,
-            video_card_id: videoCard.id,
+            video_card_id: videoCardId,
             source_task_id: sourceTask?.id || null,
             estimated_cost: estimatedCost,
             billing_scope: billingScope,
           }),
         },
       });
+      await acceptVideoCreationIntent(tx, user, { ...creationBody, action: 'enhance', entry: 'enhance', provider: 'volcengine_mediakit', model: 'enhance-video',
+        source_task_id: sourceTask?.id, project_id: project.id, video_card_id: videoCardId, tool_version: body.toolVersion, resolution: body.resolution, fps: body.fps, duration }, { taskId: task.id, cost: estimatedCost, pricingRevision: priceQuote.revision });
       await recordTaskCostEstimate(tx, updatedTask, pricing, user.id);
       return updatedTask;
     });
   } catch (error) {
+    if (error instanceof CreationError) return jsonError(error.message, error.status, error.code);
+    const pricingFailure = videoPricingError(error);
+    if (pricingFailure) return jsonError(pricingFailure.message, pricingFailure.status, pricingFailure.code);
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
     if (error instanceof CreditError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: 400 });
     }
@@ -536,21 +592,21 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       id: createdTask.id,
-      provider_task_id: providerResult.provider_task_id,
+      ...(!privateSourceMarker ? { provider_task_id: providerResult.provider_task_id } : {}),
       status: 'submitted',
       provider: 'volcengine_mediakit',
       model: 'enhance-video',
       generation_mode: 'enhance_video',
       estimated_cost: estimatedCost,
       frozen_cost: estimatedCost,
-      pricing,
+      pricing: publicVideoPricing(priceQuote),
       project_id: project.id,
-      video_card_id: videoCard.id,
-      source_task_id: sourceTask?.id || null,
+      video_card_id: videoCardId,
+      ...(!privateSourceMarker ? { source_task_id: sourceTask?.id || null } : {}),
       billing_scope: billingScope,
       billing_account_id: billingAccountId,
       created_at: new Date().toISOString(),
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const errorMessage = error instanceof Error ? redactAiMediaKitLog(error.message) : 'AI MediaKit 调用异常';
     if (providerRequestId) {

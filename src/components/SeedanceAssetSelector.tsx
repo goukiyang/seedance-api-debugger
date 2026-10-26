@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 // ============================================================================
 // Types
@@ -94,7 +95,7 @@ function ThumbnailCard({
       )}
       {showRemove && !isSelected && (
         <button
-          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           onClick={(e) => {
             e.stopPropagation();
             onRemove?.();
@@ -118,9 +119,18 @@ function AssetGrid({
   onSelect: (asset: SeedanceAssetRecord) => void;
   onClose: () => void;
 }) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [assets, setAssets] = useState<SeedanceAssetRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useDialogDismiss({
+    open: true,
+    dialogRef,
+    dismissSurfaceRef: backdropRef,
+    onDismiss: onClose,
+  });
 
   useEffect(() => {
     fetch('/api/assets/list')
@@ -137,19 +147,14 @@ function AssetGrid({
   }, []);
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.6)' }}
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+    <div ref={backdropRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <div
-          className="bg-[#1a1a2e] rounded-xl border border-white/10 shadow-2xl pointer-events-auto w-full max-w-2xl max-h-[70vh] flex flex-col"
-          onClick={(e) => e.stopPropagation()}
+          ref={dialogRef}
+          className="bg-[#1a1a2e] rounded-xl border border-white/10 shadow-2xl w-full max-w-2xl max-h-[70vh] flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择 Seedance 资产作为参考图"
+          onClick={(event) => event.stopPropagation()}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
@@ -173,7 +178,7 @@ function AssetGrid({
               <div className="text-center text-white/50 py-8">加载中...</div>
             )}
             {error && (
-              <div className="text-center text-red-400 py-8">{error}</div>
+              <div className="text-center text-gray py-8">{error}</div>
             )}
             {!loading && !error && assets.length === 0 && (
               <div className="text-center text-white/40 py-8">
@@ -210,8 +215,7 @@ function AssetGrid({
             )}
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 
@@ -327,7 +331,7 @@ export function SeedanceAssetSelector({
 
               {/* 删除按钮 */}
               <button
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                 onClick={() => handleRemove(asset.localAssetId)}
                 title="移除"
               >
@@ -371,7 +375,7 @@ export function SeedanceAssetSelector({
 
         {/* 警告 */}
         {showWarning && (
-          <div className="text-xs text-red-400">最多选择 {max} 张参考图</div>
+          <div className="text-xs text-gray">最多选择 {max} 张参考图</div>
         )}
 
         {/* 说明 */}

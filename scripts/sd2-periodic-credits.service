@@ -1,0 +1,25 @@
+[Unit]
+Description=SD2 periodic credit refresh
+After=network-online.target sd2-gray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gouki
+WorkingDirectory=/srv/video-api-debugger/app
+EnvironmentFile=/srv/video-api-debugger/app/.env
+Environment=NODE_ENV=production
+Environment=DATABASE_URL=file:/data/video-api-debugger/var-lib/dev.db
+ExecStart=/usr/bin/node --import tsx scripts/process-periodic-credits.ts
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

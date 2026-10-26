@@ -1,0 +1,329 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const workflow = require('../public/tools/ultimate-canvas/video-card-workflow.js');
+
+function contains(source: string, needle: string, label: string) {
+  assert.ok(source.includes(needle), `${label}: missing ${needle}`);
+}
+
+function request(operation: string, input: Record<string, unknown>) {
+  return workflow.requestFor(operation, input);
+}
+
+const branches = [
+  { id: 'closed', status: 'closed', is_primary: false },
+  { id: 'main', status: 'primary', is_primary: true },
+  { id: 'idea', status: 'exploring', is_primary: false },
+  { id: 'candidate', status: 'candidate', is_primary: false },
+];
+
+assert.deepEqual(
+  workflow.activeBranches(branches).map((item: { id: string }) => item.id),
+  ['main', 'idea', 'candidate'],
+);
+assert.equal(workflow.chooseBranch(branches, 'closed'), 'main');
+assert.equal(workflow.chooseBranch(branches, 'idea'), 'idea');
+assert.equal(workflow.chooseBranch([], 'idea'), '');
+
+assert.equal(workflow.operationAllowed({
+  video_card: { status: 'active' },
+  permissions: { can_generate: true, can_manage: false },
+}, 'generate'), true);
+assert.equal(workflow.operationAllowed({
+  video_card: { status: 'sealed' },
+  permissions: { can_generate: true, can_manage: true },
+}, 'generate'), false);
+assert.equal(workflow.operationAllowed({
+  video_card: { status: 'active' },
+  permissions: { can_generate: true, can_manage: false },
+}, 'card-update'), false);
+
+assert.deepEqual(request('card-update', {
+  cardId: 'card 1',
+  values: { title: '开场镜头' },
+}), {
+  url: '/api/video-cards/card%201',
+  method: 'PATCH',
+  payload: { title: '开场镜头' },
+});
+assert.deepEqual(request('card-seal', { cardId: 'card-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { seal: true },
+});
+assert.deepEqual(request('card-archive', { cardId: 'card-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { action: 'archive' },
+});
+assert.deepEqual(request('card-discard', { cardId: 'card-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { action: 'discard' },
+});
+assert.deepEqual(request('branch-create', {
+  cardId: 'card-1',
+  title: '动作方向',
+  description: '快速移动',
+}), {
+  url: '/api/video-cards/card-1/branches',
+  method: 'POST',
+  payload: { title: '动作方向', description: '快速移动' },
+});
+assert.deepEqual(request('branch-create', {
+  cardId: 'card-1',
+  title: '第六方向',
+  confirmOverLimit: true,
+}), {
+  url: '/api/video-cards/card-1/branches',
+  method: 'POST',
+  payload: { title: '第六方向', description: null, confirm_over_limit: true },
+});
+assert.deepEqual(request('branch-action', {
+  cardId: 'card-1',
+  branchId: 'branch-1',
+  action: 'merge',
+  targetBranchId: 'branch-main',
+}), {
+  url: '/api/video-cards/card-1/branches/branch-1',
+  method: 'PATCH',
+  payload: { action: 'merge', target_branch_id: 'branch-main' },
+});
+assert.deepEqual(request('branch-action', {
+  cardId: 'card-1',
+  branchId: 'branch-1',
+  action: 'promote_to_card',
+  title: '动作独立卡',
+  reason: '方向成熟',
+}), {
+  url: '/api/video-cards/card-1/branches/branch-1',
+  method: 'PATCH',
+  payload: { action: 'promote_to_card', title: '动作独立卡', reason: '方向成熟' },
+});
+assert.deepEqual(request('version-candidate', { cardId: 'card-1', taskId: 'task-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { candidate_task_id: 'task-1' },
+});
+assert.deepEqual(request('version-best', { cardId: 'card-1', taskId: 'task-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { current_best_task_id: 'task-1' },
+});
+assert.deepEqual(request('version-final', { cardId: 'card-1', taskId: 'task-1' }), {
+  url: '/api/video-cards/card-1',
+  method: 'PATCH',
+  payload: { final_task_id: 'task-1' },
+});
+assert.deepEqual(request('tasks-move', {
+  cardId: 'card-1',
+  targetCardId: 'card-2',
+  taskIds: ['task-1'],
+  targetBranchId: 'branch-2',
+  reason: '整理版本',
+}), {
+  url: '/api/video-cards/card-1/tasks',
+  method: 'PATCH',
+  payload: {
+    action: 'move',
+    target_video_card_id: 'card-2',
+    task_ids: ['task-1'],
+    target_branch_id: 'branch-2',
+    reason: '整理版本',
+  },
+});
+assert.deepEqual(request('card-split', {
+  cardId: 'card-1',
+  title: '产品特写',
+  taskIds: ['task-1'],
+  reason: '独立方向',
+}), {
+  url: '/api/video-cards/card-1/split',
+  method: 'POST',
+  payload: { title: '产品特写', task_ids: ['task-1'], reason: '独立方向' },
+});
+assert.deepEqual(request('card-merge', {
+  cardId: 'card-1',
+  targetCardId: 'card-2',
+  reason: '收敛方向',
+}), {
+  url: '/api/video-cards/card-1/merge',
+  method: 'POST',
+  payload: { target_video_card_id: 'card-2', reason: '收敛方向' },
+});
+assert.deepEqual(request('approval-ratio', {
+  projectId: 'project-1',
+  cardId: 'card-1',
+  targetRatio: '9:16',
+  reason: '竖屏交付',
+}), {
+  url: '/api/approvals',
+  method: 'POST',
+  payload: {
+    type: 'ratio_change',
+    project_id: 'project-1',
+    video_card_id: 'card-1',
+    reason: '竖屏交付',
+    payload: {
+      source: 'ultimate_canvas',
+      target_ratio: '9:16',
+      change_reason: '竖屏交付',
+    },
+  },
+});
+assert.deepEqual(request('approval-reopen', {
+  projectId: 'project-1',
+  cardId: 'card-1',
+  reason: '继续修改',
+}), {
+  url: '/api/approvals',
+  method: 'POST',
+  payload: {
+    type: 'video_card_reopen',
+    project_id: 'project-1',
+    video_card_id: 'card-1',
+    reason: '继续修改',
+    payload: {
+      source: 'ultimate_canvas',
+      target_status: 'active',
+      reopen_reason: '继续修改',
+    },
+  },
+});
+assert.deepEqual(request('task-retry', { taskId: 'task-1' }), {
+  url: '/api/video/retry/task-1',
+  method: 'POST',
+  payload: {},
+});
+
+assert.deepEqual(workflow.generationContext({
+  projectId: 'project-1',
+  cardId: 'card-1',
+  branchId: 'branch-1',
+  documentId: 'document-1',
+  nodeId: 'node-1',
+  tabId: 'tab-1',
+}), {
+  project_id: 'project-1',
+  video_card_id: 'card-1',
+  video_branch_id: 'branch-1',
+  canvas_document_id: 'document-1',
+  canvas_node_id: 'node-1',
+  tab_id: 'tab-1',
+});
+
+assert.throws(() => request('unknown-operation', {}), /不支持的视频卡操作/);
+
+const app = readFileSync('public/tools/ultimate-canvas/app.js', 'utf8');
+contains(app, 'selectedVideoBranchId: null', 'runtime tracks selected branch');
+contains(app, 'videoCardDetails: new Map()', 'runtime caches card detail');
+contains(app, 'videoCardBranches: new Map()', 'runtime caches card branches');
+contains(app, 'videoCardTasks: new Map()', 'runtime caches card tasks');
+contains(app, 'videoCardLoads: new Map()', 'runtime deduplicates card loads');
+contains(app, 'async function loadVideoCardWorkspace', 'card workspace is lazy loaded');
+contains(app, 'function invalidateVideoCardWorkspace', 'card cache can be invalidated');
+contains(
+  app,
+  'video_branch_id: canvasRuntime.selectedVideoBranchId || null',
+  'save stores selected branch',
+);
+contains(app, 'parsed?.context?.video_branch_id', 'restore reads selected branch');
+contains(
+  app,
+  'UltimateCanvasVideoCards.generationContext',
+  'generation uses shared context builder',
+);
+contains(app, 'data-video-card-search', 'video card list has search');
+contains(app, 'data-video-card-refresh', 'video card list has refresh');
+contains(app, 'data-video-card-manage', 'video card rows open in-place management');
+contains(app, 'data-video-card-view-back', 'video card detail returns to list');
+contains(app, 'data-video-card-section', 'video card detail has in-place sections');
+contains(app, 'async function refreshProjectVideoCards', 'menu refreshes complete project cards');
+contains(app, 'data-video-card-info-form', 'video card info is editable in place');
+contains(app, 'data-video-card-seal', 'video card can be sealed in place');
+contains(app, 'data-video-card-approval-ratio', 'ratio approval is requested in place');
+contains(app, 'data-video-card-approval-reopen', 'reopen approval is requested in place');
+contains(app, 'async function executeVideoCardOperation', 'card mutations share one executor');
+contains(app, 'UltimateCanvasVideoCards.requestFor', 'card mutations use shared request contracts');
+contains(
+  app,
+  'const canRequestApproval = Boolean(detail?.video_card)',
+  'viewable cards can request approval without admin or generate permission',
+);
+contains(app, 'data-video-branch-create-form', 'branches can be created in place');
+contains(app, 'data-video-branch-select', 'active branch can be selected');
+contains(app, 'data-video-branch-action', 'branch lifecycle actions are available');
+contains(app, 'async function executeVideoBranchAction', 'branch actions use one executor');
+contains(app, 'data-video-branch-prompt-select', 'video prompt contains branch selector');
+contains(
+  app,
+  'videoBranchId: canvasRuntime.selectedVideoBranchId',
+  'video node persists selected branch',
+);
+contains(
+  app,
+  'branchId: payload.videoBranchId || canvasRuntime.selectedVideoBranchId',
+  'real generation uses node or canvas branch',
+);
+contains(app, "scheduleCanvasSave('prompt_modal_save')", 'prompt modal saves branch and prompt');
+contains(app, 'data-video-task-select', 'task history supports selection');
+contains(app, 'data-video-task-version', 'task history supports version roles');
+contains(app, 'data-video-task-retry', 'task history supports retry');
+contains(app, 'data-video-task-move-form', 'selected tasks can move cards');
+contains(app, 'data-video-card-split-form', 'selected tasks can split to a new card');
+contains(app, 'data-video-card-merge-form', 'cards can merge in place');
+contains(app, 'data-generated-task-retry', 'video result node supports retry');
+contains(app, 'data-generated-task-version', 'video result node supports version roles');
+contains(app, 'function refreshVideoTaskNode', 'task response updates node in place');
+contains(app, 'async function executeVideoTaskVersion', 'task version uses real card API');
+contains(app, 'async function retryVideoTask', 'task retry uses real retry API');
+contains(app, 'async function moveVideoTasks', 'task migration uses real card API');
+contains(app, 'async function splitVideoCard', 'card split uses real split API');
+contains(app, 'async function mergeVideoCard', 'card merge uses real merge API');
+contains(app, 'entry.serverDelayMs', 'video polling can honor backend retry_after_ms');
+contains(app, 'normalized.stableDownloadReady', 'video node status distinguishes generation success from stable download readiness');
+contains(app, 'const downloadUrl = stableDownloadReady', 'restored video nodes should not invent a download URL before stable delivery is ready');
+contains(app, "node.data.generationStatus === 'succeeded' && !stableDownloadReady", 'restored succeeded video nodes keep polling until stable download is ready');
+contains(app, 'stableDownloadReady: normalized.stableDownloadReady', 'video nodes persist stable download readiness for reload recovery');
+contains(app, 'const downloadUrl = stableDownloadReady ? rawDownloadUrl :', 'video task action menu hides download until stable delivery is ready');
+
+const styles = readFileSync('public/tools/ultimate-canvas/styles.css', 'utf8');
+contains(styles, '.video-card-context-detail', 'video card detail styles exist');
+contains(styles, '.video-card-section-tabs', 'video card section tabs are stable');
+contains(styles, '.video-card-task-list', 'video card task list has stable layout');
+contains(
+  styles,
+  'max-width: min(560px, calc(100vw - 24px))',
+  'video card menu is constrained to viewport',
+);
+
+const tasksRoute = readFileSync('src/app/api/video-cards/[id]/tasks/route.ts', 'utf8');
+contains(tasksRoute, 'video_branch_id: true', 'task history returns its branch id');
+const retryRoute = readFileSync('src/app/api/video/retry/[id]/route.ts', 'utf8');
+contains(retryRoute, 'video_branch_id: true', 'retry reads the original branch id');
+contains(
+  retryRoute,
+  'video_branch_id: originalTask.video_branch_id',
+  'retry remains assigned to the original branch',
+);
+
+const index = readFileSync('public/tools/ultimate-canvas/index.html', 'utf8');
+const coordinator = readFileSync('public/tools/ultimate-canvas/generation-task-coordinator.js', 'utf8');
+contains(coordinator, 'shouldKeepPollingTerminalStatus', 'polling coordinator keeps succeeded video tasks alive until stable download is ready');
+contains(coordinator, 'retry_after_ms', 'polling coordinator reads backend polling cadence');
+
+assert.ok(index.includes('video-card-workflow.js'), 'index loads video card workflow');
+assert.ok(
+  index.indexOf('video-card-workflow.js') < index.indexOf('app.js'),
+  'workflow loads before app',
+);
+assert.match(index, /styles\.css\?v=20260826-canvas-module-refresh/);
+assert.match(index, /video-card-workflow\.js\?v=20260711-video-card-complete/);
+assert.match(index, /generation-node-workflow\.js\?v=20260813-video-delivery/);
+assert.match(index, /generation-task-coordinator\.js\?v=20260813-video-delivery/);
+assert.match(index, /app\.js\?v=20260826-canvas-module-refresh/);
+
+console.log('ultimate-canvas-video-card-workflow-smoke passed');

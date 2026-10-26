@@ -1,4 +1,7 @@
+import { assertCanViewTask } from '@/lib/projects/permissions';
+import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import { NextRequest, NextResponse } from 'next/server';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
@@ -8,6 +11,7 @@ import {
   assertCanViewVideoCard,
 } from '@/lib/video-cards/permissions';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,21 +59,33 @@ function serializeDeliverySpecs(card: {
 
 function serializeTaskPreview(task: null | {
   id: string;
+  source_metadata_json: string | null;
   prompt: string;
+  provider?: string | null;
+  generation_mode?: string | null;
   local_status: string;
+  public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
   created_at: Date;
 }) {
   if (!task) return null;
-  return {
+  return projectSelectedMultiviewTask({
     id: task.id,
+    source_metadata_json: task.source_metadata_json,
     prompt: task.prompt,
+    provider: task.provider ?? null,
+    generation_mode: task.generation_mode ?? null,
     local_status: task.local_status,
+    public_video_url: task.public_video_url,
     local_video_path: task.local_video_path,
     result_video_url: task.result_video_url,
+    result_last_frame_url: task.result_last_frame_url ?? null,
+    ...taskThumbnailProjection(task),
     created_at: task.created_at,
-  };
+  });
 }
 
 async function getSerializableVideoCard(id: string) {
@@ -81,10 +97,10 @@ async function getSerializableVideoCard(id: string) {
       creator: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       sealedBy: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       current_best_task: {
-        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
       },
       final_task: {
-        select: { id: true, prompt: true, local_status: true, local_video_path: true, result_video_url: true, created_at: true },
+        select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
       },
     },
   });
@@ -159,7 +175,7 @@ export async function GET(
         can_manage: access.canManage,
         project_role: access.projectAccess?.role || null,
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -184,6 +200,47 @@ export async function PATCH(
     const body = await request.json() as Record<string, unknown>;
     const data: Record<string, unknown> = {};
     const lockedForDirectChanges = access.videoCard.status === 'sealed' || access.videoCard.status === 'archived';
+
+    const lifecycleAction = asOptionalString(body.action);
+    if (lifecycleAction === 'archive' || lifecycleAction === 'discard') {
+      if (access.videoCard.is_fallback) {
+        return NextResponse.json({ error: '系统兜底视频卡不能归档或废弃' }, { status: 400 });
+      }
+      if (['sealed', 'merged', 'archived', 'discarded'].includes(access.videoCard.status)) {
+        return NextResponse.json(
+          { error: '视频卡当前状态不允许归档或废弃，请在详情页按现有工作流处理' },
+          { status: 400 },
+        );
+      }
+
+      if (lifecycleAction === 'discard') {
+        const [taskCount, branchCount] = await Promise.all([
+          prisma.videoTask.count({ where: { video_card_id: params.id } }),
+          prisma.videoBranch.count({ where: { video_card_id: params.id } }),
+        ]);
+        const hasHistory = taskCount > 0
+          || branchCount > 0
+          || Boolean(access.videoCard.current_best_task_id)
+          || Boolean(access.videoCard.final_task_id);
+        if (hasHistory) {
+          return NextResponse.json(
+            { error: '视频卡已有任务、最终版或分支，不能废弃；请改为归档' },
+            { status: 409 },
+          );
+        }
+      }
+
+      await prisma.videoCard.update({
+        where: { id: params.id },
+        data: { status: lifecycleAction === 'archive' ? 'archived' : 'discarded' },
+      });
+      await logProjectAction(user.id, `video_card_${lifecycleAction}`, 'video_card', params.id, {
+        project_id: access.videoCard.project_id,
+        previous_status: access.videoCard.status,
+      });
+      const videoCard = await getSerializableVideoCard(params.id);
+      return NextResponse.json({ video_card: videoCard, action: lifecycleAction }, { headers: { 'Cache-Control': 'private, no-store' } });
+    }
 
     if (hasOwn(body, 'status')) {
       return NextResponse.json(
@@ -318,6 +375,20 @@ export async function PATCH(
     }
 
     await prisma.$transaction(async (tx) => {
+      const changesSelection = candidateTaskId !== undefined || currentBestTaskId !== undefined || finalTaskId !== undefined;
+      const freshCard = await tx.videoCard.findUnique({ where: { id: params.id } });
+      if (!freshCard) throw new AuthError('视频卡不存在', 404);
+      if (changesSelection) {
+        const expected = body.expected_updated_at ?? body.expectedUpdatedAt;
+        if (typeof expected !== 'string' || new Date(expected).getTime() !== freshCard.updated_at.getTime()) throw new AuthError('视频卡已变化，请刷新后再选择版本', 409);
+        for (const taskId of [candidateTaskId, currentBestTaskId, finalTaskId]) {
+          if (!taskId) continue;
+          const task = await tx.videoTask.findUnique({ where: { id: taskId } });
+          if (!task || task.video_card_id !== params.id || task.project_id !== freshCard.project_id || ['admin_hidden', 'user_deleted'].includes(task.retention_status)) throw new AuthError('所选结果已不可用', 409);
+          await assertCanViewTask(user, task);
+          if (task.local_status !== 'succeeded' || !videoDeliveryStageForTask(task).stableDownloadReady) throw new AuthError('请等待完整成品就绪后再设为候选、最佳或最终版', 409);
+        }
+      }
       if (candidateTaskId !== undefined && candidateTaskId) {
         await tx.videoTask.update({
           where: { id: candidateTaskId },
@@ -348,10 +419,8 @@ export async function PATCH(
         }
       }
 
-      await tx.videoCard.update({
-        where: { id: params.id },
-        data,
-      });
+      const changed = await tx.videoCard.updateMany({ where: { id: params.id, updated_at: freshCard.updated_at }, data });
+      if (changed.count !== 1) throw new AuthError('视频卡已变化，未覆盖他人操作', 409);
     });
 
     await logProjectAction(user.id, 'video_card_update', 'video_card', params.id, {
@@ -363,7 +432,7 @@ export async function PATCH(
     });
 
     const videoCard = await getSerializableVideoCard(params.id);
-    return NextResponse.json({ video_card: videoCard });
+    return NextResponse.json({ video_card: videoCard }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

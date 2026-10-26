@@ -18,9 +18,14 @@ export function hashPassword(password: string): string {
   return `scrypt:${salt.toString('base64')}:${hash}`;
 }
 
+export function hasSessionPasswordBinding(stored: string): boolean {
+  const parts = stored.split(':');
+  return parts.length === 4 && parts[0] === 'scrypt' && /^session-v1-[a-f0-9]{32}$/.test(parts[3]);
+}
+
 export function verifyPassword(password: string, stored: string): boolean {
   const parts = stored.split(':');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  if ((parts.length !== 3 && !hasSessionPasswordBinding(stored)) || parts[0] !== 'scrypt') return false;
   const [, saltB64, hashB64] = parts;
   try {
     const salt = Buffer.from(saltB64, 'base64');

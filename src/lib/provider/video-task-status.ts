@@ -1,14 +1,18 @@
 import type { ProviderStatusResponse } from '@/types';
 import { getAiMediaKitTaskStatus } from './aimediakit-enhance-video';
+import { H3_VIDEO_PROVIDER, getH3TaskStatus } from './h3';
 import { getVideoTaskStatus } from './jimeng';
 import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from './volcengine-ip';
+import { isPrivateMultiviewTask } from '../video/multiview-task-privacy';
 
 export const VIDEO_TASK_PROVIDER_SEEDANCE = 'seedance';
 export const VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT = 'volcengine_mediakit';
+export const VIDEO_TASK_PROVIDER_H3 = H3_VIDEO_PROVIDER;
 
 export type ProviderStatusTask = {
   provider?: string | null;
   provider_task_id: string | null;
+  source_metadata_json?: string | null;
 };
 
 export type RefreshProviderResultTask = ProviderStatusTask & {
@@ -16,12 +20,18 @@ export type RefreshProviderResultTask = ProviderStatusTask & {
   result_last_frame_url?: string | null;
 };
 
+export type ProviderStatusQueryContext = { sensitiveRecipe?: boolean };
 export type ProviderStatusFetcher = (providerTaskId: string) => Promise<ProviderStatusResponse>;
+export type SeedanceProviderStatusFetcher = (
+  providerTaskId: string,
+  context?: ProviderStatusQueryContext,
+) => Promise<ProviderStatusResponse>;
 
 export type ProviderStatusFetchers = {
-  seedance: ProviderStatusFetcher;
+  seedance: SeedanceProviderStatusFetcher;
   volcengineIp: ProviderStatusFetcher;
   aiMediaKitEnhanceVideo: ProviderStatusFetcher;
+  h3: ProviderStatusFetcher;
 };
 
 export type ProviderStatusRouterOptions = {
@@ -38,6 +48,7 @@ const defaultFetchers: ProviderStatusFetchers = {
   seedance: getVideoTaskStatus,
   volcengineIp: getVolcengineIpTaskStatus,
   aiMediaKitEnhanceVideo: getAiMediaKitTaskStatus,
+  h3: getH3TaskStatus,
 };
 
 function normalizeProvider(provider: string | null | undefined) {
@@ -48,7 +59,17 @@ function fetcherForProvider(provider: string, fetchers: ProviderStatusFetchers) 
   if (provider === VIDEO_TASK_PROVIDER_SEEDANCE) return fetchers.seedance;
   if (provider === VOLCENGINE_IP_VIDEO_PROVIDER) return fetchers.volcengineIp;
   if (provider === VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT) return fetchers.aiMediaKitEnhanceVideo;
+  if (provider === VIDEO_TASK_PROVIDER_H3) return fetchers.h3;
   throw new Error(`暂不支持的任务 Provider: ${provider}`);
+}
+
+function seedanceQueryContext(task: ProviderStatusTask): ProviderStatusQueryContext {
+  if (!Object.prototype.hasOwnProperty.call(task, 'source_metadata_json') || task.source_metadata_json === undefined) {
+    // Cache refreshes use legacy partial rows. Missing protection metadata is
+    // not evidence that provider logs are safe, and must not cause another DB read.
+    return { sensitiveRecipe: true };
+  }
+  return { sensitiveRecipe: isPrivateMultiviewTask({ source_metadata_json: task.source_metadata_json }) };
 }
 
 export async function getProviderTaskStatus(
@@ -63,7 +84,9 @@ export async function getProviderTaskStatus(
 
   const provider = normalizeProvider(task.provider);
   const fetchers = options.fetchers || defaultFetchers;
-  return fetcherForProvider(provider, fetchers)(providerTaskId);
+  return provider === VIDEO_TASK_PROVIDER_SEEDANCE
+    ? fetchers.seedance(providerTaskId, seedanceQueryContext(task))
+    : fetcherForProvider(provider, fetchers)(providerTaskId);
 }
 
 export async function refreshProviderTaskResultUrl(

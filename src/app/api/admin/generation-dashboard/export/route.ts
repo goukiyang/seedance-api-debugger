@@ -18,7 +18,7 @@ function csvCell(value: unknown) {
 }
 
 function rangeKey(value: string | null): DashboardRangeKey | undefined {
-  if (value === '7d' || value === '30d' || value === 'month' || value === 'custom') return value;
+  if (value === 'all' || value === '7d' || value === '30d' || value === 'month' || value === 'custom') return value;
   return undefined;
 }
 
@@ -76,16 +76,36 @@ export async function GET(request: NextRequest) {
       resolution: resolution ? normalizeDashboardResolution(resolution) : null,
     });
 
+    const trendExtra = (item: typeof dashboard.trends.day[number]) => [
+      `duration_seconds=${item.duration_seconds}`,
+      `regular_task_count=${Math.max(0, item.task_count - (item.enhance_task_count || 0))}`,
+      `enhance_task_count=${item.enhance_task_count || 0}`,
+      `date_from=${item.date_from}`,
+      `date_to=${item.date_to}`,
+    ].join(';');
     const rows: unknown[][] = [
       ['section', 'key', 'label', 'count', 'succeeded', 'failed', 'points', 'official_costs', 'official_costs_cny_estimate', 'extra'],
       ['summary', 'range', dashboard.range.label, dashboard.kpis.total_tasks, dashboard.kpis.succeeded_tasks, dashboard.kpis.failed_tasks, dashboard.kpis.total_points, totalsText(dashboard.kpis.official_costs), totalsCnyText(dashboard.kpis.official_costs), `warnings=${dashboard.kpis.warning_count}`],
       ...dashboard.resolution_breakdown.map((item) => ['resolution', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
       ...dashboard.project_breakdown.map((item) => ['project', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
       ...dashboard.member_ranking.map((item) => ['member', item.key, item.label, item.count, item.succeeded, item.failed, item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `pending_official=${item.pending_official_count}`]),
-      ...dashboard.trends.day.map((item) => ['trend_day', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
-      ...dashboard.trends.week.map((item) => ['trend_week', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
-      ...dashboard.trends.month.map((item) => ['trend_month', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), `duration_seconds=${item.duration_seconds};date_from=${item.date_from};date_to=${item.date_to}`]),
+      ...dashboard.trends.day.map((item) => ['trend_day', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
+      ...dashboard.trends.week.map((item) => ['trend_week', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
+      ...dashboard.trends.month.map((item) => ['trend_month', item.key, item.label, item.task_count, '', '', item.points, totalsText(item.official_costs), totalsCnyText(item.official_costs), trendExtra(item)]),
       ...dashboard.warnings.map((item) => ['warning', item.type, item.title, item.count, '', '', '', '', '', item.detail]),
+      ['generation_timing', 'kind', 'model', 'provider', 'metric', 'samples', 'missing', 'average_seconds', 'p50_seconds', 'p90_seconds', 'longest_seconds', 'succeeded', 'failed_or_cancelled', 'unfinished'],
+      ...[...dashboard.timing.summary, ...dashboard.timing.models].flatMap(item =>
+        (['completion', 'ready', 'delivery'] as const).map(metric => {
+          const value = item.metrics[metric];
+          return ['generation_timing', item.kind, item.model || 'all', item.provider || '', metric,
+            value.sample_count, value.missing_count, value.average_seconds, value.median_seconds,
+            value.p90_seconds, value.longest_seconds, item.succeeded_count, item.failed_count, item.unfinished_count];
+        })),
+      ['generation_timing_notes', 'completion', 'System task creation to observed successful completion; image includes saving; video includes polling delay'],
+      ['generation_timing_notes', 'ready', 'System task creation to successful saving; missing timestamps excluded; later backfill may increase elapsed time'],
+      ['generation_timing_notes', 'delivery', 'Observed completion/response to successful saving; includes receive/download/validation/recovery; not pure model time'],
+      ['generation_timing_notes', 'percentile', 'Nearest rank over valid succeeded samples; date filter uses task creation'],
+      ['generation_timing_notes', 'images_included', dashboard.timing.images_included, 'Images do not support project or video resolution filters; pre-task analysis and uploads excluded'],
       ['recent_tasks', 'task_id', 'prompt', 'status', 'resolution', 'duration', 'points', 'official_cost', 'official_cost_cny_estimate', 'project_or_owner'],
       ...dashboard.recent_tasks.map((task) => [
         'recent_tasks',
@@ -99,6 +119,9 @@ export async function GET(request: NextRequest) {
         taskOfficialCostCnyText(task),
         `${task.project?.name || '未归属项目'} / ${task.owner ? displayUserName(task.owner) : '未知成员'}`,
       ]),
+      ['recent_task_timing', 'task_id', 'created_at', 'completed_at', 'completion_seconds', 'ready_seconds', 'delivery_seconds'],
+      ...dashboard.recent_tasks.map(task => ['recent_task_timing', task.id, task.created_at, task.completed_at,
+        task.timing.completion, task.timing.ready, task.timing.delivery]),
     ];
 
     const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');

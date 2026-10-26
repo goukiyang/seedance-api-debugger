@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { sumCredits, addCredits, normalizeCredits, assertCreditWriteback } from '@/lib/credits/precision';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
 const MAX_SOURCE_USERS = 20;
 
@@ -103,7 +105,7 @@ function mergePermissionsJson(values: string[]) {
 }
 
 function sum(items: Array<number | null | undefined>): number {
-  return items.reduce<number>((total, item) => total + (Number(item ?? 0) || 0), 0);
+  return sumCredits(items.map(item => item ?? 0));
 }
 
 function hasFeishuIdentity(user: MergeUserIdentity) {
@@ -153,6 +155,11 @@ export async function POST(request: NextRequest) {
   if (sourceUserIds.length > MAX_SOURCE_USERS) return errorJson(`单次最多合并 ${MAX_SOURCE_USERS} 个账号`, 400);
   if (!reason) return errorJson('合并原因必填', 400);
 
+  const protectedIds = [targetUserId, ...sourceUserIds];
+  const quotaMembership = await prisma.platformSetting.count({ where: { key: { in: protectedIds.map(id => `periodic_credit_user:${id}`) } } });
+  const unsettledQuota = await prisma.creditBucket.count({ where: { user_id: { in: protectedIds }, OR: [{ amount_remaining: { gt: 0 } }, { frozen_amount: { gt: 0 } }] } });
+  if (quotaMembership || unsettledQuota) return errorJson('所选账号有周期额度或额度归属记录，暂不支持自动合并。请先核对额度与生成任务，避免丢点或重复领点。', 409);
+
   const [targetUser, sourceUsers] = await Promise.all([
     prisma.user.findUnique({ where: { id: targetUserId } }),
     prisma.user.findMany({ where: { id: { in: sourceUserIds } } }),
@@ -170,6 +177,9 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await prisma.$transaction(async (tx) => {
+    const membership = await tx.platformSetting.count({ where: { key: { in: protectedIds.map(id => `periodic_credit_user:${id}`) } } });
+    const quota = await tx.creditBucket.count({ where: { user_id: { in: protectedIds }, OR: [{ amount_remaining: { gt: 0 } }, { frozen_amount: { gt: 0 } }] } });
+    if (membership || quota) return { quota_conflict: true as const };
     const counts = {
       video_tasks: 0,
       owned_tasks: 0,
@@ -209,15 +219,17 @@ export async function POST(request: NextRequest) {
     const sourceTotalUsed = sum(sourceAccounts.map((account) => account.total_used));
 
     if (sourceBalance !== 0 || sourceFrozen !== 0 || sourceMonthlyUsed !== 0 || sourceTotalUsed !== 0) {
-      await tx.creditAccount.update({
+      const expected = { balance: addCredits(targetAccount.balance, sourceBalance),
+        frozen_credits: addCredits(targetAccount.frozen_credits, sourceFrozen),
+        monthly_used: addCredits(targetAccount.monthly_used, sourceMonthlyUsed),
+        total_used: addCredits(targetAccount.total_used, sourceTotalUsed) };
+      const written = await tx.creditAccount.update({
         where: { user_id: targetUserId },
         data: {
-          balance: { increment: sourceBalance },
-          frozen_credits: { increment: sourceFrozen },
-          monthly_used: { increment: sourceMonthlyUsed },
-          total_used: { increment: sourceTotalUsed },
+          ...expected,
         },
       });
+      assertCreditWriteback(written, expected);
 
       await tx.creditLedger.create({
         data: {
@@ -225,19 +237,19 @@ export async function POST(request: NextRequest) {
           type: 'account_merge_in',
           amount: sourceBalance,
           balance_before: targetAccount.balance,
-          balance_after: targetAccount.balance + sourceBalance,
+          balance_after: expected.balance,
           frozen_before: targetAccount.frozen_credits,
-          frozen_after: targetAccount.frozen_credits + sourceFrozen,
+          frozen_after: expected.frozen_credits,
           operator_id: admin.id,
           reason,
         },
       });
 
       for (const account of sourceAccounts) {
-        const accountBalance = Number(account.balance ?? 0) || 0;
-        const accountFrozen = Number(account.frozen_credits ?? 0) || 0;
-        const accountMonthlyUsed = Number(account.monthly_used ?? 0) || 0;
-        const accountTotalUsed = Number(account.total_used ?? 0) || 0;
+        const accountBalance = normalizeCredits(account.balance);
+        const accountFrozen = normalizeCredits(account.frozen_credits);
+        const accountMonthlyUsed = normalizeCredits(account.monthly_used);
+        const accountTotalUsed = normalizeCredits(account.total_used);
         if (accountBalance === 0 && accountFrozen === 0 && accountMonthlyUsed === 0 && accountTotalUsed === 0) continue;
         await tx.creditLedger.create({
           data: {
@@ -494,7 +506,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await tx.user.update({
+      const changed = await tx.user.updateMany({
         where: { id: targetUserId },
         data: {
           feishu_user_id: primaryFeishuIdentity.feishu_user_id,
@@ -509,12 +521,15 @@ export async function POST(request: NextRequest) {
           avatar_url: primaryFeishuIdentity.avatar_url,
         },
       });
+      if (changed.count !== 1) throw new Error('Account changed concurrently');
     }
 
-    await tx.user.updateMany({
-      where: { id: { in: sourceUserIds } },
-      data: { status: 'deleted' },
-    });
+    for (const source of sourceUsers) {
+      await tx.user.update({
+        where: { id: source.id, password_hash: source.password_hash },
+        data: { status: 'deleted', password_hash: maintainAccountSessionBinding(source, { ...source, status: 'deleted' }) },
+      });
+    }
 
     await tx.operationLog.create({
       data: {
@@ -568,5 +583,6 @@ export async function POST(request: NextRequest) {
     };
   });
 
+  if ('quota_conflict' in result) return errorJson('合并期间额度状态发生变化，已停止合并，请重新读取账号。', 409);
   return NextResponse.json(result);
 }

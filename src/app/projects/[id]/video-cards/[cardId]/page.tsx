@@ -1,13 +1,16 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import PageBanner from '@/components/PageBanner';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import EnhanceVideoAction from '@/components/EnhanceVideoAction';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { showVideoCardManagementUi } from '@/lib/navigation';
 import { formatAmountMicrosWithFixedCny } from '@/lib/costs/currency';
 
 interface VideoCardSummary {
@@ -54,9 +57,15 @@ interface TaskItem {
   duration: number | null;
   video_card_id: string | null;
   local_status: string;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   estimated_cost: number | null;
   actual_cost: number | null;
   refund_amount: number | null;
@@ -134,7 +143,9 @@ function formatOfficialCost(totals?: Array<{ currency: string; amount_micros: nu
 }
 
 export default function VideoCardDetailPage() {
+  const { confirm, productDialog } = useProductDialog();
   const params = useParams<{ id: string; cardId: string }>();
+  const router = useRouter();
   const projectId = params.id;
   const videoCardId = params.cardId;
   const returnTo = `/projects/${projectId}/video-cards/${videoCardId}`;
@@ -201,8 +212,12 @@ export default function VideoCardDetailPage() {
   }, [projectId, videoCardId]);
 
   useEffect(() => {
+    if (!showVideoCardManagementUi) {
+      router.replace(`/projects/${encodeURIComponent(projectId)}`);
+      return;
+    }
     void loadVideoCard();
-  }, [loadVideoCard]);
+  }, [loadVideoCard, projectId, router]);
 
   const patchVideoCard = async (payload: Record<string, unknown>, successMessage: string, taskId?: string) => {
     setError('');
@@ -212,7 +227,7 @@ export default function VideoCardDetailPage() {
       const res = await fetch(`/api/video-cards/${videoCardId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, expected_updated_at: videoCard?.updated_at }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -227,7 +242,7 @@ export default function VideoCardDetailPage() {
   };
 
   const sealVideoCard = async () => {
-    if (!window.confirm('封板后默认不能继续在此视频卡下生成，确定封板吗？')) return;
+    if (!await confirm('封板后默认不能继续在此视频卡下生成，确定封板吗？', { title: '视频卡封板', confirmLabel: '确认封板' })) return;
     setSealing(true);
     await patchVideoCard({ seal: true }, '视频卡已封板');
     setSealing(false);
@@ -281,12 +296,14 @@ export default function VideoCardDetailPage() {
     }
   };
 
+  if (!showVideoCardManagementUi) return <div className="card" aria-busy="true"><p className="text-gray">正在返回项目...</p></div>;
+
   if (loading) return <div className="card"><p className="text-gray">加载中...</p></div>;
 
   if (!videoCard) {
     return (
       <div className="card">
-        <p className="text-red">{error || '视频卡不存在或无权访问'}</p>
+        <p className="text-gray">{error || '视频卡不存在或无权访问'}</p>
         <Link className="btn btn-secondary mt-4" href="/projects">返回项目</Link>
       </div>
     );
@@ -294,10 +311,12 @@ export default function VideoCardDetailPage() {
 
   const summary = videoCard.summary;
   const canGenerate = permissions.can_generate && videoCard.status !== 'sealed' && videoCard.status !== 'archived';
+  const isAdmin = permissions.project_role === 'admin';
   const primaryBranch = branches.find((branch) => branch.is_primary);
 
   return (
     <div>
+      {productDialog}
       <PageBanner
         eyebrow="视频卡"
         title={videoCard.title}
@@ -307,8 +326,8 @@ export default function VideoCardDetailPage() {
       />
 
       {(message || error) && (
-        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
         </div>
       )}
 
@@ -487,13 +506,22 @@ export default function VideoCardDetailPage() {
                 <article key={task.id} className="video-card-task-item">
                   <TaskVideoThumbnail
                     taskId={task.id}
+                    thumbnailUrl={task.thumbnail_url}
+                    publicVideoUrl={task.public_video_url}
                     localVideoPath={task.local_video_path}
                     resultVideoUrl={task.result_video_url}
                     resultLastFrameUrl={task.result_last_frame_url}
                     status={task.local_status}
+                    deliveryStage={task.delivery_stage}
+                    previewAvailable={task.preview_available}
+                    stableDownloadReady={task.stable_download_ready}
+                    retryAfterMs={task.retry_after_ms}
+                    provider={task.provider}
+                    generationMode={task.generation_mode}
                     href={taskDetailHref(task.id, returnTo)}
                     size="medium"
                     className="video-card-task-preview"
+                    reactions={permissions.can_manage && task.local_status === 'succeeded'}
                   />
                   <div className="video-card-task-body">
                     <div className="video-card-task-head">
@@ -537,7 +565,7 @@ export default function VideoCardDetailPage() {
                         </button>
                       </div>
                     )}
-                    {canGenerate && (
+                    {canGenerate && isAdmin && (
                       <EnhanceVideoAction task={task} />
                     )}
                   </div>

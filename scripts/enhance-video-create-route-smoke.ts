@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   assertEnhanceVideoSourceTaskAllowed,
   buildEnhanceVideoProviderInput,
@@ -109,6 +110,18 @@ async function main() {
     clientToken: 'local-task-002',
   });
   assert.equal('scene' in professionalInput, false);
+
+  const routeSource = fs.readFileSync(
+    `${process.cwd()}/src/app/api/tasks/enhance-video/create/route.ts`,
+    'utf8',
+  );
+  assert.equal(routeSource.includes('视频超分功能暂时只对管理员开放'), false);
+  assert.ok(routeSource.includes('RAW_VIDEO_URL_FORBIDDEN'));
+  assert.ok(routeSource.includes('普通用户请从资产页选择已有视频发起超分'));
+  const localUploadIndex = routeSource.indexOf('const uploaded = await uploadLocalVideoForEnhance(task, providerOptions);');
+  const providerUrlIndex = routeSource.indexOf('if (task.result_video_url)');
+  assert.ok(localUploadIndex >= 0);
+  assert.ok(providerUrlIndex > localUploadIndex);
 
   console.log('enhance-video-create-route smoke passed');
 }

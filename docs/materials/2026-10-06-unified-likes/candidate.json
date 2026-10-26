@@ -1,0 +1,20 @@
+{
+  "version": "0.49.0",
+  "commit": "9adbaa2d77798c05d9e8a463337e7feccbe1e66a",
+  "build": "qm5JfAJ6THxzn3X5MOiUZ",
+  "assets": [
+    {
+      "url": "/_next/static/chunks/5694-16a1888f77cb77e2.js",
+      "sha256": "9a16702de2e43b7089d50a33758b9200701493bd51f715cd94c2f0f446417ed5"
+    },
+    {
+      "url": "/_next/static/chunks/app/assets/page-ae60385d3e240d2d.js",
+      "sha256": "31d40a321f13f1bda93d63741aa4ee751baa7b0ed15964f36b675c2bb23f8be4"
+    },
+    {
+      "url": "/_next/static/css/74683fb197e54f2c.css",
+      "sha256": "4a3f1e9227782305873fed17c92605b6bcf94896ac3bf547bd35d9bfec08d3ad"
+    }
+  ],
+  "acceptance": "Compiled static artifacts only; not functional or visual acceptance"
+}

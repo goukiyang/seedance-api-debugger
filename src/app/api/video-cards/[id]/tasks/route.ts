@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageVideoCard, assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { moveTasksBetweenVideoCards } from '@/lib/video-cards/workflow';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,11 +52,14 @@ export async function GET(
           provider: true,
           provider_task_id: true,
           prompt: true,
+          source_metadata_json: true,
           generation_mode: true,
           ratio: true,
           duration: true,
           resolution: true,
           local_status: true,
+          delivery_status: true,
+          public_video_url: true,
           result_video_url: true,
           result_last_frame_url: true,
           local_video_path: true,
@@ -74,6 +80,7 @@ export async function GET(
           owner_user_id: true,
           project_id: true,
           video_card_id: true,
+          video_branch_id: true,
           project: { select: { id: true, name: true, type: true } },
           video_card: { select: { id: true, title: true, objective: true, status: true } },
           owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
@@ -83,14 +90,20 @@ export async function GET(
     ]);
 
     return NextResponse.json({
-      tasks,
+      tasks: tasks.map((task) => projectSelectedMultiviewTask({
+        ...task,
+        error_message: task.local_status === 'failed'
+          ? visibleProviderErrorMessage(task.error_message)
+          : task.error_message,
+        ...taskThumbnailProjection(task),
+      })),
       pagination: {
         page,
         limit,
         total,
         total_pages: Math.max(1, Math.ceil(total / limit)),
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });

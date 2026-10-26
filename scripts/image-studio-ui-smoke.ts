@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolveStudioAspectRatio } from '../src/lib/image-studio/ratios';
+
+const studioSource = readFileSync('src/app/image-studio/studio.tsx', 'utf8');
+const previewSource = readFileSync('src/components/ZoomableImagePreview.tsx', 'utf8');
+const previewStyles = readFileSync('src/components/ZoomableImagePreview.module.css', 'utf8');
+const studioStyles = readFileSync('src/app/image-studio/studio.module.css', 'utf8');
+
+assert.deepEqual(resolveStudioAspectRatio('auto', { width: 1600, height: 900 }).resolved, '16:9');
+assert.deepEqual(resolveStudioAspectRatio('auto', { width: 900, height: 1600 }).resolved, '9:16');
+assert.equal(resolveStudioAspectRatio('auto').resolved, '1:1');
+assert.ok(studioSource.includes('task.snapshot?.sourceAvailable'), 'copy context stays hidden without historical context');
+assert.ok(studioSource.includes('navigator.clipboard.writeText'), 'copy context uses the browser clipboard');
+assert.ok(studioSource.includes('复制上下文'), 'copy context has a clear action label');
+assert.ok(studioSource.includes('globalContext') && studioSource.includes('moduleContext'), 'copy context includes the two saved context layers');
+assert.ok(previewSource.includes('data-image-preview-compare'), 'single-reference preview exposes compare control');
+assert.ok(previewSource.includes('data-image-preview-direction'), 'compare control supports horizontal and vertical layouts');
+assert.ok(previewSource.includes('style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }}'), 'comparison panes share one zoom and pan transform');
+assert.ok(previewSource.includes("event.key === 'ArrowLeft'"), 'left arrow navigates generated previews');
+assert.ok(previewSource.includes("event.key === 'ArrowRight'"), 'right arrow navigates generated previews');
+assert.ok(previewSource.includes('hasNavigation'), 'preview navigation is only enabled for a generated result list');
+assert.ok(previewSource.includes('previewKey'), 'switching between same-source results still resets preview state');
+assert.ok(previewSource.includes('setComparisonMode(false)'), 'switching result clears an invalid comparison mode');
+assert.ok(studioSource.includes('previewableTasks.findIndex'), 'preview navigation wraps through the current generated list');
+assert.ok(studioSource.includes('studioTaskPreviewState'), 'preview navigation refreshes result metadata');
+assert.equal((studioSource.match(/className=\{styles\.deleteResult\}/g) || []).length, 1, 'result cards render one shared hover delete control');
+assert.equal((studioSource.match(/className=\{styles\.deleteInline\}/g) || []).length, 0, 'result cards do not render a second bottom delete control');
+assert.ok(studioSource.includes('const [downloadMode, setDownloadMode]'), 'download selection mode has explicit state');
+assert.ok(studioSource.includes('{downloadMode && <input className={styles.select}'), 'selection boxes stay hidden outside download mode');
+assert.ok(studioSource.includes('确认下载'), 'download mode has an explicit confirmation action');
+assert.ok(studioSource.includes('setDownloadMode(false)'), 'download mode exits after cancel, completion, or preview close');
+assert.ok(previewStyles.includes('.compareHorizontal') && previewStyles.includes('.compareVertical'), 'comparison uses fixed horizontal/vertical panes');
+assert.ok(studioStyles.includes('.pagination'), 'template covers expose pagination');
+assert.ok(studioStyles.includes('.copyFeedback'), 'copy feedback has a compact status treatment');
+console.log('PASS: image-studio ratio fallback, compare viewer, cover pagination, and context-copy UI contracts; no paid calls.');

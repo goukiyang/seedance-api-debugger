@@ -10,31 +10,59 @@ import type {
   WorkspaceAssetItem,
 } from '@/types';
 import { checkPrompt } from '@/components/PromptChecker';
-import { useWorkspace } from '@/lib/hooks/useWorkspace';
+import { useWorkspace, WorkspaceInputRecoveryError, type WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
+import { uploadSession } from '@/lib/http/upload-session';
+import type { TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
+import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
 import { PromptEditor } from '@/components/PromptEditor';
 import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
-import { ComposerActionBar } from '@/components/ComposerActionBar';
+import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { ReferenceAlbumPicker } from '@/components/ReferenceAlbumPicker';
-import { UploadedImagePicker } from '@/components/UploadedImagePicker';
-import { calculateEstimatedCostClient } from '@/lib/pricing-client';
+import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
+import type { PickerItem } from '@/lib/assets/picker-types';
+import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
+import MediaPreview from '@/components/MediaPreview';
+import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { seedanceReferenceMediaCapabilities, validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
+import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
-import type { VolcengineIpModelOption } from '@/lib/integrations/volcengine-ip-models';
+import { readImageResultVideoDraft, saveImageResultVideoDraft, type ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
+import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import type { SerializedGenerationTemplate, TemplateModuleKey, TemplateModuleUsage } from '@/lib/templates/workbench';
 import type { AgentPlan } from '@/lib/agent-plans/template-plans';
+import type { StudioAssetRole, StudioGenerationHandoff } from '@/lib/template-studio/types';
+import type { ContentKey } from '@/lib/content-reactions/types';
+import {
+  formatUnsupportedStudioParameters,
+  getMissingRequiredStudioAssetSlot,
+  getStudioMaterialCompatibilityError,
+  mapStudioVideoParameters,
+} from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
-import { Bot, FileJson, Settings2 } from 'lucide-react';
+import { Bot, FileJson, Settings2, RotateCcw } from 'lucide-react';
+import {
+  GENERATION_PROMPT_LIMIT_MESSAGE,
+  MAX_GENERATION_PROMPT_CHARS,
+} from '@/lib/prompt/limits';
 
 const DEFAULT_GENERATION_MODE: GenerationMode = 'all_in_one_reference';
 const DEFAULT_RATIO: VideoRatio = '16:9';
+
+type ReferencePreviewRequest = {
+  src: string;
+  type: WorkspaceAssetItem['type'];
+  title: string;
+  poster?: string;
+  contentKey?: ContentKey;
+};
 const DEFAULT_DURATION: VideoDuration = 5;
 const DEFAULT_RESOLUTION: VideoResolution = '480p';
-const MAX_REFS = 9;
-const MAX_PROMPT_CHARS = 2000;
 const TEMPLATE_MODIFIERS = ['更科技', '更快节奏', '更品牌', '更产品', '更情绪化', '更克制'];
 const TEMPLATE_WORKBENCH_PREFS_KEY = 'seedance_template_workbench_preferences_v1';
 
@@ -168,6 +196,34 @@ function uniqueStrings(values: string[]): string[] {
     seen.add(value);
     return true;
   });
+}
+
+function studioRoleForAsset(
+  assetId: string,
+  workspaceRole: string | null,
+  handoff: StudioGenerationHandoff,
+): StudioAssetRole {
+  if (workspaceRole === 'first_frame') return 'first';
+  if (workspaceRole === 'last_frame') return 'last';
+  return handoff.assets.find((asset) => asset.assetId === assetId)?.role || 'reference';
+}
+
+function studioParameterField(key: string): string | null {
+  const aliases: Record<string, string[]> = {
+    provider: ['provider'],
+    model: ['model'],
+    generationMode: ['generationMode', 'generation_mode', 'mode'],
+    ratio: ['ratio', 'aspectRatio', 'aspect_ratio'],
+    duration: ['duration', 'durationSeconds', 'duration_seconds'],
+    resolution: ['resolution'],
+    seed: ['seed'],
+    generateAudio: ['generateAudio', 'generate_audio'],
+    returnLastFrame: ['returnLastFrame', 'return_last_frame'],
+    watermark: ['watermark'],
+    draft: ['draft'],
+    h3LoraId: ['h3LoraId', 'h3_lora_id', 'loraId', 'lora_id'],
+  };
+  return Object.entries(aliases).find(([, keys]) => keys.includes(key))?.[0] || null;
 }
 
 function appendReferenceMarkers(value: string, labels: string[]): string {
@@ -332,14 +388,19 @@ function createModuleBuilderDraft(params: {
 
 interface Props {
   collections: AssetCollection[];
+  creationContextKey?: string;
   initialSettings?: GenerationDefaults | null;
-  lockedSettings?: {
-    sourceLabel: string;
+  preferencesReady?: boolean;
+  onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
+  videoCardDefaults?: {
+    id: string;
     ratio?: VideoRatio | null;
     duration?: VideoDuration | null;
     resolution?: VideoResolution | null;
   } | null;
   reuseDraft?: {
+    videoCardId?: string | null;
+    model?: string | null;
     taskId: string;
     reuseKey: number;
     prompt: string;
@@ -353,6 +414,17 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed?: boolean;
   } | null;
+  studioHandoff?: StudioGenerationHandoff | null;
+  imageResultHandoff?: ImageResultVideoHandoff | null;
+  interactionLocked?: boolean;
+  onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
+  onWorkspaceRefreshReady?: (refresh: (() => Promise<WorkspaceReadResult>) | null) => void;
+  inputRecoveryScope?: string | (() => string);
+  onInputRecoveryReady?: (capture: (() => TaskReuseInputBackup | false) | null) => void;
+  onCaptureInputRecoveryTarget?: (target?: { projectId: string; videoCardId: string; videoBranchId: string }) => (() => void);
+  onReuseStateChange?: (state: ComposerReuseState) => void;
+  onPrepareReuseReady?: (prepare: (() => void) | null) => void;
+  onReuseDraftApplied?: (taskId: string, reuseKey: number, outcome: 'applied' | 'read_failed' | 'context_changed' | 'unsupported', message?: string) => void;
   onCollectionLoad: (collectionId: string) => Promise<void>;
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
@@ -369,18 +441,35 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
+    referenceVideoUrls: string[];
+    referenceAudioUrls: string[];
     templateId: string | null;
     agentRunId: string | null;
     selectedAgentPlanKey: string | null;
     agentPromptSnapshot: string | null;
     finalPromptSnapshot: string | null;
     promptUserEdited: boolean;
+    provider: string | null;
     model: string | null;
+    h3LoraId: string | null;
+    pricingRevision: string | null;
+    pricingQuoteToken?: string;
+    quotedEstimatedCost: number;
+    draft: boolean;
+    templateStudioRunId: string | null;
+    imageResultReceiptId?: string | null;
+    templateStudioAssets: Array<{ assetId: string; role: StudioAssetRole; type: 'image' | 'video' | 'audio'; slotKey?: string }>;
+    templateStudioParameters: Record<string, unknown>;
   }) => Promise<void>;
   submitError: string | null;
   submitErrorDebug?: object | null;
   isSubmitting: boolean;
-  result: { id: string; provider_task_id: string; prompt_rendered?: string } | null;
+  result: {
+    id: string;
+    provider_task_id: string;
+    prompt_rendered?: string;
+    reference_image_notice?: string | null;
+  } | null;
   polledResult: PolledTask | null;
   isPolling: boolean;
   onReset: () => void;
@@ -389,15 +478,38 @@ interface Props {
   templateMode?: 'disabled' | 'workbench';
   initialTemplateId?: string | null;
   resultReturnTo?: string;
+  studioReturnTo?: string | null;
   submitDisabledReason?: string | null;
+  providerLabel?: string;
+  providerOptions?: ComposerSelectOption[];
+  selectedProvider?: string | null;
+  pricingProvider?: string;
+  pricingModelId?: string;
+  pricingProjectId?: string | null;
+  onProviderChange?: (provider: string) => void;
+  h3CapabilitiesReady?: boolean;
+  providerStatus?: ComposerProviderStatus | null;
   modelLabel?: string;
-  modelOptions?: VolcengineIpModelOption[];
+  modelOptions?: ComposerSelectOption[];
+  allowExtendedSeedanceDuration?: boolean;
+  onModelChange?: (model: string) => void;
+  auxiliaryLabel?: string;
+  auxiliaryOptions?: ComposerSelectOption[];
+  selectedAuxiliary?: string | null;
+  onAuxiliaryChange?: (value: string) => void;
+  seedanceDraft?: {
+    createEnabled: boolean;
+    message: string;
+  };
 }
 
 export function GenerationComposer({
   collections,
+  creationContextKey,
   initialSettings,
-  lockedSettings,
+  preferencesReady = false,
+  onSettingsChange,
+  videoCardDefaults,
   onCollectionLoad,
   onCollectionSave,
   onCollectionNew,
@@ -410,24 +522,67 @@ export function GenerationComposer({
   isPolling,
   onReset,
   reuseDraft,
+  studioHandoff = null,
+  imageResultHandoff = null,
+  interactionLocked = false,
+  onWorkspaceBusyChange,
+  onWorkspaceRefreshReady,
+  inputRecoveryScope = '',
+  onInputRecoveryReady,
+  onCaptureInputRecoveryTarget,
+  onReuseStateChange,
+  onPrepareReuseReady,
+  onReuseDraftApplied,
   require1080pApproval,
   selectedVideoCardId,
   canManageTemplates = false,
   templateMode = 'disabled',
   initialTemplateId = null,
   resultReturnTo = '/generate',
+  studioReturnTo = null,
   submitDisabledReason = null,
+  providerLabel = 'Seedance 视频',
+  providerOptions = [],
+  selectedProvider = 'seedance',
+  pricingProvider,
+  pricingModelId,
+  pricingProjectId,
+  onProviderChange,
+  h3CapabilitiesReady = false,
+  providerStatus = null,
   modelLabel = 'Seedance 2.0',
   modelOptions = [],
+  allowExtendedSeedanceDuration = false,
+  onModelChange,
+  auxiliaryLabel = '',
+  auxiliaryOptions = [],
+  selectedAuxiliary = null,
+  onAuxiliaryChange,
+  seedanceDraft = {
+    createEnabled: false,
+    message: '供应商 Draft 能力尚未完成核验，暂不可用。',
+  },
 }: Props) {
   const workspace = useWorkspace();
+  const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
+  const workspaceOperationCountRef = React.useRef(0);
+  const workspaceReadCountRef = React.useRef(0);
+  const reuseMountedRef = React.useRef(true);
+  useEffect(() => { reuseMountedRef.current = true; return () => { reuseMountedRef.current = false; }; }, []);
   const templateEnabled = templateMode === 'workbench';
   const appliedReuseDraftRef = React.useRef<string | null>(null);
   const appliedInitialSettingsRef = React.useRef(false);
+  const appliedVideoCardDefaultsRef = React.useRef<string | null>(null);
+  const settingsTouchedRef = React.useRef(false);
+  const reuseEditRevisionRef = React.useRef(0);
+  const [reuseReadCompleteKey, setReuseReadCompleteKey] = useState<string | null>(null);
+  const reportedReuseAppliedRef = React.useRef<string | null>(null);
   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
   const [showAlbumPicker, setShowAlbumPicker] = useState(false);
   const [showUploadedImagePicker, setShowUploadedImagePicker] = useState(false);
+  // “替换” a reference through the shared picker (project rule, 2026-10-25).
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
   const [referenceAlbums, setReferenceAlbums] = useState<ReferenceAlbumOption[]>([]);
   const [currentReferenceAlbumId, setCurrentReferenceAlbumId] = useState<string | null>(null);
   const [currentReferenceAlbumName, setCurrentReferenceAlbumName] = useState<string | null>(null);
@@ -448,6 +603,7 @@ export function GenerationComposer({
   const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
   const [templateSaveBusy, setTemplateSaveBusy] = useState(false);
   const [templateSaveError, setTemplateSaveError] = useState<string | null>(null);
+
   const [moduleBuilderType, setModuleBuilderType] = useState<ModuleBuilderType>('auto');
   const [moduleBuilderIntent, setModuleBuilderIntent] = useState('');
   const [moduleBuilderRules, setModuleBuilderRules] = useState(DEFAULT_MODULE_BUILDER_RULES);
@@ -474,10 +630,293 @@ export function GenerationComposer({
   const [returnLastFrame, setReturnLastFrame] = useState(false);
   const [watermark, setWatermark] = useState(false);
   const [selectedModel, setSelectedModel] = useState(modelOptions[0]?.id || '');
+  const [draftMode, setDraftMode] = useState(false);
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
+  const [studioSettingsReady, setStudioSettingsReady] = useState(false);
+  const [imageResultDraftReady, setImageResultDraftReady] = useState(false);
+  const [imageResultDraftMessage, setImageResultDraftMessage] = useState('');
+  type InputRecovery = { workspace: WorkspaceInputRecovery; restoreFields: () => void };
+  const [inputRecovery, setInputRecovery] = useState<InputRecovery | null>(null);
+  const [inputRecoveryPair, setInputRecoveryPair] = useState<{ previous: InputRecovery; next: InputRecovery; pendingTarget: InputRecovery | null } | null>(null);
+  const [inputRecoveryBusy, setInputRecoveryBusy] = useState(false);
+  const [inputRecoveryMessage, setInputRecoveryMessage] = useState('');
+  const recoveryScopeRef = React.useRef(inputRecoveryScope); recoveryScopeRef.current = inputRecoveryScope;
+  const [studioCorrectedParameters, setStudioCorrectedParameters] = useState<string[]>([]);
+  const appliedStudioBaseRunRef = React.useRef<string | null>(null);
+  const appliedStudioProviderRunRef = React.useRef<string | null>(null);
+  const appliedStudioModelRunRef = React.useRef<string | null>(null);
+  const appliedStudioLoraRunRef = React.useRef<string | null>(null);
+
+  const reportWorkspaceBusy = useCallback(() => {
+    const uploadStatuses = Object.values(workspace.uploadStatuses);
+    const reason = workspace.pendingWorkspaceAttach
+      ? 'pending-attach'
+      : uploadStatuses.some((status) => status === 'uploading')
+        ? 'uploading'
+        : uploadStatuses.some((status) => status === 'failed')
+          ? 'upload-failed'
+          : workspace.error
+            ? 'read-error'
+            : workspaceOperationCountRef.current > 0 || templateSaveBusy
+              ? 'saving'
+              : showAlbumPicker || showUploadedImagePicker || templateDrawerOpen
+                ? 'picker-open'
+                : workspace.loading || workspaceReadCountRef.current > 0 || templateLoading || agentBusy || moduleBuilderBusy || muskConfigLoading || Boolean(studioHandoff && !studioSettingsReady)
+                  ? 'loading'
+                  : null;
+    onWorkspaceBusyChange?.(reason !== null, reason);
+    // Preserve the older busy contract for every existing caller. This page's
+    // optional bridge can additionally distinguish reads from user operations.
+    onReuseStateChange?.({
+      initializing: reason === 'loading' && !agentBusy && !moduleBuilderBusy,
+      reason: inputRecoveryBusy || inputRecoveryPair ? 'recovery-pending'
+        : agentBusy || moduleBuilderBusy ? 'agent-running' : reason,
+      editRevision: reuseEditRevisionRef.current,
+    });
+  }, [agentBusy, moduleBuilderBusy, inputRecoveryBusy, inputRecoveryPair, muskConfigLoading, onWorkspaceBusyChange, onReuseStateChange, showAlbumPicker, showUploadedImagePicker, studioHandoff, studioSettingsReady, templateDrawerOpen, templateLoading, templateSaveBusy, workspace.error, workspace.loading, workspace.pendingWorkspaceAttach, workspace.uploadStatuses]);
+
+  const prepareReuse = useCallback(() => {
+    // These selectors only stage a choice. Template editing remains open to protect its unique draft.
+    setShowAlbumPicker(false);
+    setShowUploadedImagePicker(false);
+    pendingMentionRequestRef.current?.resolve(null);
+    pendingMentionRequestRef.current = null;
+  }, []);
+  useEffect(() => { onPrepareReuseReady?.(prepareReuse); return () => onPrepareReuseReady?.(null); }, [onPrepareReuseReady, prepareReuse]);
+
+  const markReuseInputChanged = useCallback(() => {
+    if (!onReuseStateChange || interactionLocked) return;
+    reuseEditRevisionRef.current += 1;
+    settingsTouchedRef.current = true;
+    reportWorkspaceBusy();
+  }, [interactionLocked, onReuseStateChange, reportWorkspaceBusy]);
+
+  const runWorkspaceOperation = useCallback(async <T,>(operation: () => Promise<T>, userChange = true, readOnly = false): Promise<T> => {
+    if (userChange) markReuseInputChanged();
+    const counter = readOnly ? workspaceReadCountRef : workspaceOperationCountRef;
+    counter.current += 1;
+    reportWorkspaceBusy();
+    try {
+      return await operation();
+    } finally {
+      counter.current = Math.max(0, counter.current - 1);
+      reportWorkspaceBusy();
+    }
+  }, [markReuseInputChanged, reportWorkspaceBusy]);
+
+  const refreshWorkspaceForParent = useCallback(
+    () => runWorkspaceOperation(() => workspace.refresh(), false, true),
+    [runWorkspaceOperation, workspace.refresh],
+  );
+  const makeInputRecovery = useCallback(() => {
+    const snapshot = workspace.captureRecovery();
+    if (!snapshot) return null;
+    const restoreTarget = onCaptureInputRecoveryTarget?.();
+    return { workspace: snapshot, restoreFields: () => {
+      settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
+      setPrompt(prompt); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
+      setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
+      setResolutionApprovalConfirmed(resolutionApprovalConfirmed); setSelectedModel(selectedModel);
+      setCurrentReferenceAlbumId(currentReferenceAlbumId); setCurrentReferenceAlbumName(currentReferenceAlbumName);
+      if (selectedProvider) onProviderChange?.(selectedProvider);
+      onModelChange?.(selectedModel); if (selectedAuxiliary != null) onAuxiliaryChange?.(selectedAuxiliary);
+      restoreTarget?.();
+    } };
+  }, [workspace.captureRecovery, selectedVideoCardId, prompt, generationMode, ratio, duration, resolution, seed, generateAudio,
+    returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
+    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
+  const captureInputRecovery = useCallback(() => {
+    const value = makeInputRecovery();
+    if (!value) { setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
+    setInputRecovery(value); setInputRecoveryMessage('替换前输入已保留，可恢复。'); return { version: 1 as const, workspace: value.workspace, fields: { prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
+  }, [makeInputRecovery, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, selectedVideoCardId]);
+  useEffect(() => { onInputRecoveryReady?.(captureInputRecovery); return () => onInputRecoveryReady?.(null); }, [onInputRecoveryReady, captureInputRecovery]);
+  const restoredBackupScope = React.useRef('');
+  useEffect(() => {
+    const current = workspace.workspace, session = uploadSession();
+    if (!current || workspace.loading || current.owner_id !== session.ownerId || restoredBackupScope.current === current.id) return;
+    restoredBackupScope.current = current.id;
+    try {
+      const tab = sessionStorage.getItem('workspace_tab_id') || 'default', backup = readTaskReuseInputBackup(current.owner_id, tab);
+      if (!backup || backup.workspace.workspaceId !== current.id) return;
+      const value = backup.fields;
+      if (!['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(value.generationMode) || typeof value.ratio !== 'string'
+        || typeof value.resolution !== 'string' || !Number.isFinite(value.duration) || !Number.isFinite(value.seed)) return;
+      const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
+      setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, restoreFields: () => {
+        settingsTouchedRef.current = true;
+        setPrompt(value.prompt); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
+        setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
+        setGenerateAudio(value.generateAudio === true); setReturnLastFrame(value.returnLastFrame === true); setWatermark(value.watermark === true); setResolutionApprovalConfirmed(false);
+        if (value.model) { setSelectedModel(value.model); onModelChange?.(value.model); }
+        if (value.provider) onProviderChange?.(value.provider);
+        if (value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
+        restoreTarget?.();
+      } });
+      setInputRecoveryMessage('复用前输入仍保留，可主动恢复。');
+    } catch { /* Optional recovery never replaces current input during initialization. */ }
+  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget]);
+  const ordinaryDraftKey = creationContextKey ? `sd2:video-input-draft:v2:${creationContextKey}` : '';
+  const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
+  React.useLayoutEffect(() => {
+    if (!ordinaryDraftKey || ordinaryDraftLoaded === ordinaryDraftKey || !preferencesReady) return;
+    try {
+      if (!studioHandoff && !imageResultHandoff && !reuseDraft && !interactionLocked && !settingsTouchedRef.current) {
+        const saved = JSON.parse(localStorage.getItem(ordinaryDraftKey) || 'null');
+        if (saved?.version === 2 && typeof saved.prompt === 'string' && saved.prompt.length <= 20000
+          && ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(saved.generationMode)
+          && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
+          && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
+          setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
+          if (saved.model) { setSelectedModel(saved.model); onModelChange?.(saved.model); }
+        }
+      }
+    } catch { /* Invalid optional local data never blocks a new draft. */ }
+    setOrdinaryDraftLoaded(ordinaryDraftKey);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange]);
+  useEffect(() => {
+    if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || studioHandoff || imageResultHandoff || interactionLocked
+      || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, model: selectedModel })); }
+      catch { setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
+  const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
+  const restoreInputRecovery = async (target = inputRecovery) => {
+    if (!target || inputRecoveryBusy || interactionLocked || workspace.loading || workspace.pendingWorkspaceAttach) return;
+    if (inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== target) {
+      setInputRecoveryMessage('原恢复的素材关联结果尚未确认，请先继续原恢复；两份输入仍保留在本页。'); return;
+    }
+    const pair = inputRecoveryPair || { previous: target, next: makeInputRecovery(), pendingTarget: null };
+    if (!pair.next) { setInputRecoveryMessage('当前素材尚未确认，未开始恢复；请先完成素材准备。'); return; }
+    const previous = target, next = target === pair.previous ? pair.next : pair.previous;
+    // Retain both sides before the first write, including when a later role/read step fails.
+    setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: target });
+    markReuseInputChanged(); const edit = reuseEditRevisionRef.current, scope = readRecoveryScope();
+    setInputRecoveryBusy(true);
+    let associationConfirmed = false;
+    try {
+      await runWorkspaceOperation(() => workspace.restoreRecovery(previous.workspace), false);
+      associationConfirmed = true;
+      const session = uploadSession();
+      if (session.ownerId !== previous.workspace.ownerId || session.epoch !== previous.workspace.epoch
+        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
+      previous.restoreFields(); setInputRecovery(next); setInputRecoveryPair(null); setInputRecoveryMessage('已恢复所选输入，另一份输入也保留在本页。');
+    } catch (cause) {
+      if (cause instanceof WorkspaceInputRecoveryError) associationConfirmed = cause.associationConfirmed;
+      setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: associationConfirmed ? null : target });
+      setInputRecoveryMessage(`${cause instanceof Error ? cause.message : '恢复尚未完成。'} 两份输入仍保留在本页。${associationConfirmed ? '可重试原恢复，或返回刚才输入。' : '请先继续原恢复，核对原素材关联。'}`);
+    }
+    finally { setInputRecoveryBusy(false); }
+  };
+
+  useEffect(() => {
+    const element = generationComposerRef.current;
+    if (!element) return;
+    if (interactionLocked || inputRecoveryBusy || inputRecoveryPair || imageResultHandoff && !imageResultDraftReady) element.setAttribute('inert', '');
+    else element.removeAttribute('inert');
+  }, [interactionLocked, inputRecoveryBusy, inputRecoveryPair, imageResultHandoff, imageResultDraftReady]);
+
+  useEffect(() => {
+    reportWorkspaceBusy();
+  }, [reportWorkspaceBusy]);
+
+  useEffect(() => {
+    onWorkspaceRefreshReady?.(refreshWorkspaceForParent);
+    return () => onWorkspaceRefreshReady?.(null);
+  }, [onWorkspaceRefreshReady, refreshWorkspaceForParent]);
+
+  useEffect(() => {
+    if (!studioHandoff) {
+      setStudioSettingsReady(true);
+      return;
+    }
+    const mapping = mapStudioVideoParameters(studioHandoff.parameters);
+    const parameters = mapping.supported;
+
+    if (appliedStudioBaseRunRef.current !== studioHandoff.runId) {
+      setStudioSettingsReady(false);
+      setStudioCorrectedParameters([]);
+      setPrompt(studioHandoff.prompt);
+      if (parameters.generationMode) setGenerationMode(parameters.generationMode);
+      else if (studioHandoff.assets.some((asset) => asset.role === 'first' || asset.role === 'last')) {
+        setGenerationMode('first_last_frame');
+      }
+      if (parameters.ratio) setRatio(parameters.ratio);
+      if (parameters.duration) setDuration(parameters.duration);
+      if (parameters.resolution) setResolution(parameters.resolution);
+      if (parameters.seed !== undefined) setSeed(parameters.seed);
+      if (parameters.generateAudio !== undefined) setGenerateAudio(parameters.generateAudio);
+      if (parameters.returnLastFrame !== undefined) setReturnLastFrame(parameters.returnLastFrame);
+      if (parameters.watermark !== undefined) setWatermark(parameters.watermark);
+      if (parameters.draft !== undefined) setDraftMode(parameters.draft);
+      appliedStudioBaseRunRef.current = studioHandoff.runId;
+    }
+
+    if (parameters.provider && appliedStudioProviderRunRef.current !== studioHandoff.runId) {
+      onProviderChange?.(parameters.provider);
+      appliedStudioProviderRunRef.current = studioHandoff.runId;
+    }
+
+    const requestedProvider = parameters.provider || selectedProvider;
+    const hasModelParameter = parameters.model !== undefined;
+    if (hasModelParameter && appliedStudioModelRunRef.current !== studioHandoff.runId) {
+      const capabilitiesReady = requestedProvider === 'h3' ? h3CapabilitiesReady : modelOptions.length > 0;
+      if (selectedProvider !== requestedProvider || !capabilitiesReady) return;
+      if (parameters.model && modelOptions.some((option) => option.id === parameters.model)) {
+        setSelectedModel(parameters.model);
+        onModelChange?.(parameters.model);
+        appliedStudioModelRunRef.current = studioHandoff.runId;
+      }
+    }
+
+    const hasLoraParameter = parameters.h3LoraId !== undefined;
+    if (hasLoraParameter && requestedProvider === 'h3' && appliedStudioLoraRunRef.current !== studioHandoff.runId) {
+      if (selectedProvider !== 'h3') return;
+      if (!h3CapabilitiesReady) return;
+      if (parameters.h3LoraId && auxiliaryOptions.some((option) => option.id === parameters.h3LoraId)) {
+        onAuxiliaryChange?.(parameters.h3LoraId);
+        appliedStudioLoraRunRef.current = studioHandoff.runId;
+      }
+    }
+
+    setStudioSettingsReady(true);
+  }, [studioHandoff, modelOptions, auxiliaryOptions, selectedProvider, h3CapabilitiesReady, onProviderChange, onModelChange, onAuxiliaryChange]);
+
+  const studioUnsupportedReason = useMemo(() => {
+    if (!studioHandoff) return null;
+    const mapping = mapStudioVideoParameters(studioHandoff.parameters);
+    const unsupported = mapping.unsupported.filter(({ key }) => {
+      const field = studioParameterField(key);
+      return !field || !studioCorrectedParameters.includes(field);
+    });
+    if (mapping.supported.model && !modelOptions.some((option) => option.id === mapping.supported.model)
+      && !studioCorrectedParameters.includes('model')) {
+      unsupported.push({ key: 'model', value: mapping.supported.model });
+    }
+    if (mapping.supported.h3LoraId && selectedProvider === 'h3'
+      && !auxiliaryOptions.some((option) => option.id === mapping.supported.h3LoraId)
+      && !studioCorrectedParameters.includes('h3LoraId')) {
+      unsupported.push({ key: 'h3LoraId', value: mapping.supported.h3LoraId });
+    }
+    return formatUnsupportedStudioParameters(unsupported);
+  }, [studioHandoff, studioCorrectedParameters, modelOptions, auxiliaryOptions, selectedProvider]);
+
+  const markStudioParameterCorrected = useCallback((field: string) => {
+    markReuseInputChanged();
+    settingsTouchedRef.current = true;
+    setStudioCorrectedParameters((current) => current.includes(field) ? current : [...current, field]);
+  }, [markReuseInputChanged]);
 
   const need1080pApproval = require1080pApproval && resolution === '1080p';
-  const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
+
+  useEffect(() => {
+    if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+  }, [selectedModel, studioHandoff]);
   const selectedTemplate = useMemo(() => {
     if (!templateEnabled) return null;
     return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
@@ -487,40 +926,177 @@ export function GenerationComposer({
   // Validation
   // ============================================================================
 
-  const validation = useMemo(() => {
-    return checkPrompt(prompt, workspace.assets.length, duration);
-  }, [prompt, workspace.assets.length, duration]);
+  const imageReferenceAssets = useMemo(() => {
+    return workspace.assets.filter((asset) => asset.type === 'image'
+      && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'));
+  }, [studioHandoff, workspace.assets]);
 
-  const submitBlocker = useMemo(() => {
+  const validation = useMemo(() => {
+    return checkPrompt(prompt, imageReferenceAssets.length, duration);
+  }, [prompt, imageReferenceAssets.length, duration]);
+
+  const referenceMediaPreflightBlocker = useMemo(() => {
+    const issue = validateSeedanceReferenceMediaPreflight({
+      model: selectedModel,
+      metadataValidation: 'known-only',
+      images: workspace.assets
+        .filter((asset) => asset.type === 'image')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+        })),
+      videos: workspace.assets
+        .filter((asset) => asset.type === 'video')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+        })),
+      audios: workspace.assets
+        .filter((asset) => asset.type === 'audio')
+        .map((asset) => ({
+          url: asset.originalUrl,
+          name: asset.fileName,
+          mimeType: asset.mimeType,
+        })),
+    });
+    return issue?.message || null;
+  }, [workspace.assets, selectedModel]);
+
+  const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
+  const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
+    ? null
+    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。请重新选择时长，或切换支持该时长的模型。确认前不会提交或扣点。`;
+
+  const hasUploadingMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'uploading');
+  const hasFailedMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'failed');
+  const isRestoringStudioSettings = Boolean(studioHandoff && !studioSettingsReady);
+
+  const submitBlockerState = useMemo(() => {
+    const reason = (() => {
+    if (imageResultHandoff) {
+      if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
+      if (generationMode !== 'first_last_frame') return '这张图已放在首帧。请选择首尾帧模式后生成；不会改放参考图。';
+      if (!modelOptions.some(option => option.id === selectedModel)) return '原视频模型目前不可用，请明确选择支持首帧的可用模型。';
+      if (!['seedance', 'h3'].includes(selectedProvider || '')) return '当前模型未确认支持首帧，请明确选择支持首帧的模型。';
+      const frames = workspace.assets.filter(asset => asset.type === 'image');
+      if (frames.filter(asset => asset.role === 'first_frame').length !== 1 || frames.filter(asset => asset.role === 'last_frame').length > 1
+        || frames.some(asset => !['first_frame', 'last_frame'].includes(asset.role || '')) || workspace.assets.some(asset => asset.type !== 'image')) {
+        return '首帧素材已改变，请保留一个首帧及至多一个尾帧，移除不适用参考后再生成。';
+      }
+    }
+    if (durationBlocker) return durationBlocker;
+    if (reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)) {
+      return '原任务模型目前不可选，已保留原参数，请明确选择可用模型后再生成。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && !volcengineIpModelResolutions(selectedModel).includes(resolution)) {
+      return '当前模型不支持所选清晰度，请切换模型或重新选择清晰度。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && generationMode !== 'all_in_one_reference' && workspace.assets.some((asset) => asset.type !== 'image')) {
+      return '当前模式不能使用视频或音频参考，请切换全能参考模式或移除这些素材。';
+    }
+    if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
+      return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
+    }
     if (!prompt.trim()) return '请填写提示词';
+    if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
+    }
 
     // 检查上传状态
-    const hasUploading = Object.values(workspace.uploadStatuses).some((s) => s === 'uploading');
-    if (hasUploading) return '素材上传中，请稍候';
+    if (hasUploadingMaterial) return { message: '素材上传中，请稍候', tone: 'progress' as const };
 
-    const hasFailed = Object.values(workspace.uploadStatuses).some((s) => s === 'failed');
-    if (hasFailed) return '存在上传失败的素材，请移除后重试';
+    if (hasFailedMaterial) return '存在上传失败的素材，请移除后重试';
 
-    if (generationMode === 'first_last_frame' && workspace.assets.length < 2) {
-      return `首尾帧模式至少需要 2 张素材，当前 ${workspace.assets.length} 张`;
+    if (workspace.pendingWorkspaceAttach) {
+      return '素材已上传成功，但加入参考区失败，请先重试加入参考区。';
     }
-    if (generationMode === 'smart_multi_frame' && workspace.assets.length < 3) {
-      return `智能多帧模式至少需要 3 张素材，当前 ${workspace.assets.length} 张`;
+
+    if (referenceMediaPreflightBlocker) {
+      return referenceMediaPreflightBlocker;
+    }
+
+    if (isRestoringStudioSettings) return { message: '正在恢复模板参数与模型能力，请稍候', tone: 'progress' as const };
+    if (studioHandoff && studioUnsupportedReason) return studioUnsupportedReason;
+    if (studioHandoff) {
+      const materialCompatibilityError = getStudioMaterialCompatibilityError({
+        provider: selectedProvider || 'seedance',
+        generationMode,
+        assets: workspace.assets.map((asset) => ({
+          role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+          type: asset.type,
+        })),
+      });
+      if (materialCompatibilityError) return materialCompatibilityError;
+    }
+    if (studioHandoff && draftMode && (selectedProvider !== 'seedance' || selectedModel !== SEEDANCE_2_5_MODEL_ID)) {
+      return '模板 Draft 参数与当前 Provider/模型不兼容，请修正后提交';
+    }
+    if (studioHandoff && generationMode !== 'first_last_frame'
+      && workspace.assets.some((asset) => {
+        const role = studioRoleForAsset(asset.assetId, asset.role, studioHandoff);
+        return role === 'first' || role === 'last';
+      })) {
+      return '模板包含首尾帧素材，请切换到首尾帧模式后提交';
+    }
+    if (studioHandoff) {
+      const currentStudioAssets = workspace.assets.map((asset) => {
+        const sourceAsset = studioHandoff.assets.find((item) => item.assetId === asset.assetId);
+        return {
+          assetId: asset.assetId,
+          role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+          type: asset.type,
+          ...(sourceAsset?.slotKey ? { slotKey: sourceAsset.slotKey } : {}),
+        };
+      });
+      const missingRequiredSlot = getMissingRequiredStudioAssetSlot(
+        studioHandoff.snapshot.recipe?.assetSlots,
+        currentStudioAssets,
+      );
+      if (missingRequiredSlot) return `模板必填素材槽「${missingRequiredSlot.label}」缺少素材，请返回模板工作台补齐`;
+    }
+    if (generationMode === 'first_last_frame' && studioHandoff) {
+      const studioFrames = workspace.assets.filter((asset) => {
+        const role = studioRoleForAsset(asset.assetId, asset.role, studioHandoff);
+        return role === 'first' || role === 'last';
+      });
+      if (studioFrames.some((asset) => asset.type !== 'image')) return '首尾帧素材必须是图片，当前模板参数不能安全映射';
+      if (studioFrames.filter((asset) => studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'first').length !== 1
+        || studioFrames.filter((asset) => studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'last').length > 1) {
+        return '首尾帧素材角色不完整，请返回模板工作台修正';
+      }
+    } else if (generationMode === 'first_last_frame' && !imageResultHandoff && imageReferenceAssets.length < 2) {
+      return `首尾帧模式至少需要 2 个图片参考，当前 ${imageReferenceAssets.length} 个`;
+    }
+    if (generationMode === 'smart_multi_frame' && imageReferenceAssets.length < 3) {
+      return `智能多帧模式至少需要 3 个图片参考，当前 ${imageReferenceAssets.length} 个`;
     }
     if (!validation.valid) {
-      return `提示词引用了图${validation.maxMissing}，但当前只有 ${workspace.assets.length} 张素材`;
+      return `提示词引用了图${validation.maxMissing}，但当前只有 ${imageReferenceAssets.length} 个图片参考`;
     }
     if (need1080pApproval && !resolutionApprovalConfirmed) {
       return '1080p 生成需要先确认审批通过。';
     }
+    if (draftMode && !seedanceDraft.createEnabled) {
+      return seedanceDraft.message;
+    }
     return null;
-  }, [prompt, workspace.uploadStatuses, workspace.assets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation]);
+    })();
+    return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
+  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
     if (isSubmitting) {
       return { message: '提交中...', tone: 'progress' as const };
     }
-    if (mentionNotice) {
+    if (durationBlocker) return { message: durationBlocker, tone: 'error' as const };
+    if (mentionNotice && !submitBlocker && !submitDisabledReason) {
       return { message: mentionNotice, tone: 'hint' as const };
     }
     if (!prompt.trim()) {
@@ -530,20 +1106,28 @@ export function GenerationComposer({
       };
     }
     if (submitBlocker) {
-      const isUploading = submitBlocker.includes('上传中');
-      return { message: submitBlocker, tone: isUploading ? 'progress' as const : 'error' as const };
+      const tone = submitBlockerState?.tone || 'error';
+      return { message: submitBlocker, tone };
     }
     if (submitDisabledReason) {
       return { message: submitDisabledReason, tone: 'hint' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, mentionNotice, prompt, submitBlocker, submitDisabledReason]);
+  }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason, submitBlockerState]);
 
-  const canPressSubmit = !isSubmitting && !submitDisabledReason && !(need1080pApproval && !resolutionApprovalConfirmed);
-
-  const estimatedPoints = useMemo(() => {
-    return calculateEstimatedCostClient(resolution, duration);
-  }, [resolution, duration]);
+  const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
+    model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
+      project_id: pricingProjectId, video_card_id: selectedVideoCardId, ratio,
+      draft: selectedProvider === 'seedance' && selectedModel === SEEDANCE_2_5_MODEL_ID && draftMode,
+      reference_video_urls: workspace.assets.filter(asset => asset.type === 'video' && Boolean(asset.originalUrl)
+        && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference')).map(asset => asset.originalUrl),
+      template_studio_run_id: studioHandoff?.runId,
+      ...(studioHandoff ? { template_studio_assets: workspace.assets.map(asset => ({ assetId: asset.assetId,
+        role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff), type: asset.type,
+        ...(studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey ? { slotKey: studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey } : {}) })) } : {}),
+    } }, !durationBlocker && preferencesReady);
+  const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
   const activeRules = useMemo(() => {
     return selectedTemplate?.rules.filter((rule) => rule.status === 'active') || [];
@@ -564,7 +1148,7 @@ export function GenerationComposer({
   }, [validation.referencedFigures]);
 
   const referenceLabels = useMemo(() => {
-    return workspace.assets.map((asset, index) => {
+    return imageReferenceAssets.map((asset, index) => {
       const label = `图片${index + 1}`;
       const titleParts = [
         label,
@@ -576,18 +1160,17 @@ export function GenerationComposer({
         title: titleParts.join(' · '),
       };
     });
-  }, [workspace.assets]);
+  }, [imageReferenceAssets]);
 
   const muskReady = muskConfig?.ready === true;
   const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
   const muskStatusText = muskConfigLoading
     ? '正在检查 LLM 配置...'
     : muskReady
-      ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.4'}`
+      ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.5'}`
       : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
 
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
-    const sourceDisabled = workspace.assets.length >= MAX_REFS;
     return [
       {
         id: 'create-subject',
@@ -596,7 +1179,7 @@ export function GenerationComposer({
         label: '创建主体',
         description: '主体库下一批开放，当前先用图集复用',
       },
-      ...workspace.assets.map((asset, index): PromptMentionCandidate => {
+      ...imageReferenceAssets.map((asset, index): PromptMentionCandidate => {
         const label = `图片${index + 1}`;
         const titleParts = [
           asset.fileName,
@@ -618,20 +1201,18 @@ export function GenerationComposer({
         id: 'source:history',
         type: 'source',
         source: 'history',
-        label: '从历史图片选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '选择曾经上传过的图片',
-        disabled: sourceDisabled,
+        label: '从历史素材选择',
+        description: '选择曾经上传过的图片、视频或音频',
       },
       {
         id: 'source:album',
         type: 'source',
         source: 'album',
         label: '从图集选择',
-        description: sourceDisabled ? `已达 ${MAX_REFS} 张上限` : '我的图集、项目图集、公共图集',
-        disabled: sourceDisabled,
+        description: '我的图集、项目图集、公共图集',
       },
     ];
-  }, [workspace.assets]);
+  }, [imageReferenceAssets]);
 
   const currentReferenceImageIds = useMemo(() => {
     return workspace.assets
@@ -743,48 +1324,101 @@ export function GenerationComposer({
 
   useEffect(() => {
     const reuseKey = reuseDraft ? `${reuseDraft.taskId}:${reuseDraft.reuseKey}` : null;
-    if (!reuseDraft || appliedReuseDraftRef.current === reuseKey) return;
-    appliedReuseDraftRef.current = reuseKey;
+    if (!reuseDraft || studioHandoff || appliedReuseDraftRef.current === reuseKey) return;
+    appliedReuseDraftRef.current = reuseKey; settingsTouchedRef.current = true;
+    if (reuseDraft.model && modelOptions.length && !modelOptions.some(option => option.id === reuseDraft.model)) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'unsupported', '原模型当前不可用，服务器素材已恢复，当前参数未替换。'); return; }
     setPrompt(reuseDraft.prompt);
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
+    if (reuseDraft.model) {
+      setSelectedModel(reuseDraft.model);
+      onModelChange?.(reuseDraft.model);
+    }
     setResolution(reuseDraft.resolution);
     setSeed(reuseDraft.seed);
-    setGenerateAudio(true);
+    setGenerateAudio(reuseDraft.generateAudio);
     setReturnLastFrame(reuseDraft.returnLastFrame);
     setWatermark(reuseDraft.watermark);
     setResolutionApprovalConfirmed(
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
-    void workspace.refresh();
-  }, [reuseDraft, require1080pApproval, workspace]);
+    setReuseReadCompleteKey(null);
+    void runWorkspaceOperation(() => workspace.refresh(), false, true).then(result => {
+      if (!reuseMountedRef.current || appliedReuseDraftRef.current !== reuseKey) return;
+      if (!result.applied) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', result.error || '服务器已完成，参考区读取尚未确认；可以重新读取同一结果。'); return; }
+      setReuseReadCompleteKey(reuseKey);
+    }).catch(() => onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', '服务器已完成，参考区暂不可读。'));
+  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
 
   useEffect(() => {
-    if (!initialSettings || appliedInitialSettingsRef.current || reuseDraft) return;
+    if (!reuseDraft || !onReuseDraftApplied || studioHandoff || workspace.loading || workspace.error) return;
+    const reuseKey = `${reuseDraft.taskId}:${reuseDraft.reuseKey}`;
+    if (reuseReadCompleteKey !== reuseKey || reportedReuseAppliedRef.current === reuseKey) return;
+    if (prompt !== reuseDraft.prompt || generationMode !== reuseDraft.generationMode || ratio !== reuseDraft.ratio
+      || duration !== reuseDraft.duration || resolution !== reuseDraft.resolution || seed !== reuseDraft.seed
+      || generateAudio !== reuseDraft.generateAudio || returnLastFrame !== reuseDraft.returnLastFrame
+      || watermark !== reuseDraft.watermark || (reuseDraft.model && selectedModel !== reuseDraft.model)) { reportedReuseAppliedRef.current = reuseKey; onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'context_changed', '服务器已完成复用，当前参数已有新编辑，未继续覆盖。'); return; }
+    reportedReuseAppliedRef.current = reuseKey;
+    onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'applied');
+  }, [reuseDraft, reuseReadCompleteKey, onReuseDraftApplied, studioHandoff, workspace.loading, workspace.error,
+    prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
+
+  useEffect(() => {
+    if (imageResultHandoff) return;
+    if (!initialSettings || appliedInitialSettingsRef.current || settingsTouchedRef.current || reuseDraft || studioHandoff) return;
     appliedInitialSettingsRef.current = true;
     setGenerationMode(initialSettings.generationMode);
     setRatio(initialSettings.ratio);
     setDuration(initialSettings.duration);
+    if (initialSettings.model && modelOptions.some((option) => option.id === initialSettings.model)) {
+      setSelectedModel(initialSettings.model);
+      onModelChange?.(initialSettings.model);
+    }
     setResolution(initialSettings.resolution);
     setSeed(-1);
     setGenerateAudio(initialSettings.generateAudio);
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
-  }, [initialSettings, reuseDraft]);
+  }, [initialSettings, reuseDraft, studioHandoff, imageResultHandoff, modelOptions, onModelChange]);
 
   useEffect(() => {
-    if (!lockedSettings) return;
-    if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
-    if (lockedSettings.duration) setDuration(lockedSettings.duration);
-    if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
-  }, [
-    lockedSettings?.sourceLabel,
-    lockedSettings?.ratio,
-    lockedSettings?.duration,
-    lockedSettings?.resolution,
-  ]);
+    if (!imageResultHandoff || !preferencesReady || imageResultDraftReady) return;
+    const draft = readImageResultVideoDraft(imageResultHandoff);
+    const settings = draft?.settings || initialSettings;
+    setPrompt(draft?.prompt || '');
+    setGenerationMode(draft?.settings.generationMode || 'first_last_frame');
+    if (settings) {
+      setRatio(settings.ratio); setDuration(settings.duration); setResolution(settings.resolution);
+      setGenerateAudio(settings.generateAudio); setReturnLastFrame(settings.returnLastFrame); setWatermark(settings.watermark);
+    }
+    const model = draft?.model || settings?.model;
+    if (model) { setSelectedModel(model); onModelChange?.(model); }
+    appliedInitialSettingsRef.current = true;
+    setImageResultDraftReady(true);
+  }, [imageResultHandoff, preferencesReady, imageResultDraftReady, initialSettings, onModelChange]);
+  useEffect(() => {
+    if (!imageResultHandoff || !imageResultDraftReady) return;
+    const timer = setTimeout(() => {
+      const saved = saveImageResultVideoDraft(imageResultHandoff, { version: 1, prompt, model: selectedModel,
+        settings: { model: selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark, seedMode: 'random', projectId: null } });
+      setImageResultDraftMessage(saved ? '' : '本次视频草稿无法记住，请保留当前页面，关闭前复制动作文字。');
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [imageResultHandoff, imageResultDraftReady, prompt, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
+
+  useEffect(() => {
+    if (!videoCardDefaults) { appliedVideoCardDefaultsRef.current = null; return; }
+    if (!preferencesReady || studioHandoff || imageResultHandoff || appliedVideoCardDefaultsRef.current === videoCardDefaults.id) return;
+    const initializing = appliedVideoCardDefaultsRef.current === null;
+    appliedVideoCardDefaultsRef.current = videoCardDefaults.id;
+    // Card recommendations initialize a selection, never resynchronize over later edits.
+    if (reuseDraft?.videoCardId === videoCardDefaults.id || (initializing && (initialSettings || reuseDraft || settingsTouchedRef.current))) return;
+    if (videoCardDefaults.ratio) setRatio(videoCardDefaults.ratio);
+    if (videoCardDefaults.duration) setDuration(videoCardDefaults.duration);
+    if (videoCardDefaults.resolution) setResolution(videoCardDefaults.resolution);
+  }, [videoCardDefaults, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, initialSettings]);
 
   useEffect(() => {
     if (!need1080pApproval) {
@@ -793,22 +1427,43 @@ export function GenerationComposer({
   }, [need1080pApproval]);
 
   useEffect(() => {
+    if (studioHandoff && !studioSettingsReady && Object.hasOwn(studioHandoff.parameters, 'model')) return;
     const fallbackModel = modelOptions[0]?.id || '';
     if (!fallbackModel) {
+      if (imageResultHandoff) return;
       if (selectedModel) setSelectedModel('');
       return;
     }
     if (!modelOptions.some((option) => option.id === selectedModel)) {
+      if (reuseDraft?.model === selectedModel) return;
+      if (imageResultHandoff) return;
       setSelectedModel(fallbackModel);
+      onModelChange?.(fallbackModel);
     }
-  }, [modelOptions, selectedModel]);
+  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady, imageResultHandoff, reuseDraft?.model]);
 
   // ============================================================================
   // Handlers
   // ============================================================================
 
+  useEffect(() => {
+    if (!preferencesReady || !onSettingsChange || studioHandoff || imageResultHandoff || isRestoringStudioSettings || interactionLocked
+      || ordinaryDraftKey && ordinaryDraftLoaded !== ordinaryDraftKey || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
+    const timeout = setTimeout(() => onSettingsChange({
+      model: selectedModel || null,
+      generationMode,
+      ratio,
+      duration,
+      resolution,
+      generateAudio,
+      returnLastFrame,
+      watermark,
+    }), 400);
+    return () => clearTimeout(timeout);
+  }, [preferencesReady, onSettingsChange, studioHandoff, imageResultHandoff, isRestoringStudioSettings, interactionLocked, ordinaryDraftKey, ordinaryDraftLoaded, reuseDraft, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
+
   const handleSubmit = useCallback(async () => {
-    if (submitBlocker || submitDisabledReason || isSubmitting) return;
+    if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
     await onSubmit({
       prompt,
       generationMode,
@@ -821,21 +1476,61 @@ export function GenerationComposer({
       watermark,
       resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
       referenceImageIds: workspace.assets
+        .filter((asset) => asset.type === 'image' && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
+        .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
+      referenceVideoUrls: workspace.assets
+        .filter((asset) => asset.type === 'video' && Boolean(asset.originalUrl) && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
+        .map((asset) => asset.originalUrl),
+      referenceAudioUrls: workspace.assets
+        .filter((asset) => asset.type === 'audio' && Boolean(asset.originalUrl) && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
+        .map((asset) => asset.originalUrl),
       templateId: selectedTemplate?.id || null,
       agentRunId,
       selectedAgentPlanKey: selectedPlanKey,
       agentPromptSnapshot,
       finalPromptSnapshot: prompt,
       promptUserEdited,
+      provider: selectedProvider || null,
       model: selectedModel || null,
+      h3LoraId: selectedAuxiliary || null,
+      pricingRevision: videoPricing.quote.pricing_revision,
+      pricingQuoteToken: videoPricing.quote.pricing_quote_token,
+      quotedEstimatedCost: videoPricing.quote.estimatedCost,
+      draft: draftMode,
+      templateStudioRunId: studioHandoff?.runId || null,
+      imageResultReceiptId: imageResultHandoff?.receiptId || null,
+      templateStudioAssets: studioHandoff ? workspace.assets.map((asset) => ({
+        assetId: asset.assetId,
+        role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff),
+        type: asset.type,
+        ...(studioHandoff.assets.find((sourceAsset) => sourceAsset.assetId === asset.assetId)?.slotKey
+          ? { slotKey: studioHandoff.assets.find((sourceAsset) => sourceAsset.assetId === asset.assetId)?.slotKey }
+          : {}),
+      })) : [],
+      templateStudioParameters: studioHandoff ? {
+        provider: selectedProvider,
+        model: selectedModel,
+        generationMode,
+        ratio,
+        duration,
+        resolution,
+        seed,
+        generateAudio,
+        returnLastFrame,
+        watermark,
+        draft: draftMode,
+        h3LoraId: selectedProvider === 'h3' ? selectedAuxiliary || '' : '',
+      } : {},
     });
   }, [
     submitBlocker,
     submitDisabledReason,
     isSubmitting,
+    videoPricing.quote,
     onSubmit,
+    imageResultHandoff,
     prompt,
     generationMode,
     ratio,
@@ -853,31 +1548,38 @@ export function GenerationComposer({
     selectedPlanKey,
     agentPromptSnapshot,
     promptUserEdited,
+    selectedProvider,
     selectedModel,
+    selectedAuxiliary,
+    draftMode,
+    studioHandoff,
   ]);
 
   const handlePromptChange = useCallback((nextPrompt: string) => {
+    markReuseInputChanged();
     setPrompt(nextPrompt);
     if (agentPromptSnapshot !== null && nextPrompt !== agentPromptSnapshot) {
       setPromptUserEdited(true);
     }
-  }, [agentPromptSnapshot]);
+  }, [agentPromptSnapshot, markReuseInputChanged]);
 
   const toggleModifier = useCallback((modifier: string) => {
+    markReuseInputChanged();
     setSelectedModifiers((current) => {
       return current.includes(modifier)
         ? current.filter((item) => item !== modifier)
         : [...current, modifier];
     });
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleSelectTemplate = useCallback((templateId: string | null) => {
+    markReuseInputChanged();
     setSelectedTemplateId(templateId);
     setAgentPlans([]);
     setSelectedPlanKey(null);
     setAgentRunId(null);
     setAgentPromptSnapshot(null);
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleGeneratePlans = useCallback(async () => {
     if (!selectedTemplate) {
@@ -1009,14 +1711,15 @@ export function GenerationComposer({
   }, [moduleBuilderDraft]);
 
   const handleSelectPlan = useCallback((plan: AgentPlan) => {
+    markReuseInputChanged();
     setSelectedPlanKey(plan.key);
     setAgentPromptSnapshot(plan.prompt);
     setPromptUserEdited(false);
     setPrompt(plan.prompt);
-  }, []);
+  }, [markReuseInputChanged]);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate) return false;
     setTemplateSaveBusy(true);
     setTemplateSaveError(null);
     try {
@@ -1026,47 +1729,48 @@ export function GenerationComposer({
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || data.error || '模板保存失败');
+      if (!res.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedTemplate.id);
-      setTemplateDrawerOpen(false);
+      return true;
     } catch (error) {
       setTemplateSaveError(error instanceof Error ? error.message : '模板保存失败');
+      return false;
     } finally {
       setTemplateSaveBusy(false);
     }
   }, [loadTemplates, selectedTemplate]);
 
   const handleLoadCollection = useCallback(async (collectionId: string) => {
-    if (workspace.assets.length > 0) {
-      const ok = window.confirm('加载图集将替换当前素材，确定继续？');
-      if (!ok) return;
-    }
-    await onCollectionLoad(collectionId);
-  }, [workspace.assets.length, onCollectionLoad]);
+    if (!captureInputRecovery()) return;
+    await runWorkspaceOperation(async () => { await onCollectionLoad(collectionId); await workspace.refresh(); });
+  }, [captureInputRecovery, onCollectionLoad, runWorkspaceOperation, workspace.refresh]);
 
   const handleSaveCollection = useCallback(async (name: string) => {
-    await onCollectionSave(name);
-  }, [onCollectionSave]);
+    await runWorkspaceOperation(() => onCollectionSave(name));
+  }, [onCollectionSave, runWorkspaceOperation]);
 
   const handleNewCollection = useCallback(async (name: string) => {
-    await onCollectionNew(name);
-  }, [onCollectionNew]);
+    await runWorkspaceOperation(() => onCollectionNew(name));
+  }, [onCollectionNew, runWorkspaceOperation]);
 
   const handleRemove = useCallback(async (assetId: string) => {
-    await workspace.removeAsset(assetId);
-  }, [workspace]);
+    await runWorkspaceOperation(() => workspace.removeAsset(assetId));
+  }, [runWorkspaceOperation, workspace]);
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
-    await workspace.reorderAssets(newOrder);
-  }, [workspace]);
+    await runWorkspaceOperation(() => workspace.reorderAssets(newOrder));
+  }, [runWorkspaceOperation, workspace]);
 
   const handleReplace = useCallback(async (assetId: string, file: File) => {
-    await workspace.replaceAsset(assetId, file);
-    await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+    await runWorkspaceOperation(async () => {
+      await workspace.replaceAsset(assetId, file);
+      await refreshReferenceAlbums();
+    });
+  }, [runWorkspaceOperation, workspace, refreshReferenceAlbums]);
 
-  const handlePreview = useCallback((url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = useCallback((src: string, type?: WorkspaceAssetItem['type'], title?: string, poster?: string, contentKey?: ContentKey) => {
+    if (!type) return;
+    setPreviewMedia({ src, type, title: title || '参考素材', poster, contentKey });
   }, []);
 
   const resolvePendingMentionRequest = useCallback((insertText: string | null) => {
@@ -1083,26 +1787,30 @@ export function GenerationComposer({
     }
   }, [resolvePendingMentionRequest]);
 
-  const addReferenceImagesAndGetLabels = useCallback(async (referenceImageIds: string[]) => {
+  const addReferenceImagesAndGetLabels = useCallback(async (
+    referenceImageIds: string[],
+    selectedAssets: ReferenceAlbumSelection[] = [],
+  ) => {
     const uniqueReferenceImageIds = uniqueStrings(referenceImageIds);
     if (uniqueReferenceImageIds.length === 0) return [];
 
     const existingLabelByReferenceId = new Map<string, string>();
-    workspace.assets.forEach((asset, index) => {
+    imageReferenceAssets.forEach((asset, index) => {
       if (asset.referenceImageId) {
         existingLabelByReferenceId.set(asset.referenceImageId, `图片${index + 1}`);
       }
     });
 
     const idsToAdd = uniqueReferenceImageIds.filter((id) => !existingLabelByReferenceId.has(id));
-    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
-    if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
-    }
 
     const labelByReferenceId = new Map(existingLabelByReferenceId);
-    idsToAdd.forEach((id, index) => {
-      labelByReferenceId.set(id, `图片${workspace.assets.length + index + 1}`);
+    const selectedTypeByReferenceId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
+    const imageIdsToAdd = idsToAdd.filter((id) => {
+      const assetType = selectedTypeByReferenceId.get(id);
+      return assetType == null || assetType === 'image';
+    });
+    imageIdsToAdd.forEach((id, index) => {
+      labelByReferenceId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
     });
 
     const labelsToInsert = uniqueReferenceImageIds
@@ -1110,80 +1818,90 @@ export function GenerationComposer({
       .filter((label): label is string => Boolean(label));
 
     if (idsToAdd.length > 0) {
-      await workspace.addReferenceImages(idsToAdd);
+      await runWorkspaceOperation(() => workspace.addReferenceImages(idsToAdd));
     }
     await refreshReferenceAlbums();
     return labelsToInsert;
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
 
-  const handleAddReferenceImages = useCallback(async (referenceImageIds: string[]) => {
-    const labelsToInsert = await addReferenceImagesAndGetLabels(referenceImageIds);
+  const handleAddReferenceImages = useCallback(async (
+    referenceImageIds: string[],
+    selectedAssets?: ReferenceAlbumSelection[],
+  ) => {
+    const labelsToInsert = await addReferenceImagesAndGetLabels(referenceImageIds, selectedAssets);
     const insertText = formatReferenceTokens(labelsToInsert);
     if (pendingMentionRequestRef.current?.source === 'album') {
       resolvePendingMentionRequest(insertText || null);
       return;
     }
     const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
-    if (nextPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    if (nextPrompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
     }
     setPrompt((currentPrompt) => {
       const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
-      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+      return next.length <= MAX_GENERATION_PROMPT_CHARS ? next : currentPrompt;
     });
   }, [addReferenceImagesAndGetLabels, prompt, resolvePendingMentionRequest]);
 
-  const addUploadedAssetsAndGetLabels = useCallback(async (assetIds: string[]) => {
+  const addUploadedAssetsAndGetLabels = useCallback(async (
+    assetIds: string[],
+    selectedAssets: UploadedAssetSelection[] = [],
+  ) => {
     const uniqueAssetIds = uniqueStrings(assetIds);
     if (uniqueAssetIds.length === 0) return [];
 
     const existingLabelByAssetId = new Map<string, string>();
-    workspace.assets.forEach((asset, index) => {
+    imageReferenceAssets.forEach((asset, index) => {
       existingLabelByAssetId.set(asset.assetId, `图片${index + 1}`);
     });
 
     const idsToAdd = uniqueAssetIds.filter((id) => !existingLabelByAssetId.has(id));
-    const availableSlots = Math.max(0, MAX_REFS - workspace.assets.length);
-    if (idsToAdd.length > availableSlots) {
-      throw new Error(`单次生成最多选择 ${MAX_REFS} 张参考图，当前还可新增 ${availableSlots} 张`);
-    }
 
     const labelByAssetId = new Map(existingLabelByAssetId);
-    idsToAdd.forEach((id, index) => {
-      labelByAssetId.set(id, `图片${workspace.assets.length + index + 1}`);
+    const selectedTypeByAssetId = new Map(selectedAssets.map((asset) => [asset.id, asset.type]));
+    const imageIdsToAdd = idsToAdd.filter((id) => {
+      const assetType = selectedTypeByAssetId.get(id);
+      return assetType == null || assetType === 'image';
+    });
+    imageIdsToAdd.forEach((id, index) => {
+      labelByAssetId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
     });
     const labelsToInsert = uniqueAssetIds
       .map((id) => labelByAssetId.get(id))
       .filter((label): label is string => Boolean(label));
 
     if (idsToAdd.length > 0) {
-      await workspace.addAssets(idsToAdd);
+      await runWorkspaceOperation(() => workspace.addAssets(idsToAdd));
       await refreshReferenceAlbums();
     }
     return labelsToInsert;
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
 
-  const handleAddUploadedAssets = useCallback(async (assetIds: string[]) => {
-    const labelsToInsert = await addUploadedAssetsAndGetLabels(assetIds);
+  const handleAddUploadedAssets = useCallback(async (
+    assetIds: string[],
+    selectedAssets?: UploadedAssetSelection[],
+  ) => {
+    const labelsToInsert = await addUploadedAssetsAndGetLabels(assetIds, selectedAssets);
     const insertText = formatReferenceTokens(labelsToInsert);
     if (pendingMentionRequestRef.current?.source === 'history') {
       resolvePendingMentionRequest(insertText || null);
       return;
     }
     const nextPrompt = appendReferenceMarkers(prompt, labelsToInsert);
-    if (nextPrompt.length > MAX_PROMPT_CHARS) {
-      throw new Error(`提示词最多 ${MAX_PROMPT_CHARS} 字，无法自动插入 @图片 标记`);
+    if (nextPrompt.length > MAX_GENERATION_PROMPT_CHARS) {
+      throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
     }
     setPrompt((currentPrompt) => {
       const next = appendReferenceMarkers(currentPrompt, labelsToInsert);
-      return next.length <= MAX_PROMPT_CHARS ? next : currentPrompt;
+      return next.length <= MAX_GENERATION_PROMPT_CHARS ? next : currentPrompt;
     });
   }, [addUploadedAssetsAndGetLabels, prompt, resolvePendingMentionRequest]);
 
   const handleMentionSelect = useCallback((candidate: PromptMentionCandidate) => {
     if (candidate.type === 'image') return candidate.token;
     if (candidate.type === 'action') {
-      setMentionNotice('主体能力将在第二批开放；当前可以先用图集保存和复用参考图。');
+      setMentionNotice('主体能力将在第二批开放；当前可以先用图集保存和复用参考素材。');
       return null;
     }
     if (candidate.disabled) return null;
@@ -1199,30 +1917,30 @@ export function GenerationComposer({
   }, []);
 
   const handleLoadReferenceAlbum = useCallback(async (albumId: string, albumName: string) => {
-    if (workspace.assets.length > 0) {
-      const ok = window.confirm('切换图集会替换当前参考图列表，确定继续？');
-      if (!ok) return;
-    }
-    await workspace.loadReferenceAlbum(albumId);
+    if (!captureInputRecovery()) return;
+    await runWorkspaceOperation(() => workspace.loadReferenceAlbum(albumId, seedanceReferenceMediaCapabilities(selectedModel).imageLimit));
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(albumName);
-  }, [workspace]);
+  }, [workspace, selectedModel, captureInputRecovery, runWorkspaceOperation]);
 
   const handleSaveCurrentAsReferenceAlbum = useCallback(async (name: string) => {
-    if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考图');
-    const albumId = await workspace.saveCurrentAsReferenceAlbum(name);
+    if (workspace.assets.length === 0) throw new Error('当前没有可保存的参考素材');
+    const albumId = await runWorkspaceOperation(() => workspace.saveCurrentAsReferenceAlbum(name));
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(name);
     await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleCreateReferenceAlbum = useCallback(async (name: string) => {
-    const albumId = await workspace.createReferenceAlbum(name);
-    await workspace.clearAssets();
+    const albumId = await runWorkspaceOperation(async () => {
+      const nextAlbumId = await workspace.createReferenceAlbum(name);
+      await workspace.clearAssets();
+      return nextAlbumId;
+    });
     setCurrentReferenceAlbumId(albumId);
     setCurrentReferenceAlbumName(name);
     await refreshReferenceAlbums();
-  }, [workspace, refreshReferenceAlbums]);
+  }, [workspace, refreshReferenceAlbums, runWorkspaceOperation]);
 
   // ============================================================================
   // Render
@@ -1230,7 +1948,17 @@ export function GenerationComposer({
 
   return (
     <>
-      <div className="generation-composer">
+      {(inputRecovery || inputRecoveryMessage) && <p className="composer-prefill-notice" role="status">{inputRecoveryMessage}
+        {inputRecovery && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : '恢复替换前输入'}</button>}
+        {inputRecoveryPair && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.next)} onClick={() => void restoreInputRecovery(inputRecoveryPair.next)}>返回刚才输入</button>}
+      </p>}
+      <div
+        ref={generationComposerRef}
+        className="generation-composer"
+        onChangeCapture={markReuseInputChanged}
+        aria-busy={interactionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
+      >
+        {imageResultHandoff && <p className="composer-prefill-notice" role="status">这次图片已放在首帧，生成时请选择首尾帧模式；模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}
         {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">
           <div className="template-workbench-header">
@@ -1541,7 +2269,7 @@ export function GenerationComposer({
           <details className="template-advanced-panel">
             <summary>
               <span>参考素材和图集</span>
-              <strong>{workspace.assets.length > 0 ? `${workspace.assets.length} 张参考图` : '默认不使用参考图'}</strong>
+              <strong>{workspace.assets.length > 0 ? `${workspace.assets.length} 个参考素材` : '默认不使用参考素材'}</strong>
             </summary>
             <ImageSetToolbar
               collections={collections}
@@ -1558,14 +2286,16 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             <ReferenceStrip
+              model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
-              onUpload={workspace.uploadAsset}
+              onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
               onReorder={handleReorder}
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
+              onReplaceFromLibrary={setReplaceTargetId}
               generationMode={generationMode}
               loading={workspace.loading}
             />
@@ -1587,18 +2317,37 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             <ReferenceStrip
+              model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
-              onUpload={workspace.uploadAsset}
+              onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
               onReorder={handleReorder}
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
+              onReplaceFromLibrary={setReplaceTargetId}
               generationMode={generationMode}
               loading={workspace.loading}
             />
           </>
+        )}
+
+        {referenceMediaPreflightBlocker && (
+          <div className="reference-media-quality-warning">
+            {referenceMediaPreflightBlocker}
+          </div>
+        )}
+
+        {workspace.pendingWorkspaceAttach && (
+          <div className="workspace-attach-retry">
+            <span>
+              素材已上传成功，但加入参考区失败。系统已保留素材 ID，可直接重试，不需要重新上传。
+            </span>
+            <button type="button" onClick={() => { void runWorkspaceOperation(() => workspace.retryPendingAttach(), false); }} disabled={workspace.loading || interactionLocked}>
+              {workspace.loading ? '正在重试...' : `重试加入参考区（${workspace.pendingWorkspaceAttach.assetIds.length} 个）`}
+            </button>
+          </div>
         )}
 
         {templateEnabled ? (
@@ -1642,7 +2391,6 @@ export function GenerationComposer({
               error={submitError}
               rawError={submitError}
               debugInfo={submitErrorDebug as Parameters<typeof ErrorTranslator>[0]['debugInfo']}
-              onRetry={() => {}}
               onCopy={() => { navigator.clipboard.writeText(submitError); }}
             />
           </div>
@@ -1662,6 +2410,24 @@ export function GenerationComposer({
           </label>
         )}
 
+        {selectedModel === SEEDANCE_2_5_MODEL_ID && (
+          <label className="composer-resolution-approval" title={seedanceDraft.message}>
+            <input
+              type="checkbox"
+              checked={draftMode}
+              disabled={!seedanceDraft.createEnabled}
+              onChange={(event) => {
+                markStudioParameterCorrected('draft');
+                setDraftMode(event.currentTarget.checked);
+              }}
+            />
+            <span>
+              样片 Draft
+              <small>{seedanceDraft.createEnabled ? '先确认内容，再生成正式 1080p' : seedanceDraft.message}</small>
+            </span>
+          </label>
+        )}
+
         {/* 入队提示：短暂展示，不阻塞下一次生成 */}
         {result && (
           <div className="composer-queue-notice">
@@ -1675,9 +2441,13 @@ export function GenerationComposer({
                     ? '系统正在后台查询生成进度，最近任务会自动更新。'
                     : '任务已提交，最近任务会继续显示进度。'}
               </small>
+              {result.reference_image_notice && (
+                <small>{result.reference_image_notice}</small>
+              )}
             </div>
             <div className="composer-queue-actions">
               <a href={taskDetailHref(result.id, resultReturnTo)} className="composer-result-link">查看详情</a>
+              {studioReturnTo && <a href={studioReturnTo} className="composer-result-link">返回模板工作台</a>}
               <button type="button" className="composer-result-reset" onClick={onReset}>
                 收起
               </button>
@@ -1686,6 +2456,31 @@ export function GenerationComposer({
         )}
 
         {/* 参数栏 */}
+        {onSettingsChange && !studioHandoff && (
+          <button
+            type="button"
+            className="composer-result-reset"
+            title="重置当前模型参数，保留提示词、素材和保存位置"
+            aria-label="重置当前模型参数，保留提示词、素材和保存位置"
+            disabled={!preferencesReady || isSubmitting}
+            onClick={() => {
+              settingsTouchedRef.current = true;
+              setGenerationMode(DEFAULT_GENERATION_MODE);
+              setRatio(DEFAULT_RATIO);
+              setDuration(DEFAULT_DURATION);
+              setResolution(DEFAULT_RESOLUTION);
+              setSeed(-1);
+              setGenerateAudio(true);
+              setReturnLastFrame(false);
+              setWatermark(false);
+              setResolutionApprovalConfirmed(false);
+              setDraftMode(false);
+            }}
+          ><RotateCcw size={16} aria-hidden="true" /></button>
+        )}
+        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || (!videoPricing.quote ? videoPricing.error || '正在读取报价' : '请先确认1080p审批已通过。')}
+          {videoPricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={16} aria-hidden="true" /></button>}
+        </p>}
         <ComposerActionBar
           generationMode={generationMode}
           ratio={ratio}
@@ -1695,59 +2490,109 @@ export function GenerationComposer({
           canSubmit={canPressSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
+          providerLabel={providerLabel}
+          providerOptions={providerOptions}
+          selectedProvider={selectedProvider}
+          onProviderChange={(provider) => {
+            markStudioParameterCorrected('provider');
+            onProviderChange?.(provider);
+          }}
+          providerStatus={providerStatus}
           modelLabel={modelLabel}
-          modelOptions={modelOptions}
+          modelOptions={reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
+            ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
+            : modelOptions}
           selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-          onModeChange={setGenerationMode}
-          onRatioChange={setRatio}
-          onDurationChange={setDuration}
-          onResolutionChange={setResolution}
-          lockedRatio={Boolean(lockedSettings?.ratio)}
-          lockedDuration={Boolean(lockedSettings?.duration)}
-          lockedResolution={Boolean(lockedSettings?.resolution)}
-          lockReason={lockReason}
+          durationModel={durationModel}
+          onModelChange={(model) => {
+            markStudioParameterCorrected('model');
+            setSelectedModel(model);
+            onModelChange?.(model);
+          }}
+          auxiliaryLabel={auxiliaryLabel}
+          auxiliaryOptions={auxiliaryOptions}
+          selectedAuxiliary={selectedAuxiliary}
+          onAuxiliaryChange={(value) => {
+            markStudioParameterCorrected('h3LoraId');
+            onAuxiliaryChange?.(value);
+          }}
+          onModeChange={(value) => {
+            markStudioParameterCorrected('generationMode');
+            setGenerationMode(value);
+          }}
+          onRatioChange={(value) => {
+            markStudioParameterCorrected('ratio');
+            setRatio(value);
+          }}
+          onDurationChange={(value) => {
+            markStudioParameterCorrected('duration');
+            setDuration(value);
+          }}
+          onResolutionChange={(value) => {
+            markStudioParameterCorrected('resolution');
+            setResolution(value);
+          }}
           compactControls={templateEnabled}
         />
       </div>
 
-      {/* 预览弹窗 */}
-      {previewUrl && (
-        <div
-          className="composer-preview-backdrop"
-          onClick={() => setPreviewUrl(null)}
-        >
-          <div className="composer-preview-content" onClick={(e) => e.stopPropagation()}>
-            <button
-              className="composer-preview-close"
-              onClick={() => setPreviewUrl(null)}
-            >
-              ×
-            </button>
-            {previewUrl.match(/\.(mp4|mov|webm)/i) ? (
-              <video src={previewUrl} controls autoPlay className="composer-preview-media" />
-            ) : (
-              <img src={previewUrl} alt="预览" className="composer-preview-media" />
-            )}
-          </div>
-        </div>
-      )}
+      {previewMedia && <MediaPreview
+        src={previewMedia.src}
+        type={previewMedia.type}
+        title={previewMedia.title}
+        poster={previewMedia.poster}
+        contentKey={previewMedia.contentKey}
+        previewKey={previewMedia.contentKey}
+        onClose={() => setPreviewMedia(null)}
+      />}
 
-      <ReferenceAlbumPicker
-        open={showAlbumPicker}
-        currentCount={workspace.assets.length}
-        currentReferenceImageIds={currentReferenceImageIds}
-        onClose={() => handleMentionPickerClose('album')}
-        onConfirm={handleAddReferenceImages}
-      />
-
+      {replaceTargetId && !interactionLocked && <UploadedImagePicker open target="workspace" title="替换这一项素材" confirmLabel="用它替换"
+        purpose={`video-${generationMode}-replace`} contextKey={`${creationContextKey || 'video'}:replace`} maxSelection={1}
+        acceptedTypes={[workspace.assets.find(asset => asset.assetId === replaceTargetId)?.type || 'image']}
+        currentCount={0} currentAssetIds={workspace.assets.map(asset => asset.assetId)} currentReferenceImageIds={currentReferenceImageIds}
+        onClose={() => setReplaceTargetId(null)}
+        onUploadFile={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAssetToHistory(file, onProgress))}
+        onConfirm={async () => ({ success: false, message: '请选择一项素材' })}
+        onConfirmSelection={async (items: PickerItem[]) => {
+          const nextId = items[0]?.assetId;
+          if (items.length !== 1 || !nextId) return { success: false, message: '请选择一项素材' };
+          await runWorkspaceOperation(async () => { await workspace.replaceAssetWithLibrary(replaceTargetId, nextId); await refreshReferenceAlbums(); });
+          setReplaceTargetId(null);
+          return { success: true };
+        }} />}
       <UploadedImagePicker
-        open={showUploadedImagePicker}
+        contextKey={creationContextKey || `video:${pricingProjectId || 'draft'}:${selectedVideoCardId || 'new'}`}
+        open={(showUploadedImagePicker || showAlbumPicker) && !interactionLocked}
+        target="workspace"
+        title={generationMode === 'first_last_frame' ? '添加首尾帧素材' : '添加视频参考素材'}
+        confirmLabel="添加到视频参考区"
+        purpose={`video-${generationMode}`}
+        acceptedTypes={generationMode === 'all_in_one_reference' ? ['image', 'video', 'audio'] : ['image']}
+        typeLimits={{
+          image: Math.max(0, (generationMode === 'first_last_frame' ? 2 : seedanceReferenceMediaCapabilities(selectedModel).imageLimit) - workspace.assets.filter(a => a.type === 'image').length),
+          video: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).videoLimit - workspace.assets.filter(a => a.type === 'video').length),
+          audio: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).audioLimit - workspace.assets.filter(a => a.type === 'audio').length),
+        }}
         currentCount={workspace.assets.length}
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
-        onClose={() => handleMentionPickerClose('history')}
-        onUploadFile={workspace.uploadAssetToHistory}
+        currentReferenceImageIds={currentReferenceImageIds}
+        avatarTarget={workspace.workspace ? { kind: 'workspace', id: workspace.workspace.id, currentAssetIds: workspace.assets.map(a=>a.assetId), capacity: Math.max(0,(generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit)-imageReferenceAssets.length), imageLimit: generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit, sourceSignature: JSON.stringify([workspace.workspace.id,generationMode,selectedModel,prompt,workspace.assets.map(a=>[a.assetId,a.role,a.referenceImageId])]), role: generationMode==='first_last_frame'?(workspace.assets.some(a=>a.role==='first_frame')?'last_frame':'first_frame'):'reference_image' } : undefined}
+        onAvatarApplied={async () => {
+          const result = await refreshWorkspaceForParent();
+          if (!result.applied) throw new Error(result.error || '参考区已变化，图片已保留，请在当前参考区重新读取。');
+        }}
+        onClose={() => { handleMentionPickerClose('history'); handleMentionPickerClose('album'); }}
+        onUploadFile={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAssetToHistory(file, onProgress))}
         onConfirm={handleAddUploadedAssets}
+        onConfirmSelection={async (items: PickerItem[]) => {
+          const newItems = items.filter(item => !workspace.assets.some(a => a.assetId === item.assetId || a.referenceImageId && a.referenceImageId === item.referenceImageId));
+          const labelList = newItems.filter(item => item.type === 'image').map((_, index) => `图片${imageReferenceAssets.length + index + 1}`);
+          const next = appendReferenceMarkers(prompt, labelList);
+          if (next.length > MAX_GENERATION_PROMPT_CHARS) throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
+          await runWorkspaceOperation(() => workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId })));
+          if (pendingMentionRequestRef.current) resolvePendingMentionRequest(formatReferenceTokens(labelList) || null);
+          else setPrompt(current => appendReferenceMarkers(current, labelList));
+        }}
       />
 
       {templateEnabled && (

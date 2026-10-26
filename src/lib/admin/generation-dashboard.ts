@@ -1,8 +1,11 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
+import { displayUserName } from '@/lib/users/display';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { buildGenerationTimings, videoTimings, type GenerationTimingData } from './generation-timing';
 
-export type DashboardRangeKey = '7d' | '30d' | 'month' | 'custom';
+export type DashboardRangeKey = 'all' | '7d' | '30d' | 'month' | 'custom';
 export type DashboardResolutionKey = '480p' | '720p' | '1080p' | 'unknown';
 export type DashboardWarningTone = 'danger' | 'warning' | 'info';
 export type DashboardTrendGranularity = 'day' | 'week' | 'month';
@@ -26,6 +29,15 @@ export type DashboardCurrencyTotal = {
   currency: string;
   amount_micros: number;
   amount_minor: number;
+};
+
+export type DashboardUserSummary = {
+  id: string;
+  name: string | null;
+  username: string;
+  email: string;
+  avatar_url: string | null;
+  account_type: string;
 };
 
 export type DashboardRange = {
@@ -58,14 +70,7 @@ export type DashboardKpis = {
 export type DashboardBreakdownItem = {
   key: string;
   label: string;
-  user?: {
-    id: string;
-    name: string | null;
-    username: string;
-    email: string;
-    avatar_url: string | null;
-    account_type: string;
-  } | null;
+  user?: DashboardUserSummary | null;
   count: number;
   succeeded: number;
   failed: number;
@@ -92,8 +97,13 @@ export type DashboardRecentTask = {
   id: string;
   prompt: string;
   local_status: string;
+  provider: string;
+  generation_mode: string;
   provider_cost_status: string;
   model: string;
+  is_draft: boolean;
+  draft_upgrade_mode: string | null;
+  source_draft_task_id: string | null;
   resolution: DashboardResolutionKey;
   raw_resolution: string | null;
   duration: number | null;
@@ -102,22 +112,22 @@ export type DashboardRecentTask = {
   estimated_cost: number | null;
   frozen_cost: number | null;
   refund_amount: number | null;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage: ReturnType<typeof taskThumbnailProjection>['delivery_stage'];
+  stable_download_ready: boolean;
+  preview_available: boolean;
+  thumbnail_url: string | null;
+  retry_after_ms: number | null;
   official_amount_micros: number | null;
   official_amount_minor: number | null;
   official_currency: string | null;
   created_at: string;
   completed_at: string | null;
-  owner: {
-    id: string;
-    name: string | null;
-    username: string;
-    email: string;
-    avatar_url: string | null;
-    account_type: string;
-  } | null;
+  timing: ReturnType<typeof videoTimings>;
+  owner: DashboardUserSummary | null;
   project: {
     id: string;
     name: string;
@@ -133,6 +143,7 @@ export type DashboardTrendBucket = {
   date_from: string;
   date_to: string;
   task_count: number;
+  enhance_task_count: number;
   duration_seconds: number;
   points: number;
   official_costs: DashboardCurrencyTotal[];
@@ -146,6 +157,7 @@ export type GenerationDashboardData = {
     resolution: DashboardResolutionKey | null;
   };
   kpis: DashboardKpis;
+  timing: GenerationTimingData;
   resolution_breakdown: DashboardBreakdownItem[];
   project_breakdown: DashboardBreakdownItem[];
   member_ranking: DashboardBreakdownItem[];
@@ -216,14 +228,23 @@ function clampCustomStart(start: Date, end: Date) {
   return start < minStart ? minStart : start;
 }
 
-export function parseDashboardRange(query: GenerationDashboardQuery, now = new Date()): DashboardRange {
-  const key = query.range || 'month';
+export function parseDashboardRange(
+  query: GenerationDashboardQuery,
+  now = new Date(),
+  bounds: { earliestDate?: Date | string | null } = {},
+): DashboardRange {
+  const key = query.range || 'all';
   const todayEnd = endOfDay(now);
   let start: Date;
   let end: Date = todayEnd;
   let label: string;
 
-  if (key === '7d') {
+  if (key === 'all') {
+    const earliest = parseDateInput(bounds.earliestDate);
+    start = earliest ? startOfDay(earliest) : startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+    if (start > end) start = startOfDay(end);
+    label = '全部';
+  } else if (key === '7d') {
     start = startOfDay(new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000));
     label = '近 7 天';
   } else if (key === '30d') {
@@ -380,6 +401,7 @@ function createTrendBucket(start: Date, rangeStart: Date, rangeEnd: Date, granul
     date_from: isoDate(bucketFrom),
     date_to: isoDate(bucketTo),
     task_count: 0,
+    enhance_task_count: 0,
     duration_seconds: 0,
     points: 0,
     official_costs: [],
@@ -394,13 +416,18 @@ function finalizeTrendBucket(bucket: DashboardTrendAccumulator): DashboardTrendB
     date_from: bucket.date_from,
     date_to: bucket.date_to,
     task_count: bucket.task_count,
+    enhance_task_count: bucket.enhance_task_count,
     duration_seconds: bucket.duration_seconds,
     points: bucket.points,
     official_costs: currencyTotals(bucket.currencyMap),
   };
 }
 
-function buildTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granularity: DashboardTrendGranularity): DashboardTrendBucket[] {
+function isEnhanceTrendTask(task: Pick<DashboardTask, 'provider' | 'generation_mode'>) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
+function buildOutputTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granularity: DashboardTrendGranularity): DashboardTrendBucket[] {
   const rangeStart = startOfDay(localDateFromIso(range.date_from));
   const rangeEnd = endOfDay(localDateFromIso(range.date_to));
   const buckets = new Map<string, DashboardTrendAccumulator>();
@@ -413,11 +440,13 @@ function buildTrendBuckets(tasks: DashboardTask[], range: DashboardRange, granul
   }
 
   tasks.forEach((task) => {
-    const bucketKey = trendKey(trendStart(task.created_at, granularity), granularity);
+    if (task.local_status !== 'succeeded' || !task.completed_at) return;
+    const bucketKey = trendKey(trendStart(task.completed_at, granularity), granularity);
     const bucket = buckets.get(bucketKey);
     if (!bucket) return;
     const officialAmount = officialCostMicros(task);
     bucket.task_count += 1;
+    if (isEnhanceTrendTask(task)) bucket.enhance_task_count += 1;
     bucket.duration_seconds += Math.max(0, task.duration ?? 0);
     bucket.points += task.actual_cost ?? 0;
     addCurrency(bucket.currencyMap, task.provider_cost_currency, officialAmount);
@@ -479,8 +508,16 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       source_type: true,
       source_label: true,
       local_status: true,
+      delivery_status: true,
+      delivery_completed_at: true,
+      public_video_cached_at: true,
+      provider: true,
+      generation_mode: true,
       provider_task_id: true,
       model: true,
+      is_draft: true,
+      draft_upgrade_mode: true,
+      source_draft_task_id: true,
       resolution: true,
       duration: true,
       ratio: true,
@@ -492,6 +529,7 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       provider_official_amount_minor: true,
       provider_official_amount_micros: true,
       provider_cost_currency: true,
+      public_video_url: true,
       result_video_url: true,
       result_last_frame_url: true,
       local_video_path: true,
@@ -503,7 +541,16 @@ async function fetchDashboardTasks(where: Prisma.VideoTaskWhereInput) {
       completed_at: true,
       owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      project: { select: { id: true, name: true, type: true, status: true } },
+      project: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          status: true,
+          owner_user_id: true,
+          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        },
+      },
       _count: { select: { cost_ledgers: true } },
     },
   });
@@ -514,13 +561,8 @@ function taskMatchesResolution(task: DashboardTask, resolution?: DashboardResolu
   return normalizeDashboardResolution(task.resolution) === resolution;
 }
 
-function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
-  const where: Prisma.VideoTaskWhereInput = {
-    created_at: {
-      gte: startOfDay(localDateFromIso(range.date_from)),
-      lte: endOfDay(localDateFromIso(range.date_to)),
-    },
-  };
+function buildDashboardScopeWhere(query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  const where: Prisma.VideoTaskWhereInput = {};
 
   if (query.projectId) {
     where.project_id = query.projectId === 'unassigned' ? null : query.projectId;
@@ -534,6 +576,28 @@ function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery):
   return where;
 }
 
+function buildTaskWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  const where: Prisma.VideoTaskWhereInput = {
+    ...buildDashboardScopeWhere(query),
+    created_at: {
+      gte: startOfDay(localDateFromIso(range.date_from)),
+      lte: endOfDay(localDateFromIso(range.date_to)),
+    },
+  };
+  return where;
+}
+
+function buildOutputTrendWhere(range: DashboardRange, query: GenerationDashboardQuery): Prisma.VideoTaskWhereInput {
+  return {
+    ...buildDashboardScopeWhere(query),
+    local_status: 'succeeded',
+    completed_at: {
+      gte: startOfDay(localDateFromIso(range.date_from)),
+      lte: endOfDay(localDateFromIso(range.date_to)),
+    },
+  };
+}
+
 function ownerSummary(task: DashboardTask) {
   const owner = task.owner || task.user;
   if (!owner) return null;
@@ -545,6 +609,27 @@ function ownerSummary(task: DashboardTask) {
     avatar_url: owner.avatar_url,
     account_type: owner.account_type,
   };
+}
+
+function userSummary(user: DashboardTask['owner'] | NonNullable<DashboardTask['project']>['owner'] | null | undefined): DashboardUserSummary | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    name: user.name,
+    username: user.username,
+    email: user.email,
+    avatar_url: user.avatar_url,
+    account_type: user.account_type,
+  };
+}
+
+function projectBreakdownLabel(project: DashboardTask['project'] | null) {
+  if (!project) return '未归属项目';
+  if (project.type === 'personal') {
+    const ownerName = displayUserName(project.owner);
+    return ownerName === '未知用户' ? '个人默认项目' : `${ownerName}的默认项目`;
+  }
+  return project.name;
 }
 
 function isTerminal(task: DashboardTask) {
@@ -688,9 +773,22 @@ function buildWarnings(tasks: DashboardTask[], range: DashboardRange, auditSumma
 }
 
 export async function getGenerationDashboardData(query: GenerationDashboardQuery = {}): Promise<GenerationDashboardData> {
-  const range = parseDashboardRange(query);
+  const imagesIncluded = !query.projectId && !query.resolution;
+  const imageWhere: Prisma.ImageStudioTaskWhereInput = query.ownerUserId ? { owner_id: query.ownerUserId } : {};
+  const imageBounds = imagesIncluded && (query.range === 'all' || !query.range)
+    ? await prisma.imageStudioTask.aggregate({ where: imageWhere, _min: { created_at: true } }) : null;
+  const allRangeBounds = query.range === 'all' || !query.range
+    ? await prisma.videoTask.aggregate({
+        where: buildDashboardScopeWhere(query),
+        _min: { created_at: true },
+      })
+    : null;
+  const earliestDates = [allRangeBounds?._min.created_at, imageBounds?._min.created_at].filter((value): value is Date => Boolean(value));
+  const earliestDate = earliestDates.length ? new Date(Math.min(...earliestDates.map(value => value.getTime()))) : null;
+  const range = parseDashboardRange(query, new Date(), { earliestDate });
   const requestedResolution = query.resolution ? normalizeDashboardResolution(query.resolution) : null;
   const where = buildTaskWhere(range, query);
+  const trendWhere = buildOutputTrendWhere(range, query);
   const requestWhere: Prisma.ProviderApiRequestWhereInput = {
     created_at: {
       gte: startOfDay(localDateFromIso(range.date_from)),
@@ -700,8 +798,9 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
   if (query.projectId && query.projectId !== 'unassigned') requestWhere.project_id = query.projectId;
   if (query.ownerUserId) requestWhere.user_id = query.ownerUserId;
 
-  const [allTasks, auditSummary, providerFailureCount, stalePendingCount] = await Promise.all([
+  const [allTasks, allTrendTasks, auditSummary, providerFailureCount, stalePendingCount, imageTasks] = await Promise.all([
     fetchDashboardTasks(where),
+    fetchDashboardTasks(trendWhere),
     getCostLedgerAuditSummary(),
     prisma.providerApiRequest.count({ where: { ...requestWhere, status: 'failed' } }),
     prisma.providerApiRequest.count({
@@ -711,9 +810,15 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
         created_at: { lt: new Date(Date.now() - 30 * 60 * 1000) },
       },
     }),
+    imagesIncluded ? prisma.imageStudioTask.findMany({
+      where: { ...imageWhere, created_at: {
+        gte: startOfDay(localDateFromIso(range.date_from)), lte: endOfDay(localDateFromIso(range.date_to)),
+      } },
+      select: { model: true, status: true, created_at: true, finished_at: true, usage_json: true },
+    }) : Promise.resolve([]),
   ]);
-
   const tasks = allTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
+  const trendTasks = allTrendTasks.filter((task) => taskMatchesResolution(task, requestedResolution));
   const officialTotal = new Map<string, number>();
   const officialCostDurationTotal = new Map<string, number>();
   const resolutionMap = new Map<DashboardResolutionKey, DashboardBreakdownAccumulator>();
@@ -744,7 +849,8 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
     const durationSeconds = Math.max(0, task.duration ?? 0);
     const resolution = normalizeDashboardResolution(task.resolution);
     const projectKey = task.project_id || 'unassigned';
-    const projectLabel = task.project?.name || '未归属项目';
+    const projectLabel = projectBreakdownLabel(task.project);
+    const projectOwner = userSummary(task.project?.owner);
     const actorId = taskActorId(task) || 'unknown';
     const actor = task.owner || task.user;
     const actorLabel = actor?.name || actor?.username || '未知成员';
@@ -771,6 +877,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
         projectKey,
         projectLabel,
         outputParams(range, { project_id: projectKey }),
+        projectOwner,
       ));
     }
     addTaskToAccumulator(projectMap.get(projectKey)!, task);
@@ -821,6 +928,7 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       warning_count: warnings.reduce((sum, warning) => sum + warning.count, 0),
     },
     resolution_breakdown: Array.from(resolutionMap.values()).map(finalizeAccumulator),
+    timing: buildGenerationTimings(tasks, imageTasks, imagesIncluded),
     project_breakdown: Array.from(projectMap.values())
       .map(finalizeAccumulator)
       .sort((a, b) => b.count - a.count || b.points - a.points)
@@ -830,17 +938,22 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       .sort((a, b) => b.count - a.count || b.points - a.points)
       .slice(0, 8),
     trends: {
-      day: buildTrendBuckets(tasks, range, 'day'),
-      week: buildTrendBuckets(tasks, range, 'week'),
-      month: buildTrendBuckets(tasks, range, 'month'),
+      day: buildOutputTrendBuckets(trendTasks, range, 'day'),
+      week: buildOutputTrendBuckets(trendTasks, range, 'week'),
+      month: buildOutputTrendBuckets(trendTasks, range, 'month'),
     },
     warnings,
     recent_tasks: tasks.slice(0, 10).map((task) => ({
       id: task.id,
       prompt: task.prompt,
       local_status: task.local_status,
+      provider: task.provider,
+      generation_mode: task.generation_mode,
       provider_cost_status: task.provider_cost_status,
       model: task.model,
+      is_draft: task.is_draft,
+      draft_upgrade_mode: task.draft_upgrade_mode,
+      source_draft_task_id: task.source_draft_task_id,
       resolution: normalizeDashboardResolution(task.resolution),
       raw_resolution: task.resolution,
       duration: task.duration,
@@ -849,20 +962,29 @@ export async function getGenerationDashboardData(query: GenerationDashboardQuery
       estimated_cost: task.estimated_cost,
       frozen_cost: task.frozen_cost,
       refund_amount: task.refund_amount,
+      public_video_url: task.public_video_url,
       result_video_url: task.result_video_url,
       result_last_frame_url: task.result_last_frame_url,
       local_video_path: task.local_video_path,
+      ...taskThumbnailProjection(task),
       official_amount_micros: task.provider_official_amount_micros,
       official_amount_minor: task.provider_official_amount_minor,
       official_currency: task.provider_cost_currency,
       created_at: task.created_at.toISOString(),
       completed_at: task.completed_at?.toISOString() || null,
+      timing: videoTimings(task),
       owner: ownerSummary(task),
       project: task.project,
       href: `/tasks/${task.id}?return_to=${encodeURIComponent('/admin')}`,
     })),
     data_notes: [
-      '统计周期按 VideoTask.created_at 计算。',
+      '顶部 KPI、拆分榜和最近任务按 VideoTask.created_at 计算。',
+      '生成耗时按创建日期归组，仅计算有完整起止记录的成功任务；缺失、时间逆序、失败与未完成不算零秒进入平均。',
+      '任务完成耗时从系统建立生成任务开始，视频到系统发现生成完成（含状态回查延迟），图片到保存完成；不含此前分析和素材上传，不等于纯模型耗时。',
+      '结果可下载耗时要求有保存成功时间。接收与保存包含响应体接收、下载、校验、保存及恢复等待；历史补保存也可能拉长耗时。',
+      '中位数与90%完成用时按有效样本排序后的最近秩计算。图片未记录线路，不适用项目与视频清晰度筛选。',
+      '趋势图按成功任务的 VideoTask.completed_at 计算实际产出；失败、排队、未完成和跨月未完成任务不计入对应月份的视频条数。',
+      '趋势图里的超分视频条数按 generation_mode=enhance_video 或 provider=volcengine_mediakit 的成功产出单独拆分。',
       '官方成本优先读取 provider_official_amount_micros，回退 provider_official_amount_minor；没有官方金额时显示“待官方确认”。',
       '每秒均价按“同币种官方成本 / 同币种且有视频时长的秒数”计算；未确认官方金额或没有时长的任务不进入秒价分母。',
       'actual_cost 是平台点数扣除，不是美元；estimated_cost 是预估点数，不能代表真实扣费。',

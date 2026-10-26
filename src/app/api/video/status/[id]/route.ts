@@ -1,24 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
-import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
+import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task-finalizer';
+import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
+import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
+import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
+import { isPrivateMultiviewTask, privateMultiviewFailure, projectPrivateMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
+import {
+  taskThumbnailProjection,
+  type TaskThumbnailProjectionSource,
+} from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
-function serializeTaskIdentity<T extends { owner?: unknown; user?: unknown }>(task: T) {
-  return {
-    ...task,
+function serializeTaskIdentity<T extends {
+  id: string;
+  owner?: unknown;
+  user?: unknown;
+  public_video_url?: string | null;
+  local_video_path?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  error_message?: string | null;
+  local_status?: string | null;
+} & TaskProtectionSource>(task: T) {
+  return projectPrivateMultiviewTask({
+    ...publicVideoTaskPricing(task),
     owner: task.owner || task.user || null,
     submitted_user: task.user || null,
-  };
+    error_message: task.local_status === 'failed'
+      ? visibleProviderErrorMessage(task.error_message)
+      : task.error_message,
+    ...taskThumbnailProjection(task as T & TaskThumbnailProjectionSource),
+  });
 }
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  let protectedTask = false;
   try {
     const taskId = params.id;
     const forceProviderRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
@@ -26,6 +53,12 @@ export async function GET(
     const user = await getSession();
     if (!user) {
       return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
+    }
+    // Codex API 的后台绑定服务账号没有飞书身份，但它是管理员显式配置的
+    // 内部普通账号；允许它查询自己生成任务的标准状态，普通邮箱账号仍走外部拦截。
+    const codexInternalServiceUser = await isCodexInternalServiceUser(user);
+    if (!codexInternalServiceUser) {
+      assertInternalOnly(user, '外部账号请使用 IP 任务状态接口。');
     }
 
     const task = await prisma.videoTask.findUnique({
@@ -45,6 +78,7 @@ export async function GET(
         { status: 404 },
       );
     }
+    protectedTask = isPrivateMultiviewTask(task);
     if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
       return NextResponse.json(
         { error: '任务是 IP 生成任务', message: '请使用 IP 任务状态接口查询此任务' },
@@ -62,15 +96,65 @@ export async function GET(
     }
 
     if (!task.provider_task_id) {
-      return NextResponse.json(serializeTaskIdentity(task));
+      if (task.draft_upgrade_mode === 'draft_upgrade' && task.provider_client_request_id) {
+        try {
+          const recovered = await getVideoTaskStatusByClientRequestId(task.provider_client_request_id);
+          if (recovered.provider_task_id && recovered.provider_task_id !== task.provider_client_request_id) {
+            await prisma.videoTask.update({
+              where: { id: task.id },
+              data: {
+                provider_task_id: recovered.provider_task_id,
+                provider_status: recovered.provider_status,
+                raw_status_response: JSON.stringify(recovered.raw),
+                error_message: null,
+              },
+            });
+            const recoveredTask = await prisma.videoTask.findUnique({
+              where: { id: task.id },
+              include: {
+                project: { select: { id: true, name: true, type: true } },
+                video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
+                generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
+                owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+                user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+              },
+            });
+            if (recoveredTask) return NextResponse.json(serializeTaskIdentity(recoveredTask), { headers: { 'Cache-Control': 'private, no-store' } });
+          }
+        } catch {
+          // Provider 查询失败时保留 submitted，下一次轮询继续按 clientRequestId 恢复。
+        }
+      }
+      return NextResponse.json(serializeTaskIdentity(task), { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    const finalizeResult = await finalizeVideoTaskStatus(taskId, {
-      forceProviderRefresh,
-      cacheOnSuccess: true,
-      generateThumbnail: true,
-      createdBy: user.id,
-    });
+    const fastPathDelivery = isVideoDeliveryFastPathTask(task);
+    const shouldRefreshProvider = forceProviderRefresh && !isTerminalLocalStatus(task.local_status);
+    const shouldFinalizeProviderStatus = !(fastPathDelivery && isTerminalLocalStatus(task.local_status));
+    const finalizeResult: Awaited<ReturnType<typeof finalizeVideoTaskStatus>> = shouldFinalizeProviderStatus
+      ? await finalizeVideoTaskStatus(taskId, {
+          forceProviderRefresh: shouldRefreshProvider,
+          cacheOnSuccess: !fastPathDelivery,
+          generateThumbnail: !fastPathDelivery,
+          createdBy: user.id,
+        })
+      : {
+          task,
+          statusRefreshed: false,
+          terminal: true,
+          skippedReason: 'terminal_fast_path_status_cached',
+        };
+
+    if (
+      finalizeResult.task
+      && finalizeResult.task.local_status === 'succeeded'
+      && fastPathDelivery
+    ) {
+      await enqueueVideoDeliveryJob(taskId, {
+        priority: shouldRefreshProvider ? 8 : 3,
+        payload: { source: 'status_route' },
+      });
+    }
 
     const responseTask = await prisma.videoTask.findUnique({
       where: { id: taskId },
@@ -91,14 +175,21 @@ export async function GET(
     }
 
     if (finalizeResult.providerError) {
-      return NextResponse.json({
-        ...serializeTaskIdentity(responseTask),
-        error_message: responseTask.error_message || finalizeResult.providerError,
-      });
+      return NextResponse.json(serializeTaskIdentity({
+        ...responseTask,
+        error_message: visibleProviderErrorMessage(responseTask.error_message || finalizeResult.providerError),
+      }), { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    return NextResponse.json(serializeTaskIdentity(responseTask));
+    return NextResponse.json(serializeTaskIdentity(responseTask), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (protectedTask) {
+      const failure = privateMultiviewFailure(error instanceof Error ? error.message : '', 'unknown');
+      console.error('Get protected multiview task status error:', failure?.code);
+      return NextResponse.json({ error: failure?.code || 'TASK_STATUS_UNAVAILABLE',
+        message: failure?.message || '原任务状态暂时无法确认，请稍后继续核对这个任务。' },
+      { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     console.error('Get task status error:', error);
     return NextResponse.json(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },

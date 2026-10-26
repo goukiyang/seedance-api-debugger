@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, RefreshCcw, RotateCcw, Search } from 'lucide-react';
@@ -10,6 +10,9 @@ import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { RelativeTime } from '@/components/RelativeTime';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import workbenchStyles from '../integrations/workbench.module.css';
 
 type OutputOwner = {
   id: string;
@@ -29,6 +32,9 @@ interface OutputItem {
   local_status: string;
   provider_task_id: string | null;
   model: string;
+  is_draft: boolean;
+  draft_upgrade_mode: string | null;
+  source_draft_task_id: string | null;
   resolution: string | null;
   duration: number | null;
   ratio: string | null;
@@ -40,14 +46,21 @@ interface OutputItem {
   provider_official_amount_minor: number | null;
   provider_official_amount_micros: number | null;
   provider_cost_currency: string | null;
+  public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   reference_image_ids: string | null;
   reference_album_ids: string | null;
   project_id: string | null;
   owner_user_id: string | null;
   retention_status: string;
+  is_enhance_task: boolean;
   user_deleted_at: string | null;
   admin_hidden_at: string | null;
   restored_at: string | null;
@@ -124,16 +137,6 @@ function truncate(value: string, length = 64) {
   return value.length > length ? `${value.slice(0, length)}...` : value;
 }
 
-function formatShortDate(value: string | null) {
-  if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function localStatusLabel(value: string) {
   if (value === 'submitted') return '排队中';
   if (value === 'running') return '生成中';
@@ -147,7 +150,7 @@ function localStatusClass(value: string) {
   if (value === 'submitted') return 'status-submitted';
   if (value === 'running') return 'status-running';
   if (value === 'succeeded') return 'status-succeeded';
-  if (value === 'failed') return 'status-failed';
+  if (value === 'failed') return 'status-cancelled';
   if (value === 'cancelled') return 'status-cancelled';
   return 'status-draft';
 }
@@ -161,7 +164,7 @@ function retentionLabel(value: string) {
 }
 
 function retentionClass(value: string) {
-  if (value === 'user_deleted') return 'status-failed';
+  if (value === 'user_deleted') return 'status-cancelled';
   if (value === 'admin_hidden') return 'status-cancelled';
   if (value === 'retained') return 'status-running';
   return 'status-succeeded';
@@ -181,6 +184,13 @@ function officialChargeText(output: OutputItem) {
     return formatAmountMinorWithFixedCny(output.provider_official_amount_minor, output.provider_cost_currency);
   }
   return '待官方确认';
+}
+
+function providerCostLabel(value: string) {
+  if (value === 'disputed') return '费用记录冲突';
+  if (['official_confirmed', 'reconciled'].includes(value)) return '费用已确认';
+  if (value === 'failed_no_charge') return '已确认未收费';
+  return '费用待核对';
 }
 
 function pointCostText(output: OutputItem) {
@@ -217,8 +227,8 @@ function outputPrimaryMeta(output: OutputItem, referenceCount: number) {
 }
 
 function deletionSummary(output: OutputItem) {
-  if (output.user_deleted_at) return `用户移除 ${formatShortDate(output.user_deleted_at)}`;
-  if (output.admin_hidden_at) return `管理员隐藏 ${formatShortDate(output.admin_hidden_at)}`;
+  if (output.user_deleted_at) return <>用户移除 <RelativeTime value={output.user_deleted_at} /></>;
+  if (output.admin_hidden_at) return <>管理员隐藏 <RelativeTime value={output.admin_hidden_at} /></>;
   return '正常留存';
 }
 
@@ -226,26 +236,39 @@ function sourceSummary(output: OutputItem) {
   return sourceLabel(output);
 }
 
-function OutputFramePreview({ output }: { output: OutputItem }) {
+function OutputFramePreview({ output, returnTo }: { output: OutputItem; returnTo: string }) {
   return (
     <TaskVideoThumbnail
       taskId={output.id}
+      thumbnailUrl={output.thumbnail_url}
+      publicVideoUrl={output.public_video_url}
       localVideoPath={output.local_video_path}
       resultVideoUrl={output.result_video_url}
       resultLastFrameUrl={output.result_last_frame_url}
       status={output.local_status}
-      href={taskDetailHref(output.id, '/admin/outputs')}
+      deliveryStage={output.delivery_stage}
+      previewAvailable={output.preview_available}
+      stableDownloadReady={output.stable_download_ready}
+      retryAfterMs={output.retry_after_ms}
+      isEnhanceTask={output.is_enhance_task}
+      href={taskDetailHref(output.id, returnTo)}
       size="medium"
       className="outputs-preview"
+      reactions={output.local_status === 'succeeded' && ['active', 'retained'].includes(output.retention_status)}
     />
   );
 }
 
 export default function AdminOutputsClient() {
   const searchParams = useSearchParams();
+  const { user } = useAppSession();
+  const readSequence = useRef(0);
+  const lastWrittenQuery = useRef<string | null>(null), skipLocationWrite = useRef(false);
+  const [restoredAccount, setRestoredAccount] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [summary, setSummary] = useState<OutputsResponse['summary'] | null>(null);
   const [pagination, setPagination] = useState<OutputsResponse['pagination'] | null>(null);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [keyword, setKeyword] = useState(() => searchParams.get('keyword') || '');
   const [status, setStatus] = useState(() => searchParams.get('status') || '');
   const [retentionStatus, setRetentionStatus] = useState(() => searchParams.get('retention_status') || '');
@@ -254,8 +277,12 @@ export default function AdminOutputsClient() {
   const [resolution, setResolution] = useState(() => searchParams.get('resolution') || '');
   const [dateFrom, setDateFrom] = useState(() => searchParams.get('date_from') || '');
   const [dateTo, setDateTo] = useState(() => searchParams.get('date_to') || '');
-  const [includeDeleted, setIncludeDeleted] = useState(true);
-  const [page, setPage] = useState(1);
+  const [costStatus, setCostStatus] = useState(() => searchParams.get('cost_status') || '');
+  const [resultStatus, setResultStatus] = useState(() => searchParams.get('result_status') || '');
+  const [attribution, setAttribution] = useState(() => searchParams.get('attribution') || '');
+  const [includeDeleted, setIncludeDeleted] = useState(searchParams.get('include_deleted') !== 'false');
+  const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
+  const [pageSize, setPageSize] = useState(30);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
   const [confirmingHideId, setConfirmingHideId] = useState<string | null>(null);
@@ -265,7 +292,7 @@ export default function AdminOutputsClient() {
   const query = useMemo(() => {
     const params = new URLSearchParams();
     params.set('page', String(page));
-    params.set('limit', '30');
+    params.set('page_size', String(pageSize));
     params.set('include_deleted', includeDeleted ? 'true' : 'false');
     if (keyword.trim()) params.set('keyword', keyword.trim());
     if (status) params.set('status', status);
@@ -275,30 +302,76 @@ export default function AdminOutputsClient() {
     if (resolution) params.set('resolution', resolution);
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
+    if (costStatus) params.set('cost_status', costStatus);
+    if (resultStatus) params.set('result_status', resultStatus);
+    if (attribution) params.set('attribution', attribution);
     return params.toString();
-  }, [dateFrom, dateTo, includeDeleted, keyword, ownerUserId, page, projectId, resolution, retentionStatus, status]);
+  }, [attribution, costStatus, dateFrom, dateTo, includeDeleted, keyword, ownerUserId, page, pageSize, projectId, resolution, resultStatus, retentionStatus, status]);
+  const returnTo = `/admin/outputs?${query}`;
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (restoredAccount === user.id && lastWrittenQuery.current === window.location.search) return;
+    skipLocationWrite.current = restoredAccount === user.id;
+    let params = new URLSearchParams(window.location.search);
+    if (!params.size) {
+      try {
+        const saved: unknown = JSON.parse(localStorage.getItem(`sd2-admin-outputs-v1:${user.id}`) || 'null');
+        if (typeof saved === 'string' && saved.length < 3000) params = new URLSearchParams(saved);
+      } catch { /* Safe filters are optional. */ }
+    }
+    setKeyword(params.get('keyword') || ''); setStatus(params.get('status') || '');
+    setRetentionStatus(params.get('retention_status') || ''); setOwnerUserId(params.get('owner_user_id') || '');
+    setProjectId(params.get('project_id') || ''); setResolution(params.get('resolution') || '');
+    setDateFrom(params.get('date_from') || ''); setDateTo(params.get('date_to') || '');
+    setCostStatus(params.get('cost_status') || ''); setResultStatus(params.get('result_status') || '');
+    setAttribution(params.get('attribution') || ''); setIncludeDeleted(params.get('include_deleted') !== 'false');
+    const nextPage = Number(params.get('page'));
+    setPage(params.has('page') ? nextPage : 1);
+    const nextSize = Number(params.get('page_size') || params.get('limit') || 30);
+    setPageSize(nextSize);
+    if (restoredAccount !== user.id) { setOutputs([]); setSummary(null); setPagination(null); setLoadedQuery(null); }
+    setRestoredAccount(user.id);
+  }, [user?.id, searchParams]);
+
+  useEffect(() => {
+    if (!user?.id || restoredAccount !== user.id) return;
+    if (skipLocationWrite.current) { skipLocationWrite.current = false; return; }
+    const url = `/admin/outputs?${query}`;
+    lastWrittenQuery.current = `?${query}`;
+    if (`${window.location.pathname}${window.location.search}` !== url) window.history.replaceState(window.history.state, '', url);
+  }, [query, restoredAccount, user?.id, searchParams]);
 
   const loadOutputs = async () => {
+    const sequence = ++readSequence.current;
     setLoading(true);
     setError('');
     try {
       const res = await fetch(`/api/admin/outputs?${query}`, { cache: 'no-store' });
       const data = await res.json();
+      if (sequence !== readSequence.current) return;
       if (!res.ok) throw new Error(data.error || '加载产出失败');
+      if (user?.id) {
+        const safe = new URLSearchParams(query); safe.delete('keyword');
+        try { localStorage.setItem(`sd2-admin-outputs-v1:${user.id}`, JSON.stringify(safe.toString())); } catch { /* Persist only successfully read filters, never business rows. */ }
+      }
       setOutputs(data.outputs || []);
       setSummary(data.summary || null);
       setPagination(data.pagination || null);
+      setLoadedQuery(query);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载产出失败');
+      if (sequence === readSequence.current) setError(err instanceof Error ? err.message : '加载产出失败');
     } finally {
-      setLoading(false);
+      if (sequence === readSequence.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!user?.id || restoredAccount !== user.id) return;
     void loadOutputs();
+    return () => { readSequence.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, restoredAccount, user?.id]);
 
   const runAction = async (output: OutputItem, action: 'restore' | 'hide') => {
     setActingId(output.id);
@@ -322,11 +395,11 @@ export default function AdminOutputsClient() {
     }
   };
 
-  const currentTotal = pagination?.total ?? outputs.length;
-  const activeCount = summary?.retention?.active ?? 0;
-  const hiddenCount = (summary?.retention?.user_deleted ?? 0) + (summary?.retention?.admin_hidden ?? 0);
-  const failedCount = summary?.statuses?.failed ?? 0;
-  const succeededCount = summary?.statuses?.succeeded ?? 0;
+  const currentTotal = pagination?.total ?? null;
+  const activeCount = summary ? summary.retention.active || 0 : null;
+  const hiddenCount = summary ? (summary.retention.user_deleted || 0) + (summary.retention.admin_hidden || 0) : null;
+  const failedCount = summary ? summary.statuses.failed || 0 : null;
+  const succeededCount = summary ? summary.statuses.succeeded || 0 : null;
 
   const resetFilters = () => {
     setKeyword('');
@@ -337,13 +410,15 @@ export default function AdminOutputsClient() {
     setResolution('');
     setDateFrom('');
     setDateTo('');
+    setCostStatus(''); setResultStatus(''); setAttribution('');
     setIncludeDeleted(true);
     setConfirmingHideId(null);
     setPage(1);
+    setPageSize(30);
   };
 
   return (
-    <div className="outputs-page">
+    <div className={`outputs-page ${workbenchStyles.surface}`}>
       <PageBanner
         eyebrow="管理员后台"
         title="产出留存"
@@ -358,7 +433,7 @@ export default function AdminOutputsClient() {
 
       {(message || error) && (
         <div className="outputs-message" data-tone={error ? 'error' : 'success'}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
         </div>
       )}
 
@@ -366,13 +441,13 @@ export default function AdminOutputsClient() {
         <div className="outputs-workbench-head">
           <div>
             <h2>产出队列</h2>
-            <p>当前筛选 {currentTotal} 条，优先处理失败、隐藏和归属异常。</p>
+            <p>{currentTotal === null ? loading ? '正在读取当前筛选' : '尚未读取到当前筛选' : `${loadedQuery === query ? '当前筛选' : '上次读取'} ${currentTotal} 条`}{loadedQuery !== query && outputs.length > 0 ? '，当前条件尚未取得新结果，以下保留上次内容。' : '。'}</p>
           </div>
           <div className="outputs-summary-strip" aria-label="产出概览">
-            <span><strong>{succeededCount}</strong> 已完成</span>
-            <span><strong>{activeCount}</strong> 可见</span>
-            <span><strong>{hiddenCount}</strong> 已移除或隐藏</span>
-            <span><strong>{failedCount}</strong> 失败</span>
+            <span><strong>{succeededCount ?? '待读取'}</strong> 已完成</span>
+            <span><strong>{activeCount ?? '待读取'}</strong> 可见</span>
+            <span><strong>{hiddenCount ?? '待读取'}</strong> 已移除或隐藏</span>
+            <span><strong>{failedCount ?? '待读取'}</strong> 失败</span>
           </div>
         </div>
 
@@ -397,6 +472,7 @@ export default function AdminOutputsClient() {
                 className={`outputs-filter-chip${status === value ? ' is-active' : ''}`}
                 onClick={() => {
                   setStatus(value);
+                  if (value !== 'succeeded') setResultStatus('');
                   setPage(1);
                 }}
               >
@@ -421,10 +497,21 @@ export default function AdminOutputsClient() {
             ))}
           </div>
 
+          <div className="outputs-filter-row">
+            <select className="input" aria-label="费用状态" value={costStatus} onChange={event => { setCostStatus(event.target.value); setPage(1); }}>
+              <option value="">全部费用状态</option><option value="pending">费用待核</option><option value="conflict">费用冲突</option><option value="confirmed">费用已确认</option>
+            </select>
+            <select className="input" aria-label="结果文件" value={resultStatus} onChange={event => { setResultStatus(event.target.value); if (event.target.value) setStatus('succeeded'); setPage(1); }}>
+              <option value="">全部结果</option><option value="not_ready">已生成，稳定文件未就绪</option><option value="ready">稳定文件已就绪</option>
+            </select>
+            <label><input type="checkbox" checked={projectId === 'unassigned'} onChange={event => { setProjectId(event.target.checked ? 'unassigned' : ''); setPage(1); }} /> 当前未归属项目</label>
+            <select className="input" aria-label="每页产出数量" value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(1); }}>{[20, 30, 50, 100].map(size => <option key={size} value={size}>每页 {size} 条</option>)}</select>
+          </div>
+
           <details className="outputs-advanced-filters">
             <summary>高级筛选</summary>
             <div>
-              <select className="input" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+              <select className="input" value={status} onChange={(event) => { setStatus(event.target.value); if (event.target.value !== 'succeeded') setResultStatus(''); setPage(1); }}>
                 {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
               <select className="input" value={retentionStatus} onChange={(event) => { setRetentionStatus(event.target.value); setPage(1); }}>
@@ -488,13 +575,13 @@ export default function AdminOutputsClient() {
           <button className="outputs-reset" type="button" onClick={resetFilters}>清空筛选</button>
         </div>
 
-        {loading ? (
+        {loading && outputs.length === 0 ? (
           <div className="outputs-loading-list" aria-label="加载产出">
             {Array.from({ length: 4 }).map((_, index) => (
               <div className="outputs-loading-row" key={index} />
             ))}
           </div>
-        ) : outputs.length === 0 ? (
+        ) : outputs.length === 0 && !error ? (
           <div className="outputs-empty">
             <h3>没有符合条件的产出</h3>
             <p>调整状态或清空筛选后再查看。</p>
@@ -506,10 +593,24 @@ export default function AdminOutputsClient() {
               const referenceCount = parseReferenceCount(output.reference_image_ids);
               return (
                 <article key={output.id} className="outputs-item">
-                  <OutputFramePreview output={output} />
+                  <OutputFramePreview output={output} returnTo={returnTo} />
 
                   <div className="outputs-item-main">
                     <div className="outputs-item-kicker">
+                      {output.is_draft ? (
+                        <span className="status-badge status-badge-enhance">
+                          样片 Draft
+                        </span>
+                      ) : output.source_draft_task_id ? (
+                        <span className="status-badge status-badge-enhance">
+                          Draft 转 1080p
+                        </span>
+                      ) : null}
+                      {output.is_enhance_task && (
+                        <span className="status-badge status-badge-enhance">
+                          超分
+                        </span>
+                      )}
                       <span className={`status-badge ${localStatusClass(output.local_status)}`}>
                         {localStatusLabel(output.local_status)}
                       </span>
@@ -519,7 +620,7 @@ export default function AdminOutputsClient() {
                       <span>{sourceSummary(output)}</span>
                     </div>
 
-                    <Link className="outputs-item-title" href={taskDetailHref(output.id, '/admin/outputs')}>
+                    <Link className="outputs-item-title" href={taskDetailHref(output.id, returnTo)}>
                       {truncate(output.prompt || '无提示词', 112)}
                     </Link>
 
@@ -531,14 +632,16 @@ export default function AdminOutputsClient() {
                       ) : (
                         <span>未归属项目</span>
                       )}
-                      <span>创建 {formatShortDate(output.created_at)}</span>
-                      {output.completed_at && <span>完成 {formatShortDate(output.completed_at)}</span>}
+                      <span>创建 <RelativeTime value={output.created_at} /></span>
+                      {output.completed_at && <span>完成 <RelativeTime value={output.completed_at} /></span>}
                     </div>
 
                     <details className="outputs-audit-details">
                       <summary>审计信息</summary>
                       <div>
                         <span>任务：{shortId(output.id, 14)}</span>
+                        {output.source_draft_task_id && <span>来源 Draft：{shortId(output.source_draft_task_id, 18)}</span>}
+                        {output.draft_upgrade_mode && <span>Draft 流程：{output.draft_upgrade_mode}</span>}
                         <span>来源请求：{shortId(output.source_request_id, 18)}</span>
                         <span>Provider：{shortId(output.provider_task_id, 18)}</span>
                         <span>成本状态：{output.provider_cost_status}</span>
@@ -571,9 +674,10 @@ export default function AdminOutputsClient() {
                       <span>实际扣除</span>
                       <strong>{officialChargeText(output)}</strong>
                       <small>{pointCostText(output)}</small>
+                      <small>{providerCostLabel(output.provider_cost_status)}</small>
                     </div>
                     <div className="outputs-actions">
-                      <Link className="btn btn-secondary" href={taskDetailHref(output.id, '/admin/outputs')}>
+                      <Link className="btn btn-secondary" href={taskDetailHref(output.id, returnTo)}>
                         <Eye size={15} />
                         详情
                       </Link>
@@ -593,7 +697,7 @@ export default function AdminOutputsClient() {
                       )}
                       {output.retention_status !== 'admin_hidden' && (
                         <button
-                          className="btn btn-danger"
+                          className="btn btn-secondary"
                           type="button"
                           disabled={actingId === output.id}
                           onClick={() => {

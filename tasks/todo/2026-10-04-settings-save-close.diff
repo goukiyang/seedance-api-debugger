@@ -1,0 +1,948 @@
+diff --git a/docs/materials/index.md b/docs/materials/index.md
+index 46553ff..60df636 100644
+--- a/docs/materials/index.md
++++ b/docs/materials/index.md
+@@ -1,5 +1,9 @@
+ # 项目资料索引
+ 
++## 设置保存成功关闭（2026-10-04）
++
++2026-10-04，video-api-debugger，用户文字要求“写工单，排查项目同情况，一起修改”，无新附件或原文件名；版本1.0.0，补充全局保存成功关闭规则，不替代即时保存/应用/主工作台语义。主题：设置、异步保存、成功退出、失败保留、多表单草稿、返回来路。[正式工单](../../tasks/todo/2026-10-04-settings-save-close.md)正文可读；图片/视频上下文、旧模板编辑及后台 API 设置实施中。开源参考 Radix Dialog 与 Ant Design ActionButton 的官方文档/实际 Promise 分支，链接在原工单；仅方法借鉴，未引入第三方代码。发布证据待补，功能待用户手动验收。
++
+ ## 主图导航与视频参数反馈工单（2026-10-03）
+ 
+ 项目video-api-debugger；2026-10-02后台两条原文见下节。2026-10-03追加/generate三参数灰色，随后明确取消三参数业务锁（模型合法范围保留），新增I5模板上下文未修改关闭及同类误提醒，I6多任务待确认只读排查。I1-I5已部署v0.36.3，最新运行源码8315f02776290cda1c0f1e7286856d193f95dfca、BUILD TIe6lesNJcjyQirM3FMpx；I3模板导航状态按surface/user本地持久化、迁移旧session记录；[发布证据](../../tasks/todo/2026-10-02-feedback-primary-navigation.evidence.json)/[统一diff](../../tasks/todo/2026-10-02-feedback-primary-navigation.diff)正式归档；最新候选内置检查及4服务/20相关静态/2变更源码一致通过，首次27静态/20源码证据为历史，功能待用户手动验收。I6故障阶段已明确、底层原因无法追溯待查；视频标注原件仍待归档，不称W1附件齐全，反馈new不改。
+diff --git a/package-lock.json b/package-lock.json
+index 4522f95..fdbb754 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.39.0",
++  "version": "0.39.1",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "video-api-debugger",
+-      "version": "0.39.0",
++      "version": "0.39.1",
+       "dependencies": {
+         "@aws-sdk/client-s3": "^3.1041.0",
+         "@aws-sdk/s3-request-presigner": "^3.1041.0",
+diff --git a/package.json b/package.json
+index 34d2d66..c29c1d8 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.39.0",
++  "version": "0.39.1",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/src/app/admin/integrations/AdminIntegrationsClient.tsx b/src/app/admin/integrations/AdminIntegrationsClient.tsx
+index fc0f524..b426863 100644
+--- a/src/app/admin/integrations/AdminIntegrationsClient.tsx
++++ b/src/app/admin/integrations/AdminIntegrationsClient.tsx
+@@ -3,6 +3,7 @@
+ import { FormEvent, useEffect, useMemo, useState } from 'react';
+ import PageBanner from '@/components/PageBanner';
+ import { useProductDialog } from '@/components/useProductDialog';
++import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
+ import { RelativeTime } from '@/components/RelativeTime';
+ import { LoadingSkeleton } from '@/components/LoadingState';
+ import BananaImageChannel from './BananaImageChannel';
+@@ -340,6 +341,16 @@ export default function AdminIntegrationsClient() {
+   const [h3QueueDirection, setH3QueueDirection] = useState<'top' | 'up' | 'down' | 'bottom'>('top');
+   const [h3QueueReason, setH3QueueReason] = useState('');
+   const [h3QueueMessage, setH3QueueMessage] = useState<SubmitState>(null);
++  const [bananaDirty, setBananaDirty] = useState(false);
++  const settingsSubmit = useSettingsPageSubmit({
++    codex: { config, entered: Boolean(token), clearToken },
++    musk: { config: muskConfig, entered: Boolean(muskApiKey), clearMuskApiKey },
++    image: { config: imageConfig, entered: Boolean(imageApiKey), clearImageApiKey },
++    volcengine: { config: volcengineConfig, entered: Boolean(volcengineApiKey), clearVolcengineApiKey },
++    mediakit: { config: aiMediaKitConfig, entered: Boolean(aiMediaKitApiKey), clearAiMediaKitApiKey },
++    h3: { config: h3Config, apiEntered: Boolean(h3ApiToken), adminEntered: Boolean(h3AdminToken), clearH3ApiToken, clearH3AdminToken },
++    banana: bananaDirty,
++  }, !loading, '/admin', confirm, muskTesting || h3Testing || h3QueueLoading);
+ 
+   const statusText = useMemo(() => {
+     if (config.ready) return '已启用，可被 Codex 调用';
+@@ -462,6 +473,8 @@ export default function AdminIntegrationsClient() {
+ 
+   const saveMuskConfig = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setMuskSaving(true);
+     setSubmitState(null);
+     setMuskTestState(null);
+@@ -479,7 +492,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -487,10 +500,12 @@ export default function AdminIntegrationsClient() {
+       setMuskApiKey('');
+       setClearMuskApiKey(false);
+       setSubmitState({ type: 'success', message: 'Musk API 配置已保存到后台配置。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setMuskSaving(false);
++      settingsSubmit.finish('musk', saved);
+     }
+   };
+ 
+@@ -532,6 +547,8 @@ export default function AdminIntegrationsClient() {
+ 
+   const saveImageConfig = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setImageSaving(true);
+     setSubmitState(null);
+ 
+@@ -559,7 +576,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -567,10 +584,12 @@ export default function AdminIntegrationsClient() {
+       setImageApiKey('');
+       setClearImageApiKey(false);
+       setSubmitState({ type: 'success', message: '图形生成 API 配置已保存到后台配置。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setImageSaving(false);
++      settingsSubmit.finish('image', saved);
+     }
+   };
+ 
+@@ -610,6 +629,8 @@ export default function AdminIntegrationsClient() {
+ 
+   const saveVolcengineConfig = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setVolcengineSaving(true);
+     setSubmitState(null);
+ 
+@@ -626,7 +647,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -634,15 +655,19 @@ export default function AdminIntegrationsClient() {
+       setVolcengineApiKey('');
+       setClearVolcengineApiKey(false);
+       setSubmitState({ type: 'success', message: '火山 IP 生成 API 配置已保存到后台配置。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setVolcengineSaving(false);
++      settingsSubmit.finish('volcengine', saved);
+     }
+   };
+ 
+   const saveAiMediaKitConfig = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setAiMediaKitSaving(true);
+     setSubmitState(null);
+ 
+@@ -658,7 +683,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -666,15 +691,19 @@ export default function AdminIntegrationsClient() {
+       setAiMediaKitApiKey('');
+       setClearAiMediaKitApiKey(false);
+       setSubmitState({ type: 'success', message: 'AI MediaKit 视频超分 API 配置已保存到后台配置。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setAiMediaKitSaving(false);
++      settingsSubmit.finish('mediakit', saved);
+     }
+   };
+ 
+   const saveH3Config = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setH3Saving(true);
+     setSubmitState(null);
+     setH3TestState(null);
+@@ -695,7 +724,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -705,10 +734,12 @@ export default function AdminIntegrationsClient() {
+       setClearH3ApiToken(false);
+       setClearH3AdminToken(false);
+       setSubmitState({ type: 'success', message: 'H3 本地生成服务配置已保存。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setH3Saving(false);
++      settingsSubmit.finish('h3', saved);
+     }
+   };
+ 
+@@ -813,6 +844,8 @@ export default function AdminIntegrationsClient() {
+ 
+   const saveConfig = async (event: FormEvent<HTMLFormElement>) => {
+     event.preventDefault();
++    if (!settingsSubmit.start()) return;
++    let saved = false;
+     setSaving(true);
+     setSubmitState(null);
+ 
+@@ -829,7 +862,7 @@ export default function AdminIntegrationsClient() {
+         }),
+       });
+       const data = await res.json();
+-      if (!res.ok) {
++      if (!res.ok || !data.config) {
+         setSubmitState({ type: 'error', message: data.error || data.message || '保存失败' });
+         return;
+       }
+@@ -837,10 +870,12 @@ export default function AdminIntegrationsClient() {
+       setToken('');
+       setClearToken(false);
+       setSubmitState({ type: 'success', message: 'Codex 接口配置已保存到后台配置。' });
++      saved = true;
+     } catch (error) {
+       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '保存失败' });
+     } finally {
+       setSaving(false);
++      settingsSubmit.finish('codex', saved);
+     }
+   };
+ 
+@@ -870,8 +905,9 @@ export default function AdminIntegrationsClient() {
+   }
+ 
+   return (
+-    <div className="admin-integrations-page">
++    <fieldset disabled={settingsSubmit.busy} className="admin-integrations-page" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+       {productDialog}
++      {settingsSubmit.notice && <p role="status">{settingsSubmit.notice}</p>}
+       <PageBanner
+         eyebrow="管理后台"
+         title="API 设置"
+@@ -1554,7 +1590,7 @@ export default function AdminIntegrationsClient() {
+         )}
+       </form>
+ 
+-      <BananaImageChannel />
++      <BananaImageChannel onDirtyChange={setBananaDirty} onSaveStart={settingsSubmit.start} onSaveFinish={saved => settingsSubmit.finish('banana', saved)} />
+ 
+       <form className="card codex-config-form" onSubmit={saveImageConfig}>
+         <div className="codex-config-head">
+@@ -1951,6 +1987,6 @@ export default function AdminIntegrationsClient() {
+         </div>
+ 
+       </form>
+-    </div>
++    </fieldset>
+   );
+ }
+diff --git a/src/app/admin/integrations/BananaImageChannel.tsx b/src/app/admin/integrations/BananaImageChannel.tsx
+index 5df4094..4f4e047 100644
+--- a/src/app/admin/integrations/BananaImageChannel.tsx
++++ b/src/app/admin/integrations/BananaImageChannel.tsx
+@@ -1,38 +1,48 @@
+ 'use client';
+ 
+-import { useEffect, useState, type FormEvent } from 'react';
++import { useEffect, useRef, useState, type FormEvent } from 'react';
+ import { Save } from 'lucide-react';
+ 
+ type Config = { enabled: boolean; ready: boolean; base_url: string; api_key_configured: boolean };
+ const endpoint = '/api/admin/integrations/banana-image';
+ 
+-export default function BananaImageChannel() {
++export default function BananaImageChannel({ onDirtyChange, onSaveStart, onSaveFinish }: {
++  onDirtyChange(dirty: boolean): void; onSaveStart(): boolean; onSaveFinish(saved: boolean): void;
++}) {
+   const [config, setConfig] = useState<Config | null>(null);
+   const [apiKey, setApiKey] = useState('');
+   const [clearKey, setClearKey] = useState(false);
+   const [saving, setSaving] = useState(false);
+   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
++  const baseline = useRef('');
++  const signature = JSON.stringify(config);
++  useEffect(() => { onDirtyChange(Boolean(config && (signature !== baseline.current || apiKey || clearKey))); }, [signature, apiKey, clearKey, config, onDirtyChange]);
+   const load = async () => {
+     try {
+       const response = await fetch(endpoint, { cache: 'no-store' });
+       const data = await response.json();
+       if (!response.ok || !data.config) throw new Error(data.error || '读取通道失败');
++      baseline.current = JSON.stringify(data.config);
+       setConfig(data.config); setNotice(null);
+     } catch { setNotice({ error: true, text: '读取 Banana 通道失败，请重试' }); }
+   };
+   useEffect(() => { void load(); }, []);
+   const save = async (event: FormEvent) => {
+     event.preventDefault();
+-    if (!config || saving) return;
++    if (!config || saving || !onSaveStart()) return;
++    let saved = false;
+     setSaving(true); setNotice(null);
+     try {
+       const response = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: config.enabled, base_url: config.base_url, api_key: apiKey, clear_api_key: clearKey }) });
+       const data = await response.json();
+       if (!response.ok || !data.config) throw new Error(data.error || '保存失败，请重试');
++      baseline.current = JSON.stringify(data.config);
+       setConfig(data.config); setApiKey(''); setClearKey(false);
++      onDirtyChange(false);
++      saved = true;
+       setNotice({ error: false, text: data.config.ready ? '已保存，新发起的 Banana 请求将使用此通道。' : '已保存，Banana 通道未启用。' });
+     } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : '保存失败，请重试' }); }
+-    finally { setSaving(false); }
++    finally { setSaving(false); onSaveFinish(saved); }
+   };
+   return <form id="banana-image-channel" className="card codex-config-form" onSubmit={save}>
+     <div className="codex-config-head">
+diff --git a/src/app/image-studio/global-settings-dialog.tsx b/src/app/image-studio/global-settings-dialog.tsx
+index ea2adab..9c0d99a 100644
+--- a/src/app/image-studio/global-settings-dialog.tsx
++++ b/src/app/image-studio/global-settings-dialog.tsx
+@@ -16,6 +16,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+   const { confirm, productDialog } = useProductDialog();
+   const dialog = useRef<HTMLDialogElement>(null);
+   const contextInput = useRef<HTMLTextAreaElement>(null);
++  const saveLock = useRef(false);
+   useEffect(() => {
+     if (open) dialog.current?.showModal();
+     else dialog.current?.close();
+@@ -30,9 +31,13 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+     if (!editor.dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) void editor.controller.load(true);
+   };
+   const save = async () => {
+-    if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
+-      && !(await confirm('确定清空通用上下文？这会影响所有模板之后的新生成，模板自己的上下文会保留。', { title: '清空上下文', confirmLabel: '清空并保存', danger: true }))) return;
+-    void editor.controller.save();
++    if (saveLock.current || editor.saving || editor.loading) return;
++    saveLock.current = true;
++    try {
++      if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
++        && !(await confirm('确定清空通用上下文？这会影响所有模板之后的新生成，模板自己的上下文会保留。', { title: '清空上下文', confirmLabel: '清空并保存', danger: true }))) return;
++      if (await editor.controller.save()) onClose();
++    } finally { saveLock.current = false; }
+   };
+   return <>{productDialog}{(<dialog ref={dialog} className={styles.dialog}>
+     <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
+@@ -47,7 +52,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+           placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
+           onChange={event => editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value))} />
+       </label>)}
+-      <button type="button" className={styles.primary} disabled={!editor.dirty || editor.loading || editor.saving} onClick={save}><Save size={16} />保存设置</button>
++      <button type="button" className={styles.primary} disabled={!editor.dirty || editor.loading || editor.saving} onClick={save}><Save size={16} />{editor.saving ? '正在保存' : '保存设置'}</button>
+     </>}
+     <p role="status">{editor.status || '正在读取通用设置'}</p>
+     {editor.error && <div role="alert" className={styles.error}>{editor.error}
+diff --git a/src/app/image-studio/settings-controller.ts b/src/app/image-studio/settings-controller.ts
+index ed6c36b..4070d62 100644
+--- a/src/app/image-studio/settings-controller.ts
++++ b/src/app/image-studio/settings-controller.ts
+@@ -79,7 +79,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
+       update({ draft: { ...state.draft, prices: { ...state.draft.prices, [model]: price } }, status: '设置未保存' });
+     },
+     async save() {
+-      if (!isAdmin || !state.settings || !state.draft || state.loading || state.saving || !studioSettingsDirty(state)) return;
++      if (!isAdmin || !state.settings || !state.draft || state.loading || state.saving || !studioSettingsDirty(state)) return false;
+       ++readSequence;
+       const contextChanged = state.draft.context !== state.settings.context;
+       const payload: SettingsWrite = { revision: state.settings.revision, prices: { ...state.draft.prices },
+@@ -87,13 +87,17 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
+       const baseline = state.settings;
+       update({ saving: true, error: '', status: '正在保存' });
+       try {
+-        const value = { ...baseline, ...await transport.write(payload) };
+-        validate(value);
++        const saved = await transport.write(payload);
++        validate(saved);
++        if (saved.revision <= baseline.revision) throw new Error('保存结果尚未确认，当前输入已保留，请重新读取核对');
++        const value = { ...baseline, ...saved };
+         value.contextConfigured = Boolean(value.context?.trim());
+         update({ settings: value, saving: false });
+         update({ status: studioSettingsDirty(state) ? '有新的修改尚未保存' : '已保存，下次生成生效' });
++        return !studioSettingsDirty(state);
+       } catch (error) {
+         update({ saving: false, status: '未保存', error: error instanceof Error ? error.message : '保存失败，请重试' });
++        return false;
+       }
+     },
+   };
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index d44cced..1383735 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -700,6 +700,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: styleGroups.map(group => group.id),
+     model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
+   const contextDialogOpening = useRef('');
++  const latestSettingsDraft = useRef('');
++  latestSettingsDraft.current = JSON.stringify({ moduleDraft, fixedReferences: fixedReferencePayload(fixedReferences) });
++  async function saveModuleSettings() {
++    const submitted = latestSettingsDraft.current;
++    const result = await saveModule();
++    if (result !== false && latestSettingsDraft.current === submitted) moduleDialog.current?.close();
++  }
+   function openModuleDialog() {
+     if (!draftLoaded || draftRestoring) return;
+     contextDialogOpening.current = contextDialogSnapshot;
+@@ -757,6 +764,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     try {
+       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ id: module.id, revision: revisionOverride, ...snapshot, context: contextEditable ? contextSnapshot : undefined, fixedReferences: fixedEditable && (manualSettings || fixedOverride) ? fixedReferencePayload(fixedSnapshot) : undefined }) }));
++      if (!Number.isInteger(result.revision) || result.revision <= revisionOverride) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
+       revisionRef.current = result.revision;
+       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
+       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
+@@ -1679,9 +1687,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       </div>
+       <div className={styles.moduleSettingsActions}>
+         <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
+-        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
++        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
+       </div>
+-      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
++      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button disabled={moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button></p>}
+       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
+         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
+       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
+diff --git a/src/components/AppShell.tsx b/src/components/AppShell.tsx
+index 4a89528..051264b 100644
+--- a/src/components/AppShell.tsx
++++ b/src/components/AppShell.tsx
+@@ -8,9 +8,11 @@ import FeedbackWidget from './FeedbackWidget';
+ import templateStudioStyles from './template-studio/template-studio.module.css';
+ import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
++import { rememberSettingsOrigin } from '@/lib/navigation/settings-return';
+ 
+ export default function AppShell({ children }: { children: React.ReactNode }) {
+   const pathname = usePathname();
++  useEffect(() => { rememberSettingsOrigin(); }, [pathname]);
+   const {
+     user,
+     credits,
+diff --git a/src/components/GenerationComposer.tsx b/src/components/GenerationComposer.tsx
+index 65c44f9..f8df5aa 100644
+--- a/src/components/GenerationComposer.tsx
++++ b/src/components/GenerationComposer.tsx
+@@ -1404,7 +1404,7 @@ export function GenerationComposer({
+   }, []);
+ 
+   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
+-    if (!selectedTemplate) return;
++    if (!selectedTemplate) return false;
+     setTemplateSaveBusy(true);
+     setTemplateSaveError(null);
+     try {
+@@ -1414,11 +1414,12 @@ export function GenerationComposer({
+         body: JSON.stringify(payload),
+       });
+       const data = await res.json();
+-      if (!res.ok) throw new Error(data.message || data.error || '模板保存失败');
++      if (!res.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
+       await loadTemplates(data.template?.id || selectedTemplate.id);
+-      setTemplateDrawerOpen(false);
++      return true;
+     } catch (error) {
+       setTemplateSaveError(error instanceof Error ? error.message : '模板保存失败');
++      return false;
+     } finally {
+       setTemplateSaveBusy(false);
+     }
+diff --git a/src/components/template-studio/VideoContextEditor.tsx b/src/components/template-studio/VideoContextEditor.tsx
+index ef6d846..ba08f3d 100644
+--- a/src/components/template-studio/VideoContextEditor.tsx
++++ b/src/components/template-studio/VideoContextEditor.tsx
+@@ -19,7 +19,12 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+   const backdropRef = useRef<HTMLDivElement>(null);
+   const dialogRef = useRef<HTMLElement>(null);
+   const contextInput = useRef<HTMLTextAreaElement>(null);
++  const saveLock = useRef(false);
++  const latestText = useRef(text);
++  latestText.current = text;
+   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
++  const latestUrl = useRef(url);
++  latestUrl.current = url;
+   useEffect(() => {
+     const controller = new AbortController();
+     void fetch(url, { cache: 'no-store', signal: controller.signal }).then(async response => {
+@@ -31,15 +36,22 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+     return () => controller.abort();
+   }, [url]);
+   async function save() {
+-    if (!value?.canEdit || busy) return;
++    if (!value?.canEdit || busy || saveLock.current) return;
++    saveLock.current = true;
++    const submitted = text;
++    const target = url;
+     setBusy(true); setMessage('');
+     try {
+-      const response = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: text, revision: value.revision }) });
++      const response = await fetch(target, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: submitted, revision: value.revision }) });
+       const data = await response.json();
+       if (!response.ok) throw new Error(response.status < 500 ? data.error : '保存失败，编辑仍保留，请重试');
+-      setValue(data); setMessage('已保存');
++      if (typeof data.context !== 'string' || !Number.isInteger(data.revision) || data.revision <= value.revision) throw new Error('保存结果尚未确认，当前输入已保留，请核对后重试');
++      if (latestUrl.current !== target) return;
++      setValue(data);
++      if (latestText.current === submitted) onClose();
++      else setMessage('已保存提交的内容，还有新的修改未保存');
+     } catch (error) { setMessage(error instanceof Error ? error.message : '保存失败'); }
+-    finally { setBusy(false); }
++    finally { saveLock.current = false; setBusy(false); }
+   }
+   async function close() {
+     if (busy) return;
+diff --git a/src/components/template-studio/VideoTemplateWorkbench.tsx b/src/components/template-studio/VideoTemplateWorkbench.tsx
+index aa29ff4..2cc6aef 100644
+--- a/src/components/template-studio/VideoTemplateWorkbench.tsx
++++ b/src/components/template-studio/VideoTemplateWorkbench.tsx
+@@ -399,6 +399,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+   const [templateConflict, setTemplateConflict] = useState<{ id: string; source: StudioTemplateDto['source'] } | null>(null);
+   const [templateRecoveryAvailable, setTemplateRecoveryAvailable] = useState(false);
+   const [templateEditBusy, setTemplateEditBusy] = useState(false);
++  const templateSaveLock = useRef(false);
+   const [createTemplateOpen, setCreateTemplateOpen] = useState(false);
+   const createTemplateBackdropRef = useRef<HTMLDivElement>(null);
+   const createTemplateDialogRef = useRef<HTMLElement>(null);
+@@ -1432,7 +1433,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+   }
+ 
+   async function saveTemplateEdit() {
+-    if (!templateEdit) return;
++    if (!templateEdit || templateEditBusy || templateSaveLock.current) return;
++    templateSaveLock.current = true;
+     setTemplateEditBusy(true);
+     try {
+       const body: UpdateStudioTemplateRequest = {
+@@ -1447,6 +1449,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+       });
+       const saved = 'template' in response ? response.template : response;
++      if (!saved?.id || !Number.isInteger(saved.revision) || saved.revision <= templateEdit.revision) throw new Error('保存结果尚未确认，当前编辑已保留，请核对后重试');
+       setTemplates((current) => current.map((item) => item.id === saved.id ? saved : item));
+       templateEditBaseline.current = null;
+       setTemplateEdit(null);
+@@ -1467,7 +1470,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+       }
+       setNotice(messageForFailure(error));
+     }
+-    finally { setTemplateEditBusy(false); }
++    finally { templateSaveLock.current = false; setTemplateEditBusy(false); }
+   }
+ 
+   async function publishTemplate(template: StudioTemplateDto) {
+@@ -2006,10 +2009,10 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
+           <section ref={templateEditDialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
+             <h2 id="template-edit-title">编辑模板草稿</h2>
+             {templateConflict?.id === templateEdit.id && <div className={`${styles.callout} ${styles.calloutWarning}`} role="alert"><span>服务器上的模板已更新。当前输入仍保留；重新载入会放弃这些编辑。</span><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={() => void reloadConflictedTemplate()}>载入最新版本</button></div>}
+-            <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
+-            <div className={styles.field}><label htmlFor="studio-template-group-name">用途分组</label><input id="studio-template-group-name" value={templateEdit.groupName} maxLength={80} onChange={(event) => setTemplateEdit((current) => current ? { ...current, groupName: event.target.value } : current)} /></div>
+-            <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
+-            <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
++            <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" disabled={templateEditBusy} value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
++            <div className={styles.field}><label htmlFor="studio-template-group-name">用途分组</label><input id="studio-template-group-name" disabled={templateEditBusy} value={templateEdit.groupName} maxLength={80} onChange={(event) => setTemplateEdit((current) => current ? { ...current, groupName: event.target.value } : current)} /></div>
++            <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" disabled={templateEditBusy} value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
++            <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" disabled={templateEditBusy} value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
+             <span className={styles.fieldHint}>字段、素材槽位和推荐参数沿用当前配方；修改配方结构由现有模板维护权限控制。</span>
+             <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={closeTemplateEditor}>取消</button><button className={styles.primaryButton} type="button" disabled={templateEditBusy || Boolean(templateConflict?.id === templateEdit.id) || !templateEdit.name.trim()} onClick={() => void saveTemplateEdit()}>{templateEditBusy ? '保存中' : '保存模板草稿'}</button></div>
+           </section>
+diff --git a/src/components/templates/AdminTemplatesClient.tsx b/src/components/templates/AdminTemplatesClient.tsx
+index 3d4bd6f..32ba4e7 100644
+--- a/src/components/templates/AdminTemplatesClient.tsx
++++ b/src/components/templates/AdminTemplatesClient.tsx
+@@ -119,7 +119,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
+   const issues = publishIssues(selectedTemplate);
+ 
+   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
+-    if (!selectedTemplate) return;
++    if (!selectedTemplate) return false;
+     setSaving(true);
+     setSaveError(null);
+     try {
+@@ -129,11 +129,12 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
+         body: JSON.stringify(payload),
+       });
+       const data = await response.json();
+-      if (!response.ok) throw new Error(data.error || data.message || '模板保存失败');
++      if (!response.ok || !data.template?.id) throw new Error(data.error || data.message || '模板保存结果尚未确认');
+       await loadTemplates(data.template?.id || selectedTemplate.id);
+-      if (!detailWorkspaceMode) setDrawerOpen(false);
++      return true;
+     } catch (saveTemplateError) {
+       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
++      return false;
+     } finally {
+       setSaving(false);
+     }
+diff --git a/src/components/templates/TemplateEditorDrawer.tsx b/src/components/templates/TemplateEditorDrawer.tsx
+index 5d8cb73..8321bb0 100644
+--- a/src/components/templates/TemplateEditorDrawer.tsx
++++ b/src/components/templates/TemplateEditorDrawer.tsx
+@@ -21,7 +21,7 @@ type Props = {
+   variant?: 'drawer' | 'inline' | 'card';
+   cardId?: string | null;
+   onClose: () => void;
+-  onSave: (payload: Record<string, unknown>) => Promise<void>;
++  onSave: (payload: Record<string, unknown>) => Promise<boolean>;
+ };
+ 
+ type ContextCardsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+@@ -107,6 +107,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+   const dialogRef = useRef<HTMLElement>(null);
+   const shellRef = useRef<HTMLElement | null>(null);
+   const backdropRef = useRef<HTMLButtonElement>(null);
++  const saveLock = useRef(false);
++  const [manualSaving, setManualSaving] = useState(false);
+ 
+   useEffect(() => {
+     if (!template) return;
+@@ -202,7 +204,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+   };
+ 
+   const requestClose = async () => {
+-    if (saving) return;
++    if (saving || saveLock.current) return;
+     const cardsDirty = JSON.stringify(contextCards) !== initialCardsJsonRef.current;
+     const fieldsDirty = Boolean(template && (
+       name !== template.name
+@@ -213,6 +215,17 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+     if ((cardsDirty || fieldsDirty) && !(await confirm('模板修改尚未全部保存，确定关闭？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+     onClose();
+   };
++  const save = async () => {
++    if (!payload || saving || saveLock.current || contextCardsSaveStatus === 'saving') return;
++    saveLock.current = true;
++    setManualSaving(true);
++    try {
++      if (await onSave(payload)) {
++        initialCardsJsonRef.current = JSON.stringify(contextCards);
++        if (variant !== 'inline') onClose();
++      }
++    } finally { saveLock.current = false; setManualSaving(false); }
++  };
+ 
+   useDialogDismiss({
+     open: open && variant !== 'inline' && Boolean(template && payload),
+@@ -220,8 +233,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+     dismissSurfaceRef: shellRef,
+     isDismissTarget: (target) => target === backdropRef.current || target === shellRef.current,
+     onDismiss: requestClose,
+-    dismissOnOutside: !saving,
+-    dismissOnEscape: !saving,
++    dismissOnOutside: !saving && !manualSaving,
++    dismissOnEscape: !saving && !manualSaving,
+   });
+ 
+   if (!open || !template || !payload) return null;
+@@ -237,8 +250,8 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+               ? '卡片保存失败'
+               : '卡片修改会自动保存'}
+       </span>
+-      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving} onClick={() => onSave(payload)} disabled={saving || !name.trim()}>
+-        {saving ? '保存中...' : '保存模板版本'}
++      <button type="button" className="is-primary sd2-loading-surface" data-busy={saving || manualSaving} onClick={() => void save()} disabled={saving || manualSaving || contextCardsSaveStatus === 'saving' || !name.trim()}>
++        {saving || manualSaving ? '保存中...' : '保存模板版本'}
+       </button>
+     </>
+   );
+@@ -251,7 +264,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+             <span>模板工作台</span>
+             <h2>{template.name}</h2>
+           </div>
+-          {variant === 'drawer' && <button type="button" onClick={onClose}>关闭</button>}
++          {variant === 'drawer' && <button type="button" disabled={saving || manualSaving} onClick={requestClose}>关闭</button>}
+           {variant === 'inline' && (
+             <div className="template-drawer-head-actions">
+               {editorActions}
+@@ -262,6 +275,7 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+ 
+       {error && <div className="template-drawer-error">{error}</div>}
+ 
++      <fieldset disabled={saving || manualSaving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+       <TemplateContextCardsPanel
+         cards={contextCards}
+         saveStatus={contextCardsSaveStatus}
+@@ -271,9 +285,10 @@ export function TemplateEditorDrawer({ open, template, saving = false, error, va
+         editorMode={variant === 'card' ? 'card-page' : 'overview'}
+         editingCardId={cardId}
+         backHref={`/admin/templates/${template.id}`}
+-        onChange={setContextCards}
++        onChange={cards => { if (!saveLock.current && !saving) setContextCards(cards); }}
+         onRewriteCard={rewriteContextCard}
+       />
++      </fieldset>
+     </>
+   );
+ 
+diff --git a/src/components/templates/TemplateLibraryClient.tsx b/src/components/templates/TemplateLibraryClient.tsx
+index 6440f85..f066419 100644
+--- a/src/components/templates/TemplateLibraryClient.tsx
++++ b/src/components/templates/TemplateLibraryClient.tsx
+@@ -223,7 +223,7 @@ export function TemplateLibraryClient() {
+   }, [router, selectedView]);
+ 
+   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
+-    if (!selectedView) return;
++    if (!selectedView) return false;
+     setSavingTemplate(true);
+     setSaveError(null);
+     try {
+@@ -233,11 +233,12 @@ export function TemplateLibraryClient() {
+         body: JSON.stringify(payload),
+       });
+       const data = await response.json();
+-      if (!response.ok) throw new Error(data.message || data.error || '模板保存失败');
++      if (!response.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
+       await loadTemplates(data.template?.id || selectedView.template.id);
+-      setDrawerOpen(false);
++      return true;
+     } catch (saveTemplateError) {
+       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
++      return false;
+     } finally {
+       setSavingTemplate(false);
+     }
+diff --git a/src/lib/hooks/use-settings-page-submit.ts b/src/lib/hooks/use-settings-page-submit.ts
+new file mode 100644
+index 0000000..8fdffc7
+--- /dev/null
++++ b/src/lib/hooks/use-settings-page-submit.ts
+@@ -0,0 +1,50 @@
++'use client';
++
++import { useEffect, useRef, useState } from 'react';
++import { useRouter } from 'next/navigation';
++import { settingsReturnTarget } from '@/lib/navigation/settings-return';
++import { useUnsavedNavigation } from './use-unsaved-navigation';
++
++export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string, confirm: Parameters<typeof useUnsavedNavigation>[1], working = false) {
++  const router = useRouter();
++  const snapshots = Object.fromEntries(Object.entries(drafts).map(([key, value]) => [key, JSON.stringify(value)]));
++  const baseline = useRef<Record<string, string> | null>(null);
++  const lock = useRef(false);
++  const [busy, setBusy] = useState(false);
++  const [completed, setCompleted] = useState<string | null>(null);
++  const [notice, setNotice] = useState('');
++  const signature = JSON.stringify(snapshots);
++  const dirty = Boolean(baseline.current && Object.keys(snapshots).some(key => snapshots[key] !== baseline.current![key]));
++  useUnsavedNavigation(dirty || busy || working, confirm, {
++    unsaved: dirty ? ['后台设置'] : [], busy: busy ? ['设置正在保存'] : working ? ['通道操作正在进行'] : [],
++  });
++
++  useEffect(() => {
++    if (!ready) return;
++    const next: Record<string, string> = JSON.parse(signature);
++    if (!baseline.current) baseline.current = next;
++    if (!completed) return;
++    baseline.current[completed] = next[completed];
++    setCompleted(null);
++    if (Object.keys(next).some(key => next[key] !== baseline.current![key])) {
++      lock.current = false;
++      setNotice('已保存这项设置；其他设置还有未保存的修改，当前页面已保留。');
++      return;
++    }
++    router.push(settingsReturnTarget(fallback));
++  }, [completed, fallback, ready, router, signature]);
++
++  return {
++    busy: busy || working, notice,
++    start() {
++      if (!ready || lock.current || working) return false;
++      lock.current = true; setBusy(true); setNotice('');
++      return true;
++    },
++    finish(key: string, saved = false) {
++      if (saved) setCompleted(key);
++      else lock.current = false;
++      setBusy(false);
++    },
++  };
++}
+diff --git a/src/lib/navigation/settings-return.ts b/src/lib/navigation/settings-return.ts
+new file mode 100644
+index 0000000..98f8b5c
+--- /dev/null
++++ b/src/lib/navigation/settings-return.ts
+@@ -0,0 +1,26 @@
++'use client';
++
++let current = '';
++let previous = '';
++
++export function rememberSettingsOrigin() {
++  const next = window.location.pathname + window.location.search + window.location.hash;
++  if (next === current) return;
++  previous = current;
++  current = next;
++}
++
++export function settingsReturnTarget(fallback: string) {
++  const here = new URL(window.location.href);
++  const requested = here.searchParams.get('return_to');
++  for (const candidate of [requested, previous, document.referrer]) {
++    if (!candidate || /[\\\u0000-\u001f\u007f]/.test(candidate)) continue;
++    try {
++      const target = new URL(candidate, here.origin);
++      if (target.origin !== here.origin || target.pathname === here.pathname
++        || !/^\/(admin|generate|template-studio|template-generate|templates|image-studio|projects|video-cards|assets|tasks|tools|workbench|collections|cutout|account|points|dashboard|notifications|approvals|help|config|videos)(\/|$)/.test(target.pathname)) continue;
++      return target.pathname + target.search + target.hash;
++    } catch { /* Invalid or external origins fall back to the owning page. */ }
++  }
++  return fallback;
++}
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index e3ddea4..af50ed5 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '另存模板后可在默认旁快捷套用；点击历史生成图片会恢复当时的上下文提示词，不混入当前上下文。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '设置保存成功后自动关闭或返回；保存失败保留输入，多个设置同时编辑时不会丢掉未保存内容。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);
+diff --git a/tasks/todo.md b/tasks/todo.md
+index d52094f..49ef7d1 100644
+--- a/tasks/todo.md
++++ b/tasks/todo.md
+@@ -2,6 +2,7 @@
+ 
+ ## 当前入口
+ 
++- [设置保存成功关闭统一修正 S1/S2](todo/2026-10-04-settings-save-close.md)：2026-10-04 已授权排查并实施；图片/视频上下文、模板编辑弹窗及后台 API 设置统一成功退出、失败留输入，多表单与新草稿保护。隔离分支实施中，自动发布后待用户手动验收。
+ - [D1统一素材库实施与发布](todo/2026-10-02-unified-resource-library.md#10-最新设计实施与发布2026-10-03)：按设计v1.2.0与v2原图实施；图片/视频参考直接开库，库内上传、类型/来源分离，真实图集/项目、全范围搜索、收藏、最近选用与顺序添加接通。v0.37.0已部署正式站（应用源码6d2f390，来自codex/canvas-liblib-layout，本目录仅同步记录）；构建/远端/公网/回退证据见工单，待用户手动验收。L2部分完成：use-only且无原图下载权限的共享/公共图片不能用于图片工作台，明确禁选；视频参考保留原ReferenceImage适配。[资料索引](../docs/materials/index.md#统一素材库批准实施)。
+ - [C3/C4更新提醒](todo/2026-10-02-feedback-primary-navigation.md#c3c4更新刷新与外部提醒2026-10-03)：已部署v0.36.10，源码b26f9d216949c3601d2cc36d050e6fc922422ab1、BUILD MFC_yPnyTMuIibuxAwjsx；去掉无条件刷新二次确认，安全存入浏览器的模板草稿不误报丢失，真正保存/上传未完成及保存失败仍保护。外部保留版本提醒及刷新入口，不展示/返回更新摘要；23公网静态/8源码一致，4服务active，待用户手动验收。[原图索引](../docs/materials/index.md#更新刷新重复提醒与外部摘要)、[统一diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
+ - [C2外部视频扣费金额](todo/2026-10-02-feedback-primary-navigation.md#c2金额显示续办2026-10-03)：已部署v0.36.9，源码527d925ae1943557d164858f0a74cc7e1fd62c85、BUILD gbpec82z8F5gOaOcQAm6y；同普通生成账单模型/参考类型费率×真实生成用量显示金额，实扣优先、估算注明；19公网静态/8源码一致及4服务active，待用户手动；无现金账务回写或权限修改。[资料](../docs/materials/index.md#外部账号视频封面费用)、[diff](todo/2026-10-02-feedback-primary-navigation.diff)、[证据](todo/2026-10-02-feedback-primary-navigation.evidence.json)。
+diff --git a/tasks/todo/2026-10-04-settings-save-close.md b/tasks/todo/2026-10-04-settings-save-close.md
+new file mode 100644
+index 0000000..31e1bb4
+--- /dev/null
++++ b/tasks/todo/2026-10-04-settings-save-close.md
+@@ -0,0 +1,72 @@
++# 设置保存成功关闭统一修正
++
++项目：video-api-debugger
++工单版本：1.0.0
++正式版本来源：package.json，应用 src/lib/release.ts 和既有 ReleaseNotice 共用
++开工需重锁版本：是，发布前重新核对生产 commit、BUILD_ID 和发布活动
++目标路径：/Volumes/Data/Projects/video-api-debugger
++正式入口：https://sd2.youdooart.com
++状态：实现完成；最终候选构建与正式发布中，功能待用户手动验收
++风险等级：UI L2；服务器发布 L3，回退及数据保护必需
++最后更新时间：2026-10-04（Asia/Shanghai）
++
++## 目标与边界
++
++来源：用户先确认跨项目规则“设置保存成功后关闭”，随后明确“写工单，排查项目同情况，一起修改”。用户仅提供文字，本轮无新图片、视频或音频附件。
++
++显式保存/确定须等校验通过、实际保存成功后关闭设置层；失败或未确认结果保留输入。独立二级设置页返回真实来路，无有效来路返回所属功能页。保护同时编辑其他设置、保存中产生的新输入；不增加成功确认步骤。保留即时保存、应用、保存并继续、主工作台的持续编辑语义。
++
++不改生成、点数、登录、权限、支付、Provider、数据库、上传及实际配置内容；只改设置提交后的前端行为。无依赖安装，无业务或浏览器功能验收，无子 agent。已授权自动提交、推送、候选构建、正式发布；实际效果由用户手动验收。
++
++## 固定任务清单
++
++| 编号 | 任务 | 完成标准 | 状态 |
++|---|---|---|---|
++| S1 | 工单、同类排查与统一修正 | 工单存入项目；设置保存成功后关闭，失败保留输入 | 已完成（实现，功能待手动） |
++| S2 | 提交与正式发布 | 可回退、正式站新版本可访问；功能待用户手动验收 | 进行中 |
++
++## 同类排查与处理
++
++| 入口 | 代码及原因 | 处理 |
++|---|---|---|
++| 图片通用上下文 | global-settings-dialog.tsx 不等待保存；settings-controller.ts 吞掉失败且无可判定返回值 | 返回实际保存结果；确认修订号推进后关闭，无新输入才关闭 |
++| 图片模块上下文 | studio.tsx 保存模块配置后未关闭 native dialog | 仅设置弹窗保存/重试入口关闭；保存期间出现新草稿则保持打开 |
++| 视频通用/模块上下文 | VideoContextEditor.tsx 更新已保存值但未退出 | 同步已保存值，确认结果后关闭；失败/迟到响应/新输入保护 |
++| 旧模板编辑抽屉及卡片编辑 | TemplateEditorDrawer.tsx 由三个调用方控制关闭，失败返回 void；保存期间编辑仍可改变 | 共享组件按 boolean 成功结果退出；提交锁及字段锁定；三个调用方返回真实结果 |
++| 视频模板草稿编辑 | VideoTemplateWorkbench.tsx 本已成功后关闭，但编辑控件保存中仍可输入 | 保持关闭行为，补提交中编辑保护 |
++| 后台 API 设置页（六组及 Banana） | AdminIntegrationsClient.tsx、BananaImageChannel.tsx 保存后停留；多表单同时编辑 | 共用提交锁，缺完整保存返回不退出；其他表单脏值保留，无其他修改才安全返回来路 |
++| 参考图备注、分享/收藏/偏好、上下文卡片 | 即时保存或“应用”，已按各自模式工作 | 不因单字段保存关闭 |
++| 画布保存、模板主编辑页、项目详情中的内嵌设置、额度规则草稿、反馈详情 | 常驻工作台/业务编辑而非临时设置层；额度发布及反馈处理有后续动作 | 不机械关闭整个工作台，不改变业务发布或审批 |
++
++## 实施与验证
++
++- [x] 整批实现上述 UI 及共享调用配套，正式主目录登记工单和资料索引。
++- [ ] 全部修改后统一 git diff --check、完整差异只读复核；仅执行发布需要的 Next.js 候选 build（含 lint/type）。初候选通过，复核补齐返回覆盖与未保存保护后仅重建最终影响范围。
++- [x] 共用 SemVer 版本来源升一次 PATCH，更新现有 release 摘要，不重复新建更新系统；外部账号摘要仍按既有隐藏约定处理。
++- [x] 保护未提交工作，用隔离分支 codex/settings-save-close-20261004；基于生产 138a2c70493ff91a87feab1de4a6aebd76f2c0fa 的仅文档后继 0927aa1f，代码等价已核对。
++- [x] 精确暂存 UI、版本及本工单；推送 origin（github.com/goukiyang/seedance-api-debugger），推送指向上一生产的 rollback 标签。
++- [ ] 核对发布活动、线上源码/build，登记预约并取得服务器 flock；git archive 精确提交，排除资料、密钥、数据库、上传和运行目录。
++- [ ] 不可变 release 中候选构建，保持 live .next-prod 不原地构建；保护原 source/build、持久软链接及图片 worker，不重启 worker。
++- [ ] 成功切换后确认系统服务、公网 release/config/login、相关新静态资源及实际 BUILD_ID；失败恢复原 source/build，不覆盖数据库。
++- [ ] 正式根保存统一 diff 和发布证据；同步 S1/S2 状态、版本及实际入口。
++
++手动验收：图片/视频通用与模块设置保存一次后退出；人为保存失败留住输入并可重试；保存中继续输入的未提交草稿不丢；API 设置无其他修改时回入口，其他表单未保存时不离开；即时保存/应用/主工作台不误关；外部/Esc 和重开焦点沿用共享机制。未执行这些功能场景不得宣称通过。
++
++## 开源依据与方案选择
++
++[Radix Dialog 异步提交后关闭](https://www.radix-ui.com/primitives/docs/components/dialog#close-after-asynchronous-form-submission)：已读官方受控 open 示例，等待提交完成再关闭。
++[Ant Design ActionButton 实现](https://github.com/ant-design/ant-design/blob/master/components/_util/ActionButton.tsx)：已读实际 Promise 成功/失败分支，成功关闭，失败取消 loading 且不关闭，clickedRef 阻止重复。借鉴状态处理，复用现有 React 和 useDialogDismiss，无新库或拷贝源码，非声称已运行开源例子。
++
++## 停止条件与收尾
++
++实际生产源码变化或发布锁冲突时重新核对并移植本轮窄改，不覆盖他人发布；候选失败、缺关键返回、回退点缺失、服务或公网不一致时不强行切换。生产数据与凭据不读取、不回写。非独立自行 Review，不冒充用户功能验收。最终源码 ec34a4c28d6c0cf3e65801b69141175b9ded5e09 已推，rollback/2026-10-04-before-settings-save-close 指向上一生产，远端已核对；正式发布证据待补。
++
++## 实际文件与内容
++
++应用改动17个文件：图片 global-settings-dialog.tsx/settings-controller.ts/studio.tsx 确认返回、草稿比较和成功关闭；视频 VideoContextEditor.tsx/VideoTemplateWorkbench.tsx 成功退出、保存中输入保护；旧模板 TemplateEditorDrawer.tsx 统一成功返回与退出，AdminTemplatesClient.tsx/TemplateLibraryClient.tsx/GenerationComposer.tsx 三调用方适配；后台 AdminIntegrationsClient.tsx/BananaImageChannel.tsx 多表单提交/脏值与等待保护；AppShell.tsx/settings-return.ts 记住并校验真实来路（同源、有效功能路径、保留query/hash）；use-settings-page-submit.ts 共用提交锁、其他未保存保护，复用原 useUnsavedNavigation 的刷新/更新/离开保护，不存凭据；package.json/package-lock.json 仅同步版本，无依赖图变化；release.ts 替换真实用户摘要。
++
++配套4个固定记录：本工单、tasks/todo.md 仅增加索引、docs/materials/index.md 仅追加本轮资料入口、tasks/todo/hygiene-log.md 自动工具最小记录；正式主目录另有[统一diff](2026-10-04-settings-save-close.diff)，是完整本轮应用与工单差异，不含其他任务的未提交内容。
++
++config/page.tsx 为只读状态/测试，不含保存；admin/integrations/aimediakit/page.tsx 复用同一后台组件，无额外复制。旧候选9782c72的完整build通过，BUILD Uay72Q1JcKs6X_LH3JvbX；自行复核后放弃未切换候选，脚本退出 synced=0/moved=0，原线上未动。普通账号sudo不可用，按既有服务器技能核对并复用 root SSH 入口，构建仍以 gouki 运行，不修改权限或单元。
++
++发布活动复核（20:33）：主线程已登记 v0.39.0，commit 54f67d1668ea0bd23d96630860e6c8bd2e651f15。本轮 ec34a4c 旧基线候选停止上传，待新生产发布完成后，只在隔离分支合入已发布源码并重算 PATCH 为 v0.39.1，保留对方新功能；重新核对 build、回退点和发布锁后继续。不得覆盖或干预主线程。
+diff --git a/tasks/todo/hygiene-log.md b/tasks/todo/hygiene-log.md
+index b5ed318..1c78f7a 100644
+--- a/tasks/todo/hygiene-log.md
++++ b/tasks/todo/hygiene-log.md
+@@ -64,3 +64,5 @@
+ - 2026-10-02 00:00:00 refreshed todo child index for `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger/tasks/todo.md`; backup `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger/tasks/todo/backups/todo-20261002-000000-1.md`.
+ - 2026-10-02 00:00:00 created child todo `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger/tasks/todo/2026-10-02-unified-resource-library.md` and updated `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger/tasks/todo.md`; backup `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger/tasks/todo/backups/todo-20261002-000000.md`.
+ - 2026-10-02 已撤回工具自动缩减的主待办正文，完整保留历史任务与回执，仅新增统一创作资源库清单入口；子文档默认审核占位改为本轮规划检查，不启动独立审核或功能验收。
++- 2026-10-04 00:00:00 refreshed todo child index for `/Volumes/Data/Projects/video-api-debugger/worktrees/settings-save-close-20261004/tasks/todo.md`; backup `/Volumes/Data/Projects/video-api-debugger/worktrees/settings-save-close-20261004/tasks/todo/backups/todo-20261004-000000-1.md`.
++- 2026-10-04 00:00:00 created child todo `/Volumes/Data/Projects/video-api-debugger/worktrees/settings-save-close-20261004/tasks/todo/2026-10-04-settings-save-close.md` and updated `/Volumes/Data/Projects/video-api-debugger/worktrees/settings-save-close-20261004/tasks/todo.md`; backup `/Volumes/Data/Projects/video-api-debugger/worktrees/settings-save-close-20261004/tasks/todo/backups/todo-20261004-000000.md`.

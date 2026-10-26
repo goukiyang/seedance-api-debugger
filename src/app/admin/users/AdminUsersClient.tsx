@@ -1,8 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
+import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
+import { useProductDialog } from '@/components/useProductDialog';
+import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import PaginationControls from '@/components/PaginationControls';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import type { SessionUser } from '@/lib/auth/session';
@@ -66,7 +70,8 @@ interface CreditPolicy {
     timezone: 'Asia/Shanghai';
     internal_default: number;
     external_default: number;
-    profile_overrides: Record<string, number>;
+    profile_overrides: Record<string, number | null>;
+    profile_override_version?: number;
     valid_hours: number;
     clear_unused_on_expire: boolean;
   };
@@ -150,14 +155,15 @@ const CREDIT_POLICY_DEFAULT: CreditPolicy = {
     internal_default: 0,
     external_default: 0,
     profile_overrides: {
-      core_video: 0,
-      core_animation: 0,
-      core_design: 0,
-      noncore_planning: 0,
-      noncore_ops: 0,
-      noncore_pm: 0,
-      other: 0,
+      core_video: null,
+      core_animation: null,
+      core_design: null,
+      noncore_planning: null,
+      noncore_ops: null,
+      noncore_pm: null,
+      other: null,
     },
+    profile_override_version: 2,
     valid_hours: 24,
     clear_unused_on_expire: true,
   },
@@ -167,10 +173,10 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: '10px 12px',
-  border: '1px solid rgba(255,255,255,0.12)',
-  borderRadius: 8,
-  background: 'rgba(255,255,255,0.06)',
-  color: '#fff',
+  border: '1px solid var(--border-color)',
+  borderRadius: 5,
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
   fontSize: 14,
 };
 
@@ -300,10 +306,12 @@ function normalizeCreditPolicy(value: unknown): CreditPolicy {
       external_default: numberOrZero(daily.external_default),
       profile_overrides: {
         ...CREDIT_POLICY_DEFAULT.daily_quota.profile_overrides,
-        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key, numberOrZero(amount)])),
+        ...Object.fromEntries(Object.entries(overrides).map(([key, amount]) => [key,
+          amount == null || (daily.profile_override_version !== 2 && numberOrZero(amount) === 0) ? null : numberOrZero(amount)])),
       },
+      profile_override_version: 2,
       valid_hours: Math.min(168, Math.max(1, Number(daily.valid_hours) || 24)),
-      clear_unused_on_expire: daily.clear_unused_on_expire !== false,
+      clear_unused_on_expire: true,
     },
   };
 }
@@ -323,7 +331,7 @@ function estimateDailyQuota(policy: CreditPolicy, user: Pick<AdminUser, 'role' |
   if (!policy.daily_quota.enabled || user.role === 'admin') return 0;
   if (user.account_type === 'external') return policy.daily_quota.external_default;
   const override = policy.daily_quota.profile_overrides[user.user_profile || 'other'];
-  return override && override > 0 ? override : policy.daily_quota.internal_default;
+  return override == null ? policy.daily_quota.internal_default : override;
 }
 
 function buildEditUserForm(user: AdminUser): EditUserForm {
@@ -342,6 +350,27 @@ function buildEditUserForm(user: AdminUser): EditUserForm {
 }
 
 export default function AdminUsersClient({ currentUser }: { currentUser: SessionUser }) {
+  return <AdminUsageClient key={currentUser.id} viewerId={currentUser.id} view="members" management={selectedId => <AccountManagement currentUser={currentUser} selectedMemberId={selectedId === 'unassigned' ? null : selectedId} />} />;
+}
+
+function AccountManagement({ currentUser, selectedMemberId }: { currentUser: SessionUser; selectedMemberId: string | null }) {
+  const { confirm: requestConfirm, productDialog } = useProductDialog();
+  const actionLock = useRef(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const confirm: typeof requestConfirm = async (...args) => {
+    setActionBusy(false);
+    const accepted = await requestConfirm(...args);
+    if (accepted) setActionBusy(true);
+    return accepted;
+  };
+  const runUserAction = async (action: () => Promise<void>) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setActionBusy(true);
+    try { await action(); }
+    catch (error) { setError(error instanceof Error ? error.message : '操作未完成，请重新读取确认结果'); }
+    finally { actionLock.current = false; setActionBusy(false); }
+  };
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [ledger, setLedger] = useState<LedgerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -402,6 +431,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   const filteredUsers = useMemo(() => {
     const keyword = filters.search.trim().toLowerCase();
     return users.filter((user) => {
+      if (user.id === selectedMemberId) return true;
       if (!matchesQuickView(user, quickView)) return false;
       if (filters.account_type !== 'all' && user.account_type !== filters.account_type) return false;
       if (filters.user_profile !== 'all' && (user.user_profile || 'other') !== filters.user_profile) return false;
@@ -410,7 +440,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       if (!keyword) return true;
       return [user.name, user.username, user.email].some((value) => value.toLowerCase().includes(keyword));
     });
-  }, [filters, quickView, users]);
+  }, [filters, quickView, users, selectedMemberId]);
   const userTotalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
   const currentUserPage = Math.min(userPage, userTotalPages);
   const pagedUsers = filteredUsers.slice(
@@ -553,6 +583,18 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     setUserPage(1);
   }, [filters, quickView]);
 
+  const appliedMember = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedMemberId) { appliedMember.current = null; return; }
+    if (appliedMember.current === selectedMemberId) return;
+    const user = users.find(item => item.id === selectedMemberId);
+    if (!user) return;
+    appliedMember.current = selectedMemberId;
+    setFocusedUserId(user.id);
+    const index = filteredUsers.findIndex(item => item.id === user.id);
+    if (index >= 0) setUserPage(Math.floor(index / USERS_PAGE_SIZE) + 1);
+  }, [selectedMemberId, users, filteredUsers]);
+
   const updateInitialPolicy = (patch: Partial<CreditPolicy['initial_grant']>) => {
     setCreditPolicy((current) => ({
       ...current,
@@ -567,14 +609,14 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     }));
   };
 
-  const updateDailyOverride = (profile: string, amount: number) => {
+  const updateDailyOverride = (profile: string, amount: number | null) => {
     setCreditPolicy((current) => ({
       ...current,
       daily_quota: {
         ...current.daily_quota,
         profile_overrides: {
           ...current.daily_quota.profile_overrides,
-          [profile]: numberOrZero(amount),
+          [profile]: amount == null ? null : numberOrZero(amount),
         },
       },
     }));
@@ -656,7 +698,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       : creditForm.type === 'deduct'
         ? `扣减 ${amount} 点长期余额`
         : `把长期余额修正为 ${amount} 点`;
-    const ok = window.confirm(`确认对 ${selectedUser.name} ${operationLabel}？`);
+    const ok = await confirm(`确认对 ${selectedUser.name} ${operationLabel}？`, { title: '确认点数操作', confirmLabel: '确认', danger: creditForm.type === 'deduct' });
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/adjust', {
@@ -723,7 +765,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const ok = window.confirm(`确认给 ${selectedUsers.length} 个用户每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
+    const ok = await confirm(`确认给 ${selectedUsers.length} 个用户每人发放 ${amount} 点？总计 ${amount * selectedUserIds.length} 点。`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/credits/bulk-grant', {
@@ -766,7 +808,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     const featureProfileText = bulkProfileForm.feature_profile_id === 'auto'
       ? `自动建议：${getFeatureProfileLabel(suggestedBulkFeatureProfileId)}`
       : getFeatureProfileLabel(bulkProfileForm.feature_profile_id);
-    const ok = window.confirm(`确认修改 ${selectedUserIds.length} 个用户？\n用户类型：${getUserProfileLabel(bulkProfileForm.user_profile)}\n能力档案：${featureProfileText}`);
+    const ok = await confirm(`确认修改 ${selectedUserIds.length} 个用户？\n用户类型：${getUserProfileLabel(bulkProfileForm.user_profile)}\n能力档案：${featureProfileText}`);
     if (!ok) return;
 
     const res = await fetch('/api/admin/users/bulk-profile', {
@@ -824,7 +866,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       '点数会以合并汇总流水转入保留账号，源账号原始流水保留用于审计。',
       `原因：${reason}`,
     ].join('\n');
-    if (!window.confirm(confirmText)) return;
+    if (!await confirm(confirmText, { title: '合并账号', confirmLabel: '合并', danger: true })) return;
 
     const res = await fetch('/api/admin/users/merge', {
       method: 'POST',
@@ -925,7 +967,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
     const confirmText = sensitiveChanges.length > 0
       ? `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n${sensitiveChanges.join('\n')}\n\n原因：${reason}`
       : `确认保存 ${editingUser.name || editingUser.username} 的账户属性？\n原因：${reason}`;
-    if (!window.confirm(confirmText)) return;
+    if (!await confirm(confirmText)) return;
 
     const res = await fetch(`/api/admin/users/${editingUser.id}`, {
       method: 'PATCH',
@@ -983,7 +1025,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   const toggleUser = async (user: AdminUser) => {
     const action = user.status === 'active' ? 'disable' : 'enable';
     const label = action === 'disable' ? '禁用' : '启用';
-    const ok = window.confirm(`确认${label}用户 ${displayUserName(user)}？`);
+    const ok = await confirm(`确认${label}用户 ${displayUserName(user)}？`, { title: `${label}用户`, confirmLabel: label });
     if (!ok) return;
     setError('');
     setMessage('');
@@ -1004,7 +1046,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
       return;
     }
 
-    const ok = window.confirm(`确认删除用户 ${displayUserName(user)}？该操作会隐藏账号并阻止登录，但不会删除历史任务和点数流水。`);
+    const ok = await confirm(`确认删除用户 ${displayUserName(user)}？该操作会隐藏账号并阻止登录，但不会删除历史任务和点数流水。`, { title: '删除用户', confirmLabel: '删除', danger: true });
     if (!ok) return;
 
     setError('');
@@ -1023,18 +1065,18 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
   };
 
   return (
-    <main className="admin-users-page admin-users-workbench-page">
+    <div className="admin-users-page admin-users-workbench-page au-account-management" data-usage-layout-pending={loading ? 'true' : undefined}>
+      {productDialog}
       <PageBanner
-        tone="dark"
-        eyebrow="管理员后台"
-        title="用户与点数工作台"
-        description="/admin/points 已归并到本页；先定位用户和钱包状态，再进入创建、策略、批量、合并等低频操作。"
+        eyebrow="账号与额度"
+        title="账号管理"
         actions={(
           <div className="admin-users-operator">
-            {currentUser.name} · {currentUser.email}
+            <UserIdentityBadge user={currentUser} size="sm" showEmail />
           </div>
         )}
       />
+      {selectedMemberId && !loading && !users.some(user => user.id === selectedMemberId) && <p className="au-management-context" role="status">该成员的历史使用记录仍保留；当前账号已不可管理或未能读取，可继续使用下方其他账号管理功能。</p>}
 
       {(message || error) && (
         <div className={`admin-users-alert ${error ? 'admin-users-alert-error' : 'admin-users-alert-success'}`}>
@@ -1157,6 +1199,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
               <p>筛选结果 {filteredUsers.length} 人 · 当前页 {currentUserPage}/{userTotalPages}</p>
             </div>
             <div className="admin-users-list-actions">
+              <Link className="admin-users-button admin-users-button-secondary" href="/admin/users/quotas">周期额度</Link>
               <button type="button" className="admin-users-button admin-users-button-secondary" onClick={toggleFilteredSelection}>
                 {allFilteredSelected ? '取消全选' : '全选结果'}
               </button>
@@ -1188,6 +1231,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                 </tr>
               </thead>
               <tbody>
+                {loading && <tr><td colSpan={8}>{users.length ? <LoadingStatus>正在更新用户列表</LoadingStatus> : <LoadingSkeleton label="正在读取用户" />}</td></tr>}
                 {pagedUsers.map((user) => {
                   const wallet = getUserWallet(user);
                   const risks = getUserRiskTags(user);
@@ -1234,8 +1278,8 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                       </td>
                       <td>
                         <div className="admin-users-muted-stack">
-                          <span>{formatDate(user.last_login_at)}</span>
-                          <small>创建 {formatDate(user.created_at)}</small>
+                          <span>{user.last_login_at ? <RelativeTime value={user.last_login_at} /> : '-'}</span>
+                          <small>创建 <RelativeTime value={user.created_at} /></small>
                         </div>
                       </td>
                       <td>
@@ -1252,14 +1296,14 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                           <button type="button" className="admin-users-text-button" onClick={() => selectOnlyUser(user.id)}>
                             点数
                           </button>
-                          <button type="button" className="admin-users-text-button" onClick={() => toggleUser(user)}>
+                          <button type="button" className="admin-users-text-button" disabled={actionBusy} onClick={() => void runUserAction(() => toggleUser(user))}>
                             {user.status === 'active' ? '禁用' : '启用'}
                           </button>
                           <button
                             type="button"
                             className="admin-users-text-button is-danger"
-                            onClick={() => deleteUser(user)}
-                            disabled={user.id === currentUser.id}
+                            onClick={() => void runUserAction(() => deleteUser(user))}
+                            disabled={actionBusy || user.id === currentUser.id}
                           >
                             删除
                           </button>
@@ -1268,7 +1312,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                     </tr>
                   );
                 })}
-                {!loading && filteredUsers.length === 0 && (
+                {!loading && !error && filteredUsers.length === 0 && (
                   <tr>
                     <td colSpan={8} className="admin-users-empty">暂无匹配用户</td>
                   </tr>
@@ -1357,7 +1401,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                   <button type="button" className="admin-users-button admin-users-button-secondary" onClick={() => openEditUser(focusedUser)}>
                     编辑账户
                   </button>
-                  <button type="button" className="admin-users-button admin-users-button-secondary" onClick={() => toggleUser(focusedUser)}>
+                  <button type="button" className="admin-users-button admin-users-button-secondary" disabled={actionBusy} onClick={() => void runUserAction(() => toggleUser(focusedUser))}>
                     {focusedUser.status === 'active' ? '禁用账号' : '启用账号'}
                   </button>
                 </div>
@@ -1410,7 +1454,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'policy' && (
-            <form onSubmit={saveCreditPolicy} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => saveCreditPolicy(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>点数策略</h3>
@@ -1492,7 +1536,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                       onChange={(event) => updateDailyPolicy({ valid_hours: Math.min(168, Math.max(1, Number(event.target.value) || 24)) })}
                     />
                   </div>
-                  <p className="admin-users-hint">每日额度按上海时间懒发放；过期未使用清零，已冻结额度等任务结算后关闭或返还。</p>
+                  <p className="admin-users-hint">旧每日额度：按上海时间发放，有效小时不是刷新间隔。已纳入周期额度的用户不再领取旧每日额度。岗位留空使用默认值，填0表示不发放。</p>
                   <div className="admin-users-policy-grid">
                     {USER_PROFILE_OPTIONS.map((option) => (
                       <label key={option.value}>
@@ -1501,8 +1545,9 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
                           style={inputStyle}
                           type="number"
                           min="0"
-                          value={creditPolicy.daily_quota.profile_overrides[option.value] || 0}
-                          onChange={(event) => updateDailyOverride(option.value, Number(event.target.value))}
+                          placeholder="使用默认"
+                          value={creditPolicy.daily_quota.profile_overrides[option.value] ?? ''}
+                          onChange={(event) => updateDailyOverride(option.value, event.target.value === '' ? null : Number(event.target.value))}
                         />
                       </label>
                     ))}
@@ -1514,7 +1559,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
 
           {activeTool === 'edit' && (
             editingUser && editUserForm ? (
-              <form onSubmit={saveEditedUser} className="admin-users-tool-panel">
+              <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => saveEditedUser(event)); }} className="admin-users-tool-panel sd2-loading-surface">
                 <div className="admin-users-panel-title-row">
                   <div>
                     <h3>账户属性</h3>
@@ -1592,7 +1637,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'bulk_profile' && (
-            <form onSubmit={bulkUpdateProfiles} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => bulkUpdateProfiles(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>批量修改用户类型</h3>
@@ -1614,7 +1659,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'merge' && (
-            <form onSubmit={mergeUsers} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => mergeUsers(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>合并重复账号</h3>
@@ -1663,7 +1708,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'bulk_grant' && (
-            <form onSubmit={bulkGrantCredits} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => bulkGrantCredits(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>批量发放点数</h3>
@@ -1683,7 +1728,7 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'create' && (
-            <form onSubmit={createUser} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => createUser(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>创建用户</h3>
@@ -1751,11 +1796,11 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           )}
 
           {activeTool === 'credit' && (
-            <form onSubmit={adjustCredits} className="admin-users-tool-panel">
+            <form data-busy={actionBusy} onSubmit={event => { event.preventDefault(); void runUserAction(() => adjustCredits(event)); }} className="admin-users-tool-panel sd2-loading-surface">
               <div className="admin-users-panel-title-row">
                 <div>
                   <h3>单人点数操作</h3>
-                  <p>只影响长期余额；每日固定额度由策略自动发放和过期清零。</p>
+                  <p>只影响长期余额；周期额度独立发放和到期，不会被本次修改覆盖。</p>
                 </div>
               </div>
               <div className="admin-users-form-grid">
@@ -1812,6 +1857,6 @@ export default function AdminUsersClient({ currentUser }: { currentUser: Session
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

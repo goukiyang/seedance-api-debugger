@@ -1,20 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
+import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getSession, type SessionUser } from '@/lib/auth/session';
 import { getAccessibleProjectIds, getTaskWhereForUser } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
+import { fileExists, thumbnailFilePath } from '@/lib/video/thumbnail';
+import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/video/thumbnail-availability';
+import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
+import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+import { assetGenerationOrigin, generationOrigins, type GenerationOrigin } from '@/lib/assets/generation-origin';
+import { imageBillingView, type ImageBillingView } from '@/lib/image-studio/billing-contract';
+import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import { removedLibraryResources } from '@/lib/assets/library-removal';
+import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
+import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
 
 export const dynamic = 'force-dynamic';
 
-const ITEM_TYPES = new Set(['all', 'video', 'image', 'reference']);
+const ITEM_TYPES = new Set(['all', 'video', 'image', 'audio', 'reference']);
 const SCOPES = new Set(['history', 'project', 'user']);
 const STATUSES = new Set(['all', 'succeeded', 'running', 'submitted', 'failed', 'cancelled', 'hidden']);
 const SORTS = new Set(['created_desc', 'created_asc', 'completed_desc', 'project', 'user', 'duration']);
 const GROUPS = new Set(['date', 'project', 'user']);
+const ENHANCE_FILTERS = new Set(['none', 'all']);
 
-type LibraryItemKind = 'video' | 'image';
+type LibraryItemKind = 'video' | 'image' | 'audio';
 type LibraryItemSource = 'video_task' | 'asset' | 'reference_image';
 
 type LibraryUser = {
@@ -37,6 +50,8 @@ type LibraryItem = {
   id: string;
   kind: LibraryItemKind;
   source: LibraryItemSource;
+  generationOrigin?: GenerationOrigin;
+  imageBilling?: ImageBillingView | null;
   taskId: string | null;
   assetId: string | null;
   referenceImageId: string | null;
@@ -45,13 +60,34 @@ type LibraryItem = {
   thumbnailUrl: string | null;
   previewUrl: string | null;
   downloadUrl: string | null;
+  width: number | null;
+  height: number | null;
+  fileSize: number | null;
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  model: string | null;
+  provider: string | null;
+  generationMode: string | null;
+  providerCostCurrency: string | null;
+  providerOfficialAmountMinor: number | null;
+  providerFinalAmountMinor: number | null;
+  providerOfficialAmountMicros: number | null;
+  providerFinalAmountMicros: number | null;
+  chargedCredits: number | null;
+  normalChargeEstimate: NormalVideoChargeEstimate | null;
+  videoCardId: string | null;
+  isEnhanceTask: boolean;
+  canEnhanceVideo: boolean;
+  enhanceSourceTaskId: string | null;
   status: string;
+  deliveryStage: VideoDeliveryStage;
+  stableDownloadReady: boolean;
+  previewAvailable: boolean;
   retentionStatus: string | null;
   createdAt: string;
   completedAt: string | null;
+  deliveryCompletedAt: string | null;
   project: LibraryProject | null;
   owner: (LibraryUser & { displayName: string; subtitle: string }) | null;
   downloadable: boolean;
@@ -61,6 +97,10 @@ type LibraryItem = {
 function enumParam(value: string | null, allowed: Set<string>, fallback: string) {
   const normalized = value?.trim();
   return normalized && allowed.has(normalized) ? normalized : fallback;
+}
+
+function publicAssetUrl(url: string | null) {
+  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
 }
 
 function positiveInt(value: string | null, fallback: number, max: number) {
@@ -83,11 +123,39 @@ function userSummary(user: LibraryUser | null | undefined) {
   };
 }
 
+function legacyAssetOwnerSummary(ownerId: string | null | undefined) {
+  const id = ownerId?.trim();
+  if (!id) return null;
+  const isLegacyDefault = id === 'default-user';
+  const user: LibraryUser = {
+    id,
+    name: isLegacyDefault ? '历史默认用户' : null,
+    username: id,
+    email: '',
+    avatar_url: null,
+    account_type: 'internal',
+  };
+  return {
+    ...user,
+    displayName: isLegacyDefault ? '历史默认用户' : `用户 ${id.slice(0, 6)}`,
+    subtitle: isLegacyDefault ? '旧版上传素材' : '用户资料缺失',
+  };
+}
+
 function taskTitle(task: { project: LibraryProject | null; prompt: string; id: string }) {
   const projectName = task.project?.name;
   const prompt = task.prompt.trim();
   if (projectName) return projectName;
   return prompt ? prompt.slice(0, 32) : `任务 ${task.id.slice(0, 8)}`;
+}
+
+function nonTaskDeliveryStage(previewAvailable: boolean): VideoDeliveryStage {
+  return {
+    key: previewAvailable ? 'ready' : 'unavailable',
+    label: previewAvailable ? '素材可用' : '素材不可用',
+    stableDownloadReady: false,
+    previewAvailable,
+  };
 }
 
 function parseBaseWhere(
@@ -115,27 +183,72 @@ function isDownloadableTask(task: {
   return task.local_status === 'succeeded' && Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
 }
 
-function serializeTask(task: {
+async function serializeTask(task: {
   id: string;
+  provider: string;
+  generation_mode: string;
   prompt: string;
   local_status: string;
   public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
+  delivery_status: string | null;
   duration: number | null;
   ratio: string | null;
   resolution: string | null;
+  model: string;
+  video_card_id: string | null;
+  provider_cost_currency: string | null;
+  provider_official_amount_minor: number | null;
+  provider_final_amount_minor: number | null;
+  provider_official_amount_micros: number | null;
+  provider_final_amount_micros: number | null;
+  actual_cost: number | null;
+  is_draft: boolean;
+  reference_video_urls: string | null;
+  provider_usage_snapshot: string | null;
+  raw_status_response: string | null;
+  params_json: string | null;
   retention_status: string;
   created_at: Date;
   completed_at: Date | null;
+  public_video_cached_at: Date | null;
+  delivery_completed_at: Date | null;
   project: LibraryProject | null;
   owner: LibraryUser | null;
   user: LibraryUser | null;
-}): LibraryItem {
+}, viewer: SessionUser, normalRates: ReadonlyMap<string, number>): Promise<LibraryItem> {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
+  const deliveryStage = videoDeliveryStageForTask(task);
   const owner = userSummary(task.owner || task.user);
+  const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+  const hasThumbnailSource = canRequestTaskThumbnail({
+    publicVideoUrl: task.public_video_url,
+    localVideoPath: task.local_video_path,
+    resultVideoUrl: task.result_video_url,
+    resultLastFrameUrl: task.result_last_frame_url,
+  });
+  const hasExistingThumbnail = hasThumbnailSource ? false : await fileExists(thumbnailFilePath(task.id));
+  const thumbnailUrl = shouldExposeTaskThumbnailUrl({
+    hasExistingThumbnail,
+    publicVideoUrl: task.public_video_url,
+    localVideoPath: task.local_video_path,
+    resultVideoUrl: task.result_video_url,
+    resultLastFrameUrl: task.result_last_frame_url,
+  }) ? `/api/video/thumbnail/${task.id}` : null;
+  let enhanceSourceTaskId: string | null = null;
+  if (isEnhanceTask && task.params_json) {
+    try {
+      const params = JSON.parse(task.params_json) as { source_task_id?: unknown };
+      enhanceSourceTaskId = typeof params.source_task_id === 'string' && params.source_task_id.trim()
+        ? params.source_task_id.trim()
+        : null;
+    } catch {
+      enhanceSourceTaskId = null;
+    }
+  }
   return {
     id: `video_task:${task.id}`,
     kind: 'video',
@@ -145,16 +258,42 @@ function serializeTask(task: {
     referenceImageId: null,
     title: taskTitle(task),
     prompt: task.prompt,
-    thumbnailUrl: hasVideo ? `/api/video/thumbnail/${task.id}` : null,
+    thumbnailUrl,
     previewUrl: videoUrl,
     downloadUrl: videoUrl,
+    width: null,
+    height: null,
+    fileSize: null,
     duration: task.duration,
     ratio: task.ratio,
     resolution: task.resolution,
+    model: task.model,
+    provider: task.provider,
+    generationMode: task.generation_mode,
+    providerCostCurrency: task.provider_cost_currency,
+    providerOfficialAmountMinor: task.provider_official_amount_minor,
+    providerFinalAmountMinor: task.provider_final_amount_minor,
+    providerOfficialAmountMicros: task.provider_official_amount_micros,
+    providerFinalAmountMicros: task.provider_final_amount_micros,
+    chargedCredits: (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
+      && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)
+      && task.actual_cost !== null && Number.isFinite(task.actual_cost) && task.actual_cost >= 0
+      ? task.actual_cost : null,
+    normalChargeEstimate: task.local_status === 'succeeded'
+      && (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
+      ? estimateNormalVideoCharge(task, normalRates) : null,
+    videoCardId: task.video_card_id,
+    isEnhanceTask,
+    canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
+    enhanceSourceTaskId,
     status: task.local_status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: task.retention_status,
     createdAt: task.created_at.toISOString(),
     completedAt: task.completed_at ? task.completed_at.toISOString() : null,
+    deliveryCompletedAt: (task.delivery_completed_at || task.public_video_cached_at)?.toISOString() || null,
     project: task.project,
     owner,
     downloadable: isDownloadableTask(task),
@@ -171,30 +310,60 @@ function serializeAsset(asset: {
   status: string;
   width: number | null;
   height: number | null;
+  file_size: number | null;
   created_at: Date;
   owner_id: string;
+  owner: LibraryUser | null;
 }): LibraryItem {
+  const originalUrl = publicAssetUrl(asset.original_url);
+  const storedThumbnailUrl = publicAssetUrl(asset.thumbnail_url);
+  const thumbnailUrl = asset.type === 'image'
+    ? storedThumbnailUrl || originalUrl
+    : storedThumbnailUrl;
+  const owner = userSummary(asset.owner) || legacyAssetOwnerSummary(asset.owner_id);
+  const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
   return {
     id: `asset:${asset.id}`,
-    kind: asset.type === 'video' ? 'video' : 'image',
+    kind: asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'image',
     source: 'asset',
     taskId: null,
     assetId: asset.id,
     referenceImageId: null,
     title: asset.file_name || `素材 ${asset.id.slice(0, 8)}`,
     prompt: null,
-    thumbnailUrl: asset.thumbnail_url || asset.original_url,
-    previewUrl: asset.original_url,
-    downloadUrl: asset.original_url,
+    thumbnailUrl,
+    previewUrl: originalUrl,
+    downloadUrl: originalUrl,
+    width: asset.width ?? null,
+    height: asset.height ?? null,
+    fileSize: asset.file_size ?? null,
     duration: null,
     ratio: asset.width && asset.height ? `${asset.width}:${asset.height}` : null,
     resolution: null,
+    model: null,
+    provider: null,
+    generationMode: null,
+    providerCostCurrency: null,
+    providerOfficialAmountMinor: null,
+    providerFinalAmountMinor: null,
+    providerOfficialAmountMicros: null,
+    providerFinalAmountMicros: null,
+    chargedCredits: null,
+    normalChargeEstimate: null,
+    videoCardId: null,
+    isEnhanceTask: false,
+    canEnhanceVideo: false,
+    enhanceSourceTaskId: null,
     status: asset.status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: null,
     createdAt: asset.created_at.toISOString(),
     completedAt: null,
+    deliveryCompletedAt: null,
     project: null,
-    owner: null,
+    owner,
     downloadable: false,
     movable: false,
   };
@@ -211,7 +380,11 @@ function serializeReferenceImage(image: {
   owner: LibraryUser | null;
   album: { id: string; name: string } | null;
   asset_id: string | null;
+  asset: { width: number | null; height: number | null } | null;
 }): LibraryItem {
+  const originalUrl = publicAssetUrl(image.url);
+  const thumbnailUrl = publicAssetUrl(image.thumbnail_url) || originalUrl;
+  const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
   return {
     id: `reference_image:${image.id}`,
     kind: 'image',
@@ -221,16 +394,37 @@ function serializeReferenceImage(image: {
     referenceImageId: image.id,
     title: image.album?.name || `参考素材 ${image.id.slice(0, 8)}`,
     prompt: image.source_type,
-    thumbnailUrl: image.thumbnail_url || image.url,
-    previewUrl: image.url,
-    downloadUrl: image.url,
+    thumbnailUrl,
+    previewUrl: originalUrl,
+    downloadUrl: originalUrl,
+    width: image.asset?.width ?? null,
+    height: image.asset?.height ?? null,
+    fileSize: null,
     duration: null,
     ratio: null,
     resolution: null,
+    model: null,
+    provider: null,
+    generationMode: null,
+    providerCostCurrency: null,
+    providerOfficialAmountMinor: null,
+    providerFinalAmountMinor: null,
+    providerOfficialAmountMicros: null,
+    providerFinalAmountMicros: null,
+    chargedCredits: null,
+    normalChargeEstimate: null,
+    videoCardId: null,
+    isEnhanceTask: false,
+    canEnhanceVideo: false,
+    enhanceSourceTaskId: null,
     status: image.status,
+    deliveryStage,
+    stableDownloadReady: deliveryStage.stableDownloadReady,
+    previewAvailable: deliveryStage.previewAvailable,
     retentionStatus: null,
     createdAt: image.created_at.toISOString(),
     completedAt: null,
+    deliveryCompletedAt: null,
     project: image.project,
     owner: userSummary(image.owner),
     downloadable: false,
@@ -238,15 +432,24 @@ function serializeReferenceImage(image: {
   };
 }
 
-function sortItems(items: LibraryItem[], sort: string) {
+type LibrarySortItem = Pick<LibraryItem, 'id' | 'createdAt' | 'completedAt' | 'duration' | 'project' | 'owner'>;
+const DIRECTORY_LIMIT = 50_000;
+
+function boundedDirectory(items: LibrarySortItem[]) {
+  if (items.length > DIRECTORY_LIMIT) throw new Error('LIBRARY_DIRECTORY_LIMIT');
+  return { items: [] as LibraryItem[], directory: items, total: items.length };
+}
+
+function sortItems<T extends LibrarySortItem>(items: T[], sort: string) {
   const time = (value: string | null) => value ? new Date(value).getTime() : 0;
   return [...items].sort((a, b) => {
-    if (sort === 'created_asc') return time(a.createdAt) - time(b.createdAt);
-    if (sort === 'completed_desc') return time(b.completedAt || b.createdAt) - time(a.completedAt || a.createdAt);
-    if (sort === 'project') return (a.project?.name || '未归属项目').localeCompare(b.project?.name || '未归属项目', 'zh-CN');
-    if (sort === 'user') return (a.owner?.displayName || '未知用户').localeCompare(b.owner?.displayName || '未知用户', 'zh-CN');
-    if (sort === 'duration') return (b.duration || 0) - (a.duration || 0) || time(b.createdAt) - time(a.createdAt);
-    return time(b.createdAt) - time(a.createdAt);
+    const primary = sort === 'created_asc' ? time(a.createdAt) - time(b.createdAt)
+      : sort === 'completed_desc' ? time(b.completedAt || b.createdAt) - time(a.completedAt || a.createdAt)
+        : sort === 'project' ? (a.project?.name || '未归属项目').localeCompare(b.project?.name || '未归属项目', 'zh-CN')
+          : sort === 'user' ? (a.owner?.displayName || '未知用户').localeCompare(b.owner?.displayName || '未知用户', 'zh-CN')
+            : sort === 'duration' ? (b.duration || 0) - (a.duration || 0)
+              : time(b.createdAt) - time(a.createdAt);
+    return primary || (sort === 'created_asc' ? time(a.createdAt) - time(b.createdAt) : time(b.createdAt) - time(a.createdAt)) || a.id.localeCompare(b.id);
   });
 }
 
@@ -255,7 +458,7 @@ function addKeywordFilter(keyword: string | null): Prisma.VideoTaskWhereInput | 
   return {
     OR: [
       { id: { contains: keyword } },
-      { prompt: { contains: keyword } },
+      safeVideoTaskKeywordWhere(keyword),
       { provider_task_id: { contains: keyword } },
       { source_label: { contains: keyword } },
       { project: { name: { contains: keyword } } },
@@ -265,9 +468,15 @@ function addKeywordFilter(keyword: string | null): Prisma.VideoTaskWhereInput | 
   };
 }
 
+function shouldIncludeActiveLibraryMedia(status: string) {
+  return status === 'all' || status === 'succeeded';
+}
+
 async function loadVideoItems(options: {
+  user: SessionUser;
   type: string;
   scope: string;
+  enhance: string;
   status: string;
   sort: string;
   projectId: string | null;
@@ -276,11 +485,14 @@ async function loadVideoItems(options: {
   page: number;
   limit: number;
   includeForMerge: boolean;
+  removedIds: string[];
+  directory?: boolean;
+  ids?: string[];
+  multiviewOutputsOnly?: boolean;
 }) {
-  const user = await getSession();
-  if (!user) throw new Error('missing_session');
+  const user = options.user;
 
-  if (options.type !== 'all' && options.type !== 'video') {
+  if (options.multiviewOutputsOnly || (options.type !== 'all' && options.type !== 'video')) {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
@@ -289,7 +501,11 @@ async function loadVideoItems(options: {
     includeAdminAll: user.role === 'admin',
     includeDeleted,
   });
-  const filters: Prisma.VideoTaskWhereInput[] = [];
+  const filters: Prisma.VideoTaskWhereInput[] = [ordinaryVideoTaskWhere()];
+  if (options.removedIds.length) filters.push({ NOT: {
+    id: { in: options.removedIds },
+    OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
+  } });
 
   if (options.scope === 'user') {
     if (user.role !== 'admin') {
@@ -311,32 +527,85 @@ async function loadVideoItems(options: {
     filters.push({ local_status: options.status });
   }
 
+  if (options.enhance === 'all') {
+    filters.push({
+      OR: [
+        { generation_mode: 'enhance_video' },
+        { provider: 'volcengine_mediakit' },
+        {
+          local_status: 'succeeded',
+          duration: { not: null },
+          video_card_id: { not: null },
+          NOT: [
+            { generation_mode: 'enhance_video' },
+            { provider: 'volcengine_mediakit' },
+          ],
+          OR: [
+            { public_video_url: { not: null } },
+            { local_video_path: { not: null } },
+            { result_video_url: { not: null } },
+            { result_last_frame_url: { not: null } },
+          ],
+        },
+      ],
+    });
+  }
+
   const keywordFilter = addKeywordFilter(options.keyword);
   if (keywordFilter) filters.push(keywordFilter);
 
   const where = parseBaseWhere(baseWhere, filters);
+  if (options.directory) {
+    const rows = await prisma.videoTask.findMany({ where, take: DIRECTORY_LIMIT + 1,
+      select: { id: true, created_at: true, completed_at: true, duration: true,
+        project: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true, username: true, email: true } },
+        user: { select: { id: true, name: true, username: true, email: true } } } });
+    return boundedDirectory(rows.map(row => ({ id: `video_task:${row.id}`, createdAt: row.created_at.toISOString(),
+      completedAt: row.completed_at?.toISOString() || null, duration: row.duration, project: row.project, owner: userSummary(row.owner || row.user) })));
+  }
+  if (options.ids) filters.push({ id: { in: options.ids } });
+  const contentWhere = parseBaseWhere(baseWhere, filters);
   const take = options.includeForMerge ? options.page * options.limit : options.limit;
   const skip = options.includeForMerge ? 0 : (options.page - 1) * options.limit;
   const [tasks, total] = await Promise.all([
     prisma.videoTask.findMany({
-      where,
+      where: contentWhere,
       orderBy: taskOrderBy(options.sort),
       skip,
       take,
       select: {
         id: true,
+        provider: true,
+        generation_mode: true,
         prompt: true,
         local_status: true,
         public_video_url: true,
         result_video_url: true,
         result_last_frame_url: true,
         local_video_path: true,
+        delivery_status: true,
         duration: true,
         ratio: true,
         resolution: true,
+        model: true,
+        video_card_id: true,
+        provider_cost_currency: true,
+        provider_official_amount_minor: true,
+        provider_final_amount_minor: true,
+        provider_official_amount_micros: true,
+        provider_final_amount_micros: true,
+        actual_cost: true,
+        is_draft: true,
+        reference_video_urls: true,
+        provider_usage_snapshot: true,
+        raw_status_response: true,
+        params_json: true,
         retention_status: true,
         created_at: true,
         completed_at: true,
+        public_video_cached_at: true,
+        delivery_completed_at: true,
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
@@ -345,32 +614,60 @@ async function loadVideoItems(options: {
     prisma.videoTask.count({ where }),
   ]);
 
+  const unbilledTasks = tasks.filter((task) => task.local_status === 'succeeded'
+    && (user.role === 'admin' || task.user?.id === user.id || task.owner?.id === user.id)
+    && task.provider_final_amount_micros === null && task.provider_official_amount_micros === null
+    && task.provider_final_amount_minor === null && task.provider_official_amount_minor === null);
+  let normalRates: ReadonlyMap<string, number> = new Map();
+  try { normalRates = await loadNormalVideoChargeRates(unbilledTasks); }
+  catch { console.warn('[AssetCosts] Ordinary billing rate lookup unavailable'); }
   return {
-    items: tasks.map(serializeTask),
+    items: await Promise.all(tasks.map((task) => serializeTask(task, user, normalRates))),
     total,
   };
 }
 
 async function loadAssetItems(options: {
+  user: SessionUser;
   userId: string;
   role: 'admin' | 'user';
   type: string;
+  enhance: string;
   scope: string;
   status: string;
   ownerUserId: string | null;
   keyword: string | null;
+  includeUploads: boolean;
+  includeGenerated: boolean;
+  multiviewOutputsOnly?: boolean;
   take: number;
+  removedIds: string[];
+  directory?: boolean;
+  ids?: string[];
 }) {
-  if (options.type !== 'all' && options.type !== 'image' && options.type !== 'video') {
+  if (options.enhance !== 'none') {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
+  if (options.type !== 'all' && options.type !== 'image' && options.type !== 'video' && options.type !== 'audio') {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
-  const where: Prisma.AssetWhereInput = {
+  if (options.status !== 'hidden' && !shouldIncludeActiveLibraryMedia(options.status)) {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
+
+  const where: PrismaTypes.AssetWhereInput = {
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
+    ...(options.multiviewOutputsOnly ? { metadata_json: { contains: '"multiviewOutput"' } } : {}),
   };
+  const removedIds = options.removedIds;
+  if (removedIds.length) where.NOT = { id: { in: removedIds }, owner_id: options.userId };
+  const hiddenUrls = await studioHiddenAssetUrls(options.user);
+  if (hiddenUrls.length) where.original_url = { notIn: hiddenUrls };
   if (options.type === 'image') where.type = 'image';
   else if (options.type === 'video') where.type = 'video';
-  else where.type = { in: ['image', 'video'] };
+  else if (options.type === 'audio') where.type = 'audio';
+  else where.type = { in: ['image', 'video', 'audio'] };
   if (options.role === 'admin' && options.scope === 'user' && options.ownerUserId) {
     where.owner_id = options.ownerUserId;
   } else if (options.role !== 'admin') {
@@ -379,45 +676,177 @@ async function loadAssetItems(options: {
   if (options.keyword) {
     where.file_name = { contains: options.keyword };
   }
+  if (options.ids) where.id = { in: options.ids };
 
-  const [assets, total] = await Promise.all([
-    prisma.asset.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: options.take,
-      select: {
-        id: true,
-        original_url: true,
-        thumbnail_url: true,
-        file_name: true,
-        type: true,
-        status: true,
-        width: true,
-        height: true,
-        created_at: true,
-        owner_id: true,
-      },
-    }),
-    prisma.asset.count({ where }),
-  ]);
+  type AssetLibraryDbRow = {
+    metadata_json: string | null;
+    id: string;
+    original_url: string;
+    thumbnail_url: string | null;
+    file_name: string;
+    type: string;
+    status: string;
+    width: number | null;
+    height: number | null;
+    file_size: number | null;
+    created_at: Date;
+    owner_id: string;
+  };
+  const generatedOnly = options.includeGenerated && !options.includeUploads;
+  let assets: AssetLibraryDbRow[];
+  let total: number;
+  if (generatedOnly) {
+    const statusFilter = options.status === 'hidden'
+      ? Prisma.sql`asset."status" IN ('hidden', 'deleted')`
+      : Prisma.sql`asset."status" = 'active'`;
+    const typeFilter = options.type === 'all'
+      ? Prisma.sql`asset."type" IN ('image', 'video', 'audio')`
+      : Prisma.sql`asset."type" = ${options.type}`;
+    const ownerFilter = options.role !== 'admin'
+      ? Prisma.sql`AND asset."owner_id" = ${options.userId}`
+      : options.scope === 'user' && options.ownerUserId
+        ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
+        : Prisma.empty;
+    const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
+    const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
+    const outputFlag = Prisma.sql`json_extract(CASE WHEN json_valid(asset."metadata_json") THEN asset."metadata_json" ELSE '{}' END, '$.multiviewOutput.schema') = 1`;
+    const generatedFilter = options.multiviewOutputsOnly ? Prisma.sql`AND ${outputFlag}` : Prisma.sql`AND (${outputFlag} OR EXISTS (
+      SELECT 1 FROM "ImageStudioTask" generated_task
+      WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
+    ))`;
+    const idFilter = options.ids ? (options.ids.length ? Prisma.sql`AND asset."id" IN (${Prisma.join(options.ids)})` : Prisma.sql`AND 0 = 1`) : Prisma.empty;
+    if (options.directory) {
+      const rows = await prisma.$queryRaw<Array<{ id: string; created_at: Date | string; owner_id: string }>>(Prisma.sql`
+        SELECT asset."id", asset."created_at", asset."owner_id" FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+        LIMIT ${DIRECTORY_LIMIT + 1}
+      `);
+      return assetDirectory(rows);
+    }
+    const [generatedAssets, generatedCount] = await Promise.all([
+      prisma.$queryRaw<AssetLibraryDbRow[]>(Prisma.sql`
+        SELECT asset."id", asset."original_url", asset."thumbnail_url", asset."file_name", asset."type", asset."status",
+          asset."width", asset."height", asset."file_size", asset."created_at", asset."owner_id", asset."metadata_json"
+        FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter} ${idFilter}
+        ORDER BY asset."created_at" DESC
+        LIMIT ${options.take}
+      `),
+      prisma.$queryRaw<Array<{ count: bigint | number }>>(Prisma.sql`
+        SELECT COUNT(DISTINCT asset."id") AS count
+        FROM "Asset" asset
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+      `),
+    ]);
+    assets = generatedAssets;
+    total = Number(generatedCount[0]?.count || 0);
+  } else {
+    if (options.directory) {
+      return assetDirectory(await prisma.asset.findMany({ where, take: DIRECTORY_LIMIT + 1,
+        select: { id: true, created_at: true, owner_id: true } }));
+    }
+    [assets, total] = await Promise.all([
+      prisma.asset.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: options.take,
+        select: {
+          id: true,
+          original_url: true,
+          thumbnail_url: true,
+          file_name: true,
+          type: true,
+          status: true,
+          width: true,
+          height: true,
+          file_size: true,
+          created_at: true,
+          owner_id: true,
+          metadata_json: true,
+        },
+      }),
+      prisma.asset.count({ where }),
+    ]);
+  }
 
-  return { items: assets.map(serializeAsset), total };
+  const ownerIds = Array.from(new Set(assets.map((asset) => asset.owner_id).filter(Boolean)));
+  const owners = ownerIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: ownerIds } },
+        select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true },
+      })
+    : [];
+  const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
+  const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'));
+  const billingRows = await prisma.imageStudioTask.findMany({ where: { asset_id: { in: assets.filter(asset => asset.type === 'image'
+    && (options.user.role === 'admin' || asset.owner_id === options.user.id)).map(asset => asset.id) },
+    ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), AND: [studioOutputTaskWhere] },
+    select: { asset_id: true, owner_id: true, billing_status: true, actual_amount_micros: true,
+      actual_credits: true, billing_contract_json: true, status: true, usage_json: true }, take: 1001 });
+  const billsByAsset = new Map<string, typeof billingRows>();
+  if (billingRows.length < 1001) for (const row of billingRows.filter(studioTaskHasViewableOutput)) { const rows = billsByAsset.get(row.asset_id!) || []; rows.push(row); billsByAsset.set(row.asset_id!, rows); }
+
+  return {
+    items: assets.map((asset) => ({ ...serializeAsset({
+      ...asset,
+      owner: ownerById.get(asset.owner_id) || null,
+    }), generationOrigin: assetGenerationOrigin(asset, origins),
+      imageBilling: (() => { const rows = billsByAsset.get(asset.id); return rows?.length === 1 && rows[0].owner_id === asset.owner_id
+        ? imageBillingView(rows[0], options.user.id, options.user.role === 'admin') : null; })() })),
+    total,
+  };
+}
+
+async function assetDirectory(rows: Array<{ id: string; created_at: Date | string; owner_id: string }>) {
+  if (rows.length > DIRECTORY_LIMIT) throw new Error('LIBRARY_DIRECTORY_LIMIT');
+  const ownerIds = Array.from(new Set(rows.map(row => row.owner_id)));
+  const byId = new Map<string, LibraryUser>();
+  for (let start = 0; start < ownerIds.length; start += 500) {
+    const owners = await prisma.user.findMany({ where: { id: { in: ownerIds.slice(start, start + 500) } },
+      select: { id: true, name: true, username: true, email: true } });
+    owners.forEach(owner => byId.set(owner.id, owner));
+  }
+  return boundedDirectory(rows.map(row => ({ id: `asset:${row.id}`, createdAt: new Date(row.created_at).toISOString(),
+    completedAt: null, duration: null, project: null, owner: userSummary(byId.get(row.owner_id)) || legacyAssetOwnerSummary(row.owner_id) })));
 }
 
 async function loadReferenceItems(options: {
   user: SessionUser;
   type: string;
+  enhance: string;
   scope: string;
+  status: string;
   projectId: string | null;
   ownerUserId: string | null;
   keyword: string | null;
   take: number;
+  removedIds: string[];
+  removedAssetIds: string[];
+  multiviewOutputsOnly?: boolean;
+  directory?: boolean;
+  ids?: string[];
 }) {
+  if (options.enhance !== 'none') {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
   if (options.type !== 'all' && options.type !== 'reference') {
     return { items: [] as LibraryItem[], total: 0 };
   }
+  if (options.status !== 'hidden' && !shouldIncludeActiveLibraryMedia(options.status)) {
+    return { items: [] as LibraryItem[], total: 0 };
+  }
 
-  const where: Prisma.ReferenceImageWhereInput = { status: 'active' };
+  const where: Prisma.ReferenceImageWhereInput = {
+    status: options.status === 'hidden' ? 'deleted' : 'active',
+    ...(options.multiviewOutputsOnly ? { asset: { is: { metadata_json: { contains: '"multiviewOutput"' } } } } : {}),
+    AND: [await studioVisibleReferenceWhere(options.user), { NOT: {
+      owner_user_id: options.user.id,
+      OR: [
+        { id: { in: options.removedIds }, asset_id: null },
+        { asset_id: { in: options.removedAssetIds }, asset: { owner_id: options.user.id } },
+      ],
+    } }],
+  };
   if (options.projectId) {
     where.project_id = options.projectId;
   }
@@ -435,6 +864,14 @@ async function loadReferenceItems(options: {
   if (options.keyword) {
     where.album = { name: { contains: options.keyword } };
   }
+  if (options.ids) where.id = { in: options.ids };
+  if (options.directory) {
+    const rows = await prisma.referenceImage.findMany({ where, take: DIRECTORY_LIMIT + 1,
+      select: { id: true, created_at: true, project: { select: { id: true, name: true } },
+        owner: { select: { id: true, name: true, username: true, email: true } } } });
+    return boundedDirectory(rows.map(row => ({ id: `reference_image:${row.id}`, createdAt: row.created_at.toISOString(),
+      completedAt: null, duration: null, project: row.project, owner: userSummary(row.owner) })));
+  }
 
   const [images, total] = await Promise.all([
     prisma.referenceImage.findMany({
@@ -449,6 +886,7 @@ async function loadReferenceItems(options: {
         status: true,
         created_at: true,
         asset_id: true,
+        asset: { select: { id: true, owner_id: true, metadata_json: true, width: true, height: true } },
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         album: { select: { id: true, name: true } },
@@ -457,7 +895,8 @@ async function loadReferenceItems(options: {
     prisma.referenceImage.count({ where }),
   ]);
 
-  return { items: images.map(serializeReferenceImage), total };
+  const origins = await generationOrigins(options.user, images.flatMap(image => image.asset ? [image.asset] : []));
+  return { items: images.map(image => ({ ...serializeReferenceImage(image), generationOrigin: image.asset ? assetGenerationOrigin(image.asset, origins) : image.source_type === 'generated' ? { kind: 'unknown' as const, label: '来源待识别' } : undefined })), total };
 }
 
 export async function GET(request: NextRequest) {
@@ -468,64 +907,55 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const type = enumParam(searchParams.get('type'), ITEM_TYPES, 'video');
     const scope = enumParam(searchParams.get('scope'), SCOPES, 'history');
-    const status = enumParam(searchParams.get('status'), STATUSES, 'all');
+    const status = enumParam(searchParams.get('status'), STATUSES, 'succeeded');
     const sort = enumParam(searchParams.get('sort'), SORTS, 'created_desc');
     const groupBy = enumParam(searchParams.get('group_by'), GROUPS, 'date');
+    const enhance = enumParam(searchParams.get('enhance'), ENHANCE_FILTERS, 'none');
     const projectId = optionalText(searchParams.get('project_id'));
     const ownerUserId = optionalText(searchParams.get('owner_user_id'));
     const keyword = optionalText(searchParams.get('keyword'));
     const page = positiveInt(searchParams.get('page'), 1, 10_000);
     const limit = positiveInt(searchParams.get('limit'), 40, 100);
-    const includeForMerge = type === 'all';
+    const includeUploads = searchParams.get('include_uploads') === 'true';
+    const includeGenerated = searchParams.get('include_generated') === 'true';
+    const multiviewOutputsOnly = searchParams.get('source') === 'multiview-output';
+    // Private library preferences must not alter project/shared or admin audit views.
+    const removed = scope === 'history' && !projectId && status !== 'hidden'
+      ? await removedLibraryResources(user.id) : { asset: [], video_task: [], reference_image: [] };
 
     if (scope === 'user' && user.role !== 'admin') {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
     }
 
-    const takeForMerge = page * limit;
-    const [videoResult, assetResult, referenceResult] = await Promise.all([
-      loadVideoItems({
-        type,
-        scope,
-        status,
-        sort,
-        projectId,
-        ownerUserId,
-        keyword,
-        page,
-        limit,
-        includeForMerge,
-      }),
-      loadAssetItems({
-        userId: user.id,
-        role: user.role,
-        type,
-        scope,
-        status,
-        ownerUserId,
-        keyword,
-        take: includeForMerge ? takeForMerge : limit,
-      }),
-      loadReferenceItems({
-        user,
-        type,
-        scope,
-        projectId,
-        ownerUserId,
-        keyword,
-        take: includeForMerge ? takeForMerge : limit,
-      }),
+    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword, multiviewOutputsOnly,
+      page: 1, limit, includeForMerge: false, removedIds: removed.video_task };
+    const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId,
+      keyword, includeUploads, includeGenerated, multiviewOutputsOnly, take: limit, removedIds: removed.asset };
+    const referenceOptions = { user, type, enhance, scope, status, projectId, ownerUserId, keyword,
+      take: limit, multiviewOutputsOnly, removedIds: removed.reference_image, removedAssetIds: removed.asset };
+    const directoryResults = await Promise.all([
+      loadVideoItems({ ...videoOptions, directory: true }),
+      includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, directory: true }) : null,
+      loadReferenceItems({ ...referenceOptions, directory: true }),
     ]);
-
-    const merged = sortItems([
-      ...videoResult.items,
-      ...assetResult.items,
-      ...referenceResult.items,
-    ], sort);
-    const total = videoResult.total + assetResult.total + referenceResult.total;
-    const items = includeForMerge
-      ? merged.slice((page - 1) * limit, page * limit)
-      : merged;
+    const directory = sortItems(Array.from(new Map(directoryResults.flatMap(result =>
+      result && 'directory' in result ? result.directory : []).map(item => [item.id, item])).values()), sort);
+    const directoryVersion = createHash('sha256').update(JSON.stringify(directory.map(item => item.id))).digest('hex');
+    const expectedDirectory = searchParams.get('directory_version');
+    if (expectedDirectory && expectedDirectory !== directoryVersion) {
+      return NextResponse.json({ error: '素材目录已变化，请刷新后继续翻页；当前内容保留' }, { status: 409, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
+    const total = directory.length;
+    const actualPage = Math.min(page, Math.max(1, Math.ceil(total / limit)));
+    const selected = directory.slice((actualPage - 1) * limit, actualPage * limit);
+    const ids = (source: LibraryItemSource) => selected.filter(item => item.id.startsWith(`${source}:`)).map(item => item.id.slice(source.length + 1));
+    const [videoResult, assetResult, referenceResult] = await Promise.all([
+      loadVideoItems({ ...videoOptions, ids: ids('video_task') }),
+      includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, ids: ids('asset') }) : null,
+      loadReferenceItems({ ...referenceOptions, ids: ids('reference_image') }),
+    ]);
+    const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items].map(item => [item.id, item]));
+    const items = selected.flatMap(item => byId.has(item.id) ? [byId.get(item.id)!] : []);
 
     return NextResponse.json({
       items,
@@ -539,26 +969,35 @@ export async function GET(request: NextRequest) {
         scope,
         status,
         sort,
+        enhance,
+        include_uploads: includeUploads,
+        include_generated: includeGenerated,
+        source: multiviewOutputsOnly ? 'multiview-output' : null,
         group_by: groupBy,
         project_id: projectId,
         owner_user_id: ownerUserId,
         keyword,
       },
       pagination: {
-        page,
+        page: actualPage,
         limit,
         total,
         total_pages: Math.max(1, Math.ceil(total / limit)),
-        has_more: page * limit < total,
+        has_more: actualPage * limit < total,
       },
-    });
+      directoryChanged: items.length !== selected.length,
+      directoryVersion,
+    }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     if (error instanceof Error && error.message === 'missing_session') {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
-    console.error('[AssetLibrary] List error:', error);
+    if (error instanceof Error && error.message === 'LIBRARY_DIRECTORY_LIMIT') {
+      return NextResponse.json({ error: '当前范围素材过多，请先按类型、项目或用户缩小范围' }, { status: 503 });
+    }
+    console.error('[AssetLibrary] List error');
     return NextResponse.json(
-      { error: '资产加载失败', message: error instanceof Error ? error.message : 'Unknown error' },
+      { error: '资产加载失败，请重新读取' },
       { status: 500 },
     );
   }

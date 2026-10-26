@@ -42,6 +42,7 @@ export async function GET(
       select: {
         id: true,
         provider: true,
+        public_video_url: true,
         local_video_path: true,
         result_video_url: true,
         result_last_frame_url: true,
@@ -60,11 +61,7 @@ export async function GET(
 
     await assertCanViewTask(user, task);
 
-    const thumbnailResult = await ensureTaskThumbnail({
-      ...task,
-      // 浏览缩略图不能触发远程 mp4 拉取；无本地视频时只允许尾帧图片作为远程兜底。
-      result_video_url: null,
-    }, { allowRemoteFallback: true });
+    const thumbnailResult = await ensureTaskThumbnail(task, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });
     }

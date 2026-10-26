@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
+import { isPrivateMultiviewTask, privateMultiviewLedgerMetadata } from '@/lib/video/multiview-task-privacy';
 
 export async function GET(request: NextRequest) {
   let user: { id: string } | null = null;
@@ -25,5 +26,11 @@ export async function GET(request: NextRequest) {
     prisma.creditLedger.count({ where: { user_id: user.id } }),
   ]);
 
-  return NextResponse.json({ records, total, page, page_size: pageSize });
+  const relatedTasks = await prisma.videoTask.findMany({ where: {
+    id: { in: records.flatMap(record => record.related_task_id ? [record.related_task_id] : []) },
+  }, select: { id: true, source_metadata_json: true } });
+  const protectedTaskIds = new Set(relatedTasks.filter(isPrivateMultiviewTask).map(task => task.id));
+  return NextResponse.json({ records: records.map(record => ({ ...record,
+    metadata_json: privateMultiviewLedgerMetadata(record.metadata_json, Boolean(record.related_task_id && protectedTaskIds.has(record.related_task_id))),
+  })), total, page, page_size: pageSize }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

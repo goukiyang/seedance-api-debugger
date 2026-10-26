@@ -1,0 +1,2 @@
+.notice { color: var(--task-notice-text, var(--text-secondary, currentColor)); overflow-wrap: anywhere; }
+.notice[data-task-notice="danger"] { color: var(--task-notice-danger-text, var(--tone-danger-text, #ffb4ab)); }

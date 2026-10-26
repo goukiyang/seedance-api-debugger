@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 
 type VideoCardSuggestionClient = Prisma.TransactionClient;
 
@@ -115,6 +116,7 @@ export async function getVideoCardArchiveAnomalies(
     select: {
       id: true,
       prompt: true,
+      source_metadata_json: true,
       local_status: true,
       created_at: true,
       estimated_cost: true,
@@ -124,13 +126,14 @@ export async function getVideoCardArchiveAnomalies(
   const mismatchedTasks = await tx.$queryRaw<Array<{
     id: string;
     prompt: string;
+    source_metadata_json: string | null;
     local_status: string;
     created_at: string;
     project_id: string;
     video_card_id: string;
     card_project_id: string;
   }>>`
-    SELECT t.id, t.prompt, t.local_status, t.created_at, t.project_id, t.video_card_id, c.project_id AS card_project_id
+    SELECT t.id, t.prompt, t.source_metadata_json, t.local_status, t.created_at, t.project_id, t.video_card_id, c.project_id AS card_project_id
     FROM VideoTask t
     JOIN VideoCard c ON t.video_card_id = c.id
     WHERE t.project_id = ${projectId}
@@ -141,8 +144,8 @@ export async function getVideoCardArchiveAnomalies(
   `;
 
   return {
-    unfiled_tasks: unfiledTasks,
-    project_card_mismatches: mismatchedTasks,
+    unfiled_tasks: unfiledTasks.map(projectSelectedMultiviewTask),
+    project_card_mismatches: mismatchedTasks.map(projectSelectedMultiviewTask),
     total_count: unfiledTasks.length + mismatchedTasks.length,
   };
 }

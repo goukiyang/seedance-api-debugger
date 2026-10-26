@@ -1,0 +1,65 @@
+import { CREDIT_GRANT_AMOUNTS } from './request-rules';
+
+const plain = (content: string) => ({ tag: 'plain_text', content });
+const section = (content: string) => ({ tag: 'div', text: plain(content) });
+const source = 'sd2_credit_requests_v1';
+
+export function creditApprovalCard(input: {
+  id: string; nonce: string; purpose: string; name: string; available: number;
+}) {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: { title: plain('SD2 积分申请'), template: 'blue' },
+    elements: [
+      section(`${input.name}\n申请时可用：${input.available} 点\n用途：${input.purpose}`),
+      { tag: 'action', actions: CREDIT_GRANT_AMOUNTS.map((amount) => ({
+        tag: 'button', text: plain(`发放 ${amount}`), type: 'primary',
+        value: { source, requestId: input.id, nonce: input.nonce, action: 'prepare', amount },
+      })) },
+      { tag: 'action', actions: [{
+        tag: 'button', text: plain('暂不发放'), type: 'default',
+        confirm: { title: plain('确认暂不发放'), text: plain('申请人将收到未通过通知，可在网站查看结果。') },
+        value: { source, requestId: input.id, nonce: input.nonce, action: 'reject' },
+      }] },
+    ],
+  };
+}
+
+export function creditConfirmationCard(input: {
+  id: string; nonce: string; confirmationNonce: string; amount: number; name: string; available: number;
+}) {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: { title: plain('确认发放'), template: 'orange' },
+    elements: [
+      section(`${input.name}\n当前可用：${input.available} 点\n本次增加：${input.amount} 点\n发放到个人长期积分。确认有效期 5 分钟。`),
+      { tag: 'action', actions: [
+        { tag: 'button', text: plain(`确认发放 ${input.amount}`), type: 'primary',
+          value: { source, requestId: input.id, nonce: input.nonce, confirmationNonce: input.confirmationNonce, action: 'confirm' } },
+        { tag: 'button', text: plain('重新选择'), type: 'default',
+          value: { source, requestId: input.id, nonce: input.nonce, action: 'back' } },
+      ] },
+    ],
+  };
+}
+
+export function creditResultCard(message: string) {
+  return { header: { title: plain('申请已处理'), template: 'green' }, elements: [section(message)] };
+}
+
+export function multiview1080pApprovalCard(input: { id: string; nonce: string; purpose: string; name: string }) {
+  return {
+    config: { wide_screen_mode: true, update_multi: true },
+    header: { title: plain('SD2 3D多视图 1080p 申请'), template: 'blue' },
+    elements: [
+      section(`${input.name}\n用途：${input.purpose}\n同意后可生成 1 次 1080p，24 小时内未使用自动作废；开始生成后失败不退回次数。`),
+      { tag: 'action', actions: [
+        { tag: 'button', text: plain('同意 1 次'), type: 'primary',
+          confirm: { title: plain('确认同意'), text: plain(`允许 ${input.name} 生成 1 次 3D多视图 1080p。`) },
+          value: { source, requestId: input.id, nonce: input.nonce, action: 'approve_1080p' } },
+        { tag: 'button', text: plain('拒绝'), type: 'default',
+          value: { source, requestId: input.id, nonce: input.nonce, action: 'reject' } },
+      ] },
+    ],
+  };
+}

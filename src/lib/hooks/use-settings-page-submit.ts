@@ -1,0 +1,50 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { settingsReturnTarget } from '@/lib/navigation/settings-return';
+import { useUnsavedNavigation } from './use-unsaved-navigation';
+
+export function useSettingsPageSubmit(drafts: Record<string, unknown>, ready: boolean, fallback: string, confirm: Parameters<typeof useUnsavedNavigation>[1], working = false) {
+  const router = useRouter();
+  const snapshots = Object.fromEntries(Object.entries(drafts).map(([key, value]) => [key, JSON.stringify(value)]));
+  const baseline = useRef<Record<string, string> | null>(null);
+  const lock = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [completed, setCompleted] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const signature = JSON.stringify(snapshots);
+  const dirty = Boolean(baseline.current && Object.keys(snapshots).some(key => snapshots[key] !== baseline.current![key]));
+  useUnsavedNavigation(dirty || busy || working, confirm, {
+    unsaved: dirty ? ['后台设置'] : [], busy: busy ? ['设置正在保存'] : working ? ['通道操作正在进行'] : [],
+  });
+
+  useEffect(() => {
+    if (!ready) return;
+    const next: Record<string, string> = JSON.parse(signature);
+    if (!baseline.current) baseline.current = next;
+    if (!completed) return;
+    baseline.current[completed] = next[completed];
+    setCompleted(null);
+    if (Object.keys(next).some(key => next[key] !== baseline.current![key])) {
+      lock.current = false;
+      setNotice('已保存这项设置；其他设置还有未保存的修改，当前页面已保留。');
+      return;
+    }
+    router.push(settingsReturnTarget(fallback));
+  }, [completed, fallback, ready, router, signature]);
+
+  return {
+    busy: busy || working, notice,
+    start() {
+      if (!ready || lock.current || working) return false;
+      lock.current = true; setBusy(true); setNotice('');
+      return true;
+    },
+    finish(key: string, saved = false) {
+      if (saved) setCompleted(key);
+      else lock.current = false;
+      setBusy(false);
+    },
+  };
+}

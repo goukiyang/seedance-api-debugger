@@ -1,6 +1,10 @@
 'use client';
+import { useProductDialog } from '@/components/useProductDialog';
+import ContentReactions from '@/components/content-reactions/ContentReactions';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
+import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import type { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
 
 interface AssetPanelProps {
@@ -8,7 +12,34 @@ interface AssetPanelProps {
   onClose: () => void;
 }
 
+type AssetUploadProgress = {
+  label: string;
+  detail: string;
+  percent?: number;
+};
+
+type UploadAndCreateResponse = {
+  error?: string;
+  message?: string;
+  reused?: boolean;
+  closedLoop?: boolean;
+  providerAssetId?: string;
+  storageProvider?: string;
+  publicUrl?: string;
+  reason?: string;
+  warning?: string;
+};
+
+function buildAssetUploadProgress(file: File, progress: UploadProgressSnapshot): AssetUploadProgress {
+  return {
+    label: progress.label,
+    detail: file.name,
+    ...(progress.percent != null ? { percent: progress.percent } : {}),
+  };
+}
+
 export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
+  const { confirm, productDialog } = useProductDialog();
   const [assets, setAssets] = useState<LocalAssetRecord[]>([]);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
@@ -26,6 +57,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const [uploadName, setUploadName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<AssetUploadProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载列表
@@ -57,7 +89,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 创建失败：${data.error}`);
+        setActionMsg(`× 创建失败：${data.error}`);
       } else if (data.reused === true) {
         // 复用已有资产
         setActionMsg(`🔄 ${data.message}`);
@@ -69,7 +101,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     } finally {
       setCreating(false);
     }
@@ -100,14 +132,14 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 重命名失败：${data.error}`);
+        setActionMsg(`× 重命名失败：${data.error}`);
       } else {
         setActionMsg('✅ 重命名成功');
         setEditId(null);
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
   }, [editName, loadAssets]);
 
@@ -118,50 +150,62 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       const res = await fetch(`/api/assets/${localId}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 移除失败：${data.error}`);
+        setActionMsg(`× 移除失败：${data.error}`);
       } else {
         setActionMsg('✅ 已从素材库移除（官方资产保留）');
         if (detailId === localId) { setDetail(null); setDetailId(null); }
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
   }, [detailId, loadAssets]);
 
   // 彻底删除官方资产
   const handleProviderDelete = useCallback(async (localId: string) => {
-    const ok = window.confirm('确认彻底删除官方 Seedance 资产？此操作不可撤销。');
+    const ok = await confirm('确认彻底删除官方 Seedance 资产？此操作不可撤销。', { title: '删除官方资产', confirmLabel: '彻底删除', danger: true });
     if (!ok) return;
     setActionMsg(null);
     try {
       const res = await fetch(`/api/assets/${localId}/provider-delete`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) {
-        setActionMsg(`❌ 彻底删除失败：${data.error}`);
+        setActionMsg(`× 彻底删除失败：${data.error}`);
       } else {
         setActionMsg('✅ 官方资产已删除');
         if (detailId === localId) { setDetail(null); setDetailId(null); }
         await loadAssets();
       }
     } catch {
-      setActionMsg('❌ 网络错误');
+      setActionMsg('× 网络错误');
     }
-  }, [detailId, loadAssets]);
+  }, [detailId, loadAssets, confirm]);
 
   // 本地上传 + 创建 Seedance Asset
   const handleLocalUpload = useCallback(async () => {
     if (!uploadFile) return;
     setUploading(true);
     setUploadMsg(null);
+    setUploadProgress({ label: '准备上传', detail: uploadFile.name });
     try {
-      const formData = new FormData();
-      formData.append('file', uploadFile);
-      if (uploadName.trim()) formData.append('name', uploadName.trim());
-      const res = await fetch('/api/assets/upload-and-create', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) {
-        setUploadMsg(`❌ ${data.error}`);
+      const asset = await uploadFileAsAsset(uploadFile, {
+        invalidJsonMessage: '资产上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
+        onProgress: (progress) => setUploadProgress(buildAssetUploadProgress(uploadFile, progress)),
+      });
+      if (!asset.id) throw new Error('素材上传成功，但没有返回素材 ID。');
+
+      setUploadProgress({ label: '正在创建官方资产', detail: asset.fileName || uploadFile.name });
+      const response = await fetch('/api/assets/upload-and-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetId: asset.id,
+          name: uploadName.trim() || uploadFile.name || asset.fileName,
+        }),
+      });
+      const data = await response.json().catch(() => ({ error: '官方资产创建服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。' })) as UploadAndCreateResponse;
+      if (!response.ok) {
+        setUploadMsg(`× ${data.error || data.message || '上传失败'}`);
       } else if (data.reused === true) {
         // 复用已有资产
         setUploadMsg(
@@ -183,7 +227,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
           msgs.push('⚠️ 当前 URL 不是公网，Seedance 官方无法访问。');
           msgs.push('请配置公网对象存储（TOS/R2）以完成闭环。');
         } else if (data.reason === 'PROVIDER_CREATE_FAILED') {
-          msgs.push(`❌ 官方 create 失败：${data.error}`);
+          msgs.push(`× 官方 create 失败：${data.error}`);
         }
         setUploadMsg(msgs.join('\n'));
         // 半闭环也刷新列表
@@ -201,10 +245,11 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         if (fileInputRef.current) fileInputRef.current.value = '';
         await loadAssets();
       }
-    } catch {
-      setUploadMsg('❌ 网络错误');
+    } catch (uploadError) {
+      setUploadMsg(`× ${uploadError instanceof Error ? uploadError.message : '网络错误'}`);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }, [uploadFile, uploadName, loadAssets]);
 
@@ -213,7 +258,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const statusBadge = (s: string) => {
     const cls = s === 'Active' ? 'bg-green-900 text-green-300'
       : s === 'Deleted' ? 'bg-yellow-900 text-yellow-300'
-      : s === 'ProviderDeleted' ? 'bg-red-900 text-red-300'
+      : s === 'ProviderDeleted' ? 'bg-gray-800 text-gray-300'
       : s === 'DeleteFailed' ? 'bg-orange-900 text-orange-300'
       : 'bg-gray-700 text-gray-300';
     return <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${cls}`}>{s}</span>;
@@ -228,6 +273,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       maxHeight: '70vh', display: 'flex', flexDirection: 'column',
     }}>
+      {productDialog}
       {/* 标题栏 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: 'white' }}>Seedance 资产管理（测试）</div>
@@ -275,7 +321,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               </button>
             </div>
             {actionMsg && (
-              <div style={{ fontSize: 11, color: actionMsg.startsWith('✅') ? '#4ade80' : '#f87171', marginTop: 8 }}>{actionMsg}</div>
+              <div style={{ fontSize: 11, color: actionMsg.startsWith('✅') ? '#4ade80' : 'rgba(255,255,255,0.76)', marginTop: 8 }}>{actionMsg}</div>
             )}
           </div>
 
@@ -290,6 +336,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                 onChange={(e) => {
                   const f = e.target.files?.[0] || null;
                   setUploadFile(f);
+                  setUploadProgress(null);
                   if (f && !uploadName) setUploadName(f.name.replace(/\.[^.]+$/, ''));
                 }}
                 style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}
@@ -315,8 +362,17 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                 {uploading ? '上传中...' : '上传并创建'}
               </button>
             </div>
+            {uploadProgress && (
+              <UploadProgressIndicator
+                label={uploadProgress.label}
+                detail={uploadProgress.detail}
+                percent={uploadProgress.percent}
+                variant="dark"
+                className="seedance-asset-upload-progress"
+              />
+            )}
             {uploadMsg && (
-              <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : '#f87171', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
+              <div style={{ fontSize: 11, color: uploadMsg.startsWith('✅') ? '#4ade80' : uploadMsg.includes('⚠️') ? '#fbbf24' : 'rgba(255,255,255,0.76)', marginTop: 8, whiteSpace: 'pre-line' }}>{uploadMsg}</div>
             )}
           </div>
 
@@ -370,6 +426,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {asset.status === 'Active' && <ContentReactions contentKey={`seedance_asset:${asset.localId}`} />}
                     <button
                       onClick={() => handleGetDetail(asset.localId)}
                       style={{ fontSize: 10, padding: '2px 8px', backgroundColor: 'rgba(37,99,235,0.2)', border: '1px solid rgba(37,99,235,0.4)', borderRadius: 6, color: '#60a5fa', cursor: 'pointer' }}
@@ -426,7 +483,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               点击「查详情」获取官方同步信息
             </div>
           ) : detail.error ? (
-            <div style={{ fontSize: 12, color: '#f87171', padding: 12, backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 8, border: '1px solid rgba(239,68,68,0.2)' }}>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.76)', padding: 12, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.18)' }}>
               官方查询失败：{detail.error}
             </div>
           ) : detail.asset ? (

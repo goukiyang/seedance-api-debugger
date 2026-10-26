@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import '../../public/styles/loading.css';
 import ClientLayout from './ClientLayout';
 
 export const metadata: Metadata = {

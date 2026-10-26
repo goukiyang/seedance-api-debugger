@@ -1,0 +1,373 @@
+{
+  "checkedAt": "2026-10-02T14:39:17.731Z",
+  "runId": "sd2-template-workbench-20261002T143320Z",
+  "version": "0.36.2",
+  "commit": "f6478176fb34cefa432318f38ac521693bbdd2f6",
+  "build": "OlWyIuDDh1fBfDOaID4Tt",
+  "routes": [
+    "/layout",
+    "/login/page",
+    "/template-studio/page"
+  ],
+  "files": [
+    {
+      "path": "static/chunks/webpack-5771f0fcaecd5647.js",
+      "sha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+      "publicSha256": "048c5c89c03618d8a65caa7b22d5a4f788a219285e5f6ba46348cebde4af1514",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/8344c0af-421bfd77be53e753.js",
+      "sha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "publicSha256": "90ea459ce5041b54315a2fdb9635eff5612c549a08296816534b9eeb998b8303",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/1890-7faa2453eb06933f.js",
+      "sha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "publicSha256": "2821bac8fd88a8c987ddcd020b555bee437acfe7c64f8d040ab871e868fa0aa1",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/main-app-2d700b7ebb08890f.js",
+      "sha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "publicSha256": "e640077680f49d5a86830b834c5edcf3c9016c95b0ee64137fa36c3462cdd1ec",
+      "status": 200
+    },
+    {
+      "path": "static/css/91ad5daa836b5e3d.css",
+      "sha256": "e9f39945b9f7db8a5e82c735ca65d84acff5ed2ccc5406d6fe0360c2ffe4c5a9",
+      "publicSha256": "e9f39945b9f7db8a5e82c735ca65d84acff5ed2ccc5406d6fe0360c2ffe4c5a9",
+      "status": 200
+    },
+    {
+      "path": "static/css/ea095be58e8c4d2c.css",
+      "sha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "publicSha256": "ac8fd56a7a17cb13d5dce59e9f6eff173a31e567cca7a76f006613a5faf73792",
+      "status": 200
+    },
+    {
+      "path": "static/css/0cacfd9b992f5cee.css",
+      "sha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+      "publicSha256": "055543b5b3cb03531bbb562315ea5cc152e86528cd5e3d68fb457cbc406cecef",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4275-2d8ee08a0e5c670c.js",
+      "sha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "publicSha256": "a653e3952bde19f8b95d73ce8e9c8c7a272c1cc6c5f2b3dd53cd4faf136126b7",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3267-3fbd97130dd04797.js",
+      "sha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+      "publicSha256": "aef9df708b6f8a5fb5fd5a84b4b2ecd7065ecb80cda8c75829b3a72a8cf1f38c",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/3461-4160763e155494a1.js",
+      "sha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "publicSha256": "15b989e58e2c879a5e16d3d0b6fcc0ea3ae7af3b706a89a63ba9e764c1d61137",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5634-2f74d0149c7e4de8.js",
+      "sha256": "5632447b61661c7878097761abdb0d95f2659e1e74c81a92aaa245691d4add34",
+      "publicSha256": "5632447b61661c7878097761abdb0d95f2659e1e74c81a92aaa245691d4add34",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/layout-7471320f7b0bc928.js",
+      "sha256": "a31a15995c336f7beba0875d58379b19656a0c33735a29daf9420d1c1e8179cb",
+      "publicSha256": "a31a15995c336f7beba0875d58379b19656a0c33735a29daf9420d1c1e8179cb",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/login/page-6b90097fb72bf0a0.js",
+      "sha256": "dd8da124e4a0f39a999f5c5212f226e0bb9b1a55af2df80ee6d117b2f82c5f2a",
+      "publicSha256": "dd8da124e4a0f39a999f5c5212f226e0bb9b1a55af2df80ee6d117b2f82c5f2a",
+      "status": 200
+    },
+    {
+      "path": "static/css/53c843adf00a1818.css",
+      "sha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+      "publicSha256": "6cc1a6d3436d6218387604637b4af5f40277dad992294b1143deba016db9a834",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6370-4123e213528db92e.js",
+      "sha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "publicSha256": "1afc1c1f31e2f532603db7d8381d88de7afd81bd561eda29b4d767fed7037e91",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5557-8807fd6738a80a57.js",
+      "sha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+      "publicSha256": "a4c7c61213dbe4ec05d1475fe98438a5a07594f2143242d031a5f276783078f7",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/4881-0f4d34f12b6f2026.js",
+      "sha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "publicSha256": "44f5d72057b441b9bb1ed3fa7a143416750e55cf5002c3c1dc79d56591088209",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/6670-7082efca1a6a1ace.js",
+      "sha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "publicSha256": "d318996806ab8030c917e634e5da6392649177db21c0541d382f0290f6566fc2",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5559-c83f34e4e3c28875.js",
+      "sha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+      "publicSha256": "d7b7fbaff02b3ad912b2539fbcdb3bfa22bb491e092982c7cb2fe70c0db4c205",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/5595-d1bcc5f90a86099c.js",
+      "sha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+      "publicSha256": "bbc33ec29f39273d1492c3b3a367daf332c7d341d7bba208f23689d4a9e8d863",
+      "status": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-82ebc468d421cfd9.js",
+      "sha256": "19ac8acc3f4e7e9a136e7bc3a635195870fa12ce358384e645b123e43fe47281",
+      "publicSha256": "19ac8acc3f4e7e9a136e7bc3a635195870fa12ce358384e645b123e43fe47281",
+      "status": 200
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "package-lock.json",
+      "sha256": "dd1b1a55d5549a5e4580c3f0efc889f5339c48748e39361d3751f64d44665b78",
+      "localSha256": "dd1b1a55d5549a5e4580c3f0efc889f5339c48748e39361d3751f64d44665b78"
+    },
+    {
+      "path": "package.json",
+      "sha256": "ea8713fcf1e951083c2430743c52e00fd563ff2fc0e571ddd6560077d865cef3",
+      "localSha256": "ea8713fcf1e951083c2430743c52e00fd563ff2fc0e571ddd6560077d865cef3"
+    },
+    {
+      "path": "src/app/image-studio/studio.tsx",
+      "sha256": "ee4a52a863531f1d977d688081f618f23110e55f39ebd6f7d7871cb0d9dd1c9a",
+      "localSha256": "ee4a52a863531f1d977d688081f618f23110e55f39ebd6f7d7871cb0d9dd1c9a"
+    },
+    {
+      "path": "src/components/template-studio/TemplateStudioShell.tsx",
+      "sha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a",
+      "localSha256": "cf3fdd23f1883c81e1f4a5d237b33dc8eef41639d3fce956f7adc20f8db5592a"
+    },
+    {
+      "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
+      "sha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b",
+      "localSha256": "1df34472abc25bc0882ed18a7ab64cb385c66ee1cc76bbe7e34abd8ef207be9b"
+    },
+    {
+      "path": "src/components/template-studio/template-studio.module.css",
+      "sha256": "6d7c34092eb9b473364962abdcbb6f7205d06e77220fe4f0f5394e6313ea2f0e",
+      "localSha256": "6d7c34092eb9b473364962abdcbb6f7205d06e77220fe4f0f5394e6313ea2f0e"
+    },
+    {
+      "path": "src/lib/release.ts",
+      "sha256": "7d4e7b02dfca6fcab489efa3683d162359b99079d566009a19e8c5e261bdf5a3",
+      "localSha256": "7d4e7b02dfca6fcab489efa3683d162359b99079d566009a19e8c5e261bdf5a3"
+    },
+    {
+      "path": "src/components/RelativeTime.tsx",
+      "sha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd",
+      "localSha256": "8802ce917f56333fffa90529e79b6d0756c943e70f34e8ed83299bde68ab85cd"
+    },
+    {
+      "path": "src/components/useDialogDismiss.ts",
+      "sha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb",
+      "localSha256": "7eac8f9fa598a040cae296a5a78490176705e39defc4ecbd85691d14f961aebb"
+    },
+    {
+      "path": "src/components/useProductDialog.tsx",
+      "sha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d",
+      "localSha256": "23265c7d3c4fbbeb48ec5205f51b77bf254230be8be7ea42f2ff39574afe058d"
+    },
+    {
+      "path": "src/components/ReleaseNotice.tsx",
+      "sha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5",
+      "localSha256": "faea60fdfec675414c959066966094a63e1ea6475fd5f714684c66087da903f5"
+    },
+    {
+      "path": "public/styles/loading.css",
+      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f",
+      "localSha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
+    },
+    {
+      "path": "src/components/LoadingState.tsx",
+      "sha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725",
+      "localSha256": "6660c798ef1aba0f4ece5c70d6e30310059aaccdc445b365a6080094fc72d725"
+    },
+    {
+      "path": "src/lib/image-studio/worker.ts",
+      "sha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813",
+      "localSha256": "e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813"
+    },
+    {
+      "path": "scripts/process-image-studio.ts",
+      "sha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387",
+      "localSha256": "2dcbb04a698ed652e606c1f2b6b2999b476128b6470c29f16f76598c11b3e387"
+    }
+  ],
+  "unitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+  "priorUnitSha256": "7716042e30f4d3a553823bcdbb1634ad763ad1f8e0dc4af92ef4f8a5a53a18ff",
+  "workerBefore": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+  "workerAfter": "MainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n",
+  "checks": [
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193",
+      "version": "0.36.2"
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/image-studio",
+      "status": 307,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/template-studio",
+      "status": 307,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/styles/loading.css",
+      "status": 200,
+      "origin": "server-42-193",
+      "sha256": "9d10cd84974d66ae4b8750410649ccd39b3e447dd499a6478e218b2c2bb42a7f"
+    }
+  ],
+  "local": {
+    "checks": [
+      {
+        "path": "/api/config",
+        "status": 200
+      },
+      {
+        "path": "/api/release",
+        "status": 200
+      },
+      {
+        "path": "/login",
+        "status": 200
+      }
+    ],
+    "services": [
+      "active",
+      "active",
+      "active",
+      "active"
+    ],
+    "worker": "TimeoutStopUSec=11min\nMainPID=1241475\nExecMainStatus=0\nActiveEnterTimestamp=Fri 2026-10-02 19:26:26 CST\n"
+  },
+  "manualAcceptance": "pending; no functional/offline/browser tests, paid generation or production DB writes",
+  "archiveSha256": "99402b8b56f410e42c9b0e14d8614f10f056e919a8edb51c8264b1d15f6f500c",
+  "localBuild": {
+    "build": "yjy-j_yw5-4g5Ik8CkEhx",
+    "exitCode": 0,
+    "log": "/tmp/sd2-template-workbench-v0362-local-build-final.log",
+    "sha256": "6ab423b9bc619dcfbebe53fd4068fc23462ce40f464593c3da5b5a6e2e4a7f6c",
+    "initialFailure": "Map spread unsupported by existing TypeScript target; corrected with Array.from; second unified build passed"
+  },
+  "serverBuild": {
+    "exitCode": 0,
+    "log": "/tmp/sd2-template-workbench-20261002T143320Z-build.log",
+    "sha256": "4ead89763eb16b9ee2aaea530f561d0d74b28d03f69c735f4e589d058b39a2a4"
+  },
+  "deployment": {
+    "exitCode": 0,
+    "script": "/tmp/sd2-template-workbench-v0362-deploy.sh",
+    "scriptSha256": "d9f86b389b68a207cbe26358901066b4242e82f41ff39f835b30510c44886e6e",
+    "firstPrecheck": {
+      "exitCode": 1,
+      "synced": 0,
+      "moved": 0,
+      "reason": "runtime prisma/dev.db excluded from source comparison; stopped candidate and record preserved; same run continued"
+    },
+    "backendEquivalence": "src/app/api, scripts, prisma and src/lib except release.ts matched old release and live source; runtime db/sqlite/log excluded",
+    "workerRestarted": false
+  },
+  "gates": [
+    {
+      "action": "部署开始",
+      "runId": "sd2-template-workbench-20261002T143320Z",
+      "commit": "f6478176fb34cefa432318f38ac521693bbdd2f6",
+      "appendConfirmed": true,
+      "reservationConfirmed": true,
+      "at": "2026-10-02T14:33:42.453Z",
+      "exitCode": 0
+    },
+    {
+      "action": "部署开始",
+      "runId": "sd2-template-workbench-20261002T143320Z",
+      "commit": "f6478176fb34cefa432318f38ac521693bbdd2f6",
+      "appendConfirmed": true,
+      "reservationConfirmed": true,
+      "at": "2026-10-02T14:35:02.503Z",
+      "exitCode": 0
+    },
+    {
+      "action": "部署开始",
+      "runId": "sd2-template-workbench-20261002T143320Z",
+      "commit": "f6478176fb34cefa432318f38ac521693bbdd2f6",
+      "appendConfirmed": true,
+      "reservationConfirmed": true,
+      "at": "2026-10-02T14:38:52.686Z",
+      "exitCode": 0
+    },
+    {
+      "action": "部署完成",
+      "runId": "sd2-template-workbench-20261002T143320Z",
+      "commit": "f6478176fb34cefa432318f38ac521693bbdd2f6",
+      "appendConfirmed": true,
+      "reservationConfirmed": true,
+      "at": "2026-10-02T14:39:59.323Z",
+      "exitCode": 0
+    }
+  ],
+  "rollback": {
+    "commit": "8acaf46e5fcd93004fc55b3016d74060b6020361",
+    "build": "Ec6Hfe91C-vrdLDtYaCKN",
+    "tag": "rollback/2026-10-02-before-template-workbench-v0362",
+    "sourcePresent": true,
+    "buildPresent": true,
+    "buildDirectory": "/srv/video-api-debugger/app/.next-prod-before-sd2-template-workbench-20261002T143320Z",
+    "record": "/srv/video-api-debugger/backups/sd2-template-workbench-20261002T143320Z"
+  },
+  "persistentPaths": [
+    "/data/video-api-debugger/var-lib/storage",
+    "/data/video-api-debugger/var-lib/uploads",
+    "/data/video-api-debugger/var-lib/videos"
+  ],
+  "scope": {
+    "templateWorkbenchOnly": true,
+    "templateWorkbenchPropDefault": false,
+    "independentImageStudioUnchanged": true,
+    "backendChanged": false,
+    "dependenciesChanged": false,
+    "dbWritten": false,
+    "providerOrFeesChanged": false
+  },
+  "guardian": {
+    "start": "L3-visible-runtime (corrected before implementation)",
+    "finish": "L3-visible-runtime",
+    "misclassification": true,
+    "record": "/Users/gouki-youdoo/.codex/classification-misjudgment-log.md",
+    "realResult": "pending manual acceptance by explicit project boundary"
+  }
+}

@@ -1,0 +1,124 @@
+'use client';
+
+import { useProductDialog } from '@/components/useProductDialog';
+
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowDown, ArrowUp, GripVertical, MessageSquare, Save, X } from 'lucide-react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import type { UploadedAssetPayload } from '@/lib/http/file-upload';
+import styles from './studio.module.css';
+
+export type FixedStudioReference = UploadedAssetPayload & { note: string; available?: boolean };
+
+function ReferenceThumbnail({ src, label, loading, unavailableLabel, onError }: { src?: string | null; label: string; loading: boolean; unavailableLabel?: string; onError: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return src && !failed ? <img decoding="async" draggable={false} src={src} alt={label} onError={() => { setFailed(true); onError(); }} />
+    : <span>{loading ? '正在读取图片…' : unavailableLabel || '图片已不可用'}</span>;
+}
+
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false, renderDetails, onThumbnailError, loading = false, unavailableLabel }: {
+  items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
+  disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; standalone?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
+  renderDetails?: (item: T, index: number) => ReactNode; onThumbnailError?: (item: T) => void; loading?: boolean;
+  unavailableLabel?: (item: T, index: number) => string;
+}) {
+  const { confirm, productDialog } = useProductDialog();
+  const root = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointer: number; index: number; x: number; y: number; moved: boolean; target: number } | null>(null);
+  const suppressClick = useRef(false);
+  const [targetIndex, setTargetIndex] = useState<number | null>(null);
+  const [sourceIndex, setSourceIndex] = useState<number | null>(null);
+  const [noteIndex, setNoteIndex] = useState<number | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteError, setNoteError] = useState('');
+  const noteDialog = useRef<HTMLDialogElement>(null);
+  const label = (index: number) => labels === 'template' ? `模板${String.fromCharCode(65 + index)}` : `${labels === 'style' ? '风格' : labels === 'primary' ? '主图' : labels === 'auxiliary' ? '参考图' : '图'} ${offset + index + 1}`;
+  const originalNote = noteIndex === null ? '' : (items[noteIndex] as unknown as FixedStudioReference)?.note || '';
+  const closeNote = async () => {
+    if (noteBusy || (noteDraft !== originalNote && !(await confirm('备注尚未保存，放弃这次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })))) return;
+    setNoteIndex(null);
+  };
+  useEffect(() => { if (noteIndex === null) noteDialog.current?.close(); else noteDialog.current?.showModal(); }, [noteIndex]);
+  useDialogDismiss({ open: noteIndex !== null, dialogRef: noteDialog, nativeDialog: true, onDismiss: closeNote });
+  async function saveNote() {
+    if (noteIndex === null || disabled || noteBusy) return;
+    setNoteBusy(true); setNoteError('');
+    try {
+      const next = items.map((item, index) => index === noteIndex ? { ...item, note: noteDraft } : item);
+      if (onSaveNote) { if (!await onSaveNote(next)) { setNoteError('备注未保存，请重试'); return; } }
+      else onChange(next);
+      setNoteIndex(null);
+    } catch { setNoteError('备注未保存，请重试'); }
+    finally { setNoteBusy(false); }
+  }
+  const move = (from: number, to: number) => {
+    if (disabled || from === to || to < 0 || to >= items.length) return;
+    const next = [...items];
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    onChange(next);
+  };
+  const reset = () => { drag.current = null; setTargetIndex(null); setSourceIndex(null); };
+  return <>{productDialog}{(<><div ref={root} className={`${styles.references} ${compact ? styles.referencesCompact : ''} ${materialTiles ? styles.materialGrid : ''} ${standalone ? styles.standaloneReferences : ''}`}>
+    {items.map((item, index) => <div key={renderDetails ? item.id : `${item.id}-${index}`} data-reference-index={index}
+      className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
+      data-dragging={sourceIndex === index || undefined}
+      onPointerDown={event => {
+        if (disabled || event.button !== 0 || !(event.target instanceof Element)) return;
+        const grip = event.target.closest('[data-sort-grip]');
+        if (event.target.closest('textarea,input,select,a,[data-reference-remove],[data-reference-note],[data-reference-details]') || (event.pointerType !== 'mouse' && !grip)) return;
+        suppressClick.current = false;
+        drag.current = { pointer: event.pointerId, index, x: event.clientX, y: event.clientY, moved: false, target: index };
+      }}
+      onPointerMove={event => {
+        const state = drag.current;
+        if (!state || state.pointer !== event.pointerId) return;
+        if (!state.moved && Math.hypot(event.clientX - state.x, event.clientY - state.y) < 5) return;
+        event.preventDefault();
+        if (!state.moved) { event.currentTarget.setPointerCapture(event.pointerId); state.moved = true; setSourceIndex(state.index); }
+        const nodes = root.current?.querySelectorAll<HTMLElement>('[data-reference-index]') || [];
+        let closest = state.index; let distance = Infinity;
+        nodes.forEach(node => {
+          const rect = node.getBoundingClientRect();
+          const d = Math.hypot(event.clientX - (rect.left + rect.width / 2), event.clientY - (rect.top + rect.height / 2));
+          if (d < distance) { distance = d; closest = Number(node.dataset.referenceIndex); }
+        });
+        state.target = closest; setTargetIndex(closest);
+      }}
+      onPointerUp={event => {
+        const state = drag.current;
+        if (!state || state.pointer !== event.pointerId) return;
+        if (state.moved) { suppressClick.current = true; move(state.index, state.target); window.setTimeout(() => { suppressClick.current = false; }, 0); }
+        reset();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={reset} onLostPointerCapture={reset}
+      onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
+      <div className={styles.reference}>
+        <button type="button" className={styles.preview} disabled={!item.originalUrl} aria-label={`预览${label(index)}`} onClick={() => onPreview(item, offset + index + 1)}>
+          <ReferenceThumbnail key={item.thumbnailUrl || 'unavailable'} src={item.thumbnailUrl} label={label(index)} loading={loading} unavailableLabel={unavailableLabel?.(item, index)} onError={() => onThumbnailError?.(item)} />
+        </button>
+        <span className={styles.referenceNumber}>{label(index)}</span>
+        <button type="button" data-sort-grip className={styles.referenceGrip} disabled={disabled} aria-label={`移动${label(index)}`} title="移动参考图"
+          onKeyDown={event => { if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) { event.preventDefault(); move(index, index + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1)); } }}><GripVertical size={16} /></button>
+        <button type="button" data-reference-remove className={styles.remove} disabled={disabled} onClick={() => onChange(items.filter((_, i) => i !== index))} title="移除参考图" aria-label={`移除${label(index)}`}><X size={16} /></button>
+      </div>
+      {notes && <button type="button" data-reference-note className={styles.referenceNoteButton} title={`${label(index)}备注`} aria-label={`${label(index)}备注`}
+        onClick={() => { setNoteDraft((item as unknown as FixedStudioReference).note || ''); setNoteError(''); setNoteIndex(index); }}>
+        <MessageSquare size={14} />{(item as unknown as FixedStudioReference).note ? '已备注' : '备注'}
+      </button>}
+      {onChangeRole && <button type="button" data-reference-note className={materialTiles ? styles.materialRole : styles.referenceNoteButton} disabled={disabled}
+        title={labels === 'primary' ? '改为辅助参考' : '设为主图'} aria-label={`${label(index)}${labels === 'primary' ? '改为辅助参考' : '设为主图'}`}
+        onClick={() => onChangeRole(item, index)}>{labels === 'primary' ? <ArrowDown size={14} /> : <ArrowUp size={14} />}{!materialTiles && (labels === 'primary' ? '设为参考' : '设为主图')}</button>}
+      {renderDetails && <div data-reference-details>{renderDetails(item, index)}</div>}
+    </div>)}
+    {children}
+  </div>
+    <dialog ref={noteDialog} className={`${styles.dialog} ${styles.noteDialog}`} aria-label="参考图备注">
+      <header className={styles.header}><h3>{noteIndex === null ? '备注' : `${label(noteIndex)}备注`}</h3><button type="button" aria-label="关闭备注" disabled={noteBusy} onClick={closeNote}><X size={18} /></button></header>
+      <textarea aria-label="参考图备注内容" rows={5} maxLength={2000} readOnly={disabled} disabled={noteBusy} value={noteDraft} onChange={event => setNoteDraft(event.target.value)} />
+      {noteError && <p role="alert" className={styles.error}>{noteError}</p>}
+      {!disabled && <button type="button" className={styles.primary} disabled={noteBusy || noteDraft === originalNote} onClick={() => void saveNote()}><Save size={16} />{noteBusy ? '正在保存' : onSaveNote ? '保存备注' : '应用备注'}</button>}
+    </dialog>
+  </>)}</>;
+}

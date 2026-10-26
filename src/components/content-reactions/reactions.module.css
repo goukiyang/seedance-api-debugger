@@ -1,0 +1,69 @@
+.controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.reactionActions { display: inline-flex; align-items: center; gap: 4px; }
+.secondaryAction { display: inline-flex; }
+.parentOverlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); padding: 3px; }
+.parentOverlayControls :is(.error, .busy) { padding: 4px 6px; border-radius: 4px; background: rgb(12 17 19 / 86%); max-width: min(52vw, 320px); white-space: normal; overflow-wrap: anywhere; }
+.favoriteTitleRow { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-width: 0; flex-wrap: nowrap; }
+.favoriteTitleRow > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.favoriteOnly { position: relative; flex: 0 0 auto; flex-wrap: nowrap; }
+.favoriteOnly :is(.busy, .error) { position: absolute; top: calc(100% + 5px); left: 0; z-index: 30; width: max-content; max-width: min(260px, 65vw); padding: 6px 8px; border: 1px solid #465057; border-radius: 5px; background: #1c2529; box-shadow: 0 3px 12px #10141680; white-space: normal; overflow-wrap: anywhere; }
+.controls button:not([data-reaction-action]) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 32px; height: 32px; padding: 4px 7px; border: 1px solid var(--border, #394449); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font-size: 12px; letter-spacing: 0; }
+.controls button:not([data-reaction-action])[aria-pressed="true"] { color: #f3bb64; background: #f3bb641c; border-color: #f3bb645c; }
+.controls button:disabled { opacity: .45; cursor: default; }
+.controls button:focus-visible { outline: 2px solid #70cfbd; outline-offset: 2px; }
+.error { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary, #bdc8c5); }
+.busy { display: inline-flex; align-items: center; gap: 4px; color: #f3d68c; font-size: 11px; white-space: nowrap; }
+.busyIcon { animation: reaction-busy-spin .8s linear infinite; }
+.overlayControls { position: absolute; top: 6px; left: 6px; z-index: 4; max-width: calc(100% - 12px); flex-wrap: wrap; padding: 3px; border-radius: 7px; background: transparent; opacity: 0; pointer-events: none; }
+.controls.overlayControls button { opacity: 0; pointer-events: none; }
+.overlayControls:has(button[data-reaction-action][aria-pressed="true"], button[data-bloom]) { opacity: 1; }
+.controls.overlayControls button[data-reaction-action][aria-pressed="true"],
+.controls.overlayControls button[data-bloom] { opacity: 1; pointer-events: auto; }
+.controls.overlayControls:where(:hover, :focus-within, :has(.busy), :has(.error)) button,
+:where([data-reaction-surface]:hover, [data-reaction-surface]:focus-within) .controls.overlayControls button { opacity: 1; pointer-events: auto; }
+.controls.overlayControls button[data-reaction-action][aria-pressed="true"]:disabled,
+.controls.overlayControls:where(:hover, :focus-within, :has(.busy), :has(.error)) button:disabled,
+:where([data-reaction-surface]:hover, [data-reaction-surface]:focus-within) .controls.overlayControls button:disabled { opacity: .45; }
+.overlayControls:hover,
+.overlayControls:focus-within,
+[data-reaction-surface]:hover .overlayControls,
+[data-reaction-surface]:focus-within .overlayControls,
+.overlayControls:has(button[data-reaction-action][aria-pressed="true"]),
+.overlayControls:has(.busy),
+.overlayControls:has(.error) { background: transparent; }
+.overlayControls:hover,
+.overlayControls:focus-within,
+[data-reaction-surface]:hover .overlayControls,
+[data-reaction-surface]:focus-within .overlayControls,
+.overlayControls:has(.busy),
+.overlayControls:has(.error) { opacity: 1; pointer-events: auto; }
+.overlayControls .error,
+.overlayControls .busy { opacity: 1; }
+.overlayControls:not(.favoriteOnly) :is(.error, .busy) { padding: 4px 6px; border-radius: 4px; background: rgb(12 17 19 / 86%); }
+.overlayControls .error { max-width: min(52vw, 320px); overflow-wrap: anywhere; white-space: normal; }
+.overlayControls .error button { flex: 0 0 auto; }
+@media (hover: none), (pointer: coarse) {
+  .overlayControls { background: transparent; opacity: 1; pointer-events: auto; }
+  .controls.overlayControls button { opacity: 1; pointer-events: auto; }
+  .controls.overlayControls button:disabled { opacity: .45; }
+}
+@keyframes reaction-busy-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .busyIcon { animation: none; } }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.toolbar input { min-width: 180px; max-width: 100%; padding: 8px; background: transparent; color: inherit; border: 1px solid #394449; border-radius: 5px; }
+.tabs button, .command { border: 1px solid #394449; border-radius: 5px; padding: 7px 10px; background: transparent; color: inherit; cursor: pointer; }
+.tabs button[aria-pressed="true"] { border-color: #70cfbd; color: #70cfbd; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.card { min-width: 0; border: 1px solid #394449; border-radius: 7px; overflow: hidden; }
+.media { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 10; background: #080b0c; color: #8c999e; padding: 0; border: 0; cursor: pointer; overflow: hidden; }
+.media img, .media video { width: 100%; height: 100%; object-fit: contain; }
+.body { padding: 12px; display: grid; gap: 10px; }
+.title { font-size: 15px; margin: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.muted { color: #9da9ae; font-size: 12px; overflow-wrap: anywhere; }
+.status { padding: 24px 0; }
+.undo { position: sticky; bottom: 16px; padding: 10px; background: #172a28; border: 1px solid #567b74; border-radius: 6px; display: flex; gap: 12px; align-items: center; }
+.overlay { position: fixed; inset: 0; z-index: 1500; background: #000d; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.preview { max-width: 95vw; max-height: 90vh; display: grid; gap: 12px; }
+.preview video, .preview img { max-width: 90vw; max-height: 75vh; }

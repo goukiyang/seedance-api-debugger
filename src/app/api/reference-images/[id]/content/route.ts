@@ -1,67 +1,73 @@
-import fs from 'fs';
-import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import {
   assertCanViewReferenceImage,
   canDownloadOriginal,
+  canUseAlbumImage,
 } from '@/lib/reference-albums/permissions';
+import { mediaPreviewResponse } from '@/lib/media/preview-response';
+import { authorizedImageResponse, discardHdViewingInterest, type ImageVariant } from '@/lib/media/authorized-image-response';
+import { performance } from 'node:perf_hooks';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(
+async function content(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const started = performance.now();
+  let requesterId: string | undefined;
   try {
     const user = await getSession();
-    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    if (!user) throw new AuthError('未登录', 401);
+    requesterId = user.id;
 
     const image = await assertCanViewReferenceImage(user, params.id);
-    const variant = request.nextUrl.searchParams.get('variant') === 'thumbnail' ? 'thumbnail' : 'original';
+    if (image.asset && image.asset.status !== 'active') throw new AuthError('素材已不可用', 404);
+    const variant = request.nextUrl.searchParams.get('variant') || 'original';
+    if (!['thumbnail', 'preview', 'detail', 'original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant)) throw new AuthError('素材类型无效', 400);
+    const assetType = image.asset?.type || 'image';
+    if (variant === 'thumbnail' && assetType !== 'image' && !image.thumbnail_url) {
+      throw new AuthError('暂无封面', 404);
+    }
+    const downloadable = await canDownloadOriginal(user, image);
+    const isOriginalMediaPreview = assetType !== 'image' && ['preview', 'detail'].includes(variant);
 
-    if (variant === 'original' && !(await canDownloadOriginal(user, image))) {
-      return NextResponse.json({ error: '无权访问原图' }, { status: 403 });
+    if (['original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant) && !downloadable) {
+      throw new AuthError('无权访问原素材', 403);
     }
 
-    const sourceUrl = variant === 'thumbnail'
+    if (
+      isOriginalMediaPreview
+      && !(await canUseAlbumImage(user, image))
+      && !downloadable
+    ) {
+      throw new AuthError('无权预览原始视频/音频素材', 403);
+    }
+
+    // Image-only viewers keep thumbnail access; originals still require download permission.
+    const useThumbnail = variant === 'thumbnail' || (['preview', 'detail'].includes(variant) && assetType === 'image' && !downloadable);
+    const sourceUrl = useThumbnail
       ? (image.thumbnail_url || image.url)
       : image.url;
-    const contentType = image.asset?.mime_type || 'image/jpeg';
-
-    if (sourceUrl.startsWith('/')) {
-      const filePath = path.join(process.cwd(), 'public', sourceUrl);
-      if (!fs.existsSync(filePath)) return NextResponse.json({ error: '文件不存在' }, { status: 404 });
-      const buffer = fs.readFileSync(filePath);
-      return new NextResponse(buffer, {
-        headers: {
-          'content-type': contentType,
-          'cache-control': 'private, no-store',
-        },
-      });
-    }
-
-    const upstream = await fetch(sourceUrl, { cache: 'no-store' });
-    if (!upstream.ok) {
-      return NextResponse.json({ error: '图片读取失败' }, { status: upstream.status });
-    }
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    return new NextResponse(buffer, {
-      headers: {
-        'content-type': upstream.headers.get('content-type') || contentType,
-        'cache-control': 'private, no-store',
-      },
-    });
+    const contentType = useThumbnail && image.thumbnail_url ? 'image/jpeg' : image.asset?.mime_type || 'image/jpeg';
+    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, variant as ImageVariant, contentType, image.asset?.file_name || 'reference-image', started,
+      { requesterId: user.id, owner: image.asset ? { kind: 'asset', id: image.asset.id, ownerId: image.asset.owner_id }
+        : { kind: 'reference', id: image.id, ownerId: image.owner_user_id } });
+    return await mediaPreviewResponse(request, sourceUrl, contentType);
   } catch (error) {
     if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      if (requesterId && [401, 403, 404].includes(error.status)) await discardHdViewingInterest(request, requesterId);
+      return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
-    console.error('[ReferenceImages] Content error:', error);
     return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
+      { error: '素材暂时无法读取，请重试' },
+      { status: 502, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } },
     );
   }
 }
+
+export const GET = content;
+export const HEAD = content;

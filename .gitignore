@@ -8,6 +8,8 @@
 .next-dev/
 .next-prod/
 .next-prod-candidate/
+.next-credits-candidate/
+.next-reactions-candidate/
 .next-prod-prev/
 .next.bad-*/
 out/
@@ -22,6 +24,7 @@ node_modules
 npm-debug.log*
 
 # Build artifacts
+.role-tests/
 .tsbuildinfo
 *.tsbuildinfo
 
@@ -34,6 +37,10 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local git worktrees
+.worktrees/
+.superpowers/sdd/
 
 # Storage (local uploads)
 storage/
@@ -58,3 +65,9 @@ public/uploads/*
 # Runtime generated videos and thumbnails
 public/videos/*
 public/videos/thumbnails/*
+# Local user feedback contains private prompts; never publish these originals.
+/docs/materials/2026-09-30-template-ui/
+/docs/materials/2026-10-01-image-template-redesign/
+/docs/materials/2026-10-01-canvas-quick-actions/
+/docs/materials/2026-10-01-media-copy-share/
+/docs/materials/2026-10-02-unified-resource-library/

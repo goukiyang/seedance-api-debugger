@@ -1,89 +1,49 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
-import ComposerTopbar from './ComposerTopbar';
+import ComposerTopbar, { ComposerTopbarProvided } from './ComposerTopbar';
 import SideNav from './SideNav';
 import FeedbackWidget from './FeedbackWidget';
+import templateStudioStyles from './template-studio/template-studio.module.css';
 import { shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
-
-interface SessionUserSummary {
-  name: string | null;
-  username: string | null;
-  email: string | null;
-  avatar_url?: string | null;
-  role: 'admin' | 'user';
-}
-
-interface CreditSummary {
-  available: number;
-  frozen_credits: number;
-  monthly_used: number;
-}
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { rememberSettingsOrigin } from '@/lib/navigation/settings-return';
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [user, setUser] = useState<SessionUserSummary | null>(null);
-  const [credits, setCredits] = useState<CreditSummary | null>(null);
-  const [loadingUser, setLoadingUser] = useState(false);
+  useEffect(() => { rememberSettingsOrigin(); }, [pathname]);
+  const {
+    user,
+    credits,
+    loadingUser,
+    hasLoadedUser,
+    refreshUser,
+    refreshCredits,
+    clearSession,
+  } = useAppSession();
 
   const showShell = useMemo(() => shouldUseNavigationShell(pathname), [pathname]);
-  const topbarOnlyShell = useMemo(() => shouldUseTopbarOnlyShell(pathname), [pathname]);
+  const topbarOnlyShell = useMemo(() => pathname === '/' || shouldUseTopbarOnlyShell(pathname), [pathname]);
+  const imageStudioShell = pathname === '/image-studio';
+  const templateStudioShell = pathname === '/template-studio';
+  const projectsWorkspace = /^\/(?:projects(?:\/|$)|usage(?:\/|$)|tasks\/[^/]+$|collections(?:\/|$))/.test(pathname);
+  const shellBodyClass = templateStudioShell
+    ? templateStudioStyles.shellBody
+    : `shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}${imageStudioShell ? ' shell-body-image-studio' : ''}`;
+  const shellContentClass = templateStudioShell
+    ? templateStudioStyles.shellContent
+    : `shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`;
 
   useEffect(() => {
-    if (!showShell) return;
-
-    let cancelled = false;
-    setLoadingUser(true);
-
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        if (!cancelled) {
-          setUser(data.user || null);
-          if (!data.user) {
-            setCredits(null);
-          }
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUser(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingUser(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [showShell, pathname]);
+    if (!showShell || hasLoadedUser || loadingUser) return;
+    void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser, showShell]);
 
   useEffect(() => {
     if (!showShell || !user) return;
-
-    let cancelled = false;
-
-    fetch('/api/me/credits', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => {
-        if (!cancelled && data) {
-          setCredits(data);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCredits(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [showShell, user, pathname]);
+    void refreshCredits();
+  }, [refreshCredits, showShell, user]);
 
   if (!showShell) {
     return (
@@ -95,12 +55,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="shell-root">
-      <ComposerTopbar user={user} loadingUser={loadingUser} credits={credits} />
-      <div className={`shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}`}>
-        {!topbarOnlyShell && <SideNav isAdmin={user?.role === 'admin'} />}
-        <main className={`shell-content${topbarOnlyShell ? ' shell-content-topbar-only' : ''}`}>
-          {children}
+    <div className={`shell-root${projectsWorkspace ? ' shell-projects-workspace' : ''}`}>
+      <ComposerTopbar
+        user={user}
+        loadingUser={loadingUser}
+        credits={credits}
+        onSessionClear={clearSession}
+      />
+      <div className={shellBodyClass}>
+        {!topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
+        <main className={shellContentClass}>
+          <ComposerTopbarProvided.Provider value>{children}</ComposerTopbarProvided.Provider>
         </main>
       </div>
       <FeedbackWidget />

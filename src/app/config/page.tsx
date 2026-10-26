@@ -103,7 +103,7 @@ export default function ConfigPage() {
               {config?.api_key_configured ? (
                 <span className="text-green">已配置 ✅</span>
               ) : (
-                <span className="text-red">未配置 ❌</span>
+                <span className="text-gray">未配置 ✕</span>
               )}
             </span>
           </div>
@@ -126,7 +126,7 @@ export default function ConfigPage() {
           </button>
 
           {testResult && (
-            <div className={`alert ${testResult.success ? 'alert-success' : 'alert-error'} mt-4`}>
+            <div className={`alert ${testResult.success ? 'alert-success' : 'alert-info'} mt-4`}>
               {testResult.message}
             </div>
           )}

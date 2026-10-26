@@ -4,6 +4,7 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewTask, getProjectAccess, logProjectAction } from '@/lib/projects/permissions';
 import { recordTaskProjectTransfer } from '@/lib/costs/ledger';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,7 +100,7 @@ export async function PATCH(
     }
 
     if (task.project_id === targetProjectId && task.video_card_id === targetVideoCardId) {
-      return NextResponse.json({ task, unchanged: true });
+      return NextResponse.json({ task: publicVideoTaskPricing(task), unchanged: true });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -143,7 +144,7 @@ export async function PATCH(
       reason,
     });
 
-    return NextResponse.json({ task: updated });
+    return NextResponse.json({ task: publicVideoTaskPricing(updated) });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

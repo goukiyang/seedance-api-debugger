@@ -20,7 +20,7 @@ export async function GET(
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const notification = await prisma.notification.findFirst({
-      where: { id: params.id, target_user_id: user.id },
+      where: { id: params.id, target_user_id: user.id, channel: 'in_app' },
       include: NOTIFICATION_INCLUDE,
     });
     if (!notification) return NextResponse.json({ error: '通知不存在' }, { status: 404 });
@@ -49,7 +49,7 @@ export async function PATCH(
     }
 
     const existing = await prisma.notification.findFirst({
-      where: { id: params.id, target_user_id: user.id },
+      where: { id: params.id, target_user_id: user.id, channel: 'in_app' },
       select: { id: true, status: true },
     });
     if (!existing) return NextResponse.json({ error: '通知不存在' }, { status: 404 });

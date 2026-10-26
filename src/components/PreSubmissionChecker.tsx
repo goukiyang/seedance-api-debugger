@@ -116,7 +116,7 @@ export function PreSubmissionChecker({
         {checks.map((check) => (
           <div key={check.id} className={`pre-check-item pre-check-item-${check.status}`}>
             <span className="pre-check-icon">
-              {check.status === 'ok' ? '✅' : check.status === 'warn' ? '⚠️' : '❌'}
+              {check.status === 'ok' ? '✅' : check.status === 'warn' ? '⚠️' : '×'}
             </span>
             <span className="pre-check-label">{check.label}</span>
             <span className="pre-check-msg">{check.message}</span>

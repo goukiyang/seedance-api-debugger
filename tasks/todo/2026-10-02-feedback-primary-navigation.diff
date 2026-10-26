@@ -1,0 +1,1382 @@
+diff --git a/package-lock.json b/package-lock.json
+index 27b7df7..7569463 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.36.2",
++  "version": "0.36.10",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "video-api-debugger",
+-      "version": "0.36.2",
++      "version": "0.36.10",
+       "dependencies": {
+         "@aws-sdk/client-s3": "^3.1041.0",
+         "@aws-sdk/s3-request-presigner": "^3.1041.0",
+diff --git a/package.json b/package.json
+index 19794d5..68f1cec 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.36.2",
++  "version": "0.36.10",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/src/app/api/assets/library/route.ts b/src/app/api/assets/library/route.ts
+index 88846aa..ea5812b 100644
+--- a/src/app/api/assets/library/route.ts
++++ b/src/app/api/assets/library/route.ts
+@@ -10,6 +10,7 @@ import { canRequestTaskThumbnail, shouldExposeTaskThumbnailUrl } from '@/lib/vid
+ import { videoDeliveryStageForTask, type VideoDeliveryStage } from '@/lib/video/delivery-status';
+ import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
+ import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
++import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+ 
+ export const dynamic = 'force-dynamic';
+ 
+@@ -65,6 +66,8 @@ type LibraryItem = {
+   providerFinalAmountMinor: number | null;
+   providerOfficialAmountMicros: number | null;
+   providerFinalAmountMicros: number | null;
++  chargedCredits: number | null;
++  normalChargeEstimate: NormalVideoChargeEstimate | null;
+   videoCardId: string | null;
+   isEnhanceTask: boolean;
+   canEnhanceVideo: boolean;
+@@ -193,6 +196,11 @@ async function serializeTask(task: {
+   provider_final_amount_minor: number | null;
+   provider_official_amount_micros: number | null;
+   provider_final_amount_micros: number | null;
++  actual_cost: number | null;
++  is_draft: boolean;
++  reference_video_urls: string | null;
++  provider_usage_snapshot: string | null;
++  raw_status_response: string | null;
+   params_json: string | null;
+   retention_status: string;
+   created_at: Date;
+@@ -202,7 +210,7 @@ async function serializeTask(task: {
+   project: LibraryProject | null;
+   owner: LibraryUser | null;
+   user: LibraryUser | null;
+-}): Promise<LibraryItem> {
++}, viewer: SessionUser, normalRates: ReadonlyMap<string, number>): Promise<LibraryItem> {
+   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
+   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
+   const deliveryStage = videoDeliveryStageForTask(task);
+@@ -259,6 +267,13 @@ async function serializeTask(task: {
+     providerFinalAmountMinor: task.provider_final_amount_minor,
+     providerOfficialAmountMicros: task.provider_official_amount_micros,
+     providerFinalAmountMicros: task.provider_final_amount_micros,
++    chargedCredits: (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
++      && ['succeeded', 'failed', 'cancelled'].includes(task.local_status)
++      && task.actual_cost !== null && Number.isFinite(task.actual_cost) && task.actual_cost >= 0
++      ? task.actual_cost : null,
++    normalChargeEstimate: task.local_status === 'succeeded'
++      && (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
++      ? estimateNormalVideoCharge(task, normalRates) : null,
+     videoCardId: task.video_card_id,
+     isEnhanceTask,
+     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
+@@ -325,6 +340,8 @@ function serializeAsset(asset: {
+     providerFinalAmountMinor: null,
+     providerOfficialAmountMicros: null,
+     providerFinalAmountMicros: null,
++    chargedCredits: null,
++    normalChargeEstimate: null,
+     videoCardId: null,
+     isEnhanceTask: false,
+     canEnhanceVideo: false,
+@@ -386,6 +403,8 @@ function serializeReferenceImage(image: {
+     providerFinalAmountMinor: null,
+     providerOfficialAmountMicros: null,
+     providerFinalAmountMicros: null,
++    chargedCredits: null,
++    normalChargeEstimate: null,
+     videoCardId: null,
+     isEnhanceTask: false,
+     canEnhanceVideo: false,
+@@ -540,6 +559,11 @@ async function loadVideoItems(options: {
+         provider_final_amount_minor: true,
+         provider_official_amount_micros: true,
+         provider_final_amount_micros: true,
++        actual_cost: true,
++        is_draft: true,
++        reference_video_urls: true,
++        provider_usage_snapshot: true,
++        raw_status_response: true,
+         params_json: true,
+         retention_status: true,
+         created_at: true,
+@@ -554,8 +578,15 @@ async function loadVideoItems(options: {
+     prisma.videoTask.count({ where }),
+   ]);
+ 
++  const unbilledTasks = tasks.filter((task) => task.local_status === 'succeeded'
++    && (user.role === 'admin' || task.user?.id === user.id || task.owner?.id === user.id)
++    && task.provider_final_amount_micros === null && task.provider_official_amount_micros === null
++    && task.provider_final_amount_minor === null && task.provider_official_amount_minor === null);
++  let normalRates: ReadonlyMap<string, number> = new Map();
++  try { normalRates = await loadNormalVideoChargeRates(unbilledTasks); }
++  catch { console.warn('[AssetCosts] Ordinary billing rate lookup unavailable'); }
+   return {
+-    items: await Promise.all(tasks.map(serializeTask)),
++    items: await Promise.all(tasks.map((task) => serializeTask(task, user, normalRates))),
+     total,
+   };
+ }
+diff --git a/src/app/api/release/route.ts b/src/app/api/release/route.ts
+index e1ecec9..b98158f 100644
+--- a/src/app/api/release/route.ts
++++ b/src/app/api/release/route.ts
+@@ -1,4 +1,10 @@
+ import { NextResponse } from 'next/server';
+ import { release } from '@/lib/release';
++import { getSession } from '@/lib/auth/session';
+ export const dynamic = 'force-dynamic';
+-export function GET() { return NextResponse.json(release, { headers: { 'Cache-Control': 'no-store' } }); }
++export async function GET() {
++  const user = await getSession();
++  return NextResponse.json({ ...release, summary: user?.account_type === 'internal' ? release.summary : '' }, {
++    headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' },
++  });
++}
+diff --git a/src/app/api/tasks/create/route.ts b/src/app/api/tasks/create/route.ts
+index c7ba3ff..94e0e82 100644
+--- a/src/app/api/tasks/create/route.ts
++++ b/src/app/api/tasks/create/route.ts
+@@ -963,10 +963,6 @@ export async function POST(request: NextRequest) {
+     }
+   }
+ 
+-  if (videoCard.ratio_locked && videoCard.ratio && ratio !== videoCard.ratio) {
+-    return errorJson(`此视频卡已锁定比例 ${videoCard.ratio}，变更比例需要先通过比例变更审批`, 403);
+-  }
+-
+   let videoBranch: { id: string; title: string; status: string; is_primary: boolean } | null = null;
+   if (requestedVideoBranchId) {
+     const branch = await prisma.videoBranch.findUnique({
+diff --git a/src/app/assets/page.tsx b/src/app/assets/page.tsx
+index b5b7e1d..df09982 100644
+--- a/src/app/assets/page.tsx
++++ b/src/app/assets/page.tsx
+@@ -32,6 +32,7 @@ import {
+ import { cacheSafeAssetUrl } from '@/lib/assets/library-cache-policy';
+ import { useAppSession } from '@/lib/context/AppSessionContext';
+ import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
++import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+ import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
+ 
+ type AssetScope = 'history' | 'project' | 'user';
+@@ -123,6 +124,8 @@ type AssetLibraryItem = {
+   providerFinalAmountMinor: number | null;
+   providerOfficialAmountMicros: number | null;
+   providerFinalAmountMicros: number | null;
++  chargedCredits: number | null;
++  normalChargeEstimate: NormalVideoChargeEstimate | null;
+   videoCardId: string | null;
+   isEnhanceTask: boolean;
+   canEnhanceVideo: boolean;
+@@ -471,6 +474,14 @@ function formatAssetSpec(item: Pick<AssetLibraryItem, 'kind' | 'resolution' | 'd
+   return parts.join(' · ');
+ }
+ 
++function formatChargedCredits(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'chargedCredits'>) {
++  if (item.kind !== 'video' || item.source !== 'video_task') return '';
++  const amount = item.chargedCredits;
++  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount < 0) return '';
++  if (amount > 0 && amount < 0.01) return '< 0.01 点';
++  return `${amount.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 点`;
++}
++
+ function formatCnyCostBadge(item: Pick<AssetLibraryItem, 'kind' | 'source' | 'providerCostCurrency' | 'providerOfficialAmountMinor' | 'providerFinalAmountMinor' | 'providerOfficialAmountMicros' | 'providerFinalAmountMicros'>) {
+   if (item.kind !== 'video' || item.source !== 'video_task') return '';
+   if (item.providerCostCurrency?.trim().toUpperCase() !== 'USD') return '';
+@@ -1725,6 +1736,11 @@ function AssetsPageContent() {
+ 
+   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
+   const activeItemDetails = activeItem ? <>
++    {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
++      <div><span>按普通费率估算</span><strong>约 {costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
++      <div><span>美元金额</span><strong>{formatUsdDetailAmount(activeItem.normalChargeEstimate.amountMicros / 1_000_000, 6)}</strong></div>
++      <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × ${activeItem.normalChargeEstimate.usdPerMillionTokens.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}/百万 Token。{usdToCnyRateText()}</small>
++    </div>}
+     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
+       <div><span>美金扣费</span><strong>{activeItemCostBreakdown.usd}</strong></div>
+       <div><span>人民币扣费</span><strong>{activeItemCostBreakdown.cny}</strong></div>
+@@ -1732,6 +1748,7 @@ function AssetsPageContent() {
+     </div>}
+     <dl className="asset-detail-list">
+       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
++      {formatChargedCredits(activeItem) && <div><dt>实际扣点</dt><dd>{formatChargedCredits(activeItem)}</dd></div>}
+       {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
+       <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
+       {isAdmin && <div><dt>用户</dt><dd><UserIdentityBadge user={activeItem.owner} size="sm" subtitle={activeItem.owner?.subtitle || null} className="asset-detail-user" /></dd></div>}
+@@ -2228,6 +2245,9 @@ function AssetsPageContent() {
+                 const duration = formatDuration(item.duration);
+                 const specText = formatAssetSpec(item);
+                 const cnyCostBadge = formatCnyCostBadge(item);
++                const estimate = item.normalChargeEstimate;
++                const estimatedCash = estimate ? costAmountToCnyEstimate({ amount_micros: estimate.amountMicros, currency: estimate.currency }) : '';
++                const costBadge = cnyCostBadge || (estimatedCash ? `约 ${estimatedCash}` : item.kind === 'video' && item.source === 'video_task' && item.status === 'succeeded' ? '扣费待确认' : '');
+                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
+                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
+                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
+@@ -2272,11 +2292,11 @@ function AssetsPageContent() {
+                       ) : (
+                         <AssetLibraryThumbnail key={`${item.source}:${item.thumbnailUrl || ''}:${item.previewUrl || ''}`} item={item} />
+                       )}
+-                      {(cnyCostBadge || enhanceStateLabel) && (
++                      {(costBadge || enhanceStateLabel) && (
+                         <span className="asset-card-top-right-badges">
+-                          {cnyCostBadge && (
+-                            <span className="asset-card-badge asset-card-cost-badge">
+-                              {cnyCostBadge}
++                          {costBadge && (
++                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : estimatedCash ? '按普通生成相同模型、相同参考类型的费率估算扣费；尚无此任务现金账单' : '缺少现金账单、计费用量或普通生成费率，暂无法确认扣费金额'}>
++                              {costBadge}
+                             </span>
+                           )}
+                           {enhanceStateLabel && (
+diff --git a/src/app/image-studio/global-settings-dialog.tsx b/src/app/image-studio/global-settings-dialog.tsx
+index 835e734..ea2adab 100644
+--- a/src/app/image-studio/global-settings-dialog.tsx
++++ b/src/app/image-studio/global-settings-dialog.tsx
+@@ -1,6 +1,7 @@
+ 'use client';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useEffect, useRef } from 'react';
+ import { RefreshCw, Save, X } from 'lucide-react';
+@@ -14,6 +15,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+ }) {
+   const { confirm, productDialog } = useProductDialog();
+   const dialog = useRef<HTMLDialogElement>(null);
++  const contextInput = useRef<HTMLTextAreaElement>(null);
+   useEffect(() => {
+     if (open) dialog.current?.showModal();
+     else dialog.current?.close();
+@@ -36,7 +38,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor }: {
+     <header className={styles.header}><h2>通用上下文</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
+     {editor.draft && <>
+       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
+-      <textarea id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
++      <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={editor.controller.editContext} maxLength={20000} disabled={editor.loading || editor.saving || !open} />
++      <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={editor.loading}
+         value={editor.draft.context} onChange={event => editor.controller.editContext(event.target.value)} />
+       <p className={styles.label}>通用模型积分规则</p>
+       {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
+diff --git a/src/app/image-studio/studio.module.css b/src/app/image-studio/studio.module.css
+index a9babaf..cdf1e2b 100644
+--- a/src/app/image-studio/studio.module.css
++++ b/src/app/image-studio/studio.module.css
+@@ -1,5 +1,6 @@
+ .page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
+ .content { min-width: 0; }
++.mobileModuleNav { display: none; }
+ .moduleRail { position: fixed; left: 0; top: var(--composer-topbar-height, 48px); bottom: 0; z-index: 15; box-sizing: border-box; width: 236px; max-height: none; overflow-y: auto; padding: 18px 14px; border: 0; border-right: 1px solid #2d383d; border-radius: 0; background: #151a1d; scrollbar-width: thin; scrollbar-color: #647179 transparent; scrollbar-gutter: stable; }
+ .moduleRail:hover, .moduleRail:focus-within { scrollbar-color: #839098 transparent; }
+ .moduleRail::-webkit-scrollbar { width: 8px; height: 8px; }
+@@ -60,6 +61,9 @@
+ .referenceLimits { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0; font-size: 12px; }
+ .referenceLimits label { display: inline-flex; align-items: center; gap: 6px; }
+ .referenceLimits select { width: auto; min-width: 60px; padding: 5px 7px !important; }
++.moduleSettingsActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; margin: 22px 0 26px; padding-top: 16px; border-top: 1px solid #2d383d; }
++.moduleSettingsActions > p { min-width: 0; margin: 0; color: #adb6bd; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
++.moduleSettingsActions > button { min-width: 150px; margin-left: auto; white-space: nowrap; }
+ .referenceToggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
+ .page .referenceToggle input { width: 16px; height: 16px; margin: 0; accent-color: #8ce5d2; }
+ .imageSectionHeading .referenceLimitControl { flex-wrap: wrap; }
+@@ -95,6 +99,7 @@
+ .page textarea { width: 100%; resize: vertical; min-height: 120px; line-height: 1.6; }
+ .references { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+ .referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
++.primaryMaterials .materialGrid { grid-template-columns: repeat(3, minmax(0, calc(32.5% - 7.8px))); max-width: none; }
+ .referencesCompact .referenceNumber { left: 4px; top: auto; bottom: 4px; padding: 2px 4px; font-size: 11px; max-width: calc(100% - 8px); }
+ .page .referencesCompact .referenceGrip { left: 3px; top: 3px; bottom: auto; padding: 3px; }
+ .page .referencesCompact .remove { right: 3px; top: 3px; width: 24px; height: 24px; padding: 3px; }
+@@ -235,3 +240,16 @@
+ .presetSharing[aria-checked="false"] { color: #adb6bd; background: #20262a; }
+ @media (max-width: 1000px) { .page { display: grid; grid-template-columns: 1fr; min-height: auto; padding: 16px; } .moduleRail { position: sticky; left: auto; top: var(--composer-topbar-height, 48px); bottom: auto; z-index: 5; width: auto; max-height: none; display: flex; gap: 10px; overflow-x: auto; padding: 8px; border: 1px solid #2d383d; border-radius: 8px; } .moduleRailTitle, .moduleRailGroup > span { display: none; } .moduleRailGroup { display: flex; margin: 0; } .moduleRailGroup button { white-space: nowrap; } }
+ @media (max-width: 800px) { .page { padding: 16px; } .workspace { grid-template-columns: 1fr; gap: 24px; } .inputs { border-right: 0; padding-right: 0; } .references { max-width: 360px; } .header { flex-wrap: wrap; } .dialog { padding: 16px; } .modelQualityRow { grid-template-columns: 1fr; } .page .coverCard { grid-template-rows: minmax(0, 1fr) 122px; } .coverDescription strong { font-size: 20px; } .moduleBannerHasImage { block-size: 120px; } }
++@media (max-width: 1200px) {
++  .page.templateWorkbench { padding: 16px; }
++  .templateWorkbench .moduleRail { display: none; }
++  .templateWorkbench .mobileModuleNav { position: sticky; top: var(--composer-topbar-height, 48px); z-index: 15; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px; margin-bottom: 16px; background: #151a1d; border-bottom: 1px solid #2d383d; }
++  .mobileModuleNav label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
++  .mobileModuleNav label > span { flex: 0 0 auto; }
++  .page .mobileModuleNav select { flex: 1 1 0; min-width: 0; width: 0; max-width: 100%; min-height: 44px; padding: 8px; font-size: 14px; text-overflow: ellipsis; }
++  .page .mobileModuleNav button { min-height: 44px; padding: 8px 10px; white-space: nowrap; }
++  .page .mobileModuleNav button[aria-pressed=true] { background: #203d38; border-color: #367d70; color: #b9f7e8; }
++  .mobileModulePicker { grid-column: 1 / -1; }
++  .templateWorkbench .module { scroll-margin-top: calc(var(--composer-topbar-height, 48px) + 132px); }
++}
++@media (max-width: 800px) { .primaryMaterials .materialGrid { max-width: 360px; } }
+diff --git a/src/app/image-studio/studio.tsx b/src/app/image-studio/studio.tsx
+index 1987311..0b8901e 100644
+--- a/src/app/image-studio/studio.tsx
++++ b/src/app/image-studio/studio.tsx
+@@ -2,6 +2,7 @@
+ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import { Clipboard, Copy, Download, ImagePlus, Settings, X, RefreshCw, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+@@ -35,7 +36,7 @@ import { StudioGlobalSettingsDialog } from './global-settings-dialog';
+ import { StudioStyleGroups, type StudioStyleSummary } from './style-groups-view';
+ import type { SettingsValue } from './settings-controller';
+ import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
+-import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
++import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
+ import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
+ import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_COST_USD, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+ 
+@@ -55,8 +56,11 @@ const models = IMAGE_STUDIO_MODELS;
+ const fixedReferencePayload = (items: FixedStudioReference[]) => items.map(item => ({ assetId: item.id, note: item.note || '' }));
+ const DEFAULT_GROUPS = ['未分组', '常用', '角色', '场景', '海报'];
+ function moduleReferencePolicy(module: StudioModule): StudioReferencePolicy {
+-  return module.referencePolicy ? { styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, ...module.referencePolicy } : { primaryIds: module.images.flatMap(image => image.id ? [image.id] : []), primaryMin: 0,
+-    primaryMax: module.referenceLimit || MAX_REFERENCE_IMAGES, auxiliaryMax: MAX_REFERENCE_IMAGES, styleMax: MAX_REFERENCE_IMAGES, referenceMax: MAX_REFERENCE_IMAGES, useFixedReferences: true };
++  const policy = module.referencePolicy;
++  return { primaryIds: policy?.primaryIds ?? module.images.flatMap(image => image.id ? [image.id] : []),
++    primaryMin: policy?.primaryMin ?? 0, primaryMax: policy?.primaryMax ?? (module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX),
++    auxiliaryMax: policy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: policy?.styleMax ?? MAX_REFERENCE_IMAGES,
++    referenceMax: policy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: policy?.useFixedReferences ?? true };
+ }
+ async function readResponse(response: Response) {
+   const value = await response.json().catch(() => { throw new Error('服务暂时无法响应，请重试'); });
+@@ -152,21 +156,41 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+   const [creating, setCreating] = useState(false);
+   const [active, setActive] = useState('');
+   const [selectedGroup, setSelectedGroup] = useState('');
+-  const [viewRestored, setViewRestored] = useState(false);
++  const [coverView, setCoverView] = useState(false);
++  const viewStorageKey = templateWorkbench ? `sd2-template-studio:image-view:v1:${userId}` : `sd2-studio-view:${userId}`;
++  const [restoredViewKey, setRestoredViewKey] = useState('');
++  const viewRestored = restoredViewKey === viewStorageKey;
+   useRememberedScroll(`image-studio:${userId}`, viewRestored);
+   useEffect(() => {
++    const readView = (storage: Storage, key: string) => {
++      try {
++        const view = JSON.parse(storage.getItem(key) || 'null');
++        return view && typeof view === 'object' && !Array.isArray(view)
++          && (typeof view.group === 'string' || typeof view.active === 'string' || typeof view.coverView === 'boolean') ? view : null;
++      } catch { return null; }
++    };
++    let view = null;
+     try {
+-      const view = JSON.parse(sessionStorage.getItem(`sd2-studio-view:${userId}`) || 'null');
++      view = templateWorkbench ? readView(localStorage, viewStorageKey) : readView(sessionStorage, viewStorageKey);
++      if (templateWorkbench && !view) view = readView(sessionStorage, `sd2-studio-view:${userId}`);
++    } catch { /* Unavailable storage must not block editing. */ }
++    if (templateWorkbench) {
++      setSelectedGroup(typeof view?.group === 'string' ? view.group : '');
++      setActive(typeof view?.active === 'string' ? view.active : '');
++      setCoverView(typeof view?.coverView === 'boolean' ? view.coverView : false);
++    } else {
+       if (typeof view?.group === 'string') setSelectedGroup(view.group);
+       if (typeof view?.active === 'string') setActive(view.active);
+-    } catch {}
+-    setViewRestored(true);
+-  }, [userId]);
++    }
++    setRestoredViewKey(viewStorageKey);
++  }, [userId, templateWorkbench, viewStorageKey]);
+   useEffect(() => {
+     if (!viewRestored) return;
+-    try { sessionStorage.setItem(`sd2-studio-view:${userId}`, JSON.stringify({ group: selectedGroup, active })); } catch {}
+-  }, [viewRestored, userId, selectedGroup, active]);
+-  const [coverView, setCoverView] = useState(false);
++    try {
++      const storage = templateWorkbench ? localStorage : sessionStorage;
++      storage.setItem(viewStorageKey, JSON.stringify({ group: selectedGroup, active, ...(templateWorkbench ? { coverView } : {}) }));
++    } catch {}
++  }, [viewRestored, viewStorageKey, selectedGroup, active, coverView, templateWorkbench]);
+   const [coverPage, setCoverPage] = useState(() => {
+     if (typeof window === 'undefined') return 0;
+     try {
+@@ -406,21 +430,42 @@ export default function ImageStudio({ isAdmin, userId, templateWorkbench = false
+       void loadModules();
+     }
+   }
+-  return <>{productDialog}{(<main className={styles.page}>
++  const navigateToModule = (group: string, id: string) => {
++    setCoverView(false); setSelectedGroup(group); setActive(id);
++    void (async () => {
++      if (!modules.some(module => module.id === id)) await hydrateModules([id]);
++      requestAnimationFrame(() => document.getElementById(`module-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
++    })();
++  };
++  return <>{productDialog}{(<main className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
+     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label="分组快捷栏">
+       <div className={styles.moduleRailTitle}>分组快捷栏</div>
+       {Object.entries(groupedModules).map(([group, items]) => <div key={group} className={styles.moduleRailGroup}>
+         <button type="button" className={selectedGroup === group ? styles.moduleRailActive : ''} aria-current={selectedGroup === group ? 'page' : undefined} onClick={() => {
+           setCoverView(false); setSelectedGroup(group); setActive(items[0]?.id || '');
+         }}><span>{group}</span><small>{items.length}</small></button>
+-        <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={styles.moduleRailChild} onClick={() => {
+-          setCoverView(false); setSelectedGroup(group); setActive(item.id);
+-          void (async () => { if (!modules.some(module => module.id === item.id)) await hydrateModules([item.id]);
+-            requestAnimationFrame(() => document.getElementById(`module-${item.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })); })();
+-        }}>{item.name}</button>)}</div>
++        <div className={styles.moduleRailChildren}>{items.map(item => <button key={item.id} type="button" className={`${styles.moduleRailChild} ${!coverView && active === item.id ? styles.moduleRailActive : ''}`} aria-current={!coverView && active === item.id ? 'page' : undefined}
++          onClick={() => navigateToModule(group, item.id)}>{item.name}</button>)}</div>
+       </div>)}
+       <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={() => setCoverView(true)}>全部封面<small>{navigation.length}</small></button>
+     </aside>
++    {templateWorkbench && <nav className={styles.mobileModuleNav} aria-label="图片模块导航">
++      <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={selectedGroup} onChange={event => {
++        const group = event.target.value;
++        const first = groupedModules[group]?.[0];
++        if (first) navigateToModule(group, first.id);
++      }}>
++        {!Object.keys(groupedModules).length && <option value="">暂无分组</option>}
++        {Object.entries(groupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length})</option>)}
++      </select></label>
++      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={() => setCoverView(true)}>全部封面 <small>{navigation.length}</small></button>
++      <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && groupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
++        if (event.target.value) navigateToModule(selectedGroup, event.target.value);
++      }}>
++        <option value="">{coverView ? '选择模块返回编辑' : '选择模块'}</option>
++        {(groupedModules[selectedGroup] || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
++      </select></label>
++    </nav>}
+     <div className={styles.content}>
+     <header className={styles.header}><div><h1>{coverView ? (templateWorkbench ? '模块封面' : '模板封面') : templateWorkbench ? '图片模块' : '图片生成'}</h1><p className={styles.muted}>{coverView ? (templateWorkbench ? '所有模块的 3:4 封面预览' : '所有模板的 3:4 封面预览') : `当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+       <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
+@@ -475,7 +520,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const [savedAsSignature, setSavedAsSignature] = useState('');
+   const [prompt, setPrompt] = useState(module.prompt);
+   const [count, setCount] = useState(module.count);
+-  const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || MAX_REFERENCE_IMAGES)));
++  const [referenceLimit, setReferenceLimit] = useState(module.referencePolicy?.primaryMax ?? Math.max(1, Math.min(MAX_REFERENCE_IMAGES, module.referenceLimit || DEFAULT_STUDIO_PRIMARY_MAX)));
+   const [primaryMin, setPrimaryMin] = useState(module.referencePolicy?.primaryMin ?? 0);
+   const [auxiliaryLimit, setAuxiliaryLimit] = useState(module.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES);
+   const [styleLimit, setStyleLimit] = useState(module.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES);
+@@ -506,7 +551,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const [savedModuleContext, setSavedModuleContext] = useState(module.context || '');
+   const [moduleContextConfigured, setModuleContextConfigured] = useState(module.contextConfigured);
+   const [moduleSaveError, setModuleSaveError] = useState('');
+-  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: module.quality || 'auto', resolution: module.resolution || defaultImageResolution(module.model), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: module.images.map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
++  const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt: module.prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module) }));
+   const moduleSaveLock = useRef(false);
+   const restoredDraftKey = useRef('');
+   const autoSaveAttempt = useRef('');
+@@ -561,32 +606,47 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   const loadedMore = useRef(false);
+   const uploadLock = useRef(false);
+   const moduleDialog = useRef<HTMLDialogElement>(null);
++  const moduleContextInput = useRef<HTMLTextAreaElement>(null);
++  const changeModuleContext = (value: string) => {
++    if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。');
++    setModuleContext(value); setModuleSaveError('');
++  };
+   const resumeModulePreview = useRef(false);
+   const fileInput = useRef<HTMLInputElement>(null);
+   const auxiliaryFileInput = useRef<HTMLInputElement>(null);
+   const fixedFileInput = useRef<HTMLInputElement>(null);
+   const bannerFileInput = useRef<HTMLInputElement>(null);
+   const dirty = globalSettingsDirty;
+-  const unsavedContext = dirty || moduleContext !== savedModuleContext || fixedDirty;
+   const suffix = module.id === `default-${userId}` ? userId : `${userId}:${module.id}`;
+   const draftKey = `sd2-image-studio-draft:${suffix}`;
+   const pendingKey = `sd2-image-studio-pending:${suffix}`;
+   const referencePolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []), primaryMin, primaryMax: referenceLimit, auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences };
+-  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality, resolution, groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
++  const moduleDraft = { name, prompt, context: moduleContext, count, referenceLimit, aspectRatio, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), resolution: normalizeImageResolution(moduleModel, resolution), groupName, bannerAssetId: banner?.id || null, referenceIds: [...images, ...auxiliaryImages].map(image => image.id), reproduceFromTaskId: reproduceSourceTaskId || null, sourcePresetId: module.sourcePresetId || null, styleGroupIds: styleGroups.map(group => group.id), referencePolicy };
+   const moduleSaveSnapshot = { ...moduleDraft };
+   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
+   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
+-  const generationDraft = JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds });
+-  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: baseline.resolution, referenceIds: baseline.referenceIds, model: baseline.model, quality: baseline.quality, referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
++  const generationDraft = JSON.stringify({ prompt, count, referenceLimit, aspectRatio, resolution: normalizeImageResolution(moduleModel, resolution), referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: normalizeImageStudioQuality(moduleModel, quality), referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: moduleDraft.styleGroupIds });
++  const defaultGenerationDraft = JSON.stringify({ prompt: baseline.prompt, count: baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: baseline.aspectRatio, resolution: normalizeImageResolution(baseline.model, baseline.resolution), referenceIds: baseline.referenceIds, model: baseline.model, quality: normalizeImageStudioQuality(baseline.model, baseline.quality), referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), styleGroupIds: baseline.styleGroupIds });
+   const generationChanged = generationDraft !== defaultGenerationDraft || Boolean(reproduceSourceTaskId);
+   const automaticSnapshot = JSON.stringify({ ...baseline, name, groupName, bannerAssetId: banner?.id || null });
+   const automaticDirty = automaticSnapshot !== moduleSaved;
+   const unpersistedDraft = draftLoaded && generationChanged && persistedDraftSignature !== generationDraft;
+-  useUnsavedNavigation(unsavedContext || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
++  // Recoverable browser drafts are not lost on refresh; failed persistence still blocks exit.
++  useUnsavedNavigation(dirty || automaticDirty || moduleSaving || uploading || bannerUploading || unpersistedDraft, confirm);
+   const settingsDirty = moduleContext !== savedModuleContext || fixedDirty || generationDraft !== defaultGenerationDraft;
++  const contextDialogSnapshot = JSON.stringify({ context: moduleContext, primaryMin, primaryMax: referenceLimit,
++    auxiliaryMax: auxiliaryLimit, styleMax: styleLimit, referenceMax: referenceImageLimit, useFixedReferences,
++    fixedReferences: fixedReferencePayload(fixedReferences), styleGroupIds: styleGroups.map(group => group.id),
++    model: moduleModel, resolution: normalizeImageResolution(moduleModel, resolution), quality: normalizeImageStudioQuality(moduleModel, quality) });
++  const contextDialogOpening = useRef('');
++  function openModuleDialog() {
++    if (!draftLoaded || draftRestoring) return;
++    contextDialogOpening.current = contextDialogSnapshot;
++    moduleDialog.current?.showModal();
++  }
+   async function closeModuleDialog() {
+     if (moduleSaving || uploading || bannerUploading) return;
+-    if (settingsDirty && !(await confirm('上下文或固定参考图尚未保存，确定关闭吗？当前草稿会保留。', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
++    if (settingsDirty && contextDialogSnapshot !== contextDialogOpening.current && !(await confirm('模块设置尚未保存，确定关闭吗？当前草稿会保留。', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+     moduleDialog.current?.close();
+   }
+   useDialogDismiss({ open: true, dialogRef: moduleDialog, nativeDialog: true, onDismiss: closeModuleDialog });
+@@ -641,6 +701,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
+       setSavedModuleContext(contextSnapshot); setModuleContextConfigured(result.contextConfigured);
+       setSavedFixedReferences(result.fixedReferences || fixedSnapshot);
++      if (manualSettings) contextDialogOpening.current = contextDialogSnapshot;
+       if (fixedOverride) setFixedReferences(result.fixedReferences || fixedOverride);
+       else if (manualSettings) setFixedReferences(current => JSON.stringify(fixedReferencePayload(current)) === JSON.stringify(fixedReferencePayload(fixedSnapshot)) ? result.fixedReferences || fixedSnapshot : current);
+       onModuleChange(result);
+@@ -928,13 +989,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+   async function submit(retryTask?: StudioTask) {
+     if (pendingSubmission) { await querySubmission(); return; }
+     if (!settings || submitLock.current || moduleDeleteLock.current || ratioEditing || draftRestoring) return;
+-    if (reproduceSourceTaskId || tasks.some(task => task.status === 'uncertain')) {
+-      submitLock.current = true;
+-      let accepted = false;
+-      try { accepted = await confirm('这会新建图片生成任务，可能再次产生上游费用。恢复原图不会重新生成；确定按当前设置新建生成任务吗？', { title: '确认生成', confirmLabel: '新建生成任务' }); }
+-      finally { submitLock.current = false; }
+-      if (!accepted) return;
+-    }
+     if (!pendingSubmission && (images.length < primaryMin || images.length > referenceLimit || auxiliaryCount > auxiliaryLimit || styleImageCount > styleLimit || ordinaryReferenceCount > referenceImageLimit || effectiveReferenceCount > MAX_REFERENCE_IMAGES
+       || activeFixedReferences.some(item => item.available === false) || activeStyles.some(group => group.unavailable))) {
+       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
+@@ -1212,7 +1266,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+         </label>
+         {!DEFAULT_GROUPS.includes(groupName) && <button type="button" disabled={moduleSaving || automaticDirty} title="删除当前分组" onClick={() => void onDeleteGroup(groupName)}>删除分组</button>}
+         <span role="status" className={styles.muted}>{moduleSaving ? '保存中' : moduleSaveError ? '保存失败' : automaticDirty ? '等待自动保存' : settingsDirty ? '设置未保存' : '已保存'}</span>
+-        <button type="button" onClick={() => moduleDialog.current?.showModal()}><Settings size={17} />模块上下文</button>
++        <button type="button" disabled={!draftLoaded || draftRestoring} onClick={openModuleDialog}><Settings size={17} />模块上下文</button>
+         <button type="button" title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={`删除${templateWorkbench ? '模块' : '模板'}：${name}`}
+           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
+           onClick={() => void deleteModule()}><Trash2 size={17} />{moduleDeleting ? '删除中' : templateWorkbench ? '删除模块' : '删除模板'}</button>
+@@ -1233,7 +1287,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+     <div className={styles.workspace}>
+       <section className={styles.inputs} aria-label="生成参数">
+         {reproduceSourceTaskId && <p role="status" className={styles.muted}>历史复现模式：沿用当时的参考图，合并当前通用与模块上下文；不会自动提交或扣积分。<button type="button" onClick={() => exitReproductionMode()}>退出历史复现</button></p>}
+-        <section className={styles.materialSection} aria-label="主图">
++        <section className={`${styles.materialSection} ${templateWorkbench ? styles.primaryMaterials : ''}`} aria-label="主图">
+           <header className={styles.materialHeading}><h3>主图</h3>
+             <select aria-label="主图数量上限" value={referenceLimit} disabled={uploading || submitting || Boolean(pendingSubmission)} onChange={event => {
+               const next = Number(event.target.value);
+@@ -1245,8 +1299,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
+             <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
+               onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
+-              <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
+-                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>
++              {(!templateWorkbench || images.length < currentReferenceCap) && <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap}
++                title={images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : '添加主图'}</span></button>}
+             </StudioReferenceGrid>
+           </div>
+         </section>
+@@ -1446,7 +1500,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
+     }}>
+       <header className={styles.header}><h2>模块上下文</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
+-      {contextEditable ? <textarea aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => { if (reproduceSourceTaskId) exitReproductionMode('模块上下文已修改，已退出历史复现模式，接下来会使用新上下文。'); setModuleContext(event.target.value); setModuleSaveError(''); }} /> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
++      {contextEditable ? <>
++        <ContextClipboardActions value={moduleContext} textareaRef={moduleContextInput} onPaste={changeModuleContext} maxLength={20000} disabled={moduleSaving} />
++        <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onChange={event => changeModuleContext(event.target.value)} />
++      </> : <p className={styles.muted}>共享模板的内部上下文由创建者维护，生成时自动使用。</p>}
+       <div className={styles.referenceLimits}>
+         <label>主图最少 <select aria-label="主图最少张数" value={primaryMin} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setPrimaryMin(Number(event.target.value))}>
+           {Array.from({ length: referenceLimit + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
+@@ -1466,6 +1523,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           {Array.from({ length: MAX_REFERENCE_IMAGES + 1 }, (_, value) => <option key={value} value={value}>{value} 张</option>)}
+         </select></label>
+       </div>
++      <div className={styles.moduleSettingsActions}>
++        <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
++        {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
++      </div>
++      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
+       <div className={styles.imageSectionHeading}><label className={styles.referenceToggle}><input type="checkbox" checked={useFixedReferences} disabled={submitting || Boolean(pendingSubmission)} onChange={event => setUseFixedReferences(event.target.checked)} />使用模板固定参考图</label>
+         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
+       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
+@@ -1498,9 +1560,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onMetadataChange, o
+           </select>
+         </label>
+       </div>
+-      {contextEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} disabled={moduleSaving || uploading || bannerUploading || !settingsDirty} onClick={() => void saveModule()}><Save size={16} />{templateWorkbench ? '保存模块设置' : '保存模板设置'}</button>}
+-      <p role="status">{moduleSaving ? '正在保存' : settingsDirty ? '上下文未保存' : generationChanged ? '生成参数为临时草稿' : '已保存'}</p>
+-      {moduleSaveError && <p role="alert" className={styles.error}>{moduleSaveError}<button onClick={() => void saveModule()}>重试保存</button></p>}
+     </dialog>
+     {preview && <ZoomableImagePreview contentKey={preview.contentKey} src={preview.src} alt={preview.alt} title={preview.title} previewKey={preview.taskId || preview.src} fileName={preview.fileName} safeDetails={{ ...preview.metadata, width: preview.width, height: preview.height }} comparison={preview.comparison} hasNavigation={Boolean(preview.taskId && previewableTasks.length > 1)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} onClose={() => { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }} />}
+   </section>)}</>;
+diff --git a/src/components/ContextClipboardActions.module.css b/src/components/ContextClipboardActions.module.css
+new file mode 100644
+index 0000000..f550177
+--- /dev/null
++++ b/src/components/ContextClipboardActions.module.css
+@@ -0,0 +1,8 @@
++.bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px 12px; flex-wrap: wrap; min-width: 0; margin: 8px 0; }
++.actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
++.message { flex: 1 1 180px; min-width: 0; color: #adb6bd; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
++.bar .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 10px; border: 1px solid #465057; border-radius: 6px; background: #202629; color: #c6d0d5; font: inherit; font-size: 13px; cursor: pointer; }
++.bar .button:hover:not(:disabled) { background: #30393d; }
++.bar .button:active:not(:disabled) { filter: brightness(.92); }
++.bar .button:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
++.bar .button:disabled { opacity: .5; cursor: not-allowed; }
+diff --git a/src/components/ContextClipboardActions.tsx b/src/components/ContextClipboardActions.tsx
+new file mode 100644
+index 0000000..127b381
+--- /dev/null
++++ b/src/components/ContextClipboardActions.tsx
+@@ -0,0 +1,67 @@
++'use client';
++
++import { useEffect, useRef, useState, type RefObject } from 'react';
++import { ClipboardPaste, Copy } from 'lucide-react';
++import styles from './ContextClipboardActions.module.css';
++
++type Props = {
++  value: string;
++  textareaRef: RefObject<HTMLTextAreaElement>;
++  onPaste(value: string): void;
++  maxLength: number;
++  disabled?: boolean;
++  canCopy?: boolean;
++};
++
++export function ContextClipboardActions(props: Props) {
++  const { value, textareaRef, maxLength, disabled = false, canCopy = true } = props;
++  const latest = useRef(props);
++  latest.current = props;
++  const mounted = useRef(true);
++  const working = useRef(false);
++  const [busy, setBusy] = useState(false);
++  const [message, setMessage] = useState('');
++  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
++
++  async function copy() {
++    if (working.current || disabled || !canCopy || !value) return;
++    working.current = true; setBusy(true); setMessage('');
++    try { await navigator.clipboard.writeText(value); if (mounted.current) setMessage('已复制'); }
++    catch { if (mounted.current) setMessage('复制失败，请重试'); }
++    finally { working.current = false; if (mounted.current) setBusy(false); }
++  }
++
++  async function paste(button: HTMLButtonElement) {
++    const input = textareaRef.current;
++    if (working.current || disabled || !input || input.disabled || input.readOnly) return;
++    const start = input.selectionStart, end = input.selectionEnd;
++    working.current = true; setBusy(true); setMessage('');
++    try {
++      const text = await navigator.clipboard.readText();
++      if (!mounted.current || input !== textareaRef.current || !input.getClientRects().length) return;
++      if (latest.current.disabled || input.disabled || input.readOnly) return;
++      if (latest.current.value !== value) { setMessage('内容已变化，请重新粘贴'); return; }
++      if (!text) { setMessage('剪贴板中没有文本'); return; }
++      const next = value.slice(0, start) + text + value.slice(end);
++      if (next.length > maxLength) { setMessage(`上下文最多 ${maxLength} 字，未粘贴`); return; }
++      if (next === value) { setMessage('内容未变化'); return; }
++      latest.current.onPaste(next);
++      setMessage('已粘贴');
++      requestAnimationFrame(() => {
++        if (!mounted.current || input !== textareaRef.current || input.value !== next) return;
++        if (document.activeElement !== button && document.activeElement !== input) return;
++        input.focus({ preventScroll: true });
++        input.setSelectionRange(start + text.length, start + text.length);
++      });
++    } catch { if (mounted.current) setMessage('无法读取剪贴板，请在输入框内粘贴'); }
++    finally { working.current = false; if (mounted.current) setBusy(false); }
++  }
++
++  return <div className={styles.bar} aria-busy={busy}>
++    {message && <span className={styles.message} role="status">{message}</span>}
++    <div className={styles.actions}>
++      {canCopy && <button type="button" className={styles.button} title="复制上下文全文" aria-label="复制上下文全文" disabled={disabled || busy || !value} onClick={() => void copy()}><Copy size={15} />复制</button>}
++      <button type="button" className={styles.button} title="粘贴文本" aria-label="粘贴文本到上下文" disabled={disabled || busy} onClick={event => void paste(event.currentTarget)}><ClipboardPaste size={15} />粘贴</button>
++    </div>
++  </div>;
++}
+diff --git a/src/components/GenerationComposer.tsx b/src/components/GenerationComposer.tsx
+index 468c672..a937e75 100644
+--- a/src/components/GenerationComposer.tsx
++++ b/src/components/GenerationComposer.tsx
+@@ -386,13 +386,14 @@ interface Props {
+   initialSettings?: GenerationDefaults | null;
+   preferencesReady?: boolean;
+   onSettingsChange?: (settings: Omit<GenerationDefaults, 'projectId' | 'seedMode'>) => void;
+-  lockedSettings?: {
+-    sourceLabel: string;
++  videoCardDefaults?: {
++    id: string;
+     ratio?: VideoRatio | null;
+     duration?: VideoDuration | null;
+     resolution?: VideoResolution | null;
+   } | null;
+   reuseDraft?: {
++    videoCardId?: string | null;
+     model?: string | null;
+     taskId: string;
+     reuseKey: number;
+@@ -484,7 +485,7 @@ export function GenerationComposer({
+   initialSettings,
+   preferencesReady = false,
+   onSettingsChange,
+-  lockedSettings,
++  videoCardDefaults,
+   onCollectionLoad,
+   onCollectionSave,
+   onCollectionNew,
+@@ -530,6 +531,7 @@ export function GenerationComposer({
+   const templateEnabled = templateMode === 'workbench';
+   const appliedReuseDraftRef = React.useRef<string | null>(null);
+   const appliedInitialSettingsRef = React.useRef(false);
++  const appliedVideoCardDefaultsRef = React.useRef<string | null>(null);
+   const settingsTouchedRef = React.useRef(false);
+   const appliedTemplateDefaultsRef = React.useRef<string | null>(null);
+   const [previewMedia, setPreviewMedia] = useState<ReferencePreviewRequest | null>(null);
+@@ -672,7 +674,6 @@ export function GenerationComposer({
+   }, []);
+ 
+   const need1080pApproval = require1080pApproval && resolution === '1080p';
+-  const lockReason = lockedSettings ? `来自视频卡「${lockedSettings.sourceLabel}」的交付规格` : undefined;
+ 
+   useEffect(() => {
+     if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+@@ -731,7 +732,7 @@ export function GenerationComposer({
+   const durationModel = allowExtendedSeedanceDuration && selectedProvider === 'seedance' ? selectedModel : null;
+   const durationBlocker = isSeedanceVideoDuration(duration, durationModel)
+     ? null
+-    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。${lockedSettings?.duration ? '请切换支持该时长的模型，或修改视频卡时长。' : '请重新选择时长，或切换支持该时长的模型。'}确认前不会提交或扣点。`;
++    : `当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，已保留你选择的 ${duration} 秒。请重新选择时长，或切换支持该时长的模型。确认前不会提交或扣点。`;
+ 
+   const hasUploadingMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'uploading');
+   const hasFailedMaterial = Object.values(workspace.uploadStatuses).some((status) => status === 'failed');
+@@ -752,15 +753,6 @@ export function GenerationComposer({
+     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
+       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
+     }
+-    if (studioHandoff && lockedSettings?.ratio && ratio !== lockedSettings.ratio) {
+-      return `模板比例 ${ratio} 与当前视频卡锁定比例 ${lockedSettings.ratio} 不一致`;
+-    }
+-    if (studioHandoff && lockedSettings?.duration && duration !== lockedSettings.duration) {
+-      return `模板时长 ${duration}s 与当前视频卡锁定时长 ${lockedSettings.duration}s 不一致`;
+-    }
+-    if (studioHandoff && lockedSettings?.resolution && resolution !== lockedSettings.resolution) {
+-      return `模板分辨率 ${resolution} 与当前视频卡锁定分辨率 ${lockedSettings.resolution} 不一致`;
+-    }
+     if (!prompt.trim()) return '请填写提示词';
+     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
+       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
+@@ -846,7 +838,7 @@ export function GenerationComposer({
+     return null;
+     })();
+     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
+-  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, lockedSettings, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
++  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+   const submitBlocker = submitBlockerState?.message || null;
+ 
+   const composerStatus = useMemo(() => {
+@@ -1115,17 +1107,16 @@ export function GenerationComposer({
+   }, [initialSettings, reuseDraft, studioHandoff, modelOptions, onModelChange]);
+ 
+   useEffect(() => {
+-    if (!lockedSettings || studioHandoff) return;
+-    if (lockedSettings.ratio) setRatio(lockedSettings.ratio);
+-    if (lockedSettings.duration) setDuration(lockedSettings.duration);
+-    if (lockedSettings.resolution) setResolution(lockedSettings.resolution);
+-  }, [
+-    lockedSettings?.sourceLabel,
+-    lockedSettings?.ratio,
+-    lockedSettings?.duration,
+-    lockedSettings?.resolution,
+-    studioHandoff,
+-  ]);
++    if (!videoCardDefaults) { appliedVideoCardDefaultsRef.current = null; return; }
++    if (!preferencesReady || studioHandoff || appliedVideoCardDefaultsRef.current === videoCardDefaults.id) return;
++    const initializing = appliedVideoCardDefaultsRef.current === null;
++    appliedVideoCardDefaultsRef.current = videoCardDefaults.id;
++    // Card recommendations initialize a selection, never resynchronize over later edits.
++    if (reuseDraft?.videoCardId === videoCardDefaults.id || (initializing && (initialSettings || reuseDraft || settingsTouchedRef.current))) return;
++    if (videoCardDefaults.ratio) setRatio(videoCardDefaults.ratio);
++    if (videoCardDefaults.duration) setDuration(videoCardDefaults.duration);
++    if (videoCardDefaults.resolution) setResolution(videoCardDefaults.resolution);
++  }, [videoCardDefaults, preferencesReady, studioHandoff, reuseDraft, initialSettings]);
+ 
+   useEffect(() => {
+     if (!need1080pApproval) {
+@@ -2150,9 +2141,9 @@ export function GenerationComposer({
+               setGenerationMode(DEFAULT_GENERATION_MODE);
+               setSelectedModel(modelOptions[0]?.id || '');
+               onModelChange?.(modelOptions[0]?.id || '');
+-              setRatio(lockedSettings?.ratio || DEFAULT_RATIO);
+-              setDuration(lockedSettings?.duration || DEFAULT_DURATION);
+-              setResolution(lockedSettings?.resolution || DEFAULT_RESOLUTION);
++              setRatio(DEFAULT_RATIO);
++              setDuration(DEFAULT_DURATION);
++              setResolution(DEFAULT_RESOLUTION);
+               setSeed(-1);
+               setGenerateAudio(true);
+               setReturnLastFrame(false);
+@@ -2214,10 +2205,6 @@ export function GenerationComposer({
+             markStudioParameterCorrected('resolution');
+             setResolution(value);
+           }}
+-          lockedRatio={Boolean(lockedSettings?.ratio)}
+-          lockedDuration={Boolean(lockedSettings?.duration)}
+-          lockedResolution={Boolean(lockedSettings?.resolution)}
+-          lockReason={lockReason}
+           compactControls={templateEnabled}
+         />
+       </div>
+diff --git a/src/components/ProductDialog.module.css b/src/components/ProductDialog.module.css
+index 54683ea..a784294 100644
+--- a/src/components/ProductDialog.module.css
++++ b/src/components/ProductDialog.module.css
+@@ -1,4 +1,4 @@
+-.dialog { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
++.dialog { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: var(--product-dialog-width, min(440px, calc(100vw - 32px))); max-height: var(--product-dialog-height, calc(100dvh - 32px)); overflow: auto; padding: 20px; border: 1px solid #465057; border-radius: 8px; background: #1a2023; color: #e6e8eb; box-shadow: 0 16px 48px rgb(0 0 0 / 35%); }
+ .dialog::backdrop { background: rgb(8 12 13 / 64%); }
+ .dialog[data-anchored=true]::backdrop { background: rgb(8 12 13 / 18%); }
+ .dialog[data-anchored=true] { position: fixed; right: auto; bottom: auto; }
+diff --git a/src/components/ReleaseNotice.tsx b/src/components/ReleaseNotice.tsx
+index 7212f1a..f107022 100644
+--- a/src/components/ReleaseNotice.tsx
++++ b/src/components/ReleaseNotice.tsx
+@@ -1,16 +1,15 @@
+ 'use client';
+ 
+-import { useProductDialog } from '@/components/useProductDialog';
+-
+ import { useCallback, useEffect, useRef, useState } from 'react';
+ import { usePathname } from 'next/navigation';
+ import { createPortal } from 'react-dom';
+ import { release, newerRelease } from '@/lib/release';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
++import { useAppSession } from '@/lib/context/AppSessionContext';
+ import styles from './CreditRequestDialog.module.css';
+ 
+ export default function ReleaseNotice() {
+-  const { confirm, productDialog } = useProductDialog();
++  const { user } = useAppSession();
+   const pathname = usePathname();
+   const dialog = useRef<HTMLDialogElement>(null);
+   const [target, setTarget] = useState<typeof release | null>(null);
+@@ -47,16 +46,21 @@ export default function ReleaseNotice() {
+   useEffect(() => { if (target) dialog.current?.showModal(); }, [target]);
+   const later = () => { try { if (target) localStorage.setItem('sd2:release:later', target.version); } catch { /* Optional persistence. */ } setTarget(null); };
+   useDialogDismiss({ open: Boolean(target), dialogRef: dialog, nativeDialog: true, onDismiss: later });
+-  return <>{productDialog}{(<>
++  return <>
+     {pathname === '/account' && <footer style={{ padding: '16px 24px', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+       <span>SD2 v{release.version}</span><button className="btn btn-secondary" disabled={checking} onClick={() => void check(true)}>{checking ? '检查中…' : '检查更新'}</button><span role="status">{message}</span>
+     </footer>}
+     {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
+       <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>发现新版本</h2></header>
+-      <div className={styles.body}><p>v{target.version}</p><p>{target.summary}</p>
+-        <p>刷新前请保存当前未提交的内容。</p>
+-        <div className={styles.actions}><button className="btn btn-primary" onClick={async () => { if ((await confirm('刷新会关闭当前页面，未提交的内容可能丢失。确认已保存并刷新？', { title: '刷新页面', confirmLabel: '已保存，刷新' }))) window.location.reload(); }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
++      <div className={styles.body}><p>v{target.version}</p>
++        {user?.account_type === 'internal' && target.summary && <p>{target.summary}</p>}
++        <p>新版本已就绪，可刷新后使用。</p>
++        <div className={styles.actions}><button className="btn btn-primary" onClick={() => {
++          // Real unsaved changes retain the page's native exit guard, without stacked dialogs.
++          dialog.current?.close();
++          window.location.reload();
++        }}>立即刷新</button><button className="btn btn-secondary" onClick={later}>稍后</button></div>
+       </div>
+     </dialog>, document.body)}
+-  </>)}</>;
++  </>;
+ }
+diff --git a/src/components/generate/GeneratePageClient.tsx b/src/components/generate/GeneratePageClient.tsx
+index 413dfee..44fe300 100644
+--- a/src/components/generate/GeneratePageClient.tsx
++++ b/src/components/generate/GeneratePageClient.tsx
+@@ -2028,9 +2028,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
+ 	    ? projectMetaLabel(selectedProject)
+ 	    : '新建一个项目后即可保存任务、成本和结果。';
+ 	  const selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
+-	  const selectedVideoCardLockedSettings = selectedVideoCard
++	  const selectedVideoCardDefaults = selectedVideoCard
+ 	    ? {
+-	        sourceLabel: selectedVideoCard.title,
++	        id: selectedVideoCard.id,
+ 	        ratio: asVideoRatio(selectedVideoCard.ratio),
+ 	        duration: asVideoDuration(selectedVideoCard.duration),
+ 	        resolution: asVideoResolution(selectedVideoCard.target_resolution),
+@@ -2501,7 +2501,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
+           initialSettings={generationDefaults}
+           preferencesReady={generationDefaultsReady}
+           onSettingsChange={saveGenerationDefaults}
+-          lockedSettings={selectedVideoCardLockedSettings}
++          videoCardDefaults={selectedVideoCardDefaults}
+           reuseDraft={reuseDraft}
+           studioHandoff={studioHandoff}
+           selectedVideoCardId={selectedVideoCardId}
+diff --git a/src/components/template-studio/VideoContextEditor.tsx b/src/components/template-studio/VideoContextEditor.tsx
+index fdf47b5..ef6d846 100644
+--- a/src/components/template-studio/VideoContextEditor.tsx
++++ b/src/components/template-studio/VideoContextEditor.tsx
+@@ -1,9 +1,10 @@
+ 'use client';
+ 
+ import { useProductDialog } from '@/components/useProductDialog';
++import { ContextClipboardActions } from '@/components/ContextClipboardActions';
+ 
+ import { useEffect, useRef, useState } from 'react';
+-import { Copy, Save, X } from 'lucide-react';
++import { Save, X } from 'lucide-react';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
+ import styles from './template-studio.module.css';
+ 
+@@ -17,6 +18,7 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+   const [message, setMessage] = useState('');
+   const backdropRef = useRef<HTMLDivElement>(null);
+   const dialogRef = useRef<HTMLElement>(null);
++  const contextInput = useRef<HTMLTextAreaElement>(null);
+   const url = `/api/template-studio/context${draftId ? `?draftId=${encodeURIComponent(draftId)}` : ''}`;
+   useEffect(() => {
+     const controller = new AbortController();
+@@ -56,11 +58,12 @@ export default function VideoContextEditor({ draftId, onClose }: { draftId?: str
+     <section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="video-context-title">
+       <div className={styles.sectionHeading}><h2 id="video-context-title">{draftId ? '模块上下文' : '通用上下文'}</h2><button type="button" className={styles.iconButton} aria-label="关闭" title="关闭" disabled={busy} onClick={close}><X size={16} /></button></div>
+       <p className={styles.fieldHint}>{draftId ? '只用于当前模块。保存后影响后续文案，已有记录不变。' : '用于视频文案，不影响图片。仅管理员可修改。'}</p>
+-      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label><textarea id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
++      {value?.canEdit ? <div className={styles.field}><label htmlFor="video-context-text">固定规则</label>
++        <ContextClipboardActions value={text} textareaRef={contextInput} onPaste={setText} maxLength={12000} disabled={busy} canCopy={value.canCopy} />
++        <textarea ref={contextInput} id="video-context-text" rows={12} maxLength={12000} value={text} onChange={event => setText(event.target.value)} /></div>
+         : <p>{value ? (value.configured ? '固定规则已配置，将由后台应用；当前账号无权查看或修改。' : '尚未配置固定规则，当前账号无权修改。') : '正在读取…'}</p>}
+       {message && <p role="status">{message}</p>}
+       <div className={styles.dialogFooter}>
+-        {value?.canEdit && value.canCopy && <button type="button" className={styles.quietButton} onClick={() => void navigator.clipboard.writeText(text).then(() => setMessage('已复制上下文')).catch(() => setMessage('复制失败，请重试'))}><Copy size={15} />复制上下文</button>}
+         {value?.canEdit && <button type="button" className={styles.primaryButton} disabled={busy || text === (value.context || '')} onClick={() => void save()}><Save size={15} />{busy ? '保存中' : '保存上下文'}</button>}
+       </div>
+     </section>
+diff --git a/src/components/template-studio/template-studio.module.css b/src/components/template-studio/template-studio.module.css
+index f0eb4b1..2b689bb 100644
+--- a/src/components/template-studio/template-studio.module.css
++++ b/src/components/template-studio/template-studio.module.css
+@@ -37,7 +37,7 @@
+ 
+ .headerTitle { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+ .imageHeader { padding-inline-start: 268px; }
+-@media (max-width: 1000px) { .imageHeader { padding-inline-start: 26px; } }
++@media (max-width: 1200px) { .imageHeader { padding-inline-start: 26px; } }
+ .headerTitle h1 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 750; }
+ .kicker { color: var(--muted); font-size: 12px; }
+ 
+diff --git a/src/components/useProductDialog.tsx b/src/components/useProductDialog.tsx
+index 8bff328..381f3b5 100644
+--- a/src/components/useProductDialog.tsx
++++ b/src/components/useProductDialog.tsx
+@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
+ import { useDialogDismiss } from '@/components/useDialogDismiss';
+ import styles from './ProductDialog.module.css';
+ 
+-type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number };
++type Options = { title?: string; confirmLabel?: string; danger?: boolean; maxLength?: number; anchor?: HTMLElement | null };
+ type Request = Options & { message: string; value?: string; anchor: HTMLElement | null };
+ 
+ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (value: string | null) => void }) {
+@@ -16,7 +16,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+   const titleId = useId();
+   const descriptionId = useId();
+   const [value, setValue] = useState(request.value || '');
+-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
++  const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
+   const naming = request.value !== undefined;
+   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, initialFocusRef: naming ? input : cancel, onDismiss: () => onResolve(null) });
+   useEffect(() => {
+@@ -24,20 +24,49 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+     (naming ? input.current : cancel.current)?.focus({ preventScroll: true });
+     const place = () => {
+       const panel = dialog.current;
+-      if (!naming || !request.anchor?.isConnected || window.innerWidth < 640 || !panel) { setPosition(null); return; }
+-      const rect = request.anchor.getBoundingClientRect();
+-      const width = panel.offsetWidth, height = panel.offsetHeight, gap = 8, margin = 16;
+-      if (rect.bottom < margin || rect.top > window.innerHeight - margin || height > window.innerHeight - 2 * margin) { setPosition(null); return; }
+-      const top = rect.bottom + gap + height <= window.innerHeight - margin ? rect.bottom + gap : rect.top - gap - height;
+-      setPosition({ left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)), top: Math.max(margin, Math.min(top, window.innerHeight - height - margin)) });
++      if (!panel) return;
++      const viewport = window.visualViewport;
++      const gap = 8, margin = 16;
++      const viewportWidth = viewport?.width ?? window.innerWidth;
++      const viewportHeight = viewport?.height ?? window.innerHeight;
++      const leftEdge = (viewport?.offsetLeft ?? 0) + margin;
++      const topEdge = (viewport?.offsetTop ?? 0) + margin;
++      const rightEdge = leftEdge + viewportWidth - 2 * margin;
++      const bottomEdge = topEdge + viewportHeight - 2 * margin;
++      panel.style.setProperty('--product-dialog-width', `${Math.min(440, Math.max(0, viewportWidth - 2 * margin))}px`);
++      panel.style.setProperty('--product-dialog-height', `${Math.max(0, viewportHeight - 2 * margin)}px`);
++      const width = panel.offsetWidth, height = panel.offsetHeight;
++      const clampLeft = (left: number) => Math.max(leftEdge, Math.min(left, rightEdge - width));
++      const clampTop = (top: number) => Math.max(topEdge, Math.min(top, bottomEdge - height));
++      const rect = request.anchor?.isConnected ? request.anchor.getBoundingClientRect() : null;
++      let next = { left: leftEdge + (rightEdge - leftEdge - width) / 2, top: topEdge + (bottomEdge - topEdge - height) / 2, anchored: false };
++      if (rect && rect.width > 0 && rect.height > 0 && rect.bottom > topEdge && rect.top < bottomEdge && rect.right > leftEdge && rect.left < rightEdge) {
++        // Flip around the control before falling back to the visible viewport center.
++        if (rect.bottom + gap + height <= bottomEdge) next = { left: clampLeft(rect.left), top: rect.bottom + gap, anchored: true };
++        else if (rect.top - gap - height >= topEdge) next = { left: clampLeft(rect.left), top: rect.top - gap - height, anchored: true };
++        else if (rect.right + gap + width <= rightEdge) next = { left: rect.right + gap, top: clampTop(rect.top), anchored: true };
++        else if (rect.left - gap - width >= leftEdge) next = { left: rect.left - gap - width, top: clampTop(rect.top), anchored: true };
++      }
++      setPosition(previous => previous?.left === next.left && previous.top === next.top && previous.anchored === next.anchored ? previous : next);
+     };
+     place();
+     window.addEventListener('resize', place);
+     window.addEventListener('scroll', place, true);
+-    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
++    window.visualViewport?.addEventListener('resize', place);
++    window.visualViewport?.addEventListener('scroll', place);
++    const observer = new ResizeObserver(place);
++    if (dialog.current) observer.observe(dialog.current);
++    if (request.anchor?.isConnected) observer.observe(request.anchor);
++    return () => {
++      window.removeEventListener('resize', place);
++      window.removeEventListener('scroll', place, true);
++      window.visualViewport?.removeEventListener('resize', place);
++      window.visualViewport?.removeEventListener('scroll', place);
++      observer.disconnect();
++    };
+   }, [naming, request.anchor]);
+-  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position)}
+-    style={position ? { left: position.left, top: position.top, margin: 0 } : undefined}
++  return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position?.anchored)}
++    style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto', margin: 0 } : undefined}
+     aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
+     <form onSubmit={event => { event.preventDefault(); if (!naming || value.trim()) onResolve(naming ? value.trim() : 'yes'); }}>
+       <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
+@@ -54,6 +83,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
+ 
+ export function useProductDialog() {
+   const [request, setRequest] = useState<Request | null>(null);
++  const trigger = useRef<HTMLElement | null>(null);
+   const resolver = useRef<((value: string | null) => void) | null>(null);
+   const resolve = useCallback((value: string | null) => {
+     const pending = resolver.current;
+@@ -62,12 +92,26 @@ export function useProductDialog() {
+     pending?.(value);
+   }, []);
+   useEffect(() => () => { resolver.current?.(null); resolver.current = null; }, []);
++  useEffect(() => {
++    let clearTrigger: ReturnType<typeof setTimeout> | undefined;
++    const rememberTrigger = (event: MouseEvent) => {
++      const element = event.target instanceof Element ? event.target.closest<HTMLElement>('button, [role="button"], a[href], input[type="submit"], summary') : null;
++      trigger.current = element;
++      // Only use this click for its own action, never an unrelated later request.
++      clearTimeout(clearTrigger);
++      clearTrigger = setTimeout(() => { if (trigger.current === element) trigger.current = null; }, 0);
++    };
++    document.addEventListener('click', rememberTrigger, true);
++    return () => { document.removeEventListener('click', rememberTrigger, true); clearTimeout(clearTrigger); };
++  }, []);
+   const ask = useCallback((message: string, options: Options, value?: string) => {
+     // A repeated trigger never replaces or affirms an already open decision.
+     if (resolver.current) return Promise.resolve(null);
+     return new Promise<string | null>(done => {
+       resolver.current = done;
+-      setRequest({ ...options, message, value, anchor: document.activeElement instanceof HTMLElement ? document.activeElement : null });
++      const focused = document.activeElement instanceof HTMLElement
++        ? document.activeElement.closest<HTMLElement>('button, [role="button"], a[href], input, textarea, select, summary') : null;
++      setRequest({ ...options, message, value, anchor: options.anchor !== undefined ? options.anchor : trigger.current || focused });
+     });
+   }, []);
+   const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);
+diff --git a/src/lib/assets/library-cache.ts b/src/lib/assets/library-cache.ts
+index 91782fa..347b478 100644
+--- a/src/lib/assets/library-cache.ts
++++ b/src/lib/assets/library-cache.ts
+@@ -3,7 +3,7 @@ const STORE_NAME = 'asset_library_pages';
+ const DB_VERSION = 1;
+ const CACHE_TTL_MS = 5 * 60_000;
+ 
+-export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 2;
++export const ASSET_LIBRARY_CACHE_SCHEMA_VERSION = 4;
+ 
+ type AssetLibraryCacheKeyInput = {
+   view?: string;
+diff --git a/src/lib/costs/normal-video-charge.ts b/src/lib/costs/normal-video-charge.ts
+new file mode 100644
+index 0000000..f1e067b
+--- /dev/null
++++ b/src/lib/costs/normal-video-charge.ts
+@@ -0,0 +1,102 @@
++import { prisma } from '@/lib/prisma';
++
++export type NormalVideoChargeEstimate = {
++  amountMicros: number;
++  currency: 'USD';
++  completionTokens: number;
++  usdPerMillionTokens: number;
++};
++
++type ChargeTask = {
++  provider: string;
++  model: string;
++  reference_video_urls: string | null;
++  is_draft: boolean;
++};
++type ChargeGroup = { model: string; referenceVideo: boolean; key: string };
++
++function objectFromJson(value: string | null) {
++  try {
++    const parsed: unknown = value ? JSON.parse(value) : null;
++    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
++      ? parsed as Record<string, unknown> : null;
++  } catch { return null; }
++}
++
++function chargeGroup(task: ChargeTask): ChargeGroup | null {
++  if (!['seedance', 'volcengine_ark'].includes(task.provider) || task.is_draft) return null;
++  const model = task.model === 'doubao-seedance-2-0-260128' ? 'dreamina-seedance-2-0-260128'
++    : task.model === 'doubao-seedance-2-5-260628' ? 'dreamina-seedance-2-5-260628' : task.model;
++  if (!['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628'].includes(model)) return null;
++  let referenceVideo = false;
++  if (task.reference_video_urls?.trim()) {
++    try {
++      const urls: unknown = JSON.parse(task.reference_video_urls);
++      if (!Array.isArray(urls) || urls.some((url) => typeof url !== 'string')) return null;
++      referenceVideo = urls.some((url: string) => Boolean(url.trim()));
++    } catch { return null; }
++  }
++  return { model, referenceVideo, key: `${model}:${referenceVideo}` };
++}
++
++export function completionTokensFromSnapshot(usageJson: string | null, statusJson: string | null) {
++  const usage = objectFromJson(usageJson);
++  const status = objectFromJson(statusJson);
++  const data = status?.data;
++  const nestedUsage = status?.usage ?? (data && typeof data === 'object' ? (data as Record<string, unknown>).usage : null);
++  const tokens = usage?.completion_tokens ?? (nestedUsage && typeof nestedUsage === 'object'
++    ? (nestedUsage as Record<string, unknown>).completion_tokens : null);
++  return typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
++}
++
++export async function loadNormalVideoChargeRates(tasks: ChargeTask[]) {
++  const groups = new Map<string, ChargeGroup>();
++  for (const task of tasks) { const group = chargeGroup(task); if (group) groups.set(group.key, group); }
++  const rates = new Map<string, number>();
++  // Use the latest matching confirmed ordinary bill, not a points-to-cash conversion.
++  await Promise.all(Array.from(groups.values()).map(async (group) => {
++    const bills = await prisma.videoTask.findMany({
++      where: {
++        provider: 'seedance', model: group.model, is_draft: false, local_status: 'succeeded',
++        provider_cost_currency: 'USD', provider_cost_status: { in: ['official_confirmed', 'reconciled'] },
++        provider_usage_snapshot: { not: null },
++        ...(group.referenceVideo
++          ? { reference_video_urls: { not: null, notIn: ['', '[]'] } }
++          : { OR: [{ reference_video_urls: null }, { reference_video_urls: { in: ['', '[]'] } }] }),
++      },
++      orderBy: [{ provider_cost_confirmed_at: 'desc' }, { created_at: 'desc' }], take: 8,
++      select: {
++        provider: true, model: true, is_draft: true, reference_video_urls: true,
++        provider_final_amount_micros: true, provider_official_amount_micros: true,
++        provider_final_amount_minor: true, provider_official_amount_minor: true,
++        provider_usage_snapshot: true,
++        provider_cost_snapshot: true,
++      },
++    });
++    for (const bill of bills) {
++      if (chargeGroup(bill)?.key !== group.key) continue;
++      if (objectFromJson(bill.provider_cost_snapshot)?.source !== 'provider_get_result') continue;
++      const tokens = completionTokensFromSnapshot(bill.provider_usage_snapshot, null);
++      const minor = bill.provider_final_amount_minor ?? bill.provider_official_amount_minor;
++      const micros = bill.provider_final_amount_micros ?? bill.provider_official_amount_micros
++        ?? (minor !== null ? minor * 10_000 : null);
++      if (!tokens || micros === null || !Number.isSafeInteger(micros) || micros <= 0) continue;
++      rates.set(group.key, micros / tokens);
++      break;
++    }
++  }));
++  return rates;
++}
++
++export function estimateNormalVideoCharge(task: ChargeTask & {
++  provider_usage_snapshot: string | null;
++  raw_status_response: string | null;
++}, rates: ReadonlyMap<string, number>): NormalVideoChargeEstimate | null {
++  const group = chargeGroup(task);
++  const tokens = completionTokensFromSnapshot(task.provider_usage_snapshot, task.raw_status_response);
++  const rate = group ? rates.get(group.key) : null;
++  if (!tokens || !rate || !Number.isFinite(rate) || rate <= 0) return null;
++  const amountMicros = Math.round(tokens * rate);
++  if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0) return null;
++  return { amountMicros, currency: 'USD', completionTokens: tokens, usdPerMillionTokens: rate };
++}
+diff --git a/src/lib/image-studio/limits.ts b/src/lib/image-studio/limits.ts
+index 9e9a2e2..8dff1d1 100644
+--- a/src/lib/image-studio/limits.ts
++++ b/src/lib/image-studio/limits.ts
+@@ -1,4 +1,5 @@
+ export const MAX_REFERENCE_IMAGES = 10;
++export const DEFAULT_STUDIO_PRIMARY_MAX = 1;
+ export const MAX_STUDIO_GENERATED_BYTES = 96 * 1024 * 1024;
+ export const MAX_STUDIO_GENERATED_BASE64 = Math.ceil(MAX_STUDIO_GENERATED_BYTES / 3) * 4;
+ // Execution stays below the ten-minute lease and the existing 660s graceful stop.
+diff --git a/src/lib/image-studio/modules.ts b/src/lib/image-studio/modules.ts
+index 6045ee4..83c81ac 100644
+--- a/src/lib/image-studio/modules.ts
++++ b/src/lib/image-studio/modules.ts
+@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
+ import { normalizeStudioRatio } from './ratios';
+ import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
+ import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, type ImageResolution } from './model-catalog';
+-import { MAX_REFERENCE_IMAGES } from './limits';
++import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
+ import { canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
+ import { studioAssetUrl, studioTemplateAssetUrl } from './media';
+ import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, StudioFixedReferenceError } from './fixed-references';
+@@ -75,7 +75,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
+     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
+   const generation = resolveStudioModuleGenerationConfig(row, settings);
+   const quality = normalizeImageStudioQuality(generation.model, row.quality);
+-  const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES));
++  const referenceLimit = Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || DEFAULT_STUDIO_PRIMARY_MAX));
+   const visibleTransientIds = ids.filter(id => assets.some(asset => asset.id === id));
+   let referencePolicy;
+   try { referencePolicy = await getStudioModuleReferencePolicy(ownerId, row.id, visibleTransientIds, referenceLimit); }
+@@ -140,7 +140,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
+   const visible = rows.slice(0, 12);
+   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity)));
+   if (includeDefault) {
+-    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: MAX_REFERENCE_IMAGES, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
++    modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '', count: 1, reference_limit: DEFAULT_STUDIO_PRIMARY_MAX, reference_ids: [], revision: 0, created_at: new Date(0), updated_at: new Date(0) }, ownerId, settings, Boolean(defaultRow), isAdmin, defaultRow?.source_preset_id ? sourceById.get(defaultRow.source_preset_id) : undefined, identity));
+   }
+   // Navigation must describe all saved modules, not just the first content page.
+   const directory = !cursor && !requestedIds ? await prisma.imageStudioModule.findMany({
+@@ -193,10 +193,23 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
+   const name = createOnly ? '未命名模块' : body.name;
+   const prompt = createOnly ? '' : body.prompt;
+   const count = createOnly ? 1 : body.count;
+-  const referenceLimitValue = createOnly ? MAX_REFERENCE_IMAGES : body.referenceLimit;
+-  const referenceLimit = referenceLimitValue === undefined ? MAX_REFERENCE_IMAGES : Number(referenceLimitValue);
+   const ids = createOnly ? [] : body.referenceIds;
++  if (!Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
+   let referencePolicy: StudioReferencePolicy | undefined;
++  if (!createOnly && body.referencePolicy !== undefined) {
++    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids as string[]); }
++    catch (error) {
++      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
++      throw error;
++    }
++  }
++  const savedModuleLimit = !createOnly && body.referenceLimit === undefined && !referencePolicy
++    ? await prisma.imageStudioModule.findFirst({ where: { id, owner_id: ownerId }, select: { reference_limit: true } })
++    : null;
++  const referenceLimitValue = createOnly ? DEFAULT_STUDIO_PRIMARY_MAX
++    : body.referenceLimit !== undefined ? body.referenceLimit
++      : referencePolicy?.primaryMax ?? savedModuleLimit?.reference_limit ?? DEFAULT_STUDIO_PRIMARY_MAX;
++  const referenceLimit = Number(referenceLimitValue);
+   let fixedReferences: ReturnType<typeof parseStudioFixedReferences> | undefined;
+   if (body.fixedReferences !== undefined) {
+     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
+@@ -206,15 +219,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
+   const revision = createOnly ? 0 : body.revision;
+   if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof prompt !== 'string' || prompt.length > 20000
+     || !Number.isInteger(count) || Number(count) < 1 || Number(count) > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES
+-    || !Number.isInteger(revision) || Number(revision) < 0
+-    || !Array.isArray(ids) || ids.length > MAX_REFERENCE_IMAGES || ids.some(item => typeof item !== 'string' || !item || item.length > 100)) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
+-  if (body.referencePolicy !== undefined) {
+-    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids as string[]); }
+-    catch (error) {
+-      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+-      throw error;
+-    }
+-  } else if ((ids as string[]).length > referenceLimit) {
++    || !Number.isInteger(revision) || Number(revision) < 0) throw new StudioModuleError(`模块内容无效，请检查名称、张数和参考图片（最多 ${MAX_REFERENCE_IMAGES} 张）`);
++  if (!referencePolicy && (ids as string[]).length > referenceLimit) {
+     throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
+   }
+   const row = await prisma.$transaction(async tx => {
+diff --git a/src/lib/image-studio/presets.ts b/src/lib/image-studio/presets.ts
+index 249efa1..078ddb4 100644
+--- a/src/lib/image-studio/presets.ts
++++ b/src/lib/image-studio/presets.ts
+@@ -1,6 +1,6 @@
+ import { randomUUID } from 'crypto';
+ import { prisma } from '@/lib/prisma';
+-import { MAX_REFERENCE_IMAGES } from './limits';
++import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
+ import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
+ import { normalizeStudioRatio } from './ratios';
+ import { saveStudioModule, StudioModuleError, validStudioModuleId } from './modules';
+@@ -64,7 +64,7 @@ export async function listStudioPresets(user: ImageStudioIdentity) {
+       id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: row.prompt, context: canSeeContext ? row.context : '', revision: row.updated_at.toISOString(),
+       isShared: row.is_shared,
+       canManageSharing: canManageStudioPreset(user, row),
+-      model: row.model, quality: normalizeImageStudioQuality(row.model, row.quality), resolution: normalizeImageResolution(row.model, row.resolution || defaultImageResolution(row.model)), count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || MAX_REFERENCE_IMAGES)), referencePolicy,
++      model: row.model, quality: normalizeImageStudioQuality(row.model, row.quality), resolution: normalizeImageResolution(row.model, row.resolution || defaultImageResolution(row.model)), count: row.count, referenceLimit: Math.max(1, Math.min(MAX_REFERENCE_IMAGES, Number(row.reference_limit) || DEFAULT_STUDIO_PRIMARY_MAX)), referencePolicy,
+       aspectRatio: row.aspect_ratio, contextConfigured: Boolean(row.context.trim()),
+       images: ids.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
+       fixedReferenceCount: (fixedByPreset.get(row.id) || []).length,
+@@ -94,9 +94,18 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
+   const context = typeof body.context === 'string' ? body.context : '';
+   const model = typeof body.model === 'string' && IMAGE_STUDIO_MODELS.includes(body.model as never) ? body.model : '';
+   const count = Number(body.count);
+-  const referenceLimit = body.referenceLimit === undefined ? MAX_REFERENCE_IMAGES : Number(body.referenceLimit);
+   const ids = parseIds(body.referenceIds);
+   let referencePolicy: StudioReferencePolicy | undefined;
++  if (body.referencePolicy !== undefined) {
++    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids); }
++    catch (error) {
++      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
++      throw error;
++    }
++  }
++  const referenceLimit = body.referenceLimit === undefined
++    ? referencePolicy?.primaryMax ?? DEFAULT_STUDIO_PRIMARY_MAX
++    : Number(body.referenceLimit);
+   let fixedReferences: StudioFixedReference[] | undefined;
+   if (body.fixedReferences !== undefined) {
+     if (!isAdmin) throw new StudioModuleError('固定模板图只能由管理员修改', 403);
+@@ -104,13 +113,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
+     catch (error) { throw new StudioModuleError((error as Error).message); }
+   }
+   if (!name || name.length > 80 || prompt.length > 20000 || context.length > 20000 || groupName.length > 40 || !model || !Number.isInteger(count) || count < 1 || count > 8 || !Number.isInteger(referenceLimit) || referenceLimit < 1 || referenceLimit > MAX_REFERENCE_IMAGES || ids.length > MAX_REFERENCE_IMAGES) throw new StudioModuleError('模板内容无效');
+-  if (body.referencePolicy !== undefined) {
+-    try { referencePolicy = parseStudioReferencePolicy(body.referencePolicy, ids); }
+-    catch (error) {
+-      if (error instanceof StudioReferencePolicyError) throw new StudioModuleError(error.message, error.status);
+-      throw error;
+-    }
+-  } else if (ids.length > referenceLimit) {
++  if (!referencePolicy && ids.length > referenceLimit) {
+     throw new StudioModuleError(`旧版保存请求最多支持 ${referenceLimit} 张参考图`);
+   }
+   const aspectRatio = normalizeStudioRatio(body.aspectRatio);
+diff --git a/src/lib/image-studio/tasks.ts b/src/lib/image-studio/tasks.ts
+index bffd9e1..e44e405 100644
+--- a/src/lib/image-studio/tasks.ts
++++ b/src/lib/image-studio/tasks.ts
+@@ -17,6 +17,7 @@ import { getStudioModuleFixedReferences, parseStudioFixedReferences, type Studio
+ import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, StudioStyleError } from './style-groups';
+ import { studioVisibleAssetWhere } from './protected-assets';
+ import { defaultStudioReferencePolicy, getStudioModuleReferencePolicy, mapStudioReferencePolicy, parseStudioReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
++import { DEFAULT_STUDIO_PRIMARY_MAX } from './limits';
+ 
+ export class StudioError extends Error {
+   constructor(message: string, public status = 400) { super(message); }
+@@ -284,7 +285,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
+       referencePolicy = defaultStudioReferencePolicy(referenceIds, workspace?.reference_limit);
+     } else {
+       try {
+-        referencePolicy = await getStudioModuleReferencePolicy(ownerId, typeof moduleId === 'string' ? moduleId : defaultStudioModuleId(ownerId), referenceIds, workspace?.reference_limit);
++        referencePolicy = await getStudioModuleReferencePolicy(ownerId, typeof moduleId === 'string' ? moduleId : defaultStudioModuleId(ownerId), referenceIds, workspace?.reference_limit ?? DEFAULT_STUDIO_PRIMARY_MAX);
+       } catch (error) {
+         if (error instanceof StudioReferencePolicyError) throw new StudioError(error.message, error.status);
+         throw error;
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index d26bc6f..593e504 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,6 +1,6 @@
+ import packageInfo from '../../package.json';
+ 
+-export const release = { version: packageInfo.version, channel: 'production', summary: '模板工作台分开显示文案与视频状态；复用历史输入只新建模块。图片记录刷新和加载更多保留已有内容，恢复入口明确为查询状态；视频模型与LoRA按通道识别，模块称呼和记录时间更清楚。' };
++export const release = { version: packageInfo.version, channel: 'production', summary: '刷新更新不再重复确认；已保留的模板草稿不再误报丢失；外部账号不显示具体更新内容。' };
+ export function newerRelease(remote: string, local: string) {
+   const parse = (v: string) => /^\d+\.\d+\.\d+$/.test(v) ? v.split('.').map(Number) : null;
+   const a = parse(remote), b = parse(local);

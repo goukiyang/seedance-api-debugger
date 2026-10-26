@@ -1,0 +1,5 @@
+.button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 11px; border: 1px solid currentColor; border-radius: 8px; color: inherit; background: transparent; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.button:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 3px; }
+.button:disabled { opacity: .55; cursor: wait; }
+.notice { display: block; max-width: 42ch; margin-top: 6px; font-size: 12px; line-height: 1.5; color: inherit; }
+@media (pointer: coarse) { .button { min-height: 44px; } }

@@ -5,6 +5,7 @@ import { getSession } from '@/lib/auth/session';
 import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
   deleteVolcengineIpVideoTask,
+  getVolcengineIpTaskStatus,
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
 import { settleTask } from '@/lib/video/task-finalizer';
@@ -44,6 +45,7 @@ export async function POST(
         user_id: true,
         owner_user_id: true,
         frozen_cost: true,
+        updated_at: true,
       },
     });
 
@@ -63,16 +65,34 @@ export async function POST(
       return NextResponse.json({ error: '当前任务状态不能取消' }, { status: 409 });
     }
 
+    const current = await getVolcengineIpTaskStatus(task.provider_task_id);
+    if (current.provider_status !== 'queued') {
+      return NextResponse.json({ error: '只有仍在排队的任务可以取消，运行中的任务不能取消或退款。' }, { status: 409 });
+    }
     const providerResult = await deleteVolcengineIpVideoTask(task.provider_task_id);
-    await prisma.videoTask.update({
-      where: { id: task.id },
+    const confirmed = await getVolcengineIpTaskStatus(task.provider_task_id).catch(() => null);
+    if (confirmed?.local_status !== 'cancelled') {
+      await prisma.videoTask.updateMany({
+        where: { id: task.id, local_status: { in: ['submitted', 'running'] } },
+        data: { error_code: 'IP_CANCEL_UNCONFIRMED', error_message: '取消请求已发送，但尚未确认取消成功。点数暂不退回，请勿重复生成，等待状态同步或联系管理员核对。' },
+      });
+      return NextResponse.json({ ok: false, pending: true, message: '取消结果待确认，尚未退款。' }, { status: 202 });
+    }
+    const changed = await prisma.videoTask.updateMany({
+      where: { id: task.id, local_status: { in: ['submitted', 'running'] }, updated_at: task.updated_at },
       data: {
         local_status: 'cancelled',
         provider_status: 'cancelled',
         raw_status_response: JSON.stringify(providerResult.raw),
         completed_at: new Date(),
+        error_code: null,
+        error_message: null,
       },
     });
+
+    if (!changed.count) {
+      return NextResponse.json({ error: '任务状态已变化，请刷新查看实际结果，未重复退款。' }, { status: 409 });
+    }
 
     if (ownerId && task.frozen_cost && task.frozen_cost > 0) {
       await settleTask(task.id, ownerId, task.frozen_cost, 'cancelled');

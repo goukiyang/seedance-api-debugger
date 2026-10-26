@@ -1,0 +1,418 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.tools {
+  align-items: start;
+  border-bottom: 1px solid var(--border-color);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  padding: 2px 2px 16px;
+}
+
+.createForm,
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.createForm h4,
+.addForm h4 {
+  color: var(--text-primary);
+  font-size: 14px;
+  margin: 0;
+}
+
+.createForm label,
+.addForm label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.createForm label > span,
+.addForm label > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.createForm input,
+.addForm select {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  font: inherit;
+  min-height: 36px;
+  min-width: 0;
+  padding: 7px 10px;
+  width: 100%;
+}
+
+.createForm input:focus-visible,
+.addForm select:focus-visible,
+.root button:focus-visible,
+.root a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.addForm p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.primaryButton,
+.retryRow button,
+.error button,
+.backButton,
+.loadMore {
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 7px;
+  justify-content: center;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.primaryButton {
+  align-self: start;
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #f8fafc;
+  font-weight: 600;
+  max-width: 100%;
+}
+
+.primaryButton:disabled,
+.retryRow button:disabled,
+.error button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.detailHeader {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 0 0 12px;
+}
+
+.backButton {
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+
+.detailTitle {
+  align-items: center;
+  display: flex;
+  flex: 1 1 180px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detailTitle strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.detailTitle > span {
+  background: var(--tone-info-bg);
+  border-radius: 4px;
+  color: var(--tone-info-text);
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+.manageLink,
+.albumRow > a {
+  color: var(--tone-info-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.manageLink:hover,
+.albumRow > a:hover {
+  text-decoration: underline;
+}
+
+.albumList {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.albumRow {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 2px;
+}
+
+.albumOpen {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  font: inherit;
+  gap: 9px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 3px 4px;
+  text-align: left;
+}
+
+.albumOpen:hover .albumName {
+  color: var(--tone-info-text);
+}
+
+.albumName {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.albumCount {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.imageSummary {
+  align-items: baseline;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px 14px;
+}
+
+.imageGrid {
+  align-content: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+}
+
+.imageItem {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.imageItem.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+}
+
+.imageItem.inParent {
+  background: var(--bg-hover);
+}
+
+.imageToggle {
+  background: var(--bg-hover);
+  border: 0;
+  border-radius: 4px;
+  color: #f8fafc;
+  cursor: pointer;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+  width: 100%;
+}
+
+.imageToggle img,
+.unavailableMedia {
+  aspect-ratio: 4 / 3;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.imageToggle > span:last-child {
+  background: rgba(15, 23, 42, 0.78);
+  border-radius: 4px;
+  bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  left: 6px;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  padding: 3px 6px;
+  position: absolute;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageItem.selected .imageToggle > span:last-child {
+  background: #1d4ed8;
+}
+
+.imageToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.imageItem > strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unavailableItem {
+  background: var(--bg-input);
+  color: var(--text-secondary);
+}
+
+.unavailableItem > span {
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.unavailableMedia {
+  align-items: center;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+}
+
+.status,
+.empty {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  justify-content: center;
+  min-height: 150px;
+  padding: 16px;
+  text-align: center;
+}
+
+.empty strong {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.empty span,
+.status {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.error,
+.retryRow {
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 8px 12px;
+  justify-content: space-between;
+  padding: 9px 10px;
+}
+
+.error button,
+.retryRow button {
+  background: var(--bg-panel);
+  flex: 0 0 auto;
+}
+
+.retryRow {
+  background: var(--bg-input);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.errorText,
+.successText,
+.selectionHint {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.errorText {
+  color: var(--text-secondary);
+}
+
+.successText {
+  color: var(--tone-success-text);
+}
+
+.selectionHint {
+  color: var(--text-secondary);
+}
+
+.loadMore {
+  align-self: center;
+  background: var(--bg-hover);
+  margin-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detailHeader {
+    align-items: flex-start;
+  }
+
+  .manageLink {
+    margin-left: 2px;
+  }
+
+  .albumRow {
+    align-items: flex-start;
+  }
+
+  .imageGrid {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  }
+}

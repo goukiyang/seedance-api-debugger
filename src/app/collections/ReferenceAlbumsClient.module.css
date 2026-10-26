@@ -1,0 +1,245 @@
+.root {
+  min-width: 0;
+}
+
+.toolbar,
+.toolbarActions,
+.dialogHeader,
+.dialogActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.toolbarActions {
+  margin-left: auto;
+}
+
+.quietButton,
+.recoveryButton,
+.primaryButton,
+.dialogActions button,
+.notice button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  padding: 8px 14px;
+  font: inherit;
+  cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.recoveryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.recoveryButton {
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.quietButton {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex: 0 0 40px;
+  background: transparent;
+}
+
+.primaryButton,
+.dialogActions .primaryButton {
+  background: oklch(0.52 0.14 250);
+  border-color: oklch(0.61 0.14 250);
+  color: oklch(0.98 0.004 250);
+}
+
+.root button:focus-visible,
+.dialog button:focus-visible,
+.createForm input:focus-visible,
+.createForm select:focus-visible,
+.createForm textarea:focus-visible {
+  outline: 2px solid var(--tone-info-text);
+  outline-offset: 3px;
+}
+
+.quietButton:hover:not(:disabled),
+.dialogActions button:hover:not(:disabled),
+.notice button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.primaryButton:hover:not(:disabled),
+.dialogActions .primaryButton:hover:not(:disabled) {
+  background: oklch(0.57 0.14 250);
+}
+
+.primaryButton:disabled,
+.recoveryButton:disabled,
+.quietButton:disabled,
+.dialogActions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.notice a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tone-info-text);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: oklch(0.12 0.006 160 / 0.65);
+}
+
+.dialog {
+  width: min(100%, 480px);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow: 0 16px 48px oklch(0.1 0.006 160 / 0.3);
+}
+
+.createBackdrop { place-items: stretch end; padding: 0; z-index: 1000; }
+.createDrawer { width: min(100%, 420px); height: 100dvh; max-height: 100dvh; border-radius: 0; padding: 24px; }
+.embedded { min-width: 0; }
+.embedded .toolbar { margin: 0; }
+.createDrawer .createForm { min-height: calc(100% - 60px); }
+.createDrawer .dialogActions { margin-top: auto; }
+
+.dialogHeader {
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.dialogHeader h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.createForm,
+.createForm label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.createForm {
+  gap: 18px;
+}
+
+.createForm label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.createForm input,
+.createForm textarea,
+.createForm select,
+.projectTarget {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.createForm textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.projectTarget {
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.formNotice {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.dialogActions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.cardFooter {
+  padding: 0 14px 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .backdrop {
+    padding: 12px;
+  }
+
+  .dialog {
+    padding: 16px;
+    max-height: calc(100dvh - 24px);
+  }
+
+  .dialogActions button {
+    min-height: 44px;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+  }
+}

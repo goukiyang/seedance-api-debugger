@@ -7,6 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { getAsset, updateAsset as providerUpdate } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 
@@ -15,6 +17,10 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权访问旧版 Seedance 官方素材。');
+
     const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
@@ -46,6 +52,9 @@ export async function GET(
 
     return NextResponse.json({ asset: updated ?? record });
   } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[GetAsset] Error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '查询失败' },
@@ -59,6 +68,10 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权修改旧版 Seedance 官方素材。');
+
     const body = await request.json();
     const { name } = body as { name?: string };
 
@@ -85,6 +98,9 @@ export async function PATCH(
 
     return NextResponse.json({ asset: updated });
   } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[PatchAsset] Error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '更新失败' },
@@ -98,6 +114,10 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权删除旧版 Seedance 官方素材。');
+
     const record = await seedanceAssetRepository.get(params.id);
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
@@ -112,6 +132,9 @@ export async function DELETE(
       message: '已从素材库移除，官方资产保留',
     });
   } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[DeleteAsset] Error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '删除失败' },

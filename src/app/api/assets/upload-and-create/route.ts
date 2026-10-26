@@ -1,24 +1,27 @@
 /**
  * POST /api/assets/upload-and-create
- * 本地上传 + 公网存储 + 自动创建 Seedance Asset
+ * 已上传 Asset + 自动创建 Seedance Asset
  *
  * 去重流程：
- *   1. 接收文件 → 计算 sha256 fileHash
- *   2. 按 fileHash 查 Active 资产 → 命中则复用
- *   3. 否则上传 R2/TOS → 得 publicUrl
- *   4. 按 storageProvider+storageKey 查 Active 资产 → 命中则复用（同一 R2 key）
- *   5. 否则调官方 /asset/create → 写入数据库（带存储元数据）
+ *   1. 接收 assetId → 校验当前账号可用
+ *   2. 确保 Asset URL 是公网可访问
+ *   3. 按 Asset hash 查 Active 官方素材 → 命中则复用
+ *   4. 否则调官方 /asset/create → 写入数据库
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as crypto from 'crypto';
-import { uploadPublicAsset } from '@/lib/assets/public-storage';
+import { getSession } from '@/lib/auth/session';
+import { prisma } from '@/lib/prisma';
+import { sameOriginPublicUrlForLocalUpload } from '@/lib/assets/site-upload';
+import { releaseVerifiedUpload, verifyExistingUpload } from '@/lib/assets/verified-upload';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+const UPLOAD_AND_CREATE_PROVIDER_TIMEOUT_MS = 25_000;
 
 type SeedanceUploadAssetType = 'Image' | 'Video' | 'Audio';
 
@@ -61,12 +64,19 @@ const SUPPORTED_TYPE_LABELS = Array.from(
   new Set(Object.values(UPLOAD_TYPES_BY_MIME).map((item) => item.label))
 ).join(', ');
 
-function resolveUploadType(file: File): UploadTypeConfig | null {
-  if (file.type && UPLOAD_TYPES_BY_MIME[file.type]) {
-    return UPLOAD_TYPES_BY_MIME[file.type];
+type UploadAndCreateBody = {
+  assetId?: unknown;
+  asset_id?: unknown;
+  name?: unknown;
+};
+
+function resolveUploadTypeFromMetadata(mimeType: string | null | undefined, fileName: string | null | undefined): UploadTypeConfig | null {
+  const normalizedMimeType = (mimeType || '').split(';')[0]?.trim().toLowerCase() || '';
+  if (normalizedMimeType && UPLOAD_TYPES_BY_MIME[normalizedMimeType]) {
+    return UPLOAD_TYPES_BY_MIME[normalizedMimeType];
   }
 
-  const extension = file.name.split('.').pop()?.toLowerCase();
+  const extension = (fileName || '').split('.').pop()?.toLowerCase();
   if (extension && UPLOAD_TYPES_BY_EXTENSION[extension]) {
     return UPLOAD_TYPES_BY_EXTENSION[extension];
   }
@@ -80,126 +90,344 @@ function getAssetTypeLabel(assetType: SeedanceUploadAssetType): string {
   return '音频';
 }
 
-export async function POST(request: NextRequest) {
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.trim() ? error.message.trim() : fallback;
+}
+
+function safeLogDetails(details: Record<string, unknown>) {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (key === 'publicUrl') {
+      result.publicUrl = value ? '[redacted-url]' : null;
+      continue;
+    }
+    if (key === 'storageKey') {
+      result.storageKeyPresent = Boolean(value);
+      continue;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function jsonUploadAndCreateError(
+  code: string,
+  message: string,
+  status: number,
+  details: Record<string, unknown> = {},
+) {
+  console.error('[UploadAndCreate] Stage failed:', {
+    code,
+    message,
+    ...safeLogDetails(details),
+  });
+  return NextResponse.json(
+    {
+      success: false,
+      closedLoop: false,
+      reused: false,
+      code,
+      error: message,
+      message,
+      ...details,
+    },
+    { status: safeUploadAndCreateHttpStatus(status) },
+  );
+}
+
+function safeUploadAndCreateHttpStatus(status: number) {
+  // Cloudflare 会把源站 502/503/504 替换成 HTML 错误页，前端就会再次看到
+  // “Unexpected token '<'”。这些是应用内可解释失败，统一用 424 保留 JSON body。
+  if (status >= 500) return 424;
+  return status;
+}
+
+class ProviderCreateTimeoutError extends Error {
+  constructor() {
+    super('官方资产创建超时，请稍后重试。');
+    this.name = 'ProviderCreateTimeoutError';
+  }
+}
+
+async function withProviderTimeout<T>(operation: Promise<T>, timeoutMs = UPLOAD_AND_CREATE_PROVIDER_TIMEOUT_MS) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const name = (formData.get('name') as string | null)?.trim();
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new ProviderCreateTimeoutError()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
+export async function POST(request: NextRequest) {
+  const user = await getSession();
+  if (!user) {
+    return jsonUploadAndCreateError('UNAUTHORIZED', '未登录，请重新登录后再上传素材。', 401);
+  }
 
-    const uploadType = resolveUploadType(file);
-    if (!uploadType) {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${file.type || 'unknown'}. Supported: ${SUPPORTED_TYPE_LABELS}` },
-        { status: 400 }
-      );
-    }
+  const contentType = request.headers.get('content-type') || '';
+  if (contentType.includes('multipart/form-data')) {
+    return jsonUploadAndCreateError(
+      'CURRENT_UPLOAD_ENTRYPOINT_UPGRADED',
+      '素材上传入口已升级，请刷新页面后重试；如果仍出现，请重新登录。',
+      400,
+    );
+  }
 
-    if (file.size > uploadType.maxSize) {
-      return NextResponse.json(
-        {
-          error: `File too large: ${(file.size / MB).toFixed(1)}MB (max ${uploadType.maxSize / MB}MB)`,
-        },
-        { status: 400 }
-      );
-    }
+  let body: UploadAndCreateBody;
+  try {
+    body = await request.json();
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'JSON_PARSE_FAILED',
+      '素材创建请求格式错误，请刷新后重试。',
+      400,
+      { reason: errorMessage(error, 'json parse failed') },
+    );
+  }
 
-    const assetName = name || file.name || 'Untitled';
-    const buffer = Buffer.from(await file.arrayBuffer());
+  const assetId = typeof body.assetId === 'string'
+    ? body.assetId.trim()
+    : typeof body.asset_id === 'string'
+      ? body.asset_id.trim()
+      : '';
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
 
-    // Step 1: 计算文件 hash
-    const fileHash = crypto.createHash('sha256').update(buffer).digest('hex');
+  if (!assetId) {
+    return jsonUploadAndCreateError('NO_ASSET_ID', '没有收到素材 ID，请重新上传。', 400);
+  }
 
-    // Step 2: 按 fileHash 查 Active 资产
-    const existingByHash = await seedanceAssetRepository.findActiveByFileHash(fileHash);
-    if (existingByHash) {
-      return NextResponse.json({
-        success: true,
-        closedLoop: true,
-        reused: true,
-        reuseReason: 'FILE_HASH_MATCH',
-        message: `已检测到相同${getAssetTypeLabel(uploadType.assetType)}，已复用已有资产。`,
-        storageProvider: existingByHash.provider,
+  let assetRecord: {
+    id: string;
+    owner_id: string;
+    type: string;
+    original_url: string;
+    thumbnail_url: string | null;
+    file_name: string;
+    mime_type: string;
+    file_size: number;
+    hash: string | null;
+    status: string;
+  } | null;
+  try {
+    assetRecord = await prisma.asset.findUnique({
+      where: { id: assetId },
+      select: {
+        id: true,
+        owner_id: true,
+        type: true,
+        original_url: true,
+        thumbnail_url: true,
+        file_name: true,
+        mime_type: true,
+        file_size: true,
+        hash: true,
+        status: true,
+      },
+    });
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'ASSET_LOOKUP_FAILED',
+      '素材读取失败，请稍后重试。',
+      503,
+      { reason: errorMessage(error, 'asset lookup failed') },
+    );
+  }
+
+  if (!assetRecord || assetRecord.status !== 'active') {
+    return jsonUploadAndCreateError('ASSET_NOT_FOUND', '素材不存在或已不可用，请重新上传。', 404);
+  }
+
+  if (assetRecord.owner_id !== user.id) {
+    return jsonUploadAndCreateError('ASSET_FORBIDDEN', '当前账号无权使用这个素材。', 403);
+  }
+
+  const uploadType = resolveUploadTypeFromMetadata(assetRecord.mime_type, assetRecord.file_name);
+  if (!uploadType) {
+    return jsonUploadAndCreateError(
+      'UNSUPPORTED_FILE_TYPE',
+      `不支持的文件类型：${assetRecord.mime_type || 'unknown'}。目前支持：${SUPPORTED_TYPE_LABELS}。`,
+      400,
+    );
+  }
+
+  if (assetRecord.file_size > uploadType.maxSize) {
+    return jsonUploadAndCreateError(
+      'FILE_TOO_LARGE',
+      `${getAssetTypeLabel(uploadType.assetType)}过大：${(assetRecord.file_size / MB).toFixed(1)}MB，最大 ${uploadType.maxSize / MB}MB。`,
+      400,
+    );
+  }
+
+  let publicAsset: { asset: { original_url: string }; isPubliclyReachable: boolean; storageProvider?: string; publicUploadWarning?: string };
+  try {
+    const full = await prisma.asset.findUnique({ where: { id: assetRecord.id } });
+    if (!full) throw new Error('asset_unavailable');
+    const proof = await verifyExistingUpload(full, user.id);
+    if (!proof) throw new Error('original_unverifiable');
+    await releaseVerifiedUpload(proof);
+    const url = sameOriginPublicUrlForLocalUpload(full.original_url) || full.original_url;
+    publicAsset = { asset: { original_url: url }, isPubliclyReachable: isPubliclyReachableUrl(url), storageProvider: sameOriginPublicUrlForLocalUpload(full.original_url) ? 'local-public' : 'asset' };
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'ASSET_PUBLIC_URL_FAILED',
+      `素材已上传，但准备公网地址失败：${errorMessage(error, 'public url failed')}`,
+      503,
+    );
+  }
+
+  const publicUrl = publicAsset.asset.original_url;
+  const isPublic = publicAsset.isPubliclyReachable || isPubliclyReachableUrl(publicUrl);
+  if (!isPublic) {
+    return jsonUploadAndCreateError(
+      'ASSET_URL_NOT_PUBLIC',
+      publicAsset.publicUploadWarning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
+      424,
+      {
+        storageProvider: publicAsset.storageProvider || 'asset',
         assetType: uploadType.assetType,
-        asset: existingByHash,
-        providerAssetId: existingByHash.providerAssetId,
-      });
-    }
+        publicUrl,
+        size: assetRecord.file_size,
+      },
+    );
+  }
 
-    // Step 3: 上传公网存储（R2 > TOS > local-public > local）
-    const uploadResult = await uploadPublicAsset(buffer, file.name, uploadType.mimeType);
-    const isPublic = uploadResult.isPubliclyReachable || isPubliclyReachableUrl(uploadResult.publicUrl);
+  const fileHash = assetRecord.hash || null;
+  const assetName = name || assetRecord.file_name || 'Untitled';
+  async function providerReuseIsOwned(localId: string) {
+    const provider = await prisma.seedanceAsset.findUnique({ where: { id: localId } });
+    if (!provider || provider.local_status !== 'Active' || !provider.storage_key || provider.file_hash !== fileHash) return false;
+    const owned = await prisma.asset.findUnique({ where: { id: provider.storage_key } });
+    if (!owned || owned.owner_id !== user!.id || owned.hash !== fileHash || owned.mime_type !== assetRecord!.mime_type || owned.file_size !== assetRecord!.file_size
+      || (sameOriginPublicUrlForLocalUpload(owned.original_url) || owned.original_url) !== provider.original_url) return false;
+    const proof = await verifyExistingUpload(owned, user!.id);
+    if (!proof) return false;
+    await releaseVerifiedUpload(proof); return true;
+  }
 
-    if (!isPublic) {
-      return NextResponse.json({
-        success: true,
-        closedLoop: false,
-        reused: false,
-        message: uploadResult.warning || '当前 URL 不是公网可访问地址，Seedance 官方无法下载。',
-        storageProvider: uploadResult.storageProvider,
-        assetType: uploadType.assetType,
-        publicUrl: uploadResult.publicUrl,
-        storageKey: uploadResult.storageKey,
-        size: uploadResult.size,
-      });
-    }
-
-    // Step 4: 按 storageKey 查 Active 资产（同 R2 key 不重复上传）
-    if (uploadResult.storageProvider && uploadResult.storageKey) {
-      const existingByKey = await seedanceAssetRepository.findActiveByStorageKey(
-        uploadResult.storageProvider,
-        uploadResult.storageKey
-      );
-      if (existingByKey) {
+  if (fileHash) {
+    try {
+      const existingByHash = await seedanceAssetRepository.findActiveByFileHash(fileHash);
+      if (existingByHash) {
+        if (!await providerReuseIsOwned(existingByHash.localId)) return jsonUploadAndCreateError('PROVIDER_REUSE_UNVERIFIED', '供应商已有同文件记录，但无法确认属于本人可用素材；原记录保留，未新增收费调用。', 409);
         return NextResponse.json({
           success: true,
           closedLoop: true,
           reused: true,
-          reuseReason: 'STORAGE_KEY_MATCH',
-          message: '已检测到相同存储资产，已复用已有资产。',
-          storageProvider: uploadResult.storageProvider,
+          reuseReason: 'FILE_HASH_MATCH',
+          message: `已检测到相同${getAssetTypeLabel(uploadType.assetType)}，已复用已有资产。`,
+          storageProvider: existingByHash.provider,
           assetType: uploadType.assetType,
-          asset: existingByKey,
-          providerAssetId: existingByKey.providerAssetId,
+          asset: existingByHash,
+          providerAssetId: existingByHash.providerAssetId,
         });
       }
+    } catch (error) {
+      return jsonUploadAndCreateError(
+        'DB_LOOKUP_FAILED',
+        '素材去重检查失败，请稍后重试。',
+        503,
+        { reason: errorMessage(error, 'database lookup failed') },
+      );
     }
+  }
 
-    // Step 5: 调官方 /asset/create
-    const createResult = await createAsset({
-      assetType: uploadType.assetType,
-      url: uploadResult.publicUrl,
-      name: assetName,
-    });
-
-    if (createResult.error) {
+  try {
+    const existingByUrl = await seedanceAssetRepository.findActiveByOriginalUrl(publicUrl);
+    if (existingByUrl) {
+      if (!await providerReuseIsOwned(existingByUrl.localId)) return jsonUploadAndCreateError('PROVIDER_REUSE_UNVERIFIED', '供应商已有同地址记录，但无法确认本人可合法复用；未新增收费调用。', 409);
       return NextResponse.json({
-        success: false,
-        closedLoop: false,
-        reused: false,
-        message: `官方 /asset/create 失败：${createResult.error}`,
-        storageProvider: uploadResult.storageProvider,
+        success: true,
+        closedLoop: true,
+        reused: true,
+        reuseReason: 'ORIGINAL_URL_MATCH',
+        message: '已检测到相同素材地址，已复用已有资产。',
+        storageProvider: publicAsset.storageProvider || 'asset',
         assetType: uploadType.assetType,
-        publicUrl: uploadResult.publicUrl,
-        storageKey: uploadResult.storageKey,
-        size: uploadResult.size,
-        warning: uploadResult.warning,
-      }, { status: 502 });
+        asset: existingByUrl,
+        providerAssetId: existingByUrl.providerAssetId,
+      });
     }
+  } catch (error) {
+    return jsonUploadAndCreateError(
+      'DB_LOOKUP_FAILED',
+      '素材地址去重检查失败，请稍后重试。',
+      503,
+      { reason: errorMessage(error, 'database lookup failed') },
+    );
+  }
 
-    // Step 6: 写入数据库（带存储元数据）
+  // 调官方 /asset/create
+  let createResult: Awaited<ReturnType<typeof createAsset>>;
+  try {
+    createResult = await withProviderTimeout(createAsset({
+      assetType: uploadType.assetType,
+      url: publicUrl,
+      name: assetName,
+    }));
+  } catch (error) {
+    const isTimeout = error instanceof ProviderCreateTimeoutError;
+    return jsonUploadAndCreateError(
+      isTimeout ? 'PROVIDER_CREATE_TIMEOUT' : 'PROVIDER_CREATE_FAILED',
+      isTimeout
+        ? '文件已上传成功，但官方 Seedance Asset 创建超时，请稍后重试创建。'
+        : `官方 Seedance Asset 创建失败：${errorMessage(error, '未知错误')}`,
+      isTimeout ? 504 : 502,
+      {
+        storageProvider: publicAsset.storageProvider || 'asset',
+        assetType: uploadType.assetType,
+        publicUrl,
+        size: assetRecord.file_size,
+        warning: publicAsset.publicUploadWarning,
+      },
+    );
+  }
+
+  if (createResult.error) {
+    return jsonUploadAndCreateError(
+      'PROVIDER_CREATE_FAILED',
+      `官方 Seedance Asset 创建失败：${createResult.error}`,
+      502,
+      {
+        storageProvider: publicAsset.storageProvider || 'asset',
+        assetType: uploadType.assetType,
+        publicUrl,
+        size: assetRecord.file_size,
+        warning: publicAsset.publicUploadWarning,
+      },
+    );
+  }
+
+  if (!createResult.data?.providerAssetId) {
+    return jsonUploadAndCreateError(
+      'PROVIDER_CREATE_FAILED',
+      '官方 Seedance Asset 创建返回异常：没有素材 ID。',
+      502,
+      {
+        storageProvider: publicAsset.storageProvider || 'asset',
+        assetType: uploadType.assetType,
+        publicUrl,
+        size: assetRecord.file_size,
+        warning: publicAsset.publicUploadWarning,
+      },
+    );
+  }
+
+  // 写入数据库（复用 Asset 元数据）
+  try {
     const record = await seedanceAssetRepository.createWithStorageMetadata({
       providerAssetId: createResult.data!.providerAssetId,
       assetType: uploadType.assetType,
       name: assetName,
-      originalUrl: uploadResult.publicUrl,
+      originalUrl: publicUrl,
       rawProviderResponse: JSON.stringify(createResult.data!.rawResponse),
-      fileHash,
-      storageProvider: uploadResult.storageProvider,
-      storageKey: uploadResult.storageKey,
+      ...(fileHash ? { fileHash } : {}),
+      storageProvider: publicAsset.storageProvider || 'asset',
+      storageKey: assetRecord.id,
     });
 
     return NextResponse.json({
@@ -207,20 +435,30 @@ export async function POST(request: NextRequest) {
       closedLoop: true,
       reused: false,
       message: '上传成功，Seedance Asset 创建成功。',
-      storageProvider: uploadResult.storageProvider,
+      storageProvider: publicAsset.storageProvider || 'asset',
       assetType: uploadType.assetType,
-      publicUrl: uploadResult.publicUrl,
-      storageKey: uploadResult.storageKey,
-      size: uploadResult.size,
+      publicUrl,
+      storageKey: assetRecord.id,
+      size: assetRecord.file_size,
       asset: record,
       providerAssetId: createResult.data!.providerAssetId,
-      warning: uploadResult.warning,
+      warning: publicAsset.publicUploadWarning,
     });
   } catch (error) {
-    console.error('[UploadAndCreate] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Upload and create failed' },
-      { status: 500 }
+    return jsonUploadAndCreateError(
+      'DB_CREATE_FAILED',
+      '官方 Seedance Asset 已创建，但本地素材登记失败，请稍后刷新素材列表或联系管理员处理。',
+      503,
+      {
+        reason: errorMessage(error, 'database create failed'),
+        storageProvider: publicAsset.storageProvider || 'asset',
+        assetType: uploadType.assetType,
+        publicUrl,
+        storageKey: assetRecord.id,
+        size: assetRecord.file_size,
+        providerAssetId: createResult.data!.providerAssetId,
+        warning: publicAsset.publicUploadWarning,
+      },
     );
   }
 }

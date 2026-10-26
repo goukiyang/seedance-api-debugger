@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
+import { normalizeSeedanceEditPilot, type SeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
 
 export const CODEX_VIDEO_SOURCE_TYPE = 'codex_api';
 export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
@@ -10,6 +11,7 @@ export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
 type UserSelectorType = 'id' | 'email' | 'username';
 
 export type CodexVideoApiSettings = {
+  video_edit_pilot?: SeedanceEditPilot;
   enabled: boolean;
   source_label: string;
   user_selector: {
@@ -150,6 +152,7 @@ function normalizeSettings(value: unknown): CodexVideoApiSettings {
 
   return {
     enabled: input.enabled === true,
+    video_edit_pilot: normalizeSeedanceEditPilot(input.video_edit_pilot),
     source_label: cleanString(input.source_label, DEFAULT_CODEX_VIDEO_API_SETTINGS.source_label).slice(0, 80),
     user_selector: selector.value ? selector : DEFAULT_CODEX_VIDEO_API_SETTINGS.user_selector,
     token_hash: normalizeTokenHash(input.token_hash),
@@ -210,6 +213,8 @@ export function buildCodexVideoApiSettingsPatch(
 ): CodexVideoApiSettingsSaveResult {
   const nextInput: Partial<CodexVideoApiSettings> = {
     ...current,
+    video_edit_pilot: input.video_edit_pilot === undefined
+      ? current.video_edit_pilot : normalizeSeedanceEditPilot(input.video_edit_pilot),
     enabled: input.enabled === true,
     source_label: cleanString(input.source_label, current.source_label),
     user_selector: normalizeSelector(input.user_selector || {
@@ -327,11 +332,11 @@ function validateLinkedUser(user: CodexLinkedUser | null): asserts user is Codex
   if (user.expires_at && user.expires_at.getTime() <= Date.now()) {
     throw new CodexApiAuthError('Codex 视频接口绑定用户已过期', 403, 'codex_api_user_expired');
   }
-  if (user.role !== 'admin' && user.role !== 'user') {
-    throw new CodexApiAuthError('Codex 视频接口绑定用户角色无效', 403, 'codex_api_user_invalid_role');
+  if (user.role !== 'user') {
+    throw new CodexApiAuthError('Codex 视频接口绑定用户必须是普通用户', 403, 'codex_api_user_must_be_normal_user');
   }
-  if (user.account_type !== 'internal' && user.account_type !== 'external') {
-    throw new CodexApiAuthError('Codex 视频接口绑定用户类型无效', 403, 'codex_api_user_invalid_account_type');
+  if (user.account_type !== 'internal') {
+    throw new CodexApiAuthError('Codex 视频接口绑定用户必须是内部普通账号', 403, 'codex_api_user_must_be_internal');
   }
 }
 
@@ -359,6 +364,22 @@ function toSessionUser(user: CodexLinkedUser): SessionUser {
       last_sync_at: user.last_feishu_sync_at,
     },
   };
+}
+
+
+export async function isCodexInternalServiceUser(user: Pick<SessionUser, 'id' | 'role' | 'account_type'> | null | undefined) {
+  if (!user || user.role !== 'user' || user.account_type !== 'internal') return false;
+  const settings = await getCodexVideoApiSettings();
+  if (!settings.enabled) return false;
+  const linkedUser = await resolveCodexLinkedUser(settings);
+  return Boolean(
+    linkedUser
+    && linkedUser.id === user.id
+    && linkedUser.role === 'user'
+    && linkedUser.account_type === 'internal'
+    && linkedUser.status === 'active'
+    && (!linkedUser.expires_at || linkedUser.expires_at.getTime() > Date.now())
+  );
 }
 
 export async function authenticateCodexVideoApi(request: NextRequest) {

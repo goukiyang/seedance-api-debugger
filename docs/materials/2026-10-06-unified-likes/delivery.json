@@ -1,0 +1,29 @@
+{
+  "checkedAt": "2026-10-06T14:23:14Z",
+  "version": "0.49.0",
+  "commit": "9adbaa2d77798c05d9e8a463337e7feccbe1e66a",
+  "build": "qm5JfAJ6THxzn3X5MOiUZ",
+  "branch": "codex/unified-likes-20261006",
+  "url": "https://sd2.youdooart.com/assets?view=favorites",
+  "services": { "sd2-gray.service": "active", "sd2-image-studio.service": "active" },
+  "workerRetained": true,
+  "sourceFilesMatchedBefore": 851,
+  "sourceFilesMatchedAfter": 854,
+  "sourceArchiveSha256": "c762f44a8f83deda66588fb4edcd77fe228b34afa7dd6c7a77a2a944f0167d65",
+  "rollbackArchiveSha256": "610a06236e4e99db127238cc4d17dee8e4373fbcd5d7e10b53a661c18eb59118",
+  "rollbackCommit": "ecbbc3258f4e89958f5bf55b2eae975904503b1d",
+  "rollbackTag": "rollback/2026-10-06-before-unified-likes-v0.49.0",
+  "rollbackBuild": "F2D7ZkKByROZ0JjfpqvaX",
+  "rollbackBuildDirectory": "/srv/video-api-debugger/app/.next-prod-prev-likes-9adbaa2d7779",
+  "rollbackSourceDirectory": "/srv/video-api-debugger/releases/ecbbc3258f4e89958f5bf55b2eae975904503b1d-likes-rollback-source",
+  "persistent": {
+    "storage": "/data/video-api-debugger/var-lib/storage",
+    "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+    "public/videos": "/data/video-api-debugger/var-lib/videos"
+  },
+  "localConfig": "HTTP200 and valid JSON; contents not retained",
+  "databaseMigration": false,
+  "dependenciesChanged": false,
+  "functionalAcceptance": "not run; user manual acceptance required",
+  "classificationMisjudgment": "Supervisor public-count recommendation corrected and logged; no production side effect"
+}

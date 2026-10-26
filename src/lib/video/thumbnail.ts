@@ -2,14 +2,17 @@ import { execFile } from 'child_process';
 import path from 'path';
 import { promisify } from 'util';
 import { mkdir, rename, stat, unlink } from 'fs/promises';
+import { isPublicHttpUrl } from '@/lib/media/public-url';
 
 const execFileAsync = promisify(execFile);
 const PUBLIC_VIDEO_ROOT = path.join(process.cwd(), 'public');
 const THUMBNAIL_DIR = path.join(PUBLIC_VIDEO_ROOT, 'videos', 'thumbnails');
-const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
+const DEFAULT_FFMPEG_BIN = 'ffmpeg';
+const THUMBNAIL_SEEK_SECONDS = ['2.5', '0.5'];
 
 export type ThumbnailSourceTask = {
   id: string;
+  public_video_url?: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -51,18 +54,8 @@ export function localPublicVideoPath(localVideoPath: string | null) {
   return path.join(PUBLIC_VIDEO_ROOT, localVideoPath.slice(1));
 }
 
-function isRemoteAssetUrl(value: string | null) {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
 export async function resolveThumbnailSources(
-  task: Pick<ThumbnailSourceTask, 'local_video_path' | 'result_video_url' | 'result_last_frame_url'>,
+  task: Pick<ThumbnailSourceTask, 'public_video_url' | 'local_video_path' | 'result_video_url' | 'result_last_frame_url'>,
   options: { allowRemoteFallback?: boolean } = {},
 ) {
   const sources: string[] = [];
@@ -70,23 +63,24 @@ export async function resolveThumbnailSources(
   if (localVideo && await fileExists(localVideo)) sources.push(localVideo);
 
   if (options.allowRemoteFallback !== false) {
-    if (isRemoteAssetUrl(task.result_video_url)) sources.push(task.result_video_url as string);
-    if (isRemoteAssetUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
+    if (isPublicHttpUrl(task.public_video_url || null)) sources.push(task.public_video_url as string);
+    if (isPublicHttpUrl(task.result_video_url)) sources.push(task.result_video_url as string);
+    if (isPublicHttpUrl(task.result_last_frame_url)) sources.push(task.result_last_frame_url as string);
   }
 
   return sources;
 }
 
-async function generateThumbnail(source: string, outputPath: string) {
+async function generateThumbnailAtSeek(source: string, outputPath: string, seekSeconds: string) {
   const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp.jpg`;
   try {
-    await execFileAsync(FFMPEG_BIN, [
+    await execFileAsync(process.env.FFMPEG_PATH || DEFAULT_FFMPEG_BIN, [
       '-hide_banner',
       '-loglevel',
       'error',
       '-y',
       '-ss',
-      '0.5',
+      seekSeconds,
       '-i',
       source,
       '-frames:v',
@@ -102,6 +96,19 @@ async function generateThumbnail(source: string, outputPath: string) {
     await unlink(tempPath).catch(() => undefined);
     throw error;
   }
+}
+
+async function generateThumbnail(source: string, outputPath: string) {
+  let lastError: unknown;
+  for (const seekSeconds of THUMBNAIL_SEEK_SECONDS) {
+    try {
+      await generateThumbnailAtSeek(source, outputPath, seekSeconds);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function ensureTaskThumbnail(

@@ -1,0 +1,60 @@
+{
+  "scope": "synthetic controlled constraints; real random/compile/layout core",
+  "externalModelCalls": 0,
+  "dbCalls": 0,
+  "seedSet": "state-test-fixed-0..11",
+  "cases": [
+    {
+      "group": 2,
+      "name": "fixed gender",
+      "status": "PASS",
+      "samples": 12,
+      "unfixedDistinct": 12
+    },
+    {
+      "group": 2,
+      "name": "age range 25-35",
+      "status": "PASS",
+      "samples": 12,
+      "unfixedDistinct": 12
+    },
+    {
+      "group": 2,
+      "name": "no glasses and short hair",
+      "status": "PASS",
+      "samples": 12,
+      "unfixedDistinct": 12
+    },
+    {
+      "group": 2,
+      "name": "combined fixed conditions",
+      "status": "PASS",
+      "samples": 12,
+      "unfixedDistinct": 12
+    },
+    {
+      "group": 2,
+      "name": "locked fields remain unchanged",
+      "status": "PASS",
+      "samples": 12,
+      "unfixedDistinct": 12
+    },
+    {
+      "group": 2,
+      "name": "conflicts rejected before output",
+      "status": "PASS",
+      "samples": 12
+    },
+    {
+      "group": 1,
+      "name": "real kernel: default four DNA compile to one square image",
+      "status": "PASS"
+    },
+    {
+      "group": 5,
+      "name": "real layout core: 1 vs 1/2/4 counts/quotes, old snapshot immutable",
+      "status": "PASS"
+    }
+  ],
+  "passed": 8
+}

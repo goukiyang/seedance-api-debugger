@@ -6,11 +6,20 @@ export type BulkVideoDownloadRequest = {
 };
 
 export type BulkVideoDownloadClientResult = {
+  blob: Blob;
   fileName: string;
   total: number;
   success: number;
   failed: number;
 };
+
+export type BulkVideoDownloadOptions = {
+  signal?: AbortSignal;
+  canDownload?: () => boolean;
+};
+
+const CURRENT_PRODUCTION_ORIGIN = 'https://sd2.youdooart.com';
+const LEGACY_PRODUCTION_ORIGIN = 'https://sd2.youdoodesign.com';
 
 function fallbackZipName() {
   const now = new Date();
@@ -26,16 +35,31 @@ function fileNameFromDisposition(value: string | null) {
   return match?.[1] || fallbackZipName();
 }
 
-function triggerDownload(blob: Blob, fileName: string) {
+function triggerDownload(blob: Blob, fileName: string, options?: BulkVideoDownloadOptions) {
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  let triggered = false;
+  try {
+    ensureDownloadAllowed(options);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    try {
+      ensureDownloadAllowed(options);
+      anchor.click();
+      triggered = true;
+    } finally {
+      anchor.remove();
+    }
+  } finally {
+    if (triggered) {
+      // Keep the object URL alive until the browser has accepted the download.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } else {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 async function errorMessageFromResponse(response: Response) {
@@ -47,24 +71,74 @@ async function errorMessageFromResponse(response: Response) {
   }
 }
 
+function ensureDownloadAllowed(options?: BulkVideoDownloadOptions) {
+  if (options?.signal?.aborted || options?.canDownload?.() === false) {
+    const error = new Error('The download was cancelled because its account context changed.');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
+function isLegacyOrigin() {
+  return typeof window !== 'undefined'
+    && window.location.origin === LEGACY_PRODUCTION_ORIGIN;
+}
+
+function networkDownloadErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : '';
+  if (isLegacyOrigin()) {
+    return `当前打开的是旧入口 ${LEGACY_PRODUCTION_ORIGIN}，这个入口已经停用。请改用 ${CURRENT_PRODUCTION_ORIGIN} 后重新登录再下载。`;
+  }
+  if (message === 'Failed to fetch') {
+    return '批量下载请求没有连上服务器。请刷新页面后重试；如果仍出现，请确认当前网址是 https://sd2.youdooart.com。';
+  }
+  return message || '批量下载失败';
+}
+
 export async function downloadBulkVideoZip(
   payload: BulkVideoDownloadRequest,
+  onStage?: (stage: string) => void,
+  options?: BulkVideoDownloadOptions,
 ): Promise<BulkVideoDownloadClientResult> {
-  const response = await fetch('/api/video/bulk-download', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  ensureDownloadAllowed(options);
+  onStage?.('正在打包视频…');
+  let response: Response;
+  try {
+    response = await fetch('/api/video/bulk-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+  } catch (error) {
+    ensureDownloadAllowed(options);
+    throw new Error(networkDownloadErrorMessage(error));
+  }
 
+  ensureDownloadAllowed(options);
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok || !contentType.includes('application/zip')) {
-    throw new Error(await errorMessageFromResponse(response));
+    const message = await errorMessageFromResponse(response);
+    ensureDownloadAllowed(options);
+    throw new Error(message);
   }
 
   const fileName = fileNameFromDisposition(response.headers.get('content-disposition'));
-  triggerDownload(await response.blob(), fileName);
+  ensureDownloadAllowed(options);
+  onStage?.('正在接收视频包…');
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    ensureDownloadAllowed(options);
+    throw new Error('视频包接收中断，请重新下载');
+  }
+  ensureDownloadAllowed(options);
+  if (!blob.size) throw new Error('收到的视频包为空，请重新下载');
+  triggerDownload(blob, fileName, options);
 
   return {
+    blob,
     fileName,
     total: Number(response.headers.get('x-bulk-download-total') || 0),
     success: Number(response.headers.get('x-bulk-download-success') || 0),

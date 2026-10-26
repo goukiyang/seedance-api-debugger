@@ -4,11 +4,26 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Download, RefreshCcw } from 'lucide-react';
 import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  LabelList,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
+  CNY_CONVERSION_UNAVAILABLE,
+  MONEY_AMOUNT_UNAVAILABLE,
+  currencyAmountToCny,
   formatAmountMicrosWithFixedCny,
   formatAmountMinorWithFixedCny,
+  formatCnyAmount,
 } from '@/lib/costs/currency';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import GenerationTimingPanel, { formatElapsed } from './GenerationTimingPanel';
 import type {
   DashboardBreakdownItem,
   DashboardCurrencyTotal,
@@ -47,6 +62,7 @@ type Props = {
 };
 
 const rangeOptions: Array<{ key: DashboardRangeKey; label: string }> = [
+  { key: 'all', label: '全部' },
   { key: 'month', label: '本月' },
   { key: '7d', label: '7天' },
   { key: '30d', label: '30天' },
@@ -54,22 +70,41 @@ const rangeOptions: Array<{ key: DashboardRangeKey; label: string }> = [
 ];
 
 const trendGranularityOptions: Array<{ key: DashboardTrendGranularity; label: string; title: string }> = [
-  { key: 'day', label: '按日', title: '每日生成量与成本' },
-  { key: 'week', label: '按周', title: '每周生成量与成本' },
-  { key: 'month', label: '按月', title: '每月生成量与成本' },
+  { key: 'day', label: '按日', title: '每日实际产出与成本' },
+  { key: 'week', label: '按周', title: '每周实际产出与成本' },
+  { key: 'month', label: '按月', title: '每月实际产出与成本' },
 ];
 
 const integerFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 });
-const TREND_CHART_HEIGHT = 132;
-const TREND_CHART_LEFT = 18;
-const TREND_CHART_RIGHT_PADDING = 28;
-const TREND_CHART_TOP = 22;
-const TREND_CHART_BOTTOM = 96;
-const TREND_BUCKET_WIDTH = 64;
+const compactFormatter = new Intl.NumberFormat('zh-CN', {
+  maximumFractionDigits: 1,
+  notation: 'compact',
+});
+const TREND_CHART_HEIGHT = 280;
+const TREND_BUCKET_WIDTH = 142;
 
 function formatCurrencyTotals(totals: DashboardCurrencyTotal[], fallback = '待官方确认') {
   if (!totals.length) return fallback;
-  return totals.map((item) => formatAmountMicrosWithFixedCny(item.amount_micros, item.currency)).join(' · ');
+  let totalCny = 0;
+  let hasUnconvertedAmount = false;
+  let hasInvalidAmount = false;
+  for (const item of totals) {
+    const amountCny = currencyAmountToCny(item.amount_micros / 1_000_000, item.currency);
+    if (amountCny === null) {
+      const display = formatAmountMicrosWithFixedCny(item.amount_micros, item.currency);
+      hasUnconvertedAmount ||= display === CNY_CONVERSION_UNAVAILABLE;
+      hasInvalidAmount ||= display === MONEY_AMOUNT_UNAVAILABLE;
+      continue;
+    }
+    totalCny += amountCny;
+  }
+  if (hasUnconvertedAmount || hasInvalidAmount || !Number.isFinite(totalCny)) {
+    return [
+      hasUnconvertedAmount ? CNY_CONVERSION_UNAVAILABLE : '',
+      hasInvalidAmount || !Number.isFinite(totalCny) ? MONEY_AMOUNT_UNAVAILABLE : '',
+    ].filter(Boolean).join(' · ');
+  }
+  return formatCnyAmount(totalCny);
 }
 
 function formatCurrencyRates(totals: DashboardCurrencyTotal[], fallback = '暂无可算均价') {
@@ -108,6 +143,10 @@ function taskOfficialCost(task: GenerationDashboardData['recent_tasks'][number])
   return '待官方确认';
 }
 
+function isDashboardEnhanceTask(task: Pick<GenerationDashboardData['recent_tasks'][number], 'provider' | 'generation_mode'>) {
+  return task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+}
+
 function dateTimeText(value: string) {
   return new Date(value).toLocaleString('zh-CN', {
     month: '2-digit',
@@ -132,20 +171,29 @@ function maxBreakdownCount(items: DashboardBreakdownItem[]) {
 }
 
 const donutColors = ['#2563eb', '#22a06b', '#f59e0b', '#7c3aed', '#06b6d4', '#94a3b8'];
-type DonutMetric = 'official_cost' | 'points' | 'count';
+type DonutMetric = 'official_cost' | 'points' | 'count' | 'unavailable';
 
-function officialMicrosTotal(item: DashboardBreakdownItem) {
-  return item.official_costs.reduce((sum, total) => sum + total.amount_micros, 0);
+function officialCnyTotal(item: DashboardBreakdownItem) {
+  let totalCny = 0;
+  for (const total of item.official_costs) {
+    const amountCny = currencyAmountToCny(total.amount_micros / 1_000_000, total.currency);
+    if (amountCny === null) return null;
+    totalCny += amountCny;
+  }
+  return Number.isFinite(totalCny) ? totalCny : null;
 }
 
 function donutMetric(items: DashboardBreakdownItem[]): DonutMetric {
-  if (items.some((item) => officialMicrosTotal(item) > 0)) return 'official_cost';
+  if (items.some((item) => item.official_costs.length > 0)) {
+    return items.some((item) => officialCnyTotal(item) === null) ? 'unavailable' : 'official_cost';
+  }
   if (items.some((item) => item.points > 0)) return 'points';
   return 'count';
 }
 
 function breakdownWeight(item: DashboardBreakdownItem, metric: DonutMetric) {
-  if (metric === 'official_cost') return officialMicrosTotal(item);
+  if (metric === 'unavailable') return 0;
+  if (metric === 'official_cost') return officialCnyTotal(item) || 0;
   if (metric === 'points') return item.points;
   return item.count;
 }
@@ -156,6 +204,7 @@ function breakdownWeightTotal(items: DashboardBreakdownItem[], metric: DonutMetr
 
 function breakdownShare(item: DashboardBreakdownItem, items: DashboardBreakdownItem[]) {
   const metric = donutMetric(items);
+  if (metric === 'unavailable') return '—';
   const total = breakdownWeightTotal(items, metric);
   if (total <= 0) return '0%';
   return `${((breakdownWeight(item, metric) / total) * 100).toFixed(1)}%`;
@@ -163,6 +212,7 @@ function breakdownShare(item: DashboardBreakdownItem, items: DashboardBreakdownI
 
 function donutGradient(items: DashboardBreakdownItem[]) {
   const metric = donutMetric(items);
+  if (metric === 'unavailable') return '#e2e8f0 0deg 360deg';
   const total = breakdownWeightTotal(items, metric);
   if (total <= 0) return '#e2e8f0 0deg 360deg';
 
@@ -204,7 +254,7 @@ function DonutChart({
   );
 }
 
-function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
+function DonutLegend({ items, showProjectAvatar = false }: { items: DashboardBreakdownItem[]; showProjectAvatar?: boolean }) {
   return (
     <div className="admin-dashboard-donut-legend">
       {items.map((item, index) => (
@@ -215,9 +265,17 @@ function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
             aria-hidden="true"
           />
           <span>
-            <strong>
-                      <UserIdentityBadge user={item.user || { id: item.key, name: item.label, username: null }} size="sm" />
-                    </strong>
+            <span className="admin-dashboard-donut-label-line">
+              {showProjectAvatar && (
+                <UserIdentityBadge
+                  user={item.user || { id: item.key, name: item.label, username: null }}
+                  size="sm"
+                  avatarOnly
+                  className="admin-dashboard-project-avatar"
+                />
+              )}
+              <strong>{item.label}</strong>
+            </span>
             <small>{item.count} 条 · {formatCurrencyTotals(item.official_costs)}</small>
           </span>
           <b>{breakdownShare(item, items)}</b>
@@ -227,8 +285,15 @@ function DonutLegend({ items }: { items: DashboardBreakdownItem[] }) {
   );
 }
 
-function trendOfficialMicros(bucket: DashboardTrendBucket) {
-  return bucket.official_costs.reduce((sum, total) => sum + total.amount_micros, 0);
+function trendBucketCnyAmount(bucket: DashboardTrendBucket) {
+  if (bucket.task_count > 0 && bucket.official_costs.length === 0) return null;
+  let totalCny = 0;
+  for (const total of bucket.official_costs) {
+    const amountCny = currencyAmountToCny(total.amount_micros / 1_000_000, total.currency);
+    if (amountCny === null) return null;
+    totalCny += amountCny;
+  }
+  return Number.isFinite(totalCny) ? totalCny : null;
 }
 
 function mergeTrendOfficialCosts(buckets: DashboardTrendBucket[]) {
@@ -247,19 +312,13 @@ function mergeTrendOfficialCosts(buckets: DashboardTrendBucket[]) {
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
-function formatTrendCostShort(bucket: DashboardTrendBucket) {
-  if (!bucket.official_costs.length) return '';
-  const [first] = bucket.official_costs;
-  const amount = first.amount_micros / 1_000_000;
-  const currency = first.currency.toUpperCase();
-  if (currency === 'USD') return `$${amount.toFixed(2)}`;
-  if (currency === 'CNY') return `¥${amount.toFixed(2)}`;
-  return `${amount.toFixed(2)} ${currency}`;
+function formatTrendBucketCost(bucket: DashboardTrendBucket) {
+  if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '¥0.00');
+  return bucket.task_count > 0 ? '待官方确认' : '¥0.00';
 }
 
-function formatTrendBucketCost(bucket: DashboardTrendBucket) {
-  if (bucket.official_costs.length) return formatCurrencyTotals(bucket.official_costs, '$0.00');
-  return bucket.task_count > 0 ? '待官方确认' : '$0.00';
+function formatTrendCostBarLabel(bucket: DashboardTrendBucket) {
+  return formatTrendBucketCost(bucket);
 }
 
 function trendBucketClass(bucket: DashboardTrendBucket) {
@@ -268,137 +327,237 @@ function trendBucketClass(bucket: DashboardTrendBucket) {
   return 'is-empty';
 }
 
+function formatCompactNumber(value: number) {
+  if (Math.abs(value) < 1000) return formatInteger(value);
+  return compactFormatter.format(value);
+}
+
+function formatCostAxis(value: number) {
+  return formatCnyAmount(value);
+}
+
 function trendChartWidth(bucketCount: number) {
-  return TREND_CHART_LEFT + TREND_CHART_RIGHT_PADDING + Math.max(1, bucketCount) * TREND_BUCKET_WIDTH;
+  return Math.max(720, Math.max(1, bucketCount) * TREND_BUCKET_WIDTH + 156);
 }
 
-function trendChartRight(chartWidth: number) {
-  return chartWidth - TREND_CHART_RIGHT_PADDING;
+type TrendChartPoint = {
+  key: string;
+  label: string;
+  taskCount: number;
+  regularTaskCount: number;
+  enhanceTaskCount: number;
+  durationSeconds: number;
+  durationLabel: string;
+  officialCostAmount: number | null;
+  officialCostLabel: string;
+  officialCostBarLabel: string;
+  stateLabel: string;
+  className: string;
+};
+
+function toTrendChartPoint(bucket: DashboardTrendBucket): TrendChartPoint {
+  const officialCostAmount = trendBucketCnyAmount(bucket);
+  const enhanceTaskCount = Math.max(0, bucket.enhance_task_count || 0);
+  const regularTaskCount = Math.max(0, bucket.task_count - enhanceTaskCount);
+  return {
+    key: bucket.key,
+    label: bucket.label,
+    taskCount: bucket.task_count,
+    regularTaskCount,
+    enhanceTaskCount,
+    durationSeconds: bucket.duration_seconds,
+    durationLabel: formatSeconds(bucket.duration_seconds),
+    officialCostAmount,
+    officialCostLabel: formatTrendBucketCost(bucket),
+    officialCostBarLabel: formatTrendCostBarLabel(bucket),
+    stateLabel: bucket.official_costs.length ? '官方已确认' : bucket.task_count > 0 ? '待官方确认' : '暂无生成',
+    className: trendBucketClass(bucket),
+  };
 }
 
-function trendX(index: number) {
-  return TREND_CHART_LEFT + index * TREND_BUCKET_WIDTH + TREND_BUCKET_WIDTH / 2;
+type TrendTooltipPayloadItem = {
+  payload?: TrendChartPoint;
+};
+
+function TrendTooltip({ active, payload }: { active?: boolean; payload?: TrendTooltipPayloadItem[] }) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
+
+  return (
+    <div className="admin-dashboard-trend-tooltip">
+      <strong>{point.label}</strong>
+      <dl>
+        <div>
+          <dt>普通视频条数</dt>
+          <dd>{formatInteger(point.regularTaskCount)} 条</dd>
+        </div>
+        <div>
+          <dt>超分视频条数</dt>
+          <dd>{formatInteger(point.enhanceTaskCount)} 条</dd>
+        </div>
+        <div>
+          <dt>总成功视频</dt>
+          <dd>{formatInteger(point.taskCount)} 条</dd>
+        </div>
+        <div>
+          <dt>生成秒数</dt>
+          <dd>{point.durationLabel}</dd>
+        </div>
+        <div>
+          <dt>官方额度</dt>
+          <dd>{point.officialCostLabel}</dd>
+        </div>
+      </dl>
+      <span>{point.stateLabel}</span>
+    </div>
+  );
 }
 
-function trendY(value: number, max: number) {
-  if (max <= 0) return TREND_CHART_BOTTOM;
-  return TREND_CHART_BOTTOM - (value / max) * (TREND_CHART_BOTTOM - TREND_CHART_TOP);
+type TrendBarLabelProps = {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  payload?: TrendChartPoint;
+};
+
+function numericSvgValue(value: number | string | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
-function trendPolyline(buckets: DashboardTrendBucket[], value: (bucket: DashboardTrendBucket) => number, max: number) {
-  return buckets.map((bucket, index) => `${trendX(index)},${trendY(value(bucket), max)}`).join(' ');
-}
+function renderTrendBarValueLabel(
+  props: TrendBarLabelProps,
+  kind: 'cost' | 'regular' | 'enhance',
+) {
+  // LabelList 的 index 可能和业务 bucket 错位；payload 才是当前这根柱子的原始数据。
+  const point = props.payload || null;
+  const x = numericSvgValue(props.x);
+  const y = numericSvgValue(props.y);
+  const width = numericSvgValue(props.width);
+  if (!point || x === null || y === null || width === null) return null;
 
-function trendCostLabelY(y: number) {
-  return y < TREND_CHART_TOP + 18 ? y + 15 : y - 7;
+  const label = kind === 'cost'
+    ? point.officialCostBarLabel
+    : `${formatInteger(kind === 'enhance' ? point.enhanceTaskCount : point.regularTaskCount)} 条`;
+  const labelKind = kind === 'regular' ? 'count' : kind;
+  return (
+    <text
+      className={`admin-dashboard-trend-value-label is-${labelKind}`}
+      textAnchor="middle"
+      x={x + width / 2}
+      y={Math.max(13, y - 8)}
+    >
+      {label}
+    </text>
+  );
 }
 
 function TrendChart({ buckets }: { buckets: DashboardTrendBucket[] }) {
-  const countMax = Math.max(1, ...buckets.map((bucket) => bucket.task_count));
-  const secondsMax = Math.max(1, ...buckets.map((bucket) => bucket.duration_seconds));
-  const costMax = Math.max(1, ...buckets.map(trendOfficialMicros));
-  const chartWidth = trendChartWidth(buckets.length);
-  const chartRight = trendChartRight(chartWidth);
-  const barWidth = 26;
-  const hasCost = buckets.some((bucket) => trendOfficialMicros(bucket) > 0);
-  const hasSeconds = buckets.some((bucket) => bucket.duration_seconds > 0);
+  const chartData = useMemo(() => buckets.map(toTrendChartPoint), [buckets]);
+  const chartWidth = trendChartWidth(chartData.length);
 
   return (
     <div className="admin-dashboard-trend-chart">
+      <div className="admin-dashboard-trend-chart-head">
+        <div>
+          <span>趋势图</span>
+          <strong>官方额度、普通视频与超分</strong>
+          <small>按成功完成时间归入周期；橙色柱看金额，蓝色柱看普通视频，紫色柱看超分视频。</small>
+        </div>
+        <span>悬停查看完整数值</span>
+      </div>
       <div className="admin-dashboard-trend-viewport">
-        <svg
-          className="admin-dashboard-trend-plot"
-          width={chartWidth}
-          height={TREND_CHART_HEIGHT}
-          viewBox={`0 0 ${chartWidth} ${TREND_CHART_HEIGHT}`}
-          role="img"
-          aria-label={`生成次数、生成秒数和官方额度趋势图，共 ${buckets.length} 个时间桶`}
-        >
-          {[TREND_CHART_TOP, 40, 58, 76, TREND_CHART_BOTTOM].map((y) => (
-            <line className="admin-dashboard-trend-gridline" key={y} x1={TREND_CHART_LEFT} x2={chartRight} y1={y} y2={y} />
-          ))}
-          {buckets.map((bucket, index) => {
-            const x = trendX(index);
-            const valueY = trendY(bucket.task_count, countMax);
-            const barHeight = bucket.task_count > 0 ? TREND_CHART_BOTTOM - valueY : 2;
-            const barY = bucket.task_count > 0 ? valueY : TREND_CHART_BOTTOM - barHeight;
-            return (
-              <g key={bucket.key}>
-                <rect
-                  className={`admin-dashboard-trend-bar ${bucket.task_count > 0 ? '' : 'is-empty'}`}
-                  x={x - barWidth / 2}
-                  y={barY}
-                  width={barWidth}
-                  height={barHeight}
-                  rx="3"
-                >
-                  <title>{bucket.label}：{bucket.task_count} 次，{formatSeconds(bucket.duration_seconds)}，{formatTrendBucketCost(bucket)}</title>
-                </rect>
-                <text className="admin-dashboard-trend-count-label" x={x} y={Math.max(12, barY - 5)} textAnchor="middle">
-                  {formatInteger(bucket.task_count)}
-                </text>
-              </g>
-            );
-          })}
-          {hasSeconds && (
-            <polyline
-              className="admin-dashboard-trend-line is-seconds"
-              points={trendPolyline(buckets, (bucket) => bucket.duration_seconds, secondsMax)}
-            />
-          )}
-          {hasCost && (
-            <polyline
-              className="admin-dashboard-trend-line is-cost"
-              points={trendPolyline(buckets, trendOfficialMicros, costMax)}
-            />
-          )}
-          {buckets.map((bucket, index) => {
-            const x = trendX(index);
-            const costMicros = trendOfficialMicros(bucket);
-            const costY = trendY(costMicros, costMax);
-            const secondsY = trendY(bucket.duration_seconds, secondsMax);
-            return (
-              <g key={`${bucket.key}-points`}>
-                {hasSeconds && (
-                  <circle className="admin-dashboard-trend-dot is-seconds" cx={x} cy={secondsY} r="3.2">
-                    <title>{bucket.label}：{formatSeconds(bucket.duration_seconds)}</title>
-                  </circle>
-                )}
-                {hasCost && (
-                  <circle className="admin-dashboard-trend-dot is-cost" cx={x} cy={costY} r="3.2">
-                    <title>{bucket.label}：{formatTrendBucketCost(bucket)}</title>
-                  </circle>
-                )}
-                {hasCost && costMicros > 0 && (
-                  <text className="admin-dashboard-trend-node-label is-cost" x={x} y={trendCostLabelY(costY)} textAnchor="middle">
-                    {formatTrendCostShort(bucket)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
         <div
-          className="admin-dashboard-trend-axis"
-          aria-hidden="true"
-          style={{
-            width: chartWidth,
-            gridTemplateColumns: `repeat(${Math.max(1, buckets.length)}, ${TREND_BUCKET_WIDTH}px)`,
-            paddingLeft: TREND_CHART_LEFT,
-            paddingRight: TREND_CHART_RIGHT_PADDING,
-          }}
+          className="admin-dashboard-trend-recharts"
+          style={{ minWidth: chartWidth }}
+          role="img"
+          aria-label={`官方额度和成功视频条数双柱状趋势图，共 ${chartData.length} 个时间桶，生成秒数见周期明细`}
         >
-          {buckets.map((bucket) => (
-            <span key={bucket.key}>{bucket.label}</span>
-          ))}
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={TREND_CHART_HEIGHT}>
+              <ComposedChart
+                data={chartData}
+                barCategoryGap={18}
+                barGap={4}
+                margin={{ top: 38, right: 10, bottom: 2, left: 0 }}
+                accessibilityLayer
+              >
+                <CartesianGrid stroke="#dce5f2" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  axisLine={false}
+                  dataKey="label"
+                  interval={0}
+                  minTickGap={8}
+                  tick={{ fill: '#64748b', fontSize: 12, fontWeight: 700 }}
+                  tickLine={false}
+                  tickMargin={12}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  axisLine={false}
+                  tick={{ fill: '#64748b', fontSize: 12, fontWeight: 700 }}
+                  tickFormatter={formatCompactNumber}
+                  tickLine={false}
+                  width={46}
+                  yAxisId="count"
+                />
+                <YAxis
+                  axisLine={false}
+                  orientation="right"
+                  tick={{ fill: '#92400e', fontSize: 12, fontWeight: 700 }}
+                  tickFormatter={formatCostAxis}
+                  tickLine={false}
+                  width={92}
+                  yAxisId="cost"
+                />
+                <Tooltip content={<TrendTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }} />
+                <Bar
+                  dataKey="officialCostAmount"
+                  fill="var(--admin-dashboard-chart-cost)"
+                  maxBarSize={28}
+                  name="官方额度"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="cost"
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'cost')} />
+                </Bar>
+                <Bar
+                  dataKey="regularTaskCount"
+                  fill="var(--admin-dashboard-chart-count)"
+                  maxBarSize={28}
+                  name="普通视频条数"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="count"
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'regular')} />
+                </Bar>
+                <Bar
+                  dataKey="enhanceTaskCount"
+                  fill="var(--admin-dashboard-chart-enhance)"
+                  maxBarSize={28}
+                  name="超分视频条数"
+                  radius={[6, 6, 0, 0]}
+                  yAxisId="count"
+                >
+                  <LabelList content={(props) => renderTrendBarValueLabel(props, 'enhance')} />
+                </Bar>
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="admin-dashboard-empty">当前口径暂无趋势数据。</p>
+          )}
         </div>
       </div>
-      <div className="admin-dashboard-trend-daily" aria-label="每日金额明细">
-        {buckets.map((bucket) => (
-          <div className={`admin-dashboard-trend-day ${trendBucketClass(bucket)}`} key={`${bucket.key}-daily`}>
+      <div className="admin-dashboard-trend-daily" aria-label="周期明细">
+        {chartData.map((bucket) => (
+          <div className={`admin-dashboard-trend-day ${bucket.className}`} key={`${bucket.key}-daily`}>
             <span>{bucket.label}</span>
-            <strong>{formatTrendBucketCost(bucket)}</strong>
-            <small>{formatInteger(bucket.task_count)} 次 · {formatSeconds(bucket.duration_seconds)}</small>
+            <strong>{bucket.officialCostLabel}</strong>
+            <small>
+              普通 {formatInteger(bucket.regularTaskCount)} · 超分 {formatInteger(bucket.enhanceTaskCount)} · 共 {formatInteger(bucket.taskCount)}
+            </small>
+            <small>{bucket.durationLabel}</small>
+            <em>{bucket.stateLabel}</em>
           </div>
         ))}
       </div>
@@ -411,7 +570,9 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
   const [range, setRange] = useState<DashboardRangeKey>(initialDashboard.range.key);
   const [dateFrom, setDateFrom] = useState(initialDashboard.range.date_from);
   const [dateTo, setDateTo] = useState(initialDashboard.range.date_to);
-  const [trendGranularity, setTrendGranularity] = useState<DashboardTrendGranularity>('day');
+  const [trendGranularity, setTrendGranularity] = useState<DashboardTrendGranularity>(
+    initialDashboard.range.key === 'all' ? 'month' : 'day',
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -456,9 +617,12 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
   );
   const trendSummary = useMemo(() => {
     const taskCount = trendBuckets.reduce((sum, bucket) => sum + bucket.task_count, 0);
+    const enhanceTaskCount = trendBuckets.reduce((sum, bucket) => sum + (bucket.enhance_task_count || 0), 0);
     const durationSeconds = trendBuckets.reduce((sum, bucket) => sum + bucket.duration_seconds, 0);
     return {
       taskCount,
+      enhanceTaskCount,
+      regularTaskCount: Math.max(0, taskCount - enhanceTaskCount),
       durationSeconds,
       officialCosts: mergeTrendOfficialCosts(trendBuckets),
     };
@@ -476,6 +640,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
               className={range === option.key ? 'is-active' : ''}
               onClick={() => {
                 setRange(option.key);
+                if (option.key === 'all') setTrendGranularity('month');
                 if (option.key !== 'custom') void loadDashboard(option.key);
               }}
               disabled={loading}
@@ -501,7 +666,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           </button>
           <Link className="btn btn-primary" href={exportHref}>
             <Download size={15} />
-            导出当前口径
+            导出当前范围
           </Link>
         </div>
       </section>
@@ -536,6 +701,8 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
         </Link>
       </section>
 
+      <GenerationTimingPanel data={dashboard.timing} />
+
       <section className="admin-dashboard-panel admin-dashboard-trend-panel">
         <div className="admin-dashboard-section-head">
           <div>
@@ -556,14 +723,17 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
           </div>
         </div>
         <div className="admin-dashboard-trend-summary">
-          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>生成次数</span>
+          <span><strong>{formatInteger(trendSummary.taskCount)}</strong>成功视频条数</span>
+          <span><strong>{formatInteger(trendSummary.regularTaskCount)}</strong>普通视频条数</span>
+          <span><strong>{formatInteger(trendSummary.enhanceTaskCount)}</strong>超分视频条数</span>
           <span><strong>{formatSeconds(trendSummary.durationSeconds)}</strong>生成秒数</span>
           <span><strong>{formatCurrencyTotals(trendSummary.officialCosts, '待官方确认')}</strong>官方额度</span>
         </div>
         <div className="admin-dashboard-trend-legend" aria-label="趋势图例">
-          <span className="is-count">生成次数</span>
-          <span className="is-seconds">生成秒数</span>
           <span className="is-cost">官方额度</span>
+          <span className="is-count">普通视频条数</span>
+          <span className="is-enhance">超分视频条数</span>
+          <span className="is-seconds">明细含生成秒数</span>
         </div>
         <TrendChart buckets={trendBuckets} />
       </section>
@@ -587,7 +757,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 centerValue={`${dashboard.project_breakdown.reduce((sum, item) => sum + item.count, 0)} 条`}
                 ariaLabel="项目成本占比圆环图"
               />
-              <DonutLegend items={dashboard.project_breakdown} />
+              <DonutLegend items={dashboard.project_breakdown} showProjectAvatar />
             </div>
           )}
         </div>
@@ -721,15 +891,26 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 <span>
                   <TaskVideoThumbnail
                     taskId={task.id}
+                    thumbnailUrl={task.thumbnail_url}
+                    publicVideoUrl={task.public_video_url}
                     localVideoPath={task.local_video_path}
                     resultVideoUrl={task.result_video_url}
                     resultLastFrameUrl={task.result_last_frame_url}
                     status={task.local_status}
+                    deliveryStage={task.delivery_stage}
+                    previewAvailable={task.preview_available}
+                    stableDownloadReady={task.stable_download_ready}
+                    retryAfterMs={task.retry_after_ms}
+                    provider={task.provider}
+                    generationMode={task.generation_mode}
                     size="compact"
                   />
                 </span>
                 <span>
                   <strong>{shortPrompt(task.prompt || task.id)}</strong>
+                  {task.is_draft && <span className="task-enhance-chip">样片 Draft</span>}
+                  {!task.is_draft && task.source_draft_task_id && <span className="task-enhance-chip">Draft 转 1080p</span>}
+                  {isDashboardEnhanceTask(task) && <span className="task-enhance-chip">视频超分</span>}
                   <small>{dateTimeText(task.created_at)}</small>
                 </span>
                 <span>
@@ -741,7 +922,7 @@ export default function AdminGenerationDashboardClient({ initialDashboard, provi
                 <span>{task.resolution === 'unknown' ? '未记录' : task.resolution} · {task.duration ? `${task.duration}s` : '-'} · {task.ratio || '-'}</span>
                 <span>{taskOfficialCost(task)}</span>
                 <span>{task.actual_cost !== null && task.actual_cost !== undefined ? formatPoint(task.actual_cost) : '未记录'}</span>
-                <span>{statusLabel(task.local_status)}</span>
+                <span>{statusLabel(task.local_status)}<small>耗时 {formatElapsed(task.timing.completion)}</small></span>
               </Link>
             ))
           )}

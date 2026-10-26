@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth/session';
+import { AuthError, getSession } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { recordContentAuditLog } from '@/lib/content-audit';
+import { publicVideoTaskPricing } from '@/lib/pricing/video';
+import { projectPrivateMultiviewTask, projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import {
   normalizeTaskDeleteReason,
   TASK_RETENTION_ADMIN_HIDDEN,
@@ -17,6 +20,7 @@ export async function DELETE(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权移除任务记录。');
 
     const body = await request.json().catch(() => ({}));
     const reason = normalizeTaskDeleteReason(body.reason) || '用户从任务列表移除';
@@ -25,6 +29,7 @@ export async function DELETE(
       where: { id: params.id },
       select: {
         id: true,
+        source_metadata_json: true,
         user_id: true,
         owner_user_id: true,
         project_id: true,
@@ -44,7 +49,7 @@ export async function DELETE(
     }
 
     if (task.retention_status === TASK_RETENTION_USER_DELETED) {
-      return NextResponse.json({ success: true, task, unchanged: true });
+      return NextResponse.json({ success: true, task: projectSelectedMultiviewTask(task), unchanged: true }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -71,8 +76,11 @@ export async function DELETE(
       return nextTask;
     });
 
-    return NextResponse.json({ success: true, task: updated });
+    return NextResponse.json({ success: true, task: projectPrivateMultiviewTask(publicVideoTaskPricing(updated)) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('[TaskRetention] Delete error:', error);
     return NextResponse.json(
       { error: '任务移除失败', message: error instanceof Error ? error.message : 'Unknown error' },

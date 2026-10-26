@@ -1,0 +1,20 @@
+.panel { min-width: 0; padding: 18px 0; border-block: 1px solid var(--border-color); }
+.header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.header h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.modes { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; background: var(--bg-hover); border: 1px solid var(--border-color); border-radius: 6px; }
+.modes button { min-height: 34px; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); padding: 0 12px; cursor: pointer; font-size: 13px; }
+.modes button[aria-pressed='true'] { background: var(--bg-panel); color: var(--text-primary); font-weight: 700; box-shadow: 0 1px 3px #0002; }
+.reset { display: grid; place-items: center; width: 36px; height: 36px; background: transparent; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary); cursor: pointer; }
+.controls button:focus-visible, .details summary:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.note { color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin: 10px 0; }
+.scroll { overflow-x: auto; max-width: 100%; }
+.table { border-collapse: collapse; width: 100%; min-width: 740px; font-size: 13px; text-align: left; font-variant-numeric: tabular-nums; }
+.table th, .table td { border-bottom: 1px solid var(--border-color); padding: 12px 10px; color: var(--text-primary); vertical-align: top; }
+.table thead th { background: var(--bg-hover); color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.table tbody th { max-width: 260px; overflow-wrap: anywhere; font-weight: 500; }
+.table td { white-space: nowrap; }
+.table small { display: block; margin-top: 4px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.details { margin-top: 14px; }
+.details summary { cursor: pointer; width: fit-content; padding: 6px 0; color: var(--text-primary); font-size: 13px; }
+@media (max-width: 640px) { .controls { width: 100%; } .modes { flex: 1; } .modes button { flex: 1; padding: 0 8px; } }

@@ -9,9 +9,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { AuthError, getSession } from '@/lib/auth/session';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
 import { normalizeAssetUrl } from '@/lib/assets/normalizeAssetUrl';
+import { originalImageInputUrl } from '@/lib/assets/original-image-input';
 
 type SeedanceCreateAssetType = 'Image' | 'Video' | 'Audio';
 
@@ -46,6 +49,10 @@ function inferAssetTypeFromUrl(url: string): SeedanceCreateAssetType {
 
 export async function POST(request: NextRequest) {
   try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权创建旧版 Seedance 官方素材。');
+
     const body = await request.json();
     const { url, name, assetType } = body as {
       url?: string;
@@ -74,6 +81,7 @@ export async function POST(request: NextRequest) {
     const resolvedAssetType = assetType && ALLOWED_ASSET_TYPES.has(assetType)
       ? assetType
       : inferAssetTypeFromUrl(normalizedUrl);
+    if (resolvedAssetType === 'Image') normalizedUrl = normalizeAssetUrl(await originalImageInputUrl(user, normalizedUrl));
 
     // Step 2: 按 originalUrl 查 Active 资产
     const existing = await seedanceAssetRepository.findActiveByOriginalUrl(normalizedUrl);
@@ -118,6 +126,9 @@ export async function POST(request: NextRequest) {
       providerAssetId,
     });
   } catch (err) {
+    if (err instanceof AuthError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[SeedanceCreateAsset] Error:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '创建资产失败' },

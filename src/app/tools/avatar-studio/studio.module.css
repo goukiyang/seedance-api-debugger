@@ -1,0 +1,79 @@
+.page { padding: 16px 20px; color: var(--text-primary); min-width: 0; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.heading h1 { font-size: 22px; margin: 0; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); align-items: start; gap: 24px; border:0; padding:0; margin:0; min-width:0; }
+.mainColumn { min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.input, .detail { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.input label, .detail > label, .quick label, .optionalFields label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.referenceHeading { display: flex; align-items: baseline; gap: 10px; font-size: 13px; }
+.addReference { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; aspect-ratio: 1; min-width: 0; width: 100%; border: 1px dashed var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; }
+.emptyResult { min-height: 160px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-secondary); }
+.retainedImage { max-width: 240px; aspect-ratio: 1; margin-bottom: 12px; }
+.retainedImage img { width: 100%; height: 100%; object-fit: contain; }
+.descriptionLabel { font-weight: 600; }
+.page textarea, .page select, .page input { color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; width: 100%; min-width: 0; }
+.page textarea { resize: vertical; min-height: 148px; line-height: 1.55; font-weight: 400; }
+.page button, .page a { font-size: 13px; }
+.quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.optional { border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); margin: 0; padding: 10px 0; min-width: 0; }
+.optional summary { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: start; gap: 8px 12px; font-size: 13px; }
+.optionalSummary { color: var(--text-secondary); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.optionalFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding-top: 12px; }
+.optionalFields label { min-width: 0; }
+.optionalFields select, .optionalFields input { font-size: 12px; }
+.parseStatus { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; background: var(--bg-secondary); border-radius: 6px; overflow-wrap: anywhere; }
+.parseStatus strong { font-size: 13px; }
+.parseStatus p, .parseSummary p { margin: 0; font-size: 12px; line-height: 1.5; }
+.parseStatus .controls { margin-top: 3px; }
+.parseDetails summary { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.parseDetails summary span { font-weight: 600; }
+.parseDetails summary small { color: var(--text-secondary); line-height: 1.45; overflow-wrap: anywhere; }
+.parseSummary { display: grid; gap: 6px; padding-top: 8px; overflow-wrap: anywhere; }
+.controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.controls button, .quiet { border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-primary); border-radius: 6px; min-height: 32px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.controls button[aria-pressed=true] { background: var(--bg-tertiary); border-color: var(--text-secondary); }
+.page .primary { width: 100%; background: var(--primary-color, #337bc1); color: #f8fafc; border: 0; min-height: 48px; border-radius: 6px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.page button:disabled { opacity: .5; cursor: not-allowed; }
+.preview { min-height: 330px; aspect-ratio: 1; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.preview img { width: 100%; height: 100%; object-fit: contain; }
+.preview button { border: 2px solid transparent; background: transparent; width: 100%; height: 100%; padding: 0; }
+.preview button[aria-pressed=true] { border-color: var(--primary-color, #337bc1); }
+.sheetViewport { width: 100%; height: 100%; position: absolute; inset: 0; }
+.sheetPlane { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.sheetPlane img { display: block; }
+.sheetGrid { position: absolute; inset: 0; display: grid; }
+.sheetGrid button { border: 2px solid transparent; background: transparent; padding: 0; cursor: pointer; min-width: 0; min-height: 0; }
+.sheetGrid button[aria-pressed=true] { border-color: var(--primary-color, #337bc1); box-shadow: inset 0 0 0 1px var(--bg-secondary); }
+.sheetGrid button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: -5px; }
+.cellThumb { position: absolute; inset: 0; overflow: hidden; }
+.thumb .cellThumb img { position: absolute; max-width: none; object-fit: fill; }
+.placeholder { padding: 24px; color: var(--text-secondary); text-align: center; white-space: pre-wrap; max-width: 70ch; line-height: 1.65; font-size: 14px; }
+.thumbnails { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.candidate { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.candidateLabel { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.candidatePlaceholder { display: flex; height: 100%; align-items: center; justify-content: center; flex-direction: column; gap: 6px; }
+.thumb { width: 100%; aspect-ratio: 1; padding: 0; border-radius: 6px; overflow: hidden; border: 2px solid transparent; background: var(--bg-secondary); position: relative; cursor: pointer; color: var(--text-secondary); }
+.thumb[aria-pressed=true] { border-color: var(--primary-color, #337bc1); }
+.thumb:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.candidatePlaceholder small { font-size: 12px; }
+.field { display: grid; grid-template-columns: 64px minmax(0,1fr) 28px 28px; align-items: center; gap: 5px; font-size: 13px; }
+.field button { padding: 3px; width: 28px; height: 28px; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; }
+.field select { padding: 6px; font-size: 12px; }
+.detail h2 { font-size: 16px; margin: 0; }
+.detail p { font-size: 13px; line-height: 1.6; margin: 0; }
+.detail small, .price { font-size: 12px; color: var(--text-secondary); }
+.estimate { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.prompt { white-space: pre-wrap; font-size: 12px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
+.notice { margin: 10px 0; padding: 10px 12px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.error { color: var(--text-primary); }
+.records { margin-top: 22px; border-top: 1px solid var(--border-color); padding-top: 14px; }
+.record { display: flex; gap: 12px; padding: 12px 0; align-items: center; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
+.record img, .recordCover { width: 64px; height: 64px; flex-shrink: 0; object-fit: cover; background: var(--bg-secondary); }
+.record button.recordCover { padding: 0; overflow: hidden; border: 0; cursor: zoom-in; }
+.recordText { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 4px; }
+.recordText small { color: var(--text-secondary); }
+.empty { padding: 24px 0; color: var(--text-secondary); }
+.page details summary { font-size: 13px; cursor: pointer; padding: 4px 0; }
+@media (max-width: 1120px) { .layout { grid-template-columns: minmax(0, 1fr) minmax(240px, 280px); gap: 20px; } }
+@media (max-width: 720px) { .page { padding: 12px; } .layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .preview { min-height: 0; } .detail { grid-column: auto; } .record .controls { width: 100%; } .optionalFields { grid-template-columns: minmax(0, 1fr); } .optional summary, .parseDetails summary { grid-template-columns: minmax(0, 1fr); gap: 4px; } }

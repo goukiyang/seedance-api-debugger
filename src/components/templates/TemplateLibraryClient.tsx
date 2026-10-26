@@ -1,4 +1,7 @@
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+import { RelativeTime } from '@/components/RelativeTime';
+import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -135,12 +138,6 @@ function buildTemplateView(template: SerializedGenerationTemplate): TemplateView
   };
 }
 
-function formatUpdatedAt(value: string | Date) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '未知时间';
-  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
-}
-
 export function TemplateLibraryClient() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<TemplateLibraryUser | null>(null);
@@ -226,7 +223,7 @@ export function TemplateLibraryClient() {
   }, [router, selectedView]);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedView) return;
+    if (!selectedView) return false;
     setSavingTemplate(true);
     setSaveError(null);
     try {
@@ -236,11 +233,12 @@ export function TemplateLibraryClient() {
         body: JSON.stringify(payload),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || data.error || '模板保存失败');
+      if (!response.ok || !data.template?.id) throw new Error(data.message || data.error || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedView.template.id);
-      setDrawerOpen(false);
+      return true;
     } catch (saveTemplateError) {
       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
+      return false;
     } finally {
       setSavingTemplate(false);
     }
@@ -312,13 +310,7 @@ export function TemplateLibraryClient() {
         </aside>
 
         <main className="template-library-main" aria-label="模板列表">
-          {loading && (
-            <div className="template-library-state">
-              <span className="template-library-spinner" aria-hidden="true" />
-              <strong>正在加载模板库</strong>
-              <p>读取可用模板、固定素材和规则摘要。</p>
-            </div>
-          )}
+          {loading && (templates.length ? <LoadingStatus>正在更新模板库</LoadingStatus> : <LoadingSkeleton label="正在读取模板库" grid />)}
 
           {!loading && error && (
             <div className="template-library-state is-error">
@@ -355,7 +347,7 @@ export function TemplateLibraryClient() {
             </div>
           )}
 
-          {!loading && !error && filteredViews.length > 0 && (
+          {filteredViews.length > 0 && (
             <div className="template-library-grid">
               {filteredViews.map((view) => {
                 const selected = selectedView?.template.id === view.template.id;
@@ -433,7 +425,7 @@ export function TemplateLibraryClient() {
 
               <div className="template-library-preview-title">
                 <span className="template-library-kicker">{selectedView.scenario}</span>
-                <h2>{selectedView.template.name}</h2>
+                <TemplateFavoriteTitle contentKey={selectedView.template.status === 'active' ? `legacy_template:${selectedView.template.id}` : undefined}><h2 title={selectedView.template.name}>{selectedView.template.name}</h2></TemplateFavoriteTitle>
                 <p>{cleanText(selectedView.template.description) || '适合按固定角色、标志、风格和规则生成一致的视频。'}</p>
               </div>
 
@@ -481,7 +473,7 @@ export function TemplateLibraryClient() {
               <div className="template-library-detail-block">
                 <span><Clock3 size={15} aria-hidden="true" /> 决策信息</span>
                 <p>
-                  {selectedView.activePromptsCount} 个提示词模块，更新于 {formatUpdatedAt(selectedView.template.updated_at)}。
+                  {selectedView.activePromptsCount} 个提示词模块，更新于 <RelativeTime value={String(selectedView.template.updated_at)} />。
                   {selectedView.template.temporal.enabled ? ` 已启用 ${selectedView.template.temporal.segment}s 分段。` : ' 未启用分段。'}
                 </p>
               </div>

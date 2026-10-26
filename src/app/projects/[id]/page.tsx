@@ -1,14 +1,103 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import PageBanner from '@/components/PageBanner';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Download, Eye, MoreHorizontal, Play, Repeat2, RotateCcw } from 'lucide-react';
+import ProjectFilters from '@/components/projects/ProjectFilters';
+import ReferenceAlbumsClient from '@/app/collections/ReferenceAlbumsClient';
+import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
+import MediaPreview from '@/components/MediaPreview';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
+import { RelativeTime } from '@/components/RelativeTime';
+import PaginationControls from '@/components/PaginationControls';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
-import { taskDetailHref } from '@/lib/navigation/return-to';
+import { showVideoCardManagementUi } from '@/lib/navigation';
+import { sanitizeOptionalReturnTo, taskDetailHref } from '@/lib/navigation/return-to';
+import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import UsageWorkspace from '@/components/usage/UsageWorkspace';
+import { projectStatusExpectation } from '@/lib/projects/client-operations';
+import styles from '../Projects.module.css';
+
+type ProjectSection = 'tasks' | 'albums' | 'finance' | 'members';
+type ProjectViewState = {
+  section: ProjectSection;
+  taskPage: number;
+  taskSearch: string;
+  taskStatus: 'all' | 'running' | 'playable' | 'failed';
+  taskSort: 'newest' | 'oldest';
+  albumPage: number;
+  financePage: number;
+};
+
+const DEFAULT_PROJECT_VIEW: ProjectViewState = {
+  section: 'tasks', taskPage: 1, taskSearch: '', taskStatus: 'all', taskSort: 'newest', albumPage: 1, financePage: 1,
+};
+
+function readProjectViewParams(params: { get: (name: string) => string | null }): Partial<ProjectViewState> {
+  const view = params.get('view');
+  const status = params.get('task_status');
+  const sort = params.get('task_sort');
+  const page = (value: string | null) => {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 100_000) : undefined;
+  };
+  const result: Partial<ProjectViewState> = {};
+  if (view === 'albums' || view === 'finance' || view === 'members' || view === 'tasks') result.section = view;
+  const taskPage = page(params.get('task_page'));
+  const albumPage = page(params.get('album_page'));
+  const financePage = page(params.get('finance_page'));
+  if (taskPage) result.taskPage = taskPage;
+  if (albumPage) result.albumPage = albumPage;
+  if (financePage) result.financePage = financePage;
+  if (params.get('task_q') !== null) result.taskSearch = (params.get('task_q') || '').slice(0, 120);
+  if (status === 'running' || status === 'playable' || status === 'failed' || status === 'all') result.taskStatus = status;
+  else if (status === 'succeeded' || status === 'cancelled') result.taskStatus = 'all';
+  if (sort === 'oldest' || sort === 'newest') result.taskSort = sort;
+  return result;
+}
+
+function normalizeStoredProjectView(value: unknown): Partial<ProjectViewState> {
+  if (!value || typeof value !== 'object') return {};
+  const stored = value as Record<string, unknown>;
+  const page = (candidate: unknown) => typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate > 0
+    ? Math.min(candidate, 100_000) : undefined;
+  const result: Partial<ProjectViewState> = {};
+  if (stored.section === 'tasks' || stored.section === 'albums' || stored.section === 'finance' || stored.section === 'members') result.section = stored.section;
+  const taskPage = page(stored.taskPage);
+  const albumPage = page(stored.albumPage);
+  const financePage = page(stored.financePage);
+  if (taskPage) result.taskPage = taskPage;
+  if (albumPage) result.albumPage = albumPage;
+  if (financePage) result.financePage = financePage;
+  if (typeof stored.taskSearch === 'string') result.taskSearch = stored.taskSearch.slice(0, 120);
+  if (stored.taskStatus === 'running' || stored.taskStatus === 'playable' || stored.taskStatus === 'failed' || stored.taskStatus === 'all') result.taskStatus = stored.taskStatus;
+  else if (stored.taskStatus === 'succeeded' || stored.taskStatus === 'cancelled') result.taskStatus = 'all';
+  if (stored.taskSort === 'oldest' || stored.taskSort === 'newest') result.taskSort = stored.taskSort;
+  return result;
+}
+
+function projectViewStorageKey(projectId: string, viewerId: string) {
+  return `sd2:project-detail-view:v1:${viewerId}:${projectId}`;
+}
+
+function safeProjectListReturnTo(value: string | null | undefined) {
+  const safe = sanitizeOptionalReturnTo(value);
+  return safe && safe.split(/[?#]/, 1)[0] === '/projects' ? safe : '/projects';
+}
+
+type ProjectOperation = 'member' | 'invite' | 'rename' | 'projectAction' | 'removeMember' | 'videoCard' | 'budget';
+
+type ProjectOperationSnapshot = {
+  kind: ProjectOperation;
+  identity: string;
+  epoch: number;
+  requestId: number;
+};
 
 interface ProjectDetail {
   id: string;
@@ -18,6 +107,8 @@ interface ProjectDetail {
   visibility: string;
   status: string;
   owner_user_id: string;
+  updated_at?: string;
+  status_version?: { status: string; updated_at: string };
   owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
   members: Array<{
     id: string;
@@ -30,6 +121,27 @@ interface ProjectDetail {
   _count?: { members: number; tasks: number; reference_albums?: number };
 }
 
+function TaskActionsMenu({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDetailsElement>(null);
+  const close = useCallback(() => { if (ref.current) ref.current.open = false; setOpen(false); }, []);
+  useDialogDismiss({ open, dialogRef: ref, onDismiss: close, modal: false });
+  return <details ref={ref} onToggle={(event) => setOpen(event.currentTarget.open)} onClick={(event) => {
+    if ((event.target as HTMLElement).closest('a')) close();
+  }}><summary aria-label="更多记录操作" title="更多操作"><MoreHorizontal size={18} /></summary><div>{children}</div></details>;
+}
+
+function ProjectAlbumCover({ urls }: { urls: string[] }) {
+  const [failed, setFailed] = useState<string[]>([]);
+  const key = urls.join('|');
+  useEffect(() => setFailed([]), [key]);
+  const visible = urls.filter((url) => !failed.includes(url)).slice(0, 4);
+  return <span className={styles.albumCover} data-count={visible.length}>
+    {visible.length ? visible.map((url) => <img key={url} src={url} alt="图集封面" loading="lazy" onError={() => setFailed((old) => [...old, url])} />)
+      : <span className="text-gray text-sm">{urls.length ? '封面暂不可读取' : '暂无可读图片'}</span>}
+  </span>;
+}
+
 interface ReferenceAlbumItem {
   id: string;
   name: string;
@@ -37,16 +149,32 @@ interface ReferenceAlbumItem {
   status: string;
   updated_at: string;
   image_count: number;
+  thumbnail_urls?: string[];
 }
 
 interface TaskItem {
   id: string;
   prompt: string;
+  provider: string;
+  model?: string;
+  generation_mode: string;
+  ratio?: string | null;
+  duration?: number | null;
+  resolution?: string | null;
   local_status: string;
   provider_task_id: string | null;
+  public_video_url?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  playable_available?: boolean | null;
+  play_url?: string | null;
+  download_url?: string | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   owner_user_id: string | null;
   user_id: string | null;
   estimated_cost: number | null;
@@ -78,13 +206,23 @@ interface VideoCardSummary {
   resolution_distribution: Record<string, number>;
 }
 
+type ProjectVideoPreviewTask = { id: string; prompt: string; local_status: string; thumbnail_url?: string | null; play_url?: string | null };
+
 interface VideoCardPreviewTask {
   id: string;
   prompt: string;
+  provider: string;
+  generation_mode: string;
   local_status: string;
+  public_video_url: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   created_at: string;
 }
 
@@ -124,6 +262,9 @@ interface SimilarVideoCardItem {
 }
 
 interface ProjectPermissions {
+  can_archive?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
   can_manage_project: boolean;
   can_manage_members: boolean;
   can_manage_assets: boolean;
@@ -175,15 +316,23 @@ interface ArchiveAnomalies {
 interface ReviewTaskItem {
   id: string;
   prompt: string;
+  provider?: string | null;
+  generation_mode?: string | null;
   local_status: string;
   estimated_cost: number | null;
   actual_cost?: number | null;
   refund_amount?: number | null;
   provider_cost_status: string;
   error_message?: string | null;
+  public_video_url?: string | null;
   result_video_url?: string | null;
   result_last_frame_url?: string | null;
   local_video_path?: string | null;
+  delivery_stage?: { key?: string | null; label?: string | null } | null;
+  stable_download_ready?: boolean | null;
+  preview_available?: boolean | null;
+  thumbnail_url?: string | null;
+  retry_after_ms?: number | null;
   created_at: string;
   owner?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   user?: { id?: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
@@ -229,7 +378,7 @@ interface CostLedgerItem {
   reason: string | null;
   occurred_at: string;
   created_at: string;
-  user?: { id: string; name: string; username: string; email: string; avatar_url?: string | null; account_type?: string | null } | null;
+  user?: { id: string; name: string; username: string; email?: string; avatar_url?: string | null; account_type?: string | null } | null;
   task?: (TaskItem & {
     provider_official_amount_micros?: number | null;
     provider_final_amount_micros?: number | null;
@@ -244,6 +393,13 @@ interface CostLedgerItem {
     currency: string | null;
     reason: string | null;
   }>;
+}
+
+interface ProjectPagination {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
 }
 
 function projectDisplayName(project: ProjectDetail): string {
@@ -263,6 +419,7 @@ function roleLabel(role: string): string {
 function statusLabel(status: string): string {
   if (status === 'active') return '进行中';
   if (status === 'archived') return '已归档';
+  if (status === 'locked') return '已锁定';
   return status;
 }
 
@@ -276,10 +433,6 @@ function videoCardStatusLabel(status: string): string {
   if (status === 'archived') return '已归档';
   if (status === 'discarded') return '已废弃';
   return status || '-';
-}
-
-function canDeleteProject(project: ProjectDetail): boolean {
-  return project.type === 'team' && (project._count?.tasks ?? 0) === 0 && (project._count?.reference_albums ?? 0) === 0;
 }
 
 function canShowDeleteProjectAction(project: ProjectDetail): boolean {
@@ -323,6 +476,10 @@ function videoCardPreviewTask(card: VideoCardItem) {
   return card.final_task || card.current_best_task || null;
 }
 
+function isEnhanceTask(task?: { provider?: string | null; generation_mode?: string | null } | null) {
+  return task?.generation_mode === 'enhance_video' || task?.provider === 'volcengine_mediakit';
+}
+
 function costStatusLabel(status: string): string {
   if (status === 'estimated_by_rule') return '规则预估';
   if (status === 'provisional_settled') return '临时结算';
@@ -339,6 +496,15 @@ function costEventLabel(eventType: string): string {
   if (eventType === 'adjustment') return '调整';
   if (eventType === 'reversal') return '冲正';
   return eventType;
+}
+
+function projectTaskStatusLabel(task: TaskItem) {
+  if (task.local_status === 'failed') return '失败';
+  if (task.local_status === 'cancelled') return '已取消';
+  if (task.local_status === 'submitted') return '排队中';
+  if (task.local_status === 'running') return '生成中';
+  if (task.local_status === 'succeeded') return task.delivery_stage?.label || '已完成';
+  return task.local_status || '状态待同步';
 }
 
 function confidenceLabel(confidence: string): string {
@@ -371,20 +537,121 @@ function ledgerOwnerUser(ledger: CostLedgerItem) {
   return ledger.task ? taskOwnerUser(ledger.task) : ledger.user;
 }
 
-function safeVideoSrc(url?: string | null): string | null {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('/')) return url;
-  return null;
+function ProjectVideoPoster({ src, alt }: { src?: string | null; alt: string }) {
+  const [failed, setFailed] = useState(!src);
+  if (failed || !src) {
+    return <span className="task-video-thumbnail-placeholder">暂无截图/预览不可用</span>;
+  }
+  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />;
 }
 
 function providerTaskIdLabel(ledger: CostLedgerItem): string {
   return ledger.provider_task_id || ledger.task?.provider_task_id || '-';
 }
 
+function MemberRemovalConfirmModal({
+  memberName,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  memberName: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogDismiss({
+    open: true,
+    dialogRef: panelRef,
+    dismissSurfaceRef: overlayRef,
+    onDismiss: onCancel,
+    dismissOnOutside: !busy,
+    dismissOnEscape: !busy,
+  });
+
+  return (
+    <div ref={overlayRef} className="modal-overlay" role="dialog" aria-modal="true" aria-label="移除成员确认">
+      <div ref={panelRef} className="modal-panel project-removal-modal">
+        <div className="modal-header">
+          <div>
+            <h2>移除成员</h2>
+            <p>确认后，该成员将从此项目的成员列表中移除。</p>
+          </div>
+          <button type="button" className="modal-close" onClick={onCancel} disabled={busy} aria-label="关闭">×</button>
+        </div>
+        <div className="project-removal-summary"><strong>{memberName}</strong></div>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>取消</button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+            {busy ? '处理中...' : '移除成员'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectDetailPage() {
+  const router = useRouter();
+  const { user: currentUser, hasLoadedUser, loadingUser, refreshUser } = useAppSession();
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.toString();
   const projectId = params.id;
-  const projectReturnTo = `/projects/${projectId}`;
+  const currentUserId = currentUser?.id || '';
+  const accountKey = currentUserId ? `${currentUserId}:${currentUser?.role || ''}` : 'anonymous';
+  const identityKey = `${accountKey}:${projectId}`;
+  const [workspace, setWorkspace] = useState<ProjectViewState>(() => ({
+    ...DEFAULT_PROJECT_VIEW,
+    ...readProjectViewParams(searchParams),
+  }));
+  const activeIdentityRef = useRef(identityKey);
+  const identityEpochRef = useRef(0);
+  if (activeIdentityRef.current !== identityKey) {
+    activeIdentityRef.current = identityKey;
+    identityEpochRef.current += 1;
+  }
+  const activeSectionQueryKey = (() => {
+    const query = new URLSearchParams({ section: workspace.section });
+    if (workspace.section === 'tasks') {
+      query.set('page', String(workspace.taskPage));
+      query.set('q', workspace.taskSearch);
+      query.set('status', workspace.taskStatus);
+      query.set('sort', workspace.taskSort);
+    } else if (workspace.section === 'albums') {
+      query.set('page', String(workspace.albumPage));
+    } else if (workspace.section === 'finance') {
+      query.set('page', String(workspace.financePage));
+    }
+    return `${identityKey}?${query.toString()}`;
+  })();
+  const activeSectionQueryRef = useRef(activeSectionQueryKey);
+  activeSectionQueryRef.current = activeSectionQueryKey;
+  const projectListReturnTo = safeProjectListReturnTo(searchParams.get('return_to'));
+  const projectReturnTo = (() => {
+    const query = new URLSearchParams({
+      view: workspace.section,
+      task_page: String(workspace.taskPage),
+      task_status: workspace.taskStatus,
+      task_sort: workspace.taskSort,
+      album_page: String(workspace.albumPage),
+      finance_page: String(workspace.financePage),
+    });
+    if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    query.set('return_to', projectListReturnTo);
+    return `/projects/${encodeURIComponent(projectId)}?${query.toString()}`;
+  })();
+  const projectTaskReturnTo = (taskId: string) => {
+    const query = new URLSearchParams({
+      view: 'tasks', task_page: String(workspace.taskPage), task_status: workspace.taskStatus,
+      task_sort: workspace.taskSort, album_page: String(workspace.albumPage), finance_page: String(workspace.financePage),
+    });
+    if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    query.set('return_to', projectListReturnTo);
+    return `/projects/${encodeURIComponent(projectId)}?${query.toString()}#task-${encodeURIComponent(taskId)}`;
+  };
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [videoCards, setVideoCards] = useState<VideoCardItem[]>([]);
@@ -401,6 +668,13 @@ export default function ProjectDetailPage() {
     role: '',
   });
   const [loading, setLoading] = useState(true);
+  const [sectionLoading, setSectionLoading] = useState(false);
+  const [loadedDataIdentity, setLoadedDataIdentity] = useState('');
+  const [loadErrorIdentity, setLoadErrorIdentity] = useState('');
+  const [viewerId, setViewerId] = useState('');
+  const [sectionPagination, setSectionPagination] = useState<ProjectPagination | null>(null);
+  const [sectionPaginationQueryKey, setSectionPaginationQueryKey] = useState('');
+  const [activePreviewTask, setActivePreviewTask] = useState<ProjectVideoPreviewTask | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [memberUserId, setMemberUserId] = useState('');
@@ -408,6 +682,13 @@ export default function ProjectDetailPage() {
   const [joinUrl, setJoinUrl] = useState('');
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
+  const [addingMember, setAddingMember] = useState(false);
+  const [creatingInvite, setCreatingInvite] = useState(false);
+  const savingProjectRef = useRef(false);
+  const addingMemberRef = useRef(false);
+  const creatingInviteRef = useRef(false);
   const [videoCardTitle, setVideoCardTitle] = useState('');
   const [videoCardObjective, setVideoCardObjective] = useState('');
   const [creatingVideoCard, setCreatingVideoCard] = useState(false);
@@ -417,33 +698,168 @@ export default function ProjectDetailPage() {
   const [savingBudget, setSavingBudget] = useState(false);
   const [pendingProjectAction, setPendingProjectAction] = useState<ProjectAction | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+  const [pendingMemberRemoval, setPendingMemberRemoval] = useState<{ identity: string; userId: string; memberName: string } | null>(null);
+  const [memberRemovalBusy, setMemberRemovalBusy] = useState(false);
+  const routeStatePendingRef = useRef(false);
+  const requestSequence = useRef(0);
+  const operationTokensRef = useRef<Record<ProjectOperation, number>>({
+    member: 0, invite: 0, rename: 0, projectAction: 0, removeMember: 0, videoCard: 0, budget: 0,
+  });
+  const loadedPreferencesFor = useRef('');
+  const initializedDraftsFor = useRef('');
+  const initializedBudgetDraftFor = useRef('');
+  const loadedProjectIdentity = useRef('');
+  const viewerIdRef = useRef('');
+
+  const beginOperation = (kind: ProjectOperation): ProjectOperationSnapshot => {
+    const requestId = operationTokensRef.current[kind] + 1;
+    operationTokensRef.current[kind] = requestId;
+    return { kind, identity: identityKey, epoch: identityEpochRef.current, requestId };
+  };
+  const isCurrentOperation = (snapshot: ProjectOperationSnapshot) => (
+    activeIdentityRef.current === snapshot.identity
+    && identityEpochRef.current === snapshot.epoch
+    && operationTokensRef.current[snapshot.kind] === snapshot.requestId
+  );
+
+  const clearProjectData = useCallback(() => {
+    setLoadedDataIdentity('');
+    setProject(null);
+    setTasks([]);
+    setVideoCards([]);
+    setCostLedgers([]);
+    setReferenceAlbums([]);
+    setReviewSummary(null);
+    setBudget(null);
+    setArchiveAnomalies(null);
+    setPermissions({ can_manage_project: false, can_manage_members: false, can_manage_assets: false, can_generate: false, role: '' });
+    setSectionPagination(null);
+    setSectionPaginationQueryKey('');
+    setViewerId('');
+    viewerIdRef.current = '';
+    setActivePreviewTask(null);
+    setMessage('');
+    setError('');
+    setLoadErrorIdentity('');
+    setMemberUserId('');
+    setMemberRole('member');
+    setJoinUrl('');
+    setEditName('');
+    setEditDescription('');
+    setSettingsOpen(false); setSavingProject(false); setAddingMember(false); setCreatingInvite(false);
+    savingProjectRef.current = false; addingMemberRef.current = false; creatingInviteRef.current = false;
+    setVideoCardTitle('');
+    setVideoCardObjective('');
+    setCreatingVideoCard(false);
+    setSimilarVideoCards([]);
+    setConfirmDuplicateVideoCard(false);
+    setBudgetDraft('');
+    setSavingBudget(false);
+    setPendingProjectAction(null);
+    setProjectActionBusy(false);
+    setPendingMemberRemoval(null);
+    setMemberRemovalBusy(false);
+    loadedPreferencesFor.current = '';
+    initializedDraftsFor.current = '';
+    initializedBudgetDraftFor.current = '';
+    loadedProjectIdentity.current = '';
+  }, []);
+
+  const reportApiFailure = (res: Response, data: { error?: string; message?: string }, fallback: string) => {
+    const message = data.error || data.message || fallback;
+    if (res.status === 401) {
+      clearProjectData();
+      router.replace('/login');
+      return;
+    }
+    if (res.status === 403 || res.status === 404) {
+      clearProjectData();
+      setError(message);
+      setLoadErrorIdentity(identityKey);
+      return;
+    }
+    setError(message);
+  };
 
   const loadProject = async () => {
-    setLoading(true);
+    if (!hasLoadedUser || loadingUser || !currentUserId) return;
+    const requestId = ++requestSequence.current;
+    const requestIdentity = identityKey;
+    const requestQueryKey = activeSectionQueryKey;
+    const isCurrentRequest = () => (
+      requestId === requestSequence.current
+      && activeIdentityRef.current === requestIdentity
+      && activeSectionQueryRef.current === requestQueryKey
+    );
+    const section = workspace.section;
+    if (loadedProjectIdentity.current !== identityKey) {
+      loadedProjectIdentity.current = identityKey;
+      clearProjectData();
+      loadedProjectIdentity.current = identityKey;
+      setLoading(true);
+    }
+    const query = new URLSearchParams({ section });
+    if (section === 'tasks') {
+      query.set('page', String(workspace.taskPage));
+      query.set('q', workspace.taskSearch);
+      query.set('status', workspace.taskStatus);
+      query.set('sort', workspace.taskSort);
+    } else if (section === 'albums') {
+      query.set('page', String(workspace.albumPage));
+    } else if (section === 'finance') {
+      query.set('page', String(workspace.financePage));
+    }
+    if (!project) setLoading(true);
+    else setSectionLoading(true);
     setError('');
+    setLoadErrorIdentity('');
     try {
-      const res = await fetch(`/api/projects/${projectId}`, { cache: 'no-store' });
+      const res = await fetch(`/api/projects/${projectId}?${query.toString()}`, { cache: 'no-store' });
+      if (!isCurrentRequest()) return;
       if (res.status === 401) {
-        window.location.href = '/login';
+        clearProjectData();
+        router.replace('/login');
         return;
       }
       const data = await res.json();
+      if (!isCurrentRequest()) return;
       if (!res.ok) {
+        if (res.status === 403 || res.status === 404) clearProjectData();
         setError(data.error || data.message || '项目加载失败');
-        setProject(null);
+        setLoadErrorIdentity(identityKey);
         return;
       }
-      setProject(data.project);
-      setEditName(data.project?.name || '');
-      setEditDescription(data.project?.description || '');
-      setTasks(data.tasks || []);
-      setVideoCards(data.video_cards || []);
-      setCostLedgers(data.cost_ledgers || []);
-      setReferenceAlbums(data.reference_albums || []);
-      setReviewSummary(data.review_summary || null);
-      setBudget(data.budget || null);
-      setArchiveAnomalies(data.archive_anomalies || null);
-      setBudgetDraft(data.budget ? String(data.budget.budget_credits) : '');
+      const nextViewerId = typeof data.viewer_id === 'string' ? data.viewer_id : '';
+      if (nextViewerId !== currentUserId || data.project?.id !== projectId) {
+        clearProjectData();
+        setError('登录状态或项目已变化，请重试读取。');
+        setLoadErrorIdentity(identityKey);
+        void refreshUser({ force: true });
+        return;
+      }
+      const viewerChanged = Boolean(viewerIdRef.current && nextViewerId && viewerIdRef.current !== nextViewerId);
+      if (viewerChanged) {
+        setProject(null);
+        setTasks([]);
+        setCostLedgers([]);
+        setReferenceAlbums([]);
+        setReviewSummary(null);
+        setBudget(null);
+        setVideoCards([]);
+        setArchiveAnomalies(null);
+        setJoinUrl('');
+        setMemberUserId('');
+        setMessage('');
+        setActivePreviewTask(null);
+        setPendingProjectAction(null);
+        setPermissions({ can_manage_project: false, can_manage_members: false, can_manage_assets: false, can_generate: false, role: '' });
+        loadedPreferencesFor.current = '';
+        initializedDraftsFor.current = '';
+        initializedBudgetDraftFor.current = '';
+        setBudgetDraft('');
+      }
+      viewerIdRef.current = nextViewerId;
+      setViewerId(nextViewerId);
       setPermissions(data.permissions || {
         can_manage_project: false,
         can_manage_members: false,
@@ -451,133 +867,342 @@ export default function ProjectDetailPage() {
         can_generate: false,
         role: '',
       });
+      if (viewerChanged) {
+        setProject({ ...data.project, members: section === 'members' ? data.project.members || [] : [], invites: data.project.invites || [] });
+      } else setProject((previous) => {
+        if (!previous || previous.id !== data.project.id) return data.project;
+        return {
+          ...previous,
+          ...data.project,
+          members: section === 'members' ? data.project.members || [] : previous.members || [],
+          invites: !data.permissions?.can_manage_members ? [] : section === 'members' ? data.project.invites || [] : previous.invites || [],
+          _count: { ...previous._count, ...data.project._count },
+        };
+      });
+      const draftIdentity = `${nextViewerId}:${data.project?.id || projectId}`;
+      if (initializedDraftsFor.current !== draftIdentity) {
+        let draft: { name?: string; description?: string } | null = null;
+        try { const raw = localStorage.getItem(`sd2:project-info-draft:v1:${draftIdentity}`); if (raw) draft = JSON.parse(raw); } catch { /* Keep server values when local drafts cannot be read. */ }
+        setEditName(typeof draft?.name === 'string' ? draft.name : data.project?.name || '');
+        setEditDescription(typeof draft?.description === 'string' ? draft.description : data.project?.description || '');
+        initializedDraftsFor.current = draftIdentity;
+      }
+      if (section === 'tasks') {
+        setTasks(data.tasks || []);
+        if (data.pagination?.page && data.pagination.page !== workspace.taskPage) setWorkspace((current) => ({ ...current, taskPage: data.pagination.page }));
+      }
+      if (section === 'members') {
+        setProject((previous) => previous ? { ...previous, members: data.project.members || [], invites: data.project.invites || [] } : data.project);
+      }
+      if (section === 'albums') {
+        setReferenceAlbums(data.reference_albums || []);
+        if (data.pagination?.page && data.pagination.page !== workspace.albumPage) setWorkspace((current) => ({ ...current, albumPage: data.pagination.page }));
+      }
+      if (section === 'finance') {
+        setCostLedgers(data.cost_ledgers || []);
+        setReviewSummary(data.review_summary || null);
+        if (data.pagination?.page && data.pagination.page !== workspace.financePage) setWorkspace((current) => ({ ...current, financePage: data.pagination.page }));
+      }
+      setSectionPagination(data.pagination || null);
+      setSectionPaginationQueryKey(requestQueryKey);
+      setLoadedDataIdentity(identityKey);
+      setBudget(data.budget || null);
+      if (data.budget && initializedBudgetDraftFor.current !== draftIdentity) {
+        setBudgetDraft(String(data.budget.budget_credits));
+        initializedBudgetDraftFor.current = draftIdentity;
+      }
+      setArchiveAnomalies(data.archive_anomalies || null);
+
+      const preferenceIdentity = `${nextViewerId}:${data.project?.id || projectId}`;
+      if (nextViewerId && loadedPreferencesFor.current !== preferenceIdentity) {
+        let saved: Partial<ProjectViewState> = {};
+        try {
+          const raw = window.localStorage.getItem(projectViewStorageKey(data.project.id, nextViewerId));
+          if (raw) saved = normalizeStoredProjectView(JSON.parse(raw));
+        } catch { /* Storage can be disabled or contain an older/corrupt value. */ }
+        const urlState = readProjectViewParams(new URLSearchParams(window.location.search));
+        setWorkspace({ ...DEFAULT_PROJECT_VIEW, ...saved, ...urlState });
+        loadedPreferencesFor.current = preferenceIdentity;
+      }
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setError(err instanceof Error ? err.message : '项目加载失败');
+      setLoadErrorIdentity(identityKey);
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setLoading(false);
+        setSectionLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadProject();
-  }, [projectId]);
+    if (!hasLoadedUser && !loadingUser) void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser]);
+
+  useEffect(() => {
+    if (hasLoadedUser && !currentUserId) router.replace('/login');
+  }, [hasLoadedUser, currentUserId, router]);
+
+  useEffect(() => {
+    requestSequence.current += 1;
+    clearProjectData();
+    setLoading(true);
+    setWorkspace({ ...DEFAULT_PROJECT_VIEW, ...readProjectViewParams(new URLSearchParams(window.location.search)) });
+  }, [identityKey, clearProjectData]);
+
+  useEffect(() => {
+    if (!hasLoadedUser || loadingUser || !currentUserId) return;
+    const timer = window.setTimeout(() => { void loadProject(); }, workspace.section === 'tasks' ? 250 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+    };
+  }, [hasLoadedUser, loadingUser, currentUserId, currentUser?.role, projectId, workspace.section, workspace.taskPage, workspace.taskSearch, workspace.taskStatus, workspace.taskSort, workspace.albumPage, workspace.financePage]);
+
+  useEffect(() => {
+    const urlState = readProjectViewParams(new URLSearchParams(routeQuery));
+    if (!Object.keys(urlState).length) return;
+    routeStatePendingRef.current = true;
+    setWorkspace((current) => ({ ...current, ...urlState }));
+  }, [routeQuery]);
+
+  useEffect(() => {
+    if (!viewerId || loadedDataIdentity !== identityKey || !loadedPreferencesFor.current) return;
+    if (routeStatePendingRef.current) {
+      routeStatePendingRef.current = false;
+      return;
+    }
+    try {
+      window.localStorage.setItem(projectViewStorageKey(projectId, viewerId), JSON.stringify(workspace));
+    } catch { /* Local preferences are best-effort and never block project work. */ }
+    const query = new URLSearchParams(window.location.search);
+    query.set('view', workspace.section);
+    query.set('task_page', String(workspace.taskPage));
+    query.set('task_status', workspace.taskStatus);
+    query.set('task_sort', workspace.taskSort);
+    query.set('album_page', String(workspace.albumPage));
+    query.set('finance_page', String(workspace.financePage));
+    if (workspace.taskSearch) query.set('task_q', workspace.taskSearch);
+    else query.delete('task_q');
+    query.set('return_to', projectListReturnTo);
+    window.history.replaceState(window.history.state, '', `/projects/${encodeURIComponent(projectId)}?${query.toString()}${window.location.hash}`);
+  }, [workspace, viewerId, projectId, identityKey, loadedDataIdentity, projectListReturnTo]);
+
+  useEffect(() => {
+    if (!viewerId || loadedDataIdentity !== identityKey || initializedDraftsFor.current !== `${viewerId}:${projectId}`) return;
+    try { localStorage.setItem(`sd2:project-info-draft:v1:${viewerId}:${projectId}`, JSON.stringify({ name: editName, description: editDescription })); }
+    catch { /* A failed save keeps the current form visible; it never submits automatically. */ }
+  }, [editDescription, editName, identityKey, loadedDataIdentity, projectId, viewerId]);
+
+  useEffect(() => {
+    if (workspace.section !== 'tasks' || !tasks.length || !window.location.hash.startsWith('#task-')) return;
+    const timer = window.setTimeout(() => document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ block: 'center' }), 0);
+    return () => window.clearTimeout(timer);
+  }, [tasks, workspace.section]);
 
   const addMember = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (addingMemberRef.current || !permissions.can_manage_members) return;
+    addingMemberRef.current = true; setAddingMember(true);
+    const operation = beginOperation('member');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}/members`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: memberUserId, role: memberRole }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '添加成员失败');
-      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: memberUserId, role: memberRole }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '添加成员失败');
+        return;
+      }
+      setMemberUserId('');
+      setMessage('成员已加入项目');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '添加成员失败');
+    } finally {
+      if (isCurrentOperation(operation)) { addingMemberRef.current = false; setAddingMember(false); }
     }
-    setMemberUserId('');
-    setMessage('成员已加入项目');
-    await loadProject();
   };
 
   const createInvite = async () => {
+    if (creatingInviteRef.current || !permissions.can_manage_members) return;
+    creatingInviteRef.current = true; setCreatingInvite(true);
+    const operation = beginOperation('invite');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}/invites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ default_role: 'member', expires_days: 7 }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '创建邀请失败');
-      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/invites`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ default_role: 'member', expires_days: 7 }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '创建邀请失败');
+        return;
+      }
+      const url = `${window.location.origin}${data.join_url}`;
+      setJoinUrl(url);
+      setMessage('邀请链接已创建');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '创建邀请失败');
+    } finally {
+      if (isCurrentOperation(operation)) { creatingInviteRef.current = false; setCreatingInvite(false); }
     }
-    const url = `${window.location.origin}${data.join_url}`;
-    setJoinUrl(url);
-    setMessage('邀请链接已创建');
-    await loadProject();
   };
 
   const updateProjectInfo = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!project || savingProjectRef.current) return;
+    const operation = beginOperation('rename');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const res = await fetch(`/api/projects/${projectId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName, description: editDescription }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '更新项目失败');
-      return;
+    const submittedName = editName;
+    const submittedDescription = editDescription;
+    savingProjectRef.current = true; setSavingProject(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: submittedName, description: submittedDescription, ...projectStatusExpectation(project) }),
+      });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        if (res.status === 409 && data.current) setProject((previous) => previous ? { ...previous, status_version: data.current } : previous);
+        reportApiFailure(res, data, '更新项目失败');
+        return;
+      }
+      setMessage('项目信息已更新');
+      setSettingsOpen(false);
+      try { localStorage.removeItem(`sd2:project-info-draft:v1:${currentUserId}:${projectId}`); } catch { /* Current saved values remain available. */ }
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '更新项目失败');
+    } finally {
+      if (isCurrentOperation(operation)) { savingProjectRef.current = false; setSavingProject(false); }
     }
-    setMessage('项目信息已更新');
-    await loadProject();
   };
 
   const requestProjectAction = (action: ProjectAction) => {
-    if (!project) return;
+    if (!project || activeIdentityRef.current !== identityKey) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
     setPendingProjectAction(action);
   };
 
   const confirmProjectAction = async () => {
-    if (!project || !pendingProjectAction) return;
+    if (!project || !pendingProjectAction || projectActionBusy) return;
+    const operation = beginOperation('projectAction');
+    if (!isCurrentOperation(operation)) return;
     const action = pendingProjectAction;
     const label = action === 'archive' ? '归档为只读' : action === 'restore' ? '恢复' : '删除';
 
     setProjectActionBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}`, action === 'delete'
-        ? { method: 'DELETE' }
+        ? { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(projectStatusExpectation(project)) }
         : {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action }),
+            body: JSON.stringify({ action, ...projectStatusExpectation(project) }),
           });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
-        setError(data.error || data.message || `${label}项目失败`);
+        setPendingProjectAction(null);
+        if (res.status === 409 && data.current) setProject((previous) => previous ? { ...previous, status_version: data.current } : previous);
+        reportApiFailure(res, data, `${label}项目失败`);
         return;
       }
       setPendingProjectAction(null);
       if (action === 'delete') {
-        window.location.href = '/projects';
+        window.location.href = projectListReturnTo;
         return;
       }
       setMessage(`项目已${label}`);
       await loadProject();
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${label}项目失败`);
-      setPendingProjectAction(null);
+      if (isCurrentOperation(operation)) {
+        setError(err instanceof Error ? err.message : `${label}项目失败`);
+        setPendingProjectAction(null);
+      }
     } finally {
-      setProjectActionBusy(false);
+      if (isCurrentOperation(operation)) setProjectActionBusy(false);
     }
   };
 
-  const removeMember = async (userId: string) => {
-    if (!project) return;
+  const removeMember = (userId: string, memberName: string) => {
+    if (!project || activeIdentityRef.current !== identityKey) return;
+    if (userId === project.owner_user_id || !project.members.some((member) => member.user_id === userId)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    if (!window.confirm('确定移除此项目成员吗？')) return;
-    const res = await fetch(`/api/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || '移除成员失败');
+    setPendingMemberRemoval({ identity: identityKey, userId, memberName });
+  };
+
+  const confirmMemberRemoval = async () => {
+    const target = pendingMemberRemoval;
+    if (!project || !target || target.identity !== identityKey || activeIdentityRef.current !== identityKey) return;
+    if (target.userId === project.owner_user_id || !project.members.some((member) => member.user_id === target.userId)) {
+      setPendingMemberRemoval(null);
       return;
     }
-    setMessage('成员已移除');
-    await loadProject();
+    const operation = beginOperation('removeMember');
+    if (!isCurrentOperation(operation)) return;
+    setMemberRemovalBusy(true);
+    setError('');
+    setLoadErrorIdentity('');
+    setMessage('');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/members/${target.userId}`, { method: 'DELETE' });
+      if (!isCurrentOperation(operation)) return;
+      const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
+      if (!res.ok) {
+        reportApiFailure(res, data, '移除成员失败');
+        if (isCurrentOperation(operation)) setPendingMemberRemoval(null);
+        return;
+      }
+      setPendingMemberRemoval(null);
+      setMessage('成员已移除');
+      await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) {
+        setError(err instanceof Error ? err.message : '移除成员失败');
+        setPendingMemberRemoval(null);
+      }
+    } finally {
+      if (isCurrentOperation(operation)) setMemberRemovalBusy(false);
+    }
   };
 
   const createVideoCard = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!project) return;
+    const operation = beginOperation('videoCard');
+    if (!isCurrentOperation(operation)) return;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
     const title = videoCardTitle.trim();
     if (!title) {
@@ -595,7 +1220,9 @@ export default function ProjectDetailPage() {
           confirm_duplicate: confirmDuplicateVideoCard,
         }),
       });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
         if (res.status === 409 && data.code === 'SIMILAR_VIDEO_CARD_EXISTS') {
           setSimilarVideoCards(data.similar_video_cards || []);
@@ -603,7 +1230,7 @@ export default function ProjectDetailPage() {
           setError('发现可能重复的视频卡。可以进入已有卡继续归档，或再次点击“仍然新建”。');
           return;
         }
-        setError(data.error || data.message || '创建视频卡失败');
+        reportApiFailure(res, data, '创建视频卡失败');
         return;
       }
       setVideoCardTitle('');
@@ -612,17 +1239,23 @@ export default function ProjectDetailPage() {
       setConfirmDuplicateVideoCard(false);
       setMessage('视频卡已创建');
       await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '创建视频卡失败');
     } finally {
-      setCreatingVideoCard(false);
+      if (isCurrentOperation(operation)) setCreatingVideoCard(false);
     }
   };
 
   const updateProjectBudget = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!project) return;
+    const operation = beginOperation('budget');
+    if (!isCurrentOperation(operation)) return;
+    const submittedBudgetDraft = budgetDraft;
     setError('');
+    setLoadErrorIdentity('');
     setMessage('');
-    const budgetCredits = Number(budgetDraft);
+    const budgetCredits = Number(submittedBudgetDraft);
     if (!Number.isFinite(budgetCredits) || budgetCredits < 0) {
       setError('预算必须是非负数字');
       return;
@@ -637,51 +1270,84 @@ export default function ProjectDetailPage() {
           reason: '项目详情页调整预算',
         }),
       });
+      if (!isCurrentOperation(operation)) return;
       const data = await res.json();
+      if (!isCurrentOperation(operation)) return;
       if (!res.ok) {
-        setError(data.error || data.message || '更新预算失败');
+        reportApiFailure(res, data, '更新预算失败');
         return;
       }
       setBudget(data.budget || null);
-      setBudgetDraft(data.budget ? String(data.budget.budget_credits) : budgetDraft);
+      if (budgetDraft === submittedBudgetDraft) setBudgetDraft(data.budget ? String(data.budget.budget_credits) : submittedBudgetDraft);
       setMessage('项目预算已更新');
       await loadProject();
+    } catch (err) {
+      if (isCurrentOperation(operation)) setError(err instanceof Error ? err.message : '更新预算失败');
     } finally {
-      setSavingBudget(false);
+      if (isCurrentOperation(operation)) setSavingBudget(false);
     }
   };
 
-  if (loading) {
+  const sectionPaginationIsCurrent = sectionPaginationQueryKey === activeSectionQueryKey;
+
+  if (!hasLoadedUser || loadingUser || loading || (Boolean(currentUserId) && loadedDataIdentity !== identityKey && loadErrorIdentity !== identityKey)) {
     return <div className="card"><p className="text-gray">加载中...</p></div>;
+  }
+
+  if (hasLoadedUser && !currentUserId) {
+    return <div className="card"><p className="text-gray">正在返回登录页…</p></div>;
   }
 
   if (!project) {
     return (
       <div className="card">
-        <p className="text-red">{error || '项目不存在或无权访问'}</p>
-        <Link href="/projects" className="btn btn-secondary mt-4">返回项目列表</Link>
+        <p className="text-gray">{error || '项目不存在或无权访问'}</p>
+        <div className="flex items-center mt-4" style={{ gap: 10, flexWrap: 'wrap' }}>
+          {error && <button type="button" className="btn btn-secondary" onClick={() => void loadProject()}>重试读取</button>}
+          <Link href={projectListReturnTo} className="btn btn-secondary">返回项目列表</Link>
+        </div>
       </div>
     );
   }
 
+  const generatorQuery = new URLSearchParams({ project_id: project.id, return_to: projectReturnTo });
+  const generatorHref = `/generate?${generatorQuery.toString()}`;
+
   return (
-    <div>
-      <PageBanner
-        eyebrow="项目详情"
-        title={projectDisplayName(project)}
-        description={project.description || '项目中的生成任务、参考图集和成员协作。'}
-        backHref="/projects"
-        backLabel="返回项目"
-      />
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div><Link className="link" href={projectListReturnTo}>返回项目</Link><h1>{projectDisplayName(project)}</h1>
+          <p className="text-gray text-sm">{project.description || '项目生成与协作'} · {statusLabel(project.status)} · {roleLabel(permissions.role)}</p>
+        </div>
+        <div>{permissions.can_generate && project.status === 'active' && !budget?.block_reason ? (
+          <a href={generatorHref} className="btn btn-primary">生成视频</a>
+        ) : permissions.can_generate && project.status === 'active' && budget?.block_reason ? (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">暂不可生成：{budget.block_reason}</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'finance' }))}>查看费用</button>
+          </div>
+        ) : project.status !== 'active' ? (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">当前项目为{statusLabel(project.status)}，不能继续生成。</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看项目选项</button>
+          </div>
+        ) : (
+          <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span className="text-gray text-sm">当前角色没有生成权限。</span>
+            <button type="button" className="btn btn-secondary" onClick={() => setWorkspace((current) => ({ ...current, section: 'members' }))}>查看成员与设置</button>
+          </div>
+        )}</div>
+      </header>
 
       {(message || error) && (
-        <div className="card" style={{ borderColor: error ? 'rgba(248,113,113,0.35)' : 'rgba(74,222,128,0.35)' }}>
-          <p className={error ? 'text-red' : 'text-green'}>{error || message}</p>
+        <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
+          <p className={error ? 'text-gray' : 'text-green'}>{error || message}</p>
           {joinUrl && (
             <p className="text-sm mt-2">
               邀请链接：<a className="link" href={joinUrl}>{joinUrl}</a>
             </p>
           )}
+          {error && loadErrorIdentity === identityKey && <button type="button" className="btn btn-secondary mt-2" onClick={() => void loadProject()}>重试读取</button>}
         </div>
       )}
 
@@ -691,26 +1357,26 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      <div className="card">
-        <div className="flex items-center justify-between" style={{ gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h2 className="section-title mb-0">项目概览</h2>
-            <p className="text-gray text-sm mt-2">
-              {statusLabel(project.status)} · {roleLabel(permissions.role)} · 成员 {project._count?.members ?? 0} · 任务 {project._count?.tasks ?? 0} · 图集 {project._count?.reference_albums ?? 0}
-            </p>
-          </div>
-          {permissions.can_generate ? (
-            <a href="#project-video-cards" className="btn btn-primary">
-              选择视频卡生成
-            </a>
-          ) : (
-            <span className="text-gray text-sm">当前状态或权限不可生成</span>
-          )}
-        </div>
-      </div>
+      <nav className={styles.sections} aria-label="项目分区">
+          {([
+            ['tasks', '生成记录'], ['albums', '参考图集'],
+            ['finance', '用量与费用'], ['members', '成员与设置'],
+          ] as Array<[ProjectSection, string]>).map(([section, label]) => (
+            <button key={section} type="button" aria-pressed={workspace.section === section}
+              onClick={() => setWorkspace((current) => ({ ...current, section }))}>
+              {label}
+            </button>
+          ))}
+      </nav>
+      {sectionLoading && <p className="text-gray text-sm" aria-live="polite">正在更新当前分区…</p>}
+      {workspace.section === 'finance' && <section className={styles.section} id="project-usage">
+        <h2 className="section-title">项目用量与费用</h2>
+        <UsageWorkspace key={identityKey} ownerId={currentUserId} projectId={projectId} />
+      </section>}
 
-      {project.type === 'public' && budget && (
-        <div className="card">
+      {workspace.section === 'finance' && project.type === 'public' && budget && (
+        <details className={styles.disclosure}>
+          <summary>项目预算与充值</summary>
           <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div>
               <h2 className="section-title mb-0">项目预算</h2>
@@ -756,6 +1422,7 @@ export default function ProjectDetailPage() {
                 min="0"
                 step="0.01"
                 value={budgetDraft}
+                disabled={savingBudget}
                 onChange={(event) => setBudgetDraft(event.target.value)}
                 placeholder="预算点数"
               />
@@ -766,9 +1433,10 @@ export default function ProjectDetailPage() {
           ) : (
             <p className="text-gray text-sm mt-4">追加预算需要管理员处理。</p>
           )}
-        </div>
+        </details>
       )}
 
+      {showVideoCardManagementUi && (
       <div className="card" id="project-video-cards">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
@@ -842,16 +1510,14 @@ export default function ProjectDetailPage() {
           <div className="video-card-grid">
             {videoCards.map((card) => {
               const previewTask = videoCardPreviewTask(card);
-              const previewUrl = safeVideoSrc(previewTask?.local_video_path || previewTask?.result_video_url);
               const summary = card.summary;
               return (
                 <article key={card.id} className="video-card-item">
                   <div className="video-card-preview">
-                    {previewUrl ? (
-                      <video src={previewUrl} muted preload="metadata" />
-                    ) : (
-                      <span>{card.is_fallback ? '历史' : '待生成'}</span>
-                    )}
+                    <ProjectVideoPoster key={previewTask?.thumbnail_url || 'no-cover'} src={previewTask?.thumbnail_url} alt={`${card.title}视频封面`} />
+                    {isEnhanceTask(previewTask) ? (
+                      <span className="task-video-thumbnail-enhance-badge">超分</span>
+                    ) : null}
                   </div>
                   <div className="video-card-main">
                     <div className="video-card-head">
@@ -875,12 +1541,15 @@ export default function ProjectDetailPage() {
                       <span>点数 {summary?.charged_credits ?? 0}</span>
                       <span>官方 {formatCostTotals(summary?.official_cost_totals)}</span>
                     </div>
-                    <div className="video-card-actions">
+                  <div className="video-card-actions">
+                      {previewTask?.preview_available && <button className="btn btn-secondary" type="button" onClick={() => setActivePreviewTask(previewTask)} aria-label={`预览${card.title}`} title="预览视频">
+                        <Eye size={16} aria-hidden="true" />预览
+                      </button>}
                       <Link className="btn btn-secondary" href={`/projects/${project.id}/video-cards/${card.id}`}>
                         查看视频卡
                       </Link>
                       {permissions.can_generate && card.status !== 'sealed' && card.status !== 'archived' && (
-                        <Link className="btn btn-primary" href={`/generate?project_id=${project.id}&video_card_id=${card.id}`}>
+                        <Link className="btn btn-primary" href={`/generate?project_id=${encodeURIComponent(project.id)}&video_card_id=${encodeURIComponent(card.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>
                           在此卡生成
                         </Link>
                       )}
@@ -892,16 +1561,17 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
+      )}
 
+      {workspace.section === 'finance' && <details className={styles.legacy}>
+      <summary>历史账务与项目复盘（原账务范围）</summary>
       <div className="card">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">项目复盘</h2>
             <p className="text-gray text-sm mt-2">这里看项目怎么被使用：点数、任务、失败和官方成本确认状态。</p>
           </div>
-          <Link className="btn btn-secondary" href={`/api/projects/${project.id}/costs/export`}>
-            导出明细
-          </Link>
+          <a className="link" href="#project-usage">按月份查看与导出</a>
         </div>
 
         <div className="stats-grid">
@@ -951,10 +1621,17 @@ export default function ProjectDetailPage() {
 	                    <td>
 	                      <TaskVideoThumbnail
 	                        taskId={task.id}
+	                        thumbnailUrl={task.thumbnail_url}
+	                        publicVideoUrl={task.public_video_url}
 	                        localVideoPath={task.local_video_path}
 	                        resultVideoUrl={task.result_video_url}
 	                        resultLastFrameUrl={task.result_last_frame_url}
 	                        status={task.local_status}
+	                        deliveryStage={task.delivery_stage}
+	                        previewAvailable={task.preview_available}
+	                        stableDownloadReady={task.stable_download_ready}
+	                        retryAfterMs={task.retry_after_ms}
+	                        isEnhanceTask={isEnhanceTask(task)}
 	                        href={taskDetailHref(task.id, projectReturnTo)}
 	                        size="compact"
 	                      />
@@ -980,7 +1657,9 @@ export default function ProjectDetailPage() {
             <h2 className="section-title mb-0">官方真实成本明细</h2>
             <p className="text-gray text-sm mt-2">按 official_charge / adjustment / reversal 账本行展示，可从每笔成本追到视频任务。</p>
           </div>
-          <span className="text-gray text-sm">最近 {costLedgers.length} 条</span>
+          <span className="text-gray text-sm">{sectionPaginationIsCurrent && sectionPagination
+            ? `当前页 ${costLedgers.length} 条 · 共 ${sectionPagination.total} 条`
+            : '明细读取中'}</span>
         </div>
 
         {costLedgers.length === 0 ? (
@@ -1010,10 +1689,17 @@ export default function ProjectDetailPage() {
 	                        {task ? (
 	                          <TaskVideoThumbnail
 	                            taskId={task.id}
+	                            thumbnailUrl={task.thumbnail_url}
+	                            publicVideoUrl={task.public_video_url}
 	                            localVideoPath={task.local_video_path}
 	                            resultVideoUrl={task.result_video_url}
 	                            resultLastFrameUrl={task.result_last_frame_url}
 	                            status={task.local_status}
+	                            deliveryStage={task.delivery_stage}
+	                            previewAvailable={task.preview_available}
+	                            stableDownloadReady={task.stable_download_ready}
+	                            retryAfterMs={task.retry_after_ms}
+	                            isEnhanceTask={isEnhanceTask(task)}
 	                            href={taskDetailHref(task.id, projectReturnTo)}
 	                            size="compact"
 	                          />
@@ -1059,7 +1745,7 @@ export default function ProjectDetailPage() {
                         {task?.provider_billing_status ? ` · ${task.provider_billing_status}` : ''}
                       </div>
                     </td>
-                    <td>{new Date(ledger.occurred_at || ledger.created_at).toLocaleString('zh-CN')}</td>
+                    <td><RelativeTime value={ledger.occurred_at || ledger.created_at} /></td>
                     <td>
                       {task ? (
                         <Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>查看任务</Link>
@@ -1073,105 +1759,118 @@ export default function ProjectDetailPage() {
             </tbody>
           </table>
         )}
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+          total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
+          onPageChange={(page) => setWorkspace((current) => ({ ...current, financePage: page }))} label="条成本明细" />}
       </div>
 
-      <div className="card">
-        <h2 className="section-title">历史 / 调试任务</h2>
-        <p className="text-gray text-sm mb-4">生成记录已按视频卡归档；这里保留最近任务明细，便于排查旧任务和成本账本。</p>
-        {tasks.length === 0 ? (
-          <p className="text-gray">暂无生成任务</p>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-	                <th>截图</th>
-	                <th>任务</th>
-	                <th>状态</th>
-                <th>视频卡</th>
-                <th>创建者</th>
-                <th>点数</th>
-                <th>成本状态</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task) => (
-	                <tr key={task.id}>
-	                  <td>
-	                    <TaskVideoThumbnail
-	                      taskId={task.id}
-	                      localVideoPath={task.local_video_path}
-	                      resultVideoUrl={task.result_video_url}
-	                      resultLastFrameUrl={task.result_last_frame_url}
-	                      status={task.local_status}
-	                      href={taskDetailHref(task.id, projectReturnTo)}
-	                      size="compact"
-	                    />
-	                  </td>
-	                  <td>
-	                    <Link className="link truncate" style={{ display: 'block', maxWidth: 280 }} href={taskDetailHref(task.id, projectReturnTo)} title={task.prompt}>
-	                      {task.prompt || task.id}
-	                    </Link>
-	                    <span className="text-gray text-sm">{task.id.slice(0, 10)}...</span>
-	                  </td>
-                  <td>{task.local_status}</td>
-                  <td>
-                    {task.video_card ? (
-                      <Link className="link" href={`/projects/${project.id}/video-cards/${task.video_card.id}`}>{task.video_card.title}</Link>
-                    ) : (
-                      <span className="text-gray">历史未归档</span>
-                    )}
-                  </td>
-                  <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
-                  <td>{task.actual_cost ?? task.estimated_cost ?? '-'}</td>
-                  <td>{costStatusLabel(task.provider_cost_status)}</td>
-                  <td>{new Date(task.created_at).toLocaleString('zh-CN')}</td>
-                  <td><Link className="link" href={taskDetailHref(task.id, projectReturnTo)}>详情</Link></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      </details>}
 
-      <div className="card">
-        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <h2 className="section-title mb-0">项目参考图集</h2>
-          <Link className="btn btn-secondary" href={`/collections?scope=project&project_id=${project.id}`}>
-            查看图集
-          </Link>
+      {workspace.section === 'tasks' && <section className={styles.section}>
+        <div className="flex items-start justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <h2 className="section-title mb-0">生成记录</h2>
+          <span className="text-gray text-sm">{sectionPaginationIsCurrent && sectionPagination ? `${sectionPagination.total} 条记录` : '记录数读取中'}</span>
         </div>
-        {referenceAlbums.length === 0 ? (
-          <p className="text-gray">暂无项目图集</p>
+        <div className="flex items-center mb-4" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <input className="input" style={{ flex: '1 1 220px', maxWidth: 420 }} value={workspace.taskSearch}
+            onChange={(event) => setWorkspace((current) => ({ ...current, taskSearch: event.target.value.slice(0, 120), taskPage: 1 }))}
+            placeholder="搜索提示词、模型或任务编号" aria-label="搜索生成记录" />
+          <ProjectFilters active={workspace.taskStatus !== 'all' || workspace.taskSort !== 'newest'}>
+          <select className="input" style={{ width: 170 }} value={workspace.taskStatus}
+            onChange={(event) => setWorkspace((current) => ({ ...current, taskStatus: event.target.value as ProjectViewState['taskStatus'], taskPage: 1 }))} aria-label="筛选生成状态">
+            <option value="all">全部记录</option><option value="running">进行中</option><option value="playable">可播放</option><option value="failed">失败或已取消</option>
+          </select>
+          <select className="input" style={{ width: 150 }} value={workspace.taskSort}
+            onChange={(event) => setWorkspace((current) => ({ ...current, taskSort: event.target.value as ProjectViewState['taskSort'], taskPage: 1 }))} aria-label="排序生成记录">
+            <option value="newest">最近生成</option><option value="oldest">最早生成</option>
+          </select>
+          <button className="btn btn-secondary" type="button" aria-label="重置记录筛选" title="重置记录筛选" onClick={() => setWorkspace((current) => ({ ...current, taskSearch: '', taskStatus: 'all', taskSort: 'newest', taskPage: 1 }))}><RotateCcw size={16} /></button>
+          </ProjectFilters>
+        </div>
+        {tasks.length === 0 ? (
+          <p className="text-gray">{workspace.taskSearch || workspace.taskStatus !== 'all' ? '没有符合条件的生成记录。' : '暂无生成记录。'}</p>
         ) : (
-          <div className="shell-link-grid">
-            {referenceAlbums.map((album) => (
-              <Link key={album.id} className="shell-link-card" href={`/collections/${album.id}`}>
-                <strong>{album.name}</strong>
-                <span>{album.description || '项目参考图集'}</span>
-                <span>{album.image_count} 张 · {statusLabel(album.status)}</span>
-                <span>更新 {new Date(album.updated_at).toLocaleDateString('zh-CN')}</span>
-              </Link>
-            ))}
+          <div className={styles.taskGrid}>
+            {tasks.map((task) => {
+              const returnTo = projectTaskReturnTo(task.id);
+              const detailHref = taskDetailHref(task.id, returnTo);
+              const reuseHref = taskReuseHref({ ...task, project_id: project.id }, returnTo);
+              const enhanceHref = task.local_status === 'succeeded' && task.playable_available && !isEnhanceTask(task)
+                && Boolean(task.video_card_id && task.duration && task.duration > 0)
+                ? enhanceWorkspaceHref(returnTo, task.id) : null;
+              return (
+                <article id={`task-${task.id}`} key={task.id} className={styles.taskCard}>
+                  <div className={styles.taskMedia}>
+                  <TaskVideoThumbnail taskId={task.id} thumbnailUrl={task.thumbnail_url} status={task.local_status}
+                    deliveryStage={task.delivery_stage} previewAvailable={task.preview_available} stableDownloadReady={task.stable_download_ready}
+                    retryAfterMs={task.retry_after_ms} provider={task.provider} generationMode={task.generation_mode} size="card" href={task.playable_available ? null : detailHref} />
+                  {task.playable_available && <button className={styles.playMedia} type="button" title="播放视频" aria-label="播放视频" onClick={() => setActivePreviewTask(task)}><Play size={28} /></button>}
+                  <span className={styles.taskStatus}>{projectTaskStatusLabel(task)}</span>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <Link className={`link ${styles.taskPrompt}`} href={detailHref} title={task.prompt || task.id}><strong>{task.prompt || task.id}</strong></Link>
+                    <p className={`text-gray text-sm mt-2 ${styles.taskSpecs}`} title={task.model || task.provider}>{[seedanceVideoModelLabel(task.model || task.provider), task.ratio, task.duration ? `${task.duration} 秒` : null, task.resolution].filter(Boolean).join(' · ') || '生成参数待同步'}</p>
+                    <div className={styles.cardMeta}><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /><RelativeTime value={task.created_at} /></div>
+                    <div className={styles.taskActions}>
+                      {task.stable_download_ready && task.download_url && <a className="link" href={task.download_url}><Download size={15} /> 下载</a>}
+                      {reuseHref && <Link className="link" href={reuseHref}><Repeat2 size={15} /> 复用</Link>}
+                      <TaskActionsMenu>
+                      {enhanceHref && <Link className="link" href={enhanceHref}>视频增强</Link>}
+                      {isEnhanceTask(task) && <Link className="link" href={enhanceWorkspaceHref(returnTo)}>重新选择源视频</Link>}
+                      <Link className="link" href={detailHref}>查看详情</Link>
+                      </TaskActionsMenu>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
-        {!permissions.can_manage_assets && (
-          <p className="text-gray text-sm mt-4">当前角色可查看或使用项目素材，但不能修改项目图集。</p>
-        )}
-      </div>
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+          total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
+          onPageChange={(page) => setWorkspace((current) => ({ ...current, taskPage: page }))} label="条生成记录" />}
+      </section>}
 
-      <div className="card">
+      {workspace.section === 'albums' && <section className={styles.section}>
+        <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div><h2 className="section-title mb-0">参考图集</h2><p className="text-gray text-sm mt-2">保存和复用项目参考素材。</p></div>
+          {permissions.can_manage_assets && project.status === 'active'
+            ? <ReferenceAlbumsClient key={identityKey} embeddedProjectId={project.id} onCreated={() => void loadProject()} />
+            : <Link className="link" href={`/collections?scope=project&project_id=${encodeURIComponent(project.id)}&return_to=${encodeURIComponent(projectReturnTo)}`}>查看图集</Link>}
+        </div>
+        {referenceAlbums.length === 0 ? <p className="text-gray">暂无项目图集</p> : (
+          <div className={styles.albumGrid}>
+            {referenceAlbums.map((album) => <article key={album.id} className={styles.album}>
+              <Link href={`/collections/${encodeURIComponent(album.id)}?return_to=${encodeURIComponent(projectReturnTo)}`}>
+                <ProjectAlbumCover urls={album.thumbnail_urls || []} />
+                <strong>{album.name}</strong><span>{album.description || '项目参考图集'}</span>
+                <span>{album.image_count} 张 · {statusLabel(album.status)}</span>
+              </Link>
+              <span className="text-gray text-sm">更新 <RelativeTime value={album.updated_at} /></span>
+            </article>)}
+          </div>
+        )}
+        {!permissions.can_manage_assets && <p className="text-gray text-sm mt-4">当前角色可查看或使用项目素材，但不能修改项目图集。</p>}
+        {sectionPaginationIsCurrent && sectionPagination && <PaginationControls page={sectionPagination.page} totalPages={sectionPagination.total_pages}
+          total={sectionPagination.total} pageSize={sectionPagination.page_size} busy={sectionLoading}
+          onPageChange={(page) => setWorkspace((current) => ({ ...current, albumPage: page }))} label="个图集" />}
+      </section>}
+
+      {workspace.section === 'members' && <div className={styles.memberLayout}>
+      <div className={styles.memberMain}>
+      <section className={styles.section}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title mb-0">项目成员</h2>
-          <span className="text-gray text-sm">{project.members.length} 人</span>
+          <div className={styles.actions}>
+            <span className="text-gray text-sm">{project.members.length} 人</span>
+            {permissions.can_manage_members && <button className="btn btn-primary" type="button" onClick={createInvite} disabled={creatingInvite}>{creatingInvite ? '正在创建…' : '生成邀请链接'}</button>}
+          </div>
         </div>
+        <div className={styles.tableWrap}>
         <table className="table">
           <thead>
             <tr>
               <th>成员</th>
-              <th>账号类型</th>
-              <th>平台角色</th>
               <th>项目权限</th>
               <th>加入时间</th>
               {permissions.can_manage_members && <th>操作</th>}
@@ -1184,19 +1883,22 @@ export default function ProjectDetailPage() {
                   <UserIdentityBadge
                     user={member.user}
                     size="sm"
-                    subtitle={member.user.email || `ID ${member.user.id.slice(0, 8)}`}
                   />
+                  <details className={styles.memberMeta}>
+                    <summary>账号信息</summary>
+                    <p>{member.user.email || '未登记邮箱'}</p>
+                    <p>ID：{member.user.id}</p>
+                    <p>{member.user.account_type} · {member.user.role}</p>
+                  </details>
                 </td>
-                <td>{member.user.account_type}</td>
-                <td>{member.user.role}</td>
                 <td>{roleLabel(member.role)}</td>
-                <td>{new Date(member.joined_at).toLocaleString('zh-CN')}</td>
+                <td><RelativeTime value={member.joined_at} /></td>
                 {permissions.can_manage_members && (
                   <td>
                     <button
-                      className="btn btn-danger"
+                      className="btn btn-secondary"
                       type="button"
-                      onClick={() => removeMember(member.user_id)}
+                      onClick={() => removeMember(member.user_id, member.user.name || member.user.username || member.user.email || `ID ${member.user.id.slice(0, 8)}`)}
                       disabled={member.user_id === project.owner_user_id}
                     >
                       移除
@@ -1207,36 +1909,38 @@ export default function ProjectDetailPage() {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
+      </section>
 
       {permissions.can_manage_members && (
-        <div className="card">
-          <h2 className="section-title">成员管理</h2>
-          <form onSubmit={addMember} style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) 180px auto', gap: 12, alignItems: 'center' }}>
-            <input className="input" value={memberUserId} onChange={(event) => setMemberUserId(event.target.value)} placeholder="用户 ID" />
-            <select className="input" value={memberRole} onChange={(event) => setMemberRole(event.target.value)}>
+        <details className={styles.disclosure}>
+          <summary>通过用户 ID 添加成员</summary>
+          <form onSubmit={addMember} className={styles.memberForm}>
+            <input className="input" value={memberUserId} onChange={(event) => setMemberUserId(event.target.value)} placeholder="用户 ID" aria-label="要添加的用户 ID" disabled={addingMember} />
+            <select className="input" value={memberRole} onChange={(event) => setMemberRole(event.target.value)} aria-label="项目权限" disabled={addingMember}>
               <option value="editor">可编辑</option>
               <option value="member">可生成</option>
               <option value="viewer">仅查看</option>
             </select>
-            <button className="btn btn-primary" type="submit" disabled={!memberUserId.trim()}>添加成员</button>
+            <button className="btn btn-primary" type="submit" disabled={!memberUserId.trim() || addingMember}>{addingMember ? '正在添加…' : '添加成员'}</button>
           </form>
-          <button className="btn btn-secondary mt-4" type="button" onClick={createInvite}>
-            生成 7 天邀请链接
-          </button>
-        </div>
+        </details>
       )}
 
+      </div><aside className={styles.memberAside}>
+      <h2 className="section-title">项目信息</h2>
+      <p>{projectDisplayName(project)}</p><p className="text-gray text-sm">{project.description || '暂无项目说明'}</p>
       {permissions.can_manage_project && (
-        <div className="card">
-          <h2 className="section-title">项目设置</h2>
+        <details className={styles.disclosure} open={settingsOpen} onToggle={(event) => setSettingsOpen(event.currentTarget.open)}>
+          <summary>项目设置</summary>
           <form onSubmit={updateProjectInfo} style={{ display: 'grid', gap: 12, maxWidth: 680 }}>
             <input
               className="input"
               value={editName}
               onChange={(event) => setEditName(event.target.value)}
               placeholder="项目名称"
-              disabled={project.type === 'personal'}
+              disabled={project.type === 'personal' || savingProject}
+              aria-label="项目名称"
             />
             <textarea
               className="input"
@@ -1244,19 +1948,21 @@ export default function ProjectDetailPage() {
               onChange={(event) => setEditDescription(event.target.value)}
               placeholder="项目说明"
               rows={3}
+              disabled={savingProject}
+              aria-label="项目说明"
             />
-            <button className="btn btn-primary" type="submit" disabled={!editName.trim()}>
-              保存信息
+            <button className="btn btn-primary" type="submit" disabled={!editName.trim() || savingProject}>
+              {savingProject ? '正在保存…' : '保存信息'}
             </button>
           </form>
-        </div>
+        </details>
       )}
 
       {permissions.can_manage_project && (
-        <div className="card" style={{ borderColor: 'rgba(248,113,113,0.25)' }}>
-          <h2 className="section-title">危险操作</h2>
+        <details className={styles.disclosure}>
+          <summary>归档与删除</summary>
           <div className="flex items-center" style={{ gap: 10, flexWrap: 'wrap' }}>
-            {project.status === 'archived' ? (
+            {permissions.can_restore ? (
               <button className="btn btn-secondary" type="button" onClick={() => requestProjectAction('restore')}>
                 恢复项目
               </button>
@@ -1265,7 +1971,7 @@ export default function ProjectDetailPage() {
                 className="btn btn-secondary"
                 type="button"
                 onClick={() => requestProjectAction('archive')}
-                disabled={project.type !== 'team'}
+                disabled={!permissions.can_archive}
               >
                 归档为只读
               </button>
@@ -1275,8 +1981,8 @@ export default function ProjectDetailPage() {
                 className="btn btn-danger"
                 type="button"
                 onClick={() => requestProjectAction('delete')}
-                disabled={!canDeleteProject(project)}
-                title={canDeleteProject(project) ? '删除空协作项目' : '仅没有任务和图集的协作项目可删除'}
+                disabled={!permissions.can_delete}
+                title={permissions.can_delete ? '删除已核对为空的协作项目' : '存在内容、账务或历史记录，请使用归档'}
               >
                 删除空项目
               </button>
@@ -1284,11 +1990,24 @@ export default function ProjectDetailPage() {
           </div>
           <p className="text-gray text-sm mt-4">
             {project.type === 'team'
-              ? '归档会保留历史任务和图集；删除只允许没有任务和图集的协作项目。'
+              ? '归档保留历史任务、图集与账务；只有没有业务内容、费用和历史记录的空项目可删除。'
               : '个人空间是系统保留项目，不提供删除操作。'}
           </p>
-        </div>
+        </details>
       )}
+      <button className="link" type="button" onClick={() => setWorkspace(DEFAULT_PROJECT_VIEW)}>重置查看设置</button>
+      </aside></div>}
+
+      {activePreviewTask && <MediaPreview
+        src={activePreviewTask.play_url || `/api/video/play/${encodeURIComponent(activePreviewTask.id)}`}
+        type="video"
+        title={activePreviewTask.prompt || '项目视频'}
+        poster={activePreviewTask.thumbnail_url || undefined}
+        contentKey={`video_task:${activePreviewTask.id}`}
+        previewKey={activePreviewTask.id}
+        details={<div><p>{activePreviewTask.local_status}</p></div>}
+        onClose={() => setActivePreviewTask(null)}
+      />}
 
       {pendingProjectAction && project && (
         <ProjectActionConfirmModal
@@ -1298,6 +2017,14 @@ export default function ProjectDetailPage() {
           busy={projectActionBusy}
           onCancel={() => setPendingProjectAction(null)}
           onConfirm={() => void confirmProjectAction()}
+        />
+      )}
+      {pendingMemberRemoval?.identity === identityKey && loadedDataIdentity === identityKey && project && (
+        <MemberRemovalConfirmModal
+          memberName={pendingMemberRemoval.memberName}
+          busy={memberRemovalBusy}
+          onCancel={() => { if (!memberRemovalBusy) setPendingMemberRemoval(null); }}
+          onConfirm={() => void confirmMemberRemoval()}
         />
       )}
     </div>

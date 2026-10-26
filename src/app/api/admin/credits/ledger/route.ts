@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
+import { canvasSourceJsonMarkers } from '@/lib/canvas-source';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (type) where.type = type;
   if (taskId) where.related_task_id = { contains: taskId };
   if (source === 'ultimate_canvas') {
-    andFilters.push({ metadata_json: { contains: '"source":"ultimate_canvas"' } });
+    andFilters.push({ OR: canvasSourceJsonMarkers().map(contains => ({ metadata_json: { contains } })) });
   } else if (source === 'codex_api') {
     andFilters.push({ metadata_json: { contains: '"interface":"codex"' } });
   } else if (source === 'web') {

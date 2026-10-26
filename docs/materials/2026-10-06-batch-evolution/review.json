@@ -1,0 +1,46 @@
+{
+  "scope": ["BATCH1", "EVO1", "REL1", "NOTIFY1", "PREVIEW1"],
+  "review": "implementation lead static review; no independent review or functional acceptance",
+  "evidenceWhitespace": "Application source diff and JSON/scripts pass whitespace checks. Literal app.diff keeps git patch context blank lines verbatim; full build logs retain original output. Evidence whitespace check excludes these generated raw artifacts, not application source.",
+  "correctedFindings": [
+    "Candidate lint reserved-variable naming and TypeScript ES5/stream typing corrected as one batch; candidate archive includes the unchanged tracked gateway import needed by typecheck",
+    "Unknown ordinary/avatar results remain observed; batch completion also requires zero uncertain items; unknown batch projection is not labelled complete",
+    "Same-account accepted watches survive internal route changes; route effect only clears old title, account changes and real runtime unmount clear watches",
+    "Explicit selected-failure batch retry registers a fresh operation receipt while replacing the prior watch, retaining one whole-batch summary",
+    "History relative-time control is outside its navigation button; output-directory save state and lock are shared across same-session result views"
+  ],
+  "privacy": {
+    "ownershipDoesNotGrantHiddenTemplateAccess": true,
+    "listAndDetail": "Explicit public batch/item projection only; no raw input or snapshot JSON, hidden shared context, fixed image notes, owner identity or private source URLs",
+    "assets": "Existing studioVisibleAssetWhere and authenticated asset routes protect underlying files as well as asset ids",
+    "export": "Explicit generation/file/save fields only; download provision is not a confirmed device save",
+    "taskSnapshot": "Existing publicStudioSnapshot protection preserved; new public evolution value projects direction/manual only",
+    "localPersistence": "Account/module scoped safe preferences and stable submission id; no filesystem path or private server snapshot saved for notifications"
+  },
+  "billingAndQueue": {
+    "providerAndSettlement": "Existing provider, worker, allocation/freeze/settlement reused; no new billing path",
+    "dispatch": "Worker only; GET never creates generation; queued/running share ordinary owner limit 8; account/template/material checks repeated before dispatch",
+    "budget": "Explicit total/unit price/estimate/ceiling; changed price or insufficient points stops new dispatch; retry only confirmed failure, each item at most 3 retries",
+    "bounds": "100 images/files, 30MB per input, 256MB input batch, 5 unfinished batches, 8 images and 128MB per streamed ZIP package",
+    "unknown": "No automatic resend or false completion; original task remains queryable"
+  },
+  "evolution": "Explicit capability marker or verified legacy template only; existing supplementary textarea; body wins unselected defaults, clear manual conflict blocks in place; real prompt/snapshot/history/draft/batch integration; stages/count/layout unchanged; no AvatarDNA for unrelated templates",
+  "completion": "Session-started accepted operations only, bounded watches/receipts; sound default off and user gesture resume must be running; hidden title briefly then steady, reduced motion stays steady, foreground clears title; no system permission/push/database receipt; no guarantee after close or phone lock",
+  "preview": "Actual generated main/candidate/history assets bind to existing ZoomableImagePreview; original click selection preserved; desktop double-click and mobile tap/keyboard available; text DNA is not labelled an image; reactions/download retained",
+  "releaseNotice": "Same existing package-version/release-summary/ReleaseNotice chain; numeric SemVer, short bold enlarged title, manual check, later-version dedupe and page-exit/draft guard retained; anonymous summary remains empty under existing access policy, authenticated internal summary populated",
+  "authorization": "No dependency installation/update, schema migration, direct production DB write, paid generation, browser or business API acceptance; supervisor retains formal-root records",
+  "classificationMisjudgment": "none",
+  "primaryReferences": [
+    { "url": "https://github.com/thejoshwolfe/yazl", "use": "Existing installed MIT streaming ZIP implementation; lazy read stream code inspected, no dependency added" },
+    { "url": "https://developer.mozilla.org/en-US/docs/Web/API/Window/showDirectoryPicker", "use": "Native user-gesture directory permission with ZIP fallback" },
+    { "url": "https://developer.chrome.com/blog/autoplay/", "use": "Explicit user gesture creates/resumes AudioContext; suspended is not reported as audible" },
+    { "url": "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API", "use": "Visibility-based attention and timer throttling boundary; no close/lock-screen delivery guarantee" }
+  ],
+  "manualRemaining": {
+    "BATCH1": "Real generated results, cross-template history and account switch; pause/cancel and balance/price stop; selected failure retries vs unknown query; directory permission loss, save-only retry and mobile ZIP",
+    "EVO1": "Target template direction/body prompt effect, manual conflict, restored history/draft and batch effect; original stages/layout preserved visually",
+    "REL1": "Old authenticated client update popup/manual check/later and draft preservation; deployment checks are not functional acceptance",
+    "NOTIFY1": "Real terminal mixed outcomes/unknown recovery, route continuity, foreground/no-flash, hidden title and explicit audio unlock under browser throttling",
+    "PREVIEW1": "Real main/candidate/history thumbnails and desktop/mobile preview, zoom/back-first-close and unchanged reactions/download layout"
+  }
+}

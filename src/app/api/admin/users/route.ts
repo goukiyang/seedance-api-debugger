@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
+import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 import type { SessionUser } from '@/lib/auth/session';
 import { grantInitialCredits, getCreditPolicy, resolveInitialGrantAmount } from '@/lib/credits/policy';
 import {
@@ -19,6 +20,23 @@ export async function GET(request: NextRequest) {
     await getAdminUser(request);
   } catch {
     return errorJson('权限不足', 403);
+  }
+
+  if (request.nextUrl.searchParams.get('lite') === 'true') {
+    const users = await prisma.user.findMany({
+      where: { status: { not: 'deleted' } },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        avatar_url: true,
+        status: true,
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return NextResponse.json({ users });
   }
 
   const now = new Date();
@@ -52,14 +70,14 @@ export async function GET(request: NextRequest) {
       credit_buckets: {
         where: {
           source_type: 'daily_quota',
-          status: 'active',
-          OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+          OR: [{ frozen_amount: { gt: 0 } }, { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: now } }] }],
         },
         select: {
           amount_total: true,
           amount_remaining: true,
           frozen_amount: true,
           expires_at: true,
+          status: true,
         },
       },
     },
@@ -70,10 +88,11 @@ export async function GET(request: NextRequest) {
     users: users.map((user) => ({
       ...user,
       credit_quota: {
-        daily_total: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_total, 0),
-        daily_remaining: user.credit_buckets.reduce((total, bucket) => total + bucket.amount_remaining, 0),
+        daily_total: user.credit_buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now)).reduce((total, bucket) => total + bucket.amount_total, 0),
+        daily_remaining: user.credit_buckets.filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now)).reduce((total, bucket) => total + bucket.amount_remaining, 0),
         daily_frozen: user.credit_buckets.reduce((total, bucket) => total + bucket.frozen_amount, 0),
         daily_expires_at: user.credit_buckets
+          .filter(bucket => bucket.status === 'active' && (!bucket.expires_at || bucket.expires_at > now))
           .map((bucket) => bucket.expires_at)
           .filter(Boolean)
           .sort((a, b) => Number(a) - Number(b))[0] || null,
@@ -131,7 +150,10 @@ export async function POST(request: NextRequest) {
           name,
           username,
           email,
-	          password_hash: hashPassword(password),
+	          password_hash: maintainAccountSessionBinding(
+              { id: '', password_hash: '', role: 'user', account_type: 'external' },
+              { id: '', password_hash: '', role, account_type: accountType, feature_profile_id: featureProfileId },
+              hashPassword(password)),
 	          role,
 	          account_type: accountType,
 	          user_profile: userProfile,

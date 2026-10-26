@@ -1,0 +1,322 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import Cropper, { type Area } from 'react-easy-crop';
+import { ArrowLeftRight, ImagePlus, RotateCcw, Save, X } from 'lucide-react';
+import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { useProductDialog } from '@/components/useProductDialog';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { uploadFileAsAsset } from '@/lib/http/file-upload';
+import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
+import { MODULE_COVER_OUTPUT, type ModuleCoverDTO, type ModuleCoverCrop, type ModuleCoverEditorState, type ModuleCoverLayout, type ModuleCoverSquareRecipe, type ModuleCoverRequestResult, type ModuleCoverSaveInput, type ModuleCoverSaveResult, type ModuleCoverSourceDTO, type ModuleCoverSelection } from '@/lib/image-studio/module-cover-types';
+import styles from './ModuleCoverEditor.module.css';
+
+type Slot = { source: ModuleCoverSourceDTO; crop?: ModuleCoverCrop; restore?: ModuleCoverCrop; key: number } | null;
+const layouts: Array<[ModuleCoverLayout, string]> = [['single', '单图'], ['horizontal', '左右'], ['vertical', '上下']];
+const output = { width: MODULE_COVER_OUTPUT.width, height: MODULE_COVER_OUTPUT.height } as const;
+
+function sameCrop(left: ModuleCoverCrop, right: ModuleCoverCrop) {
+  return (['x', 'y', 'width', 'height'] as const).every(key => Math.abs(left[key] - right[key]) < 0.001);
+}
+
+function validCrop(crop: ModuleCoverCrop, source: ModuleCoverSourceDTO, aspect: number) {
+  if (!Object.values(crop).every(Number.isFinite) || crop.x < 0 || crop.y < 0 || crop.width <= 0 || crop.height <= 0
+    || crop.x + crop.width > 100.00001 || crop.y + crop.height > 100.00001
+    || !Number.isInteger(source.width) || !Number.isInteger(source.height) || source.width < 1 || source.height < 1) return false;
+  // Match renderCover's rounding and clamping on the oriented original pixels.
+  const left = Math.min(source.width - 1, Math.round(source.width * crop.x / 100));
+  const top = Math.min(source.height - 1, Math.round(source.height * crop.y / 100));
+  const cropWidth = Math.min(source.width - left, Math.round(source.width * crop.width / 100));
+  const cropHeight = Math.min(source.height - top, Math.round(source.height * crop.height / 100));
+  return cropWidth >= 1 && cropHeight >= 1 && Math.abs(cropWidth / cropHeight - aspect) <= Math.max(0.01, 3 / cropHeight);
+}
+
+async function json<T>(response: Response): Promise<T> {
+  const value = await response.json().catch(() => null);
+  if (!response.ok || !value) throw Object.assign(new Error(value?.error || '暂时无法确认，请重试'), { status: response.status });
+  return value as T;
+}
+
+function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNullable<Slot>; aspect: number; disabled: boolean; onCrop: (crop?: ModuleCoverCrop) => void; onInteract: () => void }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [failed, setFailed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const loaded = useRef(false), restored = useRef(false), latestArea = useRef<Area | null>(null);
+  const publishCrop = (area: Area) => {
+    latestArea.current = area;
+    if (!loaded.current || !validCrop(area, slot.source, aspect)) return;
+    // v6.2.4 emits the default area before setInitialCrop. Only accept the
+    // restored percentages after they agree, including when no state change is needed.
+    if (!restored.current && slot.restore && !sameCrop(area, slot.restore)) return;
+    restored.current = true;
+    setReady(true);
+    onCrop(area);
+  };
+  return <div className={styles.cropSlot} aria-disabled={disabled || !ready || undefined}>
+    <Cropper image={slot.source.previewUrl} crop={position} zoom={zoom} aspect={aspect} maxZoom={12}
+      initialCroppedAreaPercentages={slot.restore}
+      onCropChange={value => { if (!restored.current || !disabled) setPosition(value); }}
+      onZoomChange={value => { if (!restored.current || !disabled) setZoom(value); }}
+      onCropAreaChange={publishCrop} onInteractionStart={() => { if (ready && !disabled) onInteract(); }}
+      onMediaLoaded={media => {
+        if (!(media.naturalWidth > 0 && media.naturalHeight > 0)) return;
+        // The protected source URL serves the oriented original, so crop percentages
+        // and the saved Sharp render both refer to these exact pixel dimensions.
+        if (!Number.isInteger(slot.source.width) || !Number.isInteger(slot.source.height) || slot.source.width < 1 || slot.source.height < 1
+          || media.naturalWidth !== slot.source.width || media.naturalHeight !== slot.source.height) {
+          loaded.current = false; setFailed(true); setReady(false); onCrop(); return;
+        }
+        loaded.current = true; setFailed(false);
+        if (latestArea.current) publishCrop(latestArea.current);
+      }}
+      onWheelRequest={() => ready && !disabled} onTouchRequest={() => ready && !disabled}
+      showGrid={!disabled} keyboardStep={5} cropperProps={{ tabIndex: disabled || !ready ? -1 : 0, 'aria-label': '拖动图片选择封面局部，可用方向键微调' }}
+      mediaProps={{ onError: () => { loaded.current = false; restored.current = false; setFailed(true); setReady(false); onCrop(); } }} />
+    {failed && <span className={styles.imageError}>图片无法读取，请重新选择</span>}
+    {!failed && !ready && <span className={styles.imageError} role="status">正在准备裁剪；若未能恢复，可重置裁剪或重新选图。</span>}
+    <label className={styles.zoom}>缩放<input type="range" min="1" max="12" step="0.01" value={zoom} disabled={disabled || !ready}
+      onChange={event => { onInteract(); setZoom(Number(event.target.value)); }} aria-label="封面图片缩放" /></label>
+  </div>;
+}
+
+function CropPreview({ slot }: { slot: Slot }) {
+  if (!slot?.crop) return <span className={styles.previewEmpty} />;
+  const crop = slot.crop;
+  return <span className={styles.previewCell}><img src={slot.source.previewUrl} alt="" draggable={false} style={{
+    width: `${10000 / crop.width}%`, height: `${10000 / crop.height}%`, left: `${-100 * crop.x / crop.width}%`, top: `${-100 * crop.y / crop.height}%`,
+  }} /></span>;
+}
+
+type CurrentPreview = { imageUrl: string; referenceUrl?: string | null };
+type PreviewModule = { id: string; fixedCover?: ModuleCoverDTO | null; sharedLive?: { intent: { presetId: string }; available: boolean } | null;
+  cover?: { thumbnailUrl?: string | null; referenceUrl?: string | null } | null; banner?: { thumbnailUrl?: string | null } | null; images?: Array<{ thumbnailUrl?: string | null }> };
+function CurrentCover({ cover, preview, error }: { cover: ModuleCoverDTO | null; preview: CurrentPreview | null; error: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = cover ? cover.available ? cover.imageUrl || cover.thumbnailUrl : null : preview?.imageUrl;
+  return <div className={styles.currentCover}>
+    <span>{cover ? '当前已保存封面' : '当前显示封面，尚未固定'}</span>
+    {src && !failed ? <div className={styles.currentPreview}>
+      {!cover && preview?.referenceUrl && <img src={preview.referenceUrl} alt="当前封面中的生成前参考图" draggable={false} onError={() => setFailed(true)} />}
+      <img src={src} alt={cover ? '当前已保存封面' : '当前封面代表图'} draggable={false} onError={() => setFailed(true)} />
+    </div> : <p role="status">{cover ? cover.unavailableReason || '当前封面暂时无法读取，请稍后重新打开。'
+      : error || (failed ? '当前封面图片暂时无法读取，请重新打开。' : '暂无合法代表图，可选图设置固定封面。')}</p>}
+  </div>;
+}
+
+export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSaved }: { userId: string; moduleId: string; moduleName: string; onClose: () => void; onSaved: (cover: ModuleCoverDTO) => void }) {
+  const { user, sessionChanged } = useAppSession();
+  const scopeKey = `${userId}:${moduleId}:${user?.id || ''}:${sessionChanged}`;
+  const scope = useRef({ key: scopeKey });
+  if (scope.current.key !== scopeKey) scope.current = { key: scopeKey };
+  const expectedScope = scope.current;
+  const sessionAllowed = user?.id === userId && !sessionChanged && !isClientSessionBlocked();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const { confirm, productDialog } = useProductDialog();
+  const [state, setState] = useState<ModuleCoverEditorState | null>(null);
+  const [preview, setPreview] = useState<CurrentPreview | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const [layout, setLayout] = useState<ModuleCoverLayout>('single');
+  const [slots, setSlots] = useState<Slot[]>([null, null]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState(true);
+  const [error, setError] = useState('');
+  const [pickerSlot, setPickerSlot] = useState<number | null>(null);
+  const [pending, setPending] = useState<ModuleCoverSaveInput | null>(null);
+  const [retryAllowed, setRetryAllowed] = useState(false);
+  const [reading, setReading] = useState(false);
+  const busyRef = useRef(false), alive = useRef(true), sequence = useRef(0);
+  const selection = useRef<{ assetId: string; index: number; paired: boolean } | null>(null);
+  const selectionEpoch = useRef(0);
+  const selectionRequest = useRef<AbortController | null>(null);
+  const endpoint = `/api/image-studio/modules/${encodeURIComponent(moduleId)}/cover`;
+  const count = layout === 'single' ? 1 : 2;
+  const legacyDraft = state?.recipe?.version === 1;
+  const disabled = !sessionAllowed || busy || reading || Boolean(pending);
+  const current = useCallback(() => alive.current && scope.current === expectedScope && sessionAllowed && !isClientSessionBlocked(), [expectedScope, sessionAllowed]);
+  const modified = () => { if (current() && !disabled) setDirty(true); };
+  useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [], onBlocked: setError });
+
+  const initialize = useCallback(async () => {
+    if (!current()) return;
+    selectionEpoch.current += 1; selectionRequest.current?.abort(); selection.current = null;
+    setReading(false); setLoading(true); setError(''); setState(null); setPreview(null); setPreviewError('');
+    try {
+      const value = await json<ModuleCoverEditorState>(await fetch(endpoint, { cache: 'no-store' }));
+      if (!current()) return;
+      setState(value); setLayout(value.recipe?.layout || 'single'); setEditing(value.recipe?.version !== 3);
+      const restored = value.recipe?.sources.map(item => {
+        const source = value.sources.find(source => source.assetId === item.assetId && source.version === item.version);
+        // A legacy 4:3 percentage crop is not a square crop. Reframe the same
+        // authorized original; keep the saved cover intact until explicit Save.
+        return source ? { source, restore: value.recipe?.version === 2 ? item.crop : undefined, key: ++sequence.current } : null;
+      }) || [];
+      setSlots([restored[0] || null, restored[1] || null]);
+      setDirty(false); setError(value.sourceError || '');
+      if (!value.fixedCover && value.target.kind === 'module') {
+        try {
+          const data = await json<{ modules: PreviewModule[] }>(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(moduleId)}`, { cache: 'no-store' }));
+          if (!current()) return;
+          const previewModule = data.modules?.find(item => item.id === moduleId);
+          if (!previewModule || value.target.id !== moduleId || Boolean(previewModule.sharedLive)) throw new Error('当前封面归属或权限未能确认，请重新读取。');
+          if (previewModule.fixedCover) throw new Error('固定封面刚有变化，请重新读取当前封面。');
+          const imageUrl = previewModule.cover?.thumbnailUrl || previewModule.banner?.thumbnailUrl || previewModule.images?.[0]?.thumbnailUrl;
+          setPreview(imageUrl ? { imageUrl, referenceUrl: previewModule.cover?.referenceUrl } : null);
+        } catch (cause) { if (current()) setPreviewError(cause instanceof Error ? cause.message : '当前显示封面未能读取，请重新打开。'); }
+      }
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '封面读取失败'); }
+    finally { if (current()) setLoading(false); }
+  }, [endpoint, moduleId, current]);
+  useEffect(() => {
+    alive.current = true; dialog.current?.showModal(); void initialize();
+    return () => { alive.current = false; selectionEpoch.current += 1; selectionRequest.current?.abort(); };
+  }, [initialize]);
+  const dismiss = () => {
+    if (busyRef.current || pending || pickerSlot !== null) return;
+    void (async () => {
+      if (dirty && !await confirm('封面裁剪还未保存，放弃这次调整吗？', { title: '放弃调整', confirmLabel: '放弃调整' })) return;
+      if (!current()) return;
+      onClose();
+    })();
+  };
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: dismiss });
+
+  function complete(result: ModuleCoverSaveResult) {
+    if (!current()) return;
+    setPending(null); setDirty(false); onSaved(result.fixedCover); onClose();
+  }
+  async function check(input: ModuleCoverSaveInput) {
+    const result = await json<ModuleCoverRequestResult>(await fetch(`${endpoint}?requestId=${encodeURIComponent(input.requestId)}`, { cache: 'no-store' }));
+    if (!current()) return;
+    if (result.status === 'saved') { complete(result); return; }
+    if (result.status === 'failed') {
+      setPending(null); setRetryAllowed(false); setError(result.error || '封面保存失败，原封面保留，请重试'); return;
+    }
+    setPending(input); setRetryAllowed(result.status === 'not-found');
+    setError(result.status === 'pending' ? '正在确认这次保存，原封面保留。请稍后检查结果。' : '暂未查到这次保存，可用同一次请求重试，避免重复保存。');
+  }
+  async function save(retry?: ModuleCoverSaveInput) {
+    if (!current() || busyRef.current || !state?.canManage) return;
+    const selected = slots.slice(0, count);
+    if (!retry && selected.some(slot => !slot?.crop)) return;
+    let input = retry;
+    if (!input) {
+      const recipe: ModuleCoverSquareRecipe = { version: 2, layout, sources: selected.map(slot => ({ assetId: slot!.source.assetId, version: slot!.source.version, crop: slot!.crop! })), output };
+      input = { requestId: crypto.randomUUID(), expectedRevision: state.revision, target: state.target, recipe };
+    }
+    busyRef.current = true; setBusy(true); setError(''); setPending(input); setRetryAllowed(false);
+    try {
+      const result = await json<ModuleCoverRequestResult>(await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(90000) }));
+      if (!current()) return;
+      if (result.status === 'saved') complete(result);
+      else await check(input);
+    } catch (cause) {
+      if (!current()) return;
+      const status = (cause as { status?: number }).status;
+      if (status && status < 500) { setPending(null); setError(cause instanceof Error ? cause.message : '封面保存未完成'); }
+      else {
+        try { await check(input); }
+        catch { setError('保存结果暂时无法确认，输入与原封面都已保留。请检查这次保存结果。'); }
+      }
+    } finally { if (current()) { busyRef.current = false; setBusy(false); } }
+  }
+  async function checkPending() {
+    if (!current() || !pending || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try { await check(pending); }
+    catch { if (current()) setError('仍无法确认保存结果，请稍后再次检查；不要重复创建新封面。'); }
+    finally { if (current()) { busyRef.current = false; setBusy(false); } }
+  }
+  async function choose(assetId: string, index: number, nextLayout = layout) {
+    if (!current()) return false;
+    const epoch = ++selectionEpoch.current;
+    selectionRequest.current?.abort();
+    const controller = new AbortController();
+    selectionRequest.current = controller;
+    const active = () => current() && selectionEpoch.current === epoch && !controller.signal.aborted;
+    setReading(true); setError('');
+    try {
+      const value = await json<ModuleCoverSelection>(await fetch(`${endpoint}?originOf=${encodeURIComponent(assetId)}`,
+        { cache: 'no-store', signal: controller.signal }));
+      if (!active()) return false;
+      if (value.source?.assetId !== assetId) throw new Error('未能确认选中的图片，请重新选择');
+      const split = nextLayout !== 'single';
+      const previousPair = selection.current?.paired;
+      setSlots(previous => {
+        const next = [...previous];
+        next[index] = { source: value.source, key: ++sequence.current };
+        if (split && value.originState === 'ready' && value.originSource) {
+          next[1 - index] = { source: value.originSource, key: ++sequence.current };
+        } else if (split && (value.originState !== 'not-generated' || previousPair)) {
+          // A new generated result must never retain the previous result's input.
+          next[1 - index] = null;
+        }
+        return next;
+      });
+      selection.current = { assetId, index, paired: split && value.originState === 'ready' && Boolean(value.originSource) };
+      if (split && value.originState !== 'ready' && value.originState !== 'not-generated') {
+        setError(value.originState === 'multiple' ? '这次生成用了多张输入主图，无法自动确定对比原图。'
+          : value.originState === 'none' ? '这张结果是纯文字生成，没有输入原图可自动对比。'
+          : value.originState === 'unavailable' ? '这张结果的输入原图已不可用或无权用于封面，另一格未填入。'
+          : '这张结果的历史记录无法确认输入原图，另一格未填入。');
+      }
+      setDirty(true);
+      return true;
+    } catch (cause) {
+      if (active()) setError(cause instanceof Error ? cause.message : '图片未能读取，请重试');
+      return false;
+    } finally {
+      if (active()) { selectionRequest.current = null; setReading(false); }
+    }
+  }
+  function changeLayout(value: ModuleCoverLayout) {
+    if (disabled || value === layout) return;
+    setLayout(value); setDirty(true);
+    // A shape change resets crop geometry but preserves the selected identities.
+    setSlots(previous => previous.map(slot => slot ? { source: slot.source, key: ++sequence.current } : null));
+    if (layout === 'single' && value !== 'single') {
+      const source = slots[0]?.source;
+      if (source) void choose(source.assetId, 0, value);
+    } else if (value === 'single') {
+      const selected = slots[selection.current?.index ?? 0];
+      selection.current = selected ? { assetId: selected.source.assetId, index: 0, paired: false } : null;
+      setSlots([selected ? { source: selected.source, key: ++sequence.current } : null, null]);
+      setError('');
+    }
+  }
+  return createPortal(<>{productDialog}<dialog ref={dialog} className={styles.dialog} aria-label={`设置封面：${moduleName}`} aria-busy={busy || undefined}>
+    <header className={styles.header}><div><h2>设置封面</h2><p>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
+    {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
+      {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
+      <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
+      {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
+      {editing && <><div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
+        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { if (selection.current) selection.current.index = 1 - selection.current.index; setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
+      </div>
+      <p className={styles.hint}>选图后拖动或缩放选择局部；左右、上下排版会自动带入所选生成结果的输入原图。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
+      <div className={`${styles.editFrame} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <div key={index} className={styles.cell}>
+        {slot ? <CropSlot key={`${scopeKey}:${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 1 / 2 : layout === 'vertical' ? 2 : 1} disabled={disabled || !state.canManage}
+          onInteract={modified} onCrop={crop => { if (current()) setSlots(previous => previous.map((item, i) => i === index && item?.key === slot.key && !(item.crop && crop && sameCrop(item.crop, crop)) ? { ...item, crop } : item)); }} /> : <span className={styles.empty}>选择图片</span>}
+        <div className={styles.cellActions}><button type="button" disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} />{slot ? '换图' : '选择图片'}</button>
+          {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
+      </div>)}</div>
+      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : legacyDraft ? '（保存后生效）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div></>}
+      {error && <p className={styles.error} role="alert">{error}</p>}
+      <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
+        {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
+          : editing && <button type="button" className={styles.primary} disabled={disabled || !editing || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
+      </footer>
+    </>}
+    {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片（只能用作者本人的图片）" confirmLabel="使用这张图片" purpose="module-cover" contextTemplateId={moduleId} contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
+      onClose={() => { selectionEpoch.current += 1; selectionRequest.current?.abort(); selectionRequest.current = null; setReading(false); setPickerSlot(null); }} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
+      onConfirm={async ids => {
+        if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false;
+        setPickerSlot(null); return true;
+      }} />}
+  </dialog></>, document.body);
+}

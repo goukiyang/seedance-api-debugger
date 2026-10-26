@@ -1,0 +1,30 @@
+[Unit]
+Description=SD2 bounded role collaboration coordinator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gouki
+Group=gouki
+WorkingDirectory=/data/video-api-debugger/role-coordinator/current
+EnvironmentFile=/data/video-api-debugger/role-coordinator/current/.env
+Environment=NODE_ENV=production
+Environment=TMPDIR=/data/video-api-debugger/role-coordinator/tmp
+ExecStart=/usr/bin/flock --no-fork -n /data/video-api-debugger/role-coordinator/locks/coordinator.lock /usr/bin/node --import tsx scripts/canvas-role-coordinator.ts
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=90
+KillMode=mixed
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
+TasksMax=32
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

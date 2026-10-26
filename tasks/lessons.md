@@ -1,5 +1,181 @@
 # Lessons
 
+## 2026-10-22 - 相容guard要独立核类型与拒绝分支
+
+- MV-DEFAULT01主程序类型通过不能代替相容guard。guard在原回执返回后、报价前对多视图快照直接提前return，会令TypeScript把后续共享路径收窄成null/never；完整guard类型诊断须一次收齐，不能只修Next首报。此类只改拒绝逻辑的产物也要在完整构建前独立核其自身类型。
+- 本次只将拒绝条件改为Boolean包装，仍对同一快照返回原503/privateNoStore，位置、原号恢复及全部return不变；不以类型强转、删校验、忽略类型或放开新创建绕过。其它包版本/写开关/摘要差异分别核对，同因修改完成后统一复查和正常新批次双完整构建。
+- 静态接线核字段、函数及局部值的真实语法，注释或出现次数不冒调用/权限证明；原20入口及行为检查保持。失败原run、原构建起止/TTL和子证保留，构建/健康不能冒用户功能验收。
+
+## 2026-10-21 - 小改发布复用成功控制，不混身份和重新制造输入
+
+- RATE-FIX反复卡在控制身份/观测/fixture接线，非应用反复编译失败：历史证书原身份、当前六角色启动身份、Git sourceBase与候选pair须分开。当前guard不一定是main祖先；合法guard源码仍须排尽旧PID。全站无host日志不能归本站，运行目录别名不能套root控制文件reader。
+- 原成功构建不动，按完整输入重验整对后另发fresh准入；schema和candidateEvidenceKind由固定准备入口提供，不能手写漏字段。控制变更单独核，未改app不重复编译，源码变化则完整新构建；不混pair，不刷新原成功时间或降低价格、数据、回退门。
+- 固定入口及锁定profile见 `ops/sd2-release-prepare.mjs` / `docs/ubuntu24-deployment.md`。所有可提前发现的静态/配置/恢复问题在维护前集中检查，实际连接/在途条件切换时重核。失败保留原run与累计分类，不靠另开run或补一个测一个重置问题；新控制须整批验证和Review后晋升，不编辑历史成功包。完整根因/附件见正式根费率工单§24.5。
+
+## 2026-10-19 - HD历史保留与当前复用分开
+
+- H01–H10最终9b720已在真实新主/guard两完整Linux20构建后保护部署v0.99.2；先前私有接线失败不能泛成产品/编码质量缺陷，修正后也不抹失败或复用过期构建。恢复后六角色PID/Invocation/ExecMainStart须一起fresh capture，HD父子/flock也核真实集合，不能只改image一行又沿用旧启动。
+- 同run维护前prepare与安装前prepare须真实复用同一已核module/native IO和同字节探针；模块反复import不能冒双prepare验证。中间runtime probe含Restart=no/infinity等临时策略，不能当最终状态；完成后核精确run drop-in确已撤及原Restart/Timeout/SendSIGKILL恢复，而非只看进程active。原HD env/cwd/no-fork正式配置不随临时文件一起拆。
+- 公网匿名release摘要空先核原权限投影和真实internal摘要来源，再判断是否丢失；补实际layout产物同字节只能证明提醒代码已发布，不能冒旧客户端弹窗或整页功能手验通过。已部署、工程门、用户手验、相容回退演练分层记录。
+
+- R07采用保helper原字节的精确copy/import而非删目录断言：私有代码目录与operation数据目录职责不同，同一已核namespace贯穿prepare/install/read/restore，真实prepare应先于维护。原生21另补同run/同IO两次prepare核原inode/SHA/owner/0444/单链接不变，不能把模块两次加载冒两次准备已证。隔离tar的`.`也会把已建0700父恢复0755；本次原门正确拒绝，仅修自有测试父目录并补失败FS组，其余原件按同源SHA复用。该配套错误与产品、原生网络机制分开计，不延时效或抹旧失败。
+
+- native只读beforeMaintenance通过不等于后续probe/install接线可用：5c2d的helper由fix01-release静态导入，却硬要求import.meta.url所在目录等于hd-release-safety-r03，维护并停原image/HD后才首次触达prepareProbe而拒绝。无fence/新pair/新writer，原服务与入口已21:44Z精确恢复；须先复盘probe/install/restore/empty-lock全部真实模块路径，再选最小修正及独立unit/临时DB全链验证，不拿mock或只读主体冒native切换全链。恢复入口也需等待nginx真实reload生效后的200，不能用reload命令exit0代替；首次过早503/重挂与最终恢复原件分别保留，不扩大成业务故障或修改质量规则。
+
+- 发布输入先按真实责任分类，不能将root专属材料reader套到既有应用配置：16d两完整build成功后，维护前`.env` uid1004/0600被误拒，同类还有Nginx uid501/0644及维护后保原owner的config/swap。不以chown/chmod或放宽全部rootFile兜；原配置按稳定FD、精确原/本run维护身份及SHA保护，root材料/内核proc/可追加日志各保原合同。只跑外层proof或mock不足以覆盖adapter；本次集中17真实FS/26适配及完整native只读主体均实际通过，工程不授发布权，旧批准/build过期不续签。
+
+- systemd观测缺字段不能一律判配置缺失或默认为空：483c双完整build通过，最终只读proof因旧HD空ExecStartPre仍被`show --all`省略而拒绝。仅固定HD/该一字段可用原生D-Bus严格类型及空数组证明规范，Web/image实际root启动保护与其它字段不放松；先在真实三unit只读证明再开新build。保原build/manifest/失败，沿新精确源/run，不因读证修正引入补充授权或跨run续签。
+
+- 高清发布保护不能把所有旧manifest都当成当前源版本：4条已标source_changed与7条旧v2 ready在f140主prepare被误拦。字段重算证实旧key对应原version、当前原件是另一身份；只冻结明确旧清单和成果，保留不等于允许当前复用。新请求继续按当前身份算新key，未知/再变/坏完整性拒绝，不补历史字段或重压。
+- 缺integrity的旧ready只沿明确60条原盘点完整SHA/身份集合处理，不能把所有缺字段对象当旧版；真实候选路径与实际Sharp头/尺寸核对不能由合成FS通过代替。Mac超时、候选prepare拒绝、完整构建与功能手验分别记，不抬时限或伪造成功回执。
+- 旧Web同步图片admission仅覆盖该调用的完整Promise，不覆盖所有视频/H3预上传/分块建票据/邮件/登录及脱离HTTP的工作。连接0或inactive不能冒全业务已排空；已确认无统一封口时暂停生产切换，向用户说明维护条件，不借本批扩全站改造或擅自封网。
+- env-i不会清umask：外层日志077会让原0444票据变0400而被正常prepare拒绝。先对齐完整调用的环境/umask/父目录/owner/nlink和写读命名空间，沿原022与私有0700日志父，不放宽权限门或修改旧失败产物。服务启动保护读的是systemd当前WorkingDirectory，不是子进程cwd；真实main→guard→main四门应保原回执，不用改cwd伪造重复检查。
+- 先读实际exit/signal/子回执再归因：2e5 Linux HD整批32.468秒自然退出，24/25与12/13各一断言失败，不是此前Mac180秒超时。首次未读原件即联想超时已纠正并录原全局同主题误判条目；超时、断言、执行环境与产品硬保护分别定位，不因透明用例失败就放松完整性或全局硬停。
+- 接入已发布增量后，应用源码合入不等于私有发布reader的重复源清单也已同步。0ef4应用npm/类型lint/87页构建成功，但私有MV清单漏53eb既有FrameImage而拒绝，不能称产品构建失败或事后冒原成功回执；一次核完整producer/reader实际集合并保缺项/多项反证，沿原不可变根/真实时段重建，不增加收养或续签规则。仅清单一项变化，其余21私有源及业务字节保持。
+
+## 2026-10-19 - MV16 先核真实会话再采性能
+
+- 原证打包等命令实际退出再算哈希：首次index抓到final-proof空hash被逐项核验拒绝；保旧包/错误，仅原proof完成后重打final证据包，不重跑部署/改原receipt。窗口外层输出有界，截断后只读核原登记，不二次append或平移时刻。
+
+- 发布保护区分冻结费用/输入与用户正常可变的可见性：本批8e9实际仅deleted_at变化却被整体hash误拦。先做字段级hash重建和原端点证据，再独立单向tombstone保护；旧隐藏不可复活/改时/丢行，原费用/原图/回执仍严等。成功编译与保护gate失败分层，不改生产数据消差异，不补造未落盘build回执。
+- Linux20/tsx工程fixture须保持同一真实模块加载图；混用动态ESM与alias CJS会使同源Error构造器分裂、instanceof失败。先用原隔离DB只读追原函数/原API证实409与503分界，只统一fixture导入，不放宽产品catch或断言；本机Node22通过不能冒Linux20通过。
+- 独立Chromium返回200不等于已核xiaobo/用户Chrome会话。此次worker先在自建隔离页做6次同目标GET，后核账号来源缺口；已关自建会话，原样本仅工具输出抄录，不冒真实用户p95。无作品/选帧写入、生成或收费，现无越权/泄露证据，不扩大结论。
+- 先核应用/profile/账号及页签占用，再做授权的同视频有界只读诊断；源码证明卡顿路径与真实页面“丝滑”分层。图集预览与实际帧标签须相符，320px只供预览，放大/导出/作品仍取精确原帧；按源/账号隔离回收缓存。
+
+## 2026-10-19 - 上传目录合同须覆盖真实发布布局
+
+- 安全helper拒绝leaf软链接，而发布器把全部storage leaf接成软链接，会让共享新上传在stage前必然拒绝；进程健康与普通源码构建不能代替候选真实目录检查。只兼容精确受信canonical，最终0700/uid/data/容量/访问条件不放松，不迁移共享storage或擅改权限。
+- 唯一既有0775父不能机械允许或chmod：仅固定路径/owner/gid成立且每次实际核主组、显式成员、ACL和NSS来源均未扩写入主体才受信，未知即拒绝；付出有界只读子进程成本而不缓存跳过安全核验。
+- 只有writing之前、当前receiving nonce的CAS能证明此次未保存；旧writing不能因找到根因或缺回执而解锁。目录读取错误与逐文件上传错误分别保存，刷新目录不清失败原因，已成功文件不再传。FIX01 v0.97.1已保护部署、待用户手验，工程/发布原件在正式根工单§8的d983e8ce目录；保30旧未知原请求不解锁或重发。
+- 既有multipart完成状态缺片时不降级/造原号；仅沿原token真实可用动作显示“核对”或“继续上传”，不能将所有Error泛化重试。候选目录探针的父命令也须用固定已核绝对路径，clean环境不假设含sbin；发布前拒绝与真实服务变更分层记录。
+
+## 2026-10-18 - 手机素材分页不能只看行数
+
+- MAT-M01/MAT-M02替代REF33原最多三行：共享分页目标至少12张、最多24张，兼顾列数、完整行与宽屏3行，不改选取额度或服务端总数。保留有界加载、账号/用途/目标/筛选隔离和可见图片锚点；不为小屏把所有来源入口隐藏，低频筛选和已选预览按需展开，主操作与内容滚动分区。
+- 实现与构建证据不代替实际手机体验；沿项目用户手验，不自行扩大到浏览器或收费测试。
+
+## 2026-10-02 - 图片分享与离开提醒
+
+- 分享图片只建立可撤销的单图可见关系，不把生成任务、私有提示词或模板参考配置公开；发布入口必须独立校验拥有者和受保护素材，不能把“能查看”当成“能发布”。沿用已有图集权限，不新增匿名能力。
+- 参数与默认模板不同不等于没有保存。临时参数已成功落入账号隔离的本机草稿时，不再按moduleDirty拦截导航；设置、上传、保存失败继续保护。多个模块不能各自安装会重复确认的导航监听，应共用一次判定。
+- 修复图片原生右键需同时核对舞台和外层事件，保留阻止冒泡以免画布父层截获，但不阻止浏览器默认图片菜单。
+
+## 2026-09-14 - Seedance 2.5 首尾帧比例约束
+
+- 后台两次创建失败原文均为 `InvalidParameter.TaskTypeConstraint`，明确指出首帧/首尾帧的比例跟随首帧；不是上传失败或版权拒绝。任务 `cmu03wuci091t4ebl3mkekeol`、`cmu04r3is092u4eblqq5yq72m` 各 54 点均有退款流水。
+- 修复限定为 2.5 的 `first_last_frame`：Provider 参数采用 `adaptive`；比例控件显示“跟随首帧”，保留其他模式的原有选择。任务业务比例保留原值供视频卡锁定校验使用，Provider 快照分别记录请求比例和实际自适应参数，不能提前覆盖业务比例。中文分类同时覆盖原始响应与已翻译文本。
+- 不自动重新生成或重写历史账目。全站审计因用户要求优先处理此故障而暂停，尚未完成，不作全站通过结论。
+
+## 2026-09-07 - 报错必须按原始错误归类，不能把相邻日志强行关联
+
+- 问题/背景：生成页截图显示通用“创建失败”，但截图提示词没有对应的任务或 Provider 请求记录；日志中虽存在 `Failed to find Server Action ... older or newer deployment`，时间却不能证明它就是截图根因。
+- 诱因/根因：只看相邻错误或最近任务容易把独立事件强行关联；没有任务 ID、请求 ID或同一时间窗口时，只能确认“落入未归类兜底”，不能宣称唯一根因。
+- 怎么改：按生产环境真实出现过的错误句式补共享中文规则和回归样例；能从 `content[n]` 识别素材序号时明确到第几项。对未归类错误诚实提示刷新和复制原始错误，不再引导用户盲目换素材。
+
+## 2026-08-18 - 创建任务 500 的直接原因是根盘写满
+
+- 问题/背景：用户在生成页创建任务失败，前端显示“创建失败 (HTTP 500)”；随后公网 `/api/config` 一度返回 nginx `502 Bad Gateway`。
+- 诱因/根因：服务器旧根盘 `/` 100% 满，`sd2-gray.service` 反复启动失败；启动后日志进一步确认 `prisma.videoTask.create()` 写 SQLite 时返回 `database or disk is full`。大头不是 sd2 业务数据，而是同机其他目录和旧 `/tmp/supplier-backup-verify*` 临时验证包占用大量空间。
+- 怎么改：先把 `/tmp/supplier-backup-verify*` 移到 `/data/quarantine/tmp-20260818` 保留，释放旧根盘约 20GB；再把 sd2 的 `/var/lib/video-api-debugger`、`/var/log/video-api-debugger`、`/srv/video-api-debugger/releases`、`/srv/video-api-debugger/backups` 迁到 `/data/video-api-debugger`，旧路径保留软链接。
+- 验证结果：`sd2-gray.service` active；公网 `https://sd2.youdooart.com/api/config` 返回 200 JSON；`/generate` 未登录按预期 307 到同域登录；`gouki` 对数据库、上传、视频、storage、日志、release/backups 路径写权限探针通过；SQLite `PRAGMA quick_check` 返回 `ok`。
+- 可复用经验：加硬盘不等于服务自动使用新盘。生产事故排查要先看真实服务状态、端口、日志和磁盘；sd2 的运行数据、日志、发布包和备份必须明确落到 `/data`，否则同机其他项目继续填满旧根盘时，创建任务和服务启动都会再次失败。
+
+## 2026-08-16 - 视频封面不能放在会被发布清理的源码目录里
+
+- 问题/背景：普通生成页最近任务只有最近几张有封面，往后分页大量显示“暂无截图”；补过一轮后又只剩少数新封面。
+- 诱因/根因：生产 `public/videos`、`public/uploads`、`storage` 曾是发布目录里的普通目录，不是 `/var/lib/video-api-debugger` 下的持久软链接；`rsync --delete` 发布后会清掉历史视频和缩略图。同时 `/videos/...` 缺少类似 `/uploads/[...path]` 的动态读取路由，运行中新生成的文件可能被 Next 静态清单挡成 404。
+- 怎么改：运行目录守护脚本负责迁移并软链接运行期目录；历史缩略图补偿脚本支持 `--tasks-only` 和 `--max-candidates` 分批生成；新增 `/videos/[...path]` 受控动态路由读取 `public/videos` 下的 jpg/mp4，并支持 HEAD/Range。
+- 验证结果：生产 `public/videos` 指向 `/var/lib/video-api-debugger/videos`；最近 200 条成功且有源任务缩略图从 165/200 补到 200/200；本地 `videos-dynamic-route-smoke`、`server-runtime-dirs-smoke`、`backfill-video-thumbnails-options-smoke`、`thumbnail-pipeline-smoke`、`npm run build` 通过。
+- 可复用经验：运行期生成的上传、视频、缩略图、备份不能只靠源码目录权限；必须放持久目录并用软链接或动态路由读出来。发布脚本要排除运行期目录，发布后再跑目录守护脚本。
+
+## 2026-08-06 - 小图片上传中断不是文件大小问题
+
+- 问题/背景：用户和同事反馈 1.5MB-1.6MB 图片上传仍提示“普通上传连接中断”，旧提示还让用户压缩文件，容易误判为图片过大。
+- 诱因/根因：R2 浏览器直传因 CORS 未验证不可用，上传被迫走本站 proxy/raw；proxy 会把浏览器请求继续中转到 R2，raw 也会在同一个请求里等待公网转存，导致小文件也可能拖到几十秒后被浏览器或链路中断。
+- 怎么改：已落盘到 `public/uploads` 的素材优先转成 `NEXT_PUBLIC_BASE_URL` 下的同源公网 URL，直接标记为 `local-public`，不再同步等待 R2；图片 raw fallback 上限与站内图片上限对齐到 30MB；通用连接中断提示不再暗示“小文件也该压缩”。
+- 验证结果：`direct-upload-r2-smoke`、`reference-media-chain-smoke`、`npx tsc --noEmit`、`npm run lint`、`npm run build` 通过。
+- 可复用经验：上传失败提示必须来自真实失败层。文件尺寸合规时不要让用户压缩；先查后台 `asset_upload_*` 流水里的 `durationMs/errorMessage/uploadMode/storageProvider`，再判断是用户素材问题、浏览器直传/CORS、本站中转、还是对象存储转存问题。
+
+## 2026-07-30 - 音频上传中转失败应允许普通上传兜底
+
+- 问题/背景：上传音频参考时，R2 浏览器直传未开启，系统走服务端中转；中转接口返回页面内容或连接中断后，前端提示“当前文件不能自动改用普通上传（仅支持 8MB 以内图片自动回退）”。
+- 诱因/根因：之前把普通上传兜底只开放给 8MB 以内图片，忽略了音频本身已有 15MB 上限且 `/api/assets/upload` 已支持音频校验和入库；因此音频遇到 proxy 非 JSON/断线时没有第二条安全路径。
+- 怎么改：`uploadFileToHistory` 的 raw fallback 改为 8MB 以内图片或 15MB 以内音频可用；视频仍不允许普通上传兜底，继续守住直传/中转边界。
+- 验证结果：`direct-upload-r2-smoke` 增加音频 proxy 失败后请求 `/api/assets/upload` 的行为断言，并保留大图/视频不兜底断言；`test:reference-media`、`lint`、`build` 通过。
+- 可复用经验：图片、音频、视频不要用同一条“是否能兜底”规则。音频大小上限小，可以安全走普通上传；视频大文件仍要靠 R2 直传或后续 chunk 分块。
+
+## 2026-07-29 - 音频参考不能占用图片引用序号
+
+- 问题/背景：底层已经支持 `reference_audio_urls`，但资产页和生成页没有完整暴露音频入口，用户会感觉音频无法上传或上传后找不到。
+- 诱因/根因：图片、视频、音频共用参考素材工作台，但即梦提示词里的 `@图片1` 只适用于图片；如果按全部素材排序，音频会挤占图片序号，造成提示词校验和真实提交不一致。
+- 当时思路：不新建上传接口、不新增依赖、不改数据库结构；继续复用统一 Asset 上传链路，只在资产库、历史素材选择、图集选择和生成页校验里补齐音频类型。
+- 改动位置：`src/app/assets/page.tsx`、`src/app/api/assets/library/route.ts`、`src/components/GenerationComposer.tsx`、`src/components/UploadedImagePicker.tsx`、`src/components/ReferenceAlbumPicker.tsx`、`src/components/ReferenceThumb.tsx`、`scripts/reference-media-chain-smoke.ts`。
+- 怎么改：资产管理页增加音频 tab、`audio/*` 上传 accept 和音频播放器；生成页只把图片纳入 `@图片` 校验和自动插入，视频/音频只作为参考 URL 传入；只有音频时前端先拦截，不创建任务；音频缩略图点击走 `<audio>` 预览。
+- 验证结果：`npm run test:reference-media`、`npm run lint`、`npm run build`、独立只读审查通过；线上 BUILD_ID `uMEngYVZfdY2OZ8x7RCob` 已发布，公网 `/assets` 命中音频入口文案，健康守护周期后服务稳定。
+- 可复用经验：统一“参考素材”概念时不能把所有素材都塞进同一种提示词引用。UI 文案可以统一为素材，但模型引用、校验和自动插入必须按媒体类型分开。
+- 遗留边界：受控浏览器没有登录态，真实登录后音频上传写库和生成页选择音频仍需要登录态复验；不要把未登录静态页面证据说成完整 E2E 上传通过。
+
+## 2026-07-27 - 上传链路成功不等于用户看得到进度
+
+- 问题/背景：视频后端上传链路已经真实跑通，但用户继续追问“上传视频是不是没有进度显示”。
+- 诱因/根因：统一上传 helper 已支持真实进度，参考图、图集等入口也接了组件，但资产管理页缺少正式上传入口和可见进度；同时服务端中转成功后没有统一发出 `done` 进度事件，页面容易只显示上传中间阶段。
+- 当时思路：不重新做上传链路，不改变 Provider、点数、数据库和 fallback 策略；只把 `/assets` 页面接到统一上传 helper，并复用已有 `UploadProgressIndicator`。
+- 改动位置：`src/app/assets/page.tsx`、`src/app/globals.css`、`src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`、`scripts/reference-media-chain-smoke.ts`。
+- 怎么改：资产页新增“上传素材”条，支持图片和 2-15 秒视频；上传进度显示真实阶段和 XHR 字节百分比；成功后自动切到对应类型列表并刷新；普通上传和服务端中转成功后发出 `done` 进度事件。
+- 验证结果：`direct-upload-r2-smoke` 覆盖视频 `preparing/ticket/proxy/done` 进度事件；`reference-media-chain-smoke` 覆盖资产页上传进度入口；`tsc` 通过。
+- 可复用经验：排查上传体验时要分三层说清楚：文件能不能上传、上传过程用户能不能看到真实进度、上传结果是否在目标页面刷新后可见。三者缺一不可。
+
+## 2026-07-27 - 视频上传要单独覆盖媒体元数据和兜底边界
+
+- 问题/背景：上传链路已有图片、小图 raw fallback 和中转失败测试，但视频文件上传还没有最小行为测试，容易被“统一上传 helper 已测过”误判为已覆盖。
+- 诱因/根因：视频上传比图片多一层浏览器媒体元数据读取：`readMediaDuration` 需要 `document.createElement('video')` 和 metadata；同时视频不能走 8MB 图片 raw fallback，必须守住服务端中转/直传边界。
+- 当时思路：不改生产代码，只在上传 smoke 中补最小视频行为测试；先红灯暴露 Node 测试环境没有 video metadata mock，再补 mock 让真实 helper 跑完整路径。
+- 改动位置：`scripts/direct-upload-r2-smoke.ts`。
+- 怎么改：视频 proxy 成功时断言只请求 `/api/assets/upload-proxy` 且携带 `X-Media-Duration=5`；proxy 失败时断言不会请求 `/api/assets/upload`；`directUploadAvailable=true` 但浏览器 PUT 失败时，视频只能转 proxy，proxy 再失败也不能 raw fallback。
+- 验证结果：`direct-upload-r2-smoke` 红绿通过；公网真实 3 秒 MP4 走 `upload-ticket` 和 `upload-proxy` 返回 200，DB 入库 `type=video`，测试 Asset、用户和 R2 对象已清理。
+- 可复用经验：图片、视频、音频虽然共用上传 helper，但测试不能只拿图片代表全部。任何媒体类型特有的元数据、大小限制、fallback 边界，都要有独立最小行为测试。
+
+## 2026-07-24 - 上传中转失败不能只给错误，要继续走安全兜底
+
+- 问题/背景：生成页“上传历史图片”弹窗仍出现“服务端中转上传连接中断”，用户需要重新上传，体验上像上传链路又坏了。
+- 诱因/根因：R2 浏览器直传未开启时，前端会直接走 `/api/assets/upload-proxy` 服务端中转；但这条 `ticket.directUploadAvailable === false` 分支漏掉了小图 raw fallback，中转一断就直接显示失败。此前只覆盖了“浏览器 PUT 失败后再中转失败”的兜底，没有覆盖“直接中转失败”。
+- 当时思路：把“中转上传”统一包一层 `uploadWithServerProxyOrRawFallback`；所有进入中转的路径失败后，都先按同一规则判断能不能自动普通上传。
+- 改动位置：`src/lib/http/file-upload.ts`、`scripts/direct-upload-r2-smoke.ts`。
+- 怎么改：直接中转路径和浏览器 PUT 失败后的中转路径共用同一个 helper；只有 8MB 以内图片能自动 raw fallback，大图、视频、音频继续给明确错误。
+- 验证结果：`direct-upload-r2-smoke` 增加行为级模拟：`/api/assets/upload-proxy` 断开后，小图会请求 `/api/assets/upload`，大图只尝试 proxy 后停止。
+- 可复用经验：上传链路的测试不能只查源码形态；凡是有 fallback，都要补一个最小行为测试，模拟上游失败后确认下一条路真的被调用，同时确认不该兜底的大文件不会被静默放行。
+
+## 2026-07-23 - 上传链路要先 Asset 后业务挂载
+
+- 问题/背景：参考图集、反馈截图和 Seedance 官方素材创建偶发无法上传，用户看到“返回页面内容 / Unexpected token '<' / 上传后没有素材”等错误。
+- 诱因/根因：站内已有 `/api/assets/upload-ticket`、`upload-proxy`、`upload-complete` 统一上传链路，但部分业务接口仍直接接收 `FormData` 文件体。单请求把“传文件”和“挂业务对象”绑在一起，遇到 tunnel、网络中断、大文件或 provider 超时时，前端无法区分到底是上传失败还是业务挂载失败。
+- 当时思路：把上传拆成两步：先统一生成 `Asset`，再用 JSON `assetId` 挂到图集、反馈或官方素材记录；旧 multipart 业务入口只返回稳定 JSON 升级错误，不再读取文件体。
+- 改动位置：`src/lib/http/file-upload.ts`、`src/app/collections/[id]/ReferenceAlbumDetailClient.tsx`、`src/app/api/reference-albums/[id]/images/route.ts`、`src/components/FeedbackWidget.tsx`、`src/app/api/feedback/upload/route.ts`、`src/components/SeedanceAssetPanel.tsx`、`src/app/api/assets/upload-and-create/route.ts`、相关 smoke 脚本。
+- 怎么改：新增 `uploadFileAsAsset` 语义导出；图集页逐个上传成 Asset 后 JSON 挂载，并在挂载失败时保留 `assetIds` 重试；反馈截图直接复用 Asset URL；Seedance 面板先上传 Asset，再用 `assetId` 创建官方素材；后端拒绝旧 multipart 主路径。
+- 验证结果：`upload-entrypoint-inventory-smoke`、`reference-album-duplicate-upload-smoke`、`upload-and-create-json-smoke`、`reference-media-chain-smoke`、`direct-upload-r2-smoke`、`template-bound-image-upload-smoke`、`npm run lint`、`npm run build`、独立只读审查通过。
+- 可复用经验：上传能力不要分散在业务接口里。业务接口只做权限、挂载和审计；文件 hash、复用、对象存储、公网 URL、进度和上传失败提示都归统一 Asset 上传层。用户看到“上传成功但挂载失败”时，应能只重试挂载，不重新传文件。
+
+## 2026-07-02 - 趋势图默认口径不能只跟当前自然月
+
+- 问题/背景：用户反馈进入新月份后，趋势图里前一个月份的内容看不到，但这些历史数据本来应该仍然可查。
+- 诱因/根因：管理中心首屏默认请求 `range=month`，后端默认时间范围也是本月；新月份开始后，旧月份数据没有丢失，只是被默认筛选条件排除。
+- 当时思路：把“看完整历史”做成一等范围 `all`，默认用全部历史；保留本月/7 天/30 天/自定义作为主动筛选，不让自然月份切换影响历史可见性。
+- 改动位置：`src/lib/admin/generation-dashboard.ts`、`src/app/admin/page.tsx`、`src/app/admin/AdminGenerationDashboardClient.tsx`、管理中心趋势 API/导出 API、`scripts/generation-dashboard-smoke.ts`。
+- 怎么改：`all` 从当前筛选条件下最早任务日期统计到今天；管理中心首屏默认 `all`；前端增加“全部”tab，并在全部范围默认按月看趋势；smoke 验证跨月时月趋势桶不被压成当前月。
+- 验证结果：专项 smoke、类型检查、lint 和生产构建通过；线上部署验证完成后回填到 `tasks/todo.md`。
+- 可复用经验：经营/后台趋势图的默认口径应优先保证历史可见，当前月只是筛选项；自然时间边界变更不能让历史数据在默认视图中“像丢了一样”。
+
+## 2026-07-02 - 用户找不到入口时要把入口跟到对象上
+
+- 问题/背景：AI MediaKit 视频超分先做了后台配置、独立 `/generate/enhance` 页面和任务详情入口，但用户仍反馈“没有找到入口”“在哪里做超分”，并要求改成资产卡片 hover 直接发起。
+- 诱因/根因：前一版把“功能存在”和“用户能在真实工作流里自然发现”混在一起；独立页面能证明能力上线，但用户真实路径是先看到某个视频资产，再决定是否超分，不会先去理解一个新功能页。
+- 当时思路：把主入口放到视频资产封面上，独立页只作为补充筛选页；超分结果必须在列表、详情和对比结果里持续可识别，不能和普通生成混在一起。
+- 改动位置：`src/app/api/assets/library/route.ts`、`src/app/assets/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/globals.css`、`scripts/enhance-video-entry-smoke.ts`、`tasks/todo.md`。
+- 怎么改：资产接口返回 `isEnhanceTask/canEnhanceVideo/enhanceSourceTaskId`；普通成功视频 hover 出“超分”按钮和分辨率/帧率菜单；超分结果封面左上角常驻“超分”；超分任务详情页改成原视频和超分视频左右同步播放。
+- 验证结果：专项 smoke、`tsc`、`lint`、本地生产 build、`youdoo-sites build/restart/status sd2` 均通过；公网静态 chunk 命中新入口和对比展示；公网配置 ready。真实登录态 hover 截图未完成，因为当前 Chrome 停在登录页，没有可复用登录态。
+- 可复用经验：用户可见能力不能只用“有路由 / 有按钮 / 有页面”验收；必须按入口 -> 操作 -> 等待 -> 结果 -> 失败恢复的真实路径检查。对象型能力优先跟随对象出现，例如视频超分应该跟着视频卡片走，而不是只放在一个独立功能页里。
+- 2026-07-02 追加：对象型动作也不要默认压在封面主视觉上。封面优先负责预览和结果标识；低频动作按钮应放在卡片信息区或动作区，右侧对齐、hover/focus 后出现，避免干扰用户扫视频画面。
+
 ## 2026-06-27 - 多 checkout 功能上线不能整分支 merge
 
 - 问题/背景：AI MediaKit 视频超分功能先在旧 checkout 的 `codex/mediakit-video-enhance` 分支完成，再要推进到真实线上工作树 `/Volumes/Data/Projects/video-api-debugger-v12-full-todo`。
@@ -701,6 +877,16 @@
 - 验证结果：以本轮 smoke、JS 语法检查、TypeScript、lint、build、部署和公网资源验收为准。
 - 可复用经验：任何“只给管理员开放”的上下文、规则、提示词能力都不能只靠前端隐藏。前端负责入口和体验，后端负责是否真正应用，日志要能区分已应用和被忽略。
 
+## 2026-07-11 - 交接普通账号前必须先拆掉工具自身的 admin-only 闸门
+
+- 问题/背景：无线画布要交给同事用普通测试账号继续开发，但代码里页面、静态全屏页和多条无线画布 API 仍把非管理员直接挡回 `/generate` 或 403。
+- 诱因/根因：之前交接文档已经改成“普通账号 + 测试点数 + 连接现有后端”，但没有同步把实际运行入口从 admin-only 改成“已登录 + 项目 / 视频卡权限”。
+- 当时思路：不能为了方便给同事 admin，也不能给第三方模型密钥；正确做法是让普通账号进入无线画布，但所有生成、上传、画布上下文仍复用主站项目、视频卡和后台模型能力白名单。
+- 改动位置：`src/app/tools/ultimate-canvas/page.tsx`、`public/tools/ultimate-canvas/index.html`、`src/app/api/tools/ultimate-canvas/bootstrap/route.ts`、`document/route.ts`、`generate/route.ts`、`upload/route.ts`、`src/lib/navigation.ts`。
+- 怎么改：移除无线画布整页 / 整接口 admin-only 判断；普通用户 LLM 调用必须带视频卡并通过 `assertCanGenerateInVideoCard`；上传继续要求视频卡；本地化健康检查保留 admin-only，因为它暴露后台补偿信息。
+- 验证结果：普通用户入口 smoke、旧入口 smoke、规则 smoke、JS 语法、`git diff --check`、TypeScript、lint、Next build 均通过。
+- 可复用经验：外部协作交接不能只看文档措辞。凡是说“普通账号可用”，必须同时检查页面入口、静态资源自检、API 路由、导航显隐和测试脚本；旧测试如果还断言 admin-only，要同步改成新的权限边界。
+
 ## 2026-06-28 - 新能力不能只藏在结果详情页里
 
 - 问题/背景：AI MediaKit 视频超分链路、API Key 设置和任务详情内按钮已经上线，但用户反馈“没有找到入口”，不知道在哪里做超分。
@@ -770,3 +956,79 @@
 - 怎么改：`Asset.hash` 改为 `owner_id + hash` 唯一；跨用户重复上传时创建当前用户 Asset，复用已有 `original_url/thumbnail_url`；图集上传统一走 `uploadSiteAsset`；新增 smoke 覆盖跨用户重复上传后历史可见并可加入工作区。
 - 验证结果：`site-upload-dedupe-smoke`、`workspace-duplicate-upload-smoke`、`reference-album-duplicate-upload-smoke`、`reference-album-duplicate-upload-integration`、TypeScript、lint、build 通过；数据库已备份后同步索引；已部署 BUILD_ID `b55InuVW1hopeSQRgTb-s`，公网真实复现确认历史可见和工作区加入成功。
 - 可复用经验：同一文件的“存储去重”不能等同于“业务对象去重”。凡是后续链路按 owner、权限、历史列表或归档对象判断的地方，跨用户复用必须给当前用户创建自己的业务记录，只复用底层文件链接。
+
+## 2026-07-01 - 视频任务收尾不能依赖前端轮询
+
+- 问题/背景：用户反馈 15s/720p 视频 50 分钟后仍显示生成中，实际 Provider 已成功，点数也可能长期冻结。
+- 诱因/根因：本地任务状态依赖生成页轮询或单次后台 runner；runner 到达最大运行时间后停止，真实定时收尾任务又没有稳定运行，导致 Provider 成功后本地仍停在 `running`。
+- 当时思路：把“查 Provider 状态、写回结果、缓存视频、生成缩略图、结算冻结点数”做成后台可重复执行的收尾任务；状态和点数先闭环，缓存和缩略图失败不能反过来卡住成功状态。
+- 改动位置：`scripts/finalize-pending-videos.ts`、`src/lib/video/task-finalizer.ts`、`src/lib/video/finalize-pending-candidates.ts`、`src/lib/video/local-cache.ts`、`src/lib/provider/jimeng.ts`、`src/lib/provider/volcengine-ip.ts`、`scripts/sd2-finalize-pending-videos.sh`。
+- 怎么改：收尾脚本优先处理 `submitted/running`，再处理最近成功但缺缓存的视频；旧 orphan submitted 且无 Provider 任务号会自动失败退款；Provider 非重试错误落为失败；下载流超时返回可控失败；LaunchAgent 每 300 秒跑一次并带陈旧锁清理。
+- 验证结果：5 个 smoke、TypeScript、lint、build 通过；`cmr1o6u8s0038f05laf0wpqic` 已成功结算并有本地/R2 视频；旧孤儿任务 `cmpkxpuqx003xd14k1ct7m4vg` 已失败退款 84 点；线上 BUILD_ID `4miq1OhmOna1d6CxNG-Hn` 已加载，LaunchAgent 退出码为 0。
+- 可复用经验：长耗时任务必须有独立后台收尾和幂等账务结算，不能把“用户打开页面继续查”当成可靠机制。任何缓存、缩略图、对象存储转存失败都只能影响后续补偿，不能阻止任务状态和点数先闭环。
+
+## 2026-07-14 - 运行中新生成的 uploads 文件不能依赖 Next 静态文件清单
+
+- 问题/背景：无线画布图片节点显示“图片生成完成，已进入资产库”，但预览区破图，只显示文件名；同一条 Asset 记录里的原图和缩略图文件实际已经写入 `public/uploads`。
+- 诱因/根因：生产 Next 服务对 `public/uploads` 下运行中新写入的文件不会稳定当成静态文件立刻服务；旧文件能 200，新生成文件在服务运行期间访问 `/uploads/...` 返回 404。
+- 当时思路：不改已有 Asset URL、不迁移数据库、不让前端绕路；保留 `/uploads/...` 语义，给它补一个动态路由读取本地上传文件。
+- 改动位置：`src/app/uploads/[...path]/route.ts`、`scripts/uploads-dynamic-route-smoke.ts`。
+- 怎么改：新增 `/uploads/[...path]` 动态路由，安全限制在 `public/uploads` 内，支持 GET、HEAD、Range、常见图片/视频/音频 MIME；新增 smoke 覆盖运行中新写入图片、HEAD 和路径越界拒绝。
+- 验证结果：复现时目标缩略图公网 404；部署后同一缩略图和原图本地/公网均 200；服务启动后再写入的 smoke 图片也可直接 200；`uploads-dynamic-route-smoke`、lint、`youdoo-sites build/restart` 通过。
+- 可复用经验：上传、生成、截图、缩略图这类运行时产物不能只靠 `public` 静态目录假设。凡是文件是在服务启动后写入的，都要用动态文件出口或对象存储 URL 做验收；验收必须包含“启动后新写入文件能立即访问”。
+
+## 2026-07-15 - 关闭自动音频后的成功视频默认就是无声源片
+
+- 问题/背景：WallVerse 第一组 24 秒预演片画面验收通过，但成片完全没有声音。
+- 诱因/根因：此前开启 `generate_audio=true` 的任务因 `OutputAudioSensitiveContentDetected` 失败并退回冻结点数；为先保住画面，后续两条成功任务明确改成 `generate_audio=false`。两条 Provider 源片本身只有视频流，因此不是下载或后期合成把音轨弄丢。
+- 当时思路：先用数据库任务参数和源片 `ffprobe` 双重定位声音在哪一层消失；不重新消耗点数生成已通过的画面，直接给现有 24 秒画面制作后期声音设计。
+- 改动位置：`storage/generated-tests/wallverse-migration-20260715/audio-v1/`、带声预演版、`tasks/todo/wallverse-audio-20260715.md`。
+- 怎么改：保留原无声版本，新增断电、世界唤醒、浮岛升起、跨屏迁移、进入新电视和结尾落点的同步音效；仅复制原 H.264 视频流并封装 AAC/48kHz/双声道音轨。
+- 验证结果：带声版 24.083333 秒、完整解码通过；无声版与带声版视频流 MD5 一致；音频响度约 -17.9 LUFS、True Peak -5.6 dBFS，无超过 1 秒的完全静音段；固定审核线程只读复验通过。
+- 可复用经验：为了绕过音频敏感失败而设置 `generate_audio=false` 时，必须明确把结果标为“无声源片”，不能直接当最终展示片交付；展示前应单独补声音设计，或者经明确授权重新测试 Provider 原生音频。排查无声问题时先查任务参数和源片音轨，再查合成链路。
+
+## 2026-07-16 - 视频标题里的“图 + 数字”会被误判成参考图编号
+
+- 问题/背景：WallVerse 第二组续片最初使用标题 `(地图013)`，创建生成任务时被提示词解析器拒绝。
+- 诱因/根因：解析器把标题里的 `图013` 当成“引用第 13 张参考图”，而当前工作台没有对应图号，因此报 `PROMPT_REFERENCE_ERROR`。
+- 怎么处理：在付费任务创建前把标题改为 `(成境013)`，画面正文和真实尾帧引用保持不变；因此没有创建失败任务，也没有发生扣点。
+- 可复用经验：sd2 提示词标题继续使用“两字 + 三位数字”时，避免第二个字为“图”，也避免正文出现没有明确语义边界的“图 + 连续数字”；标题校验应在任务创建和扣点前完成。
+
+## 2026-07-21 - 上传接口返回页面内容时不能直接暴露给用户
+
+- 问题/背景：用户在素材上传时看到“素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。”
+- 诱因/根因：直传票据和上传完成接口遇到非 JSON 响应时，前端直接抛出页面内容错误；小图片本来可以走普通上传回退，但回退边界被脚本锁成了不允许回退。
+- 怎么处理：票据、直传 PUT、上传完成这三段都保留安全边界；8MB 以内图片遇到直传非 JSON、服务端 5xx 或 PUT 失败时自动改用普通上传；不能回退的大文件给出清楚原因和管理员检查项。
+- 可复用经验：用户上传链路不能把“返回 HTML/登录页/错误页”当最终错误文案。能自动修正就自动修正，不能修正时要说清楚是登录态、文件边界还是对象存储 CORS/直传配置问题。
+
+## 2026-07-22 - 新增上传兜底路径必须同步锁异常回归
+
+- 问题/背景：素材上传新增服务端中转兜底后，用户再次遇到同类“服务返回页面内容”报错。
+- 诱因/根因：前一轮只锁了票据和完成登记接口；后来新增的 `/api/assets/upload-proxy` 和旧 `/api/assets/upload` 仍直接使用通用非 JSON 文案。生产日志同时出现上传流 `ECONNRESET/aborted`，这类中断可能绕开业务 JSON 错误。
+- 怎么处理：普通上传、服务端中转、票据、完成登记统一走分段 JSON 解析；连接中断给“连接中断/文件较大/请重新上传”的明确提示；smoke 增加 raw/proxy 非 JSON 不得泄漏通用文案的断言。
+- 可复用经验：只要给上传链路增加新的 fallback、proxy、direct、complete 或 cleanup 分支，就必须同时补异常路径回归。不能只测成功路径和主接口，否则旧错误会从新分支漏出来。
+- 2026-07-22 补充：只读复查发现票据创建和完成登记的 `fetch` 中断仍可能落到泛化 catch；上传 smoke 必须按 ticket/raw/proxy/complete 分段切片断言连接中断和非 JSON 两类异常，不能只用跨函数宽正则。
+
+## 2026-08-05 - 上传根治要拆成文件传输和业务挂载两段
+
+- 问题/背景：上传问题反复出现在生成页、资产页、图集、模板和反馈里，用户看到的是“上传失败/网站挂了”，但真实失败点可能是 R2 CORS、本站中转、完成登记、业务挂载或反馈入库。
+- 诱因/根因：文件上传和业务挂载长期混在一个错误分支里；大文件依赖单个长请求；浏览器直传只看开关，没有独立 CORS 验收门；后台缺少按阶段定位的上传日志。
+- 怎么处理：统一上传入口继续走 Asset；R2 直传新增 `R2_DIRECT_UPLOAD_CORS_VERIFIED` 验收门；大视频新增 multipart start/sign-part/complete/abort；上传阶段写 `asset_upload_*` 安全摘要；工作台、模板和反馈保留已上传 assetId 并支持只重试挂载/提交。
+- 验证结果：`upload-root-cure-smoke`、`direct-upload-r2-smoke`、`upload-entrypoint-inventory-smoke`、`reference-media-chain-smoke`、`tsc`、`lint`、`build` 通过；lint 仅保留项目既有 warning。生产 R2 CORS 真实 PUT 仍需在桶配置完成并设置验收开关后单独验收。
+- 可复用经验：上传链路报错时先问“文件有没有变成 Asset”，再问“Asset 有没有绑定到当前业务对象”。前者是传输/存储问题，后者是业务挂载问题；两者必须分阶段提示、分阶段日志、分阶段重试，不能继续用一个“上传失败”兜底。
+
+## 2026-08-07 - Provider 素材硬性限制要在扣点和提交前拦截
+
+- 问题/背景：用户提交含 480x480 参考视频的任务后，Provider 返回“参考素材分辨率太低”，前端虽能解释错误，但失败发生在任务创建之后，体验像系统故障。
+- 诱因/根因：上传链路只稳定保存图片宽高，视频直传、中转、普通上传、分块和复用路径容易丢 `width/height`；生成创建接口也只在 Provider 返回后才知道素材低于 409600 像素。
+- 怎么处理：上传端读取视频宽高并随直传票据、完成登记、中转和普通上传传递；Asset 复用时补写缺失宽高；生成页已知低清素材直接提示并禁用提交；`/api/tasks/create` 在冻结点数和调用 Provider 前统一校验最终图片/视频 URL，缺尺寸时探测公网素材，探测不到或低于阈值就返回 400。
+- 验证结果：`reference-media-resolution-guard-smoke`、`npx tsc --noEmit`、`git diff --check` 通过；`npm run lint` 无报错，仅保留项目既有 warning；独立只读审查三轮复查后通过。
+- 可复用经验：Provider 对输入素材的硬性规则不能只靠错误翻译兜底。凡是会扣点、冻结点数或创建长任务的外部服务限制，都要前端先提示、后端在扣点前兜底，并覆盖历史素材和绕过前端的 API 输入。
+
+## 2026-08-19 - Provider 真人隐私拦截图不能显示成未知异常
+
+- 问题/背景：资产页里失败任务显示“视频生成服务返回了未知异常”，但用户截图中的任务实际是参考图创建阶段失败。
+- 诱因/根因：Seedance/火山返回了明确错误 `InputImageSensitiveContentDetected.PrivacyInformation`，含义是 `content[1]` 参考图可能包含真实人物或隐私信息；本地错误归类没有覆盖该规则，所以把用户可修正素材问题降级成了“未知异常”。
+- 怎么处理：在 provider 创建失败翻译里增加“参考图真人隐私风险”分类，前端错误翻译组件同步识别该类型；提示用户更换非真人、已授权或隐私风险更低的参考图，并说明冻结点数已返还。
+- 验证结果：`provider-create-error-smoke`、`npm run lint`、`npm run build` 通过；生产已复查目标成功视频文件、R2 Range 播放、资产页详情和任务详情页播放均正常。
+- 可复用经验：Provider 已经给出明确素材原因时，不能统一写成“未知异常”。新增 Provider 限制要优先归入“用户可修正素材问题”，让用户知道换什么，而不是误以为网站整体故障。

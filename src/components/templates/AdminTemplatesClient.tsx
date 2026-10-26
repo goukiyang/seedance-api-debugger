@@ -1,4 +1,5 @@
 'use client';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -118,7 +119,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
   const issues = publishIssues(selectedTemplate);
 
   const handleSaveTemplate = useCallback(async (payload: Record<string, unknown>) => {
-    if (!selectedTemplate) return;
+    if (!selectedTemplate) return false;
     setSaving(true);
     setSaveError(null);
     try {
@@ -128,11 +129,12 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
         body: JSON.stringify(payload),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || data.message || '模板保存失败');
+      if (!response.ok || !data.template?.id) throw new Error(data.error || data.message || '模板保存结果尚未确认');
       await loadTemplates(data.template?.id || selectedTemplate.id);
-      if (!detailWorkspaceMode) setDrawerOpen(false);
+      return true;
     } catch (saveTemplateError) {
       setSaveError(saveTemplateError instanceof Error ? saveTemplateError.message : '模板保存失败');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -229,10 +231,10 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
             />
           </label>
           <div className="admin-template-builder-actions">
-            <button type="button" onClick={generateTemplateDraft} disabled={builderBusy}>
+            <button data-busy={builderBusy} type="button" className={`sd2-loading-surface ${!builderDraft ? 'is-primary' : ''}`} onClick={generateTemplateDraft} disabled={builderBusy}>
               {builderBusy ? 'LLM 生成中...' : builderDraft ? '重新生成草稿' : '生成模板草稿'}
             </button>
-            <button type="button" onClick={saveBuilderDraft} disabled={!builderDraft || builderBusy}>
+            <button type="button" className={builderDraft ? 'is-primary' : ''} onClick={saveBuilderDraft} disabled={!builderDraft || builderBusy}>
               保存草稿并编辑卡片
             </button>
             {builderAgentRunId && <Link href={`/admin/agent-runs/${builderAgentRunId}`}>查看链路</Link>}
@@ -256,7 +258,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
       <section className={detailWorkspaceMode ? 'admin-template-shell is-workspace' : 'admin-template-shell'}>
         {!detailWorkspaceMode && (
           <aside className="admin-template-list">
-            {loading && <div className="admin-template-state">读取模板中...</div>}
+            {loading && (templates.length ? <LoadingStatus>正在更新模板</LoadingStatus> : <LoadingSkeleton label="正在读取模板" />)}
             {!loading && error && <div className="admin-template-state is-error">{error}</div>}
             {!loading && !error && templates.length === 0 && (
               <div className="admin-template-state">
@@ -283,6 +285,8 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
         )}
 
         <main className={detailWorkspaceMode ? 'admin-template-workspace-detail' : 'admin-template-detail'}>
+          {detailWorkspaceMode && loading && (selectedTemplate ? <LoadingStatus>正在更新模板</LoadingStatus> : <LoadingSkeleton label="正在读取模板" />)}
+          {detailWorkspaceMode && error && <p role="alert">{error}</p>}
           {selectedTemplate ? (
             detailWorkspaceMode ? (
               <TemplateEditorDrawer

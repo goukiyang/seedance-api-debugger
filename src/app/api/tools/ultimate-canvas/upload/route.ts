@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
+import { readCanvasStyleJson } from '@/lib/canvas-style-bridge';
+import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
-import { uploadSiteAsset, validateSiteUploadInput } from '@/lib/assets/site-upload';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
 import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
@@ -9,6 +14,8 @@ import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 
 function cleanString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -21,58 +28,131 @@ function roleForMimeType(mimeType: string, requestedRole: string) {
   return 'reference_image';
 }
 
+function parseContentLength(value: string | null) {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无限画布上传。');
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    const jsonAssociation = request.headers.get('content-type')?.includes('application/json') === true;
+    const multipartContentLength = parseContentLength(request.headers.get('content-length'));
+    if (!jsonAssociation && multipartContentLength == null) {
+      return NextResponse.json(
+        { error: '当前旧版表单上传缺少文件大小信息，请刷新页面后使用新版上传链路。' },
+        { status: 411 },
+      );
+    }
+    if (!jsonAssociation && multipartContentLength != null && multipartContentLength > MULTIPART_COMPAT_MAX_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: '当前上传入口只兼容 8MB 以内旧版表单上传，请刷新页面后使用新版上传链路。' },
+        { status: 413 },
+      );
+    }
+    if (jsonAssociation && multipartContentLength != null && multipartContentLength > 16384) return NextResponse.json({ error: '关联请求过大' }, { status: 413 });
+    const json = jsonAssociation ? await readCanvasStyleJson(request) : null;
+    const formData = jsonAssociation ? null : await request.formData();
+    const field = (name: string) => jsonAssociation ? json?.[name] : formData?.get(name);
+    const file = formData?.get('file') as File | null;
+    if (!jsonAssociation && !file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    if (file) {
+      const validationError = validateSiteUploadInput(file);
+      if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+    }
 
-    const validationError = validateSiteUploadInput(file);
-    if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
+    const v2 = field('creation_contract_version') === 2 || field('creation_contract_version') === '2';
+    const projectId = cleanString(field('project_id'));
+    const videoCardId = cleanString(field('video_card_id'));
+    const canvasDocumentId = cleanString(field('canvas_document_id')) || null;
+    const canvasNodeId = cleanString(field('canvas_node_id')) || null;
+    const requestedRole = cleanString(field('role'));
+    const requestId = cleanString(field('request_id'));
+    const assetId = cleanString(field('asset_id'));
+    const validId = (id: string | null) => Boolean(id && /^[a-zA-Z0-9_-]{1,160}$/.test(id));
+    if (jsonAssociation && ![requestId, assetId, projectId, canvasDocumentId, canvasNodeId].every(validId) || jsonAssociation && videoCardId && !validId(videoCardId)) {
+      return NextResponse.json({ error: '关联目标或原素材编号无效，请重新打开画布' }, { status: 400 });
+    }
 
-    const projectId = cleanString(formData.get('project_id'));
-    const videoCardId = cleanString(formData.get('video_card_id'));
-    const canvasDocumentId = cleanString(formData.get('canvas_document_id')) || null;
-    const canvasNodeId = cleanString(formData.get('canvas_node_id')) || null;
-    const requestedRole = cleanString(formData.get('role'));
-
-    if (!videoCardId) {
+    if (!videoCardId && !v2) {
       return NextResponse.json({ error: '必须先选择视频卡，上传素材才能进入统一项目链路' }, { status: 400 });
     }
-    const videoCard = await prisma.videoCard.findUnique({
+    const videoCard = videoCardId ? await prisma.videoCard.findUnique({
       where: { id: videoCardId },
       select: { id: true, project_id: true },
-    });
-    if (!videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
-    if (projectId && projectId !== videoCard.project_id) {
+    }) : null;
+    if (videoCardId && !videoCard) return NextResponse.json({ error: '视频卡不存在' }, { status: 404 });
+    if (videoCard && projectId && projectId !== videoCard.project_id) {
       return NextResponse.json({ error: '视频卡不属于当前项目' }, { status: 400 });
     }
 
-    const project = await getProjectForGeneration(user, videoCard.project_id);
-    await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
+    const destination = videoCard?.project_id || projectId;
+    if (!destination) throw new AuthError('请选择保存到的项目', 400);
+    const project = await getProjectForGeneration(user, destination);
+    if (videoCard) await assertCanGenerateInVideoCard(user, project.id, videoCard.id);
 
     if (canvasDocumentId) {
+      await assertCanEditCanvasDocument(user, canvasDocumentId, project.id);
       const canvas = await prisma.canvasDocument.findUnique({
         where: { id: canvasDocumentId },
-        select: { id: true, owner_user_id: true, project_id: true, status: true },
+        select: { id: true, owner_user_id: true, project_id: true, status: true, document_json: true },
       });
       if (!canvas || canvas.status === 'deleted') return NextResponse.json({ error: '画布不存在' }, { status: 404 });
-      if (user.role !== 'admin' && canvas.owner_user_id !== user.id) {
-        return NextResponse.json({ error: '无权编辑此画布' }, { status: 403 });
-      }
+      const saved = JSON.parse(canvas.document_json).context || {};
+      const savedCard = saved.video_card_id || saved.videoCardId || null;
+      if (savedCard && savedCard !== (videoCardId || null)) throw new AuthError('原画布仍绑定原视频卡，未清除旧归属或上传保护', 409);
       if (canvas.project_id && canvas.project_id !== project.id) {
         return NextResponse.json({ error: '画布不属于当前项目' }, { status: 400 });
       }
+      if (user.role !== 'admin' && canvas.owner_user_id !== user.id && !canvas.project_id) {
+        return NextResponse.json({ error: '无权编辑此画布' }, { status: 403 });
+      }
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const uploadResult = await uploadSiteAsset(buffer, file.name, file.type, file.size, user.id);
-    const workspaceId = (await getOrCreateWorkspace(`ultimate-canvas:${project.id}:${videoCard.id}`, user.id)).id;
-    const role = roleForMimeType(uploadResult.mimeType, requestedRole);
+    // JSON associates a confirmed original; it never fetches or copies a client URL.
+    const existingAsset = jsonAssociation ? await prisma.asset.findUnique({ where: { id: assetId } }) : null;
+    if (jsonAssociation && (!existingAsset || existingAsset.owner_id !== user.id || existingAsset.status !== 'active'
+      || !['image', 'video', 'audio'].includes(existingAsset.type))) {
+      return NextResponse.json({ error: '原素材不存在或无权关联' }, { status: 403 });
+    }
+    let uploadResult;
+    if (existingAsset) {
+      uploadResult = { assetId: existingAsset.id, originalUrl: existingAsset.original_url,
+        thumbnailUrl: existingAsset.thumbnail_url, width: existingAsset.width, height: existingAsset.height,
+        fileName: existingAsset.file_name, fileSize: existingAsset.file_size, mimeType: existingAsset.mime_type,
+        isPubliclyReachable: false, storageProvider: null, publicUploadWarning: null };
+    } else {
+      const sourceFile = file!;
+      const buffer = Buffer.from(await sourceFile.arrayBuffer());
+      const mediaValidationError = await validateSiteUploadBuffer(buffer, sourceFile.name, sourceFile.type);
+      if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
+      uploadResult = await uploadSiteAsset(buffer, sourceFile.name, sourceFile.type, sourceFile.size, user.id);
+    }
+    const workspaceId = (await getOrCreateWorkspace(v2 ? `ultimate-canvas:v2:${user.id}:${project.id}:${canvasDocumentId}` : `ultimate-canvas:${project.id}:${videoCardId}`, user.id)).id;
+    const role = roleForMimeType(uploadResult.mimeType, jsonAssociation ? '' : requestedRole);
 
+    const associate = async (db: Prisma.TransactionClient) => {
+    if (jsonAssociation && existingAsset) {
+      const fresh = await db.asset.findUnique({ where: { id: assetId } });
+      if (!fresh || fresh.owner_id !== user.id || fresh.status !== 'active') throw new AuthError('原素材不存在或无权关联', 403);
+      const prior = await db.operationLog.findFirst({ where: { operator_id: user.id, action: 'ultimate_canvas_asset_upload',
+        detail: { contains: `"request_id":"${requestId}"` } } });
+      if (prior) {
+        const detail = JSON.parse(prior.detail || '{}');
+        if (prior.target_id !== assetId || detail.request_id !== requestId || detail.project_id !== project.id
+          || (detail.video_card_id || null) !== (videoCardId || null) || detail.canvas_document_id !== canvasDocumentId || detail.canvas_node_id !== canvasNodeId) {
+          throw new AuthError('关联编号已用于其它目标，未修改原素材', 409);
+        }
+        return { success: true, workspace_id: detail.workspace_id, workspace_asset_id: detail.workspace_asset_id,
+          reference_image_id: detail.reference_image_id, asset: { id: fresh.id, originalUrl: fresh.original_url,
+            thumbnailUrl: fresh.thumbnail_url, width: fresh.width, height: fresh.height,
+            fileName: fresh.file_name, fileSize: fresh.file_size, mimeType: fresh.mime_type } };
+      }
+    }
     let reference: {
       assetId: string;
       referenceImageId: string;
@@ -87,28 +167,31 @@ export async function POST(request: NextRequest) {
         workspaceId,
         projectId: project.id,
         sourceRequestId: canvasNodeId || null,
-        sourceLabel: '无线画布上传',
+        sourceLabel: '无限画布上传',
         role,
-        albumName: '无线画布上传素材',
-        albumDescription: '无线画布上传并自动归档的参考素材',
+        albumName: '无限画布上传素材',
+        albumDescription: '无限画布上传并自动归档的参考素材',
         metadataSource: 'ultimate_canvas_upload',
+        db,
       }, uploadResult.assetId);
       workspaceAssetId = reference.workspaceAssetId;
     } else {
-      workspaceAssetId = await addAssetToWorkspace(workspaceId, uploadResult.assetId, role, user.id);
+      workspaceAssetId = await addAssetToWorkspace(workspaceId, uploadResult.assetId, role, user.id, { db });
     }
 
-    await prisma.operationLog.create({
+    await db.operationLog.create({
       data: {
+        ...(jsonAssociation ? { id: `canvas-association-${createHash('sha256').update(`${user.id}:${requestId}`).digest('hex')}` } : {}),
         operator_id: user.id,
         action: 'ultimate_canvas_asset_upload',
         target_type: 'Asset',
         target_id: uploadResult.assetId,
         detail: JSON.stringify({
           project_id: project.id,
-          video_card_id: videoCard.id,
+          video_card_id: videoCardId || null,
           canvas_document_id: canvasDocumentId,
           canvas_node_id: canvasNodeId,
+          request_id: requestId || null,
           workspace_id: workspaceId,
           workspace_asset_id: workspaceAssetId,
           reference_image_id: reference?.referenceImageId || null,
@@ -119,7 +202,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({
+    return {
       success: true,
       workspace_id: workspaceId,
       workspace_asset_id: workspaceAssetId,
@@ -137,7 +220,10 @@ export async function POST(request: NextRequest) {
         storageProvider: uploadResult.storageProvider || null,
         warning: uploadResult.publicUploadWarning || null,
       },
-    });
+    };
+    };
+    // Association and its receipt commit together. Concurrent retries cannot create a second association.
+    return NextResponse.json(jsonAssociation ? await prisma.$transaction(associate) : await associate(prisma));
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -150,5 +236,36 @@ export async function POST(request: NextRequest) {
       { error: error instanceof Error ? error.message : 'Upload failed' },
       { status: 500 },
     );
+  }
+}
+
+// Unknown upload responses are resolved by an exact owned-file identity, never by reposting bytes.
+export async function GET(request: NextRequest) {
+  try {
+    const user = await getSession();
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertInternalOnly(user, '外部账号无权使用无限画布上传。');
+    const query = request.nextUrl.searchParams;
+    const documentId = query.get('canvas_document_id') || '';
+    const projectId = query.get('project_id') || '';
+    const cardId = query.get('video_card_id') || '';
+    const hash = query.get('hash') || '';
+    const mimeType = query.get('mime_type') || '';
+    const fileSize = Number(query.get('file_size'));
+    const v2 = query.get('creation_contract_version') === '2';
+    if (![(v2 && !cardId ? documentId : cardId), documentId, projectId].every(id => /^[a-zA-Z0-9_-]{1,160}$/.test(id)) || !/^[a-f0-9]{64}$/.test(hash)
+      || !Number.isSafeInteger(fileSize) || fileSize <= 0 || !/^(image|video|audio)\//.test(mimeType)) {
+      return NextResponse.json({ error: '恢复目标或文件身份无效' }, { status: 400 });
+    }
+    await getProjectForGeneration(user, projectId);
+    if (cardId) await assertCanGenerateInVideoCard(user, projectId, cardId);
+    await assertCanEditCanvasDocument(user, documentId, projectId);
+    const asset = await prisma.asset.findFirst({ where: { owner_id: user.id, hash, file_size: fileSize, mime_type: mimeType, status: 'active' } });
+    return NextResponse.json({ found: Boolean(asset), asset: asset ? { id: asset.id, originalUrl: asset.original_url,
+      thumbnailUrl: asset.thumbnail_url, width: asset.width, height: asset.height, fileName: asset.file_name,
+      fileSize: asset.file_size, mimeType: asset.mime_type, hash: asset.hash } : null });
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: '上传恢复暂不可用，未重新上传' }, { status: 500 });
   }
 }

@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Prisma } from '@prisma/client';
+import { CANVAS_PRODUCT_NAME, isCanvasSource } from '@/lib/canvas-source';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { getCostLedgerAuditSummary } from '@/lib/costs/audit';
@@ -14,15 +16,20 @@ import {
   usdToCnyRateText,
 } from '@/lib/costs/currency';
 import { taskDetailHref } from '@/lib/navigation/return-to';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import OfficialChargeForm from './OfficialChargeForm';
 import OfficialChargeImportForm from './OfficialChargeImportForm';
 import ProviderBalancePanel from './ProviderBalancePanel';
+import { RelativeTime } from '@/components/RelativeTime';
+import { costLedgerListWhere, costListSearch, costTaskListWhere, parseCostListFilters, type CostListFilters } from './list-filters';
+import CostListLocation from './CostListLocation';
+import workbenchStyles from '../integrations/workbench.module.css';
 
 export const dynamic = 'force-dynamic';
 
 const COST_SOURCE_FILTERS = [
-  { value: 'all', label: '全部来源', hint: '所有网页、外部 API 和无线画布任务' },
-  { value: 'ultimate_canvas', label: '无线画布', hint: '只看新无线画布产生的任务成本' },
+  { value: 'all', label: '全部来源', hint: '所有网页、外部 API 和无限画布任务' },
+  { value: 'ultimate_canvas', label: '无限画布', hint: '只看新无限画布产生的任务成本' },
   { value: 'web', label: '普通网页', hint: '普通生成页和站内页面任务' },
   { value: 'codex_api', label: '外部 API', hint: '外部接入接口创建的任务' },
 ] as const;
@@ -139,7 +146,7 @@ function providerBalanceHint(snapshot: ReturnType<typeof providerBalanceSnapshot
   if (!snapshot) return syncEnabled ? '可从供应商拉取或手动固化' : '下方手动录入余额后会显示在这里';
   if (snapshot.status === 'failed') return '最近一次拉取失败，请检查余额接口';
   const source = snapshot.source === 'manual' ? '手动记录' : '供应商接口';
-  return `${source} · ${new Date(snapshot.fetched_at).toLocaleString('zh-CN')}`;
+  return <>{source} · <RelativeTime value={snapshot.fetched_at} /></>;
 }
 
 function budgetRiskLabel(committedRatio: number, budgetCredits: number) {
@@ -160,13 +167,8 @@ function firstSearchParam(value: string | string[] | undefined) {
   return value || '';
 }
 
-function normalizeSourceFilter(value: string | string[] | undefined): CostSourceFilter {
-  const raw = firstSearchParam(value).trim();
-  return COST_SOURCE_FILTERS.some((item) => item.value === raw) ? raw as CostSourceFilter : 'all';
-}
-
-function sourceFilterHref(source: CostSourceFilter) {
-  return source === 'all' ? '/admin/costs' : `/admin/costs?source=${source}`;
+function sourceFilterHref(source: CostSourceFilter, filters: CostListFilters) {
+  return `/admin/costs?${costListSearch({ ...filters, source, page: 1, task_page: 1 })}`;
 }
 
 function sourcePointsHref(source: CostSourceFilter) {
@@ -196,8 +198,8 @@ function taskSourceInfo(task: TaskSourceFields | null | undefined): SourceInfo {
   const source = typeof metadata?.source === 'string' ? metadata.source : '';
   const sourceLabel = typeof metadata?.source_label === 'string' ? metadata.source_label : '';
 
-  if (source === 'ultimate_canvas' || task.source_label === '无线画布') {
-    return { key: 'ultimate_canvas', label: sourceLabel || task.source_label || '无线画布' };
+  if (isCanvasSource(source, sourceLabel, task.source_label)) {
+    return { key: 'ultimate_canvas', label: CANVAS_PRODUCT_NAME };
   }
   if (task.source_type === 'codex_api') {
     return { key: 'codex_api', label: task.source_label || '外部 API' };
@@ -214,33 +216,6 @@ function SourceBadge({ source }: { source: SourceInfo }) {
       {source.label}
     </span>
   );
-}
-
-function ultimateCanvasTaskWhere(): Prisma.VideoTaskWhereInput {
-  return {
-    OR: [
-      { source_label: '无线画布' },
-      { source_metadata_json: { contains: '"source":"ultimate_canvas"' } },
-      { source_metadata_json: { contains: '"source": "ultimate_canvas"' } },
-    ],
-  };
-}
-
-function videoTaskSourceWhere(source: CostSourceFilter): Prisma.VideoTaskWhereInput | null {
-  if (source === 'all') return null;
-  if (source === 'ultimate_canvas') return ultimateCanvasTaskWhere();
-  if (source === 'codex_api') return { source_type: 'codex_api' };
-  return {
-    AND: [
-      { source_type: 'web' },
-      { NOT: ultimateCanvasTaskWhere() },
-    ],
-  };
-}
-
-function costLedgerSourceWhere(source: CostSourceFilter): Prisma.CostLedgerWhereInput | null {
-  const taskWhere = videoTaskSourceWhere(source);
-  return taskWhere ? { task: { is: taskWhere } } : null;
 }
 
 function combineVideoTaskWhere(
@@ -261,6 +236,16 @@ function combineCostLedgerWhere(
   return { AND: filters };
 }
 
+function CostListPager({ filters, total, tasks = false }: { filters: CostListFilters; total: number; tasks?: boolean }) {
+  const page = tasks ? filters.task_page : filters.page, pages = Math.max(1, Math.ceil(total / filters.page_size));
+  const href = (next: number) => `/admin/costs?${costListSearch({ ...filters, [tasks ? 'task_page' : 'page']: next })}#${tasks ? 'pending-costs' : 'cost-ledgers'}`;
+  return <nav aria-label={tasks ? '任务分页' : '总账分页'} style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 16 }}>
+    <span className="text-gray text-sm">共 {total} 条 · 第 {page} / {pages} 页</span>
+    {page > 1 && <Link className="btn btn-secondary" href={href(page - 1)} aria-label="上一页" title="上一页"><ChevronLeft size={16} /></Link>}
+    {page < pages && <Link className="btn btn-secondary" href={href(page + 1)} aria-label="下一页" title="下一页"><ChevronRight size={16} /></Link>}
+  </nav>;
+}
+
 export default async function AdminCostsPage({
   searchParams,
 }: {
@@ -270,9 +255,15 @@ export default async function AdminCostsPage({
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');
 
-  const sourceFilter = normalizeSourceFilter(searchParams?.source);
-  const taskSourceFilter = videoTaskSourceWhere(sourceFilter);
-  const ledgerSourceFilter = costLedgerSourceWhere(sourceFilter);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams || {})) if (value !== undefined) params.set(key, firstSearchParam(value));
+  let filters: CostListFilters;
+  try { filters = parseCostListFilters(params); }
+  catch (error) { return <div><PageBanner eyebrow="管理后台" title="成本与账务" /><p role="status">{error instanceof Error ? error.message : '筛选条件无效'}</p><Link href="/admin/costs">清除无效筛选</Link></div>; }
+  const sourceFilter = filters.source;
+  const taskSourceFilter = costTaskListWhere(filters);
+  const ledgerSourceFilter = costLedgerListWhere(filters);
+  const returnTo = `/admin/costs?${costListSearch(filters)}`;
   const recentIssueBaseWhere: Prisma.VideoTaskWhereInput = {
     OR: [
       {
@@ -283,7 +274,7 @@ export default async function AdminCostsPage({
       { project_id: null },
     ],
   };
-  const recentIssueWhere = combineVideoTaskWhere(recentIssueBaseWhere, taskSourceFilter);
+  const recentIssueWhere = combineVideoTaskWhere(filters.cost_status ? null : recentIssueBaseWhere, taskSourceFilter);
   const recentLedgerWhere = combineCostLedgerWhere(ledgerSourceFilter);
 
   const [
@@ -302,6 +293,7 @@ export default async function AdminCostsPage({
     sourceTaskCount,
     sourceLedgerCount,
     sourceRecentLedgers,
+    issueCount,
   ] = await Promise.all([
     prisma.videoTask.count(),
     prisma.videoTask.count({ where: { local_status: { in: ['succeeded', 'failed', 'cancelled'] } } }),
@@ -332,15 +324,20 @@ export default async function AdminCostsPage({
     }),
     prisma.videoTask.findMany({
       where: recentIssueWhere,
-      orderBy: { created_at: 'desc' },
-      take: 20,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      take: filters.page_size,
+      skip: (filters.task_page - 1) * filters.page_size,
       select: {
         id: true,
         prompt: true,
         source_type: true,
         source_label: true,
         source_metadata_json: true,
+        provider: true,
+	        generation_mode: true,
 	        local_status: true,
+	        delivery_status: true,
+	        public_video_url: true,
 	        result_video_url: true,
 	        result_last_frame_url: true,
 	        local_video_path: true,
@@ -394,8 +391,9 @@ export default async function AdminCostsPage({
     prisma.costLedger.count({ where: recentLedgerWhere }),
     prisma.costLedger.findMany({
       where: recentLedgerWhere,
-      orderBy: [{ occurred_at: 'desc' }, { created_at: 'desc' }],
-      take: 20,
+      orderBy: [{ occurred_at: 'desc' }, { id: 'desc' }],
+      take: filters.page_size,
+      skip: (filters.page - 1) * filters.page_size,
       select: {
         id: true,
         task_id: true,
@@ -418,8 +416,13 @@ export default async function AdminCostsPage({
         },
       },
     }),
+    prisma.videoTask.count({ where: recentIssueWhere }),
   ]);
   const officialCostTotals = sumCostRowsByCurrency(officialCostRows);
+  const projectedRecentIssues = recentIssues.map((task) => ({
+    ...task,
+    ...taskThumbnailProjection(task),
+  }));
   const providerBalanceViews = providerBalanceSnapshots.map(providerBalanceSnapshotDto);
   const latestProviderBalance = providerBalanceViews[0] || null;
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
@@ -458,10 +461,11 @@ export default async function AdminCostsPage({
   ];
 
   return (
-    <div>
+    <div className={workbenchStyles.surface}>
+      <CostListLocation accountId={user.id} query={costListSearch(filters).toString()} />
       <PageBanner
         eyebrow="管理员后台"
-        title="计费与成本复盘"
+        title="成本与账务"
         description="余额看供应商账户是否还能继续生成，成本看任务、项目和官方扣费能否闭环对账。"
         actions={(
           <>
@@ -471,8 +475,8 @@ export default async function AdminCostsPage({
             <Link className="btn btn-secondary" href="/admin/points">
               点数账本
             </Link>
-            <Link className="btn btn-secondary" href="/api/admin/costs/export">
-              导出总账 CSV
+            <Link className="btn btn-secondary" href={`/api/admin/costs/export?${costListSearch(filters)}`}>
+              导出当前筛选总账 CSV
             </Link>
           </>
         )}
@@ -482,7 +486,7 @@ export default async function AdminCostsPage({
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 className="section-title mb-0">来源筛选</h2>
-            <p className="text-gray text-sm mt-2">当前成本页按任务来源查看待处理队列和最近总账，方便核对无线画布、外部 API 和普通网页是否进入同一套账本。</p>
+            <p className="text-gray text-sm mt-2">当前成本页按任务来源查看待处理队列和最近总账，方便核对无限画布、外部 API 和普通网页是否进入同一套账本。</p>
           </div>
           <Link className="btn btn-secondary" href={sourcePointsHref(sourceFilter)}>
             查看同来源点数流水
@@ -493,7 +497,7 @@ export default async function AdminCostsPage({
             <Link
               key={item.value}
               className={`outputs-filter-chip${sourceFilter === item.value ? ' is-active' : ''}`}
-              href={sourceFilterHref(item.value)}
+              href={sourceFilterHref(item.value, filters)}
               title={item.hint}
               style={{ alignItems: 'center', display: 'inline-flex', textDecoration: 'none' }}
             >
@@ -501,8 +505,20 @@ export default async function AdminCostsPage({
             </Link>
           ))}
         </div>
+        <form method="get" className="outputs-filter-row" style={{ flexWrap: 'wrap', marginTop: 16 }}>
+          <input type="hidden" name="source" value={sourceFilter} />
+          <select className="input" name="cost_status" aria-label="账务费用状态" defaultValue={filters.cost_status}><option value="">全部费用状态</option><option value="pending">费用待核</option><option value="conflict">费用冲突</option><option value="confirmed">费用已确认</option></select>
+          <input className="input" name="owner_user_id" aria-label="账务用户编号" placeholder="用户 ID" defaultValue={filters.owner_user_id} />
+          <input className="input" name="project_id" aria-label="账务项目编号" placeholder="项目 ID，未归属填 unassigned" defaultValue={filters.project_id} />
+          <input className="input" type="date" name="date_from" aria-label="账务开始日期" defaultValue={filters.date_from} />
+          <input className="input" type="date" name="date_to" aria-label="账务结束日期" defaultValue={filters.date_to} />
+          <input className="input" name="keyword" aria-label="账务记录编号" placeholder="账本、任务或供应商任务 ID" defaultValue={filters.keyword} />
+          <select className="input" name="page_size" aria-label="每页账务记录数量" defaultValue={filters.page_size}>{[20, 30, 50, 100].map(size => <option key={size} value={size}>每页 {size} 条</option>)}</select>
+          {filters.resolution && <input type="hidden" name="resolution" value={filters.resolution} />}
+          <button type="submit" className="btn btn-secondary">筛选</button><Link className="btn btn-secondary" href="/admin/costs">重置筛选</Link>
+        </form>
         <p className="form-hint mt-4">
-          当前：{selectedSourceFilterLabel(sourceFilter)} · 任务 {sourceTaskCount} · 成本账本 {sourceLedgerCount}
+          当前筛选：{selectedSourceFilterLabel(sourceFilter)} · 视频任务 {sourceTaskCount} · 成本账本 {sourceLedgerCount}。筛选作用于下方任务与总账；全站概况和管理区保持完整范围。
         </p>
       </div>
 
@@ -596,7 +612,7 @@ export default async function AdminCostsPage({
             <h2 className="section-title mb-0">账本自检</h2>
             <p className="text-gray text-sm mt-2">用于确认总账、分摊、任务状态和 Provider 请求之间没有断链。</p>
           </div>
-          <span className={auditSummary.issue_count === 0 ? 'text-green' : 'text-red'}>
+          <span className={auditSummary.issue_count === 0 ? 'text-green' : 'text-gray'}>
             {auditSummary.issue_count === 0 ? '自检通过' : `发现 ${auditSummary.issue_count} 项待处理`}
           </span>
         </div>
@@ -638,7 +654,7 @@ export default async function AdminCostsPage({
             {auditChecks.map((check) => (
               <tr key={check.label}>
                 <td>{check.label}</td>
-                <td className={check.count === 0 ? 'text-green' : 'text-red'}>{auditStatusText(check.count)}</td>
+                <td className={check.count === 0 ? 'text-green' : 'text-gray'}>{auditStatusText(check.count)}</td>
                 <td className="text-gray">{check.detail}</td>
               </tr>
             ))}
@@ -653,7 +669,7 @@ export default async function AdminCostsPage({
       </div>
 
       <OfficialChargeForm
-        pendingTasks={recentIssues.map((task) => ({
+        pendingTasks={projectedRecentIssues.map((task) => ({
           id: task.id,
           prompt: task.prompt || task.id,
           provider_task_id: task.provider_task_id,
@@ -663,8 +679,8 @@ export default async function AdminCostsPage({
       <OfficialChargeImportForm />
 
       <div className="card" id="pending-costs">
-        <h2 className="section-title">待处理队列</h2>
-        {recentIssues.length === 0 ? (
+        <h2 className="section-title">{filters.cost_status === 'confirmed' ? '已确认费用的视频任务' : '待处理视频任务'}</h2>
+        {projectedRecentIssues.length === 0 ? (
           <p className="text-gray">当前没有成本待办。</p>
         ) : (
           <table className="table">
@@ -683,28 +699,36 @@ export default async function AdminCostsPage({
               </tr>
             </thead>
             <tbody>
-              {recentIssues.map((task) => (
+              {projectedRecentIssues.map((task) => (
 	                <tr key={task.id}>
 	                  <td>
 	                    <TaskVideoThumbnail
 	                      taskId={task.id}
+	                      thumbnailUrl={task.thumbnail_url}
+	                      publicVideoUrl={task.public_video_url}
 	                      localVideoPath={task.local_video_path}
 	                      resultVideoUrl={task.result_video_url}
 	                      resultLastFrameUrl={task.result_last_frame_url}
 	                      status={task.local_status}
-	                      href={taskDetailHref(task.id, '/admin/costs')}
+	                      deliveryStage={task.delivery_stage}
+	                      previewAvailable={task.preview_available}
+	                      stableDownloadReady={task.stable_download_ready}
+	                      retryAfterMs={task.retry_after_ms}
+	                      provider={task.provider}
+	                      generationMode={task.generation_mode}
+	                      href={taskDetailHref(task.id, returnTo)}
 	                      size="compact"
 	                    />
 	                  </td>
 	                  <td className="truncate" style={{ maxWidth: 300 }} title={task.prompt}>
-	                    <Link className="link" href={taskDetailHref(task.id, '/admin/costs')}>{task.prompt || task.id}</Link>
+	                    <Link className="link" href={taskDetailHref(task.id, returnTo)}>{task.prompt || task.id}</Link>
 	                  </td>
                   <td><SourceBadge source={taskSourceInfo(task)} /></td>
                   <td>
                     {task.project ? (
                       <Link className="link" href={`/projects/${task.project.id}`}>{task.project.name}</Link>
                     ) : (
-                      <span className="text-red">未归属</span>
+                      <span className="text-gray">未归属</span>
                     )}
                   </td>
                   <td><UserIdentityBadge user={taskOwnerUser(task)} size="sm" /></td>
@@ -716,12 +740,13 @@ export default async function AdminCostsPage({
                     amount_minor: task.provider_official_amount_minor,
                     currency: task.provider_cost_currency,
                   })}</td>
-                  <td><Link className="link" href={taskDetailHref(task.id, '/admin/costs')}>详情</Link></td>
+                  <td><Link className="link" href={taskDetailHref(task.id, returnTo)}>详情</Link></td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        <CostListPager filters={filters} total={issueCount} tasks />
       </div>
 
       <div className="card" id="provider-errors">
@@ -742,10 +767,10 @@ export default async function AdminCostsPage({
             <tbody>
               {failedRequests.map((request) => (
                 <tr key={request.id}>
-                  <td>{new Date(request.created_at).toLocaleString('zh-CN')}</td>
+                  <td><RelativeTime value={request.created_at.toISOString()} /></td>
                   <td>{request.provider_name}</td>
                   <td>{request.project ? <Link className="link" href={`/projects/${request.project.id}`}>{request.project.name}</Link> : '-'}</td>
-                  <td>{request.task_id ? <Link className="link" href={taskDetailHref(request.task_id, '/admin/costs')}>{request.task_id.slice(0, 10)}...</Link> : '-'}</td>
+                  <td>{request.task_id ? <Link className="link" href={taskDetailHref(request.task_id, returnTo)}>{request.task_id.slice(0, 10)}...</Link> : '-'}</td>
                   <td className="truncate" style={{ maxWidth: 360 }} title={request.error_message || ''}>{request.error_message || '-'}</td>
                 </tr>
               ))}
@@ -754,11 +779,11 @@ export default async function AdminCostsPage({
         )}
       </div>
 
-      <div className="card">
+      <div className="card" id="cost-ledgers">
         <div className="flex items-center justify-between mb-4" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h2 className="section-title mb-0">最近总账</h2>
-            <p className="text-gray text-sm mt-2">按上方来源筛选后的成本账本；“无线画布”会直接从关联任务的来源 metadata 中识别。</p>
+            <h2 className="section-title mb-0">成本总账</h2>
+            <p className="text-gray text-sm mt-2">按上方来源筛选后的成本账本；“无限画布”会直接从关联任务的来源 metadata 中识别。</p>
           </div>
           <span className="text-gray text-sm">{selectedSourceFilterLabel(sourceFilter)}</span>
         </div>
@@ -780,12 +805,12 @@ export default async function AdminCostsPage({
             <tbody>
               {sourceRecentLedgers.map((ledger) => (
                 <tr key={ledger.id}>
-                  <td>{new Date(ledger.occurred_at).toLocaleString('zh-CN')}</td>
+                  <td><RelativeTime value={ledger.occurred_at.toISOString()} /></td>
                   <td>{ledger.event_type}</td>
                   <td><SourceBadge source={taskSourceInfo(ledger.task)} /></td>
                   <td>{ledger.project ? <Link className="link" href={`/projects/${ledger.project_id}`}>{ledger.project.name}</Link> : '-'}</td>
                   <td className="truncate" style={{ maxWidth: 320 }}>
-                    {ledger.task_id ? <Link className="link" href={taskDetailHref(ledger.task_id, '/admin/costs')}>{ledger.task?.prompt || ledger.task_id}</Link> : '-'}
+                    {ledger.task_id ? <Link className="link" href={taskDetailHref(ledger.task_id, returnTo)}>{ledger.task?.prompt || ledger.task_id}</Link> : '-'}
                   </td>
                   <td>{formatCostAmount(ledger)}</td>
                   <td>{ledger.confidence}</td>
@@ -794,6 +819,7 @@ export default async function AdminCostsPage({
             </tbody>
           </table>
         )}
+        <CostListPager filters={filters} total={sourceLedgerCount} />
       </div>
     </div>
   );

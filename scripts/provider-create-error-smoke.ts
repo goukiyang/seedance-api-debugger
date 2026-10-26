@@ -1,0 +1,318 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { readJsonResponse } from '../src/lib/http/json-response';
+import { translateError } from '../src/components/ErrorTranslator';
+import {
+  isProviderHtmlResponseError,
+  isNextServerActionVersionMismatchError,
+  isProviderOutputAudioCopyrightError,
+  isProviderOutputAudioSensitiveError,
+  isProviderOutputVideoCopyrightError,
+  isProviderReferenceImagePrivacySensitiveError,
+  isProviderReferenceMediaTooSmallError,
+  normalizeProviderErrorMessage,
+  providerCreateFailureUserMessage,
+  providerFailureUserMessage,
+  visibleProviderErrorMessage,
+} from '../src/lib/provider/error-message';
+
+const html502 = '<!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]--> <html><body>Bad gateway</body></html>';
+const lowPixelProviderError = {
+  error: {
+    code: 'InvalidParameter',
+    message: 'The parameter `content[5]` specified in the request is not valid: the parameter video pixel count specified in the request must be greater than or equal to 409600 for model dreamina-seedance-2-0 in r2v. Request id: smoke',
+    param: 'content[5]',
+    type: 'BadRequest',
+  },
+};
+const privacyProviderError = {
+  error: {
+    code: 'InputImageSensitiveContentDetected.PrivacyInformation',
+    message: "The request failed because the input image 'content[1]' may contain real person. Request id: smoke",
+    param: '',
+    type: 'BadRequest',
+  },
+};
+const outputAudioCopyrightError = '[OutputAudioSensitiveContentDetected.PolicyViolation] The request failed because the output audio may be related to copyright restrictions. Request id: smoke';
+const outputVideoCopyrightError = '[OutputVideoSensitiveContentDetected.PolicyViolation] The request failed because the output video may be related to copyright restrictions. Request id: smoke';
+const outputAudioSensitiveError = '[OutputAudioSensitiveContentDetected] The request failed because the output audio may contain sensitive information. Request id: smoke';
+const serverActionVersionMismatchError = 'Failed to find Server Action "x". This request might be from an older or newer deployment. Original error: Cannot read properties of undefined (reading "workers")';
+const resourceDownloadError = '[InvalidParameter] The parameter `content[3].image_url` specified in the request is not valid: resource download failed. Request id: smoke';
+const totalDurationError = '[InvalidParameter] The parameter `content` specified in the request is not valid: the parameter video total duration (seconds) specified in the request must be less than or equal to 15.2 for model dreamina-seedance-2-0 in r2v. Request id: smoke';
+const modelNotOpenError = 'Your account has not activated the model doubao-seedance-2-0-260128. Please activate the model service in the Ark Console. Request id: smoke';
+
+function read(relativePath: string) {
+  return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+}
+
+async function assertReadJsonResponseHidesHtml() {
+  const response = new Response(html502, {
+    status: 502,
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+  });
+
+  await assert.rejects(
+    () => readJsonResponse(response),
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /服务临时返回了异常页面/);
+      assert.match(error.message, /HTTP 502/);
+      assert.doesNotMatch(error.message, /<!DOCTYPE|<html|no-js ie6/i);
+      return true;
+    },
+  );
+}
+
+async function assertProviderCreateExtractsErrorObject() {
+  const originalFetch = globalThis.fetch;
+  const previousApiKey = process.env.SEEDANCE_API_KEY;
+  process.env.SEEDANCE_API_KEY = 'smoke-key';
+  const { createVideoTask } = await import('../src/lib/provider/jimeng');
+  globalThis.fetch = (async () => new Response(JSON.stringify(lowPixelProviderError), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => createVideoTask({
+        prompt: 'smoke',
+        generation_mode: 'all_in_one_reference',
+        ratio: '9:16',
+        duration: 6,
+        resolution: '480p',
+        reference_video_urls: ['https://example.invalid/tiny.mp4'],
+      }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /InvalidParameter/);
+        assert.match(error.message, /409600/);
+        assert.doesNotMatch(error.message, /missing id/i);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousApiKey == null) delete process.env.SEEDANCE_API_KEY;
+    else process.env.SEEDANCE_API_KEY = previousApiKey;
+  }
+}
+
+async function assertProviderCreateHidesHtml() {
+  const originalFetch = globalThis.fetch;
+  const previousApiKey = process.env.SEEDANCE_API_KEY;
+  process.env.SEEDANCE_API_KEY = 'smoke-key';
+  const { createVideoTask } = await import('../src/lib/provider/jimeng');
+  globalThis.fetch = (async () => new Response(html502, {
+    status: 502,
+    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+  })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => createVideoTask({
+        prompt: 'smoke',
+        generation_mode: 'all_in_one_reference',
+        ratio: '9:16',
+        duration: 6,
+        resolution: '480p',
+      }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Seedance 创建任务返回异常页面/);
+        assert.doesNotMatch(error.message, /<!DOCTYPE|<html|no-js ie6/i);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousApiKey == null) delete process.env.SEEDANCE_API_KEY;
+    else process.env.SEEDANCE_API_KEY = previousApiKey;
+  }
+}
+
+async function main() {
+  await assertReadJsonResponseHidesHtml();
+  await assertProviderCreateExtractsErrorObject();
+  await assertProviderCreateHidesHtml();
+
+  const normalized = normalizeProviderErrorMessage(lowPixelProviderError.error);
+  assert.ok(normalized);
+  assert.ok(isProviderReferenceMediaTooSmallError(normalized), '像素过低 Provider 错误必须被归类为用户可修正素材问题');
+
+  const userMessage = providerCreateFailureUserMessage(normalized);
+  assert.equal(userMessage.code, 'REFERENCE_MEDIA_TOO_SMALL');
+  assert.equal(userMessage.status, 400);
+  assert.match(userMessage.message, /第5项参考素材分辨率太低/);
+  assert.match(userMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(userMessage.message, /Create video task missing id|content\[5\]|InvalidParameter/);
+
+  const privacyNormalized = normalizeProviderErrorMessage(privacyProviderError.error);
+  assert.ok(privacyNormalized);
+  assert.ok(
+    isProviderReferenceImagePrivacySensitiveError(privacyNormalized),
+    '真人隐私拦截必须被归类为用户可修正素材问题',
+  );
+  const privacyMessage = providerCreateFailureUserMessage(privacyNormalized);
+  assert.equal(privacyMessage.code, 'REFERENCE_IMAGE_PRIVACY_SENSITIVE');
+  assert.equal(privacyMessage.status, 400);
+  assert.match(privacyMessage.message, /第1张参考图上传服务方人像库失败/);
+  assert.match(privacyMessage.message, /可能包含真实人物或隐私信息/);
+  assert.match(privacyMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(privacyMessage.message, /InputImageSensitiveContentDetected|content\[1\]|Request id/i);
+
+  const resourceMessage = providerCreateFailureUserMessage(resourceDownloadError);
+  assert.equal(resourceMessage.code, 'REFERENCE_RESOURCE_UNAVAILABLE');
+  assert.equal(resourceMessage.status, 400);
+  assert.match(resourceMessage.message, /第3项参考素材暂时无法/);
+  assert.doesNotMatch(resourceMessage.message, /resource download failed|content\[3\]|Request id/i);
+
+  const durationMessage = providerCreateFailureUserMessage(totalDurationError);
+  assert.equal(durationMessage.code, 'REFERENCE_TOTAL_DURATION_TOO_LONG');
+  assert.match(durationMessage.message, /总时长超过/);
+  assert.doesNotMatch(durationMessage.message, /video total duration|Request id/i);
+
+  const modelMessage = providerCreateFailureUserMessage(modelNotOpenError);
+  assert.equal(modelMessage.code, 'PROVIDER_MODEL_NOT_OPEN');
+  assert.equal(modelMessage.status, 403);
+  assert.match(modelMessage.message, /尚未开通所选视频模型/);
+  assert.doesNotMatch(modelMessage.message, /activated the model|Ark Console|Request id/i);
+
+  const gatewayTimeoutMessage = providerCreateFailureUserMessage('Create video task failed: 524 {}');
+  assert.equal(gatewayTimeoutMessage.code, 'PROVIDER_GATEWAY_TIMEOUT');
+  assert.match(gatewayTimeoutMessage.message, /先刷新任务列表确认/);
+
+  const responseFormatMessage = providerCreateFailureUserMessage('Unexpected end of JSON input');
+  assert.equal(responseFormatMessage.code, 'PROVIDER_RESPONSE_FORMAT_ERROR');
+  assert.doesNotMatch(responseFormatMessage.message, /JSON|Unexpected end/i);
+
+  const transactionMessage = providerCreateFailureUserMessage('Transaction API error: Transaction not found.');
+  assert.equal(transactionMessage.code, 'PROVIDER_TRANSACTION_CONFLICT');
+  assert.doesNotMatch(transactionMessage.message, /Transaction/i);
+
+  const translatedPrivacy = translateError(privacyNormalized);
+  assert.equal(translatedPrivacy?.title, '第1张参考图未通过人像检查');
+  assert.match(translatedPrivacy?.reasons.join('；') || '', /第1张参考图上传服务方人像库失败/);
+
+  const translatedResource = translateError(resourceDownloadError);
+  assert.equal(translatedResource?.title, '第3项参考素材无法读取');
+
+  const translatedUnknown = translateError('[NewProviderCode] provider changed a validation rule');
+  assert.equal(translatedUnknown?.title, '本次提交没有正常完成');
+  assert.ok(translatedUnknown?.actions.some((action) => action.action === 'reload'));
+  assert.doesNotMatch(translatedUnknown?.reasons.join('；') || '', /请先换素材/);
+
+  assert.ok(isProviderOutputAudioCopyrightError(outputAudioCopyrightError), '输出音频版权拦截必须被识别');
+  const outputAudioCopyrightMessage = providerFailureUserMessage(outputAudioCopyrightError, { includeRefundText: true });
+  assert.equal(outputAudioCopyrightMessage.code, 'OUTPUT_AUDIO_COPYRIGHT_RESTRICTED');
+  assert.equal(outputAudioCopyrightMessage.status, 400);
+  assert.match(outputAudioCopyrightMessage.message, /输出音频可能涉及版权限制/);
+  assert.match(outputAudioCopyrightMessage.message, /关闭音频生成/);
+  assert.match(outputAudioCopyrightMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(outputAudioCopyrightMessage.message, /OutputAudioSensitiveContentDetected|Request id|copyright restrictions/i);
+
+  assert.ok(isProviderOutputVideoCopyrightError(outputVideoCopyrightError), '输出视频版权拦截必须被识别');
+  const outputVideoCopyrightMessage = providerFailureUserMessage(outputVideoCopyrightError);
+  assert.equal(outputVideoCopyrightMessage.code, 'OUTPUT_VIDEO_COPYRIGHT_RESTRICTED');
+  assert.match(outputVideoCopyrightMessage.message, /输出视频可能涉及版权限制/);
+  assert.doesNotMatch(outputVideoCopyrightMessage.message, /OutputVideoSensitiveContentDetected|Request id|copyright restrictions/i);
+
+  assert.ok(isProviderOutputAudioSensitiveError(outputAudioSensitiveError), '输出音频敏感内容拦截必须被识别');
+  const outputAudioSensitiveMessage = providerFailureUserMessage(outputAudioSensitiveError);
+  assert.equal(outputAudioSensitiveMessage.code, 'OUTPUT_AUDIO_SENSITIVE');
+  assert.match(outputAudioSensitiveMessage.message, /输出音频可能包含敏感内容/);
+  assert.doesNotMatch(outputAudioSensitiveMessage.message, /OutputAudioSensitiveContentDetected|Request id|sensitive information/i);
+
+  const htmlMessage = providerCreateFailureUserMessage('Seedance 创建任务返回异常页面（HTTP 502，text/html; charset=UTF-8）');
+  assert.equal(htmlMessage.code, 'PROVIDER_HTML_RESPONSE');
+  assert.equal(htmlMessage.status, 502);
+  assert.ok(isProviderHtmlResponseError('Invalid JSON response: <!DOCTYPE html>'));
+  assert.doesNotMatch(htmlMessage.message, /<!DOCTYPE|<html/i);
+
+  assert.ok(isNextServerActionVersionMismatchError(serverActionVersionMismatchError), '页面版本错位必须被识别为可刷新恢复的问题');
+  const versionMismatchMessage = providerCreateFailureUserMessage(serverActionVersionMismatchError);
+  assert.equal(versionMismatchMessage.code, 'PAGE_VERSION_MISMATCH');
+  assert.equal(versionMismatchMessage.status, 409);
+  assert.match(versionMismatchMessage.message, /页面版本已更新/);
+  assert.match(versionMismatchMessage.message, /刷新页面后重新提交/);
+  assert.match(versionMismatchMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(versionMismatchMessage.message, /Server Action|workers|deployment/i);
+
+  const h3UnsupportedLoraMessage = providerCreateFailureUserMessage('[unsupported_lora] LoRA is not in the H3 allowlist');
+  assert.equal(h3UnsupportedLoraMessage.code, 'H3_UNSUPPORTED_LORA');
+  assert.equal(h3UnsupportedLoraMessage.status, 400);
+  assert.match(h3UnsupportedLoraMessage.message, /不在 H3 服务白名单/);
+  assert.match(h3UnsupportedLoraMessage.message, /已取消提交/);
+  assert.match(h3UnsupportedLoraMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(h3UnsupportedLoraMessage.message, /allowlist/i);
+
+  const h3GpuMessage = providerFailureUserMessage('GPU out of memory during generation。15 秒 720P Larry 显存风险高');
+  assert.equal(h3GpuMessage.code, 'H3_GPU_OUT_OF_MEMORY');
+  assert.match(h3GpuMessage.message, /H3 机器显存不足/);
+  assert.doesNotMatch(h3GpuMessage.message, /GPU out of memory/i);
+
+  const emptyErrorMessage = visibleProviderErrorMessage('error');
+  assert.equal(emptyErrorMessage, '视频生成服务只返回了“失败”状态，没有给出具体原因。系统已记录原始响应，管理员可以按任务 ID 到后台继续排查。');
+
+  assert.equal(
+    visibleProviderErrorMessage('当前火山账号没有这个模型、接口或素材权限，请确认模型已开通。'),
+    '当前火山账号没有这个模型、接口或素材权限，请确认模型已开通。',
+  );
+
+  const unknownMessage = providerCreateFailureUserMessage('[NewProviderCode] provider changed a validation rule');
+  assert.equal(unknownMessage.code, 'PROVIDER_CREATE_FAILED');
+  assert.equal(unknownMessage.status, 502);
+  assert.match(unknownMessage.message, /已记录错误摘要/);
+  assert.match(unknownMessage.message, /已返还冻结点数/);
+  assert.doesNotMatch(unknownMessage.message, /NewProviderCode|provider changed/i);
+
+  const errorTranslator = read('src/components/ErrorTranslator.tsx');
+  assert.match(errorTranslator, /REFERENCE_MEDIA_TOO_SMALL/, '错误翻译组件必须识别参考素材分辨率太低');
+  assert.match(errorTranslator, /REFERENCE_IMAGE_PRIVACY_SENSITIVE/, '错误翻译组件必须识别参考图真人隐私拦截');
+  assert.match(errorTranslator, /OUTPUT_AUDIO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出音频版权拦截');
+  assert.match(errorTranslator, /OUTPUT_VIDEO_COPYRIGHT_RESTRICTED/, '错误翻译组件必须识别输出视频版权拦截');
+  assert.match(errorTranslator, /PROVIDER_HTML_RESPONSE/, '错误翻译组件必须识别 Provider HTML 异常页');
+  assert.match(errorTranslator, /PAGE_VERSION_MISMATCH/, '错误翻译组件必须识别页面版本错位');
+  assert.match(errorTranslator, /REFERENCE_RESOURCE_UNAVAILABLE/, '错误翻译组件必须识别参考素材无法读取');
+  assert.match(errorTranslator, /REFERENCE_TOTAL_DURATION_TOO_LONG/, '错误翻译组件必须识别参考素材总时长超限');
+  assert.match(errorTranslator, /PROVIDER_MODEL_NOT_OPEN/, '错误翻译组件必须识别模型未开通');
+  assert.match(errorTranslator, /PROVIDER_TRANSACTION_CONFLICT/, '错误翻译组件必须识别数据事务冲突');
+  assert.match(errorTranslator, /MISSING_PROVIDER_TASK_ID/, '错误翻译组件必须识别生成服务未返回任务号');
+  assert.match(errorTranslator, /failed to find server action/, '错误翻译组件必须识别 Next Server Action 版本错位原文');
+  assert.match(errorTranslator, /window\.location\.reload\(\)/, '刷新类错误必须提供真实刷新动作');
+  assert.doesNotMatch(errorTranslator, /API 服务返回了非 JSON 格式的响应/, '错误翻译组件不能继续用容易误导的旧 JSON 泛化文案');
+
+  const tasksCreateRoute = read('src/app/api/tasks/create/route.ts');
+  assert.match(tasksCreateRoute, /error_message:\s*userFacingFailure\.message/, 'Agent 运行失败展示字段必须写用户友好文案。');
+
+  const projectRoute = read('src/app/api/projects/[id]/route.ts');
+  assert.match(projectRoute, /visibleProviderErrorMessage\(task\.error_message\)/, '项目失败任务必须翻译历史 Provider 英文错误。');
+
+  const videoCardTasksRoute = read('src/app/api/video-cards/[id]/tasks/route.ts');
+  assert.match(videoCardTasksRoute, /visibleProviderErrorMessage\(task\.error_message\)/, '视频卡任务必须翻译历史 Provider 英文错误。');
+  assert.match(tasksCreateRoute, /output_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, 'Agent 步骤输出必须写错误分类和用户友好文案。');
+  assert.match(tasksCreateRoute, /metadata_json:\s*JSON\.stringify\(\{[\s\S]*error:\s*userFacingFailure\.code,[\s\S]*message:\s*userFacingFailure\.message,/, '模板记忆元数据必须写错误分类和用户友好文案。');
+  assert.match(tasksCreateRoute, /errorCode:\s*userFacingFailure\.code/, 'Provider 请求失败记录必须写入归类后的错误码，方便后台补规则。');
+  assert.match(tasksCreateRoute, /handleProviderFailure\([\s\S]*userFacingFailure\.code/, '任务失败记录必须写入归类后的错误码，方便后台和报表筛选。');
+  assert.match(tasksCreateRoute, /responseSummary:\s*\{[\s\S]*reference_media:\s*buildReferenceMediaFailureSummary/, 'Provider 请求失败记录必须写入参考素材结构化摘要。');
+  assert.match(tasksCreateRoute, /host:\s*safeUrlHost\(url\)/, 'Provider 失败摘要只能记录 URL host，不能记录完整素材 URL。');
+  assert.doesNotMatch(tasksCreateRoute, /error_message:\s*providerFailureMessage/, 'Agent 运行失败字段不能再直接写 Provider 原始错误。');
+
+  const finalizer = read('src/lib/video/task-finalizer.ts');
+  assert.match(finalizer, /providerFailureUserMessage\(errorMessage/, '任务状态最终化必须把 Provider 终态失败翻成中文再写库。');
+  assert.match(finalizer, /updateData\.error_code\s*=\s*userFacingError\.code/, '任务状态最终化必须写入归类后的错误码。');
+
+  const listRoute = read('src/app/api/video/list/route.ts');
+  assert.match(listRoute, /visibleProviderErrorMessage/, '任务列表接口必须兜底翻译旧任务错误。');
+
+  const statusRoute = read('src/app/api/video/status/[id]/route.ts');
+  assert.match(statusRoute, /visibleProviderErrorMessage/, '任务状态接口必须兜底翻译旧任务错误。');
+
+  console.log('provider-create-error-smoke: ok');
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -1,6 +1,6 @@
 # SD2 视频生成 API 外部接入说明
 
-本文面向外部系统接入方，说明如何通过 SD2 后台配置的 API token 调用 Seedance 2.0 视频生成能力，并让生成任务、点数扣费、成本记录和后台审计进入同一套 SD2 管理系统。
+本文面向外部系统接入方，说明如何通过 SD2 后台配置的 API token 调用 Seedance 2.0 / 2.5 视频生成能力，并让生成任务、点数扣费、成本记录和后台审计进入同一套 SD2 管理系统。
 
 ## 1. 接入范围
 
@@ -9,6 +9,7 @@
 - 检查接口配置：`GET /api/codex/config`
 - 上传参考素材：`POST /api/codex/assets/upload`
 - 创建视频生成任务：`POST /api/codex/video/create`
+- 从本地 Seedance 2.5 Draft 升级 1080p：`POST /api/codex/video/draft-upgrade`
 - 兼容创建入口：`POST /api/tasks/create`
 
 任务状态查询、下载、后台产出和成本复盘目前仍沿用站内登录态与管理员后台：
@@ -112,11 +113,35 @@ curl -sS "$BASE_URL/api/codex/config" \
   "endpoints": {
     "upload_asset": "/api/codex/assets/upload",
     "create_video": "/api/codex/video/create",
+    "draft_upgrade": "/api/codex/video/draft-upgrade",
     "create_video_direct": "/api/tasks/create"
   },
   "auth": {
     "type": "bearer",
     "header": "Authorization"
+  },
+  "supported_settings": {
+    "seedance_draft": {
+      "create_enabled": false,
+      "upgrade_enabled": false,
+      "status": "provider_contract_pending"
+    },
+    "model": [
+      {
+        "id": "dreamina-seedance-2-0-260128",
+        "label": "Seedance 2.0",
+        "detail": "当前稳定默认模型",
+        "default": true,
+        "internal_credit_multiplier": 1
+      },
+      {
+        "id": "dreamina-seedance-2-5-260628",
+        "label": "Seedance 2.5",
+        "detail": "新一代视频模型",
+        "default": false,
+        "internal_credit_multiplier": 1.5
+      }
+    ]
   }
 }
 ```
@@ -226,6 +251,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
   -d '{
     "prompt": "A clean cinematic product shot of a white sneaker rotating on a glass platform, soft studio light.",
     "generation_mode": "all_in_one_reference",
+    "model": "dreamina-seedance-2-0-260128",
     "ratio": "16:9",
     "duration": 5,
     "resolution": "720p",
@@ -392,6 +418,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 |---|---|---|
 | `prompt` | string | 视频提示词，不能为空 |
 | `generation_mode` | string | 生成模式，默认可用 `all_in_one_reference` |
+| `model` | string | 可选；不传时默认 `dreamina-seedance-2-0-260128`；会影响平台内部点数扣费 |
 | `ratio` | string | 画幅比例 |
 | `duration` | number | 视频时长，单位秒 |
 | `resolution` | string | 分辨率 |
@@ -401,9 +428,17 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 | 字段 | 可选值 |
 |---|---|
 | `generation_mode` | `all_in_one_reference`, `first_last_frame`, `smart_multi_frame` |
+| `model` | `dreamina-seedance-2-0-260128`, `dreamina-seedance-2-5-260628` |
 | `ratio` | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` |
-| `duration` | `4` 到 `15` |
+| `duration` | 普通 Seedance 2.5 为 `4` 到 `30` 整数秒；默认 Seedance 2.0、IP 和 H3 仍为 `4` 到 `15` |
 | `resolution` | `480p`, `720p`, `1080p` |
+
+模型扣点规则：
+
+- `dreamina-seedance-2-0-260128`：Seedance 2.0，按平台基础 Seedance 视频点数规则计费。
+- `dreamina-seedance-2-5-260628`：Seedance 2.5，平台内部点数按 Seedance 2.0 的 `1.5` 倍计费。
+
+这里的“点数”是 SD2 平台内部给用户冻结和扣除的额度，不等于供应商美元成本。供应商实际美元成本以任务完成后 Provider 返回的 `actual_cost` 和 `currency_or_credit_type` 为准。
 
 常用可选字段：
 
@@ -475,7 +510,31 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 
 如果同一个绑定用户重复提交相同 `idempotency_key`，接口会返回已存在任务，并带上 `deduplicated: true`。
 
-## 9. 任务状态与结果
+## 9. Seedance 2.5 Draft 直出 1080p
+
+Draft 流程是“先确认样片，再生成正式片”：先在站内生成并完成一个 Seedance 2.5 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
+
+```http
+POST /api/codex/video/draft-upgrade
+```
+
+请求示例：
+
+```json
+{
+  "draft_task_id": "sd2_local_draft_task_id",
+  "resolution_approval_confirmed": true,
+  "idempotency_key": "draft-upgrade-sd2_local_draft_task_id"
+}
+```
+
+接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送嵌套的 `draft_task: { id }` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
+
+`draft_task_id` 必须是 SD2 本地任务 ID，不能填写 Seedance 官方任务 ID，也不能填写 `provider_task_id`。Draft 和正式任务分别记录点数冻结、Provider 请求、轮询和成本台账；重复的 `idempotency_key` 会返回原正式任务。
+
+当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到嵌套 `draft_task: { id }` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。计费复用现有按模型的 `calculateEstimatedCost` 规则，不新增 Draft 专属价格；2.0 旧规则保持不变。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
+
+## 10. 任务状态与结果
 
 当前 Bearer token 创建任务后，外部响应会立即返回 `id` 和 `provider_task_id`。创建响应只代表任务已提交，不代表生成完成。SD2 会在后台自动轮询 Provider 状态；任务成功后，系统会优先把视频下载到服务器本地并写入 `local_video_path`，站内页面和后台预览优先使用这个本地地址。
 
@@ -509,7 +568,7 @@ GET /api/video/status/:taskId?refresh=true
 4. 在 `/admin/outputs` 检查任务来源、外部请求 ID、Provider 任务 ID 和实际扣除。
 5. 在 `/admin/costs` 检查点数结算、Provider 请求记录和官方扣费记录。
 
-## 10. 扣费与成本记录
+## 11. 扣费与成本记录
 
 任务创建成功后，SD2 会立即冻结绑定用户点数，并记录：
 
@@ -519,6 +578,8 @@ GET /api/video/status/:taskId?refresh=true
 - `ProviderApiRequest`：供应商请求记录。
 - `CostLedger provider_request_submitted`：供应商已接受请求记录。
 - `OperationLog generation_create_codex_api`：Codex API 来源的创建操作。
+
+内部点数扣费按模型区分：Seedance 2.0 使用基础 Seedance 视频点数规则，Seedance 2.5 使用 Seedance 2.0 的 `1.5` 倍。冻结点数、成功扣点和 `pricing_snapshot` 都按创建任务时传入的 `model` 计算；不传 `model` 时按默认 Seedance 2.0 计算。
 
 任务进入终态后：
 
@@ -539,12 +600,12 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 - `provider_request_id`
 - `official_charge_id`
 
-## 11. 常见错误
+## 12. 常见错误
 
 | HTTP 状态 | 错误 | 处理方式 |
 |---|---|---|
 | 400 | `ratio 无效` | 使用支持的比例 |
-| 400 | `duration 必须是 4-15` | 调整时长 |
+| 400 | `当前模型时长须为 4–15/30 秒的整数` | 根据所选模型重新选择时长；不自动截短 |
 | 400 | `resolution 无效` | 使用 `480p`, `720p`, `1080p` |
 | 400 | `REFERENCE_IMAGE_NOT_IN_WORKSPACE` | 先用上传接口导入参考图，再传 `reference_image_ids` |
 | 401 | `codex_api_invalid_token` | 检查 token 是否正确 |
@@ -561,7 +622,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 - Provider 返回实际扣费，但没有 `CostLedger official_charge`：成本对账断了。
 - 参考图只停留在 URL，没有形成 `Asset -> ReferenceImage -> WorkspaceAsset`：后续复用、重试和后台检查会丢来源。
 
-## 12. 接入限制与上线前验收
+## 13. 接入限制与上线前验收
 
 这一节是上线前必须确认的边界，避免外部系统按“完整开放平台 API”理解当前接口。
 
@@ -611,7 +672,8 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 ### 12.6 生成参数与业务预期
 
 - `generate_audio` 默认是 `false`。如果业务需要音频，必须显式传 `generate_audio: true`。
-- `duration` 只能是 4 到 15 秒，`resolution` 只能是 `480p`、`720p`、`1080p`。
+- 普通生成的 `duration`：Seedance 2.5 为 4 到 30 整数秒，默认2.0、IP、H3仍4到15秒；`resolution` 只能是 `480p`、`720p`、`1080p`。`/api/config` 与 `/api/codex/config` 的 `duration_by_model` 为普通生成的模型时长表；旧顶层 duration 仍表示默认模型范围。Codex可使用同一Bearer鉴权GET `/api/tasks/estimate?model=...&resolution=480p&duration=30`获取估价，无付费生成。
+- 输出30秒不代表参考输入或编辑试点放宽：当前参考视频/音频仍逐条2–15秒，参考总时长是否被上游接受需按对应模型核实；edit试点仍单参考4–15秒且默认禁用。不得用分段规避已知上游总时长限制。旧无线画布默认2.0，未增加2.5模型选择器。2.5按既有费率估算30秒135积分，未修改积分费率，实际结算仍以任务账本为准。
 - `project_id` 不是任意字符串。绑定用户必须有该项目的生成权限，否则会返回权限错误。
 - `client_name` 建议固定为外部系统名称，方便管理员在 `source_metadata_json` 和审计日志里排查来源。
 
@@ -647,7 +709,7 @@ Provider 请求记录也会带上来源摘要，供应商创建失败时仍保�
 
 非付费自测只能证明接口和参数保护基本可用，不等于真实生成、扣费、结果下载和成本账本已经闭环。
 
-## 13. 接入前检查清单
+## 14. 接入前检查清单
 
 接入方：
 
@@ -672,7 +734,7 @@ SD2 管理员：
 - `/admin/costs` 能看到点数结算和供应商成本记录。
 - 状态刷新、完整下载、`ffprobe`、contact sheet 和首尾帧抽取验收链路已跑通。
 
-## 14. 管理员自测
+## 15. 管理员自测
 
 非真实生成的连接检查：
 

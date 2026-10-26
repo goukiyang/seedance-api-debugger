@@ -1,0 +1,6 @@
+.settings { font-size: 13px; min-width: 0; }
+.settings summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.settings label { display: inline-flex; align-items: center; gap: 6px; margin: 10px 12px 8px 0; }
+.settings input[type='checkbox'] { width: 16px; height: 16px; margin: 0; }
+.settings small { display: block; color: var(--text-secondary); overflow-wrap: anywhere; }
+.settings button { display: inline-flex; align-items: center; gap: 6px; }

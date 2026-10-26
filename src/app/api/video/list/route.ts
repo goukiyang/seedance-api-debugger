@@ -2,11 +2,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { projectSelectedMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
+
+function serializeTaskListItem<T extends {
+  id: string;
+  local_status: string | null;
+  user_id?: string | null;
+  owner_user_id?: string | null;
+  retention_status?: string | null;
+  public_video_url?: string | null;
+  local_video_path?: string | null;
+  result_video_url?: string | null;
+  result_last_frame_url?: string | null;
+  delivery_status?: string | null;
+  error_message?: string | null;
+} & TaskProtectionSource>(task: T, currentUserId: string) {
+  const ownerId = task.owner_user_id || task.user_id || null;
+
+  return projectSelectedMultiviewTask({
+    ...task,
+    can_delete: Boolean(ownerId && ownerId === currentUserId && task.retention_status !== 'admin_hidden'),
+    error_message: task.local_status === 'failed'
+      ? visibleProviderErrorMessage(task.error_message)
+      : task.error_message,
+    ...taskThumbnailProjection(task),
+  });
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,6 +46,7 @@ export async function GET(request: NextRequest) {
         { status: 401 },
       );
     }
+    assertInternalOnly(user, '外部账号请使用 IP 任务列表。');
 
     const searchParams = request.nextUrl.searchParams;
     const page = parseInt(searchParams.get('page') || '1');
@@ -48,8 +78,15 @@ export async function GET(request: NextRequest) {
       take: limit,
       select: {
         id: true,
+        source_metadata_json: true,
         provider: true,
+        model: true,
         provider_task_id: true,
+        is_draft: true,
+        provider_draft_task_id: true,
+        draft_upgrade_mode: true,
+        source_draft_task_id: true,
+        draft_contract_version: true,
         prompt: true,
         generation_mode: true,
         ratio: true,
@@ -59,6 +96,7 @@ export async function GET(request: NextRequest) {
         public_video_url: true,
         public_video_storage_provider: true,
         public_video_cached_at: true,
+        delivery_status: true,
         result_video_url: true,
         result_last_frame_url: true,
         local_video_path: true,
@@ -105,14 +143,14 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      tasks,
+      tasks: tasks.map((task) => serializeTaskListItem(task, user.id)),
       pagination: {
         page,
         limit,
         total,
         total_pages: Math.ceil(total / limit),
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json(

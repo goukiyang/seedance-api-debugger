@@ -1,0 +1,30 @@
+{
+  "phase": "Stable 0.42.2 review complete before product edits",
+  "version": "0.42.2",
+  "commit": "ad65015c14b20577b8e19ab77239cd7e10458d7c",
+  "newSpend": 0,
+  "productionMutations": 0,
+  "scenarios": [
+    {"group":1,"status":"PASS","evidence":"real kernel/layout plus real component synthetic default and cancelled one-image 5-point confirmation; parent already proved real 1024 square output"},
+    {"group":2,"status":"PASS","evidence":"real randomAvatar/compileAvatar, six combinations x12 fixed seeds; five accepted constraint combinations retain unfixed variation; conflicts rejected"},
+    {"group":3,"status":"PASS_REUSED","evidence":"unchanged 0.42.1 actual 27-case log; singleton/null/multiple/missing evidence and zero-callback free recheck. git diff 2c895ee HEAD for parser/contract/script empty"},
+    {"group":4,"status":"PASS","evidence":"real component synthetic pending/failed/unknown/canRecheck, explicit retry confirmation cancellation, no uncontrolled calls"},
+    {"group":5,"status":"PASS","evidence":"real layout 1 vs1/2/4 and immutable prior snapshot; real UI mode/quote/cancel; parent real read-only 4 images20points to1image5points"},
+    {"group":6,"status":"PASS","evidence":"real component queued-running-succeeded main/history/thumb, one settlement credits request and submit refresh. Credit values are synthetic, not ledger proof; reuse parent real6240 result"},
+    {"group":7,"status":"PASS","evidence":"failed retains synthetic draft/no retry; partial succeeded+uncertain keeps successful image and stops resend; Provider refund/partial charge untested"},
+    {"group":8,"status":"PRODUCT_FAIL","evidence":"primary generate and restore correctly blocked, but independent draft tweak remains enabled during pending submission"},
+    {"group":9,"status":"PASS","evidence":"synthetic400 removes pending,500/network retains pending, manual original query never resubmits"},
+    {"group":10,"status":"PRODUCT_FAIL","evidence":"same-plan older queued response demonstrably removes successful main image. Different-plan response protected by planRef source guard; isolated different-plan case not proven due fixture navigation/scheduling failures"},
+    {"group":11,"status":"PRODUCT_FAIL","evidence":"normal reload/pending reload no submit; first plan lookup503 leaves plan null and manual query silently no-ops (if(plan))"},
+    {"group":12,"status":"PASS","evidence":"real component synthetic restore preserves high/2K, image selection no restore, preview/Esc, cancelled quote no submit; server historical refs/immutable restore source checked; parent real preview/Esc reused"}
+  ],
+  "findings": [
+    {"id":"S2-1","severity":"high","file":"src/app/tools/avatar-studio/studio.tsx","cause":"prepare/tweak lacks blocked guard; buttons only check sheet/busy/locks","fix":"guard prepare and both tweak controls while original acceptance pending/uncertain"},
+    {"id":"S2-2","severity":"medium","file":"src/app/tools/avatar-studio/studio.tsx","cause":"queryPlan checks alive/plan ID but not same-plan request order","fix":"per-plan query sequence rejects superseded responses"},
+    {"id":"S2-3","severity":"high","file":"src/app/tools/avatar-studio/studio.tsx","cause":"manual original-query uses plan state which is null after lookup failure, instead of preserved planRef","fix":"query preserved original ID and adopt its plan when successfully recovered, never submit"}
+  ],
+  "repairBoundary":"Only avatar page state guards/recovery and release metadata. No API, Provider, credit rules, shared context, worker, schema or dependencies.",
+  "harnessNotes":"Two startup attempts invalid (one interrupted; missing Next process.env shim). One initial clock/locator calibration run not a product verdict. Valid baseline component run19PASS/4FAIL: three genuine findings, one deferred-query setup failure. Two isolated followups failed local navigation before API traffic; preserve as evidence gap, not SD2 failure. Navigation timeout and deterministic event latch will be corrected in harness for repair verification.",
+  "parentRealEvidence":"klih read-only real page + rvdh diagnostic. chrome-extension://invalid/ ERR_FAILED was reproduced by parent; old truncated network buffers/aborted entries are not fully attributed. Do not claim console/network clean.",
+  "limits":["No real extra text/image model calls","No production DB/credit/task writes","No original private description available; no reconstructed input","Real Provider refund/partial billing and new paid outcomes not tested","G3 uses unchanged prior source/build/public evidence; no template-wide visuals"]
+}

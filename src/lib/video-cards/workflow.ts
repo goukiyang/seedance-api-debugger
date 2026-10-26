@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { assertProjectActiveForActorInTransaction } from '@/lib/projects/permissions';
 
 type VideoCardClient = Prisma.TransactionClient;
 
@@ -30,6 +31,7 @@ export async function moveTasksBetweenVideoCards(
   const taskIds = Array.from(new Set(input.taskIds.filter(Boolean)));
   if (taskIds.length === 0) throw new Error('请选择要移动的生成记录');
   const { source, target } = await assertSameProjectCards(tx, input.sourceCardId, input.targetCardId);
+  await assertProjectActiveForActorInTransaction(tx, input.actorUserId, source.project_id);
 
   if (input.targetBranchId) {
     const branch = await tx.videoBranch.findFirst({
@@ -88,6 +90,7 @@ export async function mergeVideoCard(
   },
 ) {
   const { source, target } = await assertSameProjectCards(tx, input.sourceCardId, input.targetCardId);
+  await assertProjectActiveForActorInTransaction(tx, input.actorUserId, source.project_id);
   const moved = await tx.videoTask.updateMany({
     where: { video_card_id: source.id },
     data: { video_card_id: target.id, video_branch_id: null },
@@ -134,6 +137,7 @@ export async function splitVideoCard(
   if (taskIds.length === 0) throw new Error('请选择要拆分的生成记录');
   const source = await tx.videoCard.findUnique({ where: { id: input.sourceCardId } });
   if (!source) throw new Error('视频卡不存在');
+  await assertProjectActiveForActorInTransaction(tx, input.actorUserId, source.project_id);
   if (['sealed', 'archived', 'merged', 'discarded'].includes(source.status)) {
     throw new Error('当前视频卡不可拆分');
   }

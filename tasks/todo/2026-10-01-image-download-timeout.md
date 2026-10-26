@@ -1,0 +1,311 @@
+# 图片生成下载超时与结果找回
+
+## 2026-10-02 补充工单：按参考脚本补齐正式交付链路
+
+补充工单版本：1.1.0。来源：用户提供 `Untitled-1(1).md` 后明确选择 B“SD2 正式图片生成、下载与恢复流程”，最初要求仅写工单。2026-10-02 用户已明确“执行”：现按 ID1-ID4 实施并安全提交、推送和部署；不授权付费生成、功能自动验收、生产数据库写入或账本政策变更。下方历史授权与证据保留原时态。
+
+有效目标：https://sd2.youdooart.com/template-studio 。正式资料及工单根目录：/Volumes/Data/Projects/video-api-debugger。以下为本次有效实施范围，历史 D1/D2/T1-T4 的记录和证据保留，不把它们重置成全部未做，也不把历史发布当成本次改动已实现。
+
+| 编号 | 本次任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| I1 | 图片交付恢复工单 | 写清现状、调整范围、异常恢复与人工验收，并归档参考文件 | 已完成；正文与原件归入项目，差异和复制检查通过 |
+| ID1 | 生成请求身份与防重复 | 复用本地请求编号；未确认受理不自动再生成；追踪上游请求而不冒充上游幂等 | 已实现并部署最终修正；待用户手动验收 |
+| ID2 | 输出检查点与下载恢复 | Base64 优先、同对象恢复、慢速非续传源有界等待；进程重启不重新生图 | 已实现并部署；待用户手动验收 |
+| ID3 | 完整图片与资产交付 | 完整解码、格式/尺寸/透明要求核验；资产发布和任务成功保持一致 | 已实现并部署；待用户手动验收 |
+| ID4 | 用户状态及发布交接 | 阶段与恢复动作清楚；发布保护到位；实际功能待用户手动验收 | 已完成发布与归档；功能待用户手动验收 |
+
+### 最终定向修正与同版发布（2026-10-02）
+
+- ID1/ID4查询入口定向修正已实现并部署，待用户手动验收；ID2/ID3其余静态Review结论复用。唯一应用文件增量为 `src/app/image-studio/studio.tsx`：pending主按钮直达GET查询，submit兜底也先处理pending；查询只保留提交/删除锁，独立querying状态保证读取完成前一直显示“正在查询”，不受新生成设置/模型/素材/共享/比例/草稿/上传条件影响。新生成原阻断及GET当前owner鉴权未改，不自动丢弃未知ID、重POST或新收费。
+- 最终应用仍v0.36.0，本交付未重复抬号；正式源码 `afc4489cac533523832e317aa7e4d694d35434eb`，BUILD `vNT0S5yAGwiHTBok0KVLe`。本地候选 `Grm8WcWCNxA813egz2Xby`，日志 `/tmp/sd2-image-query-v036-local-build.log`；服务器独立候选/静态标记通过，日志 `/tmp/sd2-image-query-20261002T101312Z-build.log`，SHA256 `00b353d78f2237df3e376e0c133b710d61ed6e217cb10288eafc0ea7a97988d3`。两处构建返回0，保留既有非阻断warnings，无功能自动验收。
+- exact commit源包SHA256 `2c0b2078542c370f8fdfe7fb774e59920484fcca079757edbee32c8577abca8b`，归档完成才计算/上传；同一runId `sd2-image-query-20261002T101312Z` 上传/切换重启/完成登记均确认0。root flock至公网证据通过才释放；网页与worker精确源码一致。
+- 图片worker源码SHA `e29a081f314ede98a4ec720ccb286448697897fe262e36efe47952ae39c63813`，与首候选一致；仍按精确发布保护正常排空PID1168023后才切换，新PID1188032于2026-10-02 18:21:57 CST启动，排空后queued/running为0，未强杀，unit前后SHA相等，480s/600s/660s执行/租约/停止预算未改。持久storage/uploads/videos及数据库排除保护保持。
+- 最终发布检查：本机和公网 config/release/login 200、X-SD2-Origin server-42-193，公网release 0.36.0；四项服务active；**25项新构建公网静态SHA、14个源码/worker文件SHA一致**。匿名image-studio/template-studio 307保留鉴权，不绕过。[证据JSON](2026-10-01-image-download-timeout.evidence.json) 顶层为本次最终产物，`firstCandidateEvidence` 只作首候选历史。
+- 两级回退已推送并核对：`rollback/2026-10-02-before-image-query-final-v036` ->0575619首候选（BUILD FjIMzHMxNLluQOLfmBc61），`rollback/2026-10-02-before-image-delivery-v036` ->80afb99原生产（BUILD ILxByLZ7_8R-4aPl4WWhH）。服务器两级release/live备份均保留；本次unit与排空记录 `/srv/video-api-debugger/backups/sd2-image-query-20261002T101312Z`，首候选构建备份 `/srv/video-api-debugger/app/.next-prod-before-sd2-image-query-20261002T101312Z`。
+- 完整应用/记录diff起点21e0221；本次定向代码diff起点3e89f04，终点afc4489。最终文档提交/远端复核记在正式项目版本登记，不因文档提交重建。源码与正式root完整工单/证据一致，主todo原August脏改与未跟踪记录原状保留。
+- 工具维护仅为下述临时gate包装脚本的两行archive例外：无全局技能修改、不在Git仓库、未提交；node静态检查0及实际diff已保存，live预约/append/non0停止保护保持。本次临时deploy脚本仅新增候选查询文案marker检查，bash语法检查0；未扩大工具重构。
+- 边界仍相同：旧图未恢复、上游查询/幂等未确证、透明请求未开放、已退款终态不自动领图/补扣。未执行浏览器、离线/功能回归、付费生成、生产DB写入或外发；真实效果与旧客户端更新弹窗由用户手动验收。start/finish等价L4守门员，未发生分级误判。
+
+### 本次执行计划与边界（2026-10-02）
+
+2026-10-02 定向收尾：Supervisor静态复核发现原请求查询被新生成的settings/共享/上传/比例/草稿条件挡住。本批仅修改 `studio.tsx`：pending优先直达只读查询、保留提交/删除锁、独立查询文案；所有新生成阻断及GET鉴权不变。原请求查询不会自动放弃ID或POST。ID1/ID4最终修正已实现并部署，ID2/ID3历史完成与其余Review证据复用不重置。整批配套后统一候选构建并同版v0.36.0重发已完成；保留80afb原版及0575619首候选回退，正常排空worker，无功能自动验收/生产DB写入。
+
+归档工具确切路径：`/tmp/sd2-image-delivery-v036-gate.mjs`（real `/private/tmp/sd2-image-delivery-v036-gate.mjs`）。这是本轮临时包装脚本，非全局shared skill；共用的 `release-recent-activity-check.mjs`、`release-registry-append.mjs` 没有修改。实际差异仅“工单归档”不要求live预约，所有其他action仍检查reservation，所有append仍检查confirmed。临时文件不在Git仓库、未提交；实际diff及node静态检查随收尾登记，不冒充全局工具已修。
+
+包装脚本检查：`node --check /tmp/sd2-image-delivery-v036-gate.mjs` 返回0；实际两行差异见 `/tmp/sd2-image-delivery-v036-gate.diff`（before文本按本轮先前已读原实现还原，不冒充Git历史）：
+
+```diff
+-if (!reservation.canProceed) throw Error(reservation.reason);
++if (action !== '工单归档' && !reservation.canProceed) throw Error(reservation.reason);
+-console.log(JSON.stringify({ action, runId, commit, appendConfirmed: true, reservationConfirmed: true, at: new Date().toISOString() }));
++console.log(JSON.stringify({ action, runId, commit, appendConfirmed: true, reservationConfirmed: action === '工单归档' ? 'not required: no live action' : true, at: new Date().toISOString() }));
+```
+
+该修改没有放宽live upload/switch/restart/complete：parent仅在部署开始/完成gate返回0后才能发送下一命令；append未confirmed、其他run冲突、live reservation不成立均抛错停止。本批复用原安全脚本，临时 `/tmp/sd2-image-delivery-v036-deploy.sh` 仅额外检查候选包含新查询文案，`bash -n` 返回0，未改排空/回退/live gate保护。没有为工具修正单独重跑部署或无关测试；本次部署只由ID1/ID4应用修正触发。
+
+- 唯一开发源：`/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger`，`codex/canvas-liblib-layout`，开工 HEAD `21e022166aa0588fc6c50ad19c44a0135c536551`，干净；正式根目录只归档。生产只读核对仍为 v0.35.0、源码 `80afb99c3f664949936961e86e6d91ba9d057725`、BUILD `ILxByLZ7_8R-4aPl4WWhH`，四个服务/计时器 active，图片 worker 停止等待 660 秒；当次 queued/running 数量为零。
+- 守门员 start 已执行；工具自动标签 L3 不覆盖真实链路判断，本轮等价守门员按 **L4**：付费结果、SSRF、持久检查点、租约和结算。按本项目明确边界，不派独立审核、不浏览器、不离线回归、不调用生成或写生产库；不把源码、构建和健康证明当功能验收。
+- 批次：ID1 本站精确请求查询、持久提交标记、真实返回编号；ID2 Base64 私有原图检查点、严格同对象续传、慢速一次延长、受限保留；ID3 sharp 全量解码及任务规格核验、原子文件、资产与结算事务；ID4 共用图片工作台阶段/恢复/新请求风险确认、统一候选构建与安全排空发布。
+- 预算：下载初始180秒，最近60秒持续收到字节才允许一次延长至单次最多360秒；仍受每次执行480秒、十分钟租约、30分钟恢复绝对窗口、最多6次和96MiB上限约束，从零下载不重置窗口。保留有效私有检查点至24小时，queued/running 不清理。480秒执行与已有660秒正常停止配套，不扩大服务预算或改变账本。
+- 无已确认上游查询协议或幂等支持，不添加生成头、不编造查询接口；只记真实响应头。现有 UI 无受支持的透明请求参数，不新增默认或宣称透明背景可生成；校验工具可检查实际 Alpha/透明像素，语义背景仍由用户查看。
+- 未找到已退款终态自动领图政策：原任务及退款保留，检查点供管理员协查，不恢复终态成功、不补扣、不自行免费领图。有效 running 下载/保存恢复沿 worker 同图路径，页面“查看原图恢复”只查询现有状态，不 POST 生图。
+- Git Plan：本分支聚焦应用提交和记录提交推 `origin`；部署前推送原生产 `80afb99` 的 annotated rollback tag。精确 git archive、候选构建、release-window 每次登记确认成功、root flock 与正常退出 worker 后才切源码/构建；任何失败保留或回退原源码/构建/unit，不覆盖 storage/DB/上传资料。正式旧分支只精准暂存本轮记录，保留原脏改与未跟踪文件。
+- 参考实际代码：已安装 sharp v0.34.5 `lib/input.js`（Apache-2.0）及项目安全流/原生 https；复核 [sharp 输入失败级别](https://sharp.pixelplumbing.com/api-constructor/) 和 [curl 官方续传说明](https://curl.se/docs/manpage.html)，只借鉴边界，不安装库、不执行参考脚本。无外部真实源站验证。
+
+### 首候选发布闭环与完整逐文件记录（2026-10-02，历史保留）
+
+- 已部署，待用户手动验收：https://sd2.youdooart.com/template-studio 。应用 v0.36.0（兼容新增持久输出恢复，升 MINOR）；唯一源码提交 `05756192245111821ae7560b3aaf5041d119c693`，正式 BUILD `FjIMzHMxNLluQOLfmBc61`。源码分支及 annotated 回退标签已推送并核对远端；原生产 `80afb99c3f664949936961e86e6d91ba9d057725` 与 BUILD `ILxByLZ7_8R-4aPl4WWhH` 保留。
+- 回退标签：`rollback/2026-10-02-before-image-delivery-v036`；服务器旧 release 仍在，旧 live 构建 `/srv/video-api-debugger/app/.next-prod-before-sd2-image-delivery-20261002T095300Z`，unit/worker 前后状态及排空数量 `/srv/video-api-debugger/backups/sd2-image-delivery-20261002T095300Z`。图片 worker 由 PID180777 正常退出，排空后 queued/running 为0，新 PID1168023 于 2026-10-02 17:58:19 CST 启动；未强杀，unit 不变。
+- 精确归档 SHA256：`e9b6e15bf496e3a08f3551fa0b4c96c4307cb953ee2d7ba0d25b1c52b8863410`。源包排除环境文件、依赖、构建、storage、上传、视频、DB、日志、标记及私有参考/协查原件。上传前、切换前和完成登记均成功确认返回0，同一 runId `sd2-image-delivery-20261002T095300Z`；root flock 持有至公网检查通过。
+- 本地最终构建日志 `/tmp/sd2-image-delivery-v036-local-build-final.log`；服务器独立候选日志 `/tmp/sd2-image-delivery-20261002T095300Z-build.log`，SHA256 `a7497ab261f7cbaef09a1b748169a512ea72bb1aff19be981edead113df27fd0`；均返回0。完整发布检查详见[逐文件证据](2026-10-01-image-download-timeout.evidence.json)：本机/公网 config、release、login 200，来源 server-42-193；4服务/计时器 active；25项公网静态 SHA 与运行构建一致，14个源码/worker文件与本地一致，unit前后SHA相等。
+- 匿名 image-studio/template-studio 307 是保留鉴权，不绕过、不冒充页面验收。第一次证据汇总的嵌入换行转义失败只影响记录脚本；修正后统一必要发布检查通过，无应用改号/重建或功能测试。storage/uploads/videos 持久软链保持原路径，未执行迁移、生产库写入或付费生成。
+- 更新提醒沿用既有 ReleaseNotice：源码已核对同项目 SemVer、稍后去重、手动检查、用户点击才刷新和共享草稿保护；本轮摘要同步 v0.36.0，旧客户端真实弹窗尚待人工验证。
+- 统一 diff：[GitHub 应用与记录差异](https://github.com/goukiyang/seedance-api-debugger/compare/21e022166aa0588fc6c50ad19c44a0135c536551...codex/canvas-liblib-layout)。固定起点21e0221，最终记录提交见正式根目录/开发树 Git 与版本登记；应用运行仍精确指向0575619，不因文档提交重建。
+- 仍未解决/未验证：历史原图没有可访问旧源，未救回；真实源站 Range/ETag、慢源、重启交付和页面功能仅有源码实现，未做功能验收；上游查询/幂等未确证，不虚构协议；透明请求无受支持UI/端点证明，未开放默认；已退款终态不自动领图、补扣或改成功，只保留受限私有检查点供管理员协查。无身份/权限、价格、端点、账本政策、schema或依赖变更，无本轮分级/归类误判记录。
+
+| 实际文件 | 本轮改动 |
+|---|---|
+| src/lib/image-studio/limits.ts | 集中下载一次延长、恢复与检查点保留预算；480秒执行不变 |
+| src/lib/image-studio/delivery.ts | 原子私有POST/输出检查点、Base64校验、同对象续传/416/200边界、租约与进度、受限清理 |
+| src/lib/image-studio/provider.ts | 响应大小上限、有效Base64优先落盘、真实响应编号、安全usage；既有端点参数不变 |
+| src/lib/image-studio/media.ts | sharp完整解码、截断/尺寸/原格式核验；条件透明像素检查工具但不新增透明请求 |
+| src/lib/image-studio/output.ts | 新增生成结果原子文件发布与缩略图准备；不独立提交资产行 |
+| src/lib/image-studio/tasks.ts | 请求身份/完整输入快照、精确只读查询；资产、任务成功和既有结算在同一有效租约事务 |
+| src/lib/image-studio/worker.ts | 一次POST，下载/校验/保存重启只恢复同图；失租约禁止写入结算；终态与退款事实不改 |
+| src/app/api/image-studio/tasks/route.ts | 原所有权范围内精确requestId查询及未知提交文案 |
+| src/app/image-studio/studio.tsx | 安全持久请求编号、刷新只查询、真实阶段/字节、原图恢复查询与新付费确认分开 |
+| src/app/image-studio/studio.module.css | 必要恢复动作常驻可见，沿用暗色青绿色主次层级 |
+| package.json | 唯一应用版本0.36.0，无依赖变化 |
+| package-lock.json | 仅根版本元数据0.36.0，无依赖变化 |
+| src/lib/release.ts | 用户能感知的下载恢复更新摘要 |
+| tasks/todo/2026-10-01-image-download-timeout.md | 完整有效规格、原编号、逐文件记录、真实边界和发布回退证据；历史不重置 |
+| tasks/todo/2026-10-01-image-download-timeout.evidence.json | 持久逐项版本/构建/静态/源码/worker/回退发布证据，无私有输入 |
+| tasks/todo.md | 当前图片恢复实施/发布入口与人工验收缺口；正式目录只精确暂存本轮hunk |
+| docs/materials/index.md | 当前有效工单、原件用途及发布证据登记，私有原件不公开Git |
+
+`TemplateStudioShell.tsx` 复用当前 ImageStudio，不平行改造；`scripts/process-image-studio.ts` 及服务unit未改，仅纳入一致性与排空检查。canvas闭环文件未改。正式主目录与开发树完整工单、证据双份一致，原参考资料继续只在正式资料目录保存。
+
+归档登记补记：部署已经完成且两个记录提交推送后，“工单归档”追加本身成功，但共用工具多余检查五分钟前的部署预约而返回非0。后续没有任何live动作；已回读确认归档条目，工具仅对不涉及live的归档跳过预约。上传/切换/重启/完成各次发布gate均返回0，不把此记录工具错误隐去或混作部署失败。
+
+### A. 调整方向
+
+实施阶段记录：整批 ID1-ID4 代码已写；本地最终候选 `NEXT_DIST_DIR=.next-prod-candidate npm run build` 返回0（BUILD `eRoLgrTBvmXSGxUeW2_w-`），内置类型/编译检查通过，保留既有 lint/CSS 提示，未运行功能测试。`git diff --check`、依赖元数据差异检查、部署脚本 `bash -n` 通过。整批源码复核后统一修正了执行时间耗尽后的同图恢复与新付费请求确认，再整批构建；未触及 canvas、鉴权、Provider 端点、价格、账本政策或 schema。v0.36.0 已部署，发布检查与正式归档已完成，功能待用户手动验收。
+
+本批实际文件：`src/lib/image-studio/{provider,delivery,media,worker,tasks,limits}.ts`、新增 `src/lib/image-studio/output.ts`；`src/app/api/image-studio/tasks/route.ts`、`src/app/image-studio/studio.tsx` 与 `studio.module.css`；`package.json`、`package-lock.json` 仅根版本元数据、`src/lib/release.ts` 用户更新摘要；既有工单及固定 todo/资料索引配套。`TemplateStudioShell.tsx` 已复用 `ImageStudio`，无需平行修改；worker 脚本/unit 保持现有480秒执行/660秒正常退出配套，本次部署使用原生 drain 标记先等旧进程正常退出，不发送强杀。回退时新worker同样先排空；若新协议恢复中任务尚存，保留检查点并暂停旧worker，不让旧代码误清新原图。
+
+主链路：保存本站请求身份与输入快照 → 向上游提交一次 → 保存返回结果 → Base64 本地解码或同 URL 下载 → 完整校验 → 保存正式资产 → 单次结算 → 显示可用结果。
+
+失败分流：提交结果未知只查询/协查；已返回结果但下载失败只恢复下载；校验或保存失败只处理已返回图片；只有用户明确“重新生成”才新建付费请求。恢复不是重新生成，不能共用一个含糊的“重试”按钮。
+
+首版集中修改现有 `image-studio` GPT/OpenAI-style 交付路径，包括对应任务页面和 worker；不改模型目录、点数价格、登录权限，不更换图片库，不全站批量改造 loading。Gemini 和其他 Provider 保留既有端点、返回格式与参数；受共享入口影响时补兼容核对，不把全部模型统一切到 `/v1/images/generations`。其他图片生成入口先核对调用关系，不无条件将所有接口改成新流程。
+
+### B. 只读核对结果
+
+观察源码：/Users/gouki-youdoo/.codex/worktrees/canvas-liblib-layout/video-api-debugger，提交 `20931f7fb4b5af9dc8886120cd03d64ee5f87c09`。这是当时可读开发源码，不是已核验的当前生产产物。实施应重新确认正式部署工作树和分支，不能部署此观察工作树的其他改动。
+
+| 现有基础 | 源码入口 | 本次差距或核对点 |
+|---|---|---|
+| 按用户和 requestId 生成稳定 batchId，核对输入指纹；已有冻结/结算编号 | src/lib/image-studio/tasks.ts | 客户端超时后仍须复用原 requestId；本站防重复不等于上游防重复 |
+| 每次执行只发送一次 POST，优先 b64_json；URL 交给下载回调 | src/lib/image-studio/provider.ts | 当前签名未见稳定上游请求身份透传；Base64 返回后的持久恢复需要补核对 |
+| source.json、image.part、强 ETag/If-Range，206 核验；200 从头写；180秒/6次/30分钟 | src/lib/image-studio/delivery.ts | 非续传源不能累计进度，可能反复撞同一时限；416处理与慢速预算待补 |
+| worker 恢复绕过生图；480秒单次执行预算、租约隔离；下载和保存部分错误可恢复 | src/lib/image-studio/worker.ts | Base64路径保存失败不具备同等持久恢复；终态清理可能丢失仍有价值的恢复资料 |
+| sharp 全量解码转 PNG，生成图独立大小上限，不缩小付费原图 | src/lib/image-studio/media.ts | 当前函数未核对任务要求的精确尺寸及透明像素；转 PNG 不能掩盖上游格式不符 |
+
+现有代码基础应复用，不能以参考脚本已有这些步骤为理由另造下载器或队列。上述仅源码证据，本轮不声称真实源站 Range/ETag、生成参数或生产交付已验证。
+
+### C. 参考脚本的采用与修正
+
+采用：生成 POST 不自动重试；Base64 有效时不再访问 URL；只重试原图 GET；使用临时文件；完整校验后再发布。脚本仅为方法参考，不执行、不内嵌生产服务。
+
+不能照抄的地方：
+
+1. `curl -fL` 的反斜杠续行后插入 `## 续传`，会提前终止参数链；原件保留不修改，代码实现按项目已有 TypeScript 接口完成。
+2. `uuidgen` 每次运行重新产生编号且未落盘；头名 `X-Client-Request-Id` 不能证明上游支持防重复。原编号与请求指纹要先保存；上游支持什么请求身份、查询和幂等字段，须官方说明或实际响应证据确认。未确认时一次提交、未知不重发。
+3. POST 缺少明确 HTTP 失败分流。区分拒绝、网络中断、响应不完整及结果解析失败，不输出完整含私有内容的响应作为普通错误日志。
+4. `-C -` 不能独自保证安全续传，仍须检查对象身份、206 Content-Range、200回退和416。`--retry-all-errors` 不作为应用无差别无限重试策略。
+5. 脚本固定 2160x2160 和透明背景，这是参考请求，不是本项目所有任务的新默认。现有实际任务参数是校验依据。
+6. 脚本仅打印透明像素数量，没有将透明要求作为判定；需区分存在 Alpha 通道、存在非完全不透明像素，以及语义上满足透明背景。前两项可做文件检查，主体背景是否正确仍需用户查看。
+7. `image.png` 存在不等于本站资产、权限、下载入口、缩略图和结算均成功。成功应以本站正式资产可交付且事务一致为准，不能只检查文件名。
+
+### D. ID1：一次生图和提交不确定
+
+继续使用本站现有 requestId/batchId、任务 ID、冻结和结算防重复规则，发送前持久化输入及请求身份。普通响应丢失、刷新、连点、恢复不得新建上游生成请求。
+
+为上游请求记录稳定的本站关联编号、实际返回的上游 Request ID、响应状态和返回时间。标识头的加入以目标 Provider 确认支持为前提；它用于追踪还是用于幂等须分别标明，不能混淆。对日志和客户端隐藏密钥、完整签名 URL、Base64 与私有提示词。
+
+上游响应丢失或 POST 超时：显示“生成结果待确认”，只能使用已确认的查询能力找回或提示管理员按请求编号协查。若无查询能力，保留未知事实及安全结束状态，不自动重复 POST。明确重新生成时说明“会新建任务，可能再次产生上游费用”，使用产品自身确认弹窗。保留本站冻结/退款既有政策，不为恢复擅改旧账本。
+
+### E. ID2：返回结果后可靠保存与恢复
+
+生成响应中同时有有效 Base64 和 URL 时优先 Base64。进行长度及合法编码检查、受限解码；有效 Base64 路径不访问 URL。Base64 不合法时保留明确错误，不自动改为再生图；是否使用同响应中 URL 可作为显式同结果恢复策略，但须记录原因和经过。
+
+上游响应返回后，在下载/标准化之前持久化可恢复输出。URL 沿用受限 source.json；Base64尽快落入同任务私有临时文件。不要把完整 Base64 塞入数据库、前端缓存或日志。参考素材和输入快照无需因下载恢复重新获取。
+
+单张输出以现有任务 ID 隔离；若 Provider 返回多张，须有稳定输出序号和各自恢复信息，不能把不同 URL 写入同一个 image.part。当前 worker 使用第一张结果的约定应先核对，不能暗改张数与计费。
+
+续传规则：
+
+- 有合法强 ETag 且临时长度有效时带 Range/If-Range；206必须核对起点、终点、总长及对象标识后追加。
+- 返回200代表取完整对象，从零写该次临时文件；禁止把完整响应接在旧片段后。
+- 对象变化、ETag变化或Range无效时，丢弃本次拼接资格，不把不同图片混成一张；保持上次可诊断证据。
+- 416只有在确认同对象、总长匹配且完整解码通过时才能转入校验；否则重取同对象或明确失败，不仅凭字节长度宣布成功。
+- 没有 Content-Length 时不显示百分比；仍受字节上限、完整流结束及解码校验约束。
+
+下载只对可恢复的同对象错误进行有界重试，如超时、断流、暂时性网络/部分服务端错误；权限拒绝、链接过期、危险地址、非法图片和超过大小上限不无差别重试。过期链接仅通过已确认的上游原结果查询刷新，不能重新调用生图冒充“刷新链接”。
+
+慢速预算不能只将180改成600：沿用连接/首字节/无进展时限，持续收到有效字节时允许延长一次下载窗口，同时受明确总时限、输出大小、任务租约和并发上限约束。参数在同一入口维护；具体值在实施时结合原480秒执行预算、十分钟租约、30分钟恢复窗口和 worker 停止等待一并确定。不得每次从零下载都重置总恢复预算，也不保证有限等待能救回任意慢源。
+
+服务器重启恢复只能进入下载、校验或保存阶段，不能回到生成POST。输出文件、接收进度和对象标识持续保存，活跃租约之外的进程不能写同一临时文件或结算。耗尽次数或窗口时可结束自动恢复，但保留必要私有检查点供原图恢复；恢复保留期限应有界，活跃任务不能被清理。结束自动恢复不自动等于删除全部原图恢复资料。
+
+### F. ID3：完整校验、透明与发布
+
+HTTP成功、文件大小匹配和图片头可读都不等于完整图片。复用已安装 sharp，设置失败级别以检测截断/损坏并完成全量解码，保留现有像素、字节、SSRF和逐跳地址校验；不引入额外 Pillow 或在服务端执行参考 shell。
+
+按任务输入快照核对格式和尺寸。精确像素由该模型已确认支持的请求尺寸及返回规范决定；模型只承诺比例/分辨率档位时按该规范检查，不拿参考2160x2160硬判所有模型。记录请求值与实际值；不能缩放成要求尺寸或仅改扩展名掩盖不符。
+
+明确请求PNG时验证实际返回格式，区分“上游原格式”和“本站标准化格式”；现有转PNG属于保存处理，不等于上游原本返回PNG。保持原尺寸和透明像素，不因生成图复用参考图压缩而损失画质。
+
+仅当用户当前任务明确要求透明背景且该模型/端点证实支持时，透传合法参数并检查输出Alpha与透明像素。当前 Provider 签名未见 background 字段，不能直接宣称透明输出已生效；本工单不授权全模型新增透明默认或把无透明的图片标为透明成功。若输出不符，指出具体不符项，保留原图，不悄悄补背景、抠图或再次生成。
+
+临时输出校验通过后，采用已有存储层的原子发布或等价保护，得到正式 assetId 与准确尺寸/MIME。生成缩略图并核对原图读取/下载入口；写入或缩略图失败保留同图恢复，不再POST。文件与数据库不是同一个原子事务，必须处理“文件已保存、任务未结算”的重启场景，避免重复资产和重复扣费。
+
+任务成功和点数单次结算沿用现有事务及租约；不得将.part公开访问。任务已退款进入终态后，不能直接恢复成需扣费成功：先确定现有允许的原图领取规则，涉及重新扣费或账本策略变化需单独确认。原终态、恢复交付及费用事实分别保留，不覆盖历史证据。
+
+### G. ID4：状态、操作与发布
+
+使用现有 task status 加细分阶段/错误类别承载进度，优先复用快照和持久检查点；不直接引入新数据库枚举或迁移。仅前端动画不能冒充后台可恢复。
+
+| 用户看到的状态 | 实际含义 | 操作边界 |
+|---|---|---|
+| 提交中 | 正在向本站登记/提交 | 防连点；刷新恢复原请求编号 |
+| 生成中 | 已请求上游，尚无可用输出 | 未提供真实进度不显示百分比 |
+| 生成结果待确认 | 提交后无可靠结果确认 | 查询/协查，不自动新POST |
+| 原图下载中 / 恢复下载中 | 已取得上游结果，正在取同图 | 有可靠总字节才显示真实下载进度；只恢复同图 |
+| 图片校验中 / 保存中 | 已收到文件，尚未正式交付 | 不提供假成功或失效下载按钮 |
+| 已完成 | 正式资产可交付、任务结算一致 | 查看、下载；明确再次生成才新建任务 |
+| 下载停止 / 校验不符 | 自动恢复结束或原图不符合要求 | 分开“恢复原图”和“重新生成”，展示真实可用性 |
+
+只在受影响区域用轻量刷光，复用独立样例的运动语言可作为后续视觉参考，不把本工单扩为全站动效改造。关键恢复按钮常驻可见、主次分明，业务确认使用项目共享弹窗而非浏览器confirm；Esc和外部空白只取消最上层。刷新和离开可恢复任务，不自动执行生成。记录列表保留最左侧缩略图和人物头像；缺截图时稳定占位，时间按近时显示且可查看准确时间。
+
+用户现已授权执行，本轮整批实现ID1-ID4及关联配套后，统一执行了项目发布必需构建、版本一致性、回退、服务和公网检查；下列人工用例仍未自动运行。网页服务与 `sd2-image-studio.service` 图片worker均需匹配新源码；排空或保护活跃任务、保存storage检查点和数据库，不借升级清空原恢复资料。正式入口只用sd2.youdooart.com，不用旧Mac链路；功能由用户手动验收，本工单本身不授权自动生成调试、浏览器验收或离线回归。
+
+### H. 人工验收及停止条件
+
+人工验收用例：同requestId重复提交；POST响应丢失；Base64和URL同时返回；非法Base64；支持Range的断流恢复；忽略Range的200；416；无Content-Length；持续有进展的慢源；真正停顿；链接过期；截断图片；尺寸/透明不符；写入失败及生成后重启。逐例观察既有任务和合法输出，不为验证主动新增付费生成；如需真实新生成或自动测试，另行明确授权。
+
+关键结果：恢复期间生成POST次数不增加；原图字节不混拼；未知状态不被伪装确定失败；只有可交付资产显示完成；同任务最多一次结算；用户输入、结果与恢复资料不因刷新/发布丢失。明确区分本站积分退款与上游消费，两者不能互相证明。
+
+停止条件：上游查询/幂等协议不清时停止自动再提交，不停止可独立完成的下载/校验改进；需要生产迁移、改账本政策、额外费用或权限时单独确认；无可访问旧图时明确旧图仍无法验证，不以一次新成功任务证明旧问题解决；发布失败或无法保护活跃worker时保持原运行版。
+
+### I. 正式附件、依据与执行交接
+
+- 用户参考脚本原件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/Untitled-1(1).md；来源 /Volumes/Data/Downloads/Current/Untitled-1(1).md，2026-10-02接收；保留原名及原内容，未执行，仅本地资料，不公开Git。用途：一次生成、Base64优先、原图恢复与校验思路。
+- 历史下载超时及后续证据：本工单下方原文。用途：已完成基础与未闭环事项；历史问题截图没有可访问原件，不能声称已补齐截图。
+- 官方协查回执v1.0.0：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/2026-10-01-image-download-api-receipt.md；本轮从上述观察工作树找回，复制一致，作为历史请求与下载证据。原件仅本地资料，不公开Git，不重新向外发送；历史数据不冒充当前生产状态。
+- 资料索引：/Volumes/Data/Projects/video-api-debugger/docs/materials/index.md。
+- 成熟实现依据：curl 官方手册 https://curl.se/docs/manpage.html 的continue-at、retry、max-time语义；sharp官方输入/解码说明 https://sharp.pixelplumbing.com/api-constructor/ 和 https://sharp.pixelplumbing.com/api-input/ 。项目已用sharp和自有安全流下载，接入成本低，优先补现有模块，不改用shell下载或安装新图片库。此次已读项目实际实现和官方文档，不宣称外部续传对象已验证。
+
+可复制的执行交接正文：
+
+```text
+SD2 图片生成下载与恢复闭环工单
+项目：video-api-debugger；正式目标：https://sd2.youdooart.com/template-studio。
+有效工单：/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-10-01-image-download-timeout.md，读取顶部2026-10-02补充v1.1.0及下方历史证据。
+附件：/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-02-image-delivery/Untitled-1(1).md，仅方法参考，不执行；同目录2026-10-01-image-download-api-receipt.md为历史请求及下载证据；索引为项目docs/materials/index.md。旧问题截图无可访问原件。
+范围：ID1请求身份、ID2同图恢复、ID3校验与正式资产、ID4状态及worker发布配套；复用现有image-studio，不更换队列、计费或Provider端点，不扩成全站loading改造。
+顺序：先确认实际生产源及版本，区分已实现基础与缺口，整批完成明确授权范围内的配套；提交不确定不重POST，下载/保存恢复不再生成。
+本轮仅写工单，不是实施授权。后续获实现授权后按项目默认安全提交/推送/发布检查交付，功能待用户手动验收；付费、迁移、权限和账本规则变更须单独确认。
+停止：无法保护活跃worker/原图资料、需要未授权风险动作或发布失败时保留原版；协议未知不猜，旧图不存在不假报找回。
+回执：逐项ID1-ID4状态、实际文件和diff、版本/入口、生成与下载阶段分离证据、发布检查、待人工验收项与未解风险。
+```
+
+守门员：本轮是文档补充和只读核对，无业务实施或线上效果声明；未来改动涉及外部付费请求、资产与结算边界，应按高风险链路保护。未新增分级误判。
+
+## 官方协查回执交付
+
+2026-10-01 用户要求整理情况及代码提交信息，发送本人飞书，由用户转交 API 官方。交付范围仅本人的默认飞书会话，不直接联系官方；不包含密钥、签名 URL、提示词、参考图或全量生产日志。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| R1 | 整理并发送官方协查回执 | 信息可核对、无密钥或私有提示词，飞书发送成功 | 已完成；原生飞书附件发送成功，未直接联系官方 |
+
+附件：[官方协查回执 v1.0.0](../../docs/materials/2026-10-02-image-delivery/2026-10-01-image-download-api-receipt.md)，包含两次上游请求编号、收费匹配边界、下载字节/时限、应用与调查提交、已知限制及协查问题。原问题截图无可访问原件，未附；不拿其他历史截图冒充此次证据。2026-10-02仅补齐项目内原件及链接，不重复发送。
+
+发送结果：feishu-send 返回 ok=true、success=true、warnings=[]；消息 ID `om_x100b64d56abd00a0b10c571fe41847a`。发送前文件非空及内容核对通过，git diff --check 通过。仅新增回执并登记本工单，不改应用版本或重启服务；不把送达等同于用户已读或官方已受理。
+
+## 2026-10-01 登录后台后的补查
+
+用户确认已登录后，使用 Chrome Default/xiaobo 现有 Musk 页签，经实际接管确认进入使用日志；只读查看消费明细及展开详情，随后归还页签并停止 BrowserSkill ypai 会话。此前登录/接管障碍已解除，以下结论替代上文“未进入后台、费用未核实”的阶段状态。
+
+- 下午本站任务 `90484fcde8dc4dde...` 创建 13:31:35、结束 13:35:37，模型 gpt-image-2.5-sunburst、3840x1280、quality=auto。上游对应候选记录于 13:32:36 记账，生成耗时 59 秒、standard、1 张、消费 $0.052018；Request ID `20261001053137626294578stFmzxfC`（编号时间为 UTC，05:31:37 对应北京时间 13:31:37）。与“生成约一分钟，随后下载 180 秒超时”吻合。
+- 上午本站任务 `d1f504efcb836666...` 创建 08:33:44、结束 08:39:53，2880x2880、max。上游对应候选记录于 08:36:53 记账，生成耗时 174 秒、同模型/尺寸/品质、1 张、消费 $0.395412；Request ID `20261001003359420241709D0c75hnb`。与生成后约 180 秒下载中断吻合。
+- 上述费用是实际后台消费记录，不再是本站 provider_cost_usd 估价；但本站旧任务没有保存上游 Request ID，关联依据是时间、模型、尺寸和品质，不冒充跨系统请求编号一对一核验。未进行扣费回写、退款或旧账本修改。
+- 两条展开详情均只有 Request ID 和尺寸/品质/数量，没有输出图片、原 URL、原始响应或恢复按钮；当前账号菜单仅数据看板、令牌管理、使用日志，未访问令牌管理。由此只能说“当前可见后台没有原图恢复入口”，不能断言上游未保留文件。没有合法现存结果 URL，真实 Range/ETag 和旧链路慢速原因仍无法验证。
+- 下一步需要上游管理员按以上两个 Request ID 查询保留的响应/原图 URL（优先下午记录）及有效期；此处仅保留定位信息，未联系第三方或发送提示词、参考图、密钥等资料。拿到原 URL 后再在不重新生成、不覆盖资产/账本的条件下验证原图可读性与下载链路。
+- D1 仍受阻于原图及源链路证据，但后台消费记录已查到；D2 基础 v0.31.1 已部署、待用户手动验收，非续传慢速源适配仍未闭环。本阶段仅更新两处同名工单，不改应用、升级版本、部署或执行生成测试。核对只读生产任务时间/参数及真实后台明细，未新增分级误判。
+
+
+来源：2026-10-01 用户反馈及同名原工单（旧开发树提交 `084743a`）。正式入口 https://sd2.youdooart.com/template-studio 。在保留正式 v0.31.0 全部功能的生产工作树实施，不部署旧 `codex/gpt-image-studio` 分支。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| D1 | 原图恢复与超时排查 | 明确可否找回、慢速原因、积分及上游费用证据 | 受阻；后台消费已查到，原图及链路需上游管理员按请求编号查询；对应 T1/T2 |
+| D2 | 防复发与交付 | 在授权范围内处理，说明代码、部署及待验事项 | 进行中；v0.31.1 已部署，真实源站续传适配未闭环；对应 T3/T4 |
+
+## 现有证据和限制
+
+- 原任务 `90484fcde8dc4dde69415fb734d328bff1ce4d116ced289151166f73f2ea4563-0`，2026-10-01 13:35:37 北京时间结束。原工单只读证据：HTTP 200，下载 1,179,648 / 4,752,867 字节后触发 180,011ms 总时限；当天另一例为 12,189,696 / 12,235,926 字节。状态 uncertain，无 asset_id；站内冻结 -20/退款 +20。provider_cost_usd 仅估算，不是上游账单。
+- 本轮重新核对实际 provider/media/worker：旧实现只在内存保存 URL 和分片；180 秒时限到达即丢失恢复信息。只能证明下载低速/停顿后触发总时限，不能据此认定是图片托管端、CDN 或本站网络出口。
+- 旧任务没有已持久化 URL 或完整图片，本站无法直接恢复。未发起付费重试、第三方支持消息、生产资产覆盖或历史账本修改。原截图没有可复制本地原件，不能声称已归档。
+- T1 上游查询未完成：BrowserSkill 未列出用户页签，CUA 两次初始化超时；Chrome 只读页签查询出现连接无效。未获得可信的上游后台会话，未读凭据、未改权限。公开主页 https://api.muskapis.com 需要 JavaScript，公开搜索未找到可核实的原图查询接口。仍需在上游已登录后台核查原请求；不能将没有查到等同于上游已删除。
+- T2 原因边界已确定，历史任务缺少下载主机与进度曲线，不能重建实际域名吞吐和有效期。新代码仅记主机、阶段、字节、时间、状态，不记签名链接。
+- 单独运行的 `sd2-image-studio.service` 在本轮前仍为 09-30 启动的长驻进程。后续图片 worker 修改必须单独安全排空、重启并验证，网页服务重启不代表图片 worker 生效。
+
+## 实施与检查计划
+
+- T3：同一 URL 受限落盘（storage/studio-delivery，目录 0700 / 文件 0600），分片流式写入、强 ETag + If-Range 续传。服务器忽略 Range 则从头下载原 URL；无有效校验标记不拼接。单次 180 秒、最多 6 次、30 分钟恢复期限，终态清理、孤立临时文件一天清理。引用图 20MB、生成图 96MB 与逐跳 DNS/SSRF 防护不变。
+- 仅持有原任务租约者交付/结算；中间恢复不退还/重复冻结积分，终态沿用原结算事务。重启恢复直接进入下载，不读取参考图或调用生成。无恢复记录仍标记未交付并退款。
+- T4：整批实现后统一执行离线慢速、接近完成断流、超时、Range、过期、重启、租约和单次结算检查，使用全新临时库与合成图片，不调用付费 API。随后候选构建、Git/回退点、服务器与公网发布检查。UI 功能由用户手动验收。
+- 风险按 L4（付费结果、资产、积分及 SSRF）处理；自动守门员给出的 L3 不作为实际降级依据。不改生产数据库结构、密钥、鉴权或旧任务数据，不安装依赖。
+- 参考已读取的 [Got 流式下载源码](https://github.com/sindresorhus/got/blob/main/source/core/index.ts)：独立超时、流读取及受控重试。复用现有 Node HTTPS 逐跳 DNS 校验，不引入 Got 或新增依赖。
+
+## 实现与离线检查
+
+- v0.31.1 已实现 T3。`delivery.ts` 管理受限临时文件、期限、续传和清理；`media.ts` 共享逐跳安全下载；`provider.ts` 先保存链接再交付；`worker.ts` 与 `tasks.ts` 负责仅下载恢复、租约和幂等结算。成功后清除恢复中提示。
+- `scripts/process-image-studio.ts` 增加排空标记检查；对应 systemd 配置的停止等待改为 660 秒，覆盖现有 480 秒任务上限并留结算时间。发布前核对服务器 unit 与现有源码完全相同，切换时等待旧进程自行结束，不直接杀死生成请求。
+- 离线检查通过：`tsx scripts/image-studio-download-smoke.ts`、`tsx scripts/image-studio-provider-smoke.ts`、`tsx scripts/image-studio-delivery-smoke.ts`；最后一个使用独立 `/tmp/sd2-image-studio-test-delivery-recheck-20261001.db` 与合成图片，包含慢速、断在最后 2 字节、Range 正常/忽略/错误、总时限、403/本地过期、次数上限、私有文件权限、模拟进程重启、过期租约与一次结算。外部 fetch 被禁止，生成请求数为零。
+- `tsc --noEmit --incremental false` 与 `git diff --check` 通过。初检发现测试替身类型声明不匹配，整批修正后复查；初始化临时库首次失败，创建空 SQLite 文件后成功。没有修改生产库。
+- 本轮重新读取正式日志及任务/账本，确认原任务下载字节与 HTTP 200/180 秒超时证据、无资产，以及冻结 -20 / 退款 +20。上游实际扣费仍未核实。
+- v0.31.1 已部署，待用户手动验收。应用提交 `fb8ee0e3881e7fbc1b162ca66e5c531f6527566a`，远端分支 `codex/content-reactions-live-20260930`；回退标签 `rollback/2026-10-01-before-image-delivery-recovery` 指向原正式 `69f852e`，均已核对远端可见。
+- 候选在独立数据库副本上构建成功，无生产迁移；构建保留原有 CSS autoprefixer 兼容性警告。上传包排除环境文件、数据库及运行期媒体，SHA256 `5fb8c4fd15fdf6af09d1af637726efb3a526495ef2dc4a81aef66d5368f03d7a` 上传前后相同。
+- 实际 BUILD_ID `q55m_EaNXiuiZjTrhDKPF`；网页与图片 worker 在 2026-10-01 14:40:51 北京时间安全重启，均 active/running、NRestarts=0，启动后未见 error 级日志。源码与对应 release 一致，持久 storage/uploads/videos 链接不变。切换前没有 queued/running 图片任务。
+- 服务器回环 config、公网 release/config/login 均 200；公网来源 `server-42-193`，release 为 0.31.1。构建清单中的 layout 与 release 两份 JS 公网 SHA256 与运行目录一致，客户端 chunk 包含 0.31.1。升级提醒沿用既有检测、稍后去重、手动检查与刷新确认；真实弹窗交互未自动验收。
+- 回退目录 `/srv/video-api-debugger/backups/image-delivery-fb8ee0e3881e7fbc1b162ca66e5c531f6527566a/` 保存旧源码、构建与服务 unit；部署脚本 `/tmp/sd2-image-delivery-release-20261001.sh` 有仅代码/服务回退，不恢复覆盖生产数据库。
+
+## 用户要求继续深查后的证据与缺口
+
+来源：2026-10-01 用户再次要求“有概率是，图片已经生成，到下载出了问题，你帮我深究下”。沿用本工单，不另起任务。新阶段只增加离线证据与记录，不再修改已发布应用或发起生成。
+
+- 两个历史失败均由同模型 `gpt-image-2.5-sunburst` 的结果 URL 进入 HTTP 200/body 下载后触发绝对 180 秒上限。第二例只差 46,230 字节，已收约 99.62%。旧版 60 秒无数据计时随 data 重置，但总计时不延长。可确认终止发生于本站下载阶段；没有 Content-Type、魔数、完整解码、实际源域名或逐段曲线，不能把 HTTP 200 等同于有效完整图片。
+- 本轮重新读取时，当天新增到 13 条任务：10 条 succeeded、3 条 uncertain，其中 2 条明确 download_total_timeout。邻近两条成功任务 `7f71632818ed...`、`3c81aefe132e...` 总耗时分别 67.6 秒、225.6 秒；总任务耗时包含生成，不能当纯下载时间。
+- 新版上线后观察到另一个真实成功任务 `c79746549ad3...`（不是本轮调试触发）：14:42:12 创建，14:43:05 完成；实际源域名 `cdn.jd23kjs.work`，HTTP 200、无重定向，下载流程 3,895ms，完整收到 4,471,741 / 4,471,741 字节，随后成功解码保存。它证明当时该对象的交付正常，不证明历史失败使用同一域名、CDN 节点或链路，也不能证明持续无故障。
+- 真实源站的强 ETag / Range 支持仍未知。新成功样本的临时恢复记录已按规则清理，日志未记录相关响应头；目前没有合法可用的原结果 URL，不能对原对象重做 DNS、连接、首字节、分段吞吐或续传对照。不拿 API 域名或 CDN 首页探测冒充图片对象链路证据。
+- 补充离线对照已实际运行：无 ETag、以及有 ETag 但服务器忽略 Range 返回 200 两种慢速样本，均每次停在 51 / 102 字节，连续 6 次后达到上限。正向续传样本 100 / 102 字节中断后只取剩余 2 字节成功。结论：v0.31.1 的保留/续传/同 URL 重试机制已生效于模拟，但非续传慢速源仍会反复撞到每次 180 秒上限，不能称为根治或保证旧图可救回。
+- 下一步先取得合法现存结果 URL，验证真实 ETag/Range 和慢速阶段；若真实源不支持续传，需要再设计有进展才延长的下载预算，并同时核对 worker 480 秒总预算、租约及停止等待，不能只改一个超时数字。没有原 URL 时，历史链路无法重现；保留未明结论。
+- 上游后台路线已实际接续：只读页签清单确认没有 Musk 页；经 Chrome `Default`（xiaobo）新开 `https://api.muskapis.com` 后到达登录页，原生与 BrowserSkill 均指向新页签 2054140093。ClickOps auto-connect 两次连接关闭；BrowserSkill 借用此页签等待人工确认超时，已停止 rnqh 会话，不自动重试或换工具绕过确认。未进入后台、未读取保存密码、未发送私有资料。需用户完成登录并允许接管后继续 T1。
+- 历史原图仍未救回；原任务仍 uncertain、无资产，站内 20 积分退款已核实；上游实际费用未核实。截图原件仍不可访问，未声称归档。
+
+## 改动文件与交付入口
+
+- `src/lib/image-studio/delivery.ts`：受限恢复记录、流式临时文件、ETag/Range 校验、期限和清理。
+- `src/lib/image-studio/media.ts`：共享安全响应流，保留逐跳 DNS/SSRF、大小和阶段超时；补域名诊断。
+- `src/lib/image-studio/provider.ts`：上游返回 URL 后先交给持久交付处理；保留纯 base64 通道。
+- `src/lib/image-studio/worker.ts`：恢复只下载同一结果；租约检查、延后恢复与终态清理。
+- `src/lib/image-studio/tasks.ts`：结算返回是否实际完成，旧租约不能重复结算，成功清除恢复中提示。
+- `scripts/process-image-studio.ts`、`scripts/sd2-image-studio.service`：安全排空入口及足够的停止等待。
+- `scripts/image-studio-download-smoke.ts`、`scripts/image-studio-delivery-smoke.ts`：共享传输回归、离线恢复/结算验证，以及非续传源的已知限制对照。
+- `package.json`、`package-lock.json`、`src/lib/release.ts`：仅版本元数据和更新摘要，不改依赖。
+- `AGENTS.md`、`tasks/todo.md`、本工单：图片 worker 发布约束、固定入口、执行与深查记录。原指定工作树同名工单回写最新结论，不部署其旧开发代码。
+- 应用统一 diff：`/tmp/sd2-image-delivery-v0.31.1.patch`；真实入口 https://sd2.youdooart.com/template-studio 。完整发布检查命令和结果已在上述段落列明，不以健康检查替代用户功能验收。
+
+守门员按 L4 执行；有自动分级校正，已写入全局误判记录。未扩大权限、安装依赖、付费重试或修改旧任务资产/账本。仍有 D1 与真实源站适配缺口，不将部分发布算作全工单完成。

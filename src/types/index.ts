@@ -5,8 +5,9 @@ export type TaskGenerationMode = GenerationMode | 'enhance_video';
 // Video aspect ratios (网页版 6 个比例)
 export type VideoRatio = '21:9' | '16:9' | '4:3' | '1:1' | '3:4' | '9:16';
 
-// Video duration options (4-15 秒)
-export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+// Superset only; validate against the selected model before pricing/submission.
+export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
+  | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30;
 
 // Video resolution options (480p, 720p, 1080p)
 export type VideoResolution = '480p' | '720p' | '1080p';
@@ -16,11 +17,15 @@ export type LocalStatus = 'draft' | 'submitted' | 'running' | 'succeeded' | 'fai
 
 // Create video task input
 export interface CreateVideoInput {
+  omni_reference_task_type?: 'edit';
   prompt: string;
   generation_mode: GenerationMode;
   ratio?: VideoRatio;
   duration?: VideoDuration;
   resolution?: VideoResolution;
+  model?: string;
+  draft?: boolean;
+  draft_task_id?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -61,6 +66,9 @@ export interface CreateVideoInput {
   ratio?: VideoRatio;
   duration?: VideoDuration;
   resolution?: VideoResolution;
+  model?: string;
+  draft?: boolean;
+  draft_task_id?: string;
   seed?: number;
   generate_audio?: boolean;
   return_last_frame?: boolean;
@@ -148,6 +156,11 @@ export interface VideoTask {
   execution_expires_after?: number;
   local_status: LocalStatus;
   provider_task_id?: string;
+  is_draft?: boolean;
+  provider_draft_task_id?: string;
+  draft_upgrade_mode?: string;
+  source_draft_task_id?: string | null;
+  draft_contract_version?: string | null;
   provider_status?: string;
   result_video_url?: string;
   result_last_frame_url?: string;
@@ -157,6 +170,12 @@ export interface VideoTask {
   public_video_storage_key?: string;
   public_video_file_size?: number;
   public_video_cached_at?: Date;
+  delivery_status?: string;
+  delivery_queued_at?: Date;
+  delivery_started_at?: Date;
+  delivery_completed_at?: Date;
+  delivery_attempts?: number;
+  delivery_error?: string;
   raw_create_response?: string;
   raw_status_response?: string;
   error_message?: string;
@@ -171,6 +190,7 @@ export interface ConfigResponse {
   provider: string;
   base_url: string;
   model: string;
+  model_options?: Array<{ id: string; label: string; detail: string; internal_credit_multiplier?: number }>;
   api_key_configured: boolean;
 }
 
@@ -179,6 +199,9 @@ export interface TaskListItem {
   id: string;
   provider_task_id?: string;
   prompt: string;
+  model?: string;
+  is_draft?: boolean;
+  source_draft_task_id?: string | null;
   generation_mode: GenerationMode;
   local_status: LocalStatus;
   created_at: Date;

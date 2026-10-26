@@ -5,6 +5,7 @@ import {
   createEnhanceVideoTask,
   getAiMediaKitTaskStatus,
   mapAiMediaKitTaskStatus,
+  parseRequestMediaUploadUrlResponse,
   requestMediaUploadUrl,
   uploadMediaToAiMediaKit,
 } from '@/lib/provider/aimediakit-enhance-video';
@@ -78,6 +79,7 @@ async function main() {
       return jsonResponse({
         task_id: 'enhance-task-001',
         status: 'completed',
+        request_id: 'req-success-001',
         result: {
           video_url: 'https://result.example.com/out.mp4?auth_key=result-secret',
           duration: 8,
@@ -130,6 +132,11 @@ async function main() {
 
     return jsonResponse({ error: { code: 'UnexpectedRequest', message: `${init?.method || 'GET'} ${url}` } }, 500);
   };
+  const smokeOptions = {
+    fetchImpl,
+    apiKey: 'smoke-mediakit-key-1234567890',
+    baseUrl: AI_MEDIAKIT_DEFAULT_BASE_URL,
+  };
 
   const created = await createEnhanceVideoTask(
     {
@@ -139,7 +146,7 @@ async function main() {
       fps: 60,
       client_token: 'smoke-client-token',
     },
-    { fetchImpl },
+    smokeOptions,
   );
   assert.equal(created.provider_task_id, 'enhance-task-001');
 
@@ -157,7 +164,7 @@ async function main() {
   assert.equal(createBody.fps, 60);
   assertNoApiKeyInPayload(createBody);
 
-  const completed = await getAiMediaKitTaskStatus('enhance-task-001', { fetchImpl });
+  const completed = await getAiMediaKitTaskStatus('enhance-task-001', smokeOptions);
   assert.equal(completed.provider_task_id, 'enhance-task-001');
   assert.equal(completed.provider_status, 'completed');
   assert.equal(completed.local_status, 'succeeded');
@@ -166,6 +173,7 @@ async function main() {
   assert.equal(completed.frames_per_second, 60);
   assert.equal(completed.resolution, '1080p');
   assert.equal(completed.tool_version, 'professional');
+  assert.equal(completed.error_message, undefined);
   assert.equal(JSON.stringify(completed.raw).includes('auth_key=result-secret'), false);
 
   for (const status of ['completed', 'succeeded', 'success', 'complete', 'done', 'finished']) {
@@ -185,7 +193,7 @@ async function main() {
   }
   assert.equal(mapAiMediaKitTaskStatus('provider-new-state'), 'running');
 
-  const failed = await getAiMediaKitTaskStatus('failed-task-001', { fetchImpl });
+  const failed = await getAiMediaKitTaskStatus('failed-task-001', smokeOptions);
   assert.equal(failed.local_status, 'failed');
   assert.equal(failed.error?.code, 'InvalidParameter');
   assert.ok(failed.error?.message?.includes('fps must be between 15 and 120'));
@@ -197,7 +205,7 @@ async function main() {
   assert.equal(failed.error_message?.includes('https://example.com/bad.mp4?auth_key=secret&X-Tos-Signature=secret'), false);
 
   await assert.rejects(
-    () => getAiMediaKitTaskStatus('scalar-error-task', { fetchImpl }),
+    () => getAiMediaKitTaskStatus('scalar-error-task', smokeOptions),
     (error) => {
       assert.ok(error instanceof Error);
       assert.ok(error.message.includes('download failed'));
@@ -208,19 +216,19 @@ async function main() {
   );
 
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', resolution: '720p', resolution_limit: 720 }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', resolution: '720p', resolution_limit: 720 }, smokeOptions),
     /resolution 与 resolution_limit 不能同时传/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', fps: 121 }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', fps: 121 }, smokeOptions),
     /fps 必须在 15 到 120 之间/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'x'.repeat(65) }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'x'.repeat(65) }, smokeOptions),
     /client_token 最多 64 个字符/,
   );
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'bad\nvalue' }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'mediakit://media-file-001', client_token: 'bad\nvalue' }, smokeOptions),
     /client_token 只能包含 ASCII 可打印字符/,
   );
 
@@ -238,7 +246,7 @@ async function main() {
     );
   }
   await assertRejectsMessage(
-    () => createEnhanceVideoTask({ video_url: 'ftp://media-file-001' }, { fetchImpl }),
+    () => createEnhanceVideoTask({ video_url: 'ftp://media-file-001' }, smokeOptions),
     /video_url 协议只允许/,
   );
   for (const invalidContentLength of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5]) {
@@ -249,7 +257,7 @@ async function main() {
           content_type: 'video/mp4',
           content_length: invalidContentLength,
         },
-        { fetchImpl },
+        smokeOptions,
       ),
       /content_length 必须是正整数/,
     );
@@ -261,12 +269,35 @@ async function main() {
       content_type: 'video/mp4',
       content_length: 4,
     },
-    { fetchImpl },
+    smokeOptions,
   );
   assert.equal(uploadTicket.file_id, 'mediakit://media-file-001');
   assert.equal(uploadTicket.method, 'PUT');
   assert.equal(uploadTicket.upload_headers['Content-Type'], 'video/mp4');
   assert.equal(uploadTicket.upload_url, uploadUrl);
+
+  const emptyArrayHeadersTicket = parseRequestMediaUploadUrlResponse({
+    success: true,
+    result: {
+      file_id: 'mediakit://media-file-empty-headers',
+      method: 'PUT',
+      upload_url: uploadUrl,
+      upload_headers: [],
+    },
+  });
+  assert.deepEqual(emptyArrayHeadersTicket.upload_headers, {});
+
+  const tupleHeadersTicket = parseRequestMediaUploadUrlResponse({
+    result: {
+      file_id: 'mediakit://media-file-tuple-headers',
+      method: 'PUT',
+      upload_url: uploadUrl,
+      upload_headers: [['Content-Type', 'video/mp4'], { key: 'x-tos-meta-source', value: 'smoke' }],
+    },
+  });
+  assert.equal(tupleHeadersTicket.upload_headers['Content-Type'], 'video/mp4');
+  assert.equal(tupleHeadersTicket.upload_headers['x-tos-meta-source'], 'smoke');
+
   const uploadRequest = captured.find((request) => request.url.endsWith('/api/v1/tools-sync/request-media-upload-url'));
   assert.ok(uploadRequest);
   assert.equal(uploadRequest.init.method, 'POST');
@@ -288,7 +319,7 @@ async function main() {
         upload_headers: uploadTicket.upload_headers,
         body: new Uint8Array([1, 2, 3, 4]),
       },
-      { fetchImpl },
+      smokeOptions,
     );
     assert.equal(uploaded.ok, true);
     assert.equal(uploaded.status, 200);
@@ -313,7 +344,7 @@ async function main() {
         upload_headers: uploadTicket.upload_headers,
         body: new Uint8Array([1, 2, 3, 4]),
       },
-      { fetchImpl },
+      smokeOptions,
     ),
     (error) => {
       assert.ok(error instanceof Error);

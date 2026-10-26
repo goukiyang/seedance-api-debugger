@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { CANVAS_PRODUCT_NAME, isCanvasSource } from '@/lib/canvas-source';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import PageBanner from '@/components/PageBanner';
 import PaginationControls from '@/components/PaginationControls';
@@ -79,10 +80,10 @@ function ledgerTypeLabel(type: string) {
     task_success_deduct: '成功扣除',
     task_failed_refund: '失败返还',
     manual_refund: '手动退款',
-    periodic_grant: '周期发放',
     new_user_initial_grant: '新用户初始',
     daily_quota_grant: '每日额度发放',
-    daily_quota_expire: '每日额度过期',
+    periodic_grant: '周期额度发放',
+    daily_quota_expire: '周期额度到期',
     expired_refund_closed: '过期返还关闭',
   };
   return labels[type] || type;
@@ -90,7 +91,7 @@ function ledgerTypeLabel(type: string) {
 
 function amountClass(amount: number) {
   if (amount > 0) return 'text-green';
-  if (amount < 0) return 'text-red';
+  if (amount < 0) return 'text-gray';
   return 'text-gray';
 }
 
@@ -151,8 +152,8 @@ function recordSourceInfo(record: Pick<LedgerRecord, 'metadata_json'>) {
   const sourceLabel = typeof sourceMetadata?.source_label === 'string' ? sourceMetadata.source_label : '';
   const iface = typeof sourceMetadata?.interface === 'string' ? sourceMetadata.interface : '';
 
-  if (source === 'ultimate_canvas') {
-    return { key: 'ultimate_canvas', label: sourceLabel || '无线画布' };
+  if (isCanvasSource(source, sourceLabel)) {
+    return { key: 'ultimate_canvas', label: CANVAS_PRODUCT_NAME };
   }
   if (iface === 'codex') return { key: 'codex_api', label: sourceLabel || '外部 API' };
   if (iface === 'web') return { key: 'web', label: sourceLabel || '普通网页' };
@@ -231,6 +232,7 @@ export default function AdminPointsClient({
         actions={(
           <>
             <Link className="btn btn-secondary" href="/admin/users">用户与点数</Link>
+            <Link className="btn btn-secondary" href="/admin/pricing">点数与费率</Link>
             <Link className="btn btn-secondary" href="/admin/costs">计费与成本</Link>
           </>
         )}
@@ -255,7 +257,7 @@ export default function AdminPointsClient({
         <div className="stat-card">
           <span className="stat-label">本月已用</span>
           <strong className="stat-value">{formatNumber(stats.monthly_used)}</strong>
-          <span className="stat-sub">用户账户累计</span>
+          <span className="stat-sub">北京时间本月成功扣点流水</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">今日流水</span>
@@ -313,6 +315,8 @@ export default function AdminPointsClient({
               <option value="system_adjust">系统修正</option>
               <option value="new_user_initial_grant">新用户初始</option>
               <option value="daily_quota_grant">每日额度发放</option>
+              <option value="periodic_grant">周期额度发放</option>
+              <option value="daily_quota_expire">周期额度到期</option>
               <option value="expired_refund_closed">过期返还关闭</option>
             </select>
           </label>
@@ -323,7 +327,7 @@ export default function AdminPointsClient({
               onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
             >
               <option value="">全部来源</option>
-              <option value="ultimate_canvas">无线画布</option>
+              <option value="ultimate_canvas">无限画布</option>
               <option value="web">普通网页</option>
               <option value="codex_api">外部 API</option>
             </select>
@@ -352,7 +356,7 @@ export default function AdminPointsClient({
         </div>
       </section>
 
-      {error && <p className="text-red">{error}</p>}
+      {error && <p className="text-gray">{error}</p>}
 
       <section className="admin-points-layout">
         <div className="card admin-points-ledger-card">

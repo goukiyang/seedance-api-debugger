@@ -51,7 +51,7 @@ export function checkPrompt(value: string, assetCount: number, paramDuration: nu
   // 解析时间描述：X秒、X秒后、第X秒、X秒内
   const durationMatch = value.match(/(?:第?(\d+)秒|(\d+)秒(?:后|内|时))/);
   const durationNumbers = durationMatch
-    ? durationMatch.slice(1).map((g) => parseInt(g || '0', 10)).filter((n) => n >= 1 && n <= 15)
+    ? durationMatch.slice(1).map((g) => parseInt(g || '0', 10)).filter((n) => n >= 1 && n <= 30)
     : [];
   // 取最大值作为提示词中的时长
   const durationInPrompt = durationNumbers.length > 0 ? Math.max(...durationNumbers) : null;
@@ -117,7 +117,7 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
                   className={`px-1.5 py-0.5 rounded text-xs font-mono ${
                     n <= assetCount
                       ? 'bg-blue-100 text-blue-700'
-                      : 'bg-red-100 text-red-600'
+                      : 'bg-gray-100 text-gray-700'
                   }`}
                 >
                   图片{n}
@@ -126,12 +126,12 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
             </span>
           )}
 
-          <span className={result.valid ? 'text-green-600' : 'text-red-500'}>
+          <span className={result.valid ? 'text-green-600' : 'text-gray-600'}>
             {result.valid
               ? result.referencedFigures.length > 0
                 ? '✓ 图片引用正常'
                 : '✓ 未引用图片'
-              : `❌ 引用了不存在的图片`}
+              : `× 引用了不存在的图片`}
           </span>
 
           {result.durationConflict && (
@@ -195,7 +195,7 @@ export function PromptChecker({ value, onChange, assetCount, duration, onValidat
           <div className="text-xs">
             <strong>提示词引用了不存在的图号：</strong>
             {result.missingFigures.map((n) => (
-              <span key={n} className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs">
+              <span key={n} className="ml-1 px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
                 图{n}
               </span>
             ))}

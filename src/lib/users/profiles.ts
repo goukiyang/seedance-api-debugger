@@ -1,3 +1,7 @@
+// Explicit administrator-granted internal access for password-login accounts.
+// Never selected by self-registration or inferred from an email address.
+export const INTERNAL_EMAIL_FEATURE_PROFILE_ID = 'internal_email_authorized';
+
 export const USER_PROFILE_OPTIONS = [
   {
     value: 'core_video',
@@ -53,6 +57,11 @@ export const FEATURE_PROFILE_OPTIONS = [
     value: 'standard_internal',
     label: '标准内部',
     description: '默认内部能力，支持常规生成和项目协作。',
+  },
+  {
+    value: INTERNAL_EMAIL_FEATURE_PROFILE_ID,
+    label: '内部普通（邮箱授权）',
+    description: '明确授权此邮箱使用内部普通功能，不授予管理员权限；其他邮箱账号不受影响。',
   },
   {
     value: 'viewer_internal',

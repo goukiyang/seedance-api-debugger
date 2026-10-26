@@ -9,11 +9,11 @@ type RegisterUser = {
 };
 
 function defaultLanding(user?: RegisterUser | null) {
-  return '/generate';
+  return '/';
 }
 
 function safeLandingPath(value: string | null | undefined, fallback: string) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return fallback;
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
   return value;
 }
 
@@ -288,10 +288,10 @@ export default function RegisterPage() {
         {(error || message || debugCode) && (
           <div style={{
             padding: '10px 12px',
-            background: error ? 'rgba(255,80,80,0.1)' : 'rgba(74,222,128,0.1)',
-            border: error ? '1px solid rgba(255,80,80,0.3)' : '1px solid rgba(74,222,128,0.25)',
+            background: error ? 'rgba(255,255,255,0.06)' : 'rgba(74,222,128,0.1)',
+            border: error ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(74,222,128,0.25)',
             borderRadius: 8,
-            color: error ? '#ff6060' : '#86efac',
+            color: error ? '#cbd5e1' : '#86efac',
             fontSize: 13,
             marginTop: 16,
             marginBottom: emailRegisterOpen ? 16 : 0,

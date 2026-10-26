@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProjectMembers, assertCanViewProject, logProjectAction } from '@/lib/projects/permissions';
+import { assertProjectActiveInTransaction, getProjectAccess, logProjectActionInTransaction } from '@/lib/projects/permissions';
+import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 
 export async function DELETE(
   request: NextRequest,
@@ -12,25 +13,26 @@ export async function DELETE(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
+    assertFeatureAllowed(user, 'team_project_manage');
+    const member = await prisma.$transaction(async (tx) => {
     const access = params.userId === user.id
-      ? await assertCanViewProject(user, params.id)
-      : await assertCanManageProjectMembers(user, params.id);
-
-    if (access.project?.status === 'archived') {
-      return NextResponse.json({ error: '归档项目为只读，请先恢复后再修改成员' }, { status: 400 });
-    }
+      ? await getProjectAccess(user, params.id, tx)
+      : await assertProjectActiveInTransaction(tx, user, params.id, 'members');
+    if (!access?.canView || access.project?.status !== 'active') throw new AuthError('项目不可修改或无权访问', 403);
 
     if (access.project?.owner_user_id === params.userId) {
-      return NextResponse.json({ error: '不能移除项目负责人' }, { status: 400 });
+      throw new AuthError('不能移除项目负责人', 400);
     }
 
-    const member = await prisma.projectMember.update({
+    const updated = await tx.projectMember.update({
       where: { project_id_user_id: { project_id: params.id, user_id: params.userId } },
       data: { status: 'removed' },
     });
 
-    await logProjectAction(user.id, 'project_member_remove', 'project', params.id, {
+    await logProjectActionInTransaction(tx, user.id, 'project_member_remove', 'project', params.id, {
       user_id: params.userId,
+    });
+    return updated;
     });
 
     return NextResponse.json({ member });

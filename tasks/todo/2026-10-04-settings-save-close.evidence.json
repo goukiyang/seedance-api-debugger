@@ -1,0 +1,220 @@
+{
+  "project": "video-api-debugger",
+  "version": "0.39.1",
+  "at": "2026-10-04T12:47:31.879Z",
+  "commit": "9c8a9ac9af5894f552e8b9d0d30b95cb47442c15",
+  "build": "Bh-CIEFvI5EM3Y7NndzrU",
+  "sources": [
+    {
+      "path": "package.json",
+      "sha256": "5732a2055e049cf3a03dde437f03169cb507874fd04d9a242020172039100b3b"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "819daa85857e683942d8a23d60587b371d4848cf30bfb8c3bf1f46873234c8d4"
+    },
+    {
+      "path": "src/lib/release.ts",
+      "sha256": "437431d30ed3855fccb137dbc7f28a60c4938d4d1afdf912e987ee57629dedf6"
+    },
+    {
+      "path": "src/app/admin/integrations/AdminIntegrationsClient.tsx",
+      "sha256": "826075400b755c0deb2abe47a9ac4270756a7c73c9a333dd3cdbc4b06b4fde95"
+    },
+    {
+      "path": "src/app/admin/integrations/BananaImageChannel.tsx",
+      "sha256": "929ec4bcf71c098663e04e81b9f4289e23519e063343bb6c370c438c49138774"
+    },
+    {
+      "path": "src/app/image-studio/global-settings-dialog.tsx",
+      "sha256": "889e740c1ccc86f4e710dc7891afcddce8f8dddf9da331cb0461393b6e92f273"
+    },
+    {
+      "path": "src/app/image-studio/settings-controller.ts",
+      "sha256": "5e01c3f512899826b49358af4720a6763220d2373a0276cb3753ec65da90f814"
+    },
+    {
+      "path": "src/app/image-studio/studio.tsx",
+      "sha256": "df809369627f781eb937b0746908db1fa1f91f41570292765c81ea4757687760"
+    },
+    {
+      "path": "src/components/AppShell.tsx",
+      "sha256": "10b7ba4f3b3269253505c85626462075f687c20a4e8113940616c6be1267b7c4"
+    },
+    {
+      "path": "src/components/GenerationComposer.tsx",
+      "sha256": "dea358c599f5bd9df1c67f998996ea96cd5dd08e4e15717096c957c6943026aa"
+    },
+    {
+      "path": "src/components/template-studio/VideoContextEditor.tsx",
+      "sha256": "560246e69bbdd69d79f0867086eb5926736f5643f726e55deeaa1aba4e9ecabf"
+    },
+    {
+      "path": "src/components/template-studio/VideoTemplateWorkbench.tsx",
+      "sha256": "9b49cb104f948d7fdec025f4ab4a834261e2d6dfb7e2b01d0f1019fd01a9df5f"
+    },
+    {
+      "path": "src/components/templates/AdminTemplatesClient.tsx",
+      "sha256": "1343212ef0902487ca6bc666643f9635b552f077bd6285a441218b38948f8dfe"
+    },
+    {
+      "path": "src/components/templates/TemplateEditorDrawer.tsx",
+      "sha256": "8671bb90c625c7bba50e8aae593504eb60e3993f5d86a15dc0ced55be60c9f50"
+    },
+    {
+      "path": "src/components/templates/TemplateLibraryClient.tsx",
+      "sha256": "cc2afc4ea74349017a7a0c30bb8a2765e2b5acd10fae4f7806b5665660ef9bc8"
+    },
+    {
+      "path": "src/lib/hooks/use-settings-page-submit.ts",
+      "sha256": "139e9b66575e941eb17c4c741e8d7d4db14a4ce6b8d967177b1ca2d9768200d0"
+    },
+    {
+      "path": "src/lib/navigation/settings-return.ts",
+      "sha256": "2eba8c9c0dab8ee2076caca0479636cd649b24447c3d9d2c36e65f21b4ea9a45"
+    }
+  ],
+  "assets": [
+    {
+      "path": "static/chunks/5634-bba1a73d4fa803de.js",
+      "sha256": "a6534e741a6332e098febdd736d68abb166f6ecc0b91a1879191c9a4a91420ec",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/layout-50b4820433945b07.js",
+      "sha256": "70441ac8bf9528806bd377aa52afc3d17ac13d783139092f4902d9ec6796c83d",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/image-studio/page-a8edd64ade0a1255.js",
+      "sha256": "19954f9627ac26f21240eba8fab536d694a1b68b471ec537205f295bafdaefdd",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/3482-48ed72cf09bcd858.js",
+      "sha256": "ebbd1ed42702579845700f198cfa499945fb4fd52bb120de61b3c4302b28633c",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/template-studio/page-6b8f60ec023ff49b.js",
+      "sha256": "8b1a87575975aa1b0098e01071770e166e4c04708d3d4f97d019d7c9a819775c",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/5329-d81447f0387aecb6.js",
+      "sha256": "354443d6801f8f5e7f29b06130588173e35ae1bd9e9c5bbeb3af7f6612ee5f0b",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/8916-95e49664070be9e9.js",
+      "sha256": "97f6e027ca4a4f3b07a3ef650a5319fe88668dfb3c582ce2174aa74bc5fcca06",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/admin/integrations/page-ed678b02ab33a023.js",
+      "sha256": "f69058ab7b7b5e5b9fdab688108cb157c0d7a094ab363dd3ec4d05737284cbb4",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/admin/integrations/aimediakit/page-52c64c69cc6781b3.js",
+      "sha256": "b774612500f87ad0df38360eaaedf4c5ade8cb8cb7c89379069ee6ab3f1098f4",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/9534-513e14b0d52b325f.js",
+      "sha256": "ed4989491f452b65b19447cdf21b0b5ba720c2a9121f144aa5a9b8fa6baa6973",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/templates/page-9ae8b9358f41b049.js",
+      "sha256": "0779bf0e7668887cf5272cfe17487db42233154d000d61492370db4b834d9e33",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/285-483555d50666429b.js",
+      "sha256": "8c02acf3b2cc8431f4c65b36ba63252fe94f6f3f50aea8465e42531ad65e7767",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/template-generate/page-cc748e628cddffad.js",
+      "sha256": "da243c3c12cb9131b22a43a8beb64e359aa6a2797be94a35f317aa42e538ec47",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/3085-980eaeffc7bb5389.js",
+      "sha256": "543188672fd3b8bbb9cd6245b769834906b52fac891719f0bfefca157e83b300",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/page-ca5ad3d2bb12affd.js",
+      "sha256": "da7cc5093124801157c5beb7a7a4c41aa7cd8907c37dbb0302413f89ae0559e0",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/[id]/page-55826392f2fe6bbf.js",
+      "sha256": "0af171f1d055bf4d6856cc833c74ad935240a3734dc012b337dd94a82b85a1b4",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/admin/templates/[id]/cards/[cardId]/page-41d3554949d5ae36.js",
+      "sha256": "6674428517e063221999af596b249a32b96d44cff1253b269973514500816a0e",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/6977-928d0c14952eb2e9.js",
+      "sha256": "03011fd979c0808df4aa594a84c56102a0658e9c3e158c914c7aa45c9f33ff5c",
+      "publicStatus": 200
+    },
+    {
+      "path": "static/chunks/app/generate/page-991a9d9d9b32dde3.js",
+      "sha256": "a2e5988189e8890d2f170285ce5ec52d53d6b18a79dbcbd228306eceaede2b5c",
+      "publicStatus": 200
+    }
+  ],
+  "reused": 19,
+  "services": [
+    "active",
+    "active",
+    "active",
+    "active"
+  ],
+  "responses": [
+    {
+      "path": "/api/release",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/api/config",
+      "status": 200,
+      "origin": "server-42-193"
+    },
+    {
+      "path": "/login",
+      "status": 200,
+      "origin": "server-42-193"
+    }
+  ],
+  "functionalAcceptance": "pending user manual acceptance",
+  "diffChecks": "passed",
+  "dependencies": "unchanged",
+  "databaseWrites": false,
+  "workerRestart": false,
+  "rollbackTag": "rollback/2026-10-04-before-settings-save-close-v0391",
+  "deployment": {
+    "candidateBuild": "passed (compile/lint/type)",
+    "sourceBase": "54f67d1668ea0bd23d96630860e6c8bd2e651f15",
+    "previousVersion": "0.39.0",
+    "previousBuild": "oxKFErSV4OZB-19N8xJKh",
+    "archiveSha256": "cf1991fa372dd4ab4c77ac1e1d183ce90b91790fd25f6216fa52616326763b18",
+    "worker": {
+      "pid": 1241475,
+      "pidAndStartAndUnitUnchanged": true
+    },
+    "runtimeLinksAndEnvStatProtected": true,
+    "backupBuild": "/srv/video-api-debugger/app/.next-prod-before-sd2-settings-close-v0391-20261004-9c8a9ac",
+    "backupRecords": "/srv/video-api-debugger/backups/sd2-settings-close-v0391-20261004-9c8a9ac",
+    "scriptCompletion": "DEPLOY_COMPLETE, exit 0",
+    "functionalAcceptance": "not run, user manual acceptance pending"
+  }
+}

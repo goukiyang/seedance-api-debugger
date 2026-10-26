@@ -1,0 +1,4 @@
+{"sourceMatchesExpectedArchive":true,"checkedFiles":792}
+WORKER_DRAIN_CONFIRMED accepted_running=0
+{"sourceMatchesExpectedArchive":true,"checkedFiles":803}
+SWITCH_SUCCESS commit=545d9d6f3bbf9d0299fc1d34ac136b02958536aa build=KbJIPWhOPLhIslbk70m-a rollback_commit=f0a142fa94f77eb57165339b475da4eb09233a39 rollback_build=Nc2Ap5uhxsUEQCkxpRocE worker_reloaded=true worker_pid_before=259902 worker_pid_after=1043189

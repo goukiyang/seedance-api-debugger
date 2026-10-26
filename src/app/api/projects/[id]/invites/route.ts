@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { assertCanManageProjectMembers, normalizeProjectRole, logProjectAction } from '@/lib/projects/permissions';
+import { assertProjectActiveInTransaction, normalizeProjectRole, logProjectActionInTransaction } from '@/lib/projects/permissions';
 
 export async function POST(
   request: NextRequest,
@@ -13,11 +13,6 @@ export async function POST(
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const access = await assertCanManageProjectMembers(user, params.id);
-    if (access.project?.status === 'archived') {
-      return NextResponse.json({ error: '归档项目为只读，请先恢复后再创建邀请' }, { status: 400 });
-    }
-
     const body = await request.json().catch(() => ({}));
     const defaultRole = normalizeProjectRole(body.default_role);
     const expiresDays = Number(body.expires_days || 7);
@@ -25,7 +20,9 @@ export async function POST(
       ? new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000)
       : null;
 
-    const invite = await prisma.projectInvite.create({
+    const invite = await prisma.$transaction(async (tx) => {
+    await assertProjectActiveInTransaction(tx, user, params.id, 'members');
+    const created = await tx.projectInvite.create({
       data: {
         project_id: params.id,
         token: crypto.randomBytes(24).toString('hex'),
@@ -39,10 +36,12 @@ export async function POST(
       },
     });
 
-    await logProjectAction(user.id, 'project_invite_create', 'project', params.id, {
-      invite_id: invite.id,
-      default_role: invite.default_role,
-      expires_at: invite.expires_at,
+    await logProjectActionInTransaction(tx, user.id, 'project_invite_create', 'project', params.id, {
+      invite_id: created.id,
+      default_role: created.default_role,
+      expires_at: created.expires_at,
+    });
+    return created;
     });
 
     return NextResponse.json({
