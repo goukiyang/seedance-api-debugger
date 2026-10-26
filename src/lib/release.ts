@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '图片使用优化', outline: [
-  '同一模板的新旧结果合并筛选，保留选择现场',
-  '原图跨入口可核对，对比开关与换图分开',
-  '结果状态居中、长说明按需查看，手动封面不随新结果替换',
+const notice = { title: '封面共享池', outline: [
+  '全部封面入口置顶，标题与作者同栏显示',
+  '点赞与收藏分开，可按作者、收藏和六种顺序查找',
+  '翻页只读取当前页封面，返回时保留筛选与位置',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

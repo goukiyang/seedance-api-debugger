@@ -80,7 +80,8 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     equal(await snapshots(), before);
     const menuOffset = transactionQueries.length;
     const menus = await Promise.all([getPricingImageChannelOptions(), getPricingImageChannelOptions(), getPricingImageChannelOptions()]);
-    transactions(menuOffset, 3);
+    // Display menus coalesce one readonly projection; the three real quotes above remain independent.
+    transactions(menuOffset, 1);
     equal(menus[1], menus[0]); equal(menus[2], menus[0]);
     const options = await getPricingImageChannelOptions(db);
     equal(options, menus[0]);

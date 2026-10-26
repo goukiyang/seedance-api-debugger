@@ -316,9 +316,11 @@ assertIncludes(sharedPicker, 'await onConfirm(uniqueItems.map(i => i.id), unique
 assertIncludes(sharedPicker, 'confirmationSession !== session.current', '添加回调须保留账号与目标现场隔离。');
 
 const templatePicker = read('src/components/templates/TemplateBoundImagePicker.tsx');
-assertIncludes(templatePicker, 'pendingUploadedImage', '模板绑定图上传后必须保留待绑定的 assetId。');
-assertIncludes(templatePicker, 'retryPendingUploadedImage', '模板绑定图失败后必须允许不重传文件直接重试绑定。');
-assertIncludes(templatePicker, '图片已上传成功，但绑定失败', '模板绑定图必须区分上传成功和业务绑定失败。');
+assertIncludes(templatePicker, '<UploadedImagePicker', '模板绑定图必须复用保留原素材回执的共享选择器。');
+assertIncludes(templatePicker, 'onConfirmSelection={choose}', '绑定须交给共享选择器的对象确认，失败后保留同一素材。');
+assertIncludes(templatePicker, "return { success: false, message: cause instanceof Error ? cause.message : '绑定失败，请重试' }", '绑定失败不得关闭选择器或重新上传。');
+assertIncludes(templatePicker, 'asset_id: item.assetId!', '上传结果必须使用原 assetId 绑定。');
+assertIncludes(templatePicker, 'onUploadFile={(file, onProgress) => uploadFileToHistory(file, { onProgress })}', '上传须保留原历史上传链路。');
 
 const feedbackWidget = read('src/components/FeedbackWidget.tsx');
 assertIncludes(feedbackWidget, 'assetId?: string', '反馈截图状态必须保留上传后的 assetId。');

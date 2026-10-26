@@ -1,0 +1,10 @@
+.actions { position: absolute; z-index: 4; top: 8px; right: 8px; display: flex; gap: 4px; max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: flex-end; }
+.actions button { min-width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--bg-card, #171e20); display: inline-flex; align-items: center; justify-content: center; gap: 3px; cursor: pointer; opacity: 0; transition: opacity 150ms ease-out; }
+:global(article):hover .actions button, :global(article):focus-within .actions button, .actions[data-active="true"] button { opacity: 1; }
+.actions button[aria-pressed="true"] { opacity: 1; color: var(--accent); }
+.actions button[data-like][aria-pressed="true"] { color: #ee6f8e; }
+.actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.actions button:disabled { cursor: default; }
+.actions button span { font-size: 11px; }
+.message { flex-basis: 100%; font-size: 11px; line-height: 1.4; padding: 4px; border-radius: 4px; background: var(--bg-card, #171e20); color: var(--text-muted); max-width: 200px; overflow-wrap: anywhere; }
+@media (hover: none) { .actions button { opacity: 1; } }

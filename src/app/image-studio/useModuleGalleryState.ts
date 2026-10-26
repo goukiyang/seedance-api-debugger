@@ -82,6 +82,7 @@ export function useModuleGalleryState(userId: string, { enabled = true }: { enab
   const setQuery = useCallback((query: string) => setFilters({ query }), [setFilters]);
   const setScope = useCallback((scope: GalleryScope) => setFilters({ scope }), [setFilters]);
   const setSort = useCallback((sort: GallerySort) => setFilters({ sort }), [setFilters]);
+  const setAuthorKey = useCallback((authorKey: string | null) => setFilters({ authorKey }), [setFilters]);
 
   const markOpened = useCallback((key: string) => {
     if (currentOwner.current !== owner || !enabled || !account || !isModuleGalleryKey(key)) return;
@@ -132,5 +133,5 @@ export function useModuleGalleryState(userId: string, { enabled = true }: { enab
   const ready = snapshot.owner === owner;
   const state = ready ? snapshot : empty();
   return { query: state.query, setQuery, scope: state.scope, setScope, sort: state.sort, setSort,
-    ready, lastOpened: state.lastOpened, markOpened, reset };
+    authorKey: state.authorKey, setAuthorKey, ready, lastOpened: state.lastOpened, markOpened, reset };
 }

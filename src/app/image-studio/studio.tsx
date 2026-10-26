@@ -11,8 +11,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, ClipboardList, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ModuleGallery } from './ModuleGallery';
-import { deriveModuleGallery, mergeModuleGalleryLastOpened, type GalleryScope, type GallerySort } from './module-gallery-state';
+import { mergeModuleGalleryLastOpened, type GalleryScope, type GallerySort } from './module-gallery-state';
 import { useModuleGalleryState } from './useModuleGalleryState';
+import { useGalleryCatalog } from './useGalleryCatalog';
+import { GalleryReactionButtons } from '@/components/content-reactions/GalleryReactionButtons';
+import type { GalleryNavigationItem } from '@/lib/image-studio/gallery-types';
 import { ContextVersionLabel, useModuleContextVersion } from './context-version-label';
 import { createUploadBatch, uniqueUploadFiles, uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -408,8 +411,6 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   }, [templateWorkbench, userId]);
   const [galleryCoverModuleId, setGalleryCoverModuleId] = useState<string | null>(null);
   const [galleryReadErrors, setGalleryReadErrors] = useState<Set<string>>(new Set());
-  const [galleryOwnedPresets, setGalleryOwnedPresets] = useState<{ owner: string; revision: string; ids: string[] }>({ owner: '', revision: '', ids: [] });
-  const [galleryOwnershipError, setGalleryOwnershipError] = useState('');
   useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverModuleId(null); }, [userId]);
   const [sharedOpening, setSharedOpening] = useState(false);
   const sharedOpenLock = useRef(false);
@@ -427,7 +428,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       sharedLive: { ...item.sharedLive, available: false, unavailableReason: reason, reasonCode, capabilities, defaults: undefined, repairDefinition: undefined },
     }));
   }, []);
-  const shared = useSharedStudio({ userId, activeModule: modules.find(item => item.id === active), onDefinition: receiveSharedDefinition, onUnavailable: invalidateSharedDefinition, completeCatalog: coverView });
+  const shared = useSharedStudio({ userId, activeModule: coverView ? undefined : modules.find(item => item.id === active), onDefinition: receiveSharedDefinition, onUnavailable: invalidateSharedDefinition, lightweightCatalog: true });
   const deletionCommands = useRef<Array<{ actorId: string; objectKind: 'workspace' | 'source'; id: string }>>([]);
   const deletion = useStudioDeletion({ userId,
     blocked: target => {
@@ -634,14 +635,18 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     listLock.current = true; setLoading(true); setError('');
     const scope = moduleReadScope.current;
     try {
-      const data = await readResponse(await fetchReadWithRetry(`/api/image-studio/modules${next ? `?cursor=${encodeURIComponent(next)}` : ''}`));
+      const catalog = await readResponse(await fetch('/api/image-studio/gallery/query', { method: 'POST', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ page: 1, pageSize: 12, sort: 'directory' }) }));
+      const data = { directory: catalog.navigation.map((entry: GalleryNavigationItem) => ({ ...entry,
+        sourcePresetId: entry.presetId || null, sourcePresetShared: entry.shared,
+        canManageGroup: entry.mine && entry.coverEditable })), modules: [] as StudioModule[], nextCursor: null };
       if (moduleReadScope.current !== scope) return;
       if (Array.isArray(data.directory)) {
-        setDirectory(data.directory.filter((item: StudioModule) => !removedModuleIds.current.has(item.id)));
+        setDirectory(data.directory.filter((item: StudioNavigationEntry) => !removedModuleIds.current.has(item.id)));
         setDirectoryReady(true);
       }
-      if (Array.isArray(data.removedDefaultGroups)) setRemovedDefaultGroups(data.removedDefaultGroups);
-      if (Array.isArray(data.deletedSourcePresetIds)) setDeletedSourcePresetIds(data.deletedSourcePresetIds);
+      if (Array.isArray(catalog.removedDefaultGroups)) setRemovedDefaultGroups(catalog.removedDefaultGroups);
+      if (Array.isArray(catalog.deletedSourcePresetIds)) setDeletedSourcePresetIds(catalog.deletedSourcePresetIds);
       modulesOwner.current = userId;
       setModules(current => {
         const ids = new Set(current.map(item => item.id));
@@ -839,6 +844,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     try {
       const workspace: StudioModule = await readResponse(await fetch('/api/image-studio/modules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: createId.current, groupName: selectedGroup || '未分组', sharingDefault: true }) }));
       setModules(current => current.some(item => item.id === workspace.id) ? current : [...current, workspace]);
+      void loadModules();
       setRemovedDefaultGroups(current => current.filter(group => group !== workspace.groupName));
       navigateToModule(workspace.groupName || '未分组', workspace.id, { ensureLoaded: false, markViewed: false }); createId.current = null;
     } catch (e) { setError(e instanceof Error ? e.message : '新建失败'); }
@@ -859,14 +865,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   async function refreshPresetCatalogs() {
     const scope = moduleReadScope.current;
     if (scope.owner !== userId) return;
-    const data = await readResponse(await fetch('/api/image-studio/modules', { cache: 'no-store' }));
-    const library = await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' }));
+    await loadModules();
+    const library = presetDialogOpen ? await readResponse(await fetch('/api/image-studio/presets', { cache: 'no-store' })) : null;
     if (moduleReadScope.current !== scope) return;
-    if (!Array.isArray(data.directory) || !Array.isArray(library.presets)) throw new Error('模板已保存，目录尚未完整读取，请重试读取');
-    setDirectory(data.directory.filter((item: StudioNavigationEntry) => !removedModuleIds.current.has(item.id)));
-    setDirectoryReady(true);
-    if (Array.isArray(data.deletedSourcePresetIds)) setDeletedSourcePresetIds(data.deletedSourcePresetIds);
-    setPresets(library.presets);
+    if (library && !Array.isArray(library.presets)) throw new Error('模板已保存，目录尚未完整读取，请重试读取');
+    if (library) setPresets(library.presets);
+    pool.refresh();
     setQuickPresetVersion(value => value + 1);
     shared.refresh();
   }
@@ -964,7 +968,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     const items = new Map<string, StudioNavigationEntry>();
     const liveModules = new Map<string, StudioNavigationEntry>();
     const known = new Map<string, StudioNavigationEntry>(directory.filter(item => !item.id.startsWith('shared:')).map(item => [item.id, item]));
-    modules.forEach(item => known.set(item.id, { ...known.get(item.id), ...item,
+    modules.filter(item => directory.some(entry => entry.id === item.id)).forEach(item => known.set(item.id, { ...item, ...known.get(item.id),
       deletion: known.get(item.id)?.deletion || (item as StudioModule & { deletion?: StudioDeletionTarget }).deletion,
       canManageGroup: known.get(item.id)?.canManageGroup ?? (!item.sharedLive || item.sharedLive.mode === 'publisher' && item.sourcePresetCanManageSharing === true) }));
     known.forEach(item => {
@@ -1148,11 +1152,6 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     };
   }, [pendingModuleScroll]);
   useEffect(() => {
-    if (coverView) return;
-    const firstPage = (groupedModules[selectedGroup] || []).filter(item => !item.presetId).slice(0, 12);
-    void hydrateModules(firstPage.filter(item => !modules.some(module => module.id === item.id)).map(item => item.id));
-  }, [selectedGroup, groupedModules, modules, hydrateModules, coverView]);
-  useEffect(() => {
     if (!coverView && active && navigation.some(item => item.id === active) && !modules.some(item => item.id === active)) void hydrateModules([active]);
   }, [active, navigation, modules, hydrateModules, coverView]);
   // A restored shared entry is only highlighted until opened. Recover it once without creating a workspace
@@ -1174,51 +1173,36 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     initialGroupAligned.current = viewStorageKey;
     if ((entry.groupName || '未分组') !== selectedGroup) setSelectedGroup(entry.groupName || '未分组');
   }, [viewRestored, coverView, active, navigation, selectedGroup, viewStorageKey, directoryReady, shared.catalogReady]);
-  useEffect(() => {
-    if (!coverView || gallery.scope !== 'mine' || !shared.catalogReady
-      || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision) return;
-    const scope = moduleReadScope.current, abort = new AbortController();
-    setGalleryOwnershipError('');
-    // The existing library DTO supplies ownership; edit permission is not ownership.
-    // Read this metadata only for the My filter, without hydrating images or definitions into modules.
-    void fetch('/api/image-studio/presets', { cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) })
-      .then(readResponse).then(data => {
-        if (abort.signal.aborted || moduleReadScope.current !== scope) return;
-        if (!Array.isArray(data.presets)) throw new Error('模块归属未能读取');
-        setGalleryOwnedPresets({ owner: userId, revision: shared.catalogRevision,
-          ids: data.presets.filter((item: StudioPreset) => item.ownedByViewer === true && typeof item.id === 'string').map((item: StudioPreset) => item.id) });
-      }).catch(() => { if (!abort.signal.aborted && moduleReadScope.current === scope) setGalleryOwnershipError('模块归属未能读取，请重试；已读取的模块仍可打开。'); });
-    return () => abort.abort();
-  }, [coverView, gallery.scope, shared.catalogReady, shared.catalogRevision, userId, coverRetry, galleryOwnedPresets.owner, galleryOwnedPresets.revision]);
-  const galleryOwnershipReady = gallery.scope !== 'mine' || galleryOwnedPresets.owner === userId && galleryOwnedPresets.revision === shared.catalogRevision;
-  const galleryCatalog = useMemo(() => navigation.map(entry => ({ ...entry, key: galleryEntryKey(entry),
-    groupName: entry.groupName || '未分组', shared: entry.shared === true,
-    mine: entry.sharedLive?.mode === 'publisher' || !entry.sharedLive && !entry.presetId
-      || galleryOwnedPresets.owner === userId && Boolean(entry.presetId && galleryOwnedPresets.ids.includes(entry.presetId)) })), [navigation, galleryOwnedPresets, userId]);
-  const galleryDirectoryReady = directoryReady && shared.catalogReady && !shared.error && galleryOwnershipReady && (gallery.scope !== 'mine' || !galleryOwnershipError);
   // 最近使用 = the later of this browser's opens and this user's own generations (server, any device).
   const galleryLastUsed = useMemo(() => serverRecentUse.owner === userId
     ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
   [gallery.lastOpened, serverRecentUse, userId]);
-  const galleryDerived = useMemo(() => deriveModuleGallery(galleryCatalog, { query: gallery.query,
-    scope: gallery.scope, sort: gallery.sort, lastOpened: galleryLastUsed }),
-  [galleryCatalog, gallery.query, gallery.scope, gallery.sort, galleryLastUsed]);
-  const coverPages = useResultPages({ items: directoryReady && gallery.ready ? galleryDerived.filteredEntries : [], storageKey: `sd2:module-covers:v1:${userId}`,
-    visible: coverView, busy: loading || hydrating || !galleryDirectoryReady || !gallery.ready, error: Boolean(error || shared.error), hasMore: false,
-    total: galleryDirectoryReady ? galleryDerived.filteredTotal : null, loadMore: async () => undefined, currentId: null });
+  const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
+    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries } }, gallery.ready);
+  useEffect(() => { if (coverView) pool.refresh(); }, [coverView, shared.catalogRevision, pool.refresh]);
+  useEffect(() => {
+    if (pool.denied) { setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
+    if (!pool.data) return;
+    setDirectory(pool.data.navigation.map(entry => ({ ...entry, sourcePresetId: entry.presetId || null,
+      sourcePresetShared: entry.shared, canManageGroup: entry.mine && entry.coverEditable })));
+    setDirectoryReady(true);
+    setRemovedDefaultGroups(pool.data.removedDefaultGroups);
+    setDeletedSourcePresetIds(pool.data.deletedSourcePresetIds);
+  }, [pool.data, pool.denied, invalidateSharedDefinition]);
+  const galleryDirectoryReady = Boolean(pool.data && !pool.error);
+  const galleryDerived = { total: pool.data?.navigation.length || 0, filteredTotal: pool.data?.total || 0 };
+  const coverPages = useResultPages({ items: gallery.ready ? pool.data?.matches || [] : [], storageKey: `sd2:module-covers:v1:${userId}`,
+    visible: coverView, busy: pool.loading || !gallery.ready, error: Boolean(pool.error), hasMore: false, tabScoped: true,
+    total: pool.data?.total ?? null, loadMore: async () => undefined, currentId: null });
+  useEffect(() => { if (coverView && !coverPages.restoring) pool.setPage(coverPages.page, coverPages.capacity); }, [coverView, coverPages.page, coverPages.capacity, coverPages.restoring, pool.setPage]);
   const resetCoverScroll = useRememberedScroll(`image-studio:${userId}${coverView ? ':covers' : ''}`,
     viewRestored && directoryReady && (!coverView || gallery.ready && galleryDirectoryReady && !coverPages.restoring && !hydrating) && !loading,
     { localFallback: true, skipRestore: !coverView && typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('moduleId') || new URLSearchParams(window.location.search).get('presetId')) });
   const changeGalleryQuery = (value: string) => { gallery.setQuery(value); coverPages.reset(); resetCoverScroll(); };
   const changeGalleryScope = (value: GalleryScope) => { gallery.setScope(value); coverPages.reset(); resetCoverScroll(); };
   const changeGallerySort = (value: GallerySort) => { gallery.setSort(value); coverPages.reset(); resetCoverScroll(); };
+  const changeGalleryAuthor = (key: string | null) => { gallery.setAuthorKey(key); coverPages.reset(); resetCoverScroll(); };
   const resetGallery = () => { gallery.reset(); coverPages.reset(); resetCoverScroll(); };
-  const visibleCoverIds = coverPages.pageItems.map(item => item.id).join(',');
-  useEffect(() => {
-    if (!coverView || !directoryReady || error) return;
-    const missing = visibleCoverIds.split(',').filter(id => id && !id.startsWith('shared:') && !modules.some(module => module.id === id));
-    if (missing.length) void hydrateModules(missing);
-  }, [coverView, directoryReady, visibleCoverIds, modules, hydrateModules, error, coverRetry]);
   const coverPagination = <nav className={styles.pagination} style={{ flexWrap: 'wrap' }} aria-label="封面分页">
     <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
     <button type="button" aria-label="上一页封面" title="上一页封面" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
@@ -1330,6 +1314,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
+        <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{navigation.length}项</small></button>
         <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
         <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
@@ -1387,7 +1372,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         </div>)}
       </>}
       {shared.hasMore && <button type="button" disabled={shared.loading} onClick={shared.loadMore}>{shared.loading ? '读取中' : '更多共享模板'}</button>}
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}<small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
+      {!templateWorkbench && <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{navigation.length}项</small></button>}
     </aside>
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
@@ -1396,11 +1381,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面 <small>{navigation.length}项</small></button>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={sidebarGroupedModules[selectedGroup] ? selectedGroup : ''} onChange={event => setSelectedGroup(event.target.value)}>
         {!sidebarGroupedModules[selectedGroup] && <option value="">{navigationVisibility.ready ? '选择分组' : '正在读取侧栏…'}</option>}
         {Object.entries(sidebarGroupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面{navigation.some(item => attention.unread.has(item.id)) && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />} <small title={`共 ${navigation.length} 个模块`}>{navigation.length}项</small></button>
       <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && sidebarGroupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         const entry = navigation.find(item => item.id === event.target.value);
         if (entry) navigateToEntry(entry, { explicitSelection: true });
@@ -1446,7 +1431,6 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         onClick={() => void deletion.check(command)}>核对第 {index + 1} 项{command.objectKind === 'workspace' ? '工作区' : '原模板'}删除</button>)}
     </section>}
     {shared.error && <p role="status" className={styles.muted}>{shared.error}</p>}
-    {coverView && gallery.scope === 'mine' && galleryOwnershipError && <p role="status" className={styles.error}>{galleryOwnershipError}</p>}
     {sharedOpening && <p role="status" className={styles.muted}>正在打开模板，本人输入和历史保留</p>}
     {attention.error && <p role="status" className={styles.muted}>{attention.error}<button type="button" onClick={() => {
       const target = attention.retryModuleId && directory.find(item => item.id === attention.retryModuleId);
@@ -1456,30 +1440,25 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       total={galleryDirectoryReady ? galleryDerived.total : null} filteredTotal={galleryDirectoryReady ? galleryDerived.filteredTotal : null}
       query={gallery.query} onQueryChange={changeGalleryQuery} scope={gallery.scope} onScopeChange={changeGalleryScope}
       sort={gallery.sort} onSortChange={changeGallerySort} onReset={resetGallery} gridRef={coverPages.gridRef} pagination={coverPagination}
-      loading={loading || shared.loading || !gallery.ready || !galleryOwnershipReady && !galleryOwnershipError} error={Boolean(error || shared.error || gallery.scope === 'mine' && galleryOwnershipError || galleryReadErrors.size)} opening={sharedOpening || Boolean(galleryCoverModuleId && !galleryCoverModule)}
-      onRetry={() => { setGalleryReadErrors(new Set()); setGalleryOwnershipError(''); shared.refresh(); if (directoryReady) { setError(''); setCoverRetry(value => value + 1); } else void loadModules(); }}
+      authorKey={gallery.authorKey} authorLabel={pool.data?.navigation.find(item => item.author.key === gallery.authorKey)?.author.displayName} onAuthorChange={changeGalleryAuthor}
+      loading={pool.loading || !gallery.ready} error={Boolean(pool.error || galleryReadErrors.size)} opening={sharedOpening || Boolean(galleryCoverModuleId && !galleryCoverModule)}
+      onRetry={() => { setGalleryReadErrors(new Set()); pool.refresh(); setCoverRetry(value => value + 1); }}
       headerActions={<div className={styles.counts}>
         <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
         <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
-        <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button>
+        <button type="button" disabled={creating || !directoryReady} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button>
       </div>}
       items={coverPages.pageItems.map(entry => {
-      const coverModule = modules.find(item => item.id === entry.id);
-      const loadedCover = coverModule?.fixedCover;
-      const sameCoverTarget = loadedCover && entry.fixedCover && loadedCover.target.kind === entry.fixedCover.target.kind
-        && loadedCover.target.id === entry.fixedCover.target.id;
-      const directoryCover = entry.fixedCover && (!coverModule || sameCoverTarget && entry.fixedCover.revision >= loadedCover!.revision)
-        ? entry.fixedCover : null;
+      const pageItem = pool.data?.page === coverPages.page && pool.data.pageSize === coverPages.capacity
+        ? pool.data.items.find(item => item.key === entry.key) : undefined;
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
-        // A shared template and its source module can carry the same name; the shared copy is labelled.
-        badge: entry.presetId ? '共享模板' : undefined,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
-        loading: !entry.presetId && !coverModule && !error, error: galleryReadErrors.has(entry.key) || !entry.presetId && !coverModule && Boolean(error),
-        visual: directoryCover ? <FixedCoverVisual key={coverRetry} cover={directoryCover} name={entry.name} onReadError={onReadError} />
-          : coverModule ? <TemplateCoverVisual key={coverRetry} module={coverModule} onReadError={onReadError} /> : entry.fixedCover
-          ? <FixedCoverVisual key={coverRetry} cover={entry.fixedCover} name={entry.name} onReadError={onReadError} /> : <span className={styles.coverVisual} data-cover-source="模板素材">
-            {entry.banner?.thumbnailUrl ? <img decoding="async" src={entry.banner.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>暂无代表图</span>}</span>,
+        author: entry.author, reactions: entry.reaction && <GalleryReactionButtons key={`${userId}:${entry.key}`} userId={userId} initial={entry.reaction} enabled={!pool.error && pool.data?.capabilities.independentReactions === true} />,
+        loading: !pageItem && pool.loading, error: galleryReadErrors.has(entry.key),
+        visual: pageItem?.fixedCover ? <FixedCoverVisual key={coverRetry} cover={pageItem.fixedCover} name={entry.name} onReadError={onReadError} />
+          : <span className={styles.coverVisual} data-cover-source="模板素材">
+            {pageItem?.cover?.thumbnailUrl || pageItem?.banner?.thumbnailUrl ? <img decoding="async" src={pageItem.cover?.thumbnailUrl || pageItem.banner!.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>{entry.available ? '暂无代表图' : '仅历史，来源暂不可用'}</span>}</span>,
         canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry) };
     })} />}
     <div hidden={coverView || !viewRestored || !directoryReady || Boolean(routeQuery && resolvedRoute !== `${userId}:${routeQuery.startsWith("?") ? routeQuery : `?${routeQuery}`}`)}>
@@ -1510,6 +1489,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     </div>
     {galleryCoverModule && <ModuleCoverEditor key={`${userId}:${galleryCoverModule.id}`} userId={userId} moduleId={galleryCoverModule.id} moduleName={galleryCoverModule.name}
       onClose={() => setGalleryCoverModuleId(null)} onSaved={cover => {
+        pool.refresh();
         setModules(current => current.map(item => item.id === galleryCoverModule.id ? { ...item, fixedCover: cover } : item));
         setDirectory(current => current.map(item => item.id === galleryCoverModule.id ? { ...item, fixedCover: cover } : item));
         shared.refresh();

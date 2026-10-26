@@ -155,6 +155,13 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/cover-pool-engineering.ts', schema: 'cover-pool-engineering.v1', databaseFlag: 'applicationDatabaseOpened', sources: [
+    'scripts/cover-pool-engineering.ts', 'src/lib/content-reactions/independent.ts', 'src/lib/image-studio/gallery.ts',
+    'src/lib/image-studio/gallery-context.ts', 'src/lib/image-studio/gallery-types.ts', 'src/lib/image-studio/shared-contract.ts',
+    'src/app/api/content-reactions/independent/route.ts', 'src/app/api/image-studio/gallery/query/route.ts',
+    'src/components/content-reactions/GalleryReactionButtons.tsx', 'src/app/image-studio/module-gallery-state.ts',
+    'src/app/image-studio/useModuleGalleryState.ts', 'src/app/image-studio/useGalleryCatalog.ts',
+  ] },
   { file: 'scripts/template-author-cover-contract-engineering.ts', schema: 'template-author-cover-contract-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', checks: [
       'author_colleague_admin_and_fresh_identity_never_impersonate_each_other',
@@ -418,7 +425,9 @@ function run() {
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
   const recorded = [], publicUsageRecorded = [], failures = [], outcomes = [];
-  const fixtureEnvironment = { ...process.env, IMAGE_RECOVERY_GATE_RUN_ID: runId };
+  const fixtureEnvironment = { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: runId };
+  delete fixtureEnvironment.HD_DERIVATIVES_ROOT;
+  delete fixtureEnvironment.HD_DERIVATIVES_DIR;
   const usageEngineeringReceipt = path.join(directory, 'admin-usage-pure.json');
   const usageResult = spawnSync(process.execPath, ['--import', 'tsx', usageGate, usageEngineeringReceipt], {
     cwd: root, env: fixtureEnvironment, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024,

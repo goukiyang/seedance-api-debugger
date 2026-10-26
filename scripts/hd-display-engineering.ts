@@ -72,7 +72,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   };
   const modules = new Map<string, Record<string, any>>();
   const files = new Set(['src/lib/media/image-preview-session.ts', 'src/lib/media/image-read-session.ts', 'src/lib/media/hd-source-session.ts',
-    'src/lib/media/hd-display-policy.ts', 'src/lib/media/image-comparison.ts', 'src/lib/media/native-download.ts',
+    'src/lib/media/hd-display-policy.ts', 'src/lib/media/image-comparison.ts', 'src/lib/media/image-comparison-contract.ts', 'src/lib/media/native-download.ts',
     'src/lib/hooks/use-hd-image-source.ts', 'src/lib/hooks/use-media-preview-state.ts', 'src/lib/media/media-preview-state-contract.ts', 'src/lib/http/json-response.ts']);
   function load(file: string): Record<string, any> {
     if (modules.has(file)) return modules.get(file)!;

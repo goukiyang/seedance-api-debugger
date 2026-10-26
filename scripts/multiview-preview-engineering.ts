@@ -81,7 +81,8 @@ async function main() {
     assert(queued?.step === 1 && !queued.uncertain, 'explicit accepted queue must establish waiting stage');
     const running = multiviewGenerationProgress('submitted', { ...task, provider_status: 'processing' }, queued);
     assert(running?.step === 2, 'explicit provider processing must establish generation stage');
-    assert(multiviewGenerationProgress('submitted', { ...task, provider_task_id: task.id })?.step === null, 'local task id cannot establish upstream acceptance');
+    const siteAccepted = multiviewGenerationProgress('submitted', { ...task, provider_task_id: task.id });
+    assert(siteAccepted?.step === 1 && siteAccepted.label === '已提交，等待生成', 'local identity proves site submission only, never upstream generation');
     assert(multiviewGenerationProgress('submitted', { ...task, provider_status: 'unrecognized' }, running)?.step === 2, 'unknown provider status must retain last confirmed stage');
     assert(multiviewGenerationProgress('unknown', task, running)?.uncertain, 'unknown submit must not appear accepted');
     assert(multiviewGenerationProgress('submitted', { ...task, local_status: 'failed' }, running)?.failed, 'failure must remain failure');

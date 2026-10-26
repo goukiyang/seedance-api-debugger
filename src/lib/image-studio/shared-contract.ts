@@ -199,8 +199,7 @@ async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, 
     throw problem;
   }
 }
-async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, source: ImageStudioPreset, intent: SharedStudioIntent, client: SharedStudioClient) {
-  const presetId = source.id;
+async function readSharedStudioDependencies(actor: ImageStudioIdentity, source: ImageStudioPreset, client: SharedStudioClient) {
   const skillIds = await getSkillSelection(source.owner_id, source.id, client, 'preset');
   if (skillIds.length) throw new StudioSharingError('模板含私人skills，不能作为实时共享模板使用', 409);
   const ids = storedIds(source.reference_ids);
@@ -227,6 +226,24 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
   if (templateReferenceIds.some(id => !readableIds.has(id))) throw new StudioSharingError('模板参考图已变为受保护内容，请由创建者核对', 409);
   const model = source.model as SharedStudioDefaults['model'];
   if (!IMAGE_STUDIO_MODELS.includes(model)) throw new StudioSharingError('模板模型已不可用，请由创建者重新保存', 409);
+  return { templateReferenceIds, referencePolicy, reproduction, fixedReferences, styleGroupIds, styles, byId, readableIds, model };
+}
+
+// Catalogs reuse the exact dependency checks without constructing definitions or cover media.
+export async function sharedStudioAvailability(actor: ImageStudioIdentity, source: ImageStudioPreset, client: SharedStudioClient) {
+  if (!canViewStudioPreset(actor, source) || await studioPresetArchived(source.id, client)) return false;
+  try { await readSharedStudioDependencies(actor, source, client); return true; }
+  catch (error) {
+    const problem = normalizeSharedError(error);
+    if (problem instanceof StudioSharingError && [400, 403, 404, 409].includes(problem.status)) return false;
+    throw problem;
+  }
+}
+
+async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, source: ImageStudioPreset, intent: SharedStudioIntent, client: SharedStudioClient) {
+  const presetId = source.id;
+  const { templateReferenceIds, referencePolicy, reproduction, fixedReferences, styleGroupIds, styles, byId, readableIds, model }
+    = await readSharedStudioDependencies(actor, source, client);
   const generationDefaults: SharedStudioDefaults = { model, quality: normalizeImageStudioQuality(model, source.quality),
     resolution: normalizeImageResolution(model, source.resolution), count: source.count, aspectRatio: source.aspect_ratio,
     referenceLimit: source.reference_limit, referencePolicy };
@@ -1062,7 +1079,7 @@ export async function deleteStudioGroup(user: ImageStudioIdentity, body: Record<
   });
 }
 
-async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient) {
+export async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient) {
   const keys = rows.flatMap(row => [
     `studio_fixed_references_v1:preset:${row.id}`, `studio_reference_policy_v1:preset:${row.owner_id}:${row.id}`,
     `studio_style_preset_selection_v1:${row.id}`, `studio_skill_selection_v1:preset:${row.id}`, studioSharedReproductionKey(row.id),

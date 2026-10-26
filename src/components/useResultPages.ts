@@ -20,11 +20,12 @@ export function gridPageCapacity(grid: HTMLElement) {
   return rows * rowSize;
 }
 
-export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent }: {
+export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false }: {
   items: T[]; storageKey: string; visible: boolean; busy: boolean; error: boolean;
   hasMore: boolean; loadMore: () => Promise<unknown>; currentId: string | null;
   total?: number | null;
   navigationIntent?: ResultNavigationIntent | null;
+  tabScoped?: boolean;
 }) {
   const items = useMemo(() => Array.from(new Map(inputItems.map(item => [item.id, item])).values()), [inputItems]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -68,7 +69,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       return;
     }
     let saved: { id?: unknown; index?: unknown; version?: unknown } | null = null;
-    try { saved = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch { /* Optional preferences. */ }
+    try { saved = JSON.parse((tabScoped ? sessionStorage.getItem(storageKey) : null) || localStorage.getItem(storageKey) || 'null'); } catch { /* Optional preferences. */ }
     const valid = saved?.version === 1 && typeof saved.index === 'number' && Number.isSafeInteger(saved.index) && saved.index >= 0
       && typeof saved.id === 'string' && saved.id.length <= 160;
     readsLeft.current = valid ? Math.min(20, Math.ceil((saved!.index as number) / 24) + 2) : 2;
@@ -142,7 +143,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     if (restoredKey !== storageKey || requested || !items.length) return;
     const id = items[index]?.id;
     if (id && id !== position.id) { setPosition({ id, index }); return; }
-    try { localStorage.setItem(storageKey, JSON.stringify({ version: 1, id, index })); } catch { /* Optional preferences. */ }
+    try { const record = JSON.stringify({ version: 1, id, index }); localStorage.setItem(storageKey, record); if (tabScoped) sessionStorage.setItem(storageKey, record); } catch { /* Optional preferences. */ }
   }, [index, items, position, requested, restoredKey, storageKey]);
 
   function goToIndex(target: number, last = false) {
@@ -172,5 +173,5 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     navigationIssue, retry,
     last: () => { if (knownTotal !== null && knownTotal > 0) goToIndex(Math.floor((knownTotal - 1) / capacity) * capacity, true); },
     previous: () => goToIndex(start - capacity), next: () => goToIndex(start + capacity), goToId,
-    reset: () => { try { localStorage.removeItem(storageKey); } catch {} goToIndex(0); } };
+    reset: () => { try { localStorage.removeItem(storageKey); if (tabScoped) sessionStorage.removeItem(storageKey); } catch {} goToIndex(0); } };
 }

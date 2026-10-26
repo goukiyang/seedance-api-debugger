@@ -1,5 +1,5 @@
-export type GalleryScope = 'all' | 'mine' | 'shared';
-export type GallerySort = 'recent' | 'directory';
+import type { GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
+export type { GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
 
 export type GalleryCatalogItem = {
   id: string;
@@ -10,14 +10,14 @@ export type GalleryCatalogItem = {
   shared: boolean;
 };
 
-export type ModuleGalleryFilters = { query: string; scope: GalleryScope; sort: GallerySort };
+export type ModuleGalleryFilters = { query: string; scope: GalleryScope; sort: GallerySort; authorKey: string | null };
 export type ModuleGalleryLastOpened = Record<string, number>;
 
 export const MODULE_GALLERY_QUERY_LIMIT = 160;
 export const MODULE_GALLERY_RECENT_LIMIT = 1000;
 
 export function defaultModuleGalleryFilters(): ModuleGalleryFilters {
-  return { query: '', scope: 'all', sort: 'recent' };
+  return { query: '', scope: 'all', sort: 'created', authorKey: null };
 }
 
 export function normalizeModuleGalleryFilters(value: unknown): ModuleGalleryFilters {
@@ -26,8 +26,9 @@ export function normalizeModuleGalleryFilters(value: unknown): ModuleGalleryFilt
   const fields = value as Record<string, unknown>;
   return {
     query: typeof fields.query === 'string' ? fields.query.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MODULE_GALLERY_QUERY_LIMIT) : defaults.query,
-    scope: fields.scope === 'mine' || fields.scope === 'shared' ? fields.scope : defaults.scope,
-    sort: fields.sort === 'directory' ? fields.sort : defaults.sort,
+    scope: fields.scope === 'mine' || fields.scope === 'shared' || fields.scope === 'favorites' ? fields.scope : defaults.scope,
+    sort: ['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(String(fields.sort)) ? fields.sort as GallerySort : defaults.sort,
+    authorKey: typeof fields.authorKey === 'string' && /^author:[a-f0-9]{64}$/.test(fields.authorKey) ? fields.authorKey : null,
   };
 }
 

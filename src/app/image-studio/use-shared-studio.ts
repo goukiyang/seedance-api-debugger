@@ -44,10 +44,11 @@ async function readShared<T>(url: string, signal: AbortSignal): Promise<T> {
 }
 
 // One serial loop owns revision, catalog pages and active definition reads.
-export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable, completeCatalog = false }: {
+export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable, completeCatalog = false, lightweightCatalog = false }: {
   userId: string; activeModule?: T; onDefinition: (module: T) => void;
   onUnavailable: (presetId: string | null, reason: string, reasonCode?: SharedStudioReasonCode, capabilities?: SharedStudioCapabilities) => void;
   completeCatalog?: boolean;
+  lightweightCatalog?: boolean;
 }) {
   const { sessionChanged } = useAppSession();
   const presetId = activeModule?.sharedLive?.intent.presetId || '';
@@ -97,7 +98,8 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
         if (!currentRead()) return;
         if (typeof revision.catalogRevision !== 'string') throw new Error('模板同步暂不可用');
         const changed = initial.revision !== revision.catalogRevision;
-        if (forced || changed || !initial.ready || (append || completeCatalog) && initial.cursor) {
+        if (lightweightCatalog) commit({ owner: userId, items: [], revision: revision.catalogRevision, cursor: null, pages: 0, ready: true });
+        else if (forced || changed || !initial.ready || (append || completeCatalog) && initial.cursor) {
           const items = new Map<string, SharedStudioEntry>();
           let cursor: string | null = null, pages = 0;
           if (!forced && !changed && initial.ready && append) {
@@ -191,7 +193,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       window.removeEventListener('online', resume);
       window.removeEventListener('offline', resume);
     };
-  }, [sessionChanged, scopeKey, userId, presetId, moduleId, completeCatalog]);
+  }, [sessionChanged, scopeKey, userId, presetId, moduleId, completeCatalog, lightweightCatalog]);
 
   const visible = !sessionChanged && !isClientSessionBlocked() && catalog.owner === userId ? catalog : null;
   return { items: visible?.items || [], ready: visible?.ready || false,

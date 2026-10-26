@@ -22,7 +22,7 @@ export const HD_CHAIN_FIXTURE_SOURCES = [
   'src/lib/media/authorized-image-response.ts', 'src/lib/media/hd-display-policy.ts',
   'src/lib/media/hd-source-session.ts', 'src/lib/media/image-preview-session.ts',
   'src/lib/media/image-read-session.ts', 'src/lib/media/native-download.ts',
-  'src/lib/media/image-comparison.ts', 'src/lib/assets/site-url.ts',
+  'src/lib/media/image-comparison.ts', 'src/lib/media/image-comparison-contract.ts', 'src/lib/assets/site-url.ts',
   'src/lib/hooks/use-hd-image-source.ts', 'src/lib/hooks/use-image-neighbors.ts',
   'src/lib/hooks/use-media-preview-state.ts',
   'src/components/ZoomableImagePreview.tsx', 'src/components/ResultImageCover.tsx',
