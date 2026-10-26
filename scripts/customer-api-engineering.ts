@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { normalizeVideoInput, inputHash, budgetPeriod } from '../src/lib/customer-api/contracts';
-import { fixedPricingCredits } from '../src/lib/pricing/math';
-import { parsePreviewRange } from '../src/lib/media/preview-response';
+
+// Authentication exports share a Prisma import. Block that module before loading domain helpers.
+const prismaPath = require.resolve('../src/lib/prisma');
+assert.equal(require.cache[prismaPath], undefined, 'Run in a fresh engineering process');
+require.cache[prismaPath] = { id: prismaPath, filename: prismaPath, loaded: true,
+  exports: { prisma: new Proxy({}, { get() { throw new Error('Database access is forbidden in pure checks'); } }) } } as NodeModule;
+const { normalizeVideoInput, inputHash, budgetPeriod } = require('../src/lib/customer-api/contracts') as typeof import('../src/lib/customer-api/contracts');
+const { fixedPricingCredits } = require('../src/lib/pricing/math') as typeof import('../src/lib/pricing/math');
+const { parsePreviewRange } = require('../src/lib/media/preview-response') as typeof import('../src/lib/media/preview-response');
 
 // Pure input/math/parser checks and source wiring only. No database or provider calls.
 const input = { model: 'seedance-2.5-ip', prompt: 'test prompt', duration: 5, resolution: '720p' };
