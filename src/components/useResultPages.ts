@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 type Position = { id: string | null; index: number };
 type PageRequest = Position & { restore?: boolean; last?: boolean };
@@ -20,14 +20,16 @@ export function gridPageCapacity(grid: HTMLElement) {
   return rows * rowSize;
 }
 
-export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false }: {
+export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false, positionKey }: {
   items: T[]; storageKey: string; visible: boolean; busy: boolean; error: boolean;
   hasMore: boolean; loadMore: () => Promise<unknown>; currentId: string | null;
   total?: number | null;
   navigationIntent?: ResultNavigationIntent | null;
   tabScoped?: boolean;
+  positionKey?: (item: T) => string;
 }) {
-  const items = useMemo(() => Array.from(new Map(inputItems.map(item => [item.id, item])).values()), [inputItems]);
+  const itemId = useCallback((item: T) => positionKey?.(item) || item.id, [positionKey]);
+  const items = useMemo(() => Array.from(new Map(inputItems.map(item => [itemId(item), item])).values()), [inputItems, itemId]);
   const gridRef = useRef<HTMLDivElement>(null);
   const [capacity, setCapacity] = useState(MIN_PAGE_ITEMS);
   const [position, setPosition] = useState<Position>({ id: null, index: 0 });
@@ -45,7 +47,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     ? JSON.stringify([navigationIntent.id, navigationIntent.scopeKey, navigationIntent.revision]) : '';
   const suppliedTotal = typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? total : null;
   const knownTotal = suppliedTotal ?? (!hasMore && !busy ? items.length : null);
-  const anchorIndex = position.id ? items.findIndex(item => item.id === position.id) : -1;
+  const anchorIndex = position.id ? items.findIndex(item => itemId(item) === position.id || item.id === position.id) : -1;
   const index = anchorIndex >= 0 ? anchorIndex : Math.min(position.index, Math.max(0, items.length - 1));
   const start = Math.floor(index / capacity) * capacity;
   const pageItems = restoredKey === storageKey ? items.slice(start, start + capacity) : [];
@@ -71,7 +73,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     let saved: { id?: unknown; index?: unknown; version?: unknown } | null = null;
     try { saved = JSON.parse((tabScoped ? sessionStorage.getItem(storageKey) : null) || localStorage.getItem(storageKey) || 'null'); } catch { /* Optional preferences. */ }
     const valid = saved?.version === 1 && typeof saved.index === 'number' && Number.isSafeInteger(saved.index) && saved.index >= 0
-      && typeof saved.id === 'string' && saved.id.length <= 160;
+      && typeof saved.id === 'string' && saved.id.length <= 200;
     readsLeft.current = valid ? Math.min(20, Math.ceil((saved!.index as number) / 24) + 2) : 2;
     setPosition({ id: null, index: 0 });
     setRequested(valid ? { id: saved!.id as string, index: saved!.index as number, restore: true } : null);
@@ -91,7 +93,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       const selectedIndex = previous.items.findIndex(item => item.id === previous.currentId);
       const anchor = selectedIndex >= previous.start && selectedIndex < previous.start + previous.capacity ? selectedIndex : previous.start;
       // A resize re-pages around a visible image, never around a selection on another page.
-      setPosition({ id: previous.items[anchor]?.id || null, index: anchor });
+      setPosition({ id: previous.items[anchor] ? itemId(previous.items[anchor]) : null, index: anchor });
       readsLeft.current = Math.max(readsLeft.current, 2);
       setCapacity(next);
     };
@@ -99,12 +101,12 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const observer = new ResizeObserver(measure);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [visible, items.length]);
+  }, [visible, items.length, itemId]);
 
   useEffect(() => {
     if (restoredKey !== storageKey || busy || (error && !retryRequested.current) || navigationIssue || reading.current || !visible) return;
     const target = requested?.last && knownTotal !== null ? Math.floor(Math.max(0, knownTotal - 1) / capacity) * capacity
-      : requested ? requested.id ? items.findIndex(item => item.id === requested.id) : requested.index : index;
+      : requested ? requested.id ? items.findIndex(item => itemId(item) === requested.id || item.id === requested.id) : requested.index : index;
     const pageEnd = (Math.floor(Math.max(0, target) / capacity) + 1) * capacity;
     const complete = target >= 0 && target < items.length && items.length >= Math.min(pageEnd, knownTotal ?? pageEnd);
     const needsMore = hasMore && (!complete || Boolean(requested?.last));
@@ -113,7 +115,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       return;
     }
     if (!needsMore && complete) {
-      if (requested) { setPosition({ id: items[target].id, index: target }); setRequested(null); }
+      if (requested) { setPosition({ id: itemId(items[target]), index: target }); setRequested(null); }
       return;
     }
     if (!hasMore || readsLeft.current <= 0) {
@@ -124,7 +126,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
         return;
       }
       const nearest = Math.min(requested.index, Math.max(0, items.length - 1));
-      setPosition({ id: items[nearest]?.id || null, index: nearest }); setRequested(null);
+      setPosition({ id: items[nearest] ? itemId(items[nearest]) : null, index: nearest }); setRequested(null);
       return;
     }
     retryRequested.current = false;
@@ -141,7 +143,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
 
   useEffect(() => {
     if (restoredKey !== storageKey || requested || !items.length) return;
-    const id = items[index]?.id;
+    const id = items[index] ? itemId(items[index]) : null;
     if (id && id !== position.id) { setPosition({ id, index }); return; }
     try { const record = JSON.stringify({ version: 1, id, index }); localStorage.setItem(storageKey, record); if (tabScoped) sessionStorage.setItem(storageKey, record); } catch { /* Optional preferences. */ }
   }, [index, items, position, requested, restoredKey, storageKey]);
@@ -154,7 +156,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     retryRequested.current = false;
     const end = Math.min((Math.floor(next / capacity) + 1) * capacity, knownTotal ?? Infinity);
     if (hasMore && (last || next >= items.length || end > items.length) || next >= items.length && knownTotal !== null && knownTotal > 0) setRequested({ id: null, index: next, last });
-    else { setRequested(null); setPosition({ id: items[next]?.id || null, index: next }); }
+    else { setRequested(null); setPosition({ id: items[next] ? itemId(items[next]) : null, index: next }); }
   }
   function retry() {
     readsLeft.current = 20;
@@ -163,7 +165,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     setCompletedReads(value => value + 1);
   }
   function goToId(id: string) {
-    const target = items.findIndex(item => item.id === id);
+    const target = items.findIndex(item => itemId(item) === id || item.id === id);
     if (target >= 0) goToIndex(target);
   }
   return { gridRef, pageItems, capacity, start, page: Math.floor(start / capacity) + 1,

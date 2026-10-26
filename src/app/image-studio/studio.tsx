@@ -158,6 +158,7 @@ function galleryEntryKey(entry: { id: string; presetId?: string; sharedLive?: { 
   const presetId = entry.presetId || entry.sharedLive?.intent.presetId;
   return presetId ? `preset:${presetId}` : `module:${entry.id}`;
 }
+const galleryPositionKey = (entry: { key: string }) => entry.key;
 function canManageStudioGroupEntry(item: StudioNavigationEntry) {
   if (item.sharedLive?.mode === 'live') return false;
   if (typeof item.canManageGroup === 'boolean') return item.canManageGroup;
@@ -1192,7 +1193,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const galleryDirectoryReady = Boolean(pool.data && !pool.error);
   const galleryDerived = { total: pool.data?.navigation.length || 0, filteredTotal: pool.data?.total || 0 };
   const coverPages = useResultPages({ items: gallery.ready ? pool.data?.matches || [] : [], storageKey: `sd2:module-covers:v1:${userId}`,
-    visible: coverView, busy: pool.loading || !gallery.ready, error: Boolean(pool.error), hasMore: false, tabScoped: true,
+    visible: coverView, busy: pool.loading || !gallery.ready, error: Boolean(pool.error), hasMore: false, tabScoped: true, positionKey: galleryPositionKey,
     total: pool.data?.total ?? null, loadMore: async () => undefined, currentId: null });
   useEffect(() => { if (coverView && !coverPages.restoring) pool.setPage(coverPages.page, coverPages.capacity); }, [coverView, coverPages.page, coverPages.capacity, coverPages.restoring, pool.setPage]);
   const resetCoverScroll = useRememberedScroll(`image-studio:${userId}${coverView ? ':covers' : ''}`,
