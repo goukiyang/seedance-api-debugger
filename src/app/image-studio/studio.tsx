@@ -1,5 +1,5 @@
 'use client';
-import { parseStudioTaskSettings, studioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
+import { parseStudioTaskSettings, studioTaskSettings, sameStudioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
@@ -2311,11 +2311,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       }
       postStarted = true;
       const result = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...savePayload, ...(sharedLive || publishNew ? { requestId: request.requestId } : {}) }) }));
+        body: JSON.stringify({ ...savePayload, requestId: request.requestId }) }));
       if (!validSaveScope()) return false;
       if (repairSave && (result.commandReceipt?.requestId !== repairSave.requestId
         || !fixedReferenceReceiptMatches({ status: 'completed', receipt: result.commandReceipt }, repairSave))) throw new Error('原修复保存回执尚未确认，请核对原保存');
-      if (!Number.isInteger(result.revision) || result.revision <= revisionOverride
+      if (!sameStudioTaskSettings(result.taskSettings, saveMode) || !Number.isInteger(result.revision) || result.revision <= revisionOverride
         || publishNew && (result.sharedLive?.mode !== 'publisher' || result.sourcePresetShared !== true || result.sourcePresetId !== `module-source:${module.id}`)) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
       if (repairSave) { await clearFixedReferenceSave(repairSave); if (!validSaveScope()) return false;
         pendingFixedSaveRef.current = null; setPendingFixedSave(null); }

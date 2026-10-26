@@ -437,6 +437,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
+  if (input.taskSettings && (avatar || canvasUse || canvasPrompt || roleMedia || typeof moduleId !== 'string')) throw new StudioError('模板设置模式不能用于其他生成入口', 400);
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
   if (avatar && (moduleId !== undefined || input.sharedLive || input.restoredSettings || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
   if (input.restoredSettings && (canvasUse || canvasPrompt || roleMedia)) throw new StudioError('恢复模板设置不能混入其他生成入口', 403);

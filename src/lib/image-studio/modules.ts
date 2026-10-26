@@ -537,6 +537,14 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     const current = await tx.imageStudioModule.findUnique({ where: { id } });
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);
     if (current && createOnly) return current;
+    if (taskSettings) {
+      if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new StudioModuleError('请保留有效的原保存编号', 400);
+      const receipt = await readReceipt(tx, ownerId, body.requestId, sharedCommandFingerprint(['save-workspace-settings-v2', body]));
+      if (receipt) {
+        if (!current || receipt.moduleId !== id || receipt.revision !== current.revision) throw new StudioModuleError('原保存已完成，但模板后来又有修改，请重新读取；当前草稿保留', 409);
+        return current;
+      }
+    }
     if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模块已绑定共享原件，请重新读取后明确保存个人输入或模板定义', 409);
     if ((current?.revision || 0) !== revision) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对；当前草稿仍在本页', 409);
     const priorSettingsSource = await readStudioWorkspaceSource(tx, ownerId, id);
@@ -642,6 +650,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       throw error;
     }
     if (groupName !== undefined) await restoreStudioDefaultGroup(ownerId, groupName.trim() || '未分组', tx);
+    if (taskSettings) await writeReceipt(tx, ownerId, body.requestId, sharedCommandFingerprint(['save-workspace-settings-v2', body]),
+      { moduleId: id, revision: saved.revision, taskSettings });
     return saved;
   }, { timeout: 15000 });
   const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } }) : undefined;
