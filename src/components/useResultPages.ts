@@ -139,14 +139,14 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       if (generation.current !== token) return;
       reading.current = false; setCompletedReads(value => value + 1);
     });
-  }, [busy, capacity, completedReads, error, hasMore, index, items, knownTotal, loadMore, navigationIssue, requested, restoredKey, storageKey, visible]);
+  }, [busy, capacity, completedReads, error, hasMore, index, itemId, items, knownTotal, loadMore, navigationIssue, requested, restoredKey, storageKey, visible]);
 
   useEffect(() => {
     if (restoredKey !== storageKey || requested || !items.length) return;
     const id = items[index] ? itemId(items[index]) : null;
     if (id && id !== position.id) { setPosition({ id, index }); return; }
     try { const record = JSON.stringify({ version: 1, id, index }); localStorage.setItem(storageKey, record); if (tabScoped) sessionStorage.setItem(storageKey, record); } catch { /* Optional preferences. */ }
-  }, [index, items, position, requested, restoredKey, storageKey]);
+  }, [index, itemId, items, position, requested, restoredKey, storageKey, tabScoped]);
 
   function goToIndex(target: number, last = false) {
     generation.current++; reading.current = false;
@@ -168,6 +168,12 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const target = items.findIndex(item => itemId(item) === id || item.id === id);
     if (target >= 0) goToIndex(target);
   }
+  function resetPosition(waitForRead = false) {
+    try { localStorage.removeItem(storageKey); if (tabScoped) sessionStorage.removeItem(storageKey); } catch {}
+    goToIndex(0);
+    // A new query must anchor its new first item, not the old first item at its new rank.
+    if (waitForRead) { setPosition({ id: null, index: 0 }); setRequested({ id: null, index: 0, restore: true }); }
+  }
   return { gridRef, pageItems, capacity, start, page: Math.floor(start / capacity) + 1,
     pages: knownTotal === null ? null : Math.max(1, Math.ceil(knownTotal / capacity)), total: knownTotal, restoring: Boolean(requested),
     canNext: knownTotal === null ? start + capacity < items.length || hasMore : start + capacity < knownTotal,
@@ -175,5 +181,5 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     navigationIssue, retry,
     last: () => { if (knownTotal !== null && knownTotal > 0) goToIndex(Math.floor((knownTotal - 1) / capacity) * capacity, true); },
     previous: () => goToIndex(start - capacity), next: () => goToIndex(start + capacity), goToId,
-    reset: () => { try { localStorage.removeItem(storageKey); if (tabScoped) sessionStorage.removeItem(storageKey); } catch {} goToIndex(0); } };
+    reset: () => resetPosition(), resetForQueryChange: () => resetPosition(true) };
 }

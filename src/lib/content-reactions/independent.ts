@@ -27,13 +27,13 @@ async function availableTo(user: SessionUser, key: GalleryReactionKey, tx: Prism
     const source = await tx.imageStudioPreset.findUnique({ where: { id: parsed.id } });
     return Boolean(source && await sharedStudioAvailability(actor, source, tx));
   }
-  const module = await tx.imageStudioModule.findFirst({ where: { id: parsed.id, owner_id: actor.id } });
-  if (!module || await readStudioWorkspaceDeletion(actor.id, module.id, tx)) return false;
+  const workspace = await tx.imageStudioModule.findFirst({ where: { id: parsed.id, owner_id: actor.id } });
+  if (!workspace || await readStudioWorkspaceDeletion(actor.id, workspace.id, tx)) return false;
   // Bound live/publisher objects must use their exact source key, never a second poll.
-  try { if (await studioSharedBinding(actor.id, module.id, tx)) return false; }
+  try { if (await studioSharedBinding(actor.id, workspace.id, tx)) return false; }
   catch (error) { if (error instanceof StudioSharingError && error.status === 409) return false; throw error; }
-  if (module.source_preset_id) {
-    const source = await tx.imageStudioPreset.findUnique({ where: { id: module.source_preset_id } });
+  if (workspace.source_preset_id) {
+    const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
     return Boolean(source && await sharedStudioAvailability(actor, source, tx));
   }
   return true;

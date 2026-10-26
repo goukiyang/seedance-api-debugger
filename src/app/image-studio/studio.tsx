@@ -1199,11 +1199,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const resetCoverScroll = useRememberedScroll(`image-studio:${userId}${coverView ? ':covers' : ''}`,
     viewRestored && directoryReady && (!coverView || gallery.ready && galleryDirectoryReady && !coverPages.restoring && !hydrating) && !loading,
     { localFallback: true, skipRestore: !coverView && typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('moduleId') || new URLSearchParams(window.location.search).get('presetId')) });
-  const changeGalleryQuery = (value: string) => { gallery.setQuery(value); coverPages.reset(); resetCoverScroll(); };
-  const changeGalleryScope = (value: GalleryScope) => { gallery.setScope(value); coverPages.reset(); resetCoverScroll(); };
-  const changeGallerySort = (value: GallerySort) => { gallery.setSort(value); coverPages.reset(); resetCoverScroll(); };
-  const changeGalleryAuthor = (key: string | null) => { gallery.setAuthorKey(key); coverPages.reset(); resetCoverScroll(); };
-  const resetGallery = () => { gallery.reset(); coverPages.reset(); resetCoverScroll(); };
+  const changeGalleryQuery = (value: string) => { gallery.setQuery(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
+  const changeGalleryScope = (value: GalleryScope) => { gallery.setScope(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
+  const changeGallerySort = (value: GallerySort) => { gallery.setSort(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
+  const changeGalleryAuthor = (key: string | null) => { gallery.setAuthorKey(key); coverPages.resetForQueryChange(); resetCoverScroll(); };
+  const resetGallery = () => { gallery.reset(); coverPages.resetForQueryChange(); resetCoverScroll(); };
   const coverPagination = <nav className={styles.pagination} style={{ flexWrap: 'wrap' }} aria-label="封面分页">
     <button type="button" aria-label="回到第一页封面" title="回到第一页封面" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.start && !coverPages.restoring} onClick={coverPages.reset}><ChevronFirst size={17} /></button>
     <button type="button" aria-label="上一页封面" title="上一页封面" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.start} onClick={coverPages.previous}><ChevronLeft size={17} /></button>
