@@ -47,7 +47,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 import { ModuleGroupPicker } from './group-picker';
-import { hasSharedDefaults, useSharedStudio } from './use-shared-studio';
+import { hasSharedDefaults, sharedBannerVersion, useSharedStudio } from './use-shared-studio';
 import { planStudioDefinitionRebase } from '@/lib/image-studio/definition-rebase';
 import type { SharedStudioFixedReferenceRepair, SharedStudioIntent, SharedStudioLiveDTO, SharedStudioStateProjection, SharedStudioReasonCode, SharedStudioCapabilities } from '@/lib/image-studio/shared-types';
 import { useSharingCommand } from './use-sharing-command';
@@ -163,6 +163,7 @@ function canManageStudioGroupEntry(item: StudioNavigationEntry) {
 // An unavailable ordinary DTO is not an editable empty definition. Only the
 // server's dedicated, author-authorized repair read may initialize these fields.
 function studioRepairModule(module: StudioModule): StudioModule {
+  if (module.sharedLive) module = { ...module, banner: sharedBannerVersion(module.banner, module.sharedLive.intent.definitionToken) };
   const repair = module.sharedLive?.repairDefinition;
   if (!repair || module.sharedLive?.mode !== 'publisher' || module.sharedLive.capabilities?.editDefinition.allowed !== true) return module;
   const image = (item: typeof repair.templateReferences[number]): UploadedAssetPayload => item.image ? { ...item.image } : { id: item.id };
@@ -414,9 +415,16 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const receiveSharedDefinition = useCallback((next: StudioModule) => {
     const normalized = studioRepairModule(next);
     setModules(current => current.map(item => item.id === next.id && item.sharedLive?.intent.presetId === next.sharedLive?.intent.presetId ? normalized : item));
+    setDirectory(current => current.map(item => item.id === next.id && item.sharedLive?.intent.presetId === next.sharedLive?.intent.presetId
+      ? { ...item, ...normalized } : item));
   }, []);
   const invalidateSharedDefinition = useCallback((presetId: string | null, reason: string, reasonCode?: SharedStudioReasonCode, capabilities?: SharedStudioCapabilities) => {
     if (reasonCode === 'read-unavailable' || reasonCode === 'state-conflict') return;
+    setDirectory(current => current.map(item => !item.sharedLive || presetId && item.sharedLive.intent.presetId !== presetId ? item : {
+      ...item, banner: null, shared: false,
+      fixedCover: item.fixedCover ? { ...item.fixedCover, available: false, imageUrl: null, thumbnailUrl: null, unavailableReason: reason } : null,
+      sharedLive: { ...item.sharedLive, available: false, unavailableReason: reason, reasonCode, capabilities },
+    }));
     setModules(current => current.map(item => !item.sharedLive || presetId && item.sharedLive.intent.presetId !== presetId ? item : {
       ...item, banner: null, context: undefined, templatePrompt: undefined, contextConfigured: false,
       fixedCover: item.fixedCover ? { ...item.fixedCover, available: false, imageUrl: null, thumbnailUrl: null, unavailableReason: reason } : null,
@@ -424,7 +432,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       sharedLive: { ...item.sharedLive, available: false, unavailableReason: reason, reasonCode, capabilities, defaults: undefined, repairDefinition: undefined },
     }));
   }, []);
-  const shared = useSharedStudio({ userId, activeModule: modules.find(item => item.id === active), onDefinition: receiveSharedDefinition, onUnavailable: invalidateSharedDefinition, completeCatalog: coverView });
+  const shared = useSharedStudio({ userId, activeModule: modules.find(item => item.id === active), modules,
+    onDefinition: receiveSharedDefinition, onUnavailable: invalidateSharedDefinition, completeCatalog: coverView });
   const deletionCommands = useRef<Array<{ actorId: string; objectKind: 'workspace' | 'source'; id: string }>>([]);
   const deletion = useStudioDeletion({ userId,
     blocked: target => {
@@ -1489,7 +1498,15 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       registerResolutionDirty={registerResolutionDirty} resolutionDelta={resolutionDeltas[module.id]}
       quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onTemplateEntered={attention.confirmEntry} onResultsAvailable={attention.refresh}
       onGenerationAccepted={() => gallery.markOpened(galleryEntryKey(module))}
-      onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? next.sharedLive ? studioRepairModule(next) : { ...next, name: item.name, groupName: item.groupName } : item)); setRemovedDefaultGroups(current => current.filter(group => group !== next.groupName)); shared.refresh(); }}
+      onModuleChange={next => {
+        const normalized = studioRepairModule(next);
+        setModules(current => current.map(item => item.id === next.id
+          ? next.sharedLive ? normalized : { ...normalized, name: item.name, groupName: item.groupName } : item));
+        setDirectory(current => current.map(item => item.id === next.id
+          ? { ...item, ...normalized, ...(!next.sharedLive ? { name: item.name, groupName: item.groupName } : {}) } : item));
+        setRemovedDefaultGroups(current => current.filter(group => group !== next.groupName));
+        if (next.sharedLive) shared.confirmDefinition(normalized); else shared.refresh();
+      }}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       onReloadSettings={discard => { void globalEditor.controller.load(discard); }} />)}
     {(loading || hydrating) && <p role="status">正在读取模块…</p>}
@@ -1525,7 +1542,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         </div>{sharing.pending[preset.id] && <p role="status" className={styles.muted}>{sharing.pending[preset.id].error || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}</article>)}</div>}
       </>}
     </dialog>
-    {definitionTarget && <TemplateDefinitionRead target={definitionTarget} scopeKey={`${userId}:definition:${definitionTarget.presetId || definitionTarget.moduleId}`} onClose={() => setDefinitionTarget(null)} />}
+    {definitionTarget && <TemplateDefinitionRead target={definitionTarget} scopeKey={`${userId}:definition:${definitionTarget.presetId || definitionTarget.moduleId}:${shared.catalogRevision}`} onClose={() => setDefinitionTarget(null)} />}
     {lifecycleHistory && <StudioLifecycleHistory key={`${userId}:${lifecycleHistory.presetId}`} userId={userId} presetId={lifecycleHistory.presetId} name={lifecycleHistory.name} anchor={lifecycleHistory.anchor} onClose={() => setLifecycleHistory(null)} />}
     <StudioGlobalSettingsDialog open={globalSettingsOpen} onClose={() => setGlobalSettingsOpen(false)} editor={globalEditor} ownerId={userId} canEdit={isAdmin}
       getExcluded={() => modules.filter(module => (module.saved || module.id === `default-${userId}`) && resolutionDirty.current.has(module.id)).map(module => module.id)} onDeltas={applyResolutionDeltas}
@@ -2324,6 +2341,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         pendingFixedSaveRef.current = null; setPendingFixedSave(null); }
       revisionRef.current = result.revision;
       setModuleRevision(result.revision); setModuleSaved(JSON.stringify({ ...snapshot, context: contextSnapshot }));
+      setBanner(current => (current?.id || null) === snapshot.bannerAssetId
+        ? sharedBannerVersion(result.banner, result.sharedLive?.intent.definitionToken) : current);
       setSavedModuleContext(contextSnapshot);
       setSavedFixedReferences(result.fixedReferences || fixedSnapshot);
       if (saveDefinition) setFixedReferenceRepairs([]);
@@ -4206,7 +4225,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     </div>
     {copyFeedback && <ImageResultOperationFeedback feedback={copyFeedback} anchorRef={copyFeedbackAnchor} onDismiss={operationId => setCopyFeedback(current => current?.operationId === operationId ? null : current)} onRetry={copyFeedback.phase === 'error' ? () => { const task = tasks.find(item => item.id === copyFeedback.id); if (task) void copyTaskContext(task); } : undefined} />}
     {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${taskReadScope}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
-    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} onClose={() => setReadingDefinition(false)} />}
+    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition:${sharedLive?.intent.definitionToken || module.revision}`} onClose={() => setReadingDefinition(false)} />}
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio" contextTemplateId={module.sourcePresetId || sharedLive?.intent.presetId || module.id}
       contextKey={inputScopeKey(imageSourceTarget)} focusIntent={inputFocusIntents[imageSourceTarget]}
       onFocusIntentConsumed={id => setInputFocusIntents(previous => { if (previous[imageSourceTarget]?.id !== id) return previous; const next = { ...previous }; delete next[imageSourceTarget]; return next; })}

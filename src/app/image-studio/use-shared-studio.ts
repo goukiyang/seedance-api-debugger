@@ -28,9 +28,22 @@ export type SharedStudioEntry = {
   deletion?: StudioDeletionTarget;
   presetId: string; name: string; groupName: string; banner?: UploadedAssetPayload | null;
   isShared: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean;
-  revision?: string; available: boolean; unavailableReason?: string;
+  revision?: string; definitionToken?: string | null; available: boolean; unavailableReason?: string;
 };
-type SharedModule = { id: string; sharedLive?: Pick<SharedStudioLiveDTO, 'intent' | 'available'> & Partial<SharedStudioLiveDTO> | null };
+type SharedModule = { id: string; name?: string; groupName?: string; banner?: UploadedAssetPayload | null;
+  fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sourcePresetShared?: boolean | null;
+  sharedLive?: Pick<SharedStudioLiveDTO, 'intent' | 'available'> & Partial<SharedStudioLiveDTO> | null };
+
+export function sharedBannerVersion(banner: UploadedAssetPayload | null | undefined, version?: string | null) {
+  if (!banner || !version) return banner || null;
+  const versioned = (url?: string | null) => {
+    if (!url?.startsWith('/api/image-studio/template-assets/')) return url;
+    const [pathname, query = ''] = url.split('?');
+    const params = new URLSearchParams(query); params.set('templateVersion', version);
+    return `${pathname}?${params}`;
+  };
+  return { ...banner, originalUrl: versioned(banner.originalUrl), thumbnailUrl: versioned(banner.thumbnailUrl) };
+}
 type Catalog = { owner: string; items: SharedStudioEntry[]; revision: string; cursor: string | null; pages: number; ready: boolean };
 class SharedReadError extends Error {
   constructor(public status: number, message: string, public reasonCode?: SharedStudioReasonCode) { super(message); }
@@ -44,19 +57,21 @@ async function readShared<T>(url: string, signal: AbortSignal): Promise<T> {
 }
 
 // One serial loop owns revision, catalog pages and active definition reads.
-export function useSharedStudio<T extends SharedModule>({ userId, activeModule, onDefinition, onUnavailable, completeCatalog = false }: {
+export function useSharedStudio<T extends SharedModule>({ userId, activeModule, modules = [], onDefinition, onUnavailable, completeCatalog = false }: {
   userId: string; activeModule?: T; onDefinition: (module: T) => void;
+  modules?: T[];
   onUnavailable: (presetId: string | null, reason: string, reasonCode?: SharedStudioReasonCode, capabilities?: SharedStudioCapabilities) => void;
   completeCatalog?: boolean;
 }) {
   const { sessionChanged } = useAppSession();
   const presetId = activeModule?.sharedLive?.intent.presetId || '';
   const moduleId = activeModule?.id || '';
-  const scopeKey = `${userId}:${presetId}:${moduleId}`;
+  const mountedKey = modules.filter(item => item.sharedLive).map(item => `${item.id}:${item.sharedLive!.intent.presetId}`).sort().join(',');
+  const scopeKey = `${userId}:${presetId}:${moduleId}:${mountedKey}`;
   const scope = useRef({ key: scopeKey });
   if (scope.current.key !== scopeKey) scope.current = { key: scopeKey };
-  const latest = useRef({ activeModule, onDefinition, onUnavailable });
-  latest.current = { activeModule, onDefinition, onUnavailable };
+  const latest = useRef({ activeModule, modules, onDefinition, onUnavailable });
+  latest.current = { activeModule, modules, onDefinition, onUnavailable };
   const [catalog, setCatalog] = useState<Catalog>({ owner: userId, items: [], revision: '', cursor: null, pages: 0, ready: false });
   const catalogRef = useRef(catalog); catalogRef.current = catalog;
   const [feedback, setFeedback] = useState<{ owner: string; error: string; loading: boolean; sync: 'ready' | 'loading' | 'stale' | 'error' }>({ owner: userId, error: '', loading: true, sync: 'loading' });
@@ -64,6 +79,20 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
   const generation = useRef(0);
   const refresh = useCallback(() => wake.current(true), []);
   const loadMore = useCallback(() => wake.current(false, true), []);
+  const confirmDefinition = useCallback((module: T) => {
+    const live = module.sharedLive;
+    if (!live || !module.name || isClientSessionBlocked()) return;
+    const previous = catalogRef.current;
+    if (previous.owner !== userId) return;
+    const items = previous.items.filter(item => item.presetId !== live.intent.presetId);
+    if (module.sourcePresetShared === true && live.available) items.push({ presetId: live.intent.presetId,
+      name: module.name, groupName: module.groupName || '未分组', isShared: true, available: true,
+      revision: live.sourceRevision || undefined, definitionToken: live.intent.definitionToken,
+      banner: sharedBannerVersion(module.banner, live.intent.definitionToken), fixedCover: module.fixedCover, coverEditable: module.coverEditable });
+    const next = { ...previous, items };
+    catalogRef.current = next; setCatalog(next);
+    refresh();
+  }, [userId, refresh]);
 
   useEffect(() => {
     if (sessionChanged || isClientSessionBlocked()) return;
@@ -74,6 +103,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     let consecutiveFailures = 0;
     let appliedToken = '';
     let appliedStateToken = '';
+    const appliedModules = new Map<string, string>();
     const valid = () => !isClientSessionBlocked() && scope.current === current && !controller.signal.aborted;
     const online = () => !document.hidden && navigator.onLine;
     if (catalogRef.current.owner !== userId) {
@@ -113,7 +143,8 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             if (!currentRead()) return;
             if (page.catalogRevision !== revision.catalogRevision) throw new SharedReadError(409, '模板目录已变化');
             if (!Array.isArray(page.items)) throw new Error('模板同步暂不可用');
-            page.items.forEach(item => { if (item && typeof item.presetId === 'string') items.set(item.presetId, item); });
+            page.items.forEach(item => { if (item && typeof item.presetId === 'string') items.set(item.presetId,
+              { ...item, banner: sharedBannerVersion(item.banner, item.definitionToken || item.revision) }); });
             cursor = page.nextCursor || null; pages++;
             if (cursor && seenCursors.has(cursor)) throw new Error('模板目录暂不可用');
             if (cursor) seenCursors.add(cursor);
@@ -142,6 +173,31 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
             throw new Error('模板状态暂未确认');
           }
           appliedStateToken = stateToken;
+        }
+        // Several workbenches can be open in one group. Their saved source
+        // definitions follow the same serial revision loop as the active one.
+        const sources = new Map(catalogRef.current.items.map(item => [item.presetId, item]));
+        const pending = latest.current.modules.flatMap(module => {
+          const live = module.sharedLive;
+          if (!live || module.id === moduleId) return [];
+          const source = sources.get(live.intent.presetId);
+          const token = JSON.stringify(source
+            ? [source.revision, source.definitionToken, source.available, source.fixedCover]
+            : ['not-in-catalog', revision.catalogRevision]);
+          return forced || appliedModules.get(module.id) !== token ? [{ module, token }] : [];
+        });
+        for (let offset = 0; offset < pending.length; offset += 12) {
+          const batch = pending.slice(offset, offset + 12);
+          const data = await readShared<{ modules: T[] }>(`/api/image-studio/modules?ids=${encodeURIComponent(batch.map(item => item.module.id).join(','))}`, controller.signal);
+          if (!currentRead()) return;
+          if (!Array.isArray(data.modules)) throw new Error('模板同步暂不可用');
+          for (const { module, token } of batch) {
+            const workspace = data.modules.find(item => item.id === module.id && item.sharedLive?.intent.presetId === module.sharedLive?.intent.presetId);
+            if (!workspace?.sharedLive || !workspace.sharedLive.available && !workspace.sharedLive.repairDefinition
+              && (!workspace.sharedLive.reasonCode || workspace.sharedLive.reasonCode === 'read-unavailable')) throw new Error('模板状态暂未确认');
+            latest.current.onDefinition(workspace);
+            appliedModules.set(module.id, token);
+          }
         }
         if (currentRead()) {
           consecutiveFailures = 0;
@@ -198,5 +254,5 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
     catalogReady: Boolean(visible?.ready && !visible.cursor), hasMore: Boolean(visible?.cursor),
     catalogRevision: visible?.revision || '', loading: feedback.owner !== userId || feedback.loading,
     error: feedback.owner === userId ? feedback.error : '',
-    sync: feedback.owner === userId ? feedback.sync : 'loading', refresh, loadMore };
+    sync: feedback.owner === userId ? feedback.sync : 'loading', refresh, loadMore, confirmDefinition };
 }

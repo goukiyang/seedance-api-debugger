@@ -1114,9 +1114,13 @@ async function sharedCatalogState(user: ImageStudioIdentity, client: SharedStudi
   const bannerIds = visible.flatMap(row => row.banner_asset_id ? [row.banner_asset_id] : []);
   const assets = await client.asset.findMany({ where: { id: { in: bannerIds }, status: 'active', type: 'image', AND: [visibleAssets] }, select: { id: true, owner_id: true, width: true, height: true }, orderBy: { id: 'asc' } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
+  // Private definitions stay out of the shared catalog. Their owner still
+  // needs a revision change when another open page saves or archives one.
+  const ownedPrivateSources = rows.filter(row => row.owner_id === actor.id && !row.is_shared)
+    .map(row => ({ id: row.id, revision: row.updated_at, archived: archivedKeys.has(archivedPresetKey(row.id)) }));
   const catalogRevision = digest([actor.id, actor.role, actor.account_type, actor.feature_profile_id,
     visible.map(row => ({ id: row.id, ownerId: row.owner_id, scope: row.scope, shared: row.is_shared, name: row.name, group: row.group_name,
-      banner: row.banner_asset_id, revision: row.updated_at })), dependencies, styles, dependencyAssets, visibleAssets, assets, deletedSources]);
+      banner: row.banner_asset_id, revision: row.updated_at })), dependencies, styles, dependencyAssets, visibleAssets, assets, deletedSources, ownedPrivateSources]);
   return { actor, visible, byId, catalogRevision };
 }
 export async function listSharedStudioCatalog(user: ImageStudioIdentity, options: { cursor?: string; catalogRevision?: string } = {}, client: SharedStudioClient = prisma): Promise<SharedStudioCatalog> {

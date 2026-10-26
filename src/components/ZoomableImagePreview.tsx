@@ -260,7 +260,7 @@ type Frames = Record<Side, IntrinsicSize>;
 type ImageRequest = { token: number; controller: AbortController; releasePriority: () => void; resolve: (applied: boolean) => void; reject: (error: Error) => void };
 type SelectionWriteGuard = { context: string; phase: 'pending' | 'dormant' | 'applying' | 'writable' | 'cleared';
   current?: string; comparison?: string; enabled?: boolean };
-type ComparisonRecovery = { kind: 'dormant' | 'retry' | 'reselect'; saved?: ComparisonSelectionRecord };
+type ComparisonRecovery = { kind: 'dormant' | 'retry' | 'reselect'; saved?: ComparisonSelectionRecord; message?: string; affectedIdentity?: string };
 type ComparisonNotice = { kind: 'retry' | 'reselect'; message: string; saved?: ComparisonSelectionRecord };
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
@@ -467,7 +467,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     if (kind === 'cancelled') return;
     if (kind === 'transient') {
       selectionWriteGuard.current = { context: selectionContext, phase: 'dormant' };
-      setComparisonRecovery({ kind: 'retry', saved });
+      setComparisonRecovery({ kind: 'retry', saved, affectedIdentity: saved.comparison?.identity });
       if (active && comparisonFeedbackEpoch.current === feedbackEpoch) setComparisonNotice({ kind: 'retry', message: failureMessage, saved });
       return;
     }
@@ -475,7 +475,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     selectionWriteGuard.current = { context: selectionContext, phase: cleared ? 'cleared' : 'dormant' };
     setComparisonMode(false);
     setActiveSide('current');
-    setComparisonRecovery({ kind: 'reselect' });
+    setComparisonRecovery({ kind: 'reselect', message: failureMessage, affectedIdentity: saved.comparison?.identity });
     if (active && comparisonFeedbackEpoch.current === feedbackEpoch) setComparisonNotice({ kind: 'reselect', message: failureMessage });
   }
 
@@ -535,7 +535,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     if (saved.invalid) {
       const cleared = clearComparisonSelectionIfUnchanged(owner, selectionAnchor, saved);
       selectionWriteGuard.current.phase = cleared ? 'cleared' : 'dormant';
-      setComparisonRecovery({ kind: 'reselect' });
+      setComparisonRecovery({ kind: 'reselect', message: '上次对比图记录已失效，请重新选择' });
       return;
     }
     if (!saved.comparison) { selectionWriteGuard.current.phase = 'writable'; return; }
@@ -873,7 +873,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     setControlsOpen(null);
     setPickerSide('comparison');
   }
-  function toggleComparison(trigger: HTMLButtonElement) {
+  function toggleComparison() {
     if (comparisonMode) {
       userAction.current++;
       clearComparisonFeedback();
@@ -884,6 +884,19 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       setActiveSide('current');
       return;
     }
+    const recoveryAffectsCurrent = Boolean(comparisonImage && comparisonRecovery?.kind !== 'dormant'
+      && comparisonRecovery?.affectedIdentity === imageSourceIdentity(comparisonImage));
+    if (comparisonImage && !recoveryAffectsCurrent) {
+      userAction.current++;
+      comparisonResolveRequest.current?.abort();
+      comparisonResolveRequest.current = null;
+      clearComparisonFeedback();
+      stopGestures();
+      setComparisonRecovery(null);
+      beginSelectionWrite(currentImage, comparisonImage, true);
+      setComparisonMode(true);
+      return;
+    }
     const saved = comparisonRecovery?.saved;
     if (saved) {
       const action = ++userAction.current;
@@ -891,17 +904,12 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       void resolveStoredComparison(saved, true, action);
       return;
     }
-    if (comparisonRecovery?.kind === 'reselect' || !comparisonImage) {
-      userAction.current++;
-      openComparisonPicker(trigger);
-      return;
-    }
     userAction.current++;
-    clearComparisonFeedback();
+    comparisonResolveRequest.current?.abort();
+    comparisonResolveRequest.current = null;
+    beginComparisonFeedback();
     stopGestures();
-    setComparisonRecovery(null);
-    beginSelectionWrite(currentImage, comparisonImage, true);
-    setComparisonMode(true);
+    setComparisonNotice({ kind: 'reselect', message: comparisonRecovery?.message || '请先选择对比图' });
   }
   function actOnComparisonNotice() {
     if (!comparisonNotice) return;
@@ -978,9 +986,9 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         <button type="button" className={styles.fitButton} aria-pressed={selectedView.mode === 'fit'} title={`让${sideLabel(safeSide)}适合窗口`} onClick={() => applyMode('fit')}>适合窗口</button>
       </div>
       <div className={styles.compareSources} role="group" aria-label="图片对比">{thumbnail(paneOrder[0])}<button ref={compareToggleRef} type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode}
-          title={comparisonMode ? '退出对比' : comparisonRecovery?.kind === 'retry' || comparisonRecovery?.kind === 'dormant' ? '重新加载上次对比图' : comparisonRecovery?.kind === 'reselect' ? '对比图需要重新选择' : '开启对比'}
-          aria-label={comparisonMode ? '退出对比' : comparisonRecovery?.kind === 'retry' || comparisonRecovery?.kind === 'dormant' ? '重新加载上次对比图' : comparisonRecovery?.kind === 'reselect' ? '对比图需要重新选择' : '开启对比'}
-          onClick={event => toggleComparison(event.currentTarget)}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
+          title={comparisonMode ? '退出对比' : '开启对比'}
+          aria-label={comparisonMode ? '退出对比' : '开启对比'}
+          onClick={toggleComparison}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
       <div className={styles.actions}>
         {hasOriginalDownloadUrl ? <a className={styles.downloadAction} href={originalDownloadSource} download={selectedImage.fileName || 'original-image'} title={`下载${sideLabel(safeSide)}原图`} aria-label={`下载${sideLabel(safeSide)}原图`}><Download size={16} /><span>下载原图</span></a>
           : downloadSelectedSource && <button type="button" className={styles.downloadAction} disabled={downloadBusy} title={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-label={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-busy={downloadBusy} onClick={downloadOriginal}><Download size={16} /><span>{downloadBusy ? '准备下载' : '下载原图'}</span></button>}
@@ -1030,7 +1038,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     </div>
     <div ref={stageRef} className={styles.stage} data-image-preview-stage onAuxClick={event => event.preventDefault()}>
       {(comparisonNotice || message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.noticeStack}>
-        {comparisonNotice && <div className={styles.comparisonNotice} role="status"><span>{comparisonNotice.message}</span><div className={styles.noticeActions}><button type="button" onClick={actOnComparisonNotice}>{comparisonNotice.kind === 'retry' ? '重试' : '重新选择'}</button><button type="button" title="关闭对比提示" aria-label="关闭对比提示" onClick={clearComparisonFeedback}><X size={16} /></button></div></div>}
+        {comparisonNotice && <div className={styles.comparisonNotice} role="status"><span>{comparisonNotice.message}</span><div className={styles.noticeActions}><button type="button" onClick={actOnComparisonNotice}>{comparisonNotice.kind === 'retry' ? '重试' : '选择对比图'}</button><button type="button" title="关闭对比提示" aria-label="关闭对比提示" onClick={clearComparisonFeedback}><X size={16} /></button></div></div>}
         {(message || copyState?.src === copySource && copyState.message || isOriginalSubject && notice != null) && <div className={styles.notice} role="status">{message || (copyState?.src === copySource ? copyState.message : null)}{isOriginalSubject && notice}</div>}
       </div>}
       <div ref={frameRef} className={styles.compareFrame + ' ' + (comparisonMode ? axis === 'vertical' ? styles.compareVertical : styles.compareHorizontal : styles.singleFrame)} data-image-preview-compare-frame>
