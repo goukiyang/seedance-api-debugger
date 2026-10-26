@@ -205,7 +205,7 @@ async function inspectSources(actor: ImageStudioIdentity, state: TargetState, id
       if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new ModuleCoverError('请选择普通静态图片');
       if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
       const swapped = [5, 6, 7, 8].includes(metadata.orientation ?? 1);
-      inspected.push({ assetId: asset.id, version, previewUrl: `${studioTemplateAssetUrl(asset.id)}?preview=1`,
+      inspected.push({ assetId: asset.id, version, previewUrl: studioTemplateAssetUrl(asset.id),
         width: swapped ? metadata.height : metadata.width, height: swapped ? metadata.width : metadata.height });
     }
     return inspected;

@@ -23,6 +23,7 @@ import {
   buildMultiviewGenerationRequest, isMultiviewWorkspaceTabId, isMultiviewGenerationSeed, isMultiviewPresetVersion,
   type MultiviewGenerationDraft, type MultiviewRotationPresetPublicState,
 } from '@/lib/video/multiview-generation-contract';
+import { MultiviewGenerationConfirmDialog } from './MultiviewGenerationConfirmDialog';
 import { MultiviewPromptDialog } from './MultiviewPromptDialog';
 import { MultiviewSettingsPicker, generationSettingsValue, type MultiviewSettingsPickerApplyResult,
   type MultiviewSettingsPickerRecord } from './MultiviewSettingsPicker';
@@ -354,6 +355,17 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const quoteKey = draft ? JSON.stringify([owner, authorityKey, draft.provider, draft.model, draft.duration, draft.resolution, draft.presetVersion,
     draft.settingsBinding?.id, draft.settingsBinding?.revision, draft.projectId, draft.videoCardId, draft.ratio]) : '';
   const currentQuote = quote?.key === quoteKey ? quote : null;
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const [confirmationNotice, setConfirmationNotice] = useState('');
+  // Bind consent to the complete input and displayed price, never to a mutable form alone.
+  const confirmationKey = JSON.stringify([owner, authorityKey, draft, presetState?.revision, creationBaselineId,
+    creation.context?.contextRevision, currentQuote?.points, currentQuote?.pricingRevision]);
+  const liveConfirmation = useRef(confirmationKey); liveConfirmation.current = confirmationKey;
+  const liveGenerationReady = useRef(false);
+  liveGenerationReady.current = Boolean(ready && allowed && imageReady && currentProject && !cardSelectionInvalid && !approvalBlocked
+    && currentQuote && presetReady && !working && !association && !settingsRisk.busy && !recoveryBlocked
+    && (draft?.resolution !== '1080p' || hd?.state === 'approved'));
+  useEffect(() => { setConfirmation(null); setConfirmationNotice(''); }, [owner, authorityKey, sessionTab]);
   const accountRequestBlocked = requestScan.invalid || requestScan.incomplete || requestScan.records.some(blocksNewRequest);
   const seedValid = !draft || isMultiviewGenerationSeed(draft.seed);
   const capture = () => ({ owner, authorityKey, epoch: epoch.current, uploadEpoch: uploadSession().epoch });
@@ -930,12 +942,25 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     });
   }, [ready, phase, notSubmitted, working, submitting, closing, active, receipt?.taskId, receipt?.key, taskProgress, saved, draftEdited, draft, retainedDraft, requestStorageFailed, creating, promptRisk, settingsRisk]);
 
+  function openGenerationConfirmation() {
+    if (submitLock.current || !liveGenerationReady.current) return;
+    setError(''); setStatus(''); setConfirmationNotice(''); setConfirmation(confirmationKey);
+  }
+  function closeGenerationConfirmation() {
+    if (!submitLock.current) { setConfirmation(null); setConfirmationNotice(''); }
+  }
   async function generate() {
+    if (confirmation === null || submitLock.current) return;
+    if (confirmation !== confirmationKey || liveConfirmation.current !== confirmationKey) {
+      setConfirmation(confirmationKey); setConfirmationNotice('设置或报价已更新，请核对后再次确认生成。'); return;
+    }
     if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState
       || !seedValid || !current(capture()) || working || settingsRisk.busy || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
     if (scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
-    const scope = capture(); const token = {}; submitLock.current = token; setSubmitting(true); setError(''); setStatus('');
+    const scope = capture(); const token = {}; submitLock.current = token; setSubmitting(true); setError(''); setStatus(''); setConfirmationNotice('');
+    const confirmedKey = confirmationKey;
+    const confirmedQuote = currentQuote;
     const frozen = JSON.parse(JSON.stringify(draft)) as MultiviewGenerationDraft;
     const startedFromSourceKey = props.currentSourceKey;
     let pending: RequestReceipt | null = null;
@@ -953,11 +978,22 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       const prepared = await creation.prepare(body, key, previousIntent);
       key = prepared.request_id; body.idempotency_key = key;
       if (!current(scope)) return;
-      if (!prepared.availability?.canSubmit) { setStatus('请完成本次创作条件，当前输入已保留。'); return; }
+      if (!prepared.availability?.canSubmit) { setStatus('请完成本次创作条件，当前输入已保留。'); setConfirmation(null); return; }
+      if (!prepared.quote || !validVideoPricingAmount(prepared.quote.estimated_cost)) {
+        setConfirmationNotice('报价暂时无法确认，请返回修改后重新报价。'); setQuote(null); setRevision(value => value + 1); return;
+      }
+      if (prepared.quote.estimated_cost !== confirmedQuote.points || prepared.quote.pricing_revision !== confirmedQuote.pricingRevision) {
+        setQuote({ key: quoteKey, points: prepared.quote.estimated_cost, pricingRevision: prepared.quote.pricing_revision,
+          pricingQuoteToken: prepared.quote.pricing_quote_token });
+        setConfirmationNotice('报价已更新，请核对后再次确认生成。'); return;
+      }
       Object.assign(body, { intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
         ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) });
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(videoPricingBusinessInput(body))));
       if (!current(scope)) return;
+      if (liveConfirmation.current !== confirmedKey || !liveGenerationReady.current || JSON.stringify(draftRef.current) !== JSON.stringify(frozen)) {
+        setConfirmationNotice('设置或报价已更新，请核对后再次确认生成。'); return;
+      }
       if (presetRef.current?.preset.version !== frozen.presetVersion) { setStatus('模板已更新，正在重新报价；当前输入未提交。'); return; }
       const latest = refreshRequests();
       if (latest.invalid || latest.incomplete || latest.records.some(blocksNewRequest)) { setStatus('本账号有原请求尚未确认，请先查询原记录；当前内容未提交。'); return; }
@@ -965,6 +1001,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         taskId: null, phase: 'unknown', startedFromSourceKey };
       saveReceipt(pending, true);
       storedBeforeSubmission = true;
+      setConfirmation(null);
       const response = await fetch('/api/tasks/create', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': owner, 'x-tab-id': frozen.workspaceTabId }, body: JSON.stringify(body), signal: AbortSignal.timeout(120000) });
       submissionHttpStatus = response.status;
       const result = await readJsonResponse<RequestResponse & { id?: string; submission_unconfirmed?: boolean }>(response);
@@ -991,7 +1028,14 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           saveReceipt({ ...receiptRef.current, observation: responseObservation(submissionHttpStatus) });
           setStatus('');
         }
-        else setError(message(cause, '尚未提交，请检查输入。'));
+        else {
+          setError(message(cause, '尚未提交，请检查输入。'));
+          const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : '';
+          if (typeof code === 'string' && /pric|quote/.test(code)) {
+            setQuote(null); setRevision(value => value + 1);
+            setConfirmationNotice('报价需要更新，正在重新计算；请核对后再次确认生成。');
+          }
+        }
       }
     } finally { if (submitLock.current === token) { submitLock.current = null; setSubmitting(false); } }
   }
@@ -1221,11 +1265,17 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         </details>
         {needsApproval && !creation.context?.v2Available && <p className={styles.feedback}>当前项目的1080p生成需要关联已有候选、当前最佳或最终版的视频卡，并通过该卡审批。</p>}
         {needsApproval && !creation.context?.v2Available && currentCard && !cardSelectionInvalid && <label className={styles.approval}><input type="checkbox" checked={draft.resolutionApprovalConfirmed} disabled={formDisabled} onChange={event => change({ resolutionApprovalConfirmed: event.target.checked, resolutionApprovalId: '' })} /><span>我已确认审批中心存在当前视频卡的有效1080p审批。<a href="/approvals" target="_blank" rel="noreferrer">查看审批</a></span></label>}
-        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={() => void generate()}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '正在确认提交…' : receipt?.phase === 'accepted' ? '已提交，生成中' : notSubmitted ? '重新生成' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
+        <div className={styles.generateRow}><button type="button" className={styles.primary} disabled={Boolean(blocked)} onClick={openGenerationConfirmation}>{submitting ? '正在提交…' : receipt?.phase === 'unknown' ? '正在确认提交…' : receipt?.phase === 'accepted' ? '已提交，生成中' : notSubmitted ? '重新生成' : '生成视频'}</button><span>{currentQuote ? `本次预计 ${currentQuote.points} 点` : '报价待确认'}</span></div>
         {blocked && blockedReason && <p className={styles.blockedReason} role="status">{blockedReason}</p>}
         {quoteError && <p className={styles.feedback} role="status">{quoteError}<button type="button" className={styles.quiet} onClick={() => setRevision(value => value + 1)}>重新报价</button></p>}
       </div>
     </div>}
+    {confirmation !== null && <MultiviewGenerationConfirmDialog draft={draft} modelLabel={selectedModel?.label || draft.model}
+      projectName={currentProject?.name || ''} cardTitle={currentCard?.title} points={currentQuote?.points ?? null}
+      busy={submitting} blocked={Boolean(blocked)}
+      notice={error || confirmationNotice || status || blockedReason || (confirmation !== confirmationKey ? '设置或报价已更新，请核对后再次确认生成。' : '')}
+      onClose={closeGenerationConfirmation} onConfirm={() => void generate()}
+      onImageError={() => { setImageReady(false); setConfirmationNotice('主图暂不可读取，请返回修改后重新选择。'); }} />}
     <ProjectCreateOperationNotice operation={projectCreate} onResolved={applyCreatedProject} />
     {!quietReady && (error || status || !saved || requestStorageFailed || accountRequestBlocked || requestScan.records.length > 0 || recoveryBlocked || active || receipt?.phase === 'ready') && <footer className={styles.footer}>
       {requestSummary && <p role="status">{requestSummary}</p>}
