@@ -1464,7 +1464,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const coverModule = modules.find(item => item.id === entry.id);
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
-        lastOpenedAt: gallery.lastOpened[entry.key], unread: attention.unread.has(entry.id),
+        // A shared template and its source module can carry the same name; the shared copy is labelled.
+        badge: entry.presetId ? '共享模板' : undefined,
+        lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
         loading: !entry.presetId && !coverModule && !error, error: galleryReadErrors.has(entry.key) || !entry.presetId && !coverModule && Boolean(error),
         visual: coverModule ? <TemplateCoverVisual key={coverRetry} module={coverModule} onReadError={onReadError} /> : entry.fixedCover
           ? <FixedCoverVisual key={coverRetry} cover={entry.fixedCover} name={entry.name} onReadError={onReadError} /> : <span className={styles.coverVisual} data-cover-source="模板素材">

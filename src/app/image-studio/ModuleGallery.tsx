@@ -11,6 +11,8 @@ export type ModuleGalleryItem = {
   name: string;
   groupName: string;
   shared: boolean;
+  /** Short label next to the name, e.g. 共享模板 for a shared copy. */
+  badge?: string;
   mine: boolean;
   lastOpenedAt?: number | null;
   visual: ReactNode;
@@ -80,7 +82,7 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
       <label className={styles.sort}>
         <span className={styles.srOnly}>模块排序</span>
         <select value={sort} onChange={event => onSortChange(event.target.value as ModuleGalleryProps['sort'])}>
-          <option value="recent">最近使用（本机）</option>
+          <option value="recent">最近使用</option>
           <option value="directory">原目录顺序</option>
         </select>
       </label>
@@ -110,13 +112,14 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
           <div className={styles.footer}>
             <div className={styles.titleRow}>
               <h3 title={item.name}>{item.name}</h3>
+              {item.badge && <span className={styles.badge}>{item.badge}</span>}
               {item.unread && <span className={styles.unread} role="img" aria-label="有未读结果" />}
             </div>
             <div className={styles.metadata}>
               <span className={styles.group} title={item.groupName || '未分组'}>{item.groupName || '未分组'}</span>
               <span className={styles.lastUsed}>
                 {validTime ? <><RelativeTime value={new Date(timestamp).toISOString()} className={styles.time} /><span>使用</span></>
-                  : <span>无本机记录</span>}
+                  : <span>未使用</span>}
               </span>
             </div>
             <div className={styles.cardActions}>

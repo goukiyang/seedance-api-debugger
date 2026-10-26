@@ -163,7 +163,7 @@ async function authorizedSources(actor: ImageStudioIdentity, state: TargetState,
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(ids.map(async id => {
     const asset = byId.get(id);
-    if (!asset || hidden.includes(asset.original_url)) throw new ModuleCoverError('这张原图无权用于当前模块展示，请换图', 403);
+    if (!asset || hidden.includes(asset.original_url)) throw new ModuleCoverError('封面只能用模板作者本人的图片；这张图属于别人或是受保护的模板素材，请在“我的素材”里改选你自己的图片', 403);
     return { asset, version: await sourceVersion(asset) };
   }));
 }

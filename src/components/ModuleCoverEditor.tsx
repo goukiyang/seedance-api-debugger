@@ -240,7 +240,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       const value = await json<ModuleCoverEditorState>(await fetch(`${endpoint}?sourceAssetIds=${encodeURIComponent(assetId)}`, { cache: 'no-store' }));
       if (!current()) return;
       const source = value.sources.find(item => item.assetId === assetId);
-      if (!source) throw new Error('这张图片不能用于当前模块封面，请选择本人有展示权的图片');
+      if (!source) throw new Error('封面只能用模板作者本人的图片；这张图属于别人或是受保护的模板素材，请在“我的素材”里改选你自己的图片');
       setSlots(current => current.map((item, i) => i === index ? { source, key: ++sequence.current } : item));
       setDirty(true); setError('');
       return true;
@@ -275,7 +275,7 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
           : editing && <button type="button" className={styles.primary} disabled={disabled || !editing || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
       </footer>
     </>}
-    {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片" confirmLabel="使用这张图片" purpose="module-cover" contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
+    {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片（只能用作者本人的图片）" confirmLabel="使用这张图片" purpose="module-cover" contextTemplateId={moduleId} contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
       onClose={() => setPickerSlot(null)} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
       onConfirm={async ids => { if (!ids[0] || !await choose(ids[0], pickerSlot) || !current()) return false; setPickerSlot(null); return true; }} />}
   </dialog></>, document.body);

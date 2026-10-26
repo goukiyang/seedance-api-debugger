@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '更多地方使用统一选图', outline: [
-  '视频参考区替换、抠图、图集添加素材都用同一个选图窗口',
-  '模板卡片绑定图也改用这个窗口，可直接上传',
+const notice = { title: '模板封面设置更清楚', outline: [
+  '设置封面时默认显示当前模板和本人的图片，并说明只能用作者本人的图片',
+  '同名模板中的共享副本会标出“共享模板”',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
