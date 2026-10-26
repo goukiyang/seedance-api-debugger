@@ -12,6 +12,7 @@ import { IMAGE_BILLING_VERSION } from '../src/lib/image-studio/billing-contract'
 import { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES } from '../src/lib/image-studio/tasks';
 import { capturePricingWorkerCapability, renewPricingWorkerCapability, revokePricingWorkerCapability } from '../src/lib/pricing/runtime';
 import { isImageStudioDraining } from '../src/lib/pricing/isolation';
+import { STUDIO_TASK_SETTINGS_PROTOCOL } from '../src/lib/image-studio/task-settings';
 
 loadEnvConfig(process.cwd());
 let stopping = false;
@@ -41,7 +42,7 @@ async function main() {
   const pricingCapability = /^[a-f0-9]{40}$/.test(source) ? capturePricingWorkerCapability(source) : null;
   let readinessWork: Promise<void> | null = null;
   const renewReadiness = async () => {
-    const value = { protocol: 'shared-live-v1', workerId, source, loadedModuleSha, expiresAt: new Date(Date.now() + 90_000).toISOString() };
+    const value = { protocol: 'shared-live-v1', taskSettingsProtocol: STUDIO_TASK_SETTINGS_PROTOCOL, workerId, source, loadedModuleSha, expiresAt: new Date(Date.now() + 90_000).toISOString() };
     await prisma.platformSetting.upsert({ where: { key: STUDIO_SHARED_WORKER_KEY },
       create: { key: STUDIO_SHARED_WORKER_KEY, value_json: JSON.stringify(value) }, update: { value_json: JSON.stringify(value) } });
     if (pricingCapability) await renewPricingWorkerCapability(prisma, pricingCapability);

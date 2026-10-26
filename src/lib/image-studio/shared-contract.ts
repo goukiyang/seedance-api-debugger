@@ -24,6 +24,9 @@ import { assertStudioWorkspaceNotDeleted, listStudioDeletedSources, readStudioDe
   studioSourceDeletionCapability } from './workspace-deletion';
 import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults, SharedStudioDefinitionPersonalInput, SharedStudioIntent, SharedStudioPersonalOverrides, SharedStudioPublicDefinition, SharedStudioRepairDefinition, SharedStudioRepairReference, SharedStudioRevision, SharedStudioStateProjection } from './shared-types';
 import type { StudioOpenCommandStatus, StudioOpenNotApplied, StudioRetiredOpenProof } from './shared-types';
+import { parseStudioTaskSettings, studioTaskSettings, type StudioTaskSettings } from './task-settings';
+import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, writeStudioWorkspaceSource } from './task-settings-storage';
+import { assertRestoredStudioSourceRelation } from './restored-settings';
 
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
 export const SHARED_STUDIO_PROTOCOL = 'shared-live-v1' as const;
@@ -31,11 +34,12 @@ export { StudioSharingError } from './shared-command-storage';
 export type SharedStudioClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'imageStudioPreset' | 'imageStudioModule' | 'imageStudioTask' | 'asset' | 'user' | 'contentAuditLog'>;
 export type SharedStudioBinding = { protocol: typeof SHARED_STUDIO_PROTOCOL; ownerId: string; presetId: string; mode: 'publisher' | 'live' };
 export type SharedStudioReproduction = {
-  version: 1;
+  version: 1 | 2;
+  taskSettings?: StudioTaskSettings;
   sourceOwnerId: string;
   sourceTaskId: string;
   moduleContext: string;
-  globalContext: string;
+  globalContext?: string;
   templateFixedReferences: StudioFixedReference[];
 };
 export type SharedStudioDefinition = {
@@ -169,10 +173,15 @@ async function reproductionForPreset(client: SharedStudioClient, ownerId: string
   const row = await client.platformSetting.findUnique({ where: { key: studioSharedReproductionKey(presetId) }, select: { value_json: true } });
   if (!row) return undefined;
   const value = parseRecord(row.value_json, '历史模板定义无法读取');
-  if (value.version !== 1 || value.sourceOwnerId !== ownerId || typeof value.sourceTaskId !== 'string'
-    || typeof value.moduleContext !== 'string' || typeof value.globalContext !== 'string') throw new StudioSharingError('历史模板定义无法确认', 409);
-  return { version: 1, sourceOwnerId: ownerId, sourceTaskId: value.sourceTaskId, moduleContext: value.moduleContext,
-    globalContext: value.globalContext, templateFixedReferences: parseStudioFixedReferences(value.templateFixedReferences) };
+  const taskSettings = value.version === 2 ? parseStudioTaskSettings(value.taskSettings) : undefined;
+  if (![1, 2].includes(Number(value.version)) || value.version === 2 && !taskSettings
+    || value.sourceOwnerId !== ownerId || typeof value.sourceTaskId !== 'string' || !value.sourceTaskId
+    || typeof value.moduleContext !== 'string'
+    || (taskSettings?.mode === 'current' ? has(value, 'globalContext') : typeof value.globalContext !== 'string')) {
+    throw new StudioSharingError('历史模板定义无法确认', 409);
+  }
+  return { version: value.version as 1 | 2, ...(taskSettings ? { taskSettings } : {}), sourceOwnerId: ownerId, sourceTaskId: value.sourceTaskId, moduleContext: value.moduleContext,
+    ...(typeof value.globalContext === 'string' ? { globalContext: value.globalContext } : {}), templateFixedReferences: parseStudioFixedReferences(value.templateFixedReferences) };
 }
 
 export async function resolveSharedStudioDefinition(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient = prisma) {
@@ -273,7 +282,7 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
     styleGroupIds, styleGroups: styles.groups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
       referenceCount: group.references.length, coverUrl: `/api/image-studio/style-groups/${group.id}/cover?revision=${group.revision}`,
       canManage: canUseCompanyTemplates(actor) && (actor.role === 'admin' || group.ownerId === actor.id) })),
-    reproductionConfigured: Boolean(reproduction) };
+    reproductionConfigured: Boolean(reproduction), ...(reproduction?.taskSettings ? { taskSettings: studioTaskSettings(reproduction.taskSettings.mode) } : {}) };
   return { definition, publicDTO };
 }
 
@@ -356,7 +365,8 @@ async function readAuthorRepairDefinition(actor: ImageStudioIdentity, source: Im
       ? '可移除或替换本人模板的失效固定参考；正常项、原顺序和备注保留，保存后生效'
       : '正常固定参考图仍由管理员管理；原图、备注及未改项保持原权限' } : {}),
     ...(skillIds.length ? { skillRestriction: '提示词组仅本人可见，实时模板定义保存前需要明确移除；原共享选择会保留' } : {}),
-    reproductionConfigured: Boolean(reproduction), ...(reproduction && actor.role === 'admin' ? { globalContext: reproduction.globalContext } : {}) };
+    reproductionConfigured: Boolean(reproduction), ...(reproduction?.taskSettings ? { taskSettings: studioTaskSettings(reproduction.taskSettings.mode) } : {}),
+    ...(reproduction && actor.role === 'admin' && typeof reproduction.globalContext === 'string' ? { globalContext: reproduction.globalContext } : {}) };
 }
 
 export async function getSharedStudioPersonalOverrides(ownerId: string, moduleId: string, client: SharedStudioClient = prisma) {
@@ -605,7 +615,7 @@ export async function openSharedStudioModule(user: ImageStudioIdentity, presetId
   }
 }
 
-async function historicalDefinition(actor: ImageStudioIdentity, taskId: string, client: SharedStudioClient): Promise<SharedStudioReproduction> {
+async function historicalDefinition(actor: ImageStudioIdentity, taskId: string, client: SharedStudioClient, settings?: StudioTaskSettings): Promise<SharedStudioReproduction> {
   const task = await client.imageStudioTask.findFirst({ where: { id: taskId, owner_id: actor.id, deleted_at: null }, select: { source_preset_id: true, snapshot_json: true } });
   if (!task?.snapshot_json) throw new StudioSharingError('历史记录缺少原上下文，模板未保存', 409);
   const snapshot = parseRecord(task.snapshot_json, '历史记录缺少原上下文');
@@ -626,8 +636,8 @@ async function historicalDefinition(actor: ImageStudioIdentity, taskId: string, 
   }
   if (snapshot.skills !== undefined && (!Array.isArray(snapshot.skills) || snapshot.skills.length)) throw new StudioSharingError('历史记录含私人skills，不能共享', 409);
   if (snapshot.skillIds !== undefined && (!Array.isArray(snapshot.skillIds) || snapshot.skillIds.length)) throw new StudioSharingError('历史记录含私人skills，不能共享', 409);
-  if (snapshot.styleGroupIds !== undefined && (!Array.isArray(snapshot.styleGroupIds) || snapshot.styleGroupIds.length)
-    || snapshot.styleGroups !== undefined && (!Array.isArray(snapshot.styleGroups) || snapshot.styleGroups.length)) {
+  if (!settings && (snapshot.styleGroupIds !== undefined && (!Array.isArray(snapshot.styleGroupIds) || snapshot.styleGroupIds.length)
+    || snapshot.styleGroups !== undefined && (!Array.isArray(snapshot.styleGroups) || snapshot.styleGroups.length))) {
     throw new StudioSharingError('历史风格定义不能未经确认转换为共享模板', 409);
   }
   const raw = snapshot.templateFixedReferences ?? snapshot.fixedReferenceImages ?? [];
@@ -638,9 +648,9 @@ async function historicalDefinition(actor: ImageStudioIdentity, taskId: string, 
     return { assetId: value.assetId ?? value.id, note: typeof value.note === 'string' ? value.note : '' };
   }));
   const count = snapshot.templateFixedReferences !== undefined ? refs.length : snapshot.templateFixedCount === undefined ? refs.length : Number(snapshot.templateFixedCount);
-  if (!Number.isInteger(count) || count < 0 || count > refs.length || count !== refs.length) throw new StudioSharingError('历史记录含未确认的风格参考图，不能共享', 409);
-  return { version: 1, sourceOwnerId: actor.id, sourceTaskId: taskId, moduleContext: snapshot.moduleContext,
-    globalContext: snapshot.globalContext, templateFixedReferences: refs };
+  if (!Number.isInteger(count) || count < 0 || count > refs.length || !settings && count !== refs.length) throw new StudioSharingError('历史记录含未确认的风格参考图，不能共享', 409);
+  return { version: settings ? 2 : 1, ...(settings ? { taskSettings: settings } : {}), sourceOwnerId: actor.id, sourceTaskId: taskId, moduleContext: snapshot.moduleContext,
+    ...(settings?.mode === 'current' ? {} : { globalContext: snapshot.globalContext }), templateFixedReferences: refs.slice(0, count) };
 }
 
 type SharedStudioPersonalPatch = { personalOverrides?: unknown; resetFields?: unknown; referenceIds?: unknown; referencePolicy?: unknown };
@@ -740,11 +750,20 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       throw new StudioSharingError('skills仅自己可见，请移除后再共享模板', 409);
     }
     let reproduction = source ? await reproductionForPreset(tx, actor.id, presetId) : undefined;
+    const taskSettings = parseStudioTaskSettings(input.taskSettings);
+    if (taskSettings && has(input, 'globalContext')) throw new StudioSharingError('通用上下文由设置模式确定，不能随模板覆盖', 400);
+    const workspaceSource = await readStudioWorkspaceSource(tx, actor.id, moduleId);
+    const presetSettingsSource = source ? await readStudioWorkspaceSource(tx, actor.id, presetId, 'preset') : null;
+    assertStudioTaskSettingsWrite(reproduction?.taskSettings ?? presetSettingsSource?.taskSettings ?? workspaceSource?.taskSettings, taskSettings);
+    if (taskSettings) await assertStudioTaskSettingsWriter(tx);
     if (has(input, 'reproduceFromTaskId') && (typeof input.reproduceFromTaskId !== 'string' || !input.reproduceFromTaskId || input.reproduceFromTaskId.length > 120)) {
       throw new StudioSharingError('共享复现定义必须保留合法的历史来源', 400);
     }
-    const sourceTaskId = has(input, 'reproduceFromTaskId') ? input.reproduceFromTaskId as string : source ? reproduction?.sourceTaskId : workspace.reproduce_task_id;
-    if (sourceTaskId && reproduction?.sourceTaskId !== sourceTaskId) reproduction = await historicalDefinition(actor, sourceTaskId, tx);
+    const sourceTaskId = taskSettings?.sourceTaskId || (has(input, 'reproduceFromTaskId') ? input.reproduceFromTaskId as string : source ? reproduction?.sourceTaskId : workspace.reproduce_task_id);
+    if (sourceTaskId && (reproduction?.sourceTaskId !== sourceTaskId || taskSettings?.mode === 'historical' && typeof reproduction?.globalContext !== 'string')) {
+      reproduction = await historicalDefinition(actor, sourceTaskId, tx, taskSettings);
+    }
+    if (taskSettings?.mode === 'historical' && !reproduction) throw new StudioSharingError('历史设置来源尚未确认，模板未保存', 409);
     const base = source || workspace;
     const stringField = (key: string, fallback: string, max: number, allowEmpty = true) => {
       const value = has(input, key) ? input[key] : fallback;
@@ -795,9 +814,12 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     const readable = await tx.asset.count({ where: { id: { in: publicIds }, AND: [await studioVisibleAssetWhere(actor, tx)] } });
     if (readable !== new Set(publicIds).size) throw new StudioSharingError('模板引用包含不可查看的私人图片', 403);
     if (reproduction) {
-      const globalContext = stringField('globalContext', reproduction.globalContext, 20000);
+      if (taskSettings && has(input, 'globalContext')) throw new StudioSharingError('通用上下文由设置模式确定，不能随模板覆盖', 400);
+      const globalContext = taskSettings?.mode === 'current' ? undefined : stringField('globalContext', reproduction.globalContext ?? '', 20000);
       if (has(input, 'globalContext') && actor.role !== 'admin') throw new StudioSharingError('通用上下文只能由管理员修改', 403);
-      reproduction = { ...reproduction, moduleContext: context, globalContext, templateFixedReferences: fixedReferences };
+      const { globalContext: _oldGlobal, ...sourceRecord } = reproduction;
+      reproduction = { ...sourceRecord, ...(taskSettings ? { version: 2, taskSettings } : {}), moduleContext: context,
+        ...(globalContext === undefined ? {} : { globalContext }), templateFixedReferences: fixedReferences };
       await writeSetting(tx, studioSharedReproductionKey(presetId), actor.id, reproduction);
     } else if (has(input, 'globalContext')) throw new StudioSharingError('普通模板不能写入通用上下文', 400);
     const data = { name, group_name: groupName, prompt, context, model, quality: normalizeImageStudioQuality(model, has(input, 'quality') ? input.quality : base.quality),
@@ -828,6 +850,11 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
       data: { ...personalChanges, source_preset_id: presetId, revision: workspace.revision + 1 } });
     if (changed.count !== 1) throw new StudioSharingError('工作区版本在保存时发生变化，本次未保存；当前草稿保留', 409, 'state-conflict', 'workspace');
+    if (taskSettings) {
+      await writeStudioWorkspaceSource(tx, { version: 2, ownerId: actor.id, moduleId, sourceTaskId: null, taskSettings });
+      await writeStudioWorkspaceSource(tx, { version: 2, ownerId: actor.id, moduleId: presetId, sourceTaskId: sourceTaskId || null,
+        taskSettings: studioTaskSettings(taskSettings.mode, sourceTaskId) }, 'preset');
+    }
     await bindStudioModule(tx, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: actor.id, presetId, mode: 'publisher' });
     if (preparedCover) {
       if (preparedCover.targetPresetId !== presetId) throw new StudioSharingError('自动封面目标与模板不一致，本次未保存', 409);
@@ -1009,6 +1036,26 @@ export async function saveSharedStudioPersonal(user: ImageStudioIdentity, module
     if (!workspace || workspace.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
     const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'fixedReferenceRepairs', 'styleGroupIds', 'skillIds', 'isShared'];
     if (forbidden.some(field => has(body, field))) throw new StudioSharingError('个人保存不能修改共享模板定义', 403);
+    const taskSettings = parseStudioTaskSettings(body.taskSettings);
+    const priorSource = await readStudioWorkspaceSource(tx, actor.id, moduleId);
+    assertStudioTaskSettingsWrite(priorSource?.taskSettings, taskSettings);
+    if (taskSettings) {
+      const sourceTaskId = taskSettings.sourceTaskId || (has(body, 'reproduceFromTaskId') ? body.reproduceFromTaskId : priorSource?.sourceTaskId ?? null);
+      if (sourceTaskId !== null) {
+        if (typeof sourceTaskId !== 'string' || !/^[a-zA-Z0-9-]{1,120}$/.test(sourceTaskId)) throw new StudioSharingError('恢复设置来源无效', 400);
+        const original = await tx.imageStudioTask.findFirst({ where: { id: sourceTaskId, owner_id: actor.id, deleted_at: null },
+          select: { module_id: true, source_preset_id: true, snapshot_json: true } });
+        if (!original?.snapshot_json) throw new StudioSharingError('原设置不存在或无权使用', 403);
+        const snapshot = parseRecord(original.snapshot_json, '原设置无法读取');
+        assertRestoredStudioSourceRelation(original, snapshot, { moduleId, presetId: binding.presetId });
+        if (typeof snapshot.globalContext !== 'string' || typeof snapshot.moduleContext !== 'string') throw new StudioSharingError('原设置不完整，当前输入保留', 409);
+        await resolveSharedStudioDefinition(actor, binding.presetId, tx);
+      } else if (taskSettings.mode === 'historical') {
+        const { definition } = await resolveSharedStudioDefinition(actor, binding.presetId, tx);
+        if (!definition.reproduction || typeof definition.reproduction.globalContext !== 'string') throw new StudioSharingError('历史设置来源尚未确认', 409);
+      }
+      await writeStudioWorkspaceSource(tx, { version: 2, ownerId: actor.id, moduleId, sourceTaskId: sourceTaskId as string | null, taskSettings });
+    }
     const personalChanges = await writeSharedStudioPersonalState(actor, workspace, body, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id, revision: workspace.revision },
       data: { ...personalChanges, revision: workspace.revision + 1 } });

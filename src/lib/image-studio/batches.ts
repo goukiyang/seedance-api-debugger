@@ -163,7 +163,7 @@ export function continuationInput(batch: BatchRecord, body: Record<string, unkno
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
-    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
+    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'taskSettings', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
     .filter(field => Object.prototype.hasOwnProperty.call(body, field)).map(field => [field, body[field]]));
   const previous = { ...batch.input };
   delete previous.imageChannel;
@@ -405,7 +405,7 @@ async function prepareBatch(owner: string, id: string) {
           const before = JSON.parse((JSON.parse(first.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput).snapshot_json as string);
           const now = JSON.parse(task.snapshot_json as string);
           const skillInput = (snapshot: Record<string, unknown>) => Array.isArray(snapshot.skills) ? snapshot.skills.map(skill => ({ id: skill.id, prompt: skill.prompt, promptVersion: skill.promptVersion, ownerId: skill.ownerId })) : [];
-          const definitionFields = ['globalContext', 'moduleContext', 'settingsRevision', 'sharedLive', 'styleGroups', 'fixedReferenceImages',
+          const definitionFields = ['globalContext', 'moduleContext', 'settingsRevision', 'taskSettings', 'sharedLive', 'styleGroups', 'fixedReferenceImages',
             ...(now.restoredSettings ? ['restoredSettings', 'templatePrompt', 'personalPrompt', 'templateReferenceImages'] : []),
             ...(now.sharedLive ? [] : ['moduleRevision'])];
           if (definitionFields.some(field => JSON.stringify(before[field]) !== JSON.stringify(now[field]))

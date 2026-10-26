@@ -79,6 +79,7 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
   async function prepare() {
     await exclusive(async () => {
       if (!editor.settings || !editor.draft) throw new Error('请先完整读取设置');
+      if (editor.controller.getSnapshot().conflicts.length) throw new Error('请先处理通用设置中的字段冲突');
       if (current.current && !terminal.has(current.current.operation.phase)) throw new Error('请先停止原操作，再准备新的预览');
       const settings = { revision: editor.settings.revision, model: editor.settings.model, context: editor.draft.context,
         prices: editor.draft.prices, templateDefaults: editor.draft.templateDefaults, confirmContextClear: !editor.draft.context.trim() };
@@ -105,6 +106,7 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
     await exclusive(async () => {
       const operation = current.current?.operation;
       const input = prepared.current;
+      if (editor.controller.getSnapshot().conflicts.length) throw new Error('请先处理通用设置中的字段冲突');
       if (!operation || !input || editor.draft !== input.draft) throw new Error('设置已变化或原预览草稿未保留，请停止旧操作并重新预览');
       const receipt = await request('POST', { action: 'commit', requestId: operation.requestId, previewDigest: operation.previewDigest,
         operationRevision: operation.operationRevision, settings: input.settings, excludeIds: input.excludeIds }) as ResolutionReceipt;
@@ -116,7 +118,7 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
     return finished;
   }
   return { scope, setScope, value, history, busy, error,
-    canCommit: Boolean(prepared.current && editor.draft === prepared.current.draft && value?.operation.phase === 'preview'),
+    canCommit: Boolean(!editor.controller.getSnapshot().conflicts.length && prepared.current && editor.draft === prepared.current.draft && value?.operation.phase === 'preview'),
     prepare, commit, query: (id?: string) => exclusive(() => query(id)),
     more: () => exclusive(() => query(undefined, current.current?.nextCursor ?? 0)),
     continue: async () => {

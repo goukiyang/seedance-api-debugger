@@ -117,6 +117,7 @@ export type SharedStudioRepairDefinition = {
   fixedReferenceRestriction?: string;
   skillRestriction?: string;
   reproductionConfigured?: boolean;
+  taskSettings?: import('./task-settings').StudioTaskSettings;
   globalContext?: string;
 };
 
@@ -179,6 +180,7 @@ export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> 
   styleGroupIds: string[];
   styleGroups: Array<{ id: string; name: string; revision: number; referenceCount: number; coverUrl: string; canManage: boolean }>;
   reproductionConfigured: boolean;
+  taskSettings?: import('./task-settings').StudioTaskSettings;
   templateRead?: StudioTemplateRead;
 };
 export type SharedStudioCatalogItem = Partial<SharedStudioStateProjection> & {

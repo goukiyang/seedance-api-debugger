@@ -8,12 +8,13 @@ import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ModuleCoverError } from '@/lib/image-studio/module-cover';
 import { StudioSharingPreferenceError } from '@/lib/image-studio/module-sharing-preference';
+import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import type { StudioOpenNotApplied, StudioRetiredOpenProof } from '@/lib/image-studio/shared-types';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 function businessError(error: unknown) {
-  return error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioSharingPreferenceError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
+  return error instanceof StudioTaskSettingsError || error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioSharingPreferenceError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
 }
 function errorReason(error: unknown) {
   return error instanceof StudioSharingError ? error.reasonCode : (error as StudioModuleError).status === 403 ? 'access-revoked' : 'state-conflict';

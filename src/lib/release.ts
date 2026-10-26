@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '多视图方案', outline: [
-  '工作台与记录分开，锁定选帧后可保存、另存方案',
-  '已保存成品在素材库按方案归组，单张图片仍可使用',
-  '可向指定同事分享方案，同事另存后拥有独立副本',
+const notice = { title: '通用设置', outline: [
+  '通用设置及时同步，未保存的修改仍保留',
+  '恢复图片参数后继续创作，默认使用当前通用设置',
+  '需要沿用原通用设置时，可选择按原设置复现',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

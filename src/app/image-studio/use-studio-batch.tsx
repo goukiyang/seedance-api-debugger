@@ -69,7 +69,8 @@ export function parseImageUiBudget(value: string, precision: 0.01 | 0.1 | 1 = 0.
 type StudioBatchQuote = ImageUiQuote & { batchQuoteId: string | null; expiresAt: string };
 type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
 
-export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, pricingBySpecification = false, quotePayload, effectiveChannelId, sharedLive, sourceAvailable = true, onSourceChanged }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; pricingBySpecification?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string; sharedLive?: SharedStudioIntent; sourceAvailable?: boolean; onSourceChanged?: () => void }) {
+export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, pricingBySpecification = false, quotePayload, effectiveChannelId, sharedLive, sourceAvailable = true, onSourceChanged, readSettings }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; pricingBySpecification?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string; sharedLive?: SharedStudioIntent; sourceAvailable?: boolean; onSourceChanged?: () => void; readSettings: () => Promise<import('./settings-controller').SettingsValue | null> }) {
+  const settingsReader = useRef(readSettings); settingsReader.current = readSettings;
   const { sessionChanged } = useAppSession();
   const channelQuoteMatches = (quote: StudioBatchQuote, payload: Record<string, unknown>) => !payload.channelId
     || (payload.channelId === 'original' && (!effectiveChannelId || effectiveChannelId === 'original'))
@@ -123,10 +124,13 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (isClientSessionBlocked() || document.hidden) return;
       const requestId = crypto.randomUUID();
       const payload = { ...JSON.parse(automaticPayload), action: 'quote', count: 1, requestId, sources: JSON.parse(quoteSignature)[1] };
-      void fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      void settingsReader.current().then(current => {
+        if (!current || current.revision !== payload.revision || abort.signal.aborted || isClientSessionBlocked()) return null;
+        return fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(120000)]) })
-        .then(response => { if (!isClientSessionBlocked() && response.status === 409 && !abort.signal.aborted) sourceChanged.current?.(); return readBatchResponse(response); }).then((quote: StudioBatchQuote) => {
-          if (isClientSessionBlocked() || abort.signal.aborted || !validImageUiQuote(quote, Date.now(), true)
+        .then(response => { if (!isClientSessionBlocked() && response.status === 409 && !abort.signal.aborted) sourceChanged.current?.(); return readBatchResponse(response); });
+      }).then((quote: StudioBatchQuote | null) => {
+          if (!quote || isClientSessionBlocked() || abort.signal.aborted || !validImageUiQuote(quote, Date.now(), true)
             || !channelQuoteMatches(quote, JSON.parse(automaticPayload))) return;
           previousQuoteSignature.current = quoteSignature;
           setBillingQuote({ signature: quoteSignature, requestId, quote });
@@ -222,7 +226,8 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     try {
       const checkSettings = async () => {
         if (!valid()) throw new Error('账号或当前设置已变化，尚未生成');
-        const current = await readBatchResponse(await fetch('/api/image-studio/settings', { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+        const current = await settingsReader.current();
+        if (!current) throw new Error('未能读取当前通用设置，素材保留，尚未生成');
         if (!valid() || current.revision !== snapshot.revision) throw new Error('素材、模型或报价已变化，请重新读取设置后确认；尚未生成');
         const channelId = typeof snapshot.channelId === 'string' ? snapshot.channelId : 'original';
         const freshChannels = normalizeImageStudioChannels(current.imageChannels);

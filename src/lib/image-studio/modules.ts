@@ -4,6 +4,8 @@ import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings, IMAGE_STUDIO_MODELS, type ImageStudioSettings } from './settings';
+import { parseStudioTaskSettings } from './task-settings';
+import { assertStudioTaskSettingsWrite, readStudioWorkspaceSource, writeStudioWorkspaceSource, studioSettingsSourceContext } from './task-settings-storage';
 import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, imageStudioModelForNewSelection, type ImageResolution } from './model-catalog';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
@@ -155,7 +157,9 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     state.capabilities.editDefinition = state.capabilities.editPersonalDraft;
     state.capabilities.saveDefinition = state.capabilities.editPersonalDraft;
   }
-  return { ...state, templateRead, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name,
+  const settingsSource = await readStudioWorkspaceSource(prisma, ownerId, row.id);
+  return { ...state, templateRead, ...(settingsSource ? { taskSettings: settingsSource.taskSettings, settingsSourceTaskId: settingsSource.sourceTaskId } : {}),
+    deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name,
     // An unmarked legacy copy cannot prove that its copied prompt is personal input.
     // Keep the stored definition for execution; never expose it as the viewer's description.
     prompt: row.source_preset_id && !templateRead.canViewTemplateContext ? '' : row.prompt,
@@ -241,6 +245,11 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     templateReferenceIds: dto?.templateReferenceIds || [], fixedReferences: dto?.fixedReferences || [], fixedReferenceCount: dto?.fixedReferenceCount || 0,
     styleGroupIds: dto?.styleGroupIds || [], styleGroups: dto?.styleGroups || [], skillIds: [], skills: [],
     reproductionState: dto?.reproductionConfigured ? { fixedReferenceCount: dto.fixedReferenceCount, skills: [], styleGroups: dto.styleGroups } : null,
+    ...(await (async () => {
+      const saved = await readStudioWorkspaceSource(prisma, ownerId, row.id);
+      return { taskSettings: saved?.taskSettings ?? dto?.taskSettings ?? repairDefinition?.taskSettings,
+        settingsSourceTaskId: saved?.sourceTaskId ?? null };
+    })()),
     reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: binding.presetId,
     sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
     sourcePresetOwnedByViewer: sharedRead.ownedByViewer ?? dto?.ownedByViewer ?? canRepair,
@@ -427,6 +436,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   if (!body || !validStudioModuleId(body.id, ownerId)) throw new StudioModuleError('模块编号无效');
   const id = body.id;
   const actor = await assertStudioActor(ownerId);
+  const taskSettings = parseStudioTaskSettings(body.taskSettings);
+  if (Object.prototype.hasOwnProperty.call(body, 'globalContext')) throw new StudioModuleError('通用上下文不能随模板保存覆盖', 400);
   isAdmin = actor.role === 'admin';
   sourceIdentity = actor;
   const binding = await studioSharedBinding(ownerId, id);
@@ -528,6 +539,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     if (current && createOnly) return current;
     if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模块已绑定共享原件，请重新读取后明确保存个人输入或模板定义', 409);
     if ((current?.revision || 0) !== revision) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对；当前草稿仍在本页', 409);
+    const priorSettingsSource = await readStudioWorkspaceSource(tx, ownerId, id);
+    assertStudioTaskSettingsWrite(priorSettingsSource?.taskSettings, taskSettings);
     if (current?.source_preset_id && fixedReferences !== undefined) {
       const source = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true } });
       if (source?.owner_id !== ownerId) throw new StudioModuleError('共享模板固定图由原模板管理，不能在副本中修改', 403);
@@ -550,6 +563,12 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     if (reproduceFromTaskId) {
       const source = await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId, snapshot_json: { not: null } }, select: { id: true } });
       if (!source) throw new StudioModuleError('历史生成记录不存在或无权复现', 403);
+    }
+    if (taskSettings) {
+      const sourceTaskId = taskSettings.sourceTaskId || (reproduceFromTaskId === undefined ? current?.reproduce_task_id ?? null : reproduceFromTaskId as string | null);
+      if (sourceTaskId) await studioSettingsSourceContext(tx, identity, sourceTaskId);
+      if (taskSettings.mode === 'historical' && !sourceTaskId) throw new StudioModuleError('历史设置来源尚未确认，模板未保存', 409);
+      await writeStudioWorkspaceSource(tx, { version: 2, ownerId, moduleId: id, sourceTaskId, taskSettings });
     }
     // Read new-module defaults inside this transaction, never re-resolve old saved contracts.
     const settings = await getImageStudioSettings(tx);

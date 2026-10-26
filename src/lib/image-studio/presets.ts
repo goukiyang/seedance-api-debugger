@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
+import { parseStudioTaskSettings } from './task-settings';
+import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, writeStudioWorkspaceSource, studioSettingsSourceContext } from './task-settings-storage';
 import type { Prisma } from '@prisma/client';
 import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
@@ -16,7 +18,7 @@ import { studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover'
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
 import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
-import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError } from './shared-contract';
+import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError, studioSharedReproductionKey } from './shared-contract';
 import type { SharedStudioPersonalOverrides } from './shared-types';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference } from './module-sharing-preference';
 import { readOwnedReceipt, readReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt, parseStudioSharingReceipt } from './shared-command-storage';
@@ -30,6 +32,8 @@ import type { SharedStudioSharingCurrent, SharedStudioSharingReceipt, SharedStud
 export { canUseCompanyTemplatesForUser as canUseCompanyTemplates };
 
 type PresetDraft = {
+  taskSettings?: unknown; globalContext?: unknown;
+  skillVersions?: unknown; styleGroupVersions?: unknown;
   scope?: unknown; name?: unknown; groupName?: unknown; prompt?: unknown; context?: unknown;
   model?: unknown; quality?: unknown; resolution?: unknown; count?: unknown; aspectRatio?: unknown;
   bannerAssetId?: unknown; referenceIds?: unknown; referenceLimit?: unknown; sourceModuleId?: unknown; fixedReferences?: unknown;
@@ -181,10 +185,12 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
       return { id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height };
     };
     const personal = personalByPreset.get(row.id);
+    const settingsSource = await readStudioWorkspaceSource(prisma, row.owner_id, row.id, 'preset');
     const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
     return {
       deletion, templateRead, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: templateRead.canViewTemplateContext ? row.prompt : '', context: templateRead.canViewTemplateContext ? row.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
+      ...(settingsSource && row.owner_id === user.id ? { taskSettings: settingsSource.taskSettings } : {}),
       ...(personal ? { saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides,
         personalImages: personal.referenceIds.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
         personalReferencesAvailable: personal.referenceIds.every(id => Boolean(toPayload(id))) } : {}),
@@ -214,6 +220,8 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
 }
 
 export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDraft, replace = false) {
+  const taskSettings = parseStudioTaskSettings(body.taskSettings);
+  if (taskSettings && Object.prototype.hasOwnProperty.call(body, 'globalContext')) throw new StudioModuleError('通用上下文不能随模板覆盖', 400);
   user = await assertStudioActor(user.id);
   if (body.saveIntent !== undefined && body.saveIntent !== 'personal-quick') throw new StudioModuleError('模板保存方式无效', 400);
   const personalQuick = body.saveIntent === 'personal-quick';
@@ -307,6 +315,14 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       if (!binding) privateQuickSourceRevision = source.revision;
     }
     const target = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
+    const priorSettings = target ? await readStudioWorkspaceSource(tx, userId, target.id, 'preset') : null;
+    assertStudioTaskSettingsWrite(priorSettings?.taskSettings, taskSettings);
+    if (taskSettings) {
+      await assertStudioTaskSettingsWriter(tx);
+      const sourceTaskId = taskSettings.sourceTaskId || (typeof body.reproduceFromTaskId === 'string' ? body.reproduceFromTaskId : undefined);
+      if (sourceTaskId) { await studioSettingsSourceContext(tx, user, sourceTaskId); taskSettings.sourceTaskId = sourceTaskId; }
+      else if (taskSettings.mode === 'historical') throw new StudioModuleError('历史设置来源尚未确认，未另存模板', 409);
+    }
     if (target && await studioPresetArchived(target.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
     if (target && !canManageStudioPreset(user, target)) throw new StudioModuleError('当前账号没有修改该模板的权限', 403);
     if (target && (target.is_shared || await studioPublisherModule(userId, target.id, tx)
@@ -336,6 +352,10 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     if (!body.reproduceFromTaskId) await resolveSkills(user, skillIds, tx);
     if (target?.is_shared && skillIds.length) throw new StudioModuleError('skills仅自己可见，请先关闭模板共享，或移除skills后再保存', 409);
     const styles = await resolveStudioStyleReferences(user, styleIds, tx);
+    if (taskSettings && body.styleGroupVersions !== undefined) {
+      const versions = body.styleGroupVersions as Record<string, unknown>;
+      if (!versions || typeof versions !== 'object' || styles.groups.some(group => versions[group.id] !== group.revision)) throw new StudioModuleError('风格组已更新，当前输入保留，请重新选择后保存', 409);
+    }
     try { validateStudioReferenceCounts(referencePolicy || defaultStudioReferencePolicy(ids, referenceLimit), [...ids, ...personalReferenceIds], presetFixedReferences.length, styles.references.length); }
     catch (error) { throw new StudioModuleError((error as Error).message); }
     const assetIds = Array.from(new Set([...ids, ...personalReferenceIds, ...presetFixedReferences.map(reference => reference.assetId), ...(bannerAssetId ? [bannerAssetId] : [])]));
@@ -355,8 +375,15 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
         if (!original || !canViewStudioPreset(user, original)) throw new StudioModuleError('原模板已不可用', 403);
         if ((personalQuick || user.role !== 'admin') && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
-      effectiveContext = snapshot.moduleContext;
-      skillIds = await cloneHistoricalSkills(user, snapshot.skills, tx);
+      effectiveContext = taskSettings && body.context !== undefined ? context : snapshot.moduleContext;
+      const originalSkills = Array.isArray(snapshot.skills) ? snapshot.skills : [];
+      const versions = body.skillVersions as Record<string, unknown> | undefined;
+      const keepsOriginalSkills = skillIds.length === originalSkills.length && originalSkills.every((skill: { id: string; promptVersion?: string }, index: number) => skillIds[index] === skill.id && versions?.[skill.id] === skill.promptVersion);
+      if (!taskSettings || body.skillIds === undefined || keepsOriginalSkills) skillIds = await cloneHistoricalSkills(user, snapshot.skills, tx);
+      else {
+        const selected = await resolveSkills(user, skillIds, tx);
+        if (!versions || selected.some(skill => versions[skill.id] !== skill.promptVersion)) throw new StudioModuleError('提示词组已更新，当前输入保留，请重新选择后保存', 409);
+      }
       if (target?.is_shared && skillIds.length) throw new StudioModuleError('历史skills仅自己可见，请先关闭模板共享', 409);
       if (snapshot.evolution && ['increase', 'decrease'].includes(snapshot.evolution.direction)) inheritedEvolution = { version: 1, defaultDirection: snapshot.evolution.direction };
     }
@@ -371,6 +398,8 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     } else {
       created = await tx.imageStudioPreset.create({ data: { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: false } });
     }
+    if (taskSettings) await writeStudioWorkspaceSource(tx, { version: 2, ownerId: userId, moduleId: created.id,
+      sourceTaskId: taskSettings.sourceTaskId || null, taskSettings }, 'preset');
     if (personalQuick) {
       const personal: PersonalQuickPresetMetadata = { version: 1, ownerId: userId, presetId: created.id,
         overrides: personalOverrides!, referenceIds: personalReferenceIds };
@@ -438,6 +467,8 @@ export async function manageStudioPreset(user: ImageStudioIdentity, presetId: st
     const preset = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: user.id } });
     if (!preset || !canManageStudioPreset(user, preset)) throw new StudioModuleError('只能管理自己的模板', 403);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
+    const settingsSource = await readStudioWorkspaceSource(tx, preset.owner_id, preset.id, 'preset');
+    if (settingsSource?.taskSettings.sourceTaskId) await studioSettingsSourceContext(tx, user, settingsSource.taskSettings.sourceTaskId);
     if (typeof revision !== 'string' || revision !== preset.updated_at.toISOString()) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
     const where = { id: presetId, owner_id: user.id, updated_at: preset.updated_at };
     if (action === 'rename') {
@@ -545,6 +576,16 @@ export async function setStudioPresetSharing(user: ImageStudioIdentity, presetId
     if (await studioPresetArchived(preset.id, tx)) throw new StudioSharingError('模板已删除，请重新读取', 409, 'source-archived');
     if (revision !== preset.updated_at.toISOString()) throw new StudioSharingError('模板已在其他页面更新，请重新读取；当前草稿仍保留', 409);
     if (isShared) {
+      const settingsSource = await readStudioWorkspaceSource(tx, user.id, presetId, 'preset');
+      if (settingsSource?.taskSettings.sourceTaskId && !await tx.platformSetting.findUnique({ where: { key: studioSharedReproductionKey(presetId) }, select: { id: true } })) {
+        await assertStudioTaskSettingsWriter(tx);
+        const globalContext = await studioSettingsSourceContext(tx, user, settingsSource.taskSettings.sourceTaskId);
+        await tx.platformSetting.create({ data: { key: studioSharedReproductionKey(presetId), updated_by: user.id,
+          value_json: JSON.stringify({ version: 2, taskSettings: settingsSource.taskSettings, sourceOwnerId: user.id,
+            sourceTaskId: settingsSource.taskSettings.sourceTaskId, moduleContext: preset.context,
+            ...(settingsSource.taskSettings.mode === 'historical' ? { globalContext } : {}),
+            templateFixedReferences: await getStudioPresetFixedReferences(user, preset, tx) }) } });
+      }
       await resolveSharedStudioDefinition(user, presetId, tx);
       await assertPresetCoverShareable(user, presetId, tx);
     }
@@ -653,6 +694,7 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
       count: preset.count, reference_limit: preset.reference_limit, aspect_ratio: preset.aspect_ratio, group_name: preset.group_name,
       banner_asset_id: preset.banner_asset_id ? assetMap.get(preset.banner_asset_id) || null : null, reference_ids: JSON.stringify(copiedReferenceIds) } });
     if (preset.owner_id === userId) await setStudioModuleFixedReferences(userId, id, fixedReferences, tx);
+    if (settingsSource) await writeStudioWorkspaceSource(tx, { ...settingsSource, ownerId: userId, moduleId: id });
     await setStudioModuleReferencePolicy(userId, id, referencePolicy, copiedReferenceIds, tx);
     await setStudioModuleStyleIds(user, id, styleGroupIds, tx);
     await setSkillSelection(user, id, skillIds, tx);

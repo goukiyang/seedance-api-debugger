@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing, studioSharingCommandStatus, studioPresetDeletionStatus, studioPresetLifecycleHistory } from '@/lib/image-studio/presets';
 import { StudioModuleError } from '@/lib/image-studio/modules';
+import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
     if (mode) return NextResponse.json({ error: '模板读取方式无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ presets: await listStudioPresets(user, moduleId, presetId) }, { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof StudioTaskSettingsError) return NextResponse.json({ error: error.message, reasonCode: 'state-conflict' }, { status: error.status, headers: privateHeaders });
     if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError || error instanceof StudioDefinitionReadError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError || error instanceof StudioDefinitionReadError ? error.reasonCode : 'state-conflict',
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(await saveStudioPreset(user, body), { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof StudioTaskSettingsError) return NextResponse.json({ error: error.message, reasonCode: 'state-conflict' }, { status: error.status, headers: privateHeaders });
     if (error instanceof SyntaxError) return NextResponse.json({ error: '模板内容无效' }, { status: 400, headers: privateHeaders });
     if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError ? error.reasonCode : 'state-conflict',
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });

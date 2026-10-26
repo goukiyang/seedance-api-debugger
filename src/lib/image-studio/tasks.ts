@@ -10,6 +10,8 @@ import { prisma } from '@/lib/prisma';
 import { assertUsageProject, inheritUsageAttribution, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
+import { parseStudioTaskSettings, StudioTaskSettingsError } from './task-settings';
+import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, studioSettingsSourceContext, STUDIO_TASK_SETTINGS_FILES } from './task-settings-storage';
 import { imageBillingScope } from './billing-scope';
 import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from './billing-quote';
 import { quotePricingCharge, assertNewPricingCharge } from '@/lib/pricing/charge';
@@ -217,6 +219,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/lib/image-studio/worker.ts',
   'src/lib/image-studio/restored-settings.ts',
   'src/lib/image-studio/async-recovery.ts',
+  ...STUDIO_TASK_SETTINGS_FILES,
 ] as const;
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
 
@@ -370,6 +373,8 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
   const restoredSettings = parseRestoredStudioSettings(body.restoredSettings);
+  const taskSettings = parseStudioTaskSettings(body.taskSettings);
+  if (taskSettings && draft?.globalContext !== undefined) throw new StudioTaskSettingsError('通用上下文由已保存设置或原记录确定，不能随生成覆盖', 400);
   assertRestoredStudioDraft({ restoredSettings, reproduceFromTaskId, draft });
   const projectId = parseUsageProjectId(body.projectId);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds,
@@ -377,7 +382,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
     ...(sharedLive ? { sharedLive } : {}),
     ...(personalOverrides ? { personalOverrides } : {}),
     ...(typeof body.personalPrompt === 'string' ? { personalPrompt: body.personalPrompt.trim() } : {}),
-    ...(restoredSettings ? { restoredSettings } : {}),
+    ...(restoredSettings ? { restoredSettings } : {}), ...(taskSettings ? { taskSettings } : {}),
     ...(channelId !== undefined ? { channelId: channelId as string } : imageChannel ? { channelId: imageChannel.channelId } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(maxEstimatedCost !== undefined ? { maxEstimatedCost: maxEstimatedCost as number } : {}), ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
@@ -480,6 +485,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
+      if (input.taskSettings) {
+        if (!matchesRequest(duplicate)) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
+        return;
+      }
       if (input.sharedLive || input.restoredSettings) {
         if (moduleId !== undefined && moduleId !== duplicate.module_id) throw new StudioError('提交编号已用于其他请求，请查询原记录', 409);
         return;
@@ -487,6 +496,9 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (!matchesRequest(duplicate)) throw new StudioError('提交编号冲突', 409);
       return;
     }
+    if (input.taskSettings) await assertStudioTaskSettingsWriter(tx);
+    const settings = await getImageStudioSettings(tx);
+    if (settings.revision !== input.revision) throw new StudioError('通用设置已更新，请重新读取并确认报价；尚未生成', 409);
     try { await assertNoSynchronousImageAdmission(tx, ownerId, input.requestId); }
     catch (error) { if (error instanceof SynchronousImageAdmissionError) throw new StudioError(error.message, error.status); throw error; }
     const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
@@ -508,6 +520,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       normalizeSharedAuthorDraftForUse(identity, sharedUse, input);
     }
     const sharedDefinition = sharedUse?.definition;
+    const savedSettingsSource = moduleId ? await readStudioWorkspaceSource(tx, ownerId, String(moduleId)) : null;
+    assertStudioTaskSettingsWrite(savedSettingsSource?.taskSettings ?? sharedDefinition?.reproduction?.taskSettings, input.taskSettings);
     const restored = await resolveStudioTaskRestoredSettings(identity, typeof moduleId === 'string' ? moduleId : undefined, input, sharedUse, tx);
     if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
       && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {
@@ -516,6 +530,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const effectiveTemplatePrompt = restored ? restored.templatePrompt : sharedDefinition?.templatePrompt;
     if (sharedDefinition || restored) input.prompt = [effectiveTemplatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
     const reproduceFromTaskId = restored?.source.id || (sharedUse ? undefined : input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined));
+    const contextMode = input.taskSettings?.mode ?? sharedDefinition?.reproduction?.taskSettings?.mode ?? 'historical';
+    if (input.taskSettings?.mode === 'historical' && !input.taskSettings.sourceTaskId && !reproduceFromTaskId && !sharedDefinition?.reproduction) {
+      throw new StudioError('历史设置来源尚未确认，当前输入保留', 409);
+    }
     let sourcePresetId = sharedUse?.definition.intent.presetId || workspace?.source_preset_id || null;
     if (reproduceFromTaskId && !restored) sourcePresetId = null;
     let sourcePresetOwnerId: string | null = null;
@@ -652,7 +670,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
       snapshotModuleContext = sharedDefinition.reproduction?.moduleContext ?? sharedDefinition.context;
-      if (sharedDefinition.reproduction) snapshotGlobalContext = sharedDefinition.reproduction.globalContext;
+      if (sharedDefinition.reproduction && contextMode === 'historical') {
+        if (typeof sharedDefinition.reproduction.globalContext !== 'string') throw new StudioError('原历史上下文无法确认，请重新选择历史记录', 409);
+        snapshotGlobalContext = sharedDefinition.reproduction.globalContext;
+      }
     }
     let templateFixedReferences: StudioFixedReference[] = [];
     let styleGroupIds: string[] = [];
@@ -740,7 +761,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           throw new StudioError('这条旧记录没有保存完整上下文，无法完整复现；请退出历史复现后使用当前设置', 409);
         }
         // Reproduction must use the recorded contexts, including deliberately empty ones.
-        snapshotGlobalContext = sourceSnapshot.globalContext;
+        if (contextMode === 'historical') snapshotGlobalContext = sourceSnapshot.globalContext;
         snapshotModuleContext = sourceSnapshot.moduleContext;
       } catch (error) {
         if (error instanceof StudioError) throw error;
@@ -848,6 +869,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryCount = auxiliaryTransientIds.length + sourceTemplateReferenceIds.length + actualFixedReferences.length;
     try { validateStudioReferenceCounts(referencePolicy, [...referenceIds, ...sourceTemplateReferenceIds], templateFixedReferences.length, actualStyleReferenceGroups.reduce((total, group) => total + group.references.length, 0), true); }
     catch (error) { throw new StudioError((error as Error).message); }
+    if (input.taskSettings?.sourceTaskId) {
+      const originalGlobalContext = await studioSettingsSourceContext(tx, identity, input.taskSettings.sourceTaskId);
+      if (contextMode === 'historical') snapshotGlobalContext = originalGlobalContext;
+    }
     const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     if (!input.prompt.trim() && !baseContext.trim() && !skills.length && primaryReferenceIds.length + auxiliaryCount === 0) throw new StudioError('请填写画面描述、上下文、选择skills或添加参考图片');
     const referenceDescriptors: Array<{ id: string; role: 'primary' | 'transient-auxiliary' | 'template-reference' | 'template-fixed' | 'style-fixed'; label: string; note?: string; styleGroupId?: string }> = [];
@@ -978,6 +1003,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           imageChannel: contractImageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}),
+          ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
           ...(input.restoredSettings ? { restoredSettings: input.restoredSettings, personalPrompt,
             styleGroupIds, styleGroups: styleGroupSnapshot, skills: skills.map(skill => ({ id: skill.id, promptVersion: skill.promptVersion })) } : {}) })).digest('hex') }) });
     if (pricingQuote) billingContract = withPricingImageContract(billingContract, pricingQuote.charge, price);
@@ -1011,6 +1037,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         : undefined);
     const snapshot = JSON.stringify({
       version: 1,
+      ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
       requestId: input.requestId, batchId, inputFingerprint: requestFingerprint,
       ...(quoteImageChannel
@@ -1444,9 +1471,12 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
   try { sharedLive = parseSharedStudioIntent(parsed.sharedLive); } catch {}
   let restoredSettings;
   try { restoredSettings = parseRestoredStudioSettings(parsed.restoredSettings); } catch {}
+  let taskSettings;
+  try { taskSettings = parseStudioTaskSettings(parsed.taskSettings); } catch {}
   const personalPromptProjection = studioPersonalPromptProjection(parsed);
   return {
     ...(sharedLive ? { sharedLive } : {}),
+    ...(taskSettings ? { taskSettings } : {}),
     ...personalPromptProjection,
     ...(restoredSettings ? { restoredSettings } : {}),
     ...(isAdmin && sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),

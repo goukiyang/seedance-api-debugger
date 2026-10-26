@@ -38,9 +38,9 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   usePageExitRisk({ unsaved: ratioEditing ? ['图片默认比例'] : [],
     busy: open && (ratios.busy || batch.busy) ? ['图片设置正在保存或应用'] : [], revision: String(ratioEditing) });
   useEffect(() => {
-    if (open) dialog.current?.showModal();
+    if (open) { dialog.current?.showModal(); void editor.controller.load(); }
     else dialog.current?.close();
-  }, [open]);
+  }, [open, editor.controller]);
   const close = async () => {
     if (canEdit && (editor.saving || ratios.busy || batch.busy)) return;
     if (canEdit && ratioEditing && !(await confirm('比例编辑尚未完成，关闭会丢失这部分输入。确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
@@ -52,7 +52,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     if (!editor.dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) void editor.controller.load(true);
   };
   const save = async () => {
-    if (!canEdit || saveLock.current || editor.saving || editor.loading || ratios.busy || ratioEditing || batch.busy) return;
+    if (!canEdit || saveLock.current || editor.saving || editor.loading || editor.conflicts.length || ratios.busy || ratioEditing || batch.busy) return;
     saveLock.current = true;
     try {
       if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
@@ -65,6 +65,18 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
       } else if (await editor.controller.save()) onClose();
     } finally { saveLock.current = false; }
   };
+  const conflictFields = (prefix: string) => editor.conflicts.filter(item => item.field === prefix || item.field.startsWith(`${prefix}.`)).map(item => {
+    const fieldLabels: Record<string, string> = { context: '通用上下文', model: '生成模型', quality: '图片质量', resolution: '分辨率', count: '生成张数',
+      aspectRatio: '图片比例', primaryMin: '主图最少张数', primaryMax: '主图最多张数', auxiliaryMax: '辅助总上限', styleMax: '风格上限', referenceMax: '参考上限', useFixedReferences: '模板固定参考图' };
+    const key = item.field.slice(item.field.indexOf('.') + 1);
+    const label = fieldLabels[key] || IMAGE_STUDIO_MODEL_LABELS[key as ImageStudioModel] || key;
+    return <div key={item.field} role="status" className={styles.error}>
+      <span>{label}已在其他页面更新，你的修改已保留。</span>
+      <details><summary>查看已保存值</summary><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{String(item.saved ?? '未设置')}</p></details>
+      <button type="button" disabled={editor.saving || batch.busy} onClick={() => editor.controller.resolveConflict(item.field, 'draft')}>保留我的修改</button>
+      <button type="button" disabled={editor.saving || batch.busy} onClick={() => editor.controller.resolveConflict(item.field, 'saved')}>采用已保存值</button>
+    </div>;
+  });
   return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`}>
     <header className={styles.header}><h2>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {open && <GenerationCompletionSettings key={ownerId} ownerId={ownerId} />}
@@ -73,6 +85,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
       <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={value => { if (canEdit) editor.controller.editContext(value); }} maxLength={20000} disabled={!canEdit || editor.loading || editor.saving || !open} />
       <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={!canEdit || editor.loading}
         value={editor.draft.context} onChange={event => { if (canEdit) editor.controller.editContext(event.target.value); }} />
+      {conflictFields('context')}
       <section className={styles.auxiliarySection} aria-labelledby="studio-template-defaults-title">
         <div className={styles.imageSectionHeading}><strong id="studio-template-defaults-title">模板统一默认值</strong></div>
         <p className={styles.muted}>统一默认值用于新建模板。</p>
@@ -149,6 +162,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           </label>
         </div>
         {selectedModelReady === false && <p className={styles.muted}>所选模型的图片服务当前未就绪；这里仍可保存默认值，服务就绪后再使用。</p>}
+        {conflictFields('templateDefaults')}
       </section>
       <p className={styles.label}>通用模型积分规则</p>
       {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
@@ -156,7 +170,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
           onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
       </label>)}
-      <button type="button" className={styles.primary} disabled={!canEdit || (batch.scope ? !batch.canCommit : !editor.dirty) || editor.loading || editor.saving || batch.busy || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.busy ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
+      {conflictFields('prices')}
+      <button type="button" className={styles.primary} disabled={!canEdit || editor.conflicts.length > 0 || (batch.scope ? !batch.canCommit : !editor.dirty) || editor.loading || editor.saving || batch.busy || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.busy ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>
     {editor.error && <div role="alert" className={styles.error}>{editor.error}
