@@ -8,6 +8,7 @@ import { MULTIVIEW_SETTINGS_FIXTURE_SOURCES } from './multiview-settings-fixture
 import { HD_CHAIN_CHECKS, HD_CHAIN_CHILDREN, HD_CHAIN_FIXTURE_SOURCES } from './hd-chain-fixture-inputs.mjs';
 import { MULTIVIEW_PRIVATE_BATCH_SOURCES } from './multiview-private-batch-engineering.mjs';
 import { MULTIVIEW_FLOW_SOURCES } from './multiview-flow-fixture-inputs.mjs';
+import { PRIVATE_PROMPTS_CHECKS, PRIVATE_PROMPTS_SOURCES } from './private-prompts-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -50,6 +51,8 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
 const fixtures = [
+  { file: 'scripts/private-prompts-engineering.mjs', schema: 'private-prompts-engineering.v1',
+    marker: 'Private prompts engineering receipt: ', checks: PRIVATE_PROMPTS_CHECKS, sources: PRIVATE_PROMPTS_SOURCES },
   { file: 'ops/video-creation-contract-check.mjs', schema: 'video-creation-contract-engineering.v1',
     marker: 'Video creation contract engineering receipt: ', checks: [
       'v1_v2_and_unknown_contracts_fail_closed', 'project_only_specs_real_parent_and_child_identity',
@@ -212,6 +215,8 @@ const publicUsageFixtures = [
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/skills.ts', 'src/lib/image-studio/private-storage.server.ts',
+      'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
       'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',
       'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
       'src/lib/image-studio/batches.ts', 'scripts/studio-restored-settings-engineering.ts',
@@ -430,7 +435,8 @@ function run() {
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const directory = mkdtempSync(path.join(scratch, 'image-recovery-gate-'));
   const recorded = [], publicUsageRecorded = [], failures = [], outcomes = [];
-  const fixtureEnvironment = { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: runId };
+  const fixtureEnvironment = { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: runId,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require ${JSON.stringify(path.join(root, 'scripts/server-runtime.cjs'))}`.trim() };
   delete fixtureEnvironment.HD_DERIVATIVES_ROOT;
   delete fixtureEnvironment.HD_DERIVATIVES_DIR;
   const usageEngineeringReceipt = path.join(directory, 'admin-usage-pure.json');

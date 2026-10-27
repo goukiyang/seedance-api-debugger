@@ -6,7 +6,10 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import styles from './studio.module.css';
+import { PrivateDefinitionEditor } from './PrivateDefinitionEditor';
 export type SkillSummary = { id: string; name: string; revision?: number; prompt?: string; promptVersion?: string;
+  privatePrompt?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
+  copyFromId?: string; copyFromRevision?: number;
   coverAssetId?: string | null; coverUrl?: string | null; unavailable?: boolean };
 async function value(response: Response) { const data = await response.json(); if (!response.ok) throw new Error(data.error || '提示词组操作失败'); return data; }
 export type StudioSkillsHandle = { open: () => void; edit: (group?: SkillSummary, duplicate?: boolean) => void };
@@ -23,6 +26,7 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   const [likes, setLikes] = useState<string[]>([]), [recent, setRecent] = useState<string[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [picker, setPicker] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null), editor = useRef<HTMLDialogElement>(null), serial = useRef(0);
+  const beforePrivateClose = useRef<(() => Promise<boolean>) | null>(null);
   useEffect(() => () => { serial.current++; }, []);
   const key = `sd2:skills:v1:${userId}`;
   useEffect(() => {
@@ -30,7 +34,6 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
     try { const data = JSON.parse(localStorage.getItem(key) || '{}');
       const ids = (v: unknown) => Array.isArray(v) ? v.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)) : [];
       setLikes(ids(data.likes)); setRecent(ids(data.recent));
-      if (typeof data.query === 'string') setQuery(data.query.slice(0, 160));
       if (['all', 'liked', 'recent'].includes(data.view)) setView(data.view);
     } catch { /* Optional preferences cannot block selection. */ }
     setInitialized(key);
@@ -41,10 +44,12 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   const editing = Boolean(draft);
   useEffect(() => { if (editing) editor.current?.showModal(); else editor.current?.close(); }, [editing]);
   useEffect(() => setVisible(48), [key, query, view]);
-  useEffect(() => { if (initialized !== key) return; try { localStorage.setItem(key, JSON.stringify({ likes, recent, query, view })); } catch { /* Selection does not depend on local preferences. */ } }, [initialized, key, likes, recent, query, view]);
+  useEffect(() => { if (initialized !== key) return; try { localStorage.setItem(key, JSON.stringify({ likes, recent, view })); } catch { /* Selection does not depend on local preferences. */ } }, [initialized, key, likes, recent, view]);
   function remember(nextLikes: string[], nextRecent: string[]) { setLikes(nextLikes); setRecent(nextRecent);
-    try { localStorage.setItem(key, JSON.stringify({ likes: nextLikes, recent: nextRecent, query, view })); } catch { setError('本机无法记住喜欢与最近选择，当前选用不受影响'); } }
-  const closeEditor = async () => { if (busy || picker) return; if (draft && JSON.stringify(draft) !== saved
+    try { localStorage.setItem(key, JSON.stringify({ likes: nextLikes, recent: nextRecent, view })); } catch { setError('本机无法记住喜欢与最近选择，当前选用不受影响'); } }
+  const closeEditor = async () => { if (busy || picker) return;
+    if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
+    if (draft && JSON.stringify(draft) !== saved
     && !await confirm('提示词组尚未保存，放弃这次修改？', { title: '放弃修改', confirmLabel: '放弃修改' })) return; setDraft(null); };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: () => { if (!busy && !draft) setOpen(false); } });
   useDialogDismiss({ open: Boolean(draft), dialogRef: editor, nativeDialog: true, onDismiss: closeEditor });
@@ -63,11 +68,14 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   }
   function edit(group?: SkillSummary, duplicate = false) {
     if (managementOnly && disabled) return;
-    const next = group ? { ...group, ...(duplicate ? { id: '', revision: undefined, name: `${group.name}副本` } : {}) }
+    const next = group ? { ...group, ...(duplicate ? { id: '', revision: undefined, name: `${group.name}副本`,
+      ...(group.privatePrompt ? { copyFromId: group.id, copyFromRevision: group.revision } : {}) } : {}) }
       : { id: '', name: '', prompt: '', coverAssetId: null, coverUrl: null };
     setDraft(next); setSaved(JSON.stringify(next)); setError('');
   }
-  async function save() { if (!draft || busy || managementOnly && disabled) return; const token = serial.current; setBusy(true); setPhase('saving'); setError('');
+  async function save() { if (!draft || busy || managementOnly && disabled) return;
+    if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
+    const token = serial.current; setBusy(true); setPhase('saving'); setError('');
     try { const next = await value(await fetch('/api/image-studio/skills', { method: draft.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...draft, id: draft.id || undefined }) }));
       if (token !== serial.current) return;
       setGroups(current => [next, ...current.filter(group => group.id !== next.id)]);
@@ -106,7 +114,7 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   function move(index: number, direction: number) { const next = [...selected], to = index + direction; if (to < 0 || to >= next.length) return;
     [next[index], next[to]] = [next[to], next[index]]; onChange(next); }
   const filtered = groups.filter(group => (view !== 'liked' || likes.includes(group.id)) && (view !== 'recent' || recent.includes(group.id))
-    && `${group.name}\n${group.prompt || ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+    && (managementOnly || `${group.name}\n${group.prompt || ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
   if (view === 'recent') filtered.sort((a, b) => recent.indexOf(a.id) - recent.indexOf(b.id));
   const openManagement = () => {
     try { const stored = JSON.parse(localStorage.getItem(key) || '{}');
@@ -136,9 +144,19 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   <dialog ref={editor} className={`${styles.dialog} ${styles.styleDialog}`} aria-label="编辑提示词组">
     {draft && <><header className={styles.header}><h2>{draft.id ? '编辑提示词组' : '新建提示词组'}</h2><button title="关闭" aria-label="关闭编辑" disabled={busy} onClick={() => void closeEditor()}><X size={20} /></button></header>
       <label>名称<input disabled={busy} value={draft.name} maxLength={80} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
-      <label>提示词<textarea disabled={busy} value={draft.prompt || ''} maxLength={8000} rows={8} onChange={event => setDraft({ ...draft, prompt: event.target.value })} /></label>
+      {draft.privatePrompt ? (draft.id && <PrivateDefinitionEditor userId={userId} moduleId={draft.id} dialog={editor}
+        blocked={Boolean(disabled)} canRead={draft.canReadPrivatePrompt === true} needsIdentity={draft.requiresIdentityVerification === true}
+        endpoint="/api/image-studio/skills" contextOnly label="提示词" maxLength={8000} allowEmpty={false}
+        beforeClose={beforePrivateClose} onSaved={revision => {
+          setDraft(current => current ? { ...current, revision } : current);
+          setSaved(current => { try { return JSON.stringify({ ...JSON.parse(current), revision }); } catch { return current; } });
+          setGroups(current => current.map(group => group.id === draft.id ? { ...group, revision } : group));
+          onChange(selected.map(group => group.id === draft.id ? { ...group, revision } : group));
+          const persisted = groups.find(group => group.id === draft.id);
+          if (persisted) onUpdated?.({ ...persisted, revision });
+        }} />) : <label>提示词<textarea disabled={busy} value={draft.prompt || ''} maxLength={8000} rows={8} onChange={event => setDraft({ ...draft, prompt: event.target.value })} /></label>}
       <div className={styles.skillCover} tabIndex={0} aria-label="封面，仅展示" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void uploadCover(event.dataTransfer.files[0]); }} onPaste={event => { const file = Array.from(event.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { event.preventDefault(); void uploadCover(file); } }}><button onClick={() => setPicker(true)} disabled={busy}><Plus size={16} />封面<span>仅展示</span></button>{draft.coverUrl && <img src={draft.coverUrl} alt="封面" width={64} height={64} />}{draft.coverAssetId && <button title="移除封面" aria-label="移除封面" disabled={busy} onClick={() => setDraft({ ...draft, coverAssetId: null, coverUrl: null })}><X size={16} /></button>}</div>
-      {phase === 'uploading' && busy && <p role="status">封面正在上传，文字尚未保存</p>}{error && <p role="alert" className={styles.error}>{error}</p>}<button className={styles.primary} disabled={busy || !draft.prompt?.trim()} onClick={() => void save()}><Save size={16} />{busy && phase === 'saving' ? '保存中…' : '保存'}</button>
+      {phase === 'uploading' && busy && <p role="status">封面正在上传，文字尚未保存</p>}{error && <p role="alert" className={styles.error}>{error}</p>}<button className={styles.primary} disabled={busy || (!draft.privatePrompt && !draft.prompt?.trim())} onClick={() => void save()}><Save size={16} />{busy && phase === 'saving' ? '保存中…' : '保存'}</button>
     </>}
   </dialog>
   <ResourceLibraryPicker open={picker} portalContainer={editor.current} imageOnly target="image-studio" purpose="skills-cover" contextKey={`${userId}:skills-cover:${draft?.id || "new"}`} title="选择封面" confirmLabel="设为封面" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPicker(false)} onUploadFile={file => uploadFileAsAsset(file)} onConfirm={async (ids) => { if (draft && ids[0]) setDraft({ ...draft, coverAssetId: ids[0], coverUrl: `/api/content-reactions/media?key=${encodeURIComponent(`asset:${ids[0]}`)}&variant=thumbnail` }); setPicker(false); }} />

@@ -1,4 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import { parsePrivateCredentials, stringifyPrivateCredentials } from '@/lib/security/private-credentials.server';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
+import { privateCredentialFetch } from '@/lib/security/private-prompt-send.server';
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { imageOutputSize, normalizeImageResolution, assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
@@ -315,12 +318,13 @@ export async function getImageGenerationApiSettings(
   if (!setting) return fallback;
 
   try {
-    const value = JSON.parse(setting.value_json);
+    const value = parsePrivateCredentials(setting.key, setting.value_json);
     if (strictPricing) assertPricingApiSource(value);
     return normalizeImageGenerationApiSettings(channel === 'banana'
       ? { ...value, provider: 'musk', default_model: DEFAULT_MUSK_IMAGE_MODEL }
       : value);
   } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     if (strictPricing) throw error;
     return fallback;
   }
@@ -541,12 +545,12 @@ export async function saveImageGenerationApiSettings(
   await prisma.platformSetting.upsert({
     where: { key: IMAGE_GENERATION_API_SETTING_KEY },
     update: {
-      value_json: JSON.stringify(settings),
+      value_json: stringifyPrivateCredentials(IMAGE_GENERATION_API_SETTING_KEY, settings),
       updated_by: updatedBy,
     },
     create: {
       key: IMAGE_GENERATION_API_SETTING_KEY,
-      value_json: JSON.stringify(settings),
+      value_json: stringifyPrivateCredentials(IMAGE_GENERATION_API_SETTING_KEY, settings),
       updated_by: updatedBy,
     },
   });
@@ -683,7 +687,7 @@ async function readLegacyModelApiRegistry(channel: 'shared' | 'banana', client: 
   const row = await client.platformSetting.findUnique({ where: { key: `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${channel}` } });
   if (!row) return { version: 1, revision: null, models: {} };
   let value: unknown;
-  try { value = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('原供应商型号配置损坏，未使用旧接口代替', 500, 'image_legacy_model_api_invalid'); }
+  try { value = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('原供应商型号配置损坏，未使用旧接口代替', 500, 'image_legacy_model_api_invalid'); }
   if (!isRecord(value) || value.version !== 1 || typeof value.revision !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.revision) || !isRecord(value.models)) {
     throw new ImageGenerationChannelError('原供应商型号配置格式无效，未使用旧接口代替', 500, 'image_legacy_model_api_invalid');
   }
@@ -762,9 +766,9 @@ export async function updateLegacyImageGenerationModelApi(input: ManagedImageGen
     const row = await tx.platformSetting.findUnique({ where: { key: settingKey } });
     try {
       if (row) {
-        const swapped = await tx.platformSetting.updateMany({ where: { key: settingKey, value_json: row.value_json }, data: { value_json: JSON.stringify(next), updated_by: updatedBy } });
+        const swapped = await tx.platformSetting.updateMany({ where: { key: settingKey, value_json: row.value_json }, data: { value_json: stringifyPrivateCredentials(settingKey, next), updated_by: updatedBy } });
         if (swapped.count !== 1) throw new ImageGenerationChannelError('型号配置已变化，请重新读取', 409, 'image_legacy_model_api_conflict');
-      } else await tx.platformSetting.create({ data: { key: settingKey, value_json: JSON.stringify(next), updated_by: updatedBy } });
+      } else await tx.platformSetting.create({ data: { key: settingKey, value_json: stringifyPrivateCredentials(settingKey, next), updated_by: updatedBy } });
     } catch (error) {
       if (isRecord(error) && error.code === 'P2002') throw new ImageGenerationChannelError('型号配置已被其他管理员创建，请重新读取', 409, 'image_legacy_model_api_conflict');
       throw error;
@@ -912,7 +916,7 @@ async function readManagedChannelRegistry(client: Prisma.TransactionClient | typ
   const row = await client.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
   if (!row) return { version: 1, channels: [emptyFluxPortRecord()] };
   let parsed: unknown;
-  try { parsed = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('图片供应商注册表数据损坏，已停止使用配置', 500, 'image_channel_registry_invalid'); }
+  try { parsed = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('图片供应商注册表数据损坏，已停止使用配置', 500, 'image_channel_registry_invalid'); }
   if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.channels)) {
     throw new ImageGenerationChannelError('图片供应商注册表版本无效，已停止使用配置', 500, 'image_channel_registry_invalid');
   }
@@ -1018,7 +1022,7 @@ async function writePrivateChannelVersion(
   await client.platformSetting.create({
     data: {
       key: privateVersionKey(version.channelId, version.configRevision),
-      value_json: JSON.stringify(version),
+      value_json: stringifyPrivateCredentials(privateVersionKey(version.channelId, version.configRevision), version),
       updated_by: updatedBy,
     },
   });
@@ -1032,7 +1036,7 @@ async function readPrivateChannelVersion(
   const row = await client.platformSetting.findUnique({ where: { key: privateVersionKey(channelId, revision) } });
   if (!row) throw new ImageGenerationChannelError('图片供应商配置修订不存在，不能替换为当前配置', 404, 'image_channel_revision_not_found');
   let parsed: unknown;
-  try { parsed = JSON.parse(row.value_json); } catch { throw new ImageGenerationChannelError('图片供应商配置修订损坏，不能继续执行', 500, 'image_channel_revision_invalid'); }
+  try { parsed = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('图片供应商配置修订损坏，不能继续执行', 500, 'image_channel_revision_invalid'); }
   if (!isRecord(parsed) || parsed.version !== 1 || parsed.channelId !== channelId || parsed.configRevision !== revision
     || !isRecord(parsed.settings) || !isRecord(parsed.modelCapabilities)) {
     throw new ImageGenerationChannelError('图片供应商配置修订与任务引用不匹配', 500, 'image_channel_revision_invalid');
@@ -2400,6 +2404,7 @@ export async function saveImageModelApiForm(input: Record<string, unknown>, acto
 
 async function swapSimpleModelSetting(client: Prisma.TransactionClient, key: string, oldValue: string | undefined,
   value: string, actorId: string) {
+  value = stringifyPrivateCredentials(key, JSON.parse(value));
   if (oldValue !== undefined) {
     const changed = await client.platformSetting.updateMany({ where: { key, value_json: oldValue }, data: { value_json: value, updated_by: actorId } });
     if (changed.count !== 1) throw new ImageGenerationChannelError('设置发生并发冲突，未保存任何更改', 409, 'image_channel_revision_conflict');
@@ -2568,7 +2573,7 @@ async function saveManagedRecord(
     await writePrivateChannelVersion(tx, version, updatedBy);
     if (existingIndex >= 0) registry.channels[existingIndex] = record;
     else registry.channels.push(record);
-    const serializedRegistry = JSON.stringify(registry);
+    const serializedRegistry = stringifyPrivateCredentials(IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, registry);
     try {
       if (registryRowBefore) {
         const swapped = await tx.platformSetting.updateMany({
@@ -2638,7 +2643,7 @@ export async function prepareImageQualityChannelUpdate(tx: Prisma.TransactionCli
   if (!existing || existing.deleted || !existing.configRevision) throw new ImageGenerationChannelError('质量档位的 API 不存在或已归档', 409);
   const previous = await readPrivateChannelVersion(tx, id, existing.configRevision);
   const originalVersionRow = await tx.platformSetting.findUniqueOrThrow({ where: { key: privateVersionKey(id, existing.configRevision) } });
-  const originalVersion = JSON.parse(originalVersionRow.value_json) as PrivateImageGenerationChannelVersion;
+  const originalVersion = parsePrivateCredentials(originalVersionRow.key, originalVersionRow.value_json) as PrivateImageGenerationChannelVersion;
   const model = IMAGE_25_QUALITY_MODEL;
   const capability = previous.modelCapabilities[model];
   if (!capability) throw new ImageGenerationChannelError('该 API 没有 Sunburst 型号配置', 409);
@@ -2657,7 +2662,7 @@ export async function prepareImageQualityChannelUpdate(tx: Prisma.TransactionCli
   if (!existing.enabled || !previous.settings.api_key && !modelApiKeys[model]) throw new ImageGenerationChannelError('该质量 API 尚未启用或缺少 Key，未保存', 409);
   // Readers normalize old records. Only replace the selected raw row when writing,
   // so this operation cannot normalize or discard another provider's saved fields.
-  const rawRegistry = JSON.parse(row.value_json) as { channels: Array<Record<string, unknown>> };
+  const rawRegistry = parsePrivateCredentials(row.key, row.value_json) as { channels: Array<Record<string, unknown>> };
   const rawIndex = rawRegistry.channels.findIndex(item => item.id === id);
   if (rawIndex < 0) throw new ImageGenerationChannelError('API 原始配置不存在，未保存', 409);
   const rawRecord = rawRegistry.channels[rawIndex];
@@ -2665,7 +2670,7 @@ export async function prepareImageQualityChannelUpdate(tx: Prisma.TransactionCli
     modelCapabilities: { ...(isRecord(rawRecord.modelCapabilities) ? rawRecord.modelCapabilities : {}), [model]: nextCapability },
     ...(medium ? { baseUrl: 'https://api.uselg.top' } : {}) };
   return { before: row.value_json, registryJson: JSON.stringify(rawRegistry),
-    versionKey: privateVersionKey(id, configRevision), versionJson: JSON.stringify(version), configRevision,
+    versionKey: privateVersionKey(id, configRevision), versionJson: stringifyPrivateCredentials(privateVersionKey(id, configRevision), version), configRevision,
     previousRevision: existing.configRevision };
 }
 
@@ -2864,7 +2869,8 @@ async function createGeminiImageGeneration(params: {
     const match = source.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i);
     if (match) parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
   }
-  const response = await fetch(buildMuskGeminiGenerateContentUrl(params.settings.base_url, params.settings.default_model), {
+  const response = await privateCredentialFetch({ endpoint: buildMuskGeminiGenerateContentUrl(params.settings.base_url, params.settings.default_model),
+    provider: params.settings.provider, credential: params.settings.api_key || '', model: params.settings.default_model }, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2916,7 +2922,8 @@ async function createOpenAiImageGeneration(params: {
   referenceImages?: string[];
   signal: AbortSignal;
 }) {
-  const response = await fetch(buildOpenAiImagesGenerationUrl(params.settings.base_url), {
+  const response = await privateCredentialFetch({ endpoint: buildOpenAiImagesGenerationUrl(params.settings.base_url),
+    provider: params.settings.provider, credential: params.settings.api_key || '', model: params.settings.default_model }, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

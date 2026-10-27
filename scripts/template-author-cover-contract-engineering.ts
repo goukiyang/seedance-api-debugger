@@ -1,4 +1,7 @@
+import './server-runtime.cjs';
 import assert from 'node:assert/strict';
+import * as privatePrompts from '../src/lib/security/private-prompts.server';
+import * as privateFields from '../src/lib/security/private-prompt-fields.server';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -21,6 +24,7 @@ const sourceFiles = [fixtureFile, 'src/lib/image-studio/template-author.ts', 'sr
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
   'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts',
+  'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
   'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/pricing-state.ts',
   'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts', 'src/lib/users/profiles.ts', 'src/lib/users/display.ts'];
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
@@ -28,6 +32,7 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 async function main() {
   const root = realpathSync(process.cwd()), startedAt = Date.now();
+  assert.equal(process.env.PRIVATE_PROMPTS_POLICY_FILE, undefined, 'Legacy contract fixture must not load an external policy');
   assert.ok(process.argv[2], 'A private candidate receipt path is required');
   const destination = path.resolve(process.argv[2]);
   assert.ok(destination.startsWith(path.join(root, '.role-tests') + path.sep));
@@ -147,6 +152,7 @@ async function main() {
   const author = evaluate('src/lib/image-studio/template-author.ts', { 'server-only': {}, '@/lib/prisma': { prisma },
     '@/lib/users/display': display, './access': access, './shared-contract': shared });
   const contextVersion = evaluate('src/lib/image-studio/context-version.ts', { 'node:crypto': { ...crypto, randomInt: () => forbidden('context-version-allocation') },
+    '@/lib/security/private-prompts.server': privatePrompts, '@/lib/security/private-prompt-fields.server': privateFields,
     '@/lib/prisma': { prisma } });
   let definitionResolution = 'dependency-invalid', definitionCalls = 0, noteReads = 0;
   const definition = evaluate('src/lib/image-studio/definition-read.ts', { 'server-only': {}, 'node:crypto': crypto,

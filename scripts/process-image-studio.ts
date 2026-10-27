@@ -1,3 +1,4 @@
+import './server-runtime.cjs';
 import { loadEnvConfig } from '@next/env';
 import { processStudioTask, recoverStudioTasks } from '../src/lib/image-studio/worker';
 import { prisma } from '../src/lib/prisma';

@@ -3,6 +3,8 @@
 import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
+import { PrivateDefinitionEditor } from '@/app/image-studio/PrivateDefinitionEditor';
+import { readLegacyPrivateDraft, retainLegacyPrivateDraft, withoutLegacyPrivateFields } from '@/app/image-studio/private-draft-migration';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -225,12 +227,19 @@ function requestKey(userId: string, draftId: string) {
 function saveRecovery(userId: string, draft: StudioDraftDto | null) {
   if (!draft || typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(requestKey(userId, draft.id), JSON.stringify({ savedAt: new Date().toISOString(), draft }));
+    const key = requestKey(userId, draft.id);
+    const old = JSON.parse(window.localStorage.getItem(key) || 'null');
+    const oldInstruction = old?.draft?.recipe?.instruction;
+    if (!draft.recipe && typeof oldInstruction === 'string' && oldInstruction) return;
+    const clean = draft.recipe ? { ...draft, recipe: { ...draft.recipe, instruction: typeof oldInstruction === 'string' ? oldInstruction : '' } } : draft;
+    window.localStorage.setItem(key, JSON.stringify({ savedAt: new Date().toISOString(), draft: clean }));
   } catch { /* Keep the visible draft available even when local storage is full. */ }
 }
 
 function clearRecovery(userId: string, draftId: string) {
-  try { window.localStorage.removeItem(requestKey(userId, draftId)); } catch { /* Recovery is best-effort. */ }
+  try { const key = requestKey(userId, draftId), old = JSON.parse(window.localStorage.getItem(key) || 'null');
+    if (typeof old?.draft?.recipe?.instruction === 'string' && old.draft.recipe.instruction) return;
+    window.localStorage.removeItem(key); } catch { /* Recovery is best-effort. */ }
 }
 
 function readRecovery(userId: string, draftId: string): StudioDraftDto | null {
@@ -238,7 +247,7 @@ function readRecovery(userId: string, draftId: string): StudioDraftDto | null {
     const raw = window.localStorage.getItem(requestKey(userId, draftId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { draft?: StudioDraftDto };
-    return parsed.draft?.id === draftId ? parsed.draft : null;
+    return parsed.draft?.id === draftId ? { ...parsed.draft, recipe: parsed.draft.recipe ? { ...parsed.draft.recipe, instruction: '' } : null } : null;
   } catch { return null; }
 }
 
@@ -247,13 +256,16 @@ function templateRecoveryKey(userId: string, templateId: string) {
 }
 
 function saveTemplateRecovery(userId: string, template: StudioTemplateDto) {
-  try { const raw = JSON.stringify(template); const key = templateRecoveryKey(userId, template.id);
+  try { const key = templateRecoveryKey(userId, template.id);
+    const raw = JSON.stringify(template.privateRecipe ? retainLegacyPrivateDraft(key, withoutLegacyPrivateFields(template)) : template);
     window.localStorage.setItem(key, raw); return window.localStorage.getItem(key) === raw;
   } catch { return false; }
 }
 
 function clearTemplateRecovery(userId: string, templateId: string) {
-  try { window.localStorage.removeItem(templateRecoveryKey(userId, templateId)); } catch { /* Recovery is best-effort. */ }
+  try { const key = templateRecoveryKey(userId, templateId);
+    if (readLegacyPrivateDraft(key)) return;
+    window.localStorage.removeItem(key); } catch { /* Recovery is best-effort. */ }
 }
 
 function templateEditSignature(template: StudioTemplateDto) {
@@ -403,6 +415,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const templateEditBaseline = useRef<string | null>(null);
   const templateEditBackdropRef = useRef<HTMLDivElement>(null);
   const templateEditDialogRef = useRef<HTMLElement>(null);
+  const beforePrivateTemplateClose = useRef<(() => Promise<boolean>) | null>(null);
   const [templateConflict, setTemplateConflict] = useState<{ id: string; source: StudioTemplateDto['source'] } | null>(null);
   const [templateRecoveryAvailable, setTemplateRecoveryAvailable] = useState(false);
   const [templateEditBusy, setTemplateEditBusy] = useState(false);
@@ -1397,12 +1410,15 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   function beginTemplateEdit(template: StudioTemplateDto) {
     const recovery = readTemplateRecovery(userId, template.id);
     templateEditBaseline.current = templateEditSignature(template);
-    setTemplateEdit(recovery || template);
+    setTemplateEdit(recovery ? { ...(template.privateRecipe ? withoutLegacyPrivateFields(recovery) : recovery),
+      privateRecipe: template.privateRecipe, canReadPrivatePrompt: template.canReadPrivatePrompt,
+      canEditPrivatePrompt: template.canEditPrivatePrompt, requiresIdentityVerification: template.requiresIdentityVerification } : template);
     setTemplateRecoveryAvailable(false);
   }
 
   async function closeTemplateEditor() {
     if (!templateEdit || templateEditBusy) return;
+    if (beforePrivateTemplateClose.current && !await beforePrivateTemplateClose.current()) return;
     const dirty = templateEditBaseline.current === null
       || templateEditSignature(templateEdit) !== templateEditBaseline.current;
     if (dirty) {
@@ -1423,12 +1439,16 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
     if (!local) { setTemplateRecoveryAvailable(false); return; }
     const baseline = templates.find((item) => item.id === local.id && item.source === local.source);
     templateEditBaseline.current = baseline ? templateEditSignature(baseline) : null;
-    setTemplateEdit(local);
+    if (!baseline) { setNotice('请先重新读取模板，再恢复编辑'); return; }
+    setTemplateEdit({ ...(baseline.privateRecipe ? withoutLegacyPrivateFields(local) : local), privateRecipe: baseline.privateRecipe,
+      canReadPrivatePrompt: baseline.canReadPrivatePrompt, canEditPrivatePrompt: baseline.canEditPrivatePrompt,
+      requiresIdentityVerification: baseline.requiresIdentityVerification });
     setTemplateRecoveryAvailable(false);
   }
 
   async function reloadConflictedTemplate() {
     if (!templateConflict) return;
+    if (beforePrivateTemplateClose.current && !await beforePrivateTemplateClose.current()) return;
     if (templateEdit?.id === templateConflict.id && !(await confirm('重新载入会放弃当前模板编辑，是否继续？', { title: '重新载入', confirmLabel: '放弃修改并载入' }))) return;
     const routeAtStart = currentRouteKeyRef.current;
     setTemplateEditBusy(true);
@@ -1467,6 +1487,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
 
   async function saveTemplateEdit() {
     if (!templateEdit || templateEditBusy || templateSaveLock.current) return;
+    if (beforePrivateTemplateClose.current && !await beforePrivateTemplateClose.current()) return;
     templateSaveLock.current = true;
     setTemplateEditBusy(true);
     try {
@@ -2062,7 +2083,16 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
             <div className={styles.field}><label htmlFor="studio-template-name">模板名称</label><input id="studio-template-name" disabled={templateEditBusy} value={templateEdit.name} maxLength={120} onChange={(event) => setTemplateEdit((current) => current ? { ...current, name: event.target.value } : current)} /></div>
             <div className={styles.field}><label htmlFor="studio-template-group-name">用途分组</label><input id="studio-template-group-name" disabled={templateEditBusy} value={templateEdit.groupName} maxLength={80} onChange={(event) => setTemplateEdit((current) => current ? { ...current, groupName: event.target.value } : current)} /></div>
             <div className={styles.field}><label htmlFor="studio-template-description">说明</label><textarea id="studio-template-description" disabled={templateEditBusy} value={templateEdit.description || ''} maxLength={500} onChange={(event) => setTemplateEdit((current) => current ? { ...current, description: event.target.value } : current)} /></div>
-            <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" disabled={templateEditBusy} value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>
+            {templateEdit.privateRecipe ? <PrivateDefinitionEditor userId={userId} moduleId={templateEdit.id}
+              dialog={templateEditDialogRef} open blocked={false} canRead={templateEdit.canReadPrivatePrompt === true}
+              needsIdentity={templateEdit.requiresIdentityVerification === true}
+              endpoint={`${API}/templates/${encodeURIComponent(templateEdit.id)}`} contextOnly label="固定要求" maxLength={5000} allowEmpty={false}
+              legacyDraftKey={templateRecoveryKey(userId, templateEdit.id)} beforeClose={beforePrivateTemplateClose}
+              onSaved={revision => {
+                setTemplateEdit(current => current ? { ...current, revision } : current);
+                setTemplates(current => current.map(item => item.id === templateEdit.id ? { ...item, revision } : item));
+                setTemplateDetail(current => current?.template.id === templateEdit.id ? { ...current, template: { ...current.template, revision } } : current);
+              }} /> : <div className={styles.field}><label htmlFor="studio-template-instruction">固定要求</label><textarea id="studio-template-instruction" disabled={templateEditBusy} value={templateEdit.recipe?.instruction || ''} maxLength={5000} onChange={(event) => setTemplateEdit((current) => current ? { ...current, recipe: { ...(current.recipe || { fields: [], assetSlots: [], defaultParameters: {} }), instruction: event.target.value } } : current)} /></div>}
             <span className={styles.fieldHint}>字段、素材槽位和推荐参数沿用当前配方；修改配方结构由现有模板维护权限控制。</span>
             <div className={styles.dialogFooter}><button className={styles.quietButton} type="button" disabled={templateEditBusy} onClick={closeTemplateEditor}>取消</button><button className={styles.primaryButton} type="button" disabled={templateEditBusy || Boolean(templateConflict?.id === templateEdit.id) || !templateEdit.name.trim()} onClick={() => void saveTemplateEdit()}>{templateEditBusy ? '保存中' : '保存模板草稿'}</button></div>
           </section>

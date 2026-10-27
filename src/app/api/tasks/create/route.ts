@@ -36,6 +36,10 @@ import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingR
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
 import { createTaskSnapshot } from '@/lib/assets/snapshot';
+import { randomUUID } from 'node:crypto';
+import { transformPrivateVideoText } from '@/lib/video/private-storage.server';
+import { assertPrivateSeedanceDestination } from '@/lib/provider/jimeng';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import {
   exceedsGenerationPromptLimit,
   GENERATION_PROMPT_LIMIT_MESSAGE,
@@ -750,7 +754,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'MULTIVIEW_PRIVATE_RETRY_UNAVAILABLE', message: '原任务的归属或冻结设置不完整，未恢复或重新提交。' },
         { status: 409, headers: privateNoStore() });
     }
-    trustedMultiviewSourceTask = original;
+    trustedMultiviewSourceTask = transformPrivateVideoText('video-task', original,
+      ['prompt', 'final_prompt_snapshot'], false, true);
     receivedBody = {
       provider: 'seedance', model: frozen.model, generation_mode: 'all_in_one_reference', ratio: frozen.ratio,
       duration: frozen.duration, resolution: frozen.resolution, seed: frozen.seed,
@@ -2033,6 +2038,7 @@ export async function POST(request: NextRequest) {
 
   // --- Create snapshot ---
   const content = requestedProvider === H3_VIDEO_PROVIDER ? [] : buildContentArray(providerInput);
+  if (multiviewGeneration) assertPrivateSeedanceDestination(selectedModel);
   const snapshot = await createTaskSnapshot({
     workspaceId,
     generationMode,
@@ -2226,7 +2232,8 @@ export async function POST(request: NextRequest) {
         }
       }
       const task = await tx.videoTask.create({
-        data: {
+        data: transformPrivateVideoText('video-task', {
+          id: randomUUID(),
           provider: requestedProvider,
           model: selectedModel,
           generation_mode: generationMode,
@@ -2279,7 +2286,7 @@ export async function POST(request: NextRequest) {
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify(taskParams),
-        },
+        }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)),
       });
 
       await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost,
@@ -2753,6 +2760,11 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof PrivatePromptError) {
+      await prisma.videoTask.updateMany({ where: { id: taskId, provider_task_id: null, local_status: 'submitted' },
+        data: { error_code: 'PRIVATE_PROMPT_UNCONFIRMED', error_message: '内部模板安全配置待核对，原请求及预留保留，请管理员核对；不会重新提交。' } });
+      return errorJson('内部模板安全配置待核对，原请求及预留已保留，请按原请求查询，不要重新提交。', 503);
+    }
     const providerFailureMessage = err instanceof Error
       ? err.message
       : requestedProvider === H3_VIDEO_PROVIDER ? 'H3 调用异常' : 'Seedance 调用异常';

@@ -6,6 +6,9 @@ export type SettingsValue = {
   context?: string;
   revision: number;
   contextConfigured?: boolean;
+  privateContext?: boolean;
+  canReadPrivatePrompt?: boolean;
+  requiresIdentityVerification?: boolean;
   taskSettingsProtocol?: 'task-settings-v2' | null;
   model?: ImageStudioModel;
   templateDefaults: StudioTemplateDefaults;
@@ -96,7 +99,9 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
     update({ draft, conflicts, status: conflicts.length ? '部分设置同时被修改，请核对差异' : '设置未保存' });
   };
   function validate(value: SettingsResponse): SettingsValue {
-    if (!value || !Number.isInteger(value.revision) || !value.prices || (isAdmin && typeof value.context !== 'string')) {
+    if (!value || !Number.isInteger(value.revision) || !value.prices
+      || (value.context !== undefined && typeof value.context !== 'string')
+      || (isAdmin && value.context === undefined && typeof value.privateContext !== 'boolean')) {
       throw new Error('通用设置未完整读取，请重试');
     }
     return { ...value, templateDefaults: value.templateDefaults === undefined
@@ -160,7 +165,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
       update({ draft, conflicts: state.conflicts.filter(item => item.field !== field), error: '', status: '已核对差异，修改尚未保存' });
     },
     editContext(context: string) {
-      if (!isAdmin || !state.draft || state.loading) return;
+      if (!isAdmin || !state.draft || state.loading || state.settings?.privateContext) return;
       edit({ ...state.draft, context });
     },
     editPrice(model: string, price: number | null) {
@@ -194,7 +199,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
       }
       cancelRead();
       const epoch = accountEpoch;
-      const contextChanged = state.draft.context !== state.settings.context;
+      const contextChanged = !state.settings.privateContext && state.draft.context !== (state.settings.context ?? '');
       const payload: SettingsWrite = { revision: state.settings.revision, prices: { ...state.draft.prices },
         templateDefaults,
         ...(contextChanged ? { context: state.draft.context, confirmContextClear: state.draft.context.trim().length === 0 } : {}) };
@@ -207,7 +212,7 @@ export function createStudioSettingsController(isAdmin: boolean, transport: Tran
         const savedValue = validate(saved);
         if (savedValue.revision <= baseline.revision) throw new Error('保存结果尚未确认，当前输入已保留，请重新读取核对');
         const value = { ...baseline, ...savedValue };
-        value.contextConfigured = Boolean(value.context?.trim());
+        if (value.context !== undefined) value.contextConfigured = Boolean(value.context.trim());
         const merged = mergeSettingsDraft({ ...baseline, ...submittedDraft }, state.draft!, value, []);
         update({ settings: value, saving: false, ...merged });
         update({ status: studioSettingsDirty(state) ? '有新的修改尚未保存' : '已保存' });

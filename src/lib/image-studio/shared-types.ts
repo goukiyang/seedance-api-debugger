@@ -156,6 +156,10 @@ export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioState
 };
 export type SharedStudioImageDTO = { id: string; originalUrl: string; thumbnailUrl: string; width: number | null; height: number | null };
 export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> & {
+  privateDefinition?: boolean;
+  canReadPrivatePrompt?: boolean;
+  canEditPrivatePrompt?: boolean;
+  requiresIdentityVerification?: boolean;
   deletion?: StudioDeletionCapability;
   intent: SharedStudioIntent;
   presetId: string;

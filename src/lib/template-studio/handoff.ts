@@ -1,4 +1,8 @@
 import { prisma } from '@/lib/prisma';
+import { randomUUID } from 'node:crypto';
+import { readPrivateVideoRecipe, videoTemplateOrigins, transformPrivateVideoRun } from './private-storage.server';
+import { transferPrivateOrigins } from '@/lib/security/private-prompt-fields.server';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import type { SessionUser } from '@/lib/auth/session';
 import { authorizeStudioAssets } from './assets';
 import { makeFingerprint, requireStudioUser } from './common';
@@ -8,12 +12,13 @@ import { normalizeRecipe, normalizePrompt, stableJson } from './validation';
 import { containsPrivateContext, publicRunSnapshot, visibleRunPrompt } from './projection';
 import type { StudioGenerationHandoff, StudioRunSnapshot } from './types';
 
-function readRunSnapshot(json: string): StudioRunSnapshot {
+function readRunSnapshot(json: string, id: string, draftId: string): StudioRunSnapshot {
   try {
     const snapshot = JSON.parse(json) as StudioRunSnapshot;
     if (!snapshot || typeof snapshot.prompt !== 'string' || !snapshot.owner || !Array.isArray(snapshot.assets) || !snapshot.parameters) throw new Error('invalid');
-    return snapshot;
-  } catch {
+    return transformPrivateVideoRun(snapshot, id, draftId, false);
+  } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     throw new StudioError('运行快照无法读取', 500, 'UNAVAILABLE');
   }
 }
@@ -33,11 +38,11 @@ export async function ensureStudioSnapshotSourceStillUsable(user: SessionUser, s
   await getStudioTemplate(user, ref.templateId, 'studio');
   if (ref.versionId) {
     const version = await prisma.videoStudioTemplateVersion.findFirst({ where: { id: ref.versionId, template_id: ref.templateId } });
-    if (!version || stableJson(normalizeRecipe(JSON.parse(version.recipe_json))) !== stableJson(snapshot.recipe)) {
+    if (!version || stableJson(readPrivateVideoRecipe(version.recipe_json, 'video-template-version', version.id, videoTemplateOrigins(current.id, current.owner_user_id))) !== stableJson(snapshot.recipe)) {
       throw new StudioError('模板版本不可用，请回工作台重新确认', 409, 'CONFLICT');
     }
   } else if ((ref.sourceRevision && ref.sourceRevision !== `studio:${current.revision}`)
-    || stableJson(normalizeRecipe(JSON.parse(current.recipe_json))) !== stableJson(snapshot.recipe)) {
+    || stableJson(readPrivateVideoRecipe(current.recipe_json, 'video-template', current.id, videoTemplateOrigins(current.id, current.owner_user_id))) !== stableJson(snapshot.recipe)) {
     throw new StudioError('模板内容已变化，请回工作台重新确认', 409, 'CONFLICT');
   }
   return null;
@@ -48,7 +53,7 @@ export async function authorizeStudioRunForGeneration(user: SessionUser, runId: 
   const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
   if (!run) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
   if (run.status !== 'succeeded') throw new StudioError('只有已完成的运行记录可以提交生成', 409, 'CONFLICT');
-  const snapshot = readRunSnapshot(run.snapshot_json);
+  const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
   const legacyTemplateId = await ensureStudioSnapshotSourceStillUsable(user, snapshot);
   await authorizeStudioAssets(user, snapshot.assets);
   const prompt = visibleRunPrompt(run);
@@ -76,7 +81,7 @@ export async function saveStudioFinalText(user: SessionUser, runId: string, inpu
   const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
   if (!run) throw new StudioError('记录不存在或无权访问', 404, 'NOT_FOUND');
   if (run.status !== 'succeeded') throw new StudioError('请等待文案完成后再继续', 409, 'CONFLICT');
-  const snapshot = readRunSnapshot(run.snapshot_json);
+  const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
   await ensureStudioSnapshotSourceStillUsable(user, snapshot);
   await authorizeStudioAssets(user, snapshot.assets);
   if (containsPrivateContext(prompt, snapshot)) throw new StudioError('文案疑似包含内部规则，不能带到视频生成', 400, 'INVALID');
@@ -85,13 +90,17 @@ export async function saveStudioFinalText(user: SessionUser, runId: string, inpu
   // An immutable, idempotent revision retains the original run and makes all downstream consumers use the final text.
   const finalSnapshot: StudioRunSnapshot = { ...snapshot, sourceRunId: run.id, prompt,
     privateContext: snapshot.privateContext || { global: '', module: snapshot.recipe?.instruction || '', globalRevision: 0, moduleRevision: 0 } };
+  transferPrivateOrigins(snapshot, finalSnapshot, ['global', 'module', 'instruction']);
+  const id = randomUUID();
   const revision = await prisma.videoStudioRun.upsert({
     where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } },
     update: {},
     create: {
+      id,
       owner_user_id: user.id, draft_id: run.draft_id, draft_revision: run.draft_revision,
       request_id: requestId, request_fingerprint: fingerprint, source: run.source, mode: 'direct',
-      status: 'succeeded', delivery_state: 'not_sent', prompt, snapshot_json: JSON.stringify(finalSnapshot), completed_at: new Date(),
+      status: 'succeeded', delivery_state: 'not_sent', prompt,
+      snapshot_json: JSON.stringify(transformPrivateVideoRun(finalSnapshot, id, run.draft_id, true)), completed_at: new Date(),
     },
   });
   return { runId: revision.id, sourceRunId: run.id };

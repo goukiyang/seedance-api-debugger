@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { readPrivateCredential, writePrivateCredential } from '@/lib/security/private-credentials.server';
+import { isPrivatePromptError, isStoredPrivatePrompt, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { assertPrivateSend, privatePromptFetch, privateCredentialSendOrigins } from '@/lib/security/private-prompt-send.server';
 
 export const MUSK_API_SETTING_KEY = 'musk_api_v1';
 
@@ -46,6 +49,7 @@ export function normalizeMuskApiSettings(value: unknown): MuskApiSettings {
   const input = value && typeof value === 'object'
     ? value as Partial<MuskApiSettings>
     : {};
+  if (isStoredPrivatePrompt(input.api_key)) throw new PrivatePromptError();
 
   return {
     enabled: input.enabled === true,
@@ -61,11 +65,8 @@ export async function getMuskApiSettings(
   const setting = await client.platformSetting.findUnique({ where: { key: MUSK_API_SETTING_KEY } });
   if (!setting) return DEFAULT_MUSK_API_SETTINGS;
 
-  try {
-    return normalizeMuskApiSettings(JSON.parse(setting.value_json));
-  } catch {
-    return DEFAULT_MUSK_API_SETTINGS;
-  }
+  const stored = JSON.parse(setting.value_json);
+  return normalizeMuskApiSettings({ ...stored, api_key: readPrivateCredential(stored.api_key ?? null, MUSK_API_SETTING_KEY, 'api_key') });
 }
 
 export function buildMuskApiSettingsPatch(
@@ -98,16 +99,17 @@ export async function saveMuskApiSettings(
 ) {
   const current = await getMuskApiSettings();
   const settings = buildMuskApiSettingsPatch(current, input);
+  const storedSettings = { ...settings, api_key: writePrivateCredential(settings.api_key, MUSK_API_SETTING_KEY, 'api_key') };
 
   await prisma.platformSetting.upsert({
     where: { key: MUSK_API_SETTING_KEY },
     update: {
-      value_json: JSON.stringify(settings),
+      value_json: JSON.stringify(storedSettings),
       updated_by: updatedBy,
     },
     create: {
       key: MUSK_API_SETTING_KEY,
-      value_json: JSON.stringify(settings),
+      value_json: JSON.stringify(storedSettings),
       updated_by: updatedBy,
     },
   });
@@ -136,6 +138,11 @@ function buildChatCompletionsUrl(baseUrl: string) {
   if (path.endsWith('/chat/completions')) return url.toString();
   url.pathname = path.endsWith('/v1') ? `${path}/chat/completions` : `${path}/v1/chat/completions`;
   return url.toString();
+}
+export function assertPrivateMuskSend(settings: MuskApiSettings, origins: PrivateOrigin[]) {
+  origins = privateCredentialSendOrigins(origins);
+  if (origins.length) assertPrivateSend({ endpoint: buildChatCompletionsUrl(settings.base_url), provider: 'musk',
+    credential: settings.api_key || '', model: settings.default_model }, origins);
 }
 
 export type MuskChatMessage = {
@@ -167,6 +174,7 @@ export async function createMuskChatCompletion(params: {
   temperature?: number;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  privateOrigins?: PrivateOrigin[];
 }): Promise<MuskChatCompletionResult> {
   if (!isMuskApiReady(params.settings)) {
     throw new MuskApiError('Musk API 未启用或缺少 API Key', 503, 'musk_api_not_configured');
@@ -182,7 +190,8 @@ export async function createMuskChatCompletion(params: {
   const timeout = setTimeout(() => controller.abort(), diagnostics.timeoutMs);
 
   try {
-    const response = await (params.fetchImpl || fetch)(buildChatCompletionsUrl(params.settings.base_url), {
+    const endpoint = buildChatCompletionsUrl(params.settings.base_url);
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -190,7 +199,11 @@ export async function createMuskChatCompletion(params: {
       },
       body,
       signal: controller.signal,
-    });
+    };
+    const origins = privateCredentialSendOrigins(params.privateOrigins);
+    const response = origins.length
+      ? await privatePromptFetch({ endpoint, provider: 'musk', credential: params.settings.api_key || '', model: params.settings.default_model }, origins, init, params.fetchImpl || fetch)
+      : await (params.fetchImpl || fetch)(endpoint, init);
     diagnostics.headersMs = Date.now() - started;
     diagnostics.httpStatus = response.status;
     diagnostics.upstreamRequestId = safeMuskRequestId(response.headers.get('x-request-id') || response.headers.get('request-id'));
@@ -230,6 +243,7 @@ export async function createMuskChatCompletion(params: {
       diagnostics,
     };
   } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     diagnostics.elapsedMs = Date.now() - started;
     const code = (error as { cause?: { code?: unknown }; code?: unknown })?.cause?.code
       || (error as { code?: unknown })?.code;

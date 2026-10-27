@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readPrivateStudioDefinition, transformPrivateImageTask } from './private-storage.server';
+import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { compileCanvasPromptReferences, parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
@@ -45,7 +47,7 @@ import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
 import { isAvatarSheet, validateSheetCandidates } from '@/lib/avatar-random/layout';
 import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
 import { studioTemplateTaskWhere } from './task-visibility';
-import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, type SkillSnapshot } from './skills';
+import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, publicSkillVersion, publicSkillSnapshot, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
@@ -136,12 +138,12 @@ export async function resolveStudioTaskRestoredSettings(actor: ImageStudioIdenti
   if (!moduleId) throw new StudioError('请在原模板中恢复生成设置', 409);
   const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id }, select: { source_preset_id: true } });
   if (!workspace && moduleId !== defaultStudioModuleId(actor.id)) throw new StudioError('当前模板不存在或无权使用', 403);
-  const source = await tx.imageStudioTask.findFirst({ where: { id: input.restoredSettings.sourceTaskId, owner_id: actor.id, deleted_at: null },
-    select: { id: true, module_id: true, source_preset_id: true, snapshot_json: true } });
-  if (!source?.snapshot_json) throw new StudioError('原记录不存在、已删除或无权使用，请重新选择记录', 403);
+  const storedSource = await tx.imageStudioTask.findFirst({ where: { id: input.restoredSettings.sourceTaskId, owner_id: actor.id, deleted_at: null } });
+  if (!storedSource?.snapshot_json) throw new StudioError('原记录不存在、已删除或无权使用，请重新选择记录', 403);
+  const source = transformPrivateImageTask(storedSource, false);
   let snapshot: Record<string, unknown>;
   try {
-    const parsed: unknown = JSON.parse(source.snapshot_json);
+    const parsed: unknown = JSON.parse(source.snapshot_json!);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
     snapshot = parsed as Record<string, unknown>;
   } catch { throw new StudioError('原记录没有完整恢复设置，请使用当前模板', 409); }
@@ -513,7 +515,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
     const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds) : new Map<string, string>();
     if (canvasUse && (canvasReferenceOwners.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasReferenceOwners.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
-    const workspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
+    const storedWorkspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
+    const workspace = storedWorkspace ? readPrivateStudioDefinition('image-module', storedWorkspace) : null;
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
     const sharedUse = await resolveStudioTaskSharedUse(identity, typeof moduleId === 'string' ? moduleId : undefined, input.sharedLive, tx);
     if (sharedUse) {
@@ -688,7 +691,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let skills: SkillSnapshot[] = [];
     const referenceIds = input.referenceIds;
     if (reproduceFromTaskId) {
-      const source = restored?.source ?? await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId }, select: { source_preset_id: true, snapshot_json: true } });
+      const storedSource = restored?.source ?? await tx.imageStudioTask.findFirst({ where: { id: reproduceFromTaskId, owner_id: ownerId } });
+      const source = storedSource ? transformPrivateImageTask(storedSource, false) : null;
       if (!source?.snapshot_json) throw new StudioError('历史记录缺少可恢复上下文，请按当前模块重新生成', 409);
       try {
         const sourceSnapshot = JSON.parse(source.snapshot_json) as Record<string, unknown>;
@@ -834,7 +838,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw new StudioError('原记录的提示词组不完整，请重新选择本次提示词组', 409);
       }
     }
-    if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== skill.promptVersion)) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
+    if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== publicSkillVersion(skill))) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
     if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
     else if (sharedDefinition && !restored) {
       const primaryIds = input.draft?.referencePolicy?.primaryIds ?? input.referenceIds;
@@ -1111,9 +1115,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       };
-      if (preparation) await preparation.save(tx, taskData);
+      const protectedTaskData = transformPrivateImageTask({ ...taskData, id, owner_id: ownerId,
+        prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true);
+      if (preparation) await preparation.save(tx, protectedTaskData);
       else {
-        const created = await tx.imageStudioTask.create({ data: taskData });
+        const created = await tx.imageStudioTask.create({ data: protectedTaskData });
         if (roleMedia && roleMedia.context && typeof roleMedia.context === 'object' && 'runId' in roleMedia.context) {
           await inheritUsageAttribution(tx, { sourceKind: 'image_task', sourceId: created.id,
             actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
@@ -1222,7 +1228,7 @@ export async function claimStudioTask() {
       if (isPricingImageTask(row)) {
         try { await assertPricingImageConsumerReady(prisma); } catch { continue; }
       }
-      try { assertFrozenSharedStudioTask(row); }
+      try { assertFrozenSharedStudioTask(transformPrivateImageTask(row, false)); }
       catch {
         const message = '任务快照或共享模板协议无法确认；原任务与费用预留保留，请管理员核对，未请求生成';
         if (row.error !== message) await prisma.imageStudioTask.updateMany({ where: { id: row.id, status: row.status }, data: { error: message } });
@@ -1377,7 +1383,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
     owner: ownerById.get(task.owner_id) || null,
     moduleId: task.module_id,
     ordinal: task.ordinal,
-    prompt: task.prompt,
+    prompt: publicStudioSnapshot(task, new Map(), false, task.owner_id).prompt,
     model: task.model,
     status: publicImageTaskStatus(task.status),
     deletedAt: task.deleted_at,
@@ -1394,9 +1400,14 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string) {
+export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
+  const protectedModule = Boolean(typeof parsed.sourcePresetId === 'string' && privateOrigin('image-preset', parsed.sourcePresetId)
+    || typeof parsed.moduleId === 'string' && privateOrigin('image-module', parsed.moduleId));
+  const protectedGlobal = Boolean(privateOrigin('image-global', 'gpt_image_studio_v1'));
+  const publicText = (value: unknown, protectedField: boolean) => !protectedField && typeof value === 'string'
+    && !isStoredPrivatePrompt(value) ? value : '';
   const fallbackReferences = (() => {
     try { return (JSON.parse(task.reference_ids) as string[]).map(id => { const asset = assets.get(id); return { id, originalUrl: asset ? studioTemplateAssetUrl(id) : null, thumbnailUrl: asset ? studioTemplateAssetUrl(id, true) : null, width: asset?.width || null, height: asset?.height || null }; }); }
     catch { return []; }
@@ -1480,13 +1491,14 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     ...(taskSettings ? { taskSettings } : {}),
     ...personalPromptProjection,
     ...(restoredSettings ? { restoredSettings } : {}),
-    ...(isAdmin && sharedLive && typeof parsed.templatePrompt === 'string' ? { templatePrompt: parsed.templatePrompt } : {}),
+    ...(isAdmin && sharedLive ? { templatePrompt: publicText(parsed.templatePrompt, protectedModule) } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),
-    prompt: personalPromptProjection.personalPrompt ?? (hasSharedStudioPrompt(parsed) ? '' : typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt),
-    skills: Array.isArray(parsed.skills) ? parsed.skills.filter(skill => skill && typeof skill === 'object'
-      && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string') : [],
+    prompt: personalPromptProjection.personalPrompt ?? (hasSharedStudioPrompt(parsed) ? '' : publicText(typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt, protectedModule)),
+    skills: Array.isArray(parsed.skills) ? parsed.skills.flatMap((skill, index) => skill && typeof skill === 'object'
+      && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string'
+      ? [publicSkillSnapshot(skill, task.id, index)] : []) : [],
     evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))
       ? { direction: (parsed.evolution as Record<string, unknown>).direction, manual: (parsed.evolution as Record<string, unknown>).manual === true } : null,
     model: typeof parsed.model === 'string' ? parsed.model : task.model,
@@ -1497,8 +1509,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'snapshot_json'
     aspectRatioSource: typeof parsed.aspectRatioSource === 'string' ? parsed.aspectRatioSource : 'model-default',
     resolution: typeof parsed.resolution === 'string' ? parsed.resolution : null,
     outputSize: typeof parsed.outputSize === 'string' ? parsed.outputSize : task.output_size,
-    globalContext: isAdmin && typeof parsed.globalContext === 'string' ? parsed.globalContext : '',
-    moduleContext: isAdmin && typeof parsed.moduleContext === 'string' ? parsed.moduleContext : '',
+    globalContext: isAdmin ? publicText(parsed.globalContext, protectedGlobal) : '',
+    moduleContext: isAdmin ? publicText(parsed.moduleContext, protectedModule) : '',
     unitCredits,
     sourceAvailable,
     contextAvailable: typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',

@@ -1,4 +1,6 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
+import { PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { assertPrivateSend, privatePromptFetch, privateCredentialSendOrigins } from '@/lib/security/private-prompt-send.server';
 import { readStudioImage, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
 import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
@@ -243,9 +245,29 @@ export async function requestStudioImages(params: Parameters<typeof requestStudi
   catch (error) { diagnostics.failure(error); throw error; }
   finally { await diagnostics.flush(); }
 }
+type PrivateStudioDestination = { baseUrl: string; apiKey: string; model: string; upstreamModel?: string;
+  provider?: 'musk' | 'ai_media_vip'; protocol?: ImageGenerationChannelProtocol; images: unknown[]; privateOrigins?: PrivateOrigin[] };
+export function studioProviderEndpoint(params: PrivateStudioDestination) {
+  const url = new URL(params.baseUrl);
+  if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
+    const base = url.pathname.replace(/\/$/, '').replace(/\/v1$/, '').replace(/\/v1beta$/, '');
+    url.pathname = `${base}/v1beta/models/${encodeURIComponent(params.upstreamModel || params.model)}:generateContent`;
+  } else {
+    const base = url.pathname.replace(/\/$/, '').replace(/\/v1(?:\/images\/(?:generations|edits))?$/, '');
+    url.pathname = `${base}/v1/images/${params.images.length ? 'edits' : 'generations'}`;
+  }
+  return url;
+}
+export function assertPrivateStudioDestination(params: PrivateStudioDestination) {
+  const origins = privateCredentialSendOrigins(params.privateOrigins);
+  if (origins.length) assertPrivateSend({ endpoint: studioProviderEndpoint(params).href,
+    provider: params.provider || 'musk', credential: params.apiKey, model: params.upstreamModel || params.model }, origins);
+}
+
 async function requestStudioImagesImplementation(params: {
   baseUrl: string; apiKey: string; model: string; prompt: string;
   upstreamModel?: string;
+  privateOrigins?: PrivateOrigin[];
   provider?: 'musk' | 'ai_media_vip';
   protocol?: ImageGenerationChannelProtocol;
   idempotencyKey?: string;
@@ -281,14 +303,28 @@ async function requestStudioImagesImplementation(params: {
   if (params.size && params.protocol !== 'gemini_native' && (params.protocol === 'openai_images' || !isGeminiImageModel(params.model) || params.provider === 'ai_media_vip') && !isValidImageDimension(params.size, allowFourToOne)) {
     throw new Error('生成尺寸无效');
   }
-  const transport: typeof fetch = params.protocol && fetcher === fetch ? fetchPinnedApi as typeof fetch : fetcher;
+  const baseTransport: typeof fetch = params.protocol && fetcher === fetch
+    ? (input, init) => fetchPinnedApi(new URL(input instanceof Request ? input.url : String(input)), init || {})
+    : fetcher;
+  const protectedOrigins = privateCredentialSendOrigins(params.privateOrigins);
+  if (protectedOrigins.length) assertPrivateStudioDestination(params);
+  const transport: typeof fetch = async (input, init) => {
+    if (!protectedOrigins.length) return baseTransport(input, init);
+    if (init?.method !== 'POST') {
+      const target = new URL(input instanceof Request ? input.url : String(input));
+      if (target.origin !== studioProviderEndpoint(params).origin || target.username || target.password) throw new PrivatePromptError();
+      return baseTransport(input, { ...init, redirect: 'error' });
+    }
+    return privatePromptFetch({ endpoint: input instanceof Request ? input.url : String(input),
+      provider: params.provider || 'musk', credential: params.apiKey, model: params.upstreamModel || params.model },
+    protectedOrigins, init, baseTransport);
+  };
   if (params.protocol === 'gemini_native' || !params.protocol && params.provider !== 'ai_media_vip' && GEMINI_IMAGE_MODELS.has(params.model)) {
     if (params.resumeAsync) throw new StudioProviderError('request', 'gemini_async_not_supported');
     return requestGeminiStudioImages(standardRatioContract ? { ...params, ratio: requestRatio === 'auto' ? undefined : requestRatio } : params, transport, readImage, diagnostics);
   }
-  const url = new URL(params.baseUrl);
-  const basePath = url.pathname.replace(/\/$/, '').replace(/\/v1(?:\/images\/(?:generations|edits))?$/, '');
-  url.pathname = `${basePath}/v1/images/${params.images.length ? 'edits' : 'generations'}`;
+  const url = studioProviderEndpoint(params);
+  const basePath = url.pathname.replace(/\/v1\/images\/(?:generations|edits)$/, '');
   const headers: Record<string, string> = { Authorization: `Bearer ${params.apiKey}` };
   if (params.idempotencyKey) {
     if (!/^[a-zA-Z0-9_-]{1,200}$/.test(params.idempotencyKey)) throw new StudioProviderError('request', 'invalid_idempotency_key');
@@ -324,7 +360,7 @@ async function requestStudioImagesImplementation(params: {
       size: serialized.size, ratio: serialized.ratio, n: serialized.n, referenceCount: params.images.length }));
     diagnostics.phase('initial_request');
     try { response = await transport(url, { method: 'POST', headers, body, signal: params.signal, redirect: params.protocol ? 'error' : 'follow' }); }
-    catch { throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
+    catch (error) { if (error instanceof PrivatePromptError) throw error; throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
     await params.recordResponse?.(response);
     diagnostics.phase('initial_request', response.status);
     if (!response.ok) { const observed = await readProviderErrorBody(response, params.signal);
@@ -507,7 +543,8 @@ async function requestGeminiStudioImages(params: {
       signal: params.signal,
       redirect: params.protocol ? 'error' : 'follow',
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof PrivatePromptError) throw error;
     throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network');
   }
   await params.recordResponse?.(response);

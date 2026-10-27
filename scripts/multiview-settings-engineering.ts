@@ -178,7 +178,7 @@ async function main() {
     assert.ok(!JSON.stringify(body).includes(syntheticPrompt));
     assert.ok(!JSON.stringify(body).includes(guideSha256));
     const frozen = JSON.stringify(body);
-    await presets.saveMultiviewRotationPreset({ mutationId: randomUUID(), expectedRevision: 0, prompt: '合成新的全局旋转基准 @图片1' }, 'settings-admin');
+    await withActor('settings-admin', () => presets.saveMultiviewRotationPreset({ mutationId: randomUUID(), expectedRevision: 0, prompt: '合成新的全局旋转基准 @图片1' }, 'settings-admin'));
     await withActor('settings-peer', async user => {
       const original = await service.resolveMultiviewGenerationSettings(user, value.presetVersion, binding);
       assert.equal(original.preset.prompt, syntheticPrompt);

@@ -53,7 +53,7 @@ export function watchSessionExit(onExit: (reason: SessionBoundaryReason) => void
   try { latest = parseClientSessionEvent(localStorage.getItem(key))?.eventId || null; } catch { /* Storage is optional. */ }
   const receive = (value: unknown) => {
     const event = parseClientSessionEvent(value);
-    if (!event || event.eventId === latest || blocked) return;
+    if (!event || event.eventId === latest) return;
     latest = event.eventId;
     blocked = true;
     onExit(event.reason);

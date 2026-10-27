@@ -1,3 +1,4 @@
+import './server-runtime.cjs';
 import { loadEnvConfig } from '@next/env';
 
 async function main() {

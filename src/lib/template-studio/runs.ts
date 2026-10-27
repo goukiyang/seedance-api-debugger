@@ -1,4 +1,9 @@
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { readTemplateSnapshot } from './drafts';
+import { transformPrivateVideoRun, privateVideoRunOrigins } from './private-storage.server';
+import { isPrivatePromptError, privatePromptState, writePrivatePrompt } from '@/lib/security/private-prompts.server';
+import { assertPrivateMuskSend, getMuskApiSettings } from '@/lib/integrations/musk';
 import { prisma } from '@/lib/prisma';
 import { assertUsageProject, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import type { SessionUser } from '@/lib/auth/session';
@@ -33,7 +38,8 @@ import type {
 type RunWithOwner = Prisma.VideoStudioRunGetPayload<{ include: { owner: { select: { id: true; username: true; name: true; account_type: true } } } }>;
 
 function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; model?: string | null; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
-  const snapshot = decodeSnapshot(row.snapshot_json);
+  // This response exposes metadata and media, never an execution-ready private snapshot.
+  const snapshot = JSON.parse(row.snapshot_json) as StudioRunSnapshot;
   const owner = snapshot.owner;
   return {
     llmModel: snapshot.llmModel || row.model || null,
@@ -58,11 +64,12 @@ function draftSnapshot(row: any, user: SessionUser, mode: 'direct' | 'llm'): Stu
   let recipe: StudioRunSnapshot['recipe'] = null;
   if (row.template_snapshot_json) {
     try {
-      const data = JSON.parse(row.template_snapshot_json) as { ref?: StudioRunSnapshot['templateVersion']; recipe?: StudioRunSnapshot['recipe'] };
-      if (!data.ref || !data.recipe) throw new Error('invalid');
+      const data = readTemplateSnapshot(row.template_snapshot_json, row.id);
+      if (!data?.ref || !data.recipe) throw new Error('invalid');
       template = data.ref;
       recipe = data.recipe;
-    } catch {
+    } catch (error) {
+      if (isPrivatePromptError(error)) throw error;
       throw new StudioError('草稿模板快照无法读取', 500, 'UNAVAILABLE');
     }
   }
@@ -86,12 +93,13 @@ function draftSnapshot(row: any, user: SessionUser, mode: 'direct' | 'llm'): Stu
   };
 }
 
-function decodeSnapshot(json: string): StudioRunSnapshot {
+function decodeSnapshot(json: string, id: string, draftId: string): StudioRunSnapshot {
   try {
     const value = JSON.parse(json) as StudioRunSnapshot;
     if (!value || typeof value.prompt !== 'string' || !value.input || !value.owner || !Array.isArray(value.assets)) throw new Error('invalid');
-    return value;
-  } catch {
+    return transformPrivateVideoRun(value, id, draftId, false);
+  } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     throw new StudioError('运行快照无法读取', 500, 'UNAVAILABLE');
   }
 }
@@ -115,11 +123,11 @@ function responseStatus(run: { mode: string; status: string }) {
   return run.mode === 'llm' && (run.status === 'queued' || run.status === 'running') ? 202 : 200;
 }
 
-function assertIdempotentSemantics(run: { draft_id: string; draft_revision: number; mode: string; snapshot_json: string; model: string | null }, input: CreateStudioRunRequest) {
+function assertIdempotentSemantics(run: { id: string; draft_id: string; draft_revision: number; mode: string; snapshot_json: string; model: string | null }, input: CreateStudioRunRequest) {
   if (run.draft_id !== input.draftId || run.draft_revision !== input.revision || run.mode !== input.mode) {
     throw new StudioError('requestId 已用于不同的草稿修订或运行模式', 409, 'CONFLICT');
   }
-  if (input.llmModel !== undefined && input.llmModel !== (decodeSnapshot(run.snapshot_json).llmModel || run.model)) {
+  if (input.llmModel !== undefined && input.llmModel !== (decodeSnapshot(run.snapshot_json, run.id, run.draft_id).llmModel || run.model)) {
     throw new StudioError('这次请求已使用另一个文案模型，请先查看原记录，不要重复提交', 409, 'CONFLICT');
   }
 }
@@ -236,6 +244,10 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
     const capabilities = await getStudioCapabilities(user);
     if (!capabilities.llmEnabled) throw new StudioError(capabilities.llmReason || 'AI 整理当前不可用', 503, 'UNAVAILABLE');
     snapshot.llmModel = input.llmModel ?? capabilities.defaultLlmModel;
+    const settings = { ...await getMuskApiSettings(), default_model: snapshot.llmModel };
+    const origins = privateVideoRunOrigins(snapshot, draft.id);
+    assertPrivateMuskSend(settings, origins);
+    if (origins.length && !['legacy-read', 'compatible-read'].includes(privatePromptState())) snapshot.privateProvider = { kind: 'musk', settings };
   }
   const fingerprint = makeFingerprint({ draftId: input.draftId, revision: input.revision, mode: input.mode, snapshot });
 
@@ -256,20 +268,24 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
       }
       const projectId = parseUsageProjectId(snapshot.parameters.project_id) ?? null;
       await assertUsageProject(tx, user, projectId);
+      const id = randomUUID();
+      const storedSnapshot = transformPrivateVideoRun(snapshot, id, draft.id, true);
+      const origins = privateVideoRunOrigins(transformPrivateVideoRun(storedSnapshot, id, draft.id, false));
       const result = await tx.videoStudioRun.create({
         data: {
+          id,
           owner_user_id: user.id,
           draft_id: draft.id,
           draft_revision: input.revision,
           request_id: requestId,
-          request_fingerprint: fingerprint,
+          request_fingerprint: writePrivatePrompt(fingerprint, origins.length ? { kind: 'video-run', id, field: 'request_fingerprint', origins } : null),
           source: draft.template_source,
           mode: input.mode,
           model: snapshot.llmModel || null,
           status: input.mode === 'direct' ? 'succeeded' : 'queued',
           delivery_state: input.mode === 'direct' ? 'not_sent' : 'not_sent',
           prompt: input.mode === 'direct' ? snapshot.prompt : null,
-          snapshot_json: JSON.stringify(snapshot),
+          snapshot_json: JSON.stringify(storedSnapshot),
           completed_at: input.mode === 'direct' ? new Date() : null,
         },
       });
@@ -320,7 +336,7 @@ export async function listStudioRuns(user: SessionUser, query: StudioRunListQuer
 export async function getStudioRun(user: SessionUser, id: string): Promise<StudioRunDetailResponse> {
   const row = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id } });
   if (!row) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
-  const snapshot = decodeSnapshot(row.snapshot_json);
+  const snapshot = JSON.parse(row.snapshot_json) as StudioRunSnapshot;
   const tasks = await prisma.videoTask.findMany({
     where: { template_studio_run_id: id, owner_user_id: user.id },
     select: { id: true, local_status: true, delivery_status: true, created_at: true, result_video_url: true, public_video_url: true, local_video_path: true, result_last_frame_url: true },
@@ -361,8 +377,8 @@ export async function loadQueuedStudioRun(id: string): Promise<RunWithOwner | nu
   return prisma.videoStudioRun.findUnique({ where: { id }, include: { owner: { select: { id: true, username: true, name: true, account_type: true } } } });
 }
 
-export function parseWorkerSnapshot(json: string) {
-  return decodeSnapshot(json);
+export function parseWorkerSnapshot(json: string, id: string, draftId: string) {
+  return decodeSnapshot(json, id, draftId);
 }
 
 export function workerSafeUsage(usage: unknown) {

@@ -5,6 +5,10 @@ import { isSeedanceVideoDuration, isSeedanceVideoModelId } from '@/lib/provider/
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { MULTIVIEW_PRIVATE_MEDIA_ACCESS_PREFIX } from './multiview-recipe-storage.server';
+import { privateOrigin, isPrivatePromptError } from '@/lib/security/private-prompts.server';
+import { privateFieldBinding, readPrivateFields, writePrivateFields } from '@/lib/security/private-prompt-fields.server';
+import { readPrivatePrompt, writePrivatePrompt } from '@/lib/security/private-prompts.server';
+import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import { composeMultiviewGenerationPrompt, isMultiviewGenerationSeed, isMultiviewPresetVersion, MULTIVIEW_ROTATION_PRESET,
   publicMultiviewRotationPreset,
   type MultiviewRotationPreset, type MultiviewRotationPresetState,
@@ -20,6 +24,24 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 const receiptId = (actorId: string, mutationId: string) => `multiview-preset-save-${digest(JSON.stringify([actorId, mutationId]))}`;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const only = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).every(key => keys.includes(key));
+export function multiviewPrivateOrigins() {
+  const origin = privateOrigin('multiview-preset', MULTIVIEW_ROTATION_PRESET.id);
+  return origin ? [origin] : [];
+}
+function storedPreset(preset: MultiviewRotationPreset) {
+  return writePrivateFields(preset, 'multiview-preset-version', `${preset.id}:${preset.version}`,
+    [{ field: 'prompt', origins: multiviewPrivateOrigins() }]);
+}
+function readPreset(preset: Record<string, unknown>) {
+  if (preset.id !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(preset.version)) throw unreadable();
+  return readPrivateFields(preset, 'multiview-preset-version', `${preset.id}:${preset.version}`,
+    [{ field: 'prompt', origins: multiviewPrivateOrigins() }]);
+}
+function receiptHash(raw: string, actorId: string, mutationId: string, write = false) {
+  const origins = multiviewPrivateOrigins(), id = receiptId(actorId, mutationId);
+  return write ? writePrivatePrompt(raw, origins.length ? { kind: 'multiview-receipt', id, field: 'requestHash', origins } : null)
+    : readPrivatePrompt(raw, privateFieldBinding(raw, 'multiview-receipt', id, 'requestHash', origins));
+}
 
 export type MultiviewPrivateRecipeInstallInput = {
   sourceTaskId: string;
@@ -51,11 +73,11 @@ const unreadable = () => new MultiviewPresetError('模板提示词暂时无法�
 export const MULTIVIEW_PRESET_CHANGED_MESSAGE = '模板提示词已更新，原输入已保留；请重新读取当前模板并确认报价后再生成。';
 const changed = () => new MultiviewPresetError(MULTIVIEW_PRESET_CHANGED_MESSAGE, 409, 'MULTIVIEW_PRESET_CHANGED');
 
-function parseState(raw: string): MultiviewRotationPresetState {
+function parseState(raw: string, stored = true): MultiviewRotationPresetState {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { throw unreadable(); }
   if (!record(value) || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !record(value.preset)) throw unreadable();
-  const revision = Number(value.revision), preset = value.preset;
+  const revision = Number(value.revision), preset = stored ? readPreset(value.preset) : value.preset;
   if (!only(preset, ['id', 'version', 'prompt', 'defaults', 'compositionReference'])
     || preset.id !== MULTIVIEW_ROTATION_PRESET.id || !isMultiviewPresetVersion(preset.version)
     || preset.version !== `1.0.${revision}` || typeof preset.prompt !== 'string' || !preset.prompt.trim()
@@ -95,6 +117,8 @@ async function readCurrent(db: Db) {
   const row = await db.platformSetting.findUnique({ where: { key: CURRENT_KEY }, select: { value_json: true } });
   if (!row) throw unreadable();
   const state = parseState(row.value_json);
+  const immutableRow = await db.platformSetting.findUnique({ where: { key: VERSION_KEY_PREFIX + state.preset.version }, select: { value_json: true } });
+  if (!immutableRow || JSON.stringify(JSON.parse(immutableRow.value_json).preset) !== JSON.stringify(JSON.parse(row.value_json).preset)) throw unreadable();
   const immutable = await readMultiviewRotationPresetVersion(state.preset.version, db);
   if (JSON.stringify(immutable) !== JSON.stringify(state.preset)) throw unreadable();
   return { state, raw: row.value_json };
@@ -139,7 +163,7 @@ function installRequest(input: MultiviewPrivateRecipeInstallInput) {
   if (!Number.isSafeInteger(revision)) throw new MultiviewPresetError('模板版本已到上限，本次未安装。', 409);
   const preset: MultiviewRotationPreset = { id: MULTIVIEW_ROTATION_PRESET.id, version: `1.0.${revision}`,
     prompt: input.prompt, defaults: { ...input.defaults }, compositionReference: { ...input.compositionReference } };
-  const state = parseState(JSON.stringify({ revision, preset }));
+  const state = parseState(JSON.stringify({ revision, preset }), false);
   const requestHash = digest(JSON.stringify({ schema: PRIVATE_INSTALL_SCHEMA, sourceTaskId: input.sourceTaskId,
     expectedRevision: input.expectedRevision, mutationId: input.mutationId, expectedPromptSha256: input.expectedPromptSha256,
     defaults: state.preset.defaults, compositionReference: state.preset.compositionReference, guide: input.guide }));
@@ -174,7 +198,9 @@ async function readPrivateInstallReceipt(actorId: string, mutationId: string, db
   try { detail = JSON.parse(row.detail || '{}'); } catch { throw unreadable(); }
   if (row.operator_id !== actorId || row.action !== SAVE_ACTION || row.target_type !== 'MultiviewRotationPreset'
     || row.target_id !== MULTIVIEW_ROTATION_PRESET.id || !record(detail) || !record(detail.install)) throw unreadable();
-  const install = detail.install;
+  const install = { ...detail.install };
+  if (typeof install.requestHash !== 'string') throw unreadable();
+  install.requestHash = receiptHash(install.requestHash, actorId, mutationId);
   if (!only(install, ['schema', 'state', 'mutationId', 'revision', 'version', 'requestHash', 'activatedAt', 'activationCreated', 'sourceTaskMatched', 'guideMatched'])
     || install.schema !== PRIVATE_INSTALL_SCHEMA || install.state !== 'installed' || install.mutationId !== mutationId
     || !Number.isSafeInteger(install.revision) || Number(install.revision) < 1 || install.version !== `1.0.${Number(install.revision)}`
@@ -259,7 +285,8 @@ export async function installMultiviewPrivateRecipe(input: MultiviewPrivateRecip
       const accessValue = JSON.stringify({ schema: 1, kind: 'system-reference', assetId: binding.assetId,
         ownerId: binding.ownerId, sha256: binding.sha256, urls: Array.from(protectedUrls).sort() });
       const activatedAt = activationRow ? parseActivation(activationRow.value_json).activatedAt : new Date().toISOString();
-      const raw = JSON.stringify({ revision: request.revision, preset: request.preset });
+      const encryptedPreset = storedPreset(request.preset);
+      const raw = JSON.stringify({ revision: request.revision, preset: encryptedPreset });
       await db.platformSetting.create({ data: { key: VERSION_KEY_PREFIX + request.preset.version, value_json: raw, updated_by: actorId } });
       if (current.raw === null) await db.platformSetting.create({ data: { key: CURRENT_KEY, value_json: raw, updated_by: actorId } });
       else {
@@ -279,15 +306,16 @@ export async function installMultiviewPrivateRecipe(input: MultiviewPrivateRecip
         requestHash: request.requestHash, activatedAt, activationCreated: !activationRow,
         sourceTaskMatched: true, guideMatched: true };
       const ordinaryReceipt: MultiviewRotationPresetSaveReceipt = { state: 'saved', mutationId: input.mutationId,
-        revision: request.revision, preset: request.preset };
+        revision: request.revision, preset: encryptedPreset };
+      const encryptedHash = receiptHash(request.requestHash, actorId, input.mutationId, true);
       await db.operationLog.create({ data: { id: receiptId(actorId, input.mutationId), operator_id: actorId,
         action: SAVE_ACTION, target_type: 'MultiviewRotationPreset', target_id: request.preset.id,
-        detail: JSON.stringify({ previousRevision: input.expectedRevision, requestHash: request.requestHash,
-          receipt: ordinaryReceipt, install: receipt }) } });
+        detail: JSON.stringify({ previousRevision: input.expectedRevision, requestHash: encryptedHash,
+          receipt: ordinaryReceipt, install: { ...receipt, requestHash: encryptedHash } }) } });
       return receipt;
     });
   } catch (error) {
-    if (error instanceof MultiviewPresetError) throw error;
+    if (error instanceof MultiviewPresetError || isPrivatePromptError(error)) throw error;
     const saved = await replay(prisma);
     if (saved) return saved;
     throw new MultiviewPresetError('安装结果待确认，请只查询原安装操作编号，不要重复安装。', 503, 'MULTIVIEW_PRIVATE_INSTALL_UNKNOWN');
@@ -303,14 +331,19 @@ export async function readMultiviewPresetSaveReceipt(actorId: string, mutationId
     || row.target_id !== MULTIVIEW_ROTATION_PRESET.id) throw unreadable();
   let value: { requestHash?: unknown; receipt?: MultiviewRotationPresetSaveReceipt };
   try { value = JSON.parse(row.detail || '{}'); } catch { throw unreadable(); }
-  if (!value || typeof value.requestHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.requestHash)
+  if (!value || typeof value.requestHash !== 'string'
     || value.receipt?.state !== 'saved' || value.receipt.mutationId !== mutationId) throw unreadable();
+  const requestHash = receiptHash(value.requestHash, actorId, mutationId);
+  if (!/^[a-f0-9]{64}$/.test(requestHash)) throw unreadable();
   const state = parseState(JSON.stringify(value.receipt));
-  return { requestHash: value.requestHash, receipt: { state: 'saved', mutationId, ...state } };
+  const immutableRow = await db.platformSetting.findUnique({ where: { key: VERSION_KEY_PREFIX + state.preset.version }, select: { value_json: true } });
+  if (!immutableRow || JSON.stringify(JSON.parse(immutableRow.value_json).preset) !== JSON.stringify(value.receipt.preset)) throw unreadable();
+  return { requestHash, receipt: { state: 'saved', mutationId, ...state } };
 }
 
 /** Only this preset's current pointer, immutable revision and actor-scoped receipt are written. */
 export async function saveMultiviewRotationPreset(input: unknown, actorId: string): Promise<MultiviewRotationPresetSaveReceipt> {
+  await requirePrivatePromptRequest(actorId, multiviewPrivateOrigins());
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MultiviewPresetError('模板提示词保存内容无效。');
   const body = input as Record<string, unknown>;
   if (Object.keys(body).some(key => !['mutationId', 'expectedRevision', 'prompt'].includes(key))
@@ -345,18 +378,20 @@ export async function saveMultiviewRotationPreset(input: unknown, actorId: strin
       const current = await readCurrent(db);
       if (current.state.revision !== expectedRevision) throw new MultiviewPresetError('模板提示词已被其他管理员修改，请重新读取；未覆盖新设置。', 409, 'MULTIVIEW_PRESET_REVISION_CONFLICT');
       const state = { revision, preset };
-      const raw = JSON.stringify(state);
+      const encryptedState = { revision, preset: storedPreset(preset) };
+      const raw = JSON.stringify(encryptedState);
       await db.platformSetting.create({ data: { key: VERSION_KEY_PREFIX + preset.version, value_json: raw, updated_by: actorId } });
       const updated = await db.platformSetting.updateMany({ where: { key: CURRENT_KEY, value_json: current.raw }, data: { value_json: raw, updated_by: actorId } });
       if (updated.count !== 1) throw new MultiviewPresetError('模板提示词已更新，请重新读取；本次未覆盖。', 409, 'MULTIVIEW_PRESET_REVISION_CONFLICT');
       const receipt: MultiviewRotationPresetSaveReceipt = { state: 'saved', mutationId, ...state };
       await db.operationLog.create({ data: { id: receiptId(actorId, mutationId), operator_id: actorId,
         action: SAVE_ACTION, target_type: 'MultiviewRotationPreset', target_id: preset.id,
-        detail: JSON.stringify({ previousRevision: expectedRevision, requestHash, receipt }) } });
+        detail: JSON.stringify({ previousRevision: expectedRevision, requestHash: receiptHash(requestHash, actorId, mutationId, true),
+          receipt: { state: 'saved', mutationId, ...encryptedState } }) } });
       return receipt;
     });
   } catch (error) {
-    if (error instanceof MultiviewPresetError) throw error;
+    if (error instanceof MultiviewPresetError || isPrivatePromptError(error)) throw error;
     // A failed response is never permission to blindly create a second save.
     const saved = await replay(prisma);
     if (saved) return saved;

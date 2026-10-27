@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { IMAGE_RESOLUTION_OPTIONS } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, type ImageStudioModel } from './model-catalog';
-import { getImageStudioSettings, saveImageStudioSettingsInTx, type ImageStudioSettings } from './settings';
+import { getImageStudioSettings, imageStudioSettingsPayload, saveImageStudioSettingsInTx, type ImageStudioSettings } from './settings';
 import { parseStudioTemplateDefaults } from './template-defaults';
 import type { ResolutionDelta, ResolutionEntry, ResolutionOperation, ResolutionReceipt } from './resolution-apply-types';
 
@@ -206,7 +206,7 @@ export async function executeResolutionOperation(owner: string, body: Body, clie
       if (operation.globalRevision !== undefined) {
         const saved = await getImageStudioSettings(tx);
         if (saved.revision !== operation.globalRevision) fail('默认值在提交后又发生变化，请查询操作；不会覆盖新设置');
-        return { ...await receipt(tx, operation), settings: saved };
+        return { ...await receipt(tx, operation), settings: await imageStudioSettingsPayload(saved, owner) };
       }
       if (operation.phase !== 'preview' || Date.now() > operation.expiresAt) fail('预览已过期或停止，请停止旧操作并重新预览');
     }
@@ -220,7 +220,7 @@ export async function executeResolutionOperation(owner: string, body: Body, clie
       operation.phase = operation.counts.change ? 'defaultConfirmed' : 'complete';
       operation.operationRevision++;
       await saveHeader(tx, row, operation);
-      return { ...await receipt(tx, operation), settings: saved };
+      return { ...await receipt(tx, operation), settings: await imageStudioSettingsPayload(saved, owner) };
     }
     if (body.action === 'cancel') {
       if (operation.phase === 'restoring') fail('正在恢复，请先完成或查询恢复结果');

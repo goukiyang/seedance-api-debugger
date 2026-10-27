@@ -19,6 +19,7 @@ import styles from './studio.module.css';
 import { useResolutionApply } from './use-resolution-apply';
 import { ResolutionApplyPanel } from './resolution-apply-panel';
 import type { ResolutionDelta } from '@/lib/image-studio/resolution-apply-types';
+import { PrivateDefinitionEditor } from './PrivateDefinitionEditor';
 
 export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit, ratios, getExcluded, onDeltas }: {
   open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>; ownerId: string; canEdit: boolean;
@@ -29,6 +30,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   const dialog = useRef<HTMLDialogElement>(null);
   const contextInput = useRef<HTMLTextAreaElement>(null);
   const saveLock = useRef(false);
+  const beforePrivateClose = useRef<(() => Promise<boolean>) | null>(null);
   const [ratioEditing, setRatioEditing] = useState(false);
   const batch = useResolutionApply({ open, ownerId, canEdit, editor, getExcluded, onDeltas });
   const defaults = editor.draft?.templateDefaults;
@@ -44,6 +46,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   const close = async () => {
     if (canEdit && (editor.saving || ratios.busy || batch.busy)) return;
     if (canEdit && ratioEditing && !(await confirm('比例编辑尚未完成，关闭会丢失这部分输入。确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
+    if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
     onClose();
   };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
@@ -55,6 +58,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     if (!canEdit || saveLock.current || editor.saving || editor.loading || editor.conflicts.length || ratios.busy || ratioEditing || batch.busy) return;
     saveLock.current = true;
     try {
+      if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
       if (editor.settings?.context?.trim() && editor.draft && !editor.draft.context.trim()
         && !(await confirm('确定清空通用上下文？这会影响所有模板之后的新生成，模板自己的上下文会保留。', { title: '清空上下文', confirmLabel: '清空并保存', danger: true }))) return;
       if (batch.scope) {
@@ -81,11 +85,16 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     <header className={styles.header}><h2>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {open && <GenerationCompletionSettings key={ownerId} ownerId={ownerId} />}
     {canEdit && <>{editor.draft && defaults && <>
+      {editor.settings?.privateContext ? <PrivateDefinitionEditor key={ownerId} userId={ownerId} moduleId="gpt_image_studio_v1"
+        dialog={dialog} beforeClose={beforePrivateClose} blocked={!open} contextOnly label="通用上下文"
+        endpoint="/api/image-studio/settings" canRead={editor.settings.canReadPrivatePrompt === true}
+        needsIdentity={editor.settings.requiresIdentityVerification === true} onSaved={() => { void editor.controller.load(); }} /> : <>
       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
       <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={value => { if (canEdit) editor.controller.editContext(value); }} maxLength={20000} disabled={!canEdit || editor.loading || editor.saving || !open} />
       <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={!canEdit || editor.loading}
         value={editor.draft.context} onChange={event => { if (canEdit) editor.controller.editContext(event.target.value); }} />
       {conflictFields('context')}
+      </>}
       <section className={styles.auxiliarySection} aria-labelledby="studio-template-defaults-title">
         <div className={styles.imageSectionHeading}><strong id="studio-template-defaults-title">模板统一默认值</strong></div>
         <p className={styles.muted}>统一默认值用于新建模板。</p>

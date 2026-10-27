@@ -16,7 +16,7 @@ import { studioAssetUrl } from './media';
 import { studioDeliveryStatus } from './delivery';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { resolveStudioStyleReferences } from './style-groups';
-import { historicalSkills, resolveSkills } from './skills';
+import { historicalSkills, resolveSkills, publicSkillVersion } from './skills';
 import { assertRestoredStudioStyleVersions } from './restored-settings';
 import type { StudioReferencePolicy } from './reference-policy';
 import { imageBillingView, parseImageBillingContract } from './billing-contract';
@@ -687,7 +687,7 @@ export async function dispatchStudioBatches() {
           const draft = batch.input.draft as { skillIds?: string[]; skillVersions?: Record<string, string> } | undefined;
           if (draft?.skillIds) {
             const current = await resolveSkills(user, draft.skillIds, tx);
-            if (current.some(skill => draft.skillVersions?.[skill.id] !== skill.promptVersion)) {
+            if (current.some(skill => draft.skillVersions?.[skill.id] !== publicSkillVersion(skill))) {
               throw new StudioError('本次改选的提示词组已更新，未派发新任务', 409);
             }
           }

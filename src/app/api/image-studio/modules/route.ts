@@ -10,10 +10,16 @@ import { ModuleCoverError } from '@/lib/image-studio/module-cover';
 import { StudioSharingPreferenceError } from '@/lib/image-studio/module-sharing-preference';
 import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import type { StudioOpenNotApplied, StudioRetiredOpenProof } from '@/lib/image-studio/shared-types';
+import { readStudioModulePrivateDefinition } from '@/lib/image-studio/modules';
+import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { readPrivateStudioEditor, savePrivateStudioEditor, savePrivateStudioEditorDraft, privateStudioEditorStatus } from '@/lib/image-studio/shared-contract';
+import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 function businessError(error: unknown) {
+  if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError || error instanceof PrivateDraftConflict) return true;
   return error instanceof StudioTaskSettingsError || error instanceof StudioModuleError || error instanceof StudioSharingError || error instanceof StudioSharingPreferenceError || error instanceof StudioStyleError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError;
 }
 function errorReason(error: unknown) {
@@ -48,6 +54,12 @@ export async function GET(request: NextRequest) {
   if (ids && (ids.length > 12 || ids.some(id => !id || id.length > 100))) return NextResponse.json({ error: '模块读取参数无效' }, { status: 400, headers: privateHeaders });
   try {
     const mode = request.nextUrl.searchParams.get('mode');
+    if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(await privateStudioEditorStatus(user,
+      request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status'), { headers: privateHeaders });
+    if (mode === 'private-editor') return NextResponse.json(await readPrivateStudioEditor(user,
+      request.nextUrl.searchParams.get('id') || ''), { headers: privateHeaders });
+    if (mode === 'private-definition') return NextResponse.json(await readStudioModulePrivateDefinition(user,
+      request.nextUrl.searchParams.get('id') || ''), { headers: privateHeaders });
     if (mode === 'open-status') return NextResponse.json(await studioSharedOpenStatus(user,
       request.nextUrl.searchParams.get('presetId') || '', request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
     if (mode === 'delete-status') return NextResponse.json(await studioModuleDeletionStatus(user.id,
@@ -69,6 +81,12 @@ async function save(request: NextRequest, createOnly: boolean) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
+    if (!createOnly && (body.action === 'save-private-definition' || body.action === 'save-private-draft')) {
+      if (typeof body.id !== 'string' || !body.id || body.id.length > 100) return NextResponse.json({ error: '模板编号无效' }, { status: 400, headers: privateHeaders });
+      return NextResponse.json(body.action === 'save-private-definition'
+        ? await savePrivateStudioEditor(user, body.id, body)
+        : await savePrivateStudioEditorDraft(user, body.id, body), { headers: privateHeaders });
+    }
     if (!createOnly && body.action === 'set-sharing-preference') return NextResponse.json(await chooseStudioModuleSharing(user.id, body), { headers: privateHeaders });
     if (createOnly && body.action === 'open-shared') {
       if (typeof body.presetId !== 'string' || !body.presetId || body.presetId.length > 160) return NextResponse.json({ error: '共享模板编号无效' }, { status: 400, headers: privateHeaders });

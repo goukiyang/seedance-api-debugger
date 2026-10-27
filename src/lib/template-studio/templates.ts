@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { serializeGenerationTemplate, TEMPLATE_INCLUDE } from '@/lib/templates/workbench';
 import type { SessionUser } from '@/lib/auth/session';
@@ -6,6 +7,9 @@ import { encodeCursor, parseCursor } from './common';
 import { StudioError } from './errors';
 import { publicRecipe } from './projection';
 import { normalizeDescription, normalizeGroupName, normalizeName, normalizeRecipe, parseJsonRecord } from './validation';
+import { readPrivateVideoRecipe, writePrivateVideoRecipe, videoTemplateOrigins } from './private-storage.server';
+import { privateFieldBinding, privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import type {
   CreateStudioTemplateRequest,
   PatchStudioTemplateRequest,
@@ -20,10 +24,6 @@ const templateInclude = {
   versions: { orderBy: { version_number: 'desc' as const } },
 };
 
-function parseRecipe(json: string): StudioTemplateRecipe {
-  try { return normalizeRecipe(JSON.parse(json)); } catch { throw new StudioError('模板 recipe 快照无法读取', 500, 'UNAVAILABLE'); }
-}
-
 function versionSummary(version: any): StudioTemplateVersionSummary {
   return {
     id: version.id,
@@ -33,10 +33,19 @@ function versionSummary(version: any): StudioTemplateVersionSummary {
   };
 }
 
-function serializeStudioTemplate(row: any, user: SessionUser): StudioTemplateDto {
-  const canManage = user.role === 'admin' || (row.owner_user_id === user.id && row.visibility === 'private');
+async function serializeStudioTemplate(row: any, user: SessionUser, includePrivate = false): Promise<StudioTemplateDto> {
+  const canManage = user.role === 'admin' || row.owner_user_id === user.id;
   const canPublish = user.account_type === 'internal' && user.role === 'admin';
   const visibleRecipe = canManage ? row.recipe_json : row.published_version?.recipe_json;
+  const origins = visibleRecipe ? privateFieldBinding(JSON.parse(visibleRecipe).instruction,
+    canManage ? 'video-template' : 'video-template-version', canManage ? row.id : row.published_version.id,
+    'instruction', videoTemplateOrigins(row.id, row.owner_user_id))?.origins || [] : videoTemplateOrigins(row.id, row.owner_user_id);
+  const capabilities = await privatePromptRequestCapabilities(user.id, origins);
+  if (includePrivate && origins.length) await requirePrivatePromptRequest(user.id, origins);
+  const decodedRecipe = visibleRecipe ? readPrivateVideoRecipe(visibleRecipe, canManage ? 'video-template' : 'video-template-version',
+    canManage ? row.id : row.published_version.id, origins) : null;
+  const protectedRecipe = decodedRecipe && privateFieldOrigins(decodedRecipe, 'instruction').length > 0;
+  if (includePrivate && protectedRecipe) await requirePrivatePromptRequest(user.id, privateFieldOrigins(decodedRecipe!, 'instruction'));
   return {
     id: row.id,
     source: 'studio',
@@ -48,11 +57,13 @@ function serializeStudioTemplate(row: any, user: SessionUser): StudioTemplateDto
     revision: row.revision,
     owner: { displayName: row.owner.name || row.owner.username, avatarUrl: row.owner.avatar_url || null },
     canManage,
+    privateRecipe: Boolean(protectedRecipe),
+    ...capabilities,
     canPublish,
     applyMode: 'studio-draft',
     applyUrl: null,
     version: row.published_version ? versionSummary(row.published_version) : null,
-    recipe: visibleRecipe ? (canManage ? parseRecipe(visibleRecipe) : publicRecipe(parseRecipe(visibleRecipe))) : null,
+    recipe: decodedRecipe ? (canManage && (!protectedRecipe || includePrivate) ? decodedRecipe : publicRecipe(decodedRecipe)) : null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -119,7 +130,7 @@ export async function listStudioTemplates(user: SessionUser, query: { cursor?: s
       AND: [
         {
           OR: [
-            { owner_user_id: user.id, visibility: 'private', ...rowFilters },
+            { owner_user_id: user.id, ...rowFilters },
             {
               status: 'published',
               visibility: 'shared',
@@ -148,10 +159,10 @@ export async function listStudioTemplates(user: SessionUser, query: { cursor?: s
       })
       : Promise.resolve([]),
   ]);
-  const studio = studioRows.map((row) => {
-    const dto = serializeStudioTemplate(row, user);
+  const studio = await Promise.all(studioRows.map(async (row) => {
+    const dto = await serializeStudioTemplate(row, user);
     return { dto, updatedAt: row.updated_at, id: `studio:${row.id}` };
-  });
+  }));
   const legacy = legacyRows.map((row) => {
     const dto = serializeLegacy(row);
     return { dto, updatedAt: row.updated_at, id: `legacy:${row.id}` };
@@ -165,7 +176,7 @@ export async function listStudioTemplates(user: SessionUser, query: { cursor?: s
   return { items: page.map(({ dto }) => dto), nextCursor };
 }
 
-export async function getStudioTemplate(user: SessionUser, id: string, source: 'legacy' | 'studio' = 'studio') {
+export async function getStudioTemplate(user: SessionUser, id: string, source: 'legacy' | 'studio' = 'studio', includePrivate = false) {
   if (source === 'legacy') {
     const row = await prisma.generationTemplate.findFirst({ where: { id, status: 'active' }, include: TEMPLATE_INCLUDE });
     if (!row) throw new StudioError('模板不存在或已撤销', 404, 'NOT_FOUND');
@@ -173,7 +184,7 @@ export async function getStudioTemplate(user: SessionUser, id: string, source: '
   }
   const row = await prisma.videoStudioTemplate.findUnique({ where: { id }, include: templateInclude });
   if (!row || !canReadTemplate(row, user)) throw new StudioError('模板不存在或无权访问', 404, 'NOT_FOUND');
-  const dto = serializeStudioTemplate(row, user);
+  const dto = await serializeStudioTemplate(row, user, includePrivate);
   const versions = row.versions.map(versionSummary);
   return { template: dto, versions: user.role === 'admin' || row.owner_user_id === user.id ? versions : row.published_version ? versions.filter((version) => version.id === row.published_version_id) : [] };
 }
@@ -184,8 +195,12 @@ export async function createStudioTemplate(user: SessionUser, input: CreateStudi
   const groupName = normalizeGroupName(input?.groupName);
   const description = normalizeDescription(input?.description);
   const recipe = normalizeRecipe(input?.recipe);
+  const id = randomUUID();
+  const origins = videoTemplateOrigins(id, user.id);
+  if (origins.length) await requirePrivatePromptRequest(user.id, origins);
   const row = await prisma.videoStudioTemplate.create({
-    data: { owner_user_id: user.id, name, group_name: groupName, description, recipe_json: JSON.stringify(recipe), revision: 1 },
+    data: { id, owner_user_id: user.id, name, group_name: groupName, description,
+      recipe_json: writePrivateVideoRecipe(recipe, 'video-template', id, origins), revision: 1 },
     include: templateInclude,
   });
   return serializeStudioTemplate(row, user);
@@ -202,7 +217,7 @@ export async function patchStudioTemplate(user: SessionUser, id: string, input: 
   const initial = await prisma.videoStudioTemplate.findUnique({ where: { id }, select: { id: true, owner_user_id: true, visibility: true } });
   if (!initial) throw new StudioError('模板不存在', 404, 'NOT_FOUND');
   const isAdmin = user.account_type === 'internal' && user.role === 'admin';
-  const isPrivateOwner = initial.owner_user_id === user.id && initial.visibility === 'private';
+  const isPrivateOwner = initial.owner_user_id === user.id;
   if (!isAdmin && !isPrivateOwner) throw new StudioError('无权管理此模板', 403, 'FORBIDDEN');
 
   try {
@@ -216,12 +231,14 @@ export async function patchStudioTemplate(user: SessionUser, id: string, input: 
         if (input.expectedVersionId !== undefined && input.expectedVersionId !== current.published_version_id) {
           throw new StudioError('当前发布版本已变化，请刷新后重试', 409, 'CONFLICT');
         }
-        const recipe = parseRecipe(current.recipe_json);
+        const recipe = readPrivateVideoRecipe(current.recipe_json, 'video-template', id, videoTemplateOrigins(id, current.owner_user_id));
         const nextNumber = (await tx.videoStudioTemplateVersion.aggregate({ where: { template_id: id }, _max: { version_number: true } }))._max.version_number ?? 0;
         const cas = await tx.videoStudioTemplate.updateMany({ where: { id, revision: input.expectedRevision }, data: { revision: { increment: 1 }, updated_at: new Date() } });
         if (cas.count !== 1) throw new StudioError('模板已被其他编辑更新，请刷新后重试', 409, 'CONFLICT');
+        const versionId = randomUUID();
         const version = await tx.videoStudioTemplateVersion.create({
-          data: { template_id: id, version_number: nextNumber + 1, name: current.name, description: current.description, group_name: current.group_name, recipe_json: JSON.stringify(recipe), created_by: user.id },
+          data: { id: versionId, template_id: id, version_number: nextNumber + 1, name: current.name, description: current.description, group_name: current.group_name,
+            recipe_json: writePrivateVideoRecipe(recipe, 'video-template-version', versionId, videoTemplateOrigins(id, current.owner_user_id)), created_by: user.id },
         });
         await tx.videoStudioTemplate.update({ where: { id }, data: { status: 'published', visibility: 'shared', published_version_id: version.id, updated_at: new Date() } });
       } else if (input.action === 'archive') {
@@ -231,8 +248,14 @@ export async function patchStudioTemplate(user: SessionUser, id: string, input: 
         const name = normalizeName(input.name);
         const groupName = normalizeGroupName(input.groupName);
         const description = normalizeDescription(input.description);
-        const recipe = normalizeRecipe(input.recipe);
-        const cas = await tx.videoStudioTemplate.updateMany({ where: { id, revision: input.expectedRevision }, data: { name, group_name: groupName, description, recipe_json: JSON.stringify(recipe), revision: { increment: 1 }, updated_at: new Date() } });
+        const previous = readPrivateVideoRecipe(current.recipe_json, 'video-template', id, videoTemplateOrigins(id, current.owner_user_id));
+        const origins = privateFieldOrigins(previous, 'instruction');
+        if (origins.length && input.privateEdit === true) throw new StudioError('请通过原文入口修改固定要求', 409, 'CONFLICT');
+        const recipe = normalizeRecipe(origins.length ? { ...input.recipe, instruction: previous.instruction } : input.recipe);
+        const encoded = origins.length
+          ? JSON.stringify({ ...recipe, instruction: JSON.parse(current.recipe_json).instruction })
+          : writePrivateVideoRecipe(recipe, 'video-template', id, origins);
+        const cas = await tx.videoStudioTemplate.updateMany({ where: { id, revision: input.expectedRevision }, data: { name, group_name: groupName, description, recipe_json: encoded, revision: { increment: 1 }, updated_at: new Date() } });
         if (cas.count !== 1) throw new StudioError('模板已被其他编辑更新，请刷新后重试', 409, 'CONFLICT');
       }
       return tx.videoStudioTemplate.findUniqueOrThrow({ where: { id }, include: templateInclude });

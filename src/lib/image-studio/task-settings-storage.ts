@@ -55,10 +55,11 @@ export function assertStudioTaskSettingsWrite(prior: StudioTaskSettings | undefi
 }
 
 export async function studioSettingsSourceContext(client: Prisma.TransactionClient, actor: ImageStudioIdentity, sourceTaskId: string) {
-  const task = await client.imageStudioTask.findFirst({ where: { id: sourceTaskId, owner_id: actor.id, deleted_at: null }, select: { snapshot_json: true, source_preset_id: true } });
+  const task = await client.imageStudioTask.findFirst({ where: { id: sourceTaskId, owner_id: actor.id, deleted_at: null } });
   if (!task?.snapshot_json) throw new StudioTaskSettingsError('历史设置来源已不可用，当前输入保留');
   let snapshot;
-  try { snapshot = JSON.parse(task.snapshot_json); } catch { throw new StudioTaskSettingsError('历史设置来源无法读取'); }
+  const { readPrivateImageTaskSnapshot } = await import('./private-storage.server');
+  snapshot = readPrivateImageTaskSnapshot(task);
   if (typeof snapshot.globalContext !== 'string') throw new StudioTaskSettingsError('历史记录没有完整通用设置');
   const presetId = task.source_preset_id || (typeof snapshot.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
   if (presetId) {

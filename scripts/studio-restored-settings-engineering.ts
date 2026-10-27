@@ -1,4 +1,7 @@
+import './server-runtime.cjs';
 import assert from 'node:assert/strict';
+import * as privatePrompts from '../src/lib/security/private-prompts.server';
+import * as privateFields from '../src/lib/security/private-prompt-fields.server';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -12,10 +15,13 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/rati
 // It never imports the application database, provider, worker, or HTTP modules.
 async function main() {
   const root = realpathSync(process.cwd());
+  assert.equal(process.env.PRIVATE_PROMPTS_POLICY_FILE, undefined, 'Legacy restoration fixture must not load an external policy');
   const destination = path.resolve(process.argv[2] || '');
   assert.ok(destination.startsWith(path.join(root, '.role-tests') + path.sep));
   const files = ['src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
-    'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',
+    'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts', 'src/lib/image-studio/skills.ts',
+    'src/lib/image-studio/private-storage.server.ts', 'src/lib/security/private-prompts.server.ts',
+    'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
@@ -62,7 +68,7 @@ async function main() {
   const specificationInputs: Record<string, unknown>[] = [];
   const user = { id: owner, role: 'admin', account_type: 'internal', status: 'active' };
   const workspace = { id: moduleId, owner_id: owner, name: 'Synthetic workspace', source_preset_id: presetId,
-    revision: 7, model: 'gpt-image-1', quality: 'medium', resolution: '1K', context: 'must-not-use-current-context' };
+    revision: 7, model: 'gpt-image-1', quality: 'medium', resolution: '1K', prompt: 'must-not-use-current-template-prompt', context: 'must-not-use-current-context' };
   const settings = { revision: 1, model: 'gpt-image-1', quality: 'medium', resolution: '1K', context: 'must-not-use-current-global', prices: { 'gpt-image-1': 0 } };
   const currentStyles = new Map([
     [styleId, { id: styleId, ownerId: owner, name: 'Current style', revision: 3, note: 'must-not-use-current-note', references: [{ assetId: 'style-new', note: 'new note' }] }],
@@ -80,7 +86,8 @@ async function main() {
         if (where.batch_id) return accepted;
         sourceReads++;
         assert.equal(where.id, marker.sourceTaskId); assert.equal(where.owner_id, owner); assert.equal(where.deleted_at, null);
-        return deleted || sourceOwner !== owner ? null : { id: marker.sourceTaskId, module_id: moduleId,
+        return deleted || sourceOwner !== owner ? null : { id: marker.sourceTaskId, owner_id: sourceOwner, module_id: moduleId,
+          prompt: 'synthetic-legacy-personal', context: 'synthetic-historical-global\nsynthetic-historical-module',
           source_preset_id: null, snapshot_json: JSON.stringify(historical) };
       },
       create: async ({ data }: { data: Record<string, unknown> }) => { created.push(plain(data)); return { ...data, created_at: new Date(0) }; },
@@ -102,7 +109,17 @@ async function main() {
   const channel = { channelId: 'original', configRevision: '55555555-5555-4555-8555-555555555555' };
   const api = { provider: 'openai', modelCapabilities: {}, supports_text_to_image: true, supports_image_to_image: true };
   let forbiddenCalls = 0;
+  const storageExports: Record<string, any> = {};
+  const storageImports: Record<string, unknown> = { 'server-only': {}, '@/lib/security/private-prompts.server': privatePrompts,
+    '@/lib/security/private-prompt-fields.server': privateFields,
+    '@/lib/security/private-prompt-request.server': { requirePrivatePromptRequest: async () => { forbiddenCalls++; throw new Error('Unexpected private editing in legacy restore fixture'); } } };
+  vm.runInNewContext(ts.transpileModule(sources.get('src/lib/image-studio/private-storage.server.ts')!, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
+  { exports: storageExports, require: (name: string) => {
+    assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
+  } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
+    ...storageExports, ...privateFields, ...privatePrompts,
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
@@ -150,7 +167,7 @@ async function main() {
     declarations('src/lib/image-studio/fixed-references.ts', ['StudioFixedReferenceError', 'parseStudioFixedReferences']),
     declarations('src/lib/image-studio/reference-policy.ts', ['StudioReferencePolicyError', 'boundedPrimaryMax', 'orderedUnique',
       'defaultStudioReferencePolicy', 'validateStudioReferenceCounts', 'parsePolicyShape', 'parseStudioReferencePolicy', 'mapStudioReferencePolicy']),
-    declarations('src/lib/image-studio/skills.ts', ['parseSkillIds', 'resolveSkills', 'historicalSkills']),
+    declarations('src/lib/image-studio/skills.ts', ['parseSkillIds', 'resolveSkills', 'historicalSkills', 'publicSkillVersion', 'publicSkillSnapshot']),
     declarations('src/lib/image-studio/tasks.ts', ['StudioError', 'SharedStudioDefinitionError', 'studioBusinessErrorStatus',
       'parseSharedStudioIntent', 'sameSharedStudioIntent', 'resolveOwnedStudioTaskSharedUse', 'resolveStudioTaskRestoredSettings',
       'studioSharedGenerationSource', 'normalizeSharedAuthorDraftForUse', 'safeImageChannelSnapshot', 'parseHistoricalStyleGroups',

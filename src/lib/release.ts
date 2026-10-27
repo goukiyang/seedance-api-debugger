@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '通用设置', outline: [
-  '通用设置及时同步，未保存的修改仍保留',
-  '恢复图片参数后继续创作，默认使用当前通用设置',
-  '需要沿用原通用设置时，可选择按原设置复现',
+const notice = { title: '提示词管理', outline: [
+  '新增创作者和管理员验证身份后管理模板原文的入口',
+  '受保护提示词的编辑草稿由服务器保存',
+  '保留原生成记录、素材和费用，不重新提交历史任务',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

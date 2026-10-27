@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import type { StudioApiError } from './types';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
+import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
 export class StudioError extends Error {
   constructor(
@@ -20,6 +23,11 @@ export function requireInternalStudioUser(user: SessionUser) {
 }
 
 export function studioErrorResponse(error: unknown) {
+  if (error instanceof PrivateDraftConflict) return NextResponse.json({ error: error.message, code: 'CONFLICT' },
+    { status: 409, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+  if (error instanceof PrivatePromptError || error instanceof PrivatePromptAccessError) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+  }
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message, code: error.status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN' }, { status: error.status });
   }

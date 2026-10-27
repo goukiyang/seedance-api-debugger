@@ -843,6 +843,7 @@ def main():
     parser.add_argument('--uploads-root', default=str(PRODUCTION_UPLOADS))
     parser.add_argument('--verify-backup', help='Read-only verification of an isolated backup copy; requires --non-production.')
     parser.add_argument('--non-production', action='store_true', help='Explicit isolated paths; still requires Linux atomic publication.')
+    parser.add_argument('--sealed-staging', action='store_true', help='Private staging for the authenticated backup wrapper; production source checks remain enabled.')
     arguments = parser.parse_args()
     deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
     os.umask(0o077)
@@ -870,7 +871,13 @@ def main():
             open_descriptors.append(data_fd)
             require(os.fstat(data_fd).st_dev != os.stat('/').st_dev, 'real_data_mount_required')
             data_device = os.fstat(data_fd).st_dev
-            require(source_root == PRODUCTION_WORKS and destination.parent == PRODUCTION_BACKUPS
+            sealed_parent = destination.parent
+            allowed_destination = destination.parent == PRODUCTION_BACKUPS
+            if arguments.sealed_staging:
+                allowed_destination = (sealed_parent.parent == PRODUCTION_BACKUPS / 'private'
+                    and re.fullmatch(r'\.stage-[A-Za-z0-9_-]{6,80}', sealed_parent.name) is not None
+                    and destination.name == 'bundle')
+            require(source_root == PRODUCTION_WORKS and allowed_destination
                     and recipe_root == PRODUCTION_RECIPES and uploads_root == PRODUCTION_UPLOADS and private_source_root == PRODUCTION_SOURCES
                     and PRODUCTION_BASE / 'var-lib' in database.parents, 'production_backup_paths_invalid')
         parent_fd = open_directory(destination.parent)

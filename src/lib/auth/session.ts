@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { verifyPassword } from './password';
 import { sessionAccountPayload, sessionAccountPayloadMatches, type SessionAccount } from './session-account-binding';
+import { authenticatePrivateIdentity, PRIVATE_IDENTITY_COOKIE } from '@/lib/security/private-prompt-identity.server';
 
 export interface SessionUser {
   id: string;
@@ -56,7 +57,9 @@ export async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  return getSessionByToken(token);
+  const user = await getSessionByToken(token);
+  if (user) authenticatePrivateIdentity(user, cookieStore.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
+  return user;
 }
 
 export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
@@ -77,7 +80,9 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
       return null;
     }
 
-    const accountPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const decodedPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
+    const [accountPayload, nonce, extra] = decodedPayload.split('~');
+    if (extra !== undefined || nonce !== undefined && !/^[A-Za-z0-9_-]{32}$/.test(nonce)) return null;
     const userId = accountPayload.split(':')[0];
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -150,7 +155,7 @@ export async function createSession(userId: string, authenticatedAccount?: Sessi
   if (authenticatedAccount && sessionAccountPayload(user, SESSION_SECRET) !== sessionAccountPayload(authenticatedAccount, SESSION_SECRET)) {
     throw new Error('Account changed during authentication');
   }
-  const payload = Buffer.from(sessionAccountPayload(user, SESSION_SECRET)).toString('base64');
+  const payload = Buffer.from(`${sessionAccountPayload(user, SESSION_SECRET)}~${crypto.randomBytes(24).toString('base64url')}`).toString('base64');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
   return `${payload}.${sig}`;
 }

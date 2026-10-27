@@ -1,4 +1,8 @@
 import { prisma } from '@/lib/prisma';
+import { randomUUID } from 'node:crypto';
+import { readPrivateVideoRecipe, writePrivateVideoRecipe, videoTemplateOrigins, transformPrivateVideoRun } from './private-storage.server';
+import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import type { SessionUser } from '@/lib/auth/session';
 import { authorizeStudioAssets } from './assets';
 import { encodeCursor, parseCursor } from './common';
@@ -21,7 +25,7 @@ import type { CreateStudioDraftRequest, StudioDraftDto, StudioDraftRecoveryInput
 
 type TemplateSnapshot = { ref: StudioDraftTemplateRef; recipe: StudioTemplateRecipe };
 
-function readTemplateSnapshot(json: string | null): TemplateSnapshot | null {
+export function readTemplateSnapshot(json: string | null, draftId: string): TemplateSnapshot | null {
   if (!json) return null;
   try {
     const value = JSON.parse(json) as Record<string, unknown>;
@@ -37,15 +41,22 @@ function readTemplateSnapshot(json: string | null): TemplateSnapshot | null {
         templateName: ref.templateName,
         sourceRevision: typeof ref.sourceRevision === 'string' ? ref.sourceRevision : null,
       },
-      recipe: normalizeRecipe(value.recipe),
+      recipe: readPrivateVideoRecipe(JSON.stringify(value.recipe), 'video-draft', draftId,
+        ref.templateSource === 'studio' ? videoTemplateOrigins(ref.templateId) : []),
     };
-  } catch {
+  } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     throw new StudioError('草稿模板快照无法读取', 500, 'UNAVAILABLE');
   }
 }
+function writeTemplateSnapshot(snapshot: TemplateSnapshot | null, draftId: string) {
+  return snapshot ? JSON.stringify({ ref: snapshot.ref,
+    recipe: JSON.parse(writePrivateVideoRecipe(snapshot.recipe, 'video-draft', draftId,
+      snapshot.ref.templateSource === 'studio' ? videoTemplateOrigins(snapshot.ref.templateId) : [])) }) : null;
+}
 
 function serializeDraft(row: any): StudioDraftDto {
-  const snapshot = readTemplateSnapshot(row.template_snapshot_json);
+  const snapshot = readTemplateSnapshot(row.template_snapshot_json, row.id);
   return {
     id: row.id,
     name: row.name,
@@ -62,9 +73,9 @@ function serializeDraft(row: any): StudioDraftDto {
   };
 }
 
-function readRunSnapshot(json: string): StudioRunSnapshot {
+function readRunSnapshot(json: string, runId: string, draftId: string): StudioRunSnapshot {
   try {
-    const snapshot = JSON.parse(json) as StudioRunSnapshot;
+    const snapshot = transformPrivateVideoRun(JSON.parse(json) as StudioRunSnapshot, runId, draftId, false);
     if (!snapshot || !snapshot.input || typeof snapshot.input.name !== 'string'
       || typeof snapshot.input.groupName !== 'string' || typeof snapshot.input.draftPrompt !== 'string'
       || !snapshot.input.values || Array.isArray(snapshot.input.values) || typeof snapshot.input.values !== 'object'
@@ -75,7 +86,8 @@ function readRunSnapshot(json: string): StudioRunSnapshot {
       || (!snapshot.templateVersion && snapshot.recipe)) throw new Error('invalid');
     if (snapshot.recipe) normalizeRecipe(snapshot.recipe);
     return snapshot;
-  } catch {
+  } catch (error) {
+    if (isPrivatePromptError(error)) throw error;
     throw new StudioError('运行快照无法读取', 500, 'UNAVAILABLE');
   }
 }
@@ -83,12 +95,14 @@ function readRunSnapshot(json: string): StudioRunSnapshot {
 async function createStudioDraftFromRun(user: SessionUser, runId: string) {
   const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
   if (!run) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
-  const snapshot = readRunSnapshot(run.snapshot_json);
+  const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
   const ref = snapshot.templateVersion;
   if (run.source !== (ref?.templateSource || 'blank')) throw new StudioError('运行来源与历史快照不一致，无法复用输入', 409, 'CONFLICT');
   const row = await prisma.$transaction(async tx => {
+  const id = randomUUID();
   const created = await tx.videoStudioDraft.create({
     data: {
+      id,
       owner_user_id: user.id,
       name: snapshot.input.name,
       group_name: snapshot.input.groupName,
@@ -99,10 +113,10 @@ async function createStudioDraftFromRun(user: SessionUser, runId: string) {
       template_source: ref?.templateSource || 'blank',
       source_template_id: ref?.templateId || null,
       source_version_id: ref?.versionId || null,
-      template_snapshot_json: ref && snapshot.recipe ? JSON.stringify({ ref, recipe: snapshot.recipe }) : null,
+      template_snapshot_json: writeTemplateSnapshot(ref && snapshot.recipe ? { ref, recipe: snapshot.recipe } : null, id),
     },
   });
-  if (snapshot.privateContext) await copyModuleContext(tx, created.id, user.id, { text: snapshot.privateContext.module });
+  if (snapshot.privateContext) await copyModuleContext(tx, created.id, user.id, { text: snapshot.privateContext.module, origins: privateFieldOrigins(snapshot, 'module') });
   return created;
   });
   return serializeDraft(row);
@@ -135,7 +149,7 @@ function normalizeDraftRecovery(value: unknown, recipe: StudioTemplateRecipe | n
 async function createStudioDraftFromDraft(user: SessionUser, draftId: string, recoveryInput: unknown) {
   const source = await prisma.videoStudioDraft.findFirst({ where: { id: draftId, owner_user_id: user.id } });
   if (!source) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
-  const snapshot = readTemplateSnapshot(source.template_snapshot_json);
+  const snapshot = readTemplateSnapshot(source.template_snapshot_json, source.id);
   const isBlank = source.template_source === 'blank';
   if ((isBlank && (snapshot || source.source_template_id !== null || source.source_version_id !== null))
     || (!isBlank && (!snapshot || snapshot.ref.templateSource !== source.template_source
@@ -160,8 +174,10 @@ async function createStudioDraftFromDraft(user: SessionUser, draftId: string, re
       || currentSource.template_snapshot_json !== source.template_snapshot_json) {
       throw new StudioError('原草稿模板快照已变化，请重新恢复', 409, 'CONFLICT');
     }
+    const id = randomUUID();
     const created = await tx.videoStudioDraft.create({
       data: {
+        id,
         owner_user_id: user.id,
         name: recovery.name ?? currentSource.name,
         group_name: recovery.groupName ?? currentSource.group_name,
@@ -172,7 +188,7 @@ async function createStudioDraftFromDraft(user: SessionUser, draftId: string, re
         template_source: currentSource.template_source,
         source_template_id: currentSource.source_template_id,
         source_version_id: currentSource.source_version_id,
-        template_snapshot_json: currentSource.template_snapshot_json,
+        template_snapshot_json: writeTemplateSnapshot(snapshot, id),
       },
     });
     await copyModuleContext(tx, created.id, user.id, { draftId });
@@ -195,12 +211,12 @@ async function resolveTemplateSnapshot(user: SessionUser, templateId: string, so
     include: { published_version: true },
   });
   if (!row) throw new StudioError('模板不存在', 404, 'NOT_FOUND');
-  let recipe = normalizeRecipe(JSON.parse(row.recipe_json));
+  let recipe = readPrivateVideoRecipe(row.recipe_json, 'video-template', row.id, videoTemplateOrigins(row.id, row.owner_user_id));
   let versionId: string | null = null;
   let versionNumber: number | null = null;
   if (row.visibility === 'shared' && row.status === 'published') {
     if (!row.published_version) throw new StudioError('模板发布版本不可用', 409, 'CONFLICT');
-    recipe = normalizeRecipe(JSON.parse(row.published_version.recipe_json));
+    recipe = readPrivateVideoRecipe(row.published_version.recipe_json, 'video-template-version', row.published_version.id, videoTemplateOrigins(row.id, row.owner_user_id));
     versionId = row.published_version.id;
     versionNumber = row.published_version.version_number;
   }
@@ -261,8 +277,10 @@ export async function createStudioDraft(user: SessionUser, input: CreateStudioDr
   const recipe = snapshot?.recipe ?? null;
   const initialValues: Record<string, unknown> = {};
   for (const field of recipe?.fields ?? []) if ('defaultValue' in field && field.defaultValue !== undefined) initialValues[field.key] = field.defaultValue;
+  const id = randomUUID();
   const row = await prisma.videoStudioDraft.create({
     data: {
+      id,
       owner_user_id: user.id,
       name: normalizeName(input?.name || snapshot?.ref.templateName || '未命名草稿'),
       group_name: normalizeGroupName(input?.groupName || '未分组'),
@@ -271,7 +289,7 @@ export async function createStudioDraft(user: SessionUser, input: CreateStudioDr
       template_source: snapshot?.ref.templateSource || 'blank',
       source_template_id: snapshot?.ref.templateId || null,
       source_version_id: snapshot?.ref.versionId || null,
-      template_snapshot_json: snapshot ? JSON.stringify(snapshot) : null,
+      template_snapshot_json: writeTemplateSnapshot(snapshot, id),
     },
   });
   return serializeDraft(row);
@@ -288,7 +306,7 @@ export async function updateStudioDraft(user: SessionUser, id: string, input: Up
   const current = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id } });
   if (!current) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   if (current.revision !== input.revision) throw new StudioError('草稿已在其他位置更新，请刷新后重试', 409, 'CONFLICT', { currentRevision: current.revision });
-  const snapshot = readTemplateSnapshot(current.template_snapshot_json);
+  const snapshot = readTemplateSnapshot(current.template_snapshot_json, current.id);
   const recipe = snapshot?.recipe ?? null;
   const name = normalizeName(input.name);
   const groupName = normalizeGroupName(input.groupName);

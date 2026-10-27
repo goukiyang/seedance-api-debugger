@@ -10,6 +10,9 @@
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
+import { assertPrivateSend, privatePromptFetch } from '@/lib/security/private-prompt-send.server';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
 import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
@@ -444,6 +447,12 @@ export function redactInlineImageTransport(value: unknown): unknown {
     key.toLowerCase().includes('base64') ? '[inline image omitted]' : redactInlineImageTransport(item)]));
 }
 
+export function assertPrivateSeedanceDestination(model: string) {
+  const origins = privateMultiviewOrigins();
+  if (origins.length) assertPrivateSend({ endpoint: `${SEEDANCE_BASE_URL}/call`, provider: 'seedance',
+    credential: SEEDANCE_API_KEY, model }, origins);
+}
+
 export async function createVideoTask(
   input: SeedanceProviderInput & { generation_mode: GenerationMode },
   onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void,
@@ -453,6 +462,7 @@ export async function createVideoTask(
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
   const payload = buildSeedanceVideoPayload(input);
   const model = payload.model;
+  if (typeof model !== 'string' || !model) throw new Error('视频型号无效，未发送');
   const content = payload.content as ContentItem[];
   const clientRequestId = input.clientRequestId || input.client_request_id;
   const requestBody = JSON.stringify(payload);
@@ -486,13 +496,16 @@ export async function createVideoTask(
     return diagnostic;
   };
   try {
-    const response = await fetch(endpoint, {
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: requestBody,
-    });
+    };
+    const origins = options.sensitiveRecipe ? privateMultiviewOrigins() : [];
+    const response = origins.length ? await privatePromptFetch({ endpoint, provider: 'seedance',
+      credential: SEEDANCE_API_KEY, model }, origins, init) : await fetch(endpoint, init);
 
     httpStatus = response.status;
     phase = 'response_body';
@@ -542,6 +555,7 @@ export async function createVideoTask(
         : data,
     };
   } catch (error) {
+    if (error instanceof PrivatePromptError) throw error;
     const diagnostic = capture(error);
     const safeError = options.sensitiveRecipe ? (() => {
       const failure = privateMultiviewFailure(

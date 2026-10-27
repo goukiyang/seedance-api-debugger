@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
+import { readPrivateStudioDefinition, writePrivateStudioDefinition, protectStudioDefinitionPatch, readPrivateImageTaskSnapshot } from './private-storage.server';
+import { privateFieldOrigins, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
+import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import { parseStudioTaskSettings } from './task-settings';
 import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, writeStudioWorkspaceSource, studioSettingsSourceContext } from './task-settings-storage';
 import type { Prisma } from '@prisma/client';
@@ -16,7 +19,7 @@ import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStu
 import { studioVisibleAssetWhere } from './protected-assets';
 import { studioFixedCoverDTO, assertPresetCoverShareable } from './module-cover';
 import { getStudioModuleStyleIds, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, setStudioPresetStyleIds } from './style-groups';
-import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection } from './skills';
+import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills, setSkillSelection, publicSkillVersion } from './skills';
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError, studioSharedReproductionKey } from './shared-contract';
 import type { SharedStudioPersonalOverrides } from './shared-types';
@@ -187,14 +190,21 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
     const personal = personalByPreset.get(row.id);
     const settingsSource = await readStudioWorkspaceSource(prisma, row.owner_id, row.id, 'preset');
     const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
+    const privateRow = readPrivateStudioDefinition('image-preset', row);
+    const protectedPrompt = privateFieldOrigins(privateRow, 'prompt').length > 0;
+    const protectedContext = privateFieldOrigins(privateRow, 'context').length > 0;
+    const privatePromptAccess = await privatePromptRequestCapabilities(user.id,
+      [...privateFieldOrigins(privateRow, 'prompt'), ...privateFieldOrigins(privateRow, 'context')]);
     return {
-      deletion, templateRead, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, prompt: templateRead.canViewTemplateContext ? row.prompt : '', context: templateRead.canViewTemplateContext ? row.context : '', revision: row.updated_at.toISOString(),
+      deletion, templateRead, privatePromptAccess, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name,
+      prompt: templateRead.canViewTemplateContext && !protectedPrompt ? privateRow.prompt : '',
+      context: templateRead.canViewTemplateContext && !protectedContext ? privateRow.context : '', revision: row.updated_at.toISOString(),
       isShared: row.is_shared,
       ...(settingsSource && row.owner_id === user.id ? { taskSettings: settingsSource.taskSettings } : {}),
       ...(personal ? { saveIntent: 'personal-quick' as const, personalOverrides: personal.overrides,
         personalImages: personal.referenceIds.map(toPayload).filter((item): item is NonNullable<ReturnType<typeof toPayload>> => Boolean(item)),
         personalReferencesAvailable: personal.referenceIds.every(id => Boolean(toPayload(id))) } : {}),
-      moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
+      moduleContextVersion: await resolveModuleContextVersion(privateRow.context).catch(() => null),
       ownedByViewer: row.owner_id === user.id,
       referencesAvailable: visibleIds.length === ids.length && (fixedByPreset.get(row.id) || []).every(reference => byId.get(reference.assetId)?.owner_id === row.owner_id),
       canManageSharing: canManageStudioPreset(user, row),
@@ -314,7 +324,9 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
       }
       if (!binding) privateQuickSourceRevision = source.revision;
     }
-    const target = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
+    const storedTarget = replace ? await tx.imageStudioPreset.findFirst({ where: { id: String(body.presetId || ''), owner_id: userId } }) : null;
+    const target = storedTarget ? readPrivateStudioDefinition('image-preset', storedTarget) : null;
+    let sourceDefinition: { id: string; owner_id: string; prompt: string; context: string } | null = target;
     const priorSettings = target ? await readStudioWorkspaceSource(tx, userId, target.id, 'preset') : null;
     assertStudioTaskSettingsWrite(priorSettings?.taskSettings, taskSettings);
     if (taskSettings) {
@@ -335,8 +347,10 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     let priorPresetId: string | null = null;
     let inheritedEvolution: EvolutionCapability | null = null;
     if (sourceModuleId) {
-      const sourceModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId }, select: { id: true, context: true, source_preset_id: true } });
-      if (!sourceModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
+      const storedModule = await tx.imageStudioModule.findFirst({ where: { id: sourceModuleId, owner_id: userId } });
+      if (!storedModule) throw new StudioModuleError('模板来源模块不存在或无权使用', 403);
+      const sourceModule = readPrivateStudioDefinition('image-module', storedModule);
+      if (!sourceDefinition) sourceDefinition = sourceModule;
       if ((personalQuick || user.role !== 'admin') && sourceModule.source_preset_id) {
         const original = await tx.imageStudioPreset.findUnique({ where: { id: sourceModule.source_preset_id }, select: { owner_id: true } });
         if (!original || original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
@@ -361,13 +375,20 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     const assetIds = Array.from(new Set([...ids, ...personalReferenceIds, ...presetFixedReferences.map(reference => reference.assetId), ...(bannerAssetId ? [bannerAssetId] : [])]));
     const owned = await tx.asset.findMany({ where: { id: { in: assetIds }, owner_id: userId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] }, select: { id: true } });
     if (owned.length !== assetIds.length) throw new StudioModuleError('模板参考图片不存在或无权使用', 403);
-    let effectiveContext = context;
+    let effectiveContext = body.context === undefined && sourceDefinition ? sourceDefinition.context : context;
+    let effectivePrompt = body.prompt === undefined && sourceDefinition ? sourceDefinition.prompt : prompt;
+    if (sourceDefinition) {
+      if (privateFieldOrigins(sourceDefinition, 'prompt').length) effectivePrompt = sourceDefinition.prompt;
+      if (privateFieldOrigins(sourceDefinition, 'context').length) effectiveContext = sourceDefinition.context;
+    }
+    let historicalContext: Record<string, unknown> | undefined;
     if (body.reproduceFromTaskId) {
       if (typeof body.reproduceFromTaskId !== 'string' || body.reproduceFromTaskId.length > 120) throw new StudioModuleError('历史记录无效');
       const task = await tx.imageStudioTask.findFirst({ where: { id: body.reproduceFromTaskId, owner_id: userId, deleted_at: null } });
       if (!task?.snapshot_json) throw new StudioModuleError('历史记录缺少原上下文', 409);
       let snapshot;
-      try { snapshot = JSON.parse(task.snapshot_json); } catch { throw new StudioModuleError('历史记录缺少原上下文', 409); }
+      snapshot = readPrivateImageTaskSnapshot(task);
+      historicalContext = snapshot;
       if (!snapshot || typeof snapshot.moduleContext !== 'string' || typeof snapshot.globalContext !== 'string') throw new StudioModuleError('历史记录缺少原上下文', 409);
       const originalId = task.source_preset_id || (typeof snapshot.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
       if (originalId) {
@@ -375,28 +396,46 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
         if (!original || !canViewStudioPreset(user, original)) throw new StudioModuleError('原模板已不可用', 403);
         if ((personalQuick || user.role !== 'admin') && original.owner_id !== userId) throw new StudioModuleError('共享模板的内部配置只能由创建者另存', 403);
       }
-      effectiveContext = taskSettings && body.context !== undefined ? context : snapshot.moduleContext;
+      effectiveContext = taskSettings && body.context !== undefined
+        && !privateFieldOrigins(snapshot, 'moduleContext').length ? context : snapshot.moduleContext;
       const originalSkills = Array.isArray(snapshot.skills) ? snapshot.skills : [];
       const versions = body.skillVersions as Record<string, unknown> | undefined;
-      const keepsOriginalSkills = skillIds.length === originalSkills.length && originalSkills.every((skill: { id: string; promptVersion?: string }, index: number) => skillIds[index] === skill.id && versions?.[skill.id] === skill.promptVersion);
+      const keepsOriginalSkills = skillIds.length === originalSkills.length && originalSkills.every((skill: { id: string; promptVersion: string }, index: number) => skillIds[index] === skill.id && versions?.[skill.id] === publicSkillVersion(skill));
       if (!taskSettings || body.skillIds === undefined || keepsOriginalSkills) skillIds = await cloneHistoricalSkills(user, snapshot.skills, tx);
       else {
         const selected = await resolveSkills(user, skillIds, tx);
-        if (!versions || selected.some(skill => versions[skill.id] !== skill.promptVersion)) throw new StudioModuleError('提示词组已更新，当前输入保留，请重新选择后保存', 409);
+        if (!versions || selected.some(skill => versions[skill.id] !== publicSkillVersion(skill))) throw new StudioModuleError('提示词组已更新，当前输入保留，请重新选择后保存', 409);
       }
       if (target?.is_shared && skillIds.length) throw new StudioModuleError('历史skills仅自己可见，请先关闭模板共享', 409);
-      if (snapshot.evolution && ['increase', 'decrease'].includes(snapshot.evolution.direction)) inheritedEvolution = { version: 1, defaultDirection: snapshot.evolution.direction };
+      const evolution = snapshot.evolution as { direction?: unknown } | undefined;
+      if (evolution?.direction === 'increase' || evolution?.direction === 'decrease') inheritedEvolution = { version: 1, defaultDirection: evolution.direction };
     }
     if (inheritedEvolution && !evolutionCapability({ context: effectiveContext })) effectiveContext += `\n[studio:evolution:v1:${inheritedEvolution.defaultDirection}]`;
-    const data = { name, group_name: groupName, prompt, context: effectiveContext, model, quality, resolution, count, reference_limit: referenceLimit, aspect_ratio: aspectRatio, banner_asset_id: bannerAssetId, reference_ids: JSON.stringify(ids) };
+    const data = { name, group_name: groupName, prompt: effectivePrompt, context: effectiveContext, model, quality, resolution, count, reference_limit: referenceLimit, aspect_ratio: aspectRatio, banner_asset_id: bannerAssetId, reference_ids: JSON.stringify(ids) };
+    if (sourceDefinition) {
+      for (const field of ['prompt', 'context'] as const) {
+        const origins = privateFieldOrigins(sourceDefinition, field);
+        if (origins.length && data[field] !== sourceDefinition[field]) await requirePrivatePromptRequest(userId, origins);
+        transferPrivateFieldOrigin(sourceDefinition, field, data, field);
+      }
+    }
+    if (historicalContext) {
+      const origins = privateFieldOrigins(historicalContext, 'moduleContext');
+      if (origins.length && data.context !== historicalContext.moduleContext) await requirePrivatePromptRequest(userId, origins);
+      transferPrivateFieldOrigin(historicalContext, 'moduleContext', data, 'context');
+    }
     let created;
     if (target) {
+      const protectedData = await protectStudioDefinitionPatch('image-preset', target, { prompt: data.prompt, context: data.context }, userId);
       const changed = await tx.imageStudioPreset.updateMany({ where: { id: target.id, owner_id: userId, updated_at: target.updated_at },
-        data: { ...data, updated_at: new Date(Math.max(Date.now(), target.updated_at.getTime() + 1)) } });
+        data: { ...data, prompt: protectedData.prompt, context: protectedData.context, updated_at: new Date(Math.max(Date.now(), target.updated_at.getTime() + 1)) } });
       if (changed.count !== 1) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);
       created = await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: target.id } });
     } else {
-      created = await tx.imageStudioPreset.create({ data: { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: false } });
+      const newPreset = { ...data, id: randomUUID(), owner_id: userId, scope, is_shared: false };
+      transferPrivateFieldOrigin(data, 'prompt', newPreset, 'prompt');
+      transferPrivateFieldOrigin(data, 'context', newPreset, 'context');
+      created = await tx.imageStudioPreset.create({ data: writePrivateStudioDefinition('image-preset', newPreset, newPreset) });
     }
     if (taskSettings) await writeStudioWorkspaceSource(tx, { version: 2, ownerId: userId, moduleId: created.id,
       sourceTaskId: taskSettings.sourceTaskId || null, taskSettings }, 'preset');
@@ -658,8 +697,9 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
   const userId = user.id;
   const moduleId = await prisma.$transaction(async tx => {
     user = await assertStudioActor(userId, tx);
-    const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
-    if (!preset || !canViewStudioPreset(user, preset)) throw new StudioModuleError('模板不存在或无权使用', 404);
+    const storedPreset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
+    if (!storedPreset || !canViewStudioPreset(user, storedPreset)) throw new StudioModuleError('模板不存在或无权使用', 404);
+    const preset = readPrivateStudioDefinition('image-preset', storedPreset);
     if (await studioPresetArchived(preset.id, tx)) throw new StudioModuleError('模板已删除，请重新读取', 409);
     const settingsSource = await readStudioWorkspaceSource(tx, preset.owner_id, preset.id, 'preset');
     if (settingsSource?.taskSettings.sourceTaskId) await studioSettingsSourceContext(tx, user, settingsSource.taskSettings.sourceTaskId);
@@ -689,10 +729,10 @@ export async function applyStudioPreset(user: ImageStudioIdentity, presetId: str
     }
     const copiedReferenceIds = ids.map(id => assetMap.get(id)).filter((id): id is string => Boolean(id));
     const id = randomUUID();
-    await tx.imageStudioModule.create({ data: { id, owner_id: userId, revision: 1, source_preset_id: preset.id,
+    await tx.imageStudioModule.create({ data: writePrivateStudioDefinition('image-module', { id, owner_id: userId, revision: 1, source_preset_id: preset.id,
       name: preset.name, prompt: preset.prompt, context: preset.context, model: preset.model, quality: preset.quality, resolution: preset.resolution,
       count: preset.count, reference_limit: preset.reference_limit, aspect_ratio: preset.aspect_ratio, group_name: preset.group_name,
-      banner_asset_id: preset.banner_asset_id ? assetMap.get(preset.banner_asset_id) || null : null, reference_ids: JSON.stringify(copiedReferenceIds) } });
+      banner_asset_id: preset.banner_asset_id ? assetMap.get(preset.banner_asset_id) || null : null, reference_ids: JSON.stringify(copiedReferenceIds) }, preset) });
     if (preset.owner_id === userId) await setStudioModuleFixedReferences(userId, id, fixedReferences, tx);
     if (settingsSource) await writeStudioWorkspaceSource(tx, { ...settingsSource, ownerId: userId, moduleId: id });
     await setStudioModuleReferencePolicy(userId, id, referencePolicy, copiedReferenceIds, tx);

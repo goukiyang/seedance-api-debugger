@@ -46,6 +46,7 @@ export type StudioTemplateVersionSummary = {
 };
 
 export type StudioTemplateDto = {
+  privateRecipe?: boolean;
   id: string;
   source: StudioTemplateSource;
   name: string;
@@ -56,6 +57,9 @@ export type StudioTemplateDto = {
   revision: number;
   owner: { displayName: string; avatarUrl: string | null } | null;
   canManage: boolean;
+  canReadPrivatePrompt?: boolean;
+  canEditPrivatePrompt?: boolean;
+  requiresIdentityVerification?: boolean;
   canPublish: boolean;
   applyMode: 'studio-draft' | 'legacy-route';
   applyUrl: string | null;
@@ -90,6 +94,7 @@ export type CreateStudioTemplateRequest = {
 
 export type UpdateStudioTemplateRequest = {
   action: 'update';
+  privateEdit?: boolean;
   expectedRevision: number;
   name: string;
   description?: string | null;
@@ -170,6 +175,7 @@ export type UpdateStudioDraftRequest = {
 };
 
 export type StudioRunSnapshot = {
+  privateProvider?: { kind: 'musk'; settings: { enabled: boolean; base_url: string; default_model: string; api_key: string | null } };
   llmModel?: string;
   privateContext?: { global: string; module: string; globalRevision: number; moduleRevision: number };
   sourceRunId?: string;

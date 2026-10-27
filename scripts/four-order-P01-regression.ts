@@ -90,7 +90,7 @@ async function main() {
       const { resolution: _r2, revision: _v2, updated_at: _u2, ...b } = after[index];
       assert.deepEqual(a, b);
     }
-    checks++; check(!JSON.stringify(imageStudioSettingsPayload(await getImageStudioSettings(db), true)).includes('studio-resolution-apply'), 'Ordinary settings projection excludes private receipts');
+    checks++; check(!JSON.stringify(await imageStudioSettingsPayload(await getImageStudioSettings(db), owner)).includes('studio-resolution-apply'), 'Ordinary settings projection excludes private receipts');
     const restoreConflict = 'target-000';
     await db.imageStudioModule.update({ where: { id: restoreConflict }, data: { revision: { increment: 1 }, resolution: '1K' } });
     while (receipt.operation.phase !== 'restored') receipt = await execute(owner, payload(receipt, 'restore'), db);

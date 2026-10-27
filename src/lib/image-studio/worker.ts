@@ -1,9 +1,11 @@
 import { prisma } from '@/lib/prisma';
+import { privateImageTaskOrigins, transformPrivateImageTask } from './private-storage.server';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
   resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel, validateImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   imageGenerationSupportsStudioFourToOne, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { claimStudioTask, finishStudioTask, safeImageChannelSnapshot, assertFrozenSharedStudioTask } from './tasks';
-import { requestStudioImages, StudioProviderError } from './provider';
+import { assertPrivateStudioDestination, requestStudioImages, StudioProviderError } from './provider';
 import { normalizeStudioImage, validateGeneratedStudioImage, readStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
 import { STUDIO_EXECUTION_MS } from './limits';
 import { completeToolFlowTask } from '@/lib/tools/toolflow-runtime';
@@ -48,7 +50,7 @@ export async function assertStudioPostAuthorization(task: ImageStudioTask) {
   if (!current || current.status !== activeStatus || current.lease_token !== task.lease_token
     || !current.lease_until || current.lease_until <= new Date()) throw new StudioImageDownloadError('delivery_lease_lost');
   // Only validate the accepted snapshot; never resolve today's shared source here.
-  assertFrozenSharedStudioTask(current);
+  assertFrozenSharedStudioTask(transformPrivateImageTask(current, false));
   if (isPricingImageTask(current)) await assertPricingImageConsumerReady(prisma);
   if (current.billing_mode === 'actual') {
     const contract = parseImageBillingContract(current.billing_contract_json);
@@ -97,6 +99,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       await updateStudioDelivery(recovery, { recoveries: (recovery.recoveries || 0) + 1 });
       original = await download(recovery); usage = recovery.usage;
     } else {
+      task = transformPrivateImageTask(task, false);
       if (task.billing_mode === 'actual') {
         const contract = parseImageBillingContract(task.billing_contract_json);
         if (!contract || contract.mode !== 'actual' || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已过期，未向供应商提交');
@@ -121,11 +124,14 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       }
       await assertLease();
       await assertStudioPostAuthorization(task);
+      const privateOrigins = privateImageTaskOrigins(task);
+      assertPrivateStudioDestination({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
+        provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', images, privateOrigins });
       stage = 'provider'; providerStarted = true;
       await beginStudioRequest(task);
       await assertLease();
       await assertStudioPostAuthorization(task);
-      const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
+      const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model, privateOrigins,
         provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk',
         prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
         count: 1, images, size: task.output_size || undefined,
@@ -164,6 +170,16 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       await completeToolFlowTask(task.id);
     }
   } catch (error) {
+    if (error instanceof PrivatePromptError && (providerStarted || recovery)) {
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
+        data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, error: error.message } });
+      return;
+    }
+    if (error instanceof PrivatePromptError && !providerStarted) {
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
+        data: { status: studioTaskState(task, 'queued'), lease_token: null, lease_until: null, error: error.message } });
+      return;
+    }
     if (!delivery && providerStarted) delivery = await readStudioDelivery(task).catch(() => null) || undefined;
     const detail = error instanceof StudioProviderError ? error : null;
     const downloadError = error instanceof StudioImageDownloadError ? error : null;
@@ -283,6 +299,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         throw new StudioImageDownloadError('download_recovery_limit');
       }
 
+      if (!asyncReceipt) task = transformPrivateImageTask(task, false);
       let snapshot: Record<string, unknown>;
       try { snapshot = JSON.parse(task.snapshot_json || '{}') as Record<string, unknown>; }
       catch { throw new Error('图片通道任务快照无效'); }
@@ -354,6 +371,10 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         }
         await assertLease();
         await assertStudioPostAuthorization(task);
+        const privateOrigins = privateImageTaskOrigins(task);
+        assertPrivateStudioDestination({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
+          upstreamModel: capability.upstreamModel, protocol: capability.protocol,
+          provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', images, privateOrigins });
         stage = 'provider';
         await beginStudioRequest(task);
         preparedRequest = true;
@@ -363,7 +384,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await setStudioUnsentRequestState(task, 'attempted');
         preparedRequest = false;
         providerStarted = true;
-        const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
+        const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model, privateOrigins,
           upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability.protocol,
           idempotencyKey: task.id, prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
@@ -443,7 +464,16 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       await completeToolFlowTask(task.id);
     }
   } catch (error) {
-    if (error instanceof ImageGenerationChannelError && error.code === 'image_channel_dispatch_paused' && !providerStarted) {
+    if (error instanceof PrivatePromptError && recovering) {
+      await deferStudioAsyncRecovery(task, error.code, true);
+      return;
+    }
+    if (error instanceof PrivatePromptError && (providerStarted || asyncReceipt || delivery)) {
+      await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
+        data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, error: error.message } });
+      return;
+    }
+    if ((error instanceof PrivatePromptError || error instanceof ImageGenerationChannelError && error.code === 'image_channel_dispatch_paused') && !providerStarted) {
       if (preparedRequest) await setStudioUnsentRequestState(task, 'held');
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'channel_queued'), lease_token: null, lease_until: null, error: error.message } });

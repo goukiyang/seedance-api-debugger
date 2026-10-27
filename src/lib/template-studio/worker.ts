@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { getMuskApiSettings, isMuskApiReady, createMuskChatCompletion, MuskApiError } from '@/lib/integrations/musk';
+import { getMuskApiSettings, isMuskApiReady, createMuskChatCompletion, assertPrivateMuskSend, MuskApiError } from '@/lib/integrations/musk';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
+import { privateVideoRunOrigins } from './private-storage.server';
 import { authorizeStudioAssets } from './assets';
 import { requireStudioUser } from './common';
 import { StudioError } from './errors';
@@ -94,14 +96,14 @@ export async function recoverExpiredStudioRuns() {
 
 async function claimStudioRun() {
   const candidates = await prisma.videoStudioRun.findMany({
-    where: { mode: 'llm', status: 'queued', delivery_state: 'not_sent' },
+    where: { mode: 'llm', status: 'queued', delivery_state: 'not_sent', OR: [{ lease_expires_at: null }, { lease_expires_at: { lte: new Date() } }] },
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
     take: 5,
   });
   for (const run of candidates) {
     const token = randomUUID();
     const result = await prisma.videoStudioRun.updateMany({
-      where: { id: run.id, status: 'queued', delivery_state: 'not_sent', lease_token: null },
+      where: { id: run.id, status: 'queued', delivery_state: 'not_sent', lease_token: null, OR: [{ lease_expires_at: null }, { lease_expires_at: { lte: new Date() } }] },
       data: { status: 'running', lease_token: token, lease_expires_at: new Date(Date.now() + LEASE_MS), attempt: { increment: 1 }, updated_at: new Date() },
     });
     if (result.count === 1) return { run, token };
@@ -141,12 +143,12 @@ export async function processStudioPromptOnce() {
       return true;
     }
     requireStudioUser(user);
-    const snapshot = parseWorkerSnapshot(run.snapshot_json);
+    const snapshot = parseWorkerSnapshot(run.snapshot_json, run.id, run.draft_id);
     await ensureStudioSnapshotSourceStillUsable(user, snapshot);
     await authorizeStudioAssets(user, snapshot.assets);
 
     const setting = await prisma.platformSetting.findUnique({ where: { key: TEMPLATE_STUDIO_TEXT_ENABLED_KEY }, select: { value_json: true } });
-    const settings = await getMuskApiSettings();
+    const settings = snapshot.privateProvider?.settings || await getMuskApiSettings();
     if (!textFeatureEnabled(setting?.value_json) || !isMuskApiReady(settings)) {
       await markTerminal(run.id, token, 'failed', 'AI 整理当前未启用或服务未就绪，未提交上游。', 'not_sent');
       return true;
@@ -157,6 +159,8 @@ export async function processStudioPromptOnce() {
     }
     // Freeze the submitted model; legacy queued tasks retain the previous default-model behavior.
     const selectedSettings = { ...settings, default_model: snapshot.llmModel || settings.default_model };
+    const origins = privateVideoRunOrigins(snapshot);
+    assertPrivateMuskSend(selectedSettings, origins);
 
     const send = await updateRun(run.id, token, { delivery_state: 'not_sent' }, {
       delivery_state: 'sending', lease_expires_at: new Date(Date.now() + LEASE_MS),
@@ -165,6 +169,7 @@ export async function processStudioPromptOnce() {
     sent = true;
     const completion = await createMuskChatCompletion({
       settings: selectedSettings,
+      privateOrigins: origins,
       timeoutMs: MUSK_TIMEOUT_MS,
       temperature: 0.2,
       messages: [
@@ -189,6 +194,7 @@ export async function processStudioPromptOnce() {
       if (containsPrivateContext(prompt, snapshot)) throw new Error('文案疑似包含内部规则，已拦截且未展示。请调整本次需求后重新生成，或联系管理员检查上下文。');
     }
     catch (error) {
+      if (isPrivatePromptError(error)) throw error;
       await updateRun(run.id, token, { delivery_state: 'response_received' }, {
         status: 'failed', lease_token: null, lease_expires_at: null,
         error_message: error instanceof Error ? error.message : 'AI 返回格式无效', completed_at: new Date(),
@@ -199,6 +205,14 @@ export async function processStudioPromptOnce() {
       status: 'succeeded', prompt, error_message: null, lease_token: null, lease_expires_at: null, completed_at: new Date(),
     });
   } catch (error) {
+    if (isPrivatePromptError(error)) {
+      const attempted = sent;
+      await updateRun(run.id, token, {}, {
+        status: attempted ? 'uncertain' : 'queued', delivery_state: attempted ? 'unknown' : 'not_sent',
+        lease_token: null, lease_expires_at: attempted ? null : new Date(Date.now() + 60_000), error_message: error.message,
+      });
+      return true;
+    }
     const definiteClientRejection = error instanceof MuskApiError && error.code === 'musk_api_upstream_error' && error.status >= 400 && error.status < 500;
     await markTerminal(
       run.id,

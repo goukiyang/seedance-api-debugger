@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { isClientSessionBlocked, watchSessionExit } from '@/lib/auth/client-session-boundary';
 import { uploadSession } from '@/lib/http/upload-session';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { MAX_GENERATION_PROMPT_CHARS } from '@/lib/prompt/limits';
@@ -92,6 +92,13 @@ export function MultiviewPromptDialog(props: Props) {
     props.onStateChange({ unsaved: dirty, busy: loading || saving });
   }, [dirty, loading, saving, props.onStateChange]);
   useEffect(() => () => live.current.onStateChange({ unsaved: false, busy: false }), []);
+  useEffect(() => watchSessionExit(() => {
+    epoch.current++; setState(null); setValue(''); setEditing(false); busy.current = false;
+    setLoading(false); setSaving(false);
+  }), []);
+  useEffect(() => {
+    if (!props.open) { epoch.current++; setState(null); setValue(''); setEditing(false); }
+  }, [props.open]);
 
   function adoptSaved(payload: unknown, mutationId: string, scope: ReturnType<typeof capture>) {
     if (!current(scope) || pendingRef.current !== mutationId || !payload || typeof payload !== 'object') return false;
@@ -110,7 +117,7 @@ export function MultiviewPromptDialog(props: Props) {
       const response = await fetch('/api/admin/multiview/preset', { cache: 'no-store', signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(response);
       if (!current(scope)) return;
-      if ([401, 403].includes(response.status)) setState(null);
+      if ([401, 403].includes(response.status)) { setState(null); setValue(''); setEditing(false); }
       const next = parsePresetState(payload);
       if (!response.ok || !next) throw new Error('模板提示词暂不可读取，请重试。');
       setState(next); setNeedsRebase(false); if (!dirtyRef.current) setValue(next.preset.prompt);
@@ -127,7 +134,7 @@ export function MultiviewPromptDialog(props: Props) {
       const response = await fetch(`/api/admin/multiview/preset?mutationId=${encodeURIComponent(mutationId)}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(response);
       if (!current(scope)) return;
-      if ([401, 403].includes(response.status)) setState(null);
+      if ([401, 403].includes(response.status)) { setState(null); setValue(''); setEditing(false); }
       if (!response.ok || !adoptSaved(payload, mutationId, scope)) setNotice('尚未查到可确认的保存回执，请继续查询原保存；不会自动再次保存。');
     } catch { if (current(scope)) setNotice('保存结果暂未确认，可查询原保存；不会自动再次保存。'); }
     finally { if (current(scope)) { busy.current = false; setLoading(false); } }
@@ -144,7 +151,7 @@ export function MultiviewPromptDialog(props: Props) {
         body: JSON.stringify({ mutationId, expectedRevision: state.revision, prompt: value }), signal: AbortSignal.timeout(30000) });
       const payload = await readJsonResponse<unknown>(response);
       if (!current(scope)) return;
-      if ([401, 403].includes(response.status)) setState(null);
+      if ([401, 403].includes(response.status)) { setState(null); setValue(''); setEditing(false); }
       const code = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).code : null;
       if (response.status === 400 && code === 'MULTIVIEW_PRESET_INVALID' || response.status === 409 && code === 'MULTIVIEW_PRESET_REVISION_CONFLICT') {
         // These two server codes prove this save did not write. Never replay its PUT.

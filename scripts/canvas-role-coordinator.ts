@@ -1,3 +1,4 @@
+import './server-runtime.cjs';
 import { createHash, randomUUID } from 'crypto';
 import { appendFile, mkdir, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'fs/promises';
 import path from 'path';

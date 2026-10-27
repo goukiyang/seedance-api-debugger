@@ -12,6 +12,7 @@ import { renderPromptWithAssets } from './collection';
 import { buildContentArray } from '@/lib/provider/jimeng';
 import type { CreateVideoInput } from '@/types';
 import { multiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import { transformPrivateVideoText } from '@/lib/video/private-storage.server';
 
 // ============================================================================
 // Snapshot 创建
@@ -54,7 +55,7 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
   }
 
   const snapshot = await prisma.generationTaskSnapshot.create({
-    data: {
+    data: transformPrivateVideoText('video-generation-snapshot', {
       id: uuidv4(),
       task_id: input.taskId,
       workspace_id: input.workspaceId,
@@ -64,7 +65,7 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
       asset_mapping_json: JSON.stringify(assetMapping),
       content_json: contentJson,
       provider_payload_json: input.providerPayloadJson ?? null,
-    },
+    }, ['prompt_raw', 'prompt_rendered'], true, Boolean(input.protectedRecipeVersion)),
   });
 
   return snapshot;

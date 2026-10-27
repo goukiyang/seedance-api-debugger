@@ -1,6 +1,10 @@
 import { getSession } from '@/lib/auth/session';
-import { deleteSkill, listSkills, listSkillsPage, parseSkillIds, saveSkill } from '@/lib/image-studio/skills';
+import { deleteSkill, getSkill, skillDTO, listSkills, listSkillsPage, parseSkillIds, saveSkill } from '@/lib/image-studio/skills';
+import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
+import { readPrivateSkillEditor, savePrivateSkillDraft, savePrivateSkillEditor, privateSkillEditorStatus } from '@/lib/image-studio/private-skill-editor.server';
+import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 function validRequestOrigin(request: Request) {
@@ -21,6 +25,10 @@ async function handle(request: Request) {
     if (!user) return Response.json({ error: '请先登录' }, { status: 401, headers });
     if (request.method === 'GET') {
       const params = new URL(request.url).searchParams;
+      if (params.get('mode') === 'private-editor') return Response.json(await readPrivateSkillEditor(user, params.get('id') || ''), { headers });
+      if (['private-save-status', 'private-draft-status'].includes(params.get('mode') || '')) return Response.json(
+        await privateSkillEditorStatus(user, params.get('id') || '', params.get('requestId') || '', params.get('mode') === 'private-draft-status'), { headers });
+      if (params.get('private') === '1') return Response.json(await skillDTO(await getSkill(user, params.get('id') || ''), user, true), { headers });
       if (params.has('ids')) {
         const selected = parseSkillIds(params.get('ids')?.split(',').filter(Boolean) || []);
         const page = await listSkillsPage(user, { keys: selected });
@@ -44,7 +52,12 @@ async function handle(request: Request) {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioStyleError('提示词组内容无效');
     if (request.method === 'DELETE') { await deleteSkill(user, body); return Response.json({ ok: true }, { headers }); }
+    if (body.action === 'save-private-draft') return Response.json(await savePrivateSkillDraft(user, body.id, body), { headers });
+    if (body.action === 'save-private-definition') return Response.json(await savePrivateSkillEditor(user, body.id, body), { headers });
     return Response.json(await saveSkill(user, body), { headers });
-  } catch (error) { return Response.json({ error: error instanceof StudioStyleError ? error.message : error instanceof SyntaxError ? '提示词组内容无效' : '提示词组操作尚未确认，请重新读取' }, { status: error instanceof StudioStyleError ? error.status : error instanceof SyntaxError ? 400 : 503, headers }); }
+  } catch (error) {
+    if (error instanceof PrivateDraftConflict) return Response.json({ error: error.message }, { status: 409, headers });
+    if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return Response.json({ error: error.message, code: error.code }, { status: error.status, headers });
+    return Response.json({ error: error instanceof StudioStyleError ? error.message : error instanceof SyntaxError ? '提示词组内容无效' : '提示词组操作尚未确认，请重新读取' }, { status: error instanceof StudioStyleError ? error.status : error instanceof SyntaxError ? 400 : 503, headers }); }
 }
 export const GET = handle, POST = handle, PUT = handle, DELETE = handle;

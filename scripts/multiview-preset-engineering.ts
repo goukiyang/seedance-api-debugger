@@ -129,7 +129,11 @@ async function main() {
     assert.deepEqual(await service.readMultiviewRotationPresetVersion('1.0.0'), syntheticPreset);
     const assertSafePublic = (result: Awaited<ReturnType<typeof invoke>>, revision: number) => {
       assert.equal(result.status, 200);
-      assert.deepEqual(result.body, { revision, preset: { id: 'multiview-360', version: `1.0.${revision}`,
+      const { canReadPrivatePrompt, canEditPrivatePrompt, requiresIdentityVerification, ...publicState } = result.body;
+      assert.equal(canReadPrivatePrompt, false);
+      assert.equal(canEditPrivatePrompt, false);
+      assert.equal(typeof requiresIdentityVerification, 'boolean');
+      assert.deepEqual(publicState, { revision, preset: { id: 'multiview-360', version: `1.0.${revision}`,
         defaults: syntheticPreset.defaults } });
       assert.equal(Object.prototype.hasOwnProperty.call(result.body.preset, 'prompt'), false);
       assert.equal(Object.prototype.hasOwnProperty.call(result.body.preset, 'compositionReference'), false);

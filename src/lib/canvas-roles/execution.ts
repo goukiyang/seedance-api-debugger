@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { inheritUsageAttribution } from '@/lib/admin/usage-attribution';
 import type { SessionUser } from '@/lib/auth/session';
 import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { compileCanvasTextRules, getCanvasTextSettings } from '@/lib/canvas-text-settings';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { assertLiveNode, assertRoleCollaborationWritable, ownedRun, type RoleDb } from './permissions';
@@ -297,6 +298,7 @@ export async function executeWork(user: SessionUser, workId: string, body: JsonR
     await reconcileAttempt(user, attempt.id).catch(() => {});
     return { ...reserved, state: 'succeeded', resend: false };
   } catch (error) {
+    if (await holdRoleAttemptOnPrivateFailure(prisma, attempt.id, error)) throw error;
     if (!sent) {
       await prisma.$transaction(async db => {
         const current = await db.canvasRoleAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
@@ -393,6 +395,14 @@ async function releaseUnsentAttempt(db: RoleDb, user: SessionUser, attemptId: st
   const work = await db.canvasRoleWork.findUniqueOrThrow({ where: { id: current.work_id } });
   await db.canvasRoleTaskRun.update({ where: { id: work.role_task_run_id }, data: { reserved_points: { decrement: current.reserved_points },
     reserved_usd_micros: { decrement: current.reserved_usd_micros }, revision: { increment: 1 } } });
+}
+
+export async function holdRoleAttemptOnPrivateFailure(db: RoleDb, attemptId: string | null, error: unknown) {
+  if (!isPrivatePromptError(error)) return false;
+  if (attemptId) await db.canvasRoleAttempt.updateMany({ where: { id: attemptId,
+    state: { in: ['reserved', 'sending'] }, settlement_applied: false },
+    data: { state: 'unknown', fee_state: 'unknown' } });
+  return true;
 }
 
 export async function recoverRoleDispatch(db: RoleDb, user: SessionUser, dispatchId: string) {
@@ -520,9 +530,10 @@ export async function executeReservedDispatch(user: SessionUser, dispatchId: str
     }, { timeout: 15000 });
     await reconcileAttempt(user, reserved, { automatic: true }).catch(() => {});
   } catch (error) {
-    const code = error instanceof RoleError ? error.code : 'role_execution_unconfirmed';
+    const privateConfigurationFailure = await holdRoleAttemptOnPrivateFailure(prisma, attemptId, error);
+    const code = privateConfigurationFailure ? 'PRIVATE_PROMPT_UNAVAILABLE' : error instanceof RoleError ? error.code : 'role_execution_unconfirmed';
     if (attemptId) {
-      if (!sent) await prisma.$transaction(db => releaseUnsentAttempt(db, user, attemptId!, code), { timeout: 15000 });
+      if (!sent && !privateConfigurationFailure) await prisma.$transaction(db => releaseUnsentAttempt(db, user, attemptId!, code), { timeout: 15000 });
       else await prisma.canvasRoleAttempt.updateMany({ where: { id: attemptId, state: { in: ['sending', 'unknown'] } }, data: {
         state: actual ? 'not_adopted' : 'unknown', fee_state: actual ? 'pending' : 'unknown',
         ...(actual ? { result_json: JSON.stringify(actual), provider_reference: actual.providerReference, finished_at: new Date() }

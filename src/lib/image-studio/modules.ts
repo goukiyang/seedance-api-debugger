@@ -12,7 +12,7 @@ import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, t
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, StudioFixedReferenceError } from './fixed-references';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, studioStyleDTO, StudioStyleError } from './style-groups';
-import { getSkill, getSkillSelection, setSkillSelection, skillDTO } from './skills';
+import { getSkill, getSkillSelection, setSkillSelection, skillDTO, publicSkillSnapshot, type SkillSnapshot } from './skills';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { studioTemplateDefaultPolicy } from './template-defaults';
@@ -26,6 +26,10 @@ import { assertStudioDeletionIdle, assertStudioWorkspaceNotDeleted, listStudioDe
   recordStudioWorkspaceDeletion, studioWorkspaceDeletionCapability } from './workspace-deletion';
 import type { StudioDeletionCommandStatus, StudioDeletionNotApplied, StudioDeletionReceipt } from './shared-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { readPrivateStudioDefinition, protectStudioDefinitionPatch, writePrivateStudioDefinition, studioDefinitionOrigins } from './private-storage.server';
+import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
+import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 
 export { deleteStudioGroup };
 
@@ -69,6 +73,10 @@ type StudioModuleRow = {
 };
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string; updated_at?: Date }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
+  row = readPrivateStudioDefinition('image-module', { ...row, owner_id: ownerId });
+  const privateOrigins = privateFieldOrigins(row, 'context');
+  const promptOrigins = privateFieldOrigins(row, 'prompt');
+  const privateCapabilities = await privatePromptRequestCapabilities(ownerId, [...privateOrigins, ...promptOrigins]);
   const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
   if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, identity);
   // Author projection belongs to the Web DTO, not the shared Node worker graph.
@@ -85,7 +93,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   const styleGroupIds = await getStudioModuleStyleIds(ownerId, row.id);
   const skillIds = await getSkillSelection(ownerId, row.id);
   const skills = await Promise.all(skillIds.map(async id => {
-    try { return skillDTO(await getSkill(user, id)); }
+    try { return skillDTO(await getSkill(user, id), user); }
     catch (error) { if (error instanceof StudioStyleError && [403, 404, 409].includes(error.status)) return { id, name: 'skills不可用', unavailable: true }; throw error; }
   }));
   const styleGroups = await Promise.all(styleGroupIds.map(async id => {
@@ -97,11 +105,13 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
   }));
   let reproductionState: { fixedReferenceCount: number; skills: unknown[]; styleGroups: Array<{ id: string; name: string; referenceCount: number; coverUrl: string; canManage: false }> } | null = null;
   if (row.reproduce_task_id) {
-    const sourceTask = await prisma.imageStudioTask.findFirst({ where: { id: row.reproduce_task_id, owner_id: ownerId }, select: { snapshot_json: true } });
+    const sourceTask = await prisma.imageStudioTask.findFirst({ where: { id: row.reproduce_task_id, owner_id: ownerId }, select: { id: true, snapshot_json: true } });
     try {
       const snapshot = JSON.parse(sourceTask?.snapshot_json || '{}');
       reproductionState = { fixedReferenceCount: Array.isArray(snapshot.fixedReferenceImages) ? snapshot.fixedReferenceImages.length : 0,
-        skills: Array.isArray(snapshot.skills) ? snapshot.skills.filter((skill: { ownerId?: unknown; prompt?: unknown }) => (isAdmin || skill.ownerId === ownerId) && typeof skill.prompt === 'string') : [],
+        skills: sourceTask && Array.isArray(snapshot.skills) ? snapshot.skills.flatMap((skill: SkillSnapshot, index: number) =>
+          (isAdmin || skill.ownerId === ownerId) && typeof skill.prompt === 'string'
+            ? [publicSkillSnapshot(skill, sourceTask.id, index)] : []) : [],
         styleGroups: Array.isArray(snapshot.styleGroups) ? snapshot.styleGroups.filter((group: { id?: unknown; name?: unknown }) => typeof group.id === 'string' && typeof group.name === 'string')
           .map((group: { id: string; name: string; referenceCount?: number }) => ({ id: group.id, name: group.name, referenceCount: Number(group.referenceCount) || 0, coverUrl: `/api/image-studio/style-groups/${group.id}/cover`, canManage: false })) : [] };
     } catch { reproductionState = null; }
@@ -158,11 +168,11 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     state.capabilities.saveDefinition = state.capabilities.editPersonalDraft;
   }
   const settingsSource = await readStudioWorkspaceSource(prisma, ownerId, row.id);
-  return { ...state, templateRead, ...(settingsSource ? { taskSettings: settingsSource.taskSettings, settingsSourceTaskId: settingsSource.sourceTaskId } : {}),
+  return { ...state, templateRead, ...privateCapabilities, privateDefinition: privateOrigins.length > 0 || promptOrigins.length > 0, ...(settingsSource ? { taskSettings: settingsSource.taskSettings, settingsSourceTaskId: settingsSource.sourceTaskId } : {}),
     deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), id: row.id, name: row.name,
     // An unmarked legacy copy cannot prove that its copied prompt is personal input.
     // Keep the stored definition for execution; never expose it as the viewer's description.
-    prompt: row.source_preset_id && !templateRead.canViewTemplateContext ? '' : row.prompt,
+    prompt: promptOrigins.length || row.source_preset_id && !templateRead.canViewTemplateContext ? '' : row.prompt,
     count: row.count, referenceLimit, referencePolicy, aspectRatio: row.aspect_ratio || 'auto', resolution: generation.resolution, revision: row.revision, saved,
     model: generation.model, quality, groupName: row.group_name || '未分组', banner: banner ? { id: banner.id, originalUrl: studioTemplateAssetUrl(banner.id), thumbnailUrl: studioTemplateAssetUrl(banner.id, true), width: banner.width, height: banner.height } : null,
     fixedCover, coverEditable: saved,
@@ -174,12 +184,12 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourcePresetCanManageSharing: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !(await studioPresetArchived(sourcePreset.id))),
     sharingPreference: saved ? await readStudioModuleSharingPreference(ownerId, row.id) : null,
     canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !sourceArchived)),
-    contextEditable: !protectedSource && templateRead.canViewTemplateContext,
+    contextEditable: privateOrigins.length ? privateCapabilities.canEditPrivatePrompt : !protectedSource && templateRead.canViewTemplateContext,
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
     fixedReferenceCount: fixedReferences.length,
     styleGroupIds, styleGroups, skillIds, skills, reproductionState,
-    contextConfigured: Boolean(row.context.trim()), context: protectedSource || !templateRead.canViewTemplateContext ? '' : row.context,
+    contextConfigured: Boolean(row.context.trim()), context: privateOrigins.length || protectedSource || !templateRead.canViewTemplateContext ? '' : row.context,
     moduleContextVersion: await resolveModuleContextVersion(row.context).catch(() => null),
     createdAt: row.created_at, updatedAt: row.updated_at,
     images: ids.flatMap(id => { const asset = assets.find(item => item.id === id); return asset ? [{ id, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true), width: asset.width, height: asset.height }] : []; }),
@@ -227,7 +237,10 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
-  return { ...viewState, templateRead, deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
+  return { ...viewState, templateRead, privateDefinition: Boolean(dto?.privateDefinition),
+    canReadPrivatePrompt: Boolean(dto?.canReadPrivatePrompt), canEditPrivatePrompt: Boolean(dto?.canEditPrivatePrompt),
+    requiresIdentityVerification: Boolean(dto?.requiresIdentityVerification),
+    deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
     name: dto?.name || repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`,
     groupName: dto?.groupName || repairDefinition?.groupName || row.group_name?.trim() || '未分组',
     prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? repairDefinition?.templatePrompt ?? '',
@@ -263,6 +276,29 @@ export async function studioModuleDTOForUser(user: ImageStudioIdentity, moduleId
   if (!row) throw new StudioModuleError('模块不存在或无权使用', 404);
   const source = row.source_preset_id ? await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } }) : null;
   return moduleDTO(row, user.id, await getImageStudioSettings(), true, user.role === 'admin', source || undefined, user);
+}
+export async function readStudioModulePrivateDefinition(user: ImageStudioIdentity, moduleId: string) {
+  const actor = await assertStudioActor(user.id);
+  const stored = await prisma.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
+  if (!stored) throw new StudioModuleError('模块不存在或无权使用', 404);
+  const shared = (await readSharedStudioModules(actor.id, [stored.id])).get(stored.id);
+  if (shared?.binding) {
+    if (!shared.resolved) throw new StudioModuleError('模板当前不可读取，请刷新后重试', 409);
+    const definition = shared.resolved.definition;
+    const origins = [...privateFieldOrigins(definition, 'templatePrompt'), ...privateFieldOrigins(definition, 'context')];
+    if (origins.length) await requirePrivatePromptRequest(actor.id, origins);
+    else if (actor.role !== 'admin' && definition.sourceOwnerId !== actor.id) throw new StudioModuleError('无权查看模板原文', 403);
+    return { id: stored.id, revision: stored.revision, sourceRevision: definition.sourceRevision,
+      prompt: definition.templatePrompt, context: definition.context };
+  }
+  const row = readPrivateStudioDefinition('image-module', stored);
+  const origins = [...privateFieldOrigins(row, 'prompt'), ...privateFieldOrigins(row, 'context')];
+  if (origins.length) await requirePrivatePromptRequest(actor.id, origins);
+  else {
+    const { resolveStudioTemplateAuthor } = await import('./template-author');
+    if (!(await resolveStudioTemplateAuthor(actor, { moduleId })).templateRead.canViewTemplateContext) throw new StudioModuleError('无权查看模板原文', 403);
+  }
+  return { id: row.id, revision: row.revision, sourceRevision: null, prompt: row.prompt, context: row.context };
 }
 export async function listStudioModules(ownerId: string, cursor?: string, isAdmin = false, requestedIds?: string[], identity?: ImageStudioIdentity) {
   const actor = await assertStudioActor(ownerId);
@@ -534,7 +570,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
     const identity = await assertStudioActor(ownerId, tx);
     await assertStudioWorkspaceNotDeleted(ownerId, id, tx);
     if (fixedReferences !== undefined && identity.role !== 'admin') throw new StudioModuleError('固定模板图只能由管理员修改', 403);
-    const current = await tx.imageStudioModule.findUnique({ where: { id } });
+    const currentStored = await tx.imageStudioModule.findUnique({ where: { id } });
+    const current = currentStored ? readPrivateStudioDefinition('image-module', currentStored) : null;
     if (current && current.owner_id !== ownerId) throw new StudioModuleError('无权修改这个模块', 403);
     if (current && createOnly) return current;
     if (taskSettings) {
@@ -559,7 +596,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       protectedSource = !source || source.owner_id !== ownerId;
       if (protectedSource) {
         const currentFixedReferences = fixedReferences === undefined ? [] : await getStudioModuleFixedReferences(ownerId, id, tx);
-        const contextMatches = body.context === undefined || body.context === current.context;
+        const contextMatches = body.context === undefined || body.context === current.context
+          || body.privatePromptEdit !== true && privateFieldOrigins(current, 'context').length > 0;
         const fixedReferencesMatch = fixedReferences === undefined || (fixedReferences.length === currentFixedReferences.length
           && fixedReferences.every((reference, index) => reference.assetId === currentFixedReferences[index].assetId && reference.note === currentFixedReferences[index].note));
         if (!contextMatches || !fixedReferencesMatch) throw new StudioModuleError('共享模板的内部上下文和固定参考图只能由创建者修改', 403);
@@ -610,10 +648,14 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const sourceUser = sourceIdentity || { id: ownerId, role: isAdmin ? 'admin' : 'user', account_type: 'internal', feishu: null } as const;
       if (!source || !canViewStudioPreset(sourceUser, source)) throw new StudioModuleError('模板已停止共享，不能保存新的配置', 403);
     }
+    const newOrigins = studioDefinitionOrigins('image-module', { id, owner_id: ownerId, source_preset_id: forcedSourcePresetId });
+    if (!current && newOrigins.length && (data.prompt || data.context)) await requirePrivatePromptRequest(ownerId, newOrigins);
+    const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, body.privatePromptEdit === true)
+      : writePrivateStudioDefinition('image-module', { id, owner_id: ownerId, context: '', ...data });
     const saved = !current
-      ? await tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...data } })
+      ? await tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...protectedData } })
       : await (async () => {
-        const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(revision) }, data });
+        const changed = await tx.imageStudioModule.updateMany({ where: { id, owner_id: ownerId, revision: Number(revision) }, data: protectedData });
         if (!changed.count) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对', 409);
         return tx.imageStudioModule.findUniqueOrThrow({ where: { id } });
       })();

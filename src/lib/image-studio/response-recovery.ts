@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import type { ImageStudioTask, OperationLog, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { transformPrivateImageTask } from './private-storage.server';
 import { resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { readStudioResponseEvidence } from './response-evidence';
@@ -171,7 +172,7 @@ async function eligibility(tx: Tx, task: ImageStudioTask, input: Input) {
     || !contract || contract.mode !== 'fixed' || contract.model !== model || contract.scope !== task.billing_scope
     || contract.authorizedCredits !== task.unit_credits || contract.estimateSource !== 'legacy_fixed'
     || JSON.stringify(snapshot.billingContract) !== task.billing_contract_json) throw fail('billing');
-  assertFrozenSharedStudioTask(task);
+  assertFrozenSharedStudioTask(transformPrivateImageTask(task, false));
   const settings = await resolveImageGenerationChannelSnapshot({ channelId: channel.channelId, configRevision: channel.configRevision }, tx, false, model);
   const capability = settings.modelCapabilities[model];
   if (!settings.enabled || !settings.api_key || settings.channelId !== channel.channelId || settings.configRevision !== channel.configRevision

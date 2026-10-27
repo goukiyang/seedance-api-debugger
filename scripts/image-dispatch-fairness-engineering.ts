@@ -394,7 +394,7 @@ async function main() {
         }
         run().then(() => { console.log(JSON.stringify({ forbiddenCalls })); process.exitCode = forbiddenCalls === 0 ? 0 : 1; }, error => { console.error(error); process.exitCode = 1; });
       `;
-      const childOutput = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', child], { cwd: root, env, stdio: 'pipe', timeout: 120000, encoding: 'utf8' });
+      const childOutput = execFileSync(process.execPath, ['--require', path.join(root, 'scripts/server-runtime.cjs'), '--import', 'tsx', '--input-type=module', '-e', child], { cwd: root, env, stdio: 'pipe', timeout: 120000, encoding: 'utf8' });
       const childProof = JSON.parse(childOutput) as { forbiddenCalls: number };
       assert.equal(childProof.forbiddenCalls, 0); forbiddenCalls += childProof.forbiddenCalls;
       assert.equal(await batchState(restartBatch.key), 'complete');

@@ -104,10 +104,10 @@ async function main() {
   const initial = await getImageStudioSettings();
   const configured = await saveImageStudioSettings({ ...initial, context: 'Admin-only context' }, 'settings-test-admin');
   assert.ok(configured);
-  const regularPayload = imageStudioSettingsPayload(configured, false);
+  const regularPayload = await imageStudioSettingsPayload(configured, 'settings-test-reader');
   assert.ok(!Object.hasOwn(regularPayload, 'context'));
   assert.equal(regularPayload.contextConfigured, true);
-  assert.equal(imageStudioSettingsPayload(configured, true).context, 'Admin-only context');
+  await assert.rejects(imageStudioSettingsPayload(configured, 'settings-test-admin', true), 'A caller-supplied admin ID cannot grant raw-text access');
   await assert.rejects(saveImageStudioSettings({ ...configured, context: '' }, 'settings-test-admin'), StudioSettingsClearConfirmationError);
   assert.equal((await getImageStudioSettings()).context, 'Admin-only context');
   assert.equal(await saveImageStudioSettings(initial, 'settings-test-admin', { confirmContextClear: true }), null, 'stale revisions still fail');

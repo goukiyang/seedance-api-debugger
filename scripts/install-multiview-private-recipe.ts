@@ -1,3 +1,4 @@
+import './server-runtime.cjs';
 import { createHash, randomBytes } from 'node:crypto';
 import fsSync, { constants, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
