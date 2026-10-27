@@ -5,6 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as restoredContract from '../src/lib/image-studio/restored-settings';
+import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
@@ -14,6 +15,7 @@ async function main() {
   const destination = path.resolve(process.argv[2] || '');
   assert.ok(destination.startsWith(path.join(root, '.role-tests') + path.sep));
   const files = ['src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+    'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
@@ -100,7 +102,7 @@ async function main() {
   const channel = { channelId: 'original', configRevision: '55555555-5555-4555-8555-555555555555' };
   const api = { provider: 'openai', modelCapabilities: {}, supports_text_to_image: true, supports_image_to_image: true };
   let forbiddenCalls = 0;
-  const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
+  const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
@@ -114,6 +116,7 @@ async function main() {
     canViewStudioPreset: (_actor: unknown, preset: { owner_id: string; is_shared: boolean }) => preset.owner_id === owner || preset.is_shared,
     resolveStudioTaskSharedUse: async (_actor: unknown, _module: unknown, supplied: unknown) => { assert.deepEqual(plain(supplied), intent); return shared; },
     assertSharedStudioWorkerReady: async () => {},
+    readStudioWorkspaceSource: async () => null,
     studioPresetArchived: async (id: string) => id === 'synthetic-prior-preset' && priorArchived,
     resolveStudioModuleGenerationConfig: (source: Record<string, unknown>) => ({ ...source, prices: settings.prices }),
     resolveImageGenerationRequestChannel: async () => 'original', getImageGenerationSettingsForModel: async () => api,
@@ -143,6 +146,7 @@ async function main() {
     require: () => { forbiddenCalls++; throw new Error('Application import prohibited'); },
   };
   const code = [declarations('src/lib/image-studio/style-groups.ts', ['StudioStyleError', 'parseStudioStyleIds']),
+    declarations('src/lib/image-studio/task-settings-storage.ts', ['assertStudioTaskSettingsWrite']),
     declarations('src/lib/image-studio/fixed-references.ts', ['StudioFixedReferenceError', 'parseStudioFixedReferences']),
     declarations('src/lib/image-studio/reference-policy.ts', ['StudioReferencePolicyError', 'boundedPrimaryMax', 'orderedUnique',
       'defaultStudioReferencePolicy', 'validateStudioReferenceCounts', 'parsePolicyShape', 'parseStudioReferencePolicy', 'mapStudioReferencePolicy']),

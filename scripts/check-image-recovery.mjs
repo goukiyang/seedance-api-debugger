@@ -212,6 +212,7 @@ const publicUsageFixtures = [
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',
       'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
       'src/lib/image-studio/batches.ts', 'scripts/studio-restored-settings-engineering.ts',
     ] },
