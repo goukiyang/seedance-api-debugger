@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -20,7 +23,7 @@ function boundedInteger(value: string | null, fallback: number, min: number, max
   return Math.min(max, Math.max(min, Number(value)));
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -201,7 +204,7 @@ export async function GET(request: NextRequest) {
               where: {
                 project_id: { in: projectIds },
                 retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
-                local_status: { in: ['submitted', 'running'] },
+                local_status: { in: ['created', 'submitting', 'unknown', 'submitted', 'running'] },
               },
               _count: { _all: true },
             })
@@ -286,7 +289,7 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: [{ type: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
         members: includeAll
           ? { where: { status: 'active' }, select: { user_id: true, role: true, status: true } }
           : { where: { user_id: user.id }, select: { user_id: true, role: true, status: true } },
@@ -335,9 +338,9 @@ export async function GET(request: NextRequest) {
       { status: busy ? 503 : 500, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } },
     );
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -355,10 +358,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message, ...(error instanceof ProjectOperationError ? { code: error.code } : {}) }, { status: error.status });
     }
-    console.error('[Projects] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

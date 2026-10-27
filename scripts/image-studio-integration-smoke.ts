@@ -94,8 +94,8 @@ async function main() {
   assert.equal((await listStudioModules(user.id)).modules.find(item => item.id === moduleId)?.context, 'Module context');
   assert.equal((await listStudioModules(user.id, undefined, true)).modules.find(item => item.id === moduleId)?.context, 'Module context');
   assert.equal((await listStudioModules(stranger.id)).modules.length, 1);
-  await fs.mkdir(path.join(working, 'public/uploads'), { recursive: true });
-  await fs.writeFile(path.join(working, 'public/uploads/reference.png'), png);
+  await fs.mkdir(path.join(working, '.media/uploads'), { recursive: true });
+  await fs.writeFile(path.join(working, '.media/uploads/reference.png'), png);
   const reference = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', original_url: '/uploads/reference.png', file_name: 'reference.png', mime_type: 'image/png', file_size: png.length } });
   const referenceTwo = await prisma.asset.create({ data: { owner_id: user.id, type: 'image', original_url: '/uploads/reference.png', file_name: 'reference-two.png', mime_type: 'image/png', file_size: png.length } });
   const moduleBatch = await submitStudioBatch(user.id, { ...input, requestId: 'module-image-only-1234', moduleId, prompt: '', count: 1, aspectRatio: '5:3', referenceIds: [reference.id], revision: latest.revision });

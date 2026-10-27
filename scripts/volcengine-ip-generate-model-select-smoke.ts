@@ -15,7 +15,7 @@ const root = process.cwd();
 const composerSource = fs.readFileSync(`${root}/src/components/GenerationComposer.tsx`, 'utf8');
 const actionBarSource = fs.readFileSync(`${root}/src/components/ComposerActionBar.tsx`, 'utf8');
 const generateClientSource = fs.readFileSync(`${root}/src/components/generate/GeneratePageClient.tsx`, 'utf8');
-const createRouteSource = fs.readFileSync(`${root}/src/app/api/ip/tasks/create/route.ts`, 'utf8');
+const createRouteSource = fs.readFileSync(`${root}/src/server/video-tasks/ip-create.ts`, 'utf8');
 
 assert.ok(
   VOLCENGINE_IP_MODEL_OPTIONS.some((option) => option.id === VOLCENGINE_IP_SEEDANCE_2_0_MINI_MODEL_ID),

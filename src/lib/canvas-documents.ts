@@ -342,8 +342,11 @@ function resourceRefs(snapshot: Snapshot) {
 }
 
 export async function validateAssets(db: Db, user: SessionUser, snapshot: Snapshot, hydrateInputs = false) {
+  const { assertMedia } = await import('@/lib/access/media-policy');
+  const { mediaProjection } = await import('@/lib/media/outlet');
   const refs = resourceRefs(snapshot);
   const authorizedReferenceAssets = new Set<string>();
+  const referenceForAsset = new Map<string, string>();
   const previews = new Map<string, { id: string; originalUrl: string; thumbnailUrl: string; title: string }>();
   const referencePreviews = new Map<string, { url: string; thumbnail: string }>();
   for (const referenceId of refs.reference_image_ids) {
@@ -351,11 +354,17 @@ export async function validateAssets(db: Db, user: SessionUser, snapshot: Snapsh
     if (image.asset && image.asset.status !== 'active') {
       throw new CanvasDocumentError('参考素材已不可用，请重新选择素材', 403, 'resource_unavailable');
     }
-    if (image.asset_id) authorizedReferenceAssets.add(image.asset_id);
-    referencePreviews.set(image.id, { url: image.url, thumbnail: image.thumbnail_url || image.url });
+    if (image.asset_id) { authorizedReferenceAssets.add(image.asset_id); referenceForAsset.set(image.asset_id, image.id); }
+    if (hydrateInputs) {
+      const media = await mediaProjection(user, { type: 'reference', id: image.id });
+      if (!media?.previewUrl) throw new CanvasDocumentError('参考素材预览暂不可用', 503, 'resource_unavailable');
+      referencePreviews.set(image.id, { url: media.canDownload && media.originalUrl ? media.originalUrl : media.previewUrl,
+        thumbnail: media.thumbnailUrl || media.previewUrl });
+    }
   }
   // A valid shared reference may authorize its asset without transferring ownership.
   const directAssets = refs.asset_ids.filter(assetId => !authorizedReferenceAssets.has(assetId));
+  for (const assetId of directAssets) await assertMedia(user, { type: 'asset', id: assetId }, 'use', db as Prisma.TransactionClient);
   for (let offset = 0; offset < directAssets.length; offset += 200) {
     const batch = directAssets.slice(offset, offset + 200);
     const count = await db.asset.count({ where: {
@@ -369,9 +378,14 @@ export async function validateAssets(db: Db, user: SessionUser, snapshot: Snapsh
         where: { id: { in: refs.asset_ids.slice(offset, offset + 200) }, status: 'active' },
         select: { id: true, original_url: true, thumbnail_url: true, file_name: true },
       });
-      for (const asset of assets) previews.set(asset.id, {
-        id: asset.id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url || asset.original_url, title: asset.file_name,
-      });
+      for (const asset of assets) {
+        const referenceId = referenceForAsset.get(asset.id);
+        const media = await mediaProjection(user, referenceId && authorizedReferenceAssets.has(asset.id)
+          ? { type: 'reference', id: referenceId } : { type: 'asset', id: asset.id });
+        if (!media?.previewUrl) throw new CanvasDocumentError('素材预览暂不可用', 503, 'resource_unavailable');
+        previews.set(asset.id, { id: asset.id, originalUrl: media.canDownload && media.originalUrl ? media.originalUrl : media.previewUrl,
+          thumbnailUrl: media.thumbnailUrl || media.previewUrl, title: asset.file_name });
+      }
     }
     for (const node of snapshot.canvas.nodes) {
       const assetIds = node.data.assetIds ?? node.data.asset_ids;

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { route as apiRoute } from '@/lib/http/route';
 import { verifyCreditCallback } from '@/lib/feishu/credit-callback';
 import { handleCreditDecision } from '@/lib/credits/requests';
 import { CreditRequestError } from '@/lib/credits/request-rules';
 import { CREDIT_CARD_SOURCE, verifyCreditRelay } from '@/lib/feishu/credit-relay';
 
 export const runtime = 'nodejs';
-export async function POST(request: NextRequest) {
+const verifiedEvents = new WeakMap<NextRequest, ReturnType<typeof verifyCreditCallback> | ReturnType<typeof verifyCreditRelay>>();
+async function authenticateCallback(request: NextRequest): Promise<boolean | Response> {
   let verified;
   try {
     if (Number(request.headers.get('content-length') || 0) > 32768) return NextResponse.json({ error: 'request_too_large' }, { status: 413 });
@@ -27,6 +29,14 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'callback_verification_failed' }, { status: 401 });
   }
+  verifiedEvents.set(request, verified);
+  return true;
+}
+
+export const POST = apiRoute({ access: 'service', authenticate: authenticateCallback, rateLimit: false }, async (request: NextRequest) => {
+  const verified = verifiedEvents.get(request);
+  verifiedEvents.delete(request);
+  if (!verified) throw new Error('Verified credit callback context missing');
   if ('challenge' in verified && verified.challenge) return NextResponse.json({ challenge: verified.challenge });
   try {
     const event = verified.event;
@@ -38,4 +48,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json({ toast: { type: 'error', content: error instanceof CreditRequestError ? error.message : '暂未完成，请稍后重试或在网站查看申请' } });
   }
-}
+});

@@ -1,5 +1,6 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
+import { safeFetch } from '@/lib/net/safe-fetch';
 import path from 'path';
-import sharp from '../media/sharp';
 import { uploadSiteAsset } from '@/lib/assets/site-upload';
 
 export const PROVIDER_REFERENCE_IMAGE_MAX_PIXELS = 36_000_000;
@@ -78,23 +79,15 @@ export function providerReferenceImageSizeMessage(rawMessage?: string | null) {
 }
 
 async function fetchImageBuffer(url: string) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REFERENCE_IMAGE_FETCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`图片下载失败 HTTP ${response.status}`);
-    }
-    return Buffer.from(await response.arrayBuffer());
-  } finally {
-    clearTimeout(timeout);
-  }
+  const response = await safeFetch(url, { maxBytes: 20 * 1024 * 1024,
+    timeoutMs: REFERENCE_IMAGE_FETCH_TIMEOUT_MS, allowRedirects: true });
+  if (!response.ok) throw new Error('图片下载失败');
+  return Buffer.from(await response.arrayBuffer());
 }
 
 export async function readProviderReferenceImageDimensions(url: string) {
   const buffer = await fetchImageBuffer(url);
-  const metadata = await sharp(buffer, { limitInputPixels: false }).rotate().metadata();
+  const metadata = await (await openUntrustedImage(buffer, 'ordinary')).rotate().metadata();
   return {
     width: metadata.width ?? null,
     height: metadata.height ?? null,
@@ -113,7 +106,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
   }
 
   const buffer = await fetchImageBuffer(originalUrl);
-  const image = sharp(buffer, { limitInputPixels: false }).rotate();
+  const image = (await openUntrustedImage(buffer, 'ordinary')).rotate();
   const metadata = await image.metadata();
   const resize = getProviderSafeImageResizeDimensions(metadata.width, metadata.height);
   if (!resize) {

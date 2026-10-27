@@ -88,7 +88,7 @@ async function main() {
   );
 
   const providerSource = read('src/lib/provider/jimeng.ts');
-  const createRouteSource = read('src/app/api/tasks/create/route.ts');
+  const createRouteSource = read('src/server/video-tasks/standard-create.ts');
   const estimateRouteSource = read('src/app/api/tasks/estimate/route.ts');
   const generateClientSource = read('src/components/generate/GeneratePageClient.tsx');
   const generationComposerSource = read('src/components/GenerationComposer.tsx');

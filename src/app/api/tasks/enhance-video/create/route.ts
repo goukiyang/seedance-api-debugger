@@ -1,8 +1,15 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { transitionVideoTask, createVideoTaskRecord } from '@/lib/video/task-state';
+import { submitToProvider, acceptedSubmission, ProviderSubmissionError, recordSubmissionSideEffect } from '@/lib/video/submission';
+import { writeHoldLedger } from '@/lib/billing/holds';
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveInside } from '@/lib/fs/resolve-inside';
+import { validatePublicUrl } from '@/lib/net/safe-fetch';
+import { probeMediaFile, probeRemoteMedia } from '@/lib/media/probe-remote';
 import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
@@ -15,10 +22,9 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getProjectForGeneration, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
-import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
+import { allocateTaskCredits } from '@/lib/credits/policy';
 import {
   allocateProjectTaskBudget,
-  settleProjectTaskBudget,
   shouldBillProjectBudget,
 } from '@/lib/projects/budget';
 import {
@@ -82,17 +88,13 @@ function jsonError(message: string, status = 400, code = 'ENHANCE_VIDEO_CREATE_F
   return NextResponse.json({ error: code, message }, { status });
 }
 
-function publicVideoFilePath(localVideoPath: string) {
+async function publicVideoFilePath(localVideoPath: string) {
   if (!localVideoPath.startsWith('/videos/')) {
     throw new Error('本地视频路径不在 public/videos 目录');
   }
-  const publicDir = path.resolve(process.cwd(), 'public');
-  const videosDir = path.resolve(publicDir, 'videos');
-  const absolutePath = path.resolve(publicDir, localVideoPath.replace(/^\/+/, ''));
-  if (!absolutePath.startsWith(`${videosDir}${path.sep}`)) {
-    throw new Error('本地视频路径无效');
-  }
-  return absolutePath;
+  const { mediaRoot } = await import('@/lib/media/storage-roots');
+  const videosDir = mediaRoot('videos');
+  return resolveInside(videosDir, decodeURIComponent(localVideoPath.slice('/videos/'.length)));
 }
 
 async function uploadLocalVideoForEnhance(
@@ -101,7 +103,7 @@ async function uploadLocalVideoForEnhance(
 ) {
   if (!task.local_video_path) return null;
 
-  const filePath = publicVideoFilePath(task.local_video_path);
+  const filePath = await publicVideoFilePath(task.local_video_path);
   const info = await stat(filePath);
   if (!info.isFile() || info.size <= 0) {
     throw new Error('本地视频文件不可读');
@@ -109,6 +111,8 @@ async function uploadLocalVideoForEnhance(
   if (info.size > LOCAL_UPLOAD_SAFE_MAX_BYTES) {
     throw new Error('本地视频超过当前服务端安全上传上限，请改用公网视频 URL');
   }
+
+  await probeMediaFile(filePath, 'video');
 
   const fileName = path.basename(filePath) || `${task.id}.mp4`;
   const uploadTicket = await requestMediaUploadUrl({
@@ -143,6 +147,7 @@ async function resolveSourceVideoUrl(
 
   if (task.result_video_url) {
     try {
+      if (/^https?:/i.test(task.result_video_url)) await validatePublicUrl(task.result_video_url);
       return validateEnhanceVideoUrl(task.result_video_url);
     } catch {
       // Provider 临时 URL 不可用时，继续返回本地缓存上传时的真实错误。
@@ -160,80 +165,15 @@ async function releaseFrozenCreditsAfterProviderFailure(
   frozenAmount: number,
   errorMessage: string,
 ) {
-  await prisma.$transaction(async (tx) => {
-    const existingSettlement = await tx.creditLedger.findFirst({
-      where: {
-        related_task_id: taskId,
-        type: { in: ['task_success_deduct', 'task_failed_refund'] },
-      },
-    });
-    if (existingSettlement) return;
+  await prisma.$transaction(async tx => {
+    const task = await tx.videoTask.findUnique({ where: { id: taskId } });
+    if (!task || ['succeeded', 'failed', 'cancelled'].includes(task.local_status)) return;
 
-    const taskBeforeSettlement = await tx.videoTask.findUnique({ where: { id: taskId } });
-    if (!taskBeforeSettlement) return;
-
-    await tx.videoTask.update({
-      where: { id: taskId },
-      data: {
-        local_status: 'failed',
-        error_message: errorMessage,
-        error_code: 'PROVIDER_CREATE_FAILED',
-        completed_at: new Date(),
-      },
-    });
-
-    if (taskBeforeSettlement.billing_scope === 'project' && taskBeforeSettlement.project_id) {
-      const settlement = await settleProjectTaskBudget(tx, {
-        projectId: taskBeforeSettlement.project_id,
-        taskId,
-        terminalStatus: 'failed',
-        frozenAmount,
-        freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
-        operatorId: userId,
-      });
-      const failedTask = await tx.videoTask.update({
-        where: { id: taskId },
-        data: { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
-      });
-      await recordTaskCostSettlement(tx, failedTask, 'failed', userId);
-      return;
-    }
-
-    const settlement = await settleTaskCredits(tx, {
-      taskId,
-      userId,
-      terminalStatus: 'failed',
-      frozenAmount,
-      freezeSnapshot: taskBeforeSettlement.credit_freeze_snapshot,
-    });
-    const failedTask = await tx.videoTask.update({
-      where: { id: taskId },
-      data: { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
-    });
-
-    await tx.creditLedger.create({
-      data: {
-        user_id: userId,
-        type: 'task_failed_refund',
-        amount: settlement.refundedAmount,
-        balance_before: settlement.balanceBefore,
-        balance_after: settlement.balanceAfter,
-        frozen_before: settlement.frozenBefore,
-        frozen_after: settlement.frozenAfter,
-        related_task_id: taskId,
-        reason: `超分任务创建失败，返还冻结 ${settlement.refundedAmount} 点`,
-        metadata_json: JSON.stringify({
-          allocations: settlement.allocations,
-          expired_closed: settlement.expiredClosedAmount,
-        }),
-      },
-    });
-
-    await recordTaskCostSettlement(tx, failedTask, 'failed', userId);
+    await transitionVideoTask(taskId, task, 'failed', { error_message: errorMessage, error_code: 'PROVIDER_CREATE_FAILED' }, tx);
   });
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   let user;
   try {
     user = await getSessionUser(request);
@@ -400,6 +340,12 @@ export async function POST(request: NextRequest) {
   if (!sourceVideoUrl) {
     return jsonError('源视频不可用', 400, 'SOURCE_VIDEO_UNAVAILABLE');
   }
+  if (/^https?:/i.test(sourceVideoUrl)) {
+    try {
+      const metadata = await probeRemoteMedia(sourceVideoUrl, 'video');
+      if (!metadata.streams?.some(stream => stream.codec_type === 'video') || !(Number(metadata.format?.duration) > 0)) throw new Error('unreadable');
+    } catch { return jsonError('源视频无法安全核对，请重新选择或上传；尚未提交生成。', 400, 'SOURCE_VIDEO_UNAVAILABLE'); }
+  }
 
   let createdTask: VideoTask;
   try {
@@ -408,7 +354,7 @@ export async function POST(request: NextRequest) {
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, { ...creationBody, action: 'enhance', source_task_id: sourceTask?.id }, project.id);
       await assertVideoPricingAcceptance(priceQuote, body.pricingRevision, tx);
-      const task = await tx.videoTask.create({
+      const task = await createVideoTaskRecord(tx, {
         data: {
           provider: 'volcengine_mediakit',
           model: 'enhance-video',
@@ -482,7 +428,7 @@ export async function POST(request: NextRequest) {
             status: user.status,
           }, estimatedCost, task.id);
           freezeSnapshot = freeze.snapshot;
-          await tx.creditLedger.create({
+          await writeHoldLedger(tx, {
             data: {
               user_id: user.id,
               type: 'task_freeze',
@@ -548,6 +494,7 @@ export async function POST(request: NextRequest) {
     clientToken: createdTask.id,
   });
   let providerRequestId: string | null = null;
+  let providerSubmissionAttempted = false;
   try {
     await prisma.videoTask.update({
       where: { id: createdTask.id },
@@ -566,17 +513,13 @@ export async function POST(request: NextRequest) {
     });
     providerRequestId = providerRequest.id;
 
-    const providerResult = await createEnhanceVideoTask(providerInput, aiMediaKitRequestOptions);
-    await prisma.videoTask.update({
-      where: { id: createdTask.id },
-      data: {
-        provider_task_id: providerResult.provider_task_id,
-        raw_create_response: JSON.stringify(redactAiMediaKitLog(providerResult.raw)),
-        local_status: 'submitted',
-      },
-    });
+    providerSubmissionAttempted = true;
+    const providerResult = acceptedSubmission(await submitToProvider({
+      taskId: createdTask.id, send: async () => await createEnhanceVideoTask(providerInput, aiMediaKitRequestOptions),
+      acceptedPatch: value => ({ raw_create_response: JSON.stringify(redactAiMediaKitLog(value.raw)) }),
+    }));
 
-    await markProviderApiRequestAccepted({
+    await recordSubmissionSideEffect(createdTask.id, () => markProviderApiRequestAccepted({
       requestId: providerRequest.id,
       task: { ...createdTask, provider_task_id: providerResult.provider_task_id },
       providerTaskId: providerResult.provider_task_id,
@@ -586,7 +529,7 @@ export async function POST(request: NextRequest) {
           ? Object.keys(providerResult.raw as Record<string, unknown>)
           : [],
       },
-    });
+    }));
 
     startTaskLocalization(createdTask.id);
 
@@ -608,6 +551,10 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (providerSubmissionAttempted && !(error instanceof ProviderSubmissionError && error.outcome === 'rejected')) {
+      return NextResponse.json({ id: createdTask.id, task_id: createdTask.id, status: 'unknown',
+        submission_unconfirmed: true, message: '提交待确认，请勿重复提交' }, { status: 202, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     const errorMessage = error instanceof Error ? redactAiMediaKitLog(error.message) : 'AI MediaKit 调用异常';
     if (providerRequestId) {
       await markProviderApiRequestFailed({
@@ -626,4 +573,4 @@ export async function POST(request: NextRequest) {
       { status: 502 },
     );
   }
-}
+});

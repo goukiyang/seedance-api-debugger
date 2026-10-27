@@ -33,7 +33,7 @@ for (const name of protectedFunctions) {
 const protectedFiles = ['src/lib/credits/policy.ts', 'src/lib/costs/ledger.ts',
   'src/app/tools/ultimate-canvas/CanvasFrame.tsx', 'src/lib/image-studio/worker.ts',
   'src/app/api/tools/ultimate-canvas/video-submission/route.ts', 'src/app/api/tools/ultimate-canvas/generate/route.ts',
-  'src/app/api/tasks/create/route.ts', 'src/app/api/assets/generate/route.ts',
+  'src/server/video-tasks/standard-create.ts', 'src/app/api/assets/generate/route.ts',
   'public/tools/ultimate-canvas/generation-node-workflow.js', 'public/tools/ultimate-canvas/generation-node-interactions.js',
   'src/lib/tools/toolflow-runtime.ts'];
 for (const file of protectedFiles) assert.equal(read(file), prior(file), `Protected file ${file}`);

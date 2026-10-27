@@ -81,7 +81,7 @@ async function diagnostics() {
   await c.exports.markProviderApiRequestFailed({ requestId: 'other-provider-fixture' });
   assert.equal(updates[0].data.http_status, null); assert.equal(updates[1].data.http_status, 201);
   assert.ok(!('http_status' in updates[2].data), 'other providers unchanged');
-  const route = source('src/app/api/tasks/create/route.ts');
+  const route = source('src/server/video-tasks/standard-create.ts');
   assert.equal((route.match(/seedance_diagnostic: seedanceDiagnostic.value/g) || []).length, 2);
   assert.ok(route.includes('createVideoTask({ ...providerInput, ...seedanceReferenceTransport }, diagnostic'));
 }

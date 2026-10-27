@@ -80,6 +80,10 @@ async function findOfficialChargeAllocations(ledgerIds: string[]) {
 
 export async function getCostLedgerAuditSummary() {
   const staleProviderRequestCutoff = new Date(Date.now() - 30 * 60 * 1000);
+  // An official charge after a site refund is an exception report, never a debit.
+  const refundedButProviderChargedCount = await prisma.videoTask.count({ where: {
+    refund_amount: { gt: 0 }, OR: [{ provider_official_amount_micros: { gt: 0 } }, { provider_official_amount_minor: { gt: 0 } }],
+  } });
 
   const [
     ledgerCount,
@@ -173,10 +177,11 @@ export async function getCostLedgerAuditSummary() {
     officialConfirmedTasksWithoutChargeLedgerCount +
     acceptedRequestsWithoutProviderTaskCount +
     stalePendingProviderRequestCount +
-    duplicateProviderTaskIds.length;
+    duplicateProviderTaskIds.length + refundedButProviderChargedCount;
 
   return {
     ledger_count: ledgerCount,
+    refunded_but_provider_charged_count: refundedButProviderChargedCount,
     allocation_count: allocationCount,
     official_charge_count: officialChargeLedgers.length,
     official_ledger_totals: sumCostByCurrency(officialChargeLedgers),

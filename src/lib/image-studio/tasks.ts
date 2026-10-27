@@ -1,3 +1,5 @@
+import { writeHoldLedger } from '@/lib/billing/holds';
+import { authorizeLegacyInflight } from '@/lib/billing/legacy-inflight';
 import { createHash, randomUUID } from 'node:crypto';
 import { readPrivateStudioDefinition, transformPrivateImageTask } from './private-storage.server';
 import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
@@ -1101,7 +1103,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const id = `${billingContract.pricing ? 'rate-' : ''}${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];
       const taskPrompt = candidate?.prompt || input.prompt;
-      const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
+      const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id, 'image') : null;
       const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
         billing_mode: billingContract.mode, billing_scope: billingScope,
@@ -1131,7 +1133,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (roleMedia) await bindRoleMediaTask(tx, roleMedia, { kind: 'image', taskId: id,
         requestId: input.requestId, ordinal: i + 1, model: generation.model,
         providerId: quoteImageChannel?.channelId || imageApi.channelId || 'original', reservedPoints: price });
-      if (freeze) await tx.creditLedger.create({ data: {
+      if (freeze) await writeHoldLedger(tx, { data: {
         user_id: ownerId, type: 'task_freeze', amount: -price,
         balance_before: freeze.balance_before, balance_after: freeze.balance_after,
         frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after,
@@ -1157,6 +1159,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     // Complete the same recovery CAS before changing task state; both roll back
     // with asset/ledger settlement if any later step fails.
     if (recovery && (status !== 'uncertain' || retainedMismatch)) await recovery.completeStudioAsyncRecovery(tx, task);
+    await authorizeLegacyInflight(tx, 'image', task.id);
     const changed = await tx.imageStudioTask.updateMany({
       where: { id: task.id, status: activeStatus, lease_token: task.lease_token, lease_until: { gt: new Date() } },
       data: { status: studioTaskState(task, status), asset_id: data.assetId, error: status === 'succeeded' ? null : data.error, usage_json: data.usage ? JSON.stringify(data.usage) : undefined,
@@ -1202,7 +1205,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
       terminalStatus: status, frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot,
       ...(task.billing_mode === 'actual' ? { actualCost: 0 } : {}) });
-    await tx.creditLedger.create({ data: {
+    await writeHoldLedger(tx, { data: {
       user_id: task.owner_id, type: status === 'succeeded' ? 'task_success_deduct' : 'task_failed_refund',
       amount: status === 'succeeded' ? -settlement.actualCost : settlement.refundedAmount,
       balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter,
@@ -1272,6 +1275,7 @@ export async function cancelQueuedChannelTask(ownerId: string, id: string, clien
     if (receipt && receipt.dispatchState !== 'held' || await readStudioAsyncReceipt(task)) {
       throw new StudioError('任务已有请求或受理凭据，不能以取消释放预留；未停止供应商，也未重新生成', 409);
     }
+    await authorizeLegacyInflight(tx, 'image', task.id);
     const changed = await tx.imageStudioTask.updateMany({ where: { id, owner_id: ownerId, status: task.status },
       data: { status: 'cancelled', error: '本人取消了未向供应商请求的排队任务；原记录保留', finished_at: new Date(),
         lease_token: null, lease_until: null, billing_status: studioBillingState(task, 'channel_cancelled'), billing_next_check_at: null } });
@@ -1279,7 +1283,7 @@ export async function cancelQueuedChannelTask(ownerId: string, id: string, clien
     if (task.unit_credits > 0) {
       const settlement = await settleTaskCredits(tx, { taskId: id, userId: ownerId, terminalStatus: 'failed',
         frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot, actualCost: 0 });
-      await tx.creditLedger.create({ data: { user_id: ownerId, type: 'task_failed_refund',
+      await writeHoldLedger(tx, { data: { user_id: ownerId, type: 'task_failed_refund',
       amount: settlement.refundedAmount, balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter,
       frozen_before: settlement.frozenBefore, frozen_after: settlement.frozenAfter, related_task_id: id,
       idempotency_key: `image-studio:settle:${id}`, reason: '取消未向供应商请求的图片任务，释放原预留',

@@ -12,6 +12,7 @@ import { subscribeUploadSession, uploadSession } from '@/lib/http/upload-session
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { Workspace, WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import type { UploadProgressHandler } from '@/lib/http/file-upload';
+import type { PageInfo } from '@/lib/pagination/cursor';
 
 const TAB_ID_KEY = 'workspace_tab_id';
 const UPLOAD_INVALID_JSON_MESSAGE = '素材上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。';
@@ -30,6 +31,7 @@ type WorkspaceResponse = ApiMessageResponse & {
 
 type ReferenceAlbumDetailResponse = ApiMessageResponse & {
   images?: Array<{ id?: string }>;
+  pagination?: PageInfo;
 };
 
 type ReferenceAlbumCreateResponse = ApiMessageResponse & {
@@ -308,7 +310,8 @@ export function useWorkspace(): UseWorkspaceResult {
   const addLibrarySelection = useCallback(async (selection: Array<{ assetId?: string; referenceImageId?: string }>) => { if (selection.length) await mutate(scope => associate(scope, { selection })); }, [associate, mutate]);
   const loadReferenceAlbum = useCallback(async (albumId: string, maxImages = 9) => {
     await mutate(async scope => {
-      const detail = await request<ReferenceAlbumDetailResponse>(scope, `/api/reference-albums/${encodeURIComponent(albumId)}`, 'GET');
+      const detail = await request<ReferenceAlbumDetailResponse>(scope, `/api/reference-albums/${encodeURIComponent(albumId)}?limit=${Math.min(maxImages + 1, 100)}`, 'GET');
+      if (!detail.pagination || detail.pagination.total > maxImages || detail.pagination.hasMore) throw new Error(`当前模型最多使用 ${maxImages} 张参考图。图集有 ${detail.pagination?.total ?? '更多'} 项，请从素材选择器按需选择，现有素材未被替换。`);
       const referenceImageIds = (detail.images || []).map(image => image.id).filter((id): id is string => Boolean(id));
       if (referenceImageIds.length > maxImages) throw new Error(`当前模型最多使用 ${maxImages} 张参考图。图集有 ${referenceImageIds.length} 项，请从素材选择器按需选择，现有素材未被替换。`);
       await associate(scope, { referenceImageIds, replace: true });

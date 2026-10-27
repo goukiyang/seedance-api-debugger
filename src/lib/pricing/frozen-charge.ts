@@ -1,4 +1,5 @@
 import type { PricingAdminIdentity, PricingAdminExchange, PricingAdminMode } from './admin-contract';
+import { PublicApiError } from '@/lib/http/public-error';
 import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal, roundDecimal, sumDecimal } from './math';
 import { creditCents } from '@/lib/credits/precision';
 
@@ -20,10 +21,10 @@ export type FrozenPricingCharge = {
   rounding: 'half_up_tenth' | 'legacy';
 };
 
-export class PricingChargeError extends Error {
+export class PricingChargeError extends PublicApiError {
   readonly status = 409;
   readonly code = 'pricing_quote_changed';
-  constructor(message = '收费规则已变化，请重新获取报价；参数和素材已保留，未重新提交') { super(message); }
+  constructor(message = '收费规则已变化，请重新获取报价；参数和素材已保留，未重新提交') { super(message, 409, 'pricing_quote_changed'); }
 }
 
 function decimalNumber(value: string, maximum = '10000000') {

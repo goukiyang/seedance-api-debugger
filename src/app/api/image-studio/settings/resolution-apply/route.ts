@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -17,14 +18,14 @@ function failure(error: unknown) {
   if (error instanceof SyntaxError) return response({ error: '操作内容无效' }, 400);
   return response({ error: '本次结果尚未确认，请查询原操作编号后重试；不要新建同一批次' }, 503);
 }
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     return response(await readResolutionOperations(user.id, request.nextUrl.searchParams.get('requestId') || undefined,
       Number(request.nextUrl.searchParams.get('cursor') || 0)));
   } catch (error) { return failure(error); }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const origin = request.headers.get('origin');
@@ -40,4 +41,4 @@ export async function POST(request: NextRequest) {
     }
     return response(await executeResolutionOperation(user.id, body));
   } catch (error) { return failure(error); }
-}
+});

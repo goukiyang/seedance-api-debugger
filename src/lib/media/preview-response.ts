@@ -1,14 +1,13 @@
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import http from 'node:http';
-import https from 'node:https';
-import { lookup } from 'node:dns/promises';
-import { Readable, Transform } from 'node:stream';
+import { Readable } from 'node:stream';
 import { NextResponse } from 'next/server';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
-import { isPrivateNetworkHost } from './public-url';
+import { safeFetch, SafeFetchError } from '@/lib/net/safe-fetch';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import { imageEtagMatches, imageStatEtag } from './image-validators';
+import { mediaRoot } from './storage-roots';
 
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
 const MAX_REMOTE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -33,28 +32,18 @@ function mediaError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status, headers: privateHeaders });
 }
 
-function deadline<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(new Error('media_request_aborted'));
-    if (signal.aborted) { pending.catch(() => {}); abort(); return; }
-    signal.addEventListener('abort', abort, { once: true });
-    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-  });
-}
-
 // Caller must authorize the stored resource first. Never accept a caller-supplied proxy URL.
 export async function mediaPreviewResponse(request: Request, source: string, fallbackMime: string, inlineImagePolicy?: string): Promise<NextResponse> {
   const local = siteUploadPathFromUrl(source) || (source.startsWith('/') && !source.startsWith('//') ? source.split(/[?#]/)[0] : null);
   const contentType = previewMime(source, fallbackMime);
   if (local) {
-    const publicRoot = path.resolve(process.cwd(), 'public');
-    const decoded = decodeURIComponent(local);
-    const candidate = path.resolve(publicRoot, decoded.replace(/^\/+/, ''));
-    if (!candidate.startsWith(`${publicRoot}${path.sep}`)) return mediaError('素材路径无效', 400);
     let file: string;
-    try { file = await realpath(candidate); } catch { return mediaError('文件不存在', 404); }
-    const roots = await Promise.all(['uploads', 'videos'].map(dir => realpath(path.join(publicRoot, dir)).catch(() => '')));
-    if (!roots.some(root => root && file.startsWith(`${root}${path.sep}`))) return mediaError('素材路径无效', 400);
+    try {
+      const decoded = decodeURIComponent(local);
+      const match = /^\/(uploads|videos)\/(.+)$/.exec(decoded);
+      if (!match) return mediaError('素材路径无效', 400);
+      file = await resolveInside(mediaRoot(match[1] as 'uploads' | 'videos'), match[2]);
+    } catch { return mediaError('文件不存在或路径无效', 404); }
     const info = await stat(file);
     if (!info.isFile() || !info.size) return mediaError('文件不可用', 404);
     const imageHeaders = inlineImagePolicy && contentType.startsWith('image/')
@@ -79,74 +68,38 @@ export async function mediaPreviewResponse(request: Request, source: string, fal
   return fetchPublicMedia(request, source, contentType);
 }
 
-// Public-only transport: pinned DNS and every redirect are checked; no cookies or authorization are forwarded.
-export function fetchPublicMedia(request: Request, source: string, fallbackMime: string) {
-  return remotePreview(request, source, fallbackMime, AbortSignal.any([request.signal, AbortSignal.timeout(600000)]), 0);
-}
-
-async function remotePreview(request: Request, source: string, fallbackMime: string, signal: AbortSignal, redirects: number): Promise<NextResponse> {
-  const url = new URL(source);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || isPrivateNetworkHost(url.hostname)) return mediaError('媒体地址不可用', 503);
-  const addresses = await deadline(lookup(url.hostname, { all: true, family: 4 }), AbortSignal.any([signal, AbortSignal.timeout(10000)]));
-  if (!addresses.length || addresses.some(({ address }) => isPrivateNetworkHost(address) || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(address))) return mediaError('媒体地址不可用', 503);
-  signal.throwIfAborted();
+// Public-only transport; authorization remains the caller's responsibility.
+export async function fetchPublicMedia(request: Request, source: string, fallbackMime: string): Promise<NextResponse> {
   const range = request.method === 'HEAD' ? null : request.headers.get('range');
   if (range && (!/^bytes=(\d*)-(\d*)$/.test(range) || range.length > 80)) return mediaError('请求范围无效', 416);
-  return new Promise((resolve, reject) => {
-    const client = url.protocol === 'https:' ? https : http;
-    const upstream = client.request(url, {
-      method: request.method === 'HEAD' ? 'HEAD' : 'GET', signal, family: 4,
-      lookup: (_host, _options, callback) => callback(null, addresses[0].address, addresses[0].family),
-      headers: { 'Accept-Encoding': 'identity', ...(range ? { Range: range } : {}) },
-    }, response => {
-      clearTimeout(headersTimer);
-      const status = response.statusCode || 502;
-      if ([301, 302, 303, 307, 308].includes(status)) {
-        const location = response.headers.location;
-        response.destroy();
-        if (!location || redirects >= 3) { resolve(mediaError('媒体跳转失败', 502)); return; }
-        let next: URL;
-        try { next = new URL(location, url); } catch { resolve(mediaError('媒体地址不可用', 502)); return; }
-        if (url.protocol === 'https:' && next.protocol !== 'https:') { resolve(mediaError('媒体跳转不安全', 502)); return; }
-        resolve(remotePreview(request, next.href, fallbackMime, signal, redirects + 1));
-        return;
-      }
-      const headers = new Headers(privateHeaders);
-      if (status === 416) {
-        const value = response.headers['content-range'];
-        if (value && /^bytes \*\/\d+$/.test(value)) headers.set('Content-Range', value);
-        response.destroy(); resolve(new NextResponse(null, { status, headers })); return;
-      }
-      if (status !== 200 && status !== 206) { response.destroy(); resolve(mediaError(status === 404 ? '媒体文件不存在' : '媒体暂时无法访问', status === 404 ? 404 : 502)); return; }
-      if (response.headers['content-encoding'] && response.headers['content-encoding'] !== 'identity') { response.destroy(); resolve(mediaError('媒体编码响应无效', 502)); return; }
-      const length = Number(response.headers['content-length']);
-      if (length > MAX_REMOTE_BYTES) { response.destroy(); resolve(mediaError('媒体文件过大', 413)); return; }
-      const mime = (response.headers['content-type'] || '').split(';')[0].trim();
-      if (mime && !/^(image|video|audio)\//.test(mime) && mime !== 'application/octet-stream') { response.destroy(); resolve(mediaError('返回内容不是媒体文件', 502)); return; }
-      headers.set('Content-Type', /^(image|video|audio)\/[\w.+-]+$/.test(mime) ? mime : fallbackMime);
-      if (response.headers['content-length'] && Number.isSafeInteger(length) && length >= 0) headers.set('Content-Length', String(length));
-      if (response.headers['accept-ranges'] === 'bytes') headers.set('Accept-Ranges', 'bytes');
-      if (status === 206) {
-        const contentRange = response.headers['content-range'];
-        if (!contentRange || !/^bytes \d+-\d+\/\d+$/.test(contentRange)) { response.destroy(); resolve(mediaError('媒体分段响应无效', 502)); return; }
-        headers.set('Content-Range', contentRange);
-        headers.set('Accept-Ranges', 'bytes');
-      }
-      if (request.method === 'HEAD') { response.destroy(); resolve(new NextResponse(null, { status, headers })); return; }
-      let received = 0;
-      const limited = new Transform({ transform(chunk: Buffer, _encoding, callback) {
-        received += chunk.length;
-        callback(received > MAX_REMOTE_BYTES ? new Error('media_size_limit') : null, chunk);
-      } });
-      response.setTimeout(60000, () => response.destroy(new Error('media_idle_timeout')));
-      response.on('error', error => limited.destroy(error));
-      limited.once('close', () => { response.destroy(); upstream.destroy(); });
-      response.pipe(limited);
-      resolve(new NextResponse(Readable.toWeb(limited) as ReadableStream<Uint8Array>, { status, headers }));
-    });
-    const headersTimer = setTimeout(() => upstream.destroy(new Error('media_headers_timeout')), 30000);
-    upstream.once('error', reject);
-    upstream.once('close', () => clearTimeout(headersTimer));
-    upstream.end();
-  });
+  try {
+    const response = await safeFetch(source, { method: request.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: range ? { Range: range } : {}, maxBytes: MAX_REMOTE_BYTES, timeoutMs: 600_000, allowRedirects: true, signal: request.signal });
+    const status = response.status;
+    const headers = new Headers(privateHeaders);
+    if (status === 416) {
+      const contentRange = response.headers.get('content-range');
+      if (contentRange && /^bytes \*\/\d+$/.test(contentRange)) headers.set('Content-Range', contentRange);
+      return new NextResponse(null, { status, headers });
+    }
+    if (status !== 200 && status !== 206) return mediaError(status === 404 ? '媒体文件不存在' : '媒体暂时无法访问', status === 404 ? 404 : 502);
+    const mime = (response.headers.get('content-type') || '').split(';')[0].trim();
+    if (mime && !/^(image|video|audio)\//.test(mime) && mime !== 'application/octet-stream') {
+      await response.body?.cancel(); return mediaError('返回内容不是媒体文件', 502);
+    }
+    headers.set('Content-Type', /^(image|video|audio)\/[\w.+-]+$/.test(mime) ? mime : fallbackMime);
+    for (const name of ['content-length', 'accept-ranges']) {
+      const value = response.headers.get(name); if (value) headers.set(name, value);
+    }
+    if (status === 206) {
+      const contentRange = response.headers.get('content-range');
+      if (!contentRange || !/^bytes \d+-\d+\/\d+$/.test(contentRange)) { await response.body?.cancel(); return mediaError('媒体分段响应无效', 502); }
+      headers.set('Content-Range', contentRange); headers.set('Accept-Ranges', 'bytes');
+    }
+    return new NextResponse(response.body, { status, headers });
+  } catch (error) {
+    if (error instanceof SafeFetchError && error.code === 'TOO_LARGE') return mediaError('媒体文件过大', 413);
+    if (error instanceof SafeFetchError && error.code === 'ADDRESS_NOT_ALLOWED') return mediaError('媒体地址不可用', 503);
+    return mediaError('媒体暂时无法访问', 502);
+  }
 }

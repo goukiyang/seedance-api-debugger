@@ -34,7 +34,17 @@ async function routeContract() {
   const fs = require('node:fs');
   const ts = require('typescript');
   const { NextRequest, NextResponse } = require('next/server');
-  const { withApiErrors } = require('../src/lib/http/api-error.ts');
+  const Module = require('node:module');
+  const originalLoad = Module._load;
+  let route;
+  try {
+    Module._load = function (name, ...args) {
+      if (name === '@/lib/auth/session') return { getSession: async () => { throw new Error('Service callbacks cannot use cookie authentication'); } };
+      if (name === '@/lib/security/rate-limit-store.server') return { apiRateLimiter: {} };
+      return originalLoad.call(this, name, ...args);
+    };
+    ({ route } = require('../src/lib/http/route.ts'));
+  } finally { Module._load = originalLoad; }
   const { requireSecret } = require('../src/lib/security/secrets.ts');
   const source = fs.readFileSync(require.resolve('../src/app/api/provider/seedance/callback/route.ts'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -57,7 +67,11 @@ async function routeContract() {
     '@/lib/media/public-url': { isPublicHttpUrl: value => typeof value === 'string' && value.startsWith('https://') },
     '@/lib/video/callback-auth': { verifyVideoCallbackToken },
     '@/lib/security/secrets': { requireSecret },
-    '@/lib/http/api-error': { withApiErrors },
+    '@/lib/http/route': { route },
+    '@/lib/net/safe-fetch': { safeFetch: async (_url, options) => {
+      calls.forward.push(JSON.parse(options.body));
+      return new Response('', { status: 200 });
+    } },
   };
   const loaded = { exports: {} };
   new Function('require', 'module', 'exports', 'fetch', compiled)(name => {

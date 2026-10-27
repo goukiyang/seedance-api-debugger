@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -13,15 +16,15 @@ const APPROVAL_INCLUDE = {
   project: { select: { id: true, name: true, type: true, status: true, owner_user_id: true } },
   videoCard: { select: { id: true, title: true, status: true, project_id: true } },
   task: { select: { id: true, source_metadata_json: true, prompt: true, local_status: true } },
-  requester: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-  approver: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+  requester: { select: userSummarySelect },
+  approver: { select: userSummarySelect },
 } as const;
 
 function optionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -56,15 +59,12 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json({ actor_id: user.id, approvals: items }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
-    console.error('[Approvals] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -130,10 +130,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[Approvals] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

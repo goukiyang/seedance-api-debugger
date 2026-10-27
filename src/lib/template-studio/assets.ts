@@ -1,3 +1,5 @@
+import { safeFetch } from '@/lib/net/safe-fetch';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '@/lib/prisma';
@@ -28,8 +30,9 @@ async function assertAssetIsReadable(originalUrl: string) {
   const uploadPath = siteUploadPathFromUrl(originalUrl);
   if (uploadPath) {
     try {
-      const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-      const file = await fs.realpath(path.resolve(process.cwd(), 'public', uploadPath.replace(/^\/+/, '')));
+      const { mediaRoot } = await import('@/lib/media/storage-roots');
+      const root = await fs.realpath(mediaRoot('uploads'));
+      const file = await resolveInside(root, decodeURIComponent(uploadPath.slice('/uploads/'.length)));
       if (!file.startsWith(`${root}${path.sep}`) || !(await fs.stat(file)).isFile()) throw new Error('invalid file');
       const handle = await fs.open(file, 'r');
       await handle.close();
@@ -40,7 +43,7 @@ async function assertAssetIsReadable(originalUrl: string) {
   }
   if (!isConfiguredStorageUrl(originalUrl)) throw new StudioError('素材存储地址不受信任，无法安全读取', 409, 'CONFLICT');
   try {
-    const response = await fetch(originalUrl, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(5000) });
+    const response = await safeFetch(originalUrl, { method: 'HEAD', maxBytes: 20 * 1024 * 1024, timeoutMs: 5000 });
     if (!response.ok) throw new Error('unavailable');
   } catch {
     throw new StudioError('素材文件当前不可读取，请重新选择或上传', 409, 'CONFLICT');

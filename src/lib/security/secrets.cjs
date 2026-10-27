@@ -11,6 +11,7 @@ const secretEnvironment = Object.freeze({
   videoCallback: 'VIDEO_DELIVERY_CALLBACK_SECRET',
   privateIdentity: 'PRIVATE_IDENTITY_SECRET',
   errorLog: 'ERROR_LOG_SECRET',
+  rateLimit: 'RATE_LIMIT_SECRET',
 });
 const knownDefaults = new Set(['dev-secret-change-in-production', 'change-me', 'your-secret-key']);
 

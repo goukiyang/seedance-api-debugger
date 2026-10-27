@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from './session';
 import type { SessionUser } from './session';
 import { AuthError } from './session';
+import { SessionUnavailableError } from './session-errors';
 
 export type AuthenticatedContext = {
   user: SessionUser;
@@ -45,4 +46,10 @@ export function json(data: unknown, status = 200) {
 
 export function errorJson(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+export function authFailureResponse(error: unknown) {
+  if (error instanceof SessionUnavailableError) return NextResponse.json({ error: '服务暂时不可用', code: error.code }, { status: 503 });
+  if (error instanceof AuthError) return errorJson(error.message, error.status);
+  return errorJson('权限不足', 403);
 }

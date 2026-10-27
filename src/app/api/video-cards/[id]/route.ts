@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import { NextRequest, NextResponse } from 'next/server';
@@ -93,9 +96,9 @@ async function getSerializableVideoCard(id: string) {
     where: { id },
     include: {
       project: { select: { id: true, name: true, type: true, status: true } },
-      owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      creator: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      sealedBy: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+      owner: { select: userSummarySelect },
+      creator: { select: userSummarySelect },
+      sealedBy: { select: userSummarySelect },
       current_best_task: {
         select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
       },
@@ -156,7 +159,7 @@ async function assertTaskInVideoCard(taskId: string, videoCardId: string) {
   return task;
 }
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -178,15 +181,12 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[VideoCard] Detail error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -433,10 +433,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[VideoCard] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
@@ -7,7 +8,8 @@ import { projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy'
 import { isPublicHttpUrl } from '@/lib/media/public-url';
 import { verifyVideoCallbackToken } from '@/lib/video/callback-auth';
 import { requireSecret } from '@/lib/security/secrets';
-import { withApiErrors } from '@/lib/http/api-error';
+import { route as apiRoute } from '@/lib/http/route';
+import { safeFetch } from '@/lib/net/safe-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -79,7 +81,7 @@ async function forwardExternalCallback(input: {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await fetch(externalCallbackUrl, {
+    const response = await safeFetch(externalCallbackUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -87,7 +89,10 @@ async function forwardExternalCallback(input: {
         sd2_task_id: input.taskId,
       }),
       signal: controller.signal,
+      maxBytes: 64 * 1024,
+      timeoutMs: 10_000,
     });
+    await response.body?.cancel();
     const status = {
       forwarded: response.ok,
       status: response.status,
@@ -114,7 +119,8 @@ async function forwardExternalCallback(input: {
   }
 }
 
-export const POST = withApiErrors(async (request: NextRequest) => {
+const verifiedTasks = new WeakMap<NextRequest, VideoTask>();
+async function authenticateCallback(request: NextRequest): Promise<boolean | Response> {
   try { requireSecret('videoCallback'); } catch {
     return NextResponse.json(
       { error: 'callback_secret_not_configured', message: '视频回调密钥未配置' },
@@ -131,6 +137,14 @@ export const POST = withApiErrors(async (request: NextRequest) => {
   if (!task || !verifyVideoCallbackToken({ taskId: task.id, createdAt: task.created_at, token })) {
     return NextResponse.json({ error: 'invalid_callback_token' }, { status: 401 });
   }
+  verifiedTasks.set(request, task);
+  return true;
+}
+
+export const POST = apiRoute({ access: 'service', authenticate: authenticateCallback, rateLimit: false }, async (request: NextRequest) => {
+  const task = verifiedTasks.get(request);
+  verifiedTasks.delete(request);
+  if (!task) throw new Error('Verified callback context missing');
   const payload = await readCallbackPayload(request);
   const providerTaskId = extractProviderTaskId(payload);
   if (providerTaskId && task.provider_task_id && providerTaskId !== task.provider_task_id) {
@@ -139,6 +153,7 @@ export const POST = withApiErrors(async (request: NextRequest) => {
 
   const finalizeResult = await finalizeVideoTaskStatus(task.id, {
     forceProviderRefresh: true,
+    providerCallback: true,
     cacheOnSuccess: false,
     generateThumbnail: false,
   });

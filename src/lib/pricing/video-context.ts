@@ -1,4 +1,5 @@
 import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
+import { PublicApiError } from '@/lib/http/public-error';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
@@ -28,8 +29,8 @@ export type VideoPricingContext = {
   referenceVideoFingerprint?: string;
   templateRunId: string | null;
 };
-export class VideoPricingContextError extends Error {
-  constructor(message: string, public readonly status = 409, public readonly code = 'pricing_context_invalid') { super(message); }
+export class VideoPricingContextError extends PublicApiError {
+  constructor(message: string, public readonly status = 409, public readonly code = 'pricing_context_invalid') { super(message, status, code); }
 }
 function list(value: unknown, max: number): string[] {
   if (value === undefined) return [];

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -40,7 +41,7 @@ function formatAllocationSummary(allocations: Array<{
     .join('; ');
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
 
@@ -250,4 +251,4 @@ export async function GET(request: NextRequest) {
     console.error('[AdminCostLedgerExport] Failed:', error);
     return NextResponse.json({ error: '导出总账失败' }, { status: 500 });
   }
-}
+});

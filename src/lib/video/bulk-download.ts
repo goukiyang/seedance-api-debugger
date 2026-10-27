@@ -1,3 +1,4 @@
+import { safeFetch } from '@/lib/net/safe-fetch';
 import { stat } from 'fs/promises';
 import { Readable } from 'stream';
 import { ZipFile } from 'yazl';
@@ -398,7 +399,7 @@ async function createZipStream(items: BulkDownloadItem[]) {
     }
     if (!item.publicVideoUrl) continue;
     try {
-      const response = await fetch(item.publicVideoUrl);
+      const response = await safeFetch(item.publicVideoUrl, { maxBytes: 2 * 1024 * 1024 * 1024, timeoutMs: 300_000, allowRedirects: true });
       if (!response.ok || !response.body) {
         throw new Error(`稳定下载 URL 读取失败：HTTP ${response.status}`);
       }

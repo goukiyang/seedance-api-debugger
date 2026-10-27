@@ -34,4 +34,5 @@ export type PickerItem = {
 };
 export type PickerAlbum = { id: string; name: string; scope: PickerScope; project: { id: string; name: string } | null; count: number };
 export type PickerTemplate = { id: string; name: string; aliases?: string[] };
-export type PickerResponse = { items: PickerItem[]; albums: PickerAlbum[]; templates?: PickerTemplate[]; total: number; page: number; hasMore: boolean; nextCursor?: string | null; notice?: string };
+export type PickerResponse = { items: PickerItem[]; albums: PickerAlbum[]; templates?: PickerTemplate[]; total: number; page: number; hasMore: boolean; nextCursor?: string | null; notice?: string;
+  directoryDeferred?: boolean; directoryPage?: { total: number; hasMore: boolean; nextCursor: string | null } };

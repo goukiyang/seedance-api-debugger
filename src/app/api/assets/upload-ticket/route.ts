@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/upload-ticket
  * 为浏览器直传 R2 生成短期上传票据。
@@ -10,6 +11,7 @@ import { prepareRawUpload, rawUploadIdentity } from '@/lib/assets/raw-upload-sta
 import { createDirectUploadTicket } from '@/lib/assets/direct-upload';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +29,7 @@ type UploadTicketBody = {
   height?: number | null;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let fileName = 'upload.bin';
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
     if (body.mode === 'raw') {
       await uploadIdentity(user.id);
       const identity = rawUploadIdentity(user.id, { requestId, hash, fileSize, mimeType });
-      return NextResponse.json(await prepareRawUpload(identity, body.previousNonce), { headers: { 'Cache-Control': 'private, no-store' } });
+      return NextResponse.json(await browserUploadResponse(user, await prepareRawUpload(identity, body.previousNonce)), { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (!Number.isFinite(fileSize) || fileSize < 0) {
       await recordAssetUploadLog({
@@ -94,7 +96,7 @@ export async function POST(request: NextRequest) {
       skippedProxy: false,
       fileKind: getSiteUploadKind(mimeType),
     });
-    return NextResponse.json(ticket);
+    return NextResponse.json(await browserUploadResponse(user, ticket), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '上传票据创建失败';
@@ -119,4 +121,4 @@ export async function POST(request: NextRequest) {
     ) ? 400 : 503;
     return NextResponse.json({ error: message }, { status });
   }
-}
+});

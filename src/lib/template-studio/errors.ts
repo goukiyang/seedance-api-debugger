@@ -6,15 +6,16 @@ import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
 import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 import { apiErrorResponse } from '@/lib/http/api-error';
+import { PublicApiError } from '@/lib/http/public-error';
 
-export class StudioError extends Error {
+export class StudioError extends PublicApiError {
   constructor(
     message: string,
     public readonly status: number,
     public readonly code: NonNullable<StudioApiError['code']>,
     public readonly details?: StudioApiError['details'],
   ) {
-    super(message);
+    super(message, status, code);
     this.name = 'StudioError';
   }
 }

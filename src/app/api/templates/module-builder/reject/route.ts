@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -8,7 +9,7 @@ function cleanString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -75,4 +76,4 @@ export async function POST(request: NextRequest) {
     console.error('[ModuleBuilder] Reject failed:', error);
     return NextResponse.json({ error: '拒绝模块草稿失败' }, { status: 500 });
   }
-}
+});

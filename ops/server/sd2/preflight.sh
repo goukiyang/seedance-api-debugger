@@ -3,7 +3,6 @@ set -euo pipefail
 
 GRAY_ORIGIN="${GRAY_ORIGIN:-https://sd2-server.youdoodesign.com}"
 PROD_ORIGIN="${PROD_ORIGIN:-https://sd2.youdooart.com}"
-TOOLS_ORIGIN="${TOOLS_ORIGIN:-https://tools.youdoodesign.com}"
 SERVER="${SERVER:-root@42.193.221.253}"
 
 curl_code() {
@@ -12,15 +11,14 @@ curl_code() {
   local code
   code="$(curl -sS -o /tmp/sd2-preflight.body -w '%{http_code}' "$url")"
   printf '%s=%s %s\n' "$label" "$code" "$url"
-  test "$code" = "200"
+  test "$code" = "${3:-200}"
 }
 
-curl_code gray_config "$GRAY_ORIGIN/api/config"
+curl_code gray_config "$GRAY_ORIGIN/api/config" 401
 curl_code gray_health "$GRAY_ORIGIN/api/health"
 curl_code gray_login "$GRAY_ORIGIN/login"
 curl_code gray_register "$GRAY_ORIGIN/register"
-curl_code prod_config "$PROD_ORIGIN/api/config"
-curl_code tools_home "$TOOLS_ORIGIN/"
+curl_code prod_config "$PROD_ORIGIN/api/config" 401
 
 if [ "${EXPECT_PROD_ON_SERVER:-0}" = "1" ]; then
   prod_header="$(curl -sS -o /tmp/sd2-preflight-prod.body -D - "$PROD_ORIGIN/api/health" | tr -d '\r')"
@@ -38,21 +36,22 @@ test -L /var/lib/video-api-debugger
 test "$(readlink -f /var/lib/video-api-debugger)" = /data/video-api-debugger/var-lib
 test "$(systemctl show sd2-gray.service -p NRestarts --value)" = 0
 test "$(systemctl show sd2-image-studio.service -p NRestarts --value)" = 0
-test -L /srv/video-api-debugger/app/public/uploads
-test "$(readlink -f /srv/video-api-debugger/app/public/uploads)" = /data/video-api-debugger/var-lib/uploads
-test -L /srv/video-api-debugger/app/public/videos
-test "$(readlink -f /srv/video-api-debugger/app/public/videos)" = /data/video-api-debugger/var-lib/videos
-test -L /srv/video-api-debugger/app/storage
-test "$(readlink -f /srv/video-api-debugger/app/storage)" = /data/video-api-debugger/var-lib/storage
+app="$(systemctl show sd2-gray.service -p WorkingDirectory --value)"
+case "$app" in /data/video-api-debugger/managed-releases/*) ;; *) exit 1 ;; esac
+for name in uploads videos; do test ! -e "$app/public/$name"; test ! -L "$app/public/$name"; done
+test -L "$app/storage"
+test "$(readlink -f "$app/storage")" = /data/video-api-debugger/var-lib/storage
 test -d /data/video-api-debugger/var-lib/uploads/assets
 test -d /data/video-api-debugger/var-lib/uploads/thumbs
 test -d /data/video-api-debugger/var-lib/videos/thumbnails
 test -d /data/video-api-debugger/var-lib/storage/backups
-runuser -u gouki -- test -w /srv/video-api-debugger/app
 runuser -u gouki -- test -w /data/video-api-debugger/var-lib/uploads/assets
 runuser -u gouki -- test -w /data/video-api-debugger/var-lib/videos/thumbnails
 runuser -u gouki -- test -w /data/video-api-debugger/var-lib/storage/backups
-sqlite3 /var/lib/video-api-debugger/dev.db "pragma integrity_check; select count(*) from VideoTask; select count(*) from Asset; select count(*) from User;"
+test "$(stat -c %a /data/video-api-debugger/var-lib/storage/media-outlet)" = 2750
+test "$(stat -c %G /data/video-api-debugger/var-lib/storage/media-outlet)" = www-data
+runuser -u www-data -- test -x /data/video-api-debugger/var-lib/storage/media-outlet
+systemd-run --quiet --collect --wait --pipe -p User=gouki -p ProtectSystem=strict -p ReadOnlyPaths=/data/video-api-debugger/var-lib /usr/bin/sqlite3 "file:/data/video-api-debugger/var-lib/dev.db?mode=ro" "PRAGMA query_only=ON; pragma integrity_check; select count(*) from VideoTask; select count(*) from Asset; select count(*) from User;"
 find /var/lib/video-api-debugger/uploads -type f | wc -l
 find /var/lib/video-api-debugger/videos -name "*.mp4" -type f | wc -l
 find /var/lib/video-api-debugger/videos/thumbnails -type f | wc -l

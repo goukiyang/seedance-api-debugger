@@ -1,6 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import { assertPageOwner, PaginationError } from '@/lib/pagination/cursor';
+import { readFolderPage } from '@/lib/reference-albums/governance-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,15 +33,13 @@ function serializeFolder(folder: {
   };
 }
 
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const folders = await prisma.referenceAlbumFolder.findMany({
-      where: { scope: 'public', status: 'active' },
-      orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
-    });
+    assertPageOwner(request.headers, user.id);
+    const { items: folders, pagination } = await readFolderPage(user, request.nextUrl.searchParams);
 
     const counts = folders.length > 0
       ? await prisma.referenceAlbum.groupBy({
@@ -56,17 +58,15 @@ export async function GET() {
     return NextResponse.json({
       folders: folders.map((folder) => serializeFolder(folder, countByFolderId.get(folder.id) || 0)),
       can_manage: user.role === 'admin',
+      pagination,
     });
   } catch (error) {
-    console.error('[ReferenceAlbumFolders] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    if (error instanceof PaginationError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return apiErrorResponse(error);
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -105,10 +105,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ folder: serializeFolder(folder, 0) }, { status: 201 });
   } catch (error) {
-    console.error('[ReferenceAlbumFolders] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

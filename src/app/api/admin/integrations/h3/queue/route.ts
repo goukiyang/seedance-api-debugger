@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -38,7 +40,7 @@ function actionBody(action: H3QueueAction, input: { reason: string; direction: s
   return input.reason ? { reason: input.reason } : {};
 }
 
-function errorResponse(error: unknown, fallback: string) {
+function errorResponse(error: unknown) {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -51,13 +53,10 @@ function errorResponse(error: unknown, fallback: string) {
       retry_after_seconds: error.retryAfterSeconds,
     }, { status: error.statusCode || 502 });
   }
-  console.error('[Admin/H3Queue] failed:', error);
-  return NextResponse.json({
-    error: error instanceof Error ? error.message : fallback,
-  }, { status: 500 });
+  return apiErrorResponse(error);
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getH3ApiSettings();
@@ -71,11 +70,11 @@ export async function GET(request: NextRequest) {
       queue,
     });
   } catch (error) {
-    return errorResponse(error, '读取 H3 队列失败');
+    return errorResponse(error);
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -127,6 +126,6 @@ export async function POST(request: NextRequest) {
       result,
     });
   } catch (error) {
-    return errorResponse(error, 'H3 队列操作失败');
+    return errorResponse(error);
   }
-}
+});

@@ -13,7 +13,7 @@ export type PendingFinalizeCandidate = {
   completed_at: Date | null;
 };
 
-const REFRESH_STATUSES = new Set(['submitted', 'running']);
+const REFRESH_STATUSES = new Set(['submitting', 'unknown', 'submitted', 'running']);
 
 function timeValue(value: Date | null | undefined, fallback = 0) {
   return value ? value.getTime() : fallback;
@@ -34,15 +34,13 @@ export function isStaleSubmittedWithoutProvider(
   now: Date,
   minAgeMinutes: number,
 ) {
-  if (task.local_status !== 'submitted') return false;
-  if (task.error_code === 'IP_SUBMISSION_UNCONFIRMED') return false;
+  if (!REFRESH_STATUSES.has(task.local_status)) return false;
   if (task.provider_task_id) return false;
   const minAgeMs = Math.max(1, minAgeMinutes) * 60 * 1000;
   return now.getTime() - timeValue(task.created_at) >= minAgeMs;
 }
 
 export function isFinalizeCandidate(task: PendingFinalizeCandidate) {
-  if (!task.provider_task_id && task.error_code === 'IP_SUBMISSION_UNCONFIRMED') return false;
   if (REFRESH_STATUSES.has(task.local_status)) return true;
   if (task.provider === 'volcengine_ark' && (task.delivery_attempts || 0) >= 6) return false;
   return task.local_status === 'succeeded'

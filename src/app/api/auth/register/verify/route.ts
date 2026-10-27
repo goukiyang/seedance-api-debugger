@@ -1,92 +1,34 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
-import { createSession } from '@/lib/auth/session';
-import {
-  REGISTER_CHALLENGE_COOKIE,
-  isValidRegisterEmail,
-  normalizeEmail,
-  normalizeText,
-} from '@/lib/auth/registration/config';
-import {
-  hashRegisterCode,
-  verifyRegisterChallengeToken,
-} from '@/lib/auth/registration/challenge';
+import { completeLogin } from '@/lib/auth/complete-login';
+import { setSessionCookie } from '@/lib/auth/session-cookie';
+import { REGISTER_CHALLENGE_COOKIE, isSelfRegistrationEnabled, isValidRegisterEmail, normalizeEmail, normalizeText } from '@/lib/auth/registration/config';
+import { consumeRegisterChallenge } from '@/lib/auth/registration/challenge';
 import { createRegisteredUser } from '@/lib/auth/registration/create-user';
+import { requestSessionDevice } from '@/lib/auth/session-store';
 
-const SESSION_COOKIE = 'session';
-const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
-
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'public', rateLimit: "auth" }, async function POST(request: NextRequest) {
+  if (!isSelfRegistrationEnabled()) return NextResponse.json({ error: '注册暂未开放' }, { status: 404 });
   try {
-    const body = await request.json();
-    const email = normalizeEmail(body.email);
-    const code = normalizeText(body.code);
-
-    if (!email || !code) {
-      return NextResponse.json({ error: '邮箱和验证码不能为空' }, { status: 400 });
-    }
-    if (!isValidRegisterEmail(email)) {
-      return NextResponse.json({ error: '请输入有效邮箱' }, { status: 400 });
-    }
-
-    const cookieStore = await cookies();
-    const challenge = verifyRegisterChallengeToken(cookieStore.get(REGISTER_CHALLENGE_COOKIE)?.value);
-    if (!challenge) {
-      return NextResponse.json({ error: '验证码已失效，请重新获取' }, { status: 400 });
-    }
-    if (challenge.email !== email) {
-      return NextResponse.json({ error: '邮箱与验证码请求不一致' }, { status: 400 });
-    }
-    if (challenge.expiresAt <= Date.now()) {
-      cookieStore.delete(REGISTER_CHALLENGE_COOKIE);
-      return NextResponse.json({ error: '验证码已过期，请重新获取' }, { status: 400 });
-    }
-
-    const codeHash = hashRegisterCode(challenge.email, challenge.nonce, code);
-    if (codeHash !== challenge.codeHash) {
-      return NextResponse.json({ error: '验证码不正确' }, { status: 400 });
-    }
-
-    const created = await prisma.$transaction(async (tx) => {
-      const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
-      if (existing) return null;
-      return createRegisteredUser(tx, {
-        email: challenge.email,
-        name: challenge.name,
-        passwordHash: challenge.passwordHash,
-      });
+    const body = await request.json(), email = normalizeEmail(body.email), code = normalizeText(body.code);
+    if (!isValidRegisterEmail(email) || !code || code.length > 20) return NextResponse.json({ error: '请输入有效邮箱和验证码' }, { status: 400 });
+    const token = (await cookies()).get(REGISTER_CHALLENGE_COOKIE)?.value;
+    const result = await prisma.$transaction(async (tx) => {
+      // A wrong attempt commits its counter; throwing here would roll it back.
+      const challenge = await consumeRegisterChallenge(tx, token, email, code);
+      if (!challenge) return null;
+      if (await tx.user.findUnique({ where: { email }, select: { id: true } })) return { duplicate: true } as const;
+      const user = await createRegisteredUser(tx, { ...challenge, emailVerified: true });
+      return completeLogin({ userId: user.id, device: requestSessionDevice(request) }, 'register', tx);
     });
-
-    if (!created) {
-      cookieStore.delete(REGISTER_CHALLENGE_COOKIE);
-      return NextResponse.json({ error: '该邮箱已注册，请直接登录' }, { status: 409 });
-    }
-
-    const sessionToken = await createSession(created.id);
-    cookieStore.delete(REGISTER_CHALLENGE_COOKIE);
-    cookieStore.set(SESSION_COOKIE, sessionToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: SESSION_COOKIE_MAX_AGE,
-      path: '/',
-    });
-
-    return NextResponse.json({
-      user: {
-        id: created.id,
-        name: created.name,
-        username: created.username,
-	        email: created.email,
-	        role: created.role,
-	        account_type: created.account_type,
-	        user_profile: created.user_profile,
-	        feature_profile_id: created.feature_profile_id,
-	        status: created.status,
-	      },
-    }, { status: 201 });
-  } catch (error) {
-    console.error('[RegisterVerify]', error);
-    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
+    if (!result) return NextResponse.json({ error: '验证码不正确或已失效，请重新获取' }, { status: 400 });
+    if ('duplicate' in result) return NextResponse.json({ error: '该邮箱已注册，请直接登录' }, { status: 409 });
+    const response = setSessionCookie(NextResponse.json({ user: result.user }, { status: 201 }), result.token);
+    response.cookies.set(REGISTER_CHALLENGE_COOKIE, '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 });
+    return response;
+  } catch {
+    return NextResponse.json({ error: '服务暂时不可用' }, { status: 503 });
   }
-}
+});

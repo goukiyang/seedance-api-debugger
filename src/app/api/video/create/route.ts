@@ -1,7 +1,8 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) {
     return NextResponse.json(
@@ -26,4 +27,4 @@ export async function POST(request: NextRequest) {
     },
     { status: 410 },
   );
-}
+});

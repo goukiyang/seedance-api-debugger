@@ -1,75 +1,25 @@
-import { readFile } from 'fs/promises';
-import { NextRequest, NextResponse } from 'next/server';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
+import { getSession } from '@/lib/auth/session';
+import { assertMedia } from '@/lib/access/media-policy';
 import { prisma } from '@/lib/prisma';
-import { AuthError, getSession } from '@/lib/auth/session';
-import { assertCanViewTask } from '@/lib/projects/permissions';
-import {
-  ensureTaskThumbnail,
-  isSafeTaskId,
-  thumbnailFilePath,
-} from '@/lib/video/thumbnail';
-
+import { ensureTaskThumbnail } from '@/lib/video/thumbnail';
+import { redirectMedia } from '@/lib/media/outlet';
+import { mediaDenied } from '@/lib/media/signed-media';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-async function imageResponse(filePath: string) {
-  const file = await readFile(filePath);
-  return new NextResponse(file, {
-    headers: {
-      'Content-Type': 'image/jpeg',
-      'Cache-Control': 'private, max-age=86400',
-    },
-  });
-}
-
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
-  const params = await props.params;
+async function mediaContent(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getSession();
-    if (!user) {
-      return NextResponse.json({ error: '未登录' }, { status: 401 });
-    }
-
-    const taskId = params.id;
-    if (!isSafeTaskId(taskId)) {
-      return NextResponse.json({ error: '任务 ID 无效' }, { status: 400 });
-    }
-
-    const task = await prisma.videoTask.findUnique({
-      where: { id: taskId },
-      select: {
-        id: true,
-        provider: true,
-        public_video_url: true,
-        local_video_path: true,
-        result_video_url: true,
-        result_last_frame_url: true,
-        local_status: true,
-        provider_task_id: true,
-        project_id: true,
-        owner_user_id: true,
-        user_id: true,
-        retention_status: true,
-      },
-    });
-
-    if (!task) {
-      return NextResponse.json({ error: '任务不存在' }, { status: 404 });
-    }
-
-    await assertCanViewTask(user, task);
-
-    const thumbnailResult = await ensureTaskThumbnail(task, { allowRemoteFallback: true });
-    if (!thumbnailResult.success) {
-      return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });
-    }
-
-    return imageResponse(thumbnailFilePath(taskId));
+    const user = await getSession(), { id } = await context.params;
+    if (!user) return mediaDenied(404);
+    await assertMedia(user, { type: 'video-cover', id }, 'view-thumbnail');
+    const task = await prisma.videoTask.findUnique({ where: { id } });
+    if (!task || !(await ensureTaskThumbnail(task, { allowRemoteFallback: true })).success) return mediaDenied(404);
+    return redirectMedia(request, user, { type: 'video-cover', id }, 'thumbnail');
   } catch (error) {
-    if (error instanceof AuthError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    console.error('[VideoThumbnail] Failed to generate thumbnail:', error);
-    return NextResponse.json({ error: '生成视频截图失败' }, { status: 500 });
+    const status = (error as { status?: number }).status;
+    return status === 403 || status === 404 ? mediaDenied(status) : apiErrorResponse(error);
   }
 }
+export const GET = apiRoute({ access: 'user', rateLimit: false }, mediaContent);
+export const HEAD = apiRoute({ access: 'user', rateLimit: false }, mediaContent);

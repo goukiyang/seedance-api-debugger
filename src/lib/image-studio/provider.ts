@@ -6,9 +6,7 @@ import { MAX_REFERENCE_IMAGES, MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED
 import { assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension } from '@/lib/image-generation/resolution';
 import { normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelProtocol } from '@/lib/integrations/image-generation-channel';
-import { isPrivateNetworkHost } from '@/lib/media/public-url';
-import { lookup } from 'node:dns/promises';
-import type { LookupAddress } from 'node:dns';
+import { validatePublicUrl } from '@/lib/net/safe-fetch';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -124,22 +122,11 @@ function observeOriginalProviderBody(diagnostics: StudioProviderErrorCollector, 
   diagnostics.body(value, bodyRead, identity ? identity === taskId ? 'verified' : 'conflict' : 'not_independently_verified');
 }
 
-function unsafeAddress(value: string) {
-  return isPrivateNetworkHost(value) || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(value);
-}
 async function vettedApiUrl(value: string, signal: AbortSignal) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || unsafeAddress(url.hostname)) throw new Error('unsafe_api_url');
-  const combined = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
-  const addresses = await new Promise<LookupAddress[]>((resolve, reject) => {
-    const abort = () => reject(new Error('api_dns_timeout'));
-    if (combined.aborted) { abort(); return; }
-    combined.addEventListener('abort', abort, { once: true });
-    lookup(url.hostname, { all: true, family: 4 }).then(resolve, reject).finally(() => combined.removeEventListener('abort', abort));
-  });
-  signal.throwIfAborted();
-  if (!addresses.length || addresses.some(address => unsafeAddress(address.address))) throw new Error('unsafe_api_address');
-  return { url, address: addresses[0] };
+  if (url.protocol !== 'https:' || url.search || url.hash) throw new Error('unsafe_api_url');
+  const vetted = await validatePublicUrl(value, AbortSignal.any([signal, AbortSignal.timeout(10000)]));
+  return { url: vetted.url, address: vetted.addresses[0] };
 }
 /** DNS only: no supplier HTTP request or credential is sent during configuration validation. */
 export async function validateStudioProviderApiBaseUrl(value: string): Promise<{ ok: true; url: string } | { ok: false; code: string }> {
@@ -156,7 +143,7 @@ async function fetchPinnedApi(url: URL, init: RequestInit): Promise<Response> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const upstream = https.request(url, { method: init.method || 'GET', headers: Object.fromEntries(request.headers),
-      signal, family: 4, lookup: (_hostname, _options, callback) => callback(null, vetted.address.address, vetted.address.family) }, response => {
+      signal, family: vetted.address.family, agent: false, lookup: (_hostname, _options, callback) => callback(null, vetted.address.address, vetted.address.family) }, response => {
       const headers = new Headers();
       for (const [key, value] of Object.entries(response.headers)) {
         if (Array.isArray(value)) value.forEach(item => headers.append(key, item)); else if (value !== undefined) headers.set(key, value);

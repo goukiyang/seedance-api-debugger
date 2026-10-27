@@ -283,7 +283,7 @@ async function main() {
   assert.match(errorTranslator, /window\.location\.reload\(\)/, '刷新类错误必须提供真实刷新动作');
   assert.doesNotMatch(errorTranslator, /API 服务返回了非 JSON 格式的响应/, '错误翻译组件不能继续用容易误导的旧 JSON 泛化文案');
 
-  const tasksCreateRoute = read('src/app/api/tasks/create/route.ts');
+  const tasksCreateRoute = read('src/server/video-tasks/standard-create.ts');
   assert.match(tasksCreateRoute, /error_message:\s*userFacingFailure\.message/, 'Agent 运行失败展示字段必须写用户友好文案。');
 
   const projectRoute = read('src/app/api/projects/[id]/route.ts');

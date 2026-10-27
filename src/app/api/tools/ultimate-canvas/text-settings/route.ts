@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -13,7 +14,7 @@ function failure(error: unknown) {
   return json({ error: '规则暂时无法保存或读取，草稿仍保留，请重试' }, 503);
 }
 
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET() {
   try {
     const user = await getSession();
     if (!user) throw new AuthError('请先登录', 401);
@@ -22,9 +23,9 @@ export async function GET() {
     return json({ revision: settings.revision, contextConfigured: settings.rules.some(rule => rule.enabled && !rule.deletedAt && Boolean(rule.body.trim())),
       ...(user.role === 'admin' ? { ...settings } : {}) });
   } catch (error) { return failure(error); }
-}
+});
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = apiRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     assertInternalOnly(user, '外部账号无权修改画布规则');
@@ -35,4 +36,4 @@ export async function PATCH(request: NextRequest) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AuthError('规则内容无效', 400);
     return json(await saveCanvasTextSettings(user.id, body));
   } catch (error) { return failure(error); }
-}
+});

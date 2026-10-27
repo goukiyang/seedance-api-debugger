@@ -1,3 +1,5 @@
+import { writeHoldLedger } from '@/lib/billing/holds';
+import { authorizeLegacyInflight } from '@/lib/billing/legacy-inflight';
 import { createHash } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -17,10 +19,11 @@ const MAX_ATTEMPTS = 48;
 const billable = (task: ImageStudioTask) => ['pending', 'channel_pending'].includes(publicPricingBillingState(task.billing_status)) && terminal.includes(task.status);
 
 async function writeCreditSettlement(tx: Prisma.TransactionClient, task: ImageStudioTask, actualCost?: number) {
+  await authorizeLegacyInflight(tx, 'image_billing', task.id);
   const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id,
     terminalStatus: actualCost === undefined ? 'failed' : 'succeeded', frozenAmount: task.unit_credits,
     freezeSnapshot: task.freeze_snapshot, actualCost: actualCost ?? 0 });
-  await tx.creditLedger.create({ data: { user_id: task.owner_id,
+  await writeHoldLedger(tx, { data: { user_id: task.owner_id,
     type: actualCost === undefined ? 'task_billing_release' : 'task_success_deduct',
     amount: actualCost === undefined ? settlement.refundedAmount : -settlement.actualCost,
     balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter,
@@ -98,6 +101,7 @@ export async function settleImageSupplierCharge(taskId: string, charge: ImageSup
 async function exitImageBilling(task: ImageStudioTask, status: 'manual' | 'conflict' | 'deadline_expired' | 'unmatched', channel = false) {
   const prefix = channel ? 'channel_' : '';
   await prisma.$transaction(async tx => {
+    await authorizeLegacyInflight(tx, 'image_billing', task.id);
     const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, billing_status: studioBillingState(task, `${prefix}pending`) },
       data: { billing_status: studioBillingState(task, `${prefix}${status}`), billing_next_check_at: null } });
     if (!changed.count) return;

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getStudioTaskInputMain, StudioInputMainError } from '@/lib/image-studio/input-main';
@@ -6,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
-export async function GET(_request: Request, props: { params: Promise<{ taskId: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: Request, props: { params: Promise<{ taskId: string }> }) {
   const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
@@ -16,4 +17,4 @@ export async function GET(_request: Request, props: { params: Promise<{ taskId: 
     return NextResponse.json({ error: error instanceof StudioInputMainError ? error.message : '本次输入主图尚未确认，请重试' },
       { status: error instanceof StudioInputMainError ? error.status : 503, headers });
   }
-}
+});

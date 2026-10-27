@@ -1,7 +1,7 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from './media/sharp';
 import { prisma } from '@/lib/prisma';
 import { readStudioImage } from '@/lib/image-studio/media';
 
@@ -51,12 +51,12 @@ async function writeAtomic(directory: string, name: string, bytes: Buffer) {
 /** Renders both sizes from the original pixels of an image this user owns. */
 export async function renderAvatar(bytes: Buffer, crop: AvatarCrop) {
   // EXIF orientation is applied first, matching what the browser showed while cropping.
-  const rotated = await sharp(bytes, { limitInputPixels: 60_000_000, animated: false }).rotate().toBuffer();
-  const { width = 0, height = 0 } = await sharp(rotated).metadata();
+  const rotated = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).rotate().toBuffer();
+  const { width = 0, height = 0 } = await (await openUntrustedImage(rotated, 'ordinary')).metadata();
   if (crop.x + crop.width > width + 1 || crop.y + crop.height > height + 1) throw new AvatarError('裁切范围超出图片，请重新调整');
   const area = { left: crop.x, top: crop.y, width: Math.min(crop.width, width - crop.x), height: Math.min(crop.height, height - crop.y) };
-  const [large, small] = await Promise.all(AVATAR_SIZES.map(size =>
-    sharp(rotated).extract(area).resize(size, size, { fit: 'cover' }).webp({ quality: 86 }).toBuffer()));
+  const [large, small] = await Promise.all(AVATAR_SIZES.map(async size =>
+    (await openUntrustedImage(rotated, 'ordinary')).extract(area).resize(size, size, { fit: 'cover' }).webp({ quality: 86 }).toBuffer()));
   return { large, small };
 }
 

@@ -1,8 +1,8 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from '../media/sharp';
 import type { Prisma } from '@prisma/client';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
@@ -130,7 +130,7 @@ export async function readFeedbackImage(item: FeedbackAttachment): Promise<Buffe
   if (!validHash(item.hash) || !formats[item.mime]) throw new FeedbackImageError('attachment_source');
   let file;
   try {
-    const root = await realpath(path.join(process.cwd(), 'public', 'uploads', 'assets'));
+    const root = await realpath(path.join((await import('@/lib/media/storage-roots')).mediaRoot('uploads'), 'assets'));
     file = await open(path.join(root, filename), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const before = await file.stat();
     if (!before.isFile() || before.size !== item.size || before.size <= 0 || before.size > FEEDBACK_IMAGE_BYTES) throw new FeedbackImageError('attachment_size');
@@ -144,7 +144,7 @@ export async function readFeedbackImage(item: FeedbackAttachment): Promise<Buffe
     const after = await file.stat();
     if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
       || createHash('sha256').update(buffer).digest('hex') !== item.hash) throw new FeedbackImageError('attachment_changed');
-    const metadata = await sharp(buffer, { limitInputPixels: 12000 * 12000 }).metadata();
+    const metadata = await (await openUntrustedImage(buffer, 'ordinary')).metadata();
     const expected = item.mime === 'image/jpeg' ? 'jpeg' : formats[item.mime];
     if (metadata.format !== expected || !metadata.width || !metadata.height || metadata.width > 12000 || metadata.height > 12000
       || (metadata.pages || 1) !== 1) throw new FeedbackImageError('attachment_format');

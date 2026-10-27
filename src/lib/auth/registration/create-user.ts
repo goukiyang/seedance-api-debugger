@@ -19,6 +19,7 @@ export async function createRegisteredUser(
     email: string;
     name: string;
     passwordHash: string;
+    emailVerified?: boolean;
   },
 ) {
   const username = await generateUniqueUsername(tx, input.email);
@@ -33,6 +34,8 @@ export async function createRegisteredUser(
       username,
       email: input.email,
 	      password_hash: input.passwordHash,
+        auth_origin: 'self_register',
+        email_verified_at: input.emailVerified ? new Date() : null,
 	      role: 'user',
 	      account_type: accountType,
 	      user_profile: userProfile,

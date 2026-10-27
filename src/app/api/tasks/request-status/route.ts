@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { cookieOrCodexIdentity } from '@/lib/http/route-identities';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
@@ -13,7 +15,7 @@ const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie, Authoriza
 const taskSelect = { id: true, user_id: true, owner_user_id: true, local_status: true, project_id: true,
   video_card_id: true, retention_status: true, provider: true } as const;
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', identity: cookieOrCodexIdentity, rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const codex = hasCodexApiAuthSignal(request) ? await authenticateCodexVideoApi(request) : null;
     const user = codex?.user || await getSession();
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, safeToResubmit: false }, { status: error.status, headers });
     return NextResponse.json({ error: '原请求暂时无法确认，请稍后查询同一请求号', safeToResubmit: false }, { status: 503, headers });
   }
-}
+});
 
 async function closeBody(request: NextRequest) {
   const reader = request.body?.getReader();
@@ -55,7 +57,7 @@ async function closeBody(request: NextRequest) {
   } finally { await reader.cancel().catch(() => undefined); }
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user || user.status !== 'active') return NextResponse.json({ error: '请先登录', safeToResubmit: false }, { status: 401, headers });
@@ -91,4 +93,4 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, safeToResubmit: false }, { status: error.status, headers });
     return NextResponse.json({ error: '结束结果暂时无法确认，请查询原请求号。', safeToResubmit: false }, { status: 503, headers });
   }
-}
+});

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -31,7 +32,7 @@ function pickMemoryPreferredPlanKey(memories: Array<{ summary: string | null; me
   return Array.from(scores.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -188,4 +189,4 @@ export async function POST(request: NextRequest) {
     console.error('[TemplatePlans] Generate error:', error);
     return NextResponse.json({ error: '模板方案暂时无法生成，请稍后重试' }, { status: 500 });
   }
-}
+});

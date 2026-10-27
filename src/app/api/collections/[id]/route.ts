@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * DELETE /api/collections/[id]  - 删除图片集
  * PATCH /api/collections/[id]  - 更新图片集
@@ -7,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { deleteCollection, updateCollection } from '@/lib/assets/collection';
 import { getSession } from '@/lib/auth/session';
 
-export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -15,15 +17,12 @@ export async function DELETE(_request: NextRequest, props: { params: Promise<{ i
     await deleteCollection(params.id, user.id);
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('[DeleteCollection] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -32,10 +31,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     const collection = await updateCollection(params.id, body, user.id);
     return NextResponse.json({ collection });
   } catch (error) {
-    console.error('[UpdateCollection] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

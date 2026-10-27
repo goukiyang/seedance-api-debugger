@@ -10,6 +10,7 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import dialogStyles from '@/components/ProductDialog.module.css';
 import boundaryStyles from './AppSessionBoundary.module.css';
+import { confirmedSessionUser } from '@/lib/auth/session-response';
 
 export interface AppSessionUser {
   id: string;
@@ -97,10 +98,13 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
   const sessionEpoch = useRef(0);
   const userRequest = useRef<AbortController | null>(null);
   const creditsRequest = useRef<AbortController | null>(null);
+  const userRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userRetryAttempt = useRef(0);
+  const refreshUserCallback = useRef<((options?: RefreshOptions) => Promise<AppSessionUser | null>) | null>(null);
 
   const refreshUser = useCallback(async (options: RefreshOptions = {}) => {
     if (isClientSessionBlocked()) return null;
-    if (!options.force && hasLoadedUserRef.current) return userRef.current;
+    if (!options.force && (hasLoadedUserRef.current || userRetryTimer.current)) return userRef.current;
     if (loadingUserRef.current) return userRef.current;
 
     loadingUserRef.current = true;
@@ -113,7 +117,10 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       if (!response.ok) throw new Error('auth status failed');
       const data = await response.json();
       if (controller.signal.aborted || sessionEpoch.current !== epoch) return null;
-      const nextUser = (data.user || null) as AppSessionUser | null;
+      const nextUser = confirmedSessionUser<AppSessionUser>(data);
+      if (userRetryTimer.current) clearTimeout(userRetryTimer.current);
+      userRetryTimer.current = null;
+      userRetryAttempt.current = 0;
       if (nextUser?.id !== userRef.current?.id) {
         sessionEpoch.current++;
         creditsRequest.current?.abort();
@@ -138,10 +145,14 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
       return nextUser;
     } catch {
       if (controller.signal.aborted || sessionEpoch.current !== epoch) return null;
-      setUploadSessionOwner(null);
-      hasLoadedUserRef.current = true;
-      setHasLoadedUser(true);
-      setUserLoadError('登录状态确认失败，请刷新后重试。');
+      setUserLoadError('连接不稳定，正在重试');
+      if (!userRetryTimer.current) {
+        const delay = [2000, 4000, 8000, 16000, 30000][Math.min(userRetryAttempt.current++, 4)];
+        userRetryTimer.current = setTimeout(() => {
+          userRetryTimer.current = null;
+          if (sessionEpoch.current === epoch) void refreshUserCallback.current?.({ force: true });
+        }, delay);
+      }
       return userRef.current;
     } finally {
       if (userRequest.current === controller) {
@@ -150,6 +161,13 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
         setLoadingUser(false);
       }
     }
+  }, []);
+  refreshUserCallback.current = refreshUser;
+
+  useEffect(() => () => {
+    if (userRetryTimer.current) clearTimeout(userRetryTimer.current);
+    userRequest.current?.abort();
+    creditsRequest.current?.abort();
   }, []);
 
   const refreshCredits = useCallback(async (options: RefreshOptions = {}) => {
@@ -201,6 +219,9 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const clearSession = useCallback(() => {
+    if (userRetryTimer.current) clearTimeout(userRetryTimer.current);
+    userRetryTimer.current = null;
+    userRetryAttempt.current = 0;
     sessionEpoch.current++;
     userRequest.current?.abort();
     creditsRequest.current?.abort();
@@ -223,6 +244,8 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   useEffect(() => watchSessionExit(reason => {
+    if (userRetryTimer.current) clearTimeout(userRetryTimer.current);
+    userRetryTimer.current = null;
     sessionEpoch.current++;
     userRequest.current?.abort(); creditsRequest.current?.abort();
     userRequest.current = null; creditsRequest.current = null;
@@ -254,7 +277,10 @@ export function AppSessionProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <AppSessionContext.Provider value={value}>
-      <div ref={workspace} className={boundaryStyles.workspace}>{children}</div>
+      <div ref={workspace} className={boundaryStyles.workspace}>
+        {userLoadError && !sessionChanged && <p role="status">{userLoadError}</p>}
+        {children}
+      </div>
       {sessionChanged && <SessionChangedNotice reason={sessionBoundaryReason} />}
     </AppSessionContext.Provider>
   );

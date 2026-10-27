@@ -1,6 +1,6 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import { readFile } from 'node:fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import sharp from '../media/sharp';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { multiviewWorkRoute, multiviewWorkHeaders } from './multiview-work-api';
@@ -58,7 +58,7 @@ export function multiviewSourceRoute(request: NextRequest, access: MultiviewSour
       if (!/^\d{1,6}$/.test(frame) || !version || !/^[a-f0-9]{64}$/.test(version)) throw new AuthError('帧位置无效。', 400);
       let bytes: Buffer = await multiviewFrame(user, taskId, request, version, Number(frame), access);
       const thumbnail = params.get('thumbnail') === '1';
-      if (thumbnail) bytes = await sharp(bytes).resize(480, 480, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+      if (thumbnail) bytes = await (await openUntrustedImage(bytes, 'ordinary')).resize(480, 480, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
       await task();
       return new NextResponse(request.method === 'HEAD' ? null : new Uint8Array(bytes), { headers: { ...multiviewWorkHeaders, 'Content-Type': thumbnail ? 'image/webp' : 'image/png', 'Content-Length': String(bytes.length) } });
     }

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { PublicApiError } from '@/lib/http/public-error';
 import { NextRequest } from 'next/server';
 import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -43,13 +44,13 @@ export type GenerationRequestSource = {
   source_metadata: Record<string, unknown>;
 };
 
-export class CodexApiAuthError extends Error {
+export class CodexApiAuthError extends PublicApiError {
   constructor(
     message: string,
     public readonly status: number,
     public readonly code: string,
   ) {
-    super(message);
+    super(message, status, code);
   }
 }
 

@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ async function main() {
   const forbidden = () => { forbiddenCalls++; throw new Error('Pure usage engineering cannot access business services'); };
   process.env.DATABASE_URL = 'file:/nonexistent/admin-usage-pure-engineering.db';
   Object.assign(process.env, { NODE_ENV: 'test' });
-  Reflect.set(globalThis, 'prisma', new Proxy({}, { get: () => forbidden }));
+  setFixtureDatabase(new Proxy({}, { get: () => forbidden }));
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   const { parseUsageQuery, usageDateStartUtc } = await import('../src/lib/admin/usage-query');

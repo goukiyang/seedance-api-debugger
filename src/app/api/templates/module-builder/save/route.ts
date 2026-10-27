@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -36,7 +37,7 @@ function normalizeDraft(value: unknown): ModuleBuilderDraft | null {
   return parsed.draft || null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -203,4 +204,4 @@ export async function POST(request: NextRequest) {
     console.error('[ModuleBuilder] Save failed:', error);
     return NextResponse.json({ error: '模块保存失败' }, { status: 500 });
   }
-}
+});

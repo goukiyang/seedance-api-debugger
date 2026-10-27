@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -10,7 +12,7 @@ function requiredString(value: unknown, label: string) {
   throw new Error(`${label} 不能为空`);
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -30,15 +32,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ requirements });
   } catch (error) {
-    console.error('[FeishuRequirements] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -62,10 +61,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[FeishuRequirements] Sync error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

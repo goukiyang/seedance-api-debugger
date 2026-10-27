@@ -1,9 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { cookieOrCodexIdentity } from '@/lib/http/route-identities';
 import { NextRequest } from 'next/server';
 import { POST as upgradeDraft } from '@/app/api/tasks/[id]/draft-upgrade/route';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', identity: cookieOrCodexIdentity, rateLimit: false }, async function POST(request: NextRequest) {
   const parsedBody = await request.clone().json().catch(() => ({}));
   const body = parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
     ? parsedBody as Record<string, unknown>
@@ -22,4 +24,4 @@ export async function POST(request: NextRequest) {
     body: JSON.stringify(body),
   });
   return upgradeDraft(forwarded, { params: Promise.resolve({ id: draftTaskId }) });
-}
+});

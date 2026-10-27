@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   buildFeishuAuthorizeUrl,
@@ -24,11 +25,12 @@ function setStateCookie(response: NextResponse, state: ReturnType<typeof createF
     sameSite: 'lax',
     maxAge: state.maxAgeSeconds,
     path: '/',
+    secure: process.env.NODE_ENV === 'production',
   });
   return response;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'public', rateLimit: "auth" }, async function GET(request: NextRequest) {
   try {
     const next = request.nextUrl.searchParams.get('next');
     const state = createFeishuOAuthState(next);
@@ -41,4 +43,4 @@ export async function GET(request: NextRequest) {
     console.error('[Feishu authorize]', error);
     return NextResponse.redirect(callbackPageUrl(request, 'server_error'), { status: 303 });
   }
-}
+});

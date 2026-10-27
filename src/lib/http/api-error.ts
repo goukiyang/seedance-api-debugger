@@ -1,14 +1,8 @@
 import { createCipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { requireSecret } from '../security/secrets';
-
-/** Only deliberately public business messages may use this class. */
-export class PublicApiError extends Error {
-  constructor(message: string, public readonly status: number, public readonly code?: string) {
-    super(message);
-    if (!Number.isInteger(status) || status < 400 || status > 599) throw new RangeError('Invalid API error status');
-    this.name = 'PublicApiError';
-  }
-}
+import { PublicApiError } from './public-error';
+import { SessionUnavailableError } from '../auth/session-errors';
+export { PublicApiError } from './public-error';
 
 function recordUnexpectedError(errorId: string, error: unknown) {
   try {
@@ -36,7 +30,7 @@ export function apiErrorResponse(error: unknown): Response {
   }
   const errorId = randomUUID();
   recordUnexpectedError(errorId, error);
-  return Response.json({ error: '服务暂时不可用', code: 'UNAVAILABLE', errorId }, { status: 503, headers });
+  return Response.json({ error: '服务暂时不可用', code: error instanceof SessionUnavailableError ? 'AUTH_UNAVAILABLE' : 'UNAVAILABLE', errorId }, { status: 503, headers });
 }
 
 export function withApiErrors<Args extends unknown[]>(handler: (...args: Args) => Response | Promise<Response>) {

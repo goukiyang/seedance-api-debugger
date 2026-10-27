@@ -1,3 +1,6 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { authenticateCodexService } from '@/lib/http/route-identities';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   authenticateCodexVideoApi,
@@ -28,7 +31,7 @@ function parseContentLength(value: string | null) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'service', authenticate: authenticateCodexService, rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const context = await authenticateCodexVideoApi(request);
     const multipartContentLength = parseContentLength(request.headers.get('content-length'));
@@ -107,10 +110,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof ReferenceImportError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
-    console.error('[CodexAssetUpload] Failed:', error);
-    return NextResponse.json(
-      { error: 'codex_asset_upload_failed', message: error instanceof Error ? error.message : 'Codex 素材上传失败' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

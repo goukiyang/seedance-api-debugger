@@ -1,7 +1,10 @@
 'use client';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { appendAlbumPage, fetchAlbumPage, loadAllAlbumPages } from '@/lib/reference-albums/client-pages';
+import { usePageSentinel } from '@/lib/hooks/usePageSentinel';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import { Eye } from 'lucide-react';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import MediaPreview from '@/components/MediaPreview';
@@ -103,10 +106,18 @@ export function ReferenceAlbumPicker({
   onClose,
   onConfirm,
 }: Props) {
+  const { user, userLoadError, sessionChanged } = useAppSession();
+  const accountId = !userLoadError && !sessionChanged ? user?.id || '' : '';
   const [scope, setScope] = useState<AlbumScope>('mine');
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const requestKey = `${accountId}:${scope}:${selectedAlbumId}`;
+  const keyRef = useRef(requestKey); keyRef.current = requestKey;
+  const moreBusy = useRef(false);
+  const imageRequest = useRef<AbortController | null>(null);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedAssetsById, setSelectedAssetsById] = useState<Record<string, ReferenceAlbumSelection>>({});
   const [loading, setLoading] = useState(false);
@@ -127,6 +138,8 @@ export function ReferenceAlbumPicker({
     setSelectedImageIds([]);
     setSelectedAssetsById({});
   }, [open]);
+  useEffect(() => { setAlbums([]); setImages([]); setNextCursor(null); setSelectedAlbumId(''); setSelectedImageIds([]); setSelectedAssetsById({}); setPreviewImage(null); }, [accountId]);
+  useEffect(() => { setAlbums([]); setImages([]); setNextCursor(null); setSelectedAlbumId(''); setPreviewImage(null); }, [scope]);
 
   void currentCount;
   const currentReferenceImageIdSet = useMemo(
@@ -139,47 +152,59 @@ export function ReferenceAlbumPicker({
   );
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !accountId) return;
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums?scope=${scope}`, { signal: controller.signal })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
+    loadAllAlbumPages<AlbumItem>(`/api/reference-albums?scope=${scope}`, 'albums', { signal: controller.signal, ownerId: accountId })
+      .then((data) => {
         if (controller.signal.aborted) return;
-        if (!ok) throw new Error(data.error || data.message || '图集读取失败');
-        const list: AlbumItem[] = (data.albums || []).filter((album: AlbumItem) => album.image_count > 0);
+        const list = data.filter(album => album.image_count > 0);
         setAlbums(list);
         setSelectedAlbumId((prev) => (list.some((album) => album.id === prev) ? prev : list[0]?.id || ''));
       })
       .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '图集读取失败'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [open, scope]);
+  }, [accountId, open, scope]);
 
   useEffect(() => {
-    if (!open || !selectedAlbumId) {
+    if (!open || !accountId || !selectedAlbumId) {
       setImages([]);
       setPreviewImage(null);
       return;
     }
     const controller = new AbortController();
+    imageRequest.current = controller;
     setImages([]);
+    setNextCursor(null); setLoadingMore(false);
     setPreviewImage(null);
     setLoading(true);
     setError(null);
-    fetch(`/api/reference-albums/${selectedAlbumId}`, { signal: controller.signal })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
+    fetchAlbumPage<ReferenceImageItem>(`/api/reference-albums/${encodeURIComponent(selectedAlbumId)}/images`, 'images', { signal: controller.signal, ownerId: accountId })
+      .then((data) => {
         if (controller.signal.aborted) return;
-        if (!ok) throw new Error(data.error || data.message || '图集详情读取失败');
-        setImages(data.images || []);
+        setImages(data.items); setNextCursor(data.pagination.nextCursor);
         setPreviewImage(null);
       })
       .catch((err) => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '图集详情读取失败'); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [open, selectedAlbumId]);
+  }, [accountId, open, selectedAlbumId]);
+
+  const loadMore = useCallback(async () => {
+    if (!open || !nextCursor || loading || moreBusy.current) return;
+    const key = keyRef.current, controller = new AbortController();
+    imageRequest.current = controller; moreBusy.current = true; setLoadingMore(true);
+    try {
+      const page = await fetchAlbumPage<ReferenceImageItem>(`/api/reference-albums/${encodeURIComponent(selectedAlbumId)}/images`, 'images', { ownerId: accountId, cursor: nextCursor, signal: controller.signal });
+      if (controller.signal.aborted || key !== keyRef.current) return;
+      setImages(current => appendAlbumPage(current, page.items)); setNextCursor(page.pagination.nextCursor);
+    } catch (err) { if (!controller.signal.aborted && key === keyRef.current) setError(err instanceof Error ? err.message : '图集读取失败'); }
+    finally { moreBusy.current = false; if (key === keyRef.current) setLoadingMore(false); }
+  }, [accountId, loading, nextCursor, open, selectedAlbumId]);
+  const moreRef = usePageSentinel(() => { void loadMore(); }, Boolean(open && nextCursor && !loading && !loadingMore && !error));
+  useEffect(() => () => imageRequest.current?.abort(), [requestKey, open]);
 
   if (!open) return null;
 
@@ -332,6 +357,7 @@ export function ReferenceAlbumPicker({
                 </article>
               );
             })}
+            {nextCursor && <button type="button" ref={moreRef} onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '读取中...' : '加载更多素材'}</button>}
           </div>
         </div>
 

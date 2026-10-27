@@ -1,8 +1,7 @@
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../src/lib/prisma';
 import { hashPassword } from '../src/lib/auth/password';
-
-const prisma = new PrismaClient();
+import { revokeAllSessions } from '../src/lib/auth/session-store';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -21,6 +20,7 @@ async function main() {
     throw new Error('ADMIN_INITIAL_CREDITS must be a non-negative number');
   }
 
+  const passwordHash = await hashPassword(password);
   const admin = await prisma.$transaction(async (tx) => {
     const existing = await tx.user.findFirst({
       where: { OR: [{ username }, { email }] },
@@ -33,7 +33,7 @@ async function main() {
             name,
             username,
             email,
-	            password_hash: hashPassword(password),
+              password_hash: passwordHash,
 	            role: 'admin',
 	            account_type: 'internal',
 	            user_profile: 'other',
@@ -46,7 +46,8 @@ async function main() {
             name,
             username,
             email,
-	            password_hash: hashPassword(password),
+              password_hash: passwordHash,
+              auth_origin: 'admin',
 	            role: 'admin',
 	            account_type: 'internal',
 	            user_profile: 'other',
@@ -55,6 +56,7 @@ async function main() {
 	          },
         });
 
+    if (existing) await revokeAllSessions(user.id, 'admin_seed_reset', tx);
     const account = await tx.creditAccount.upsert({
       where: { user_id: user.id },
       update: {},

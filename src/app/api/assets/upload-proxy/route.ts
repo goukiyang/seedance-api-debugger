@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/upload-proxy
  * 使用本站后端按同一上传票据中转写入 R2。
@@ -11,6 +12,7 @@ import { directUploadRequestId, proxyDirectUploadToStorage } from '@/lib/assets/
 import { directUploadFailure } from '@/lib/assets/direct-upload-error';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,7 +31,7 @@ function readOptionalNumberHeader(request: NextRequest, name: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let originalRequestId: string | null = null;
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
       fileKind: getSiteUploadKind(uploadResult.mimeType),
       requestId: originalRequestId,
     });
-    return NextResponse.json({
+    return NextResponse.json(await browserUploadResponse(user, {
       success: true,
       upload: uploadResult.upload,
       similarity: uploadResult.similarity,
@@ -92,7 +94,7 @@ export async function POST(request: NextRequest) {
         upload: uploadResult.upload,
         similarity: uploadResult.similarity,
       },
-    });
+    }), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     const diagnostic = directUploadFailure(error, 'proxy');
     const verified = error instanceof VerifiedUploadError ? verifiedUploadFailure(error) : null;
@@ -117,4 +119,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(verified ? { ...verified, errorStage: 'proxy', recovery: 'query' } : diagnostic,
       { status: error instanceof VerifiedUploadError ? error.status : 503 });
   }
-}
+});

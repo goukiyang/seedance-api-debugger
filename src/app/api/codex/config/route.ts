@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { authenticateCodexService } from '@/lib/http/route-identities';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   authenticateCodexVideoApi,
@@ -17,7 +19,7 @@ import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-model
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'service', authenticate: authenticateCodexService, rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const context = await authenticateCodexVideoApi(request);
     const status = await codexVideoApiStatus();
@@ -114,4 +116,4 @@ export async function GET(request: NextRequest) {
     console.error('[CodexConfig] Failed:', error);
     return NextResponse.json({ error: 'codex_config_failed', message: 'Codex 接口配置检查失败' }, { status: 500 });
   }
-}
+});

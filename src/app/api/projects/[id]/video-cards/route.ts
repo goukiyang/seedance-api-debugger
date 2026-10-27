@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { prisma } from '@/lib/prisma';
@@ -120,7 +123,7 @@ function serializeVideoCard(card: any, summary: any) {
   };
 }
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -132,7 +135,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       where: { project_id: params.id },
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
       current_best_task: {
           select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
@@ -163,15 +166,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[VideoCards] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -241,7 +241,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         created_by: user.id,
       },
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
       current_best_task: {
           select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
@@ -267,10 +267,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[VideoCards] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

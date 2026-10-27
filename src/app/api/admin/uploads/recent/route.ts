@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
@@ -20,7 +21,7 @@ function safeParseDetail(value: string | null) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
   } catch {
@@ -68,4 +69,4 @@ export async function GET(request: NextRequest) {
       operator: log.operator,
     })),
   });
-}
+});

@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { AvatarError, restoreAvatar, setCustomAvatar } from '@/lib/avatar';
@@ -5,7 +6,7 @@ import { AvatarError, restoreAvatar, setCustomAvatar } from '@/lib/avatar';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store' };
 // { action: 'custom', assetId, crop } | { action: 'feishu' | 'initials' } | { action: 'admin-reset', userId } (admin → Feishu photo)
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
   if (!origin || new URL(origin).host !== (request.headers.get('x-forwarded-host') || request.headers.get('host'))) return NextResponse.json({ error: '请求来源无效' }, { status: 403, headers });
   const user = await getSession();
@@ -20,4 +21,4 @@ export async function POST(request: NextRequest) {
     if (error instanceof AvatarError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '头像暂未保存，请重试' }, { status: 503, headers });
   }
-}
+});

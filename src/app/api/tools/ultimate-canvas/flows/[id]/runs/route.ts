@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -7,7 +8,7 @@ import { createToolFlowRun, listToolFlowRuns, toolFlowQuoteCookieName } from '@/
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -20,9 +21,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
     console.error('[ToolFlow] Run list failed:', error);
     return NextResponse.json({ error: '工具流运行读取失败' }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -44,4 +45,4 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     console.error('[ToolFlow] Run create failed:', error);
     return NextResponse.json({ error: '工具流运行创建失败' }, { status: 500 });
   }
-}
+});

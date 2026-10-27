@@ -135,8 +135,9 @@ export async function enqueueUploadSimilarity(asset: Asset) {
   await privateUploadDirectory(); // Fail closed for new runtime/index writes without the real data mount.
   const owned = await authorizedAsset(asset.owner_id, asset.id);
   const local = siteUploadPathFromUrl(owned.original_url);
-  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-  const file = local ? await fs.realpath(path.join(process.cwd(), 'public', local.replace(/^\/+/, ''))).catch(() => null) : null;
+  const { mediaRoot, localMediaPath } = await import('@/lib/media/storage-roots');
+  const root = await fs.realpath(mediaRoot('uploads'));
+  const file = local ? await fs.realpath(localMediaPath(local)).catch(() => null) : null;
   if (!file || !file.startsWith(`${root}${path.sep}`)) return;
     const stamp = new Date().toISOString();
     const job: Job = { version: 1, ownerId: asset.owner_id, assetId: asset.id, hash: asset.hash,
@@ -172,8 +173,9 @@ async function readyJob(ownerId: string, assetId: string) {
   // computation already fully verified bytes; read-only candidates check the
   // same real file/stat version instead of decoding hundreds of originals.
   const local = siteUploadPathFromUrl(asset.original_url);
-  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-  const file = local ? await fs.realpath(path.join(process.cwd(), 'public', local.replace(/^\/+/, ''))).catch(() => null) : null;
+  const { mediaRoot, localMediaPath } = await import('@/lib/media/storage-roots');
+  const root = await fs.realpath(mediaRoot('uploads'));
+  const file = local ? await fs.realpath(localMediaPath(local)).catch(() => null) : null;
   if (!file || !file.startsWith(`${root}${path.sep}`) || await uploadFileVersion(file) !== job.sourceVersion) throw new VerifiedUploadError('SIMILARITY_VERSION_CHANGED', '图片来源已变化，旧相似结果不再使用');
   return { asset, job };
 }

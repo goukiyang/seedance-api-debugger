@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -15,7 +16,7 @@ function studioWorkspaceTabId(runId: string) {
   return `template-studio-${runId}`;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
   try {
@@ -187,9 +188,9 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ handoff, workspaceTabId });
-}
+});
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', code: 'UNAUTHENTICATED' }, { status: 401 });
   try {
@@ -245,4 +246,4 @@ export async function GET(request: NextRequest) {
     template_studio_run_id: task.template_studio_run_id,
     deduplicated: true,
   } : null });
-}
+});

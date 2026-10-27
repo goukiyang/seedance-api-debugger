@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -9,16 +10,16 @@ function failure(error: unknown) {
   return NextResponse.json({ error: known ? error.message : '操作未完成，请稍后刷新重试' }, { status: known ? error.status : 503 });
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
     const cursor = request.nextUrl.searchParams.get('cursor') || undefined;
     if (cursor && cursor.length > 100) throw new CreditRequestError('分页参数无效');
     return NextResponse.json(await listCreditRequests(user.id, cursor), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) { return failure(error); }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const origin = request.headers.get('origin');
     if (!origin || new URL(origin).host !== (request.headers.get('x-forwarded-host') || request.headers.get('host'))) return NextResponse.json({ error: '请求来源无效' }, { status: 403 });
@@ -34,4 +35,4 @@ export async function POST(request: NextRequest) {
       amount: body.amount, confirmationNonce: body.confirmationNonce, reason: body.reason });
     return NextResponse.json(result);
   } catch (error) { return failure(error); }
-}
+});

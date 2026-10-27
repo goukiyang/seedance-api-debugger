@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { taskThumbnailProjection, type TaskThumbnailProjectionSource } from './task-thumbnail-projection';
+import { projectVideoTaskFields, type VideoTaskFields } from '@/lib/dto/video-task-fields';
 
 /** This object is written only after the server has accepted a private recipe. */
 export type MultiviewPrivateTaskMarker = { kind: 'multiview'; schema: 1; recipeVersion: string };
@@ -108,8 +109,8 @@ function relation(value: unknown, keys: string[]) {
 }
 
 /** Positive allowlist for every browser surface, including the task owner. */
-export function projectPrivateMultiviewTask<T extends object & TaskProtectionSource>(task: T): T {
-  if (!isPrivateMultiviewTask(task)) return task;
+export function projectPrivateMultiviewTask<T extends object & TaskProtectionSource>(task: T): VideoTaskFields<T> {
+  if (!isPrivateMultiviewTask(task)) return projectVideoTaskFields(task);
   const source = task as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of scalarKeys) if (source[key] !== undefined && scalar(source[key])) result[key] = source[key];
@@ -144,14 +145,13 @@ export function projectPrivateMultiviewTask<T extends object & TaskProtectionSou
   if (typeof source.id === 'string' && typeof source.local_status === 'string') {
     Object.assign(result, taskThumbnailProjection(task as unknown as TaskThumbnailProjectionSource));
   }
-  return result as T;
+  return result as VideoTaskFields<T>;
 }
 
 /** Partial legacy DTOs must not acquire the newly selected internal column. */
-export function projectSelectedMultiviewTask<T extends object & TaskProtectionSource>(task: T): Omit<T, 'source_metadata_json'> {
+export function projectSelectedMultiviewTask<T extends object & TaskProtectionSource>(task: T): VideoTaskFields<T> {
   if (isPrivateMultiviewTask(task)) return projectPrivateMultiviewTask(task);
-  const { source_metadata_json: _protection, ...publicFields } = task;
-  return publicFields;
+  return projectVideoTaskFields(task);
 }
 
 /** Ledger source details are internal even when the ledger belongs to the actor. */

@@ -1,8 +1,8 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import sharp from '../media/sharp';
 import type { ImageStudioTask, OperationLog, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { transformPrivateImageTask } from './private-storage.server';
@@ -144,11 +144,11 @@ async function checkpoint(task: ImageStudioTask, input: Input, decode: boolean) 
       || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw fail('checkpoint');
     if (decode) {
       const options = { animated: false, limitInputPixels: 40_000_000, failOn: 'warning' as const };
-      const metadata = await sharp(bytes, options).metadata();
+      const metadata = await (await openUntrustedImage(bytes, 'ordinary', options)).metadata();
       if (metadata.format !== 'png' || (metadata.pages || 1) !== 1 || !Number.isSafeInteger(metadata.width)
         || !Number.isSafeInteger(metadata.height) || !metadata.width || !metadata.height
         || metadata.width > 16384 || metadata.height > 16384 || metadata.width * metadata.height > 40_000_000) throw fail('checkpoint');
-      await sharp(bytes, options).timeout({ seconds: 45 }).stats();
+      await (await openUntrustedImage(bytes, 'ordinary', options)).timeout({ seconds: 45 }).stats();
     }
     return { checkpointSha256: delivery.outputHash, checkpointBytes: bytes.length, requestSha256: sha(requestBytes),
       sourceSha256: sha(sourceBytes), manifestSha256: seal };

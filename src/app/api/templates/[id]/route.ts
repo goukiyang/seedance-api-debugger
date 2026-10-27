@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -12,7 +14,7 @@ export const dynamic = 'force-dynamic';
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, props: Params) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: Params) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -32,15 +34,12 @@ export async function GET(_request: NextRequest, props: Params) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[Templates] Detail error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: Params) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest, props: Params) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -112,10 +111,7 @@ export async function PATCH(request: NextRequest, props: Params) {
     if (error instanceof Error && error.message === '模板名称不能为空') {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Templates] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

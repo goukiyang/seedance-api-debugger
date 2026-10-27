@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getSession } from '@/lib/auth/session';
 import { hdControl, hdStatus, isHdRetryableFailure, listHdJobs, recheckHdResources, retryHdKey, setHdControl } from '@/lib/media/hd-derivatives';
 import type { HdControl, HdResourceSample } from '@/lib/media/hd-resource-state';
@@ -37,15 +38,15 @@ async function status() {
     canResume: value.control.state === 'manual_pause' || value.control.state === 'resource_wait' || value.control.reason === 'load_guard',
     retryableCount: (await listHdJobs()).filter(isHdRetryableFailure).length };
 }
-export async function GET() {
+export const GET = declaredRoute({ access: 'admin', rateLimit: false, unauthenticatedStatus: 403 }, async function GET() {
   const user = await getSession();
   if (!user || user.role !== 'admin') return Response.json({ error: '无权访问' }, { status: 403, headers });
   try { return Response.json(await status(), { headers }); }
   catch {
     return Response.json({ error: '暂时无法读取高清状态，请刷新后再操作。原有任务与原图保持不变。' }, { status: 503, headers });
   }
-}
-export async function POST(request: Request) {
+});
+export const POST = declaredRoute({ access: 'admin', rateLimit: false, unauthenticatedStatus: 403 }, async function POST(request: Request) {
   const user = await getSession();
   if (!user || user.role !== 'admin') return Response.json({ error: '无权访问' }, { status: 403, headers });
   if (request.headers.get('origin') !== new URL(request.url).origin) return Response.json({ error: '请求来源无效' }, { status: 403, headers });
@@ -76,4 +77,4 @@ export async function POST(request: Request) {
       : message === 'hd_control_conflict' ? '状态已变化，请刷新状态后再操作'
         : '本次操作未能确认完成，请刷新状态后再核对，原状态已保留' }, { status: 409, headers });
   }
-}
+});

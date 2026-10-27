@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync } from 'node:child_process';
@@ -38,7 +39,7 @@ async function main() {
   execFileSync(process.execPath, [path.join(path.dirname(prismaPackage), 'build/index.js'), 'db', 'push', '--skip-generate',
     '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   assert.equal(statSync(databasePath).mode & 0o777, 0o600);
-  const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient(); Reflect.set(globalThis, 'prisma', db);
+  const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient(); setFixtureDatabase(db);
   process.chdir(directory);
   const checks: string[] = [];
   let completed = false, forbiddenCalls = 0;

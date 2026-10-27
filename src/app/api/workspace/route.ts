@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * GET  /api/workspace
  * 获取当前工作区（含素材列表）
@@ -14,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401, headers: privateHeaders });
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
     const tabId = request.headers.get('x-tab-id') || 'default';
 
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
-    const workspace = await getWorkspaceWithAssets(workspaceId);
+    const workspace = await getWorkspaceWithAssets(workspaceId, user);
 
     if (!workspace) {
       return NextResponse.json({ error: 'Workspace not found' }, { status: 404, headers: privateHeaders });
@@ -33,15 +35,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ workspace, tabId }, { headers: privateHeaders });
   } catch (error) {
-    console.error('[GetWorkspace] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500, headers: privateHeaders }
-    );
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401, headers: privateHeaders });
@@ -52,14 +51,11 @@ export async function POST(request: NextRequest) {
     const tabId = body.tabId || request.headers.get('x-tab-id') || 'default';
 
     const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
-    const workspace = await getWorkspaceWithAssets(workspaceId);
+    const workspace = await getWorkspaceWithAssets(workspaceId, user);
 
     return NextResponse.json({ workspace, tabId }, { headers: privateHeaders });
   } catch (error) {
-    console.error('[InitWorkspace] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500, headers: privateHeaders }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

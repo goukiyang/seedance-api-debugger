@@ -1,7 +1,7 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from '../media/sharp';
 import type { Prisma } from '@prisma/client';
 import { StudioImageDeliveryError } from './media';
 import { studioOutputFormat } from './dimension-mismatch';
@@ -28,16 +28,16 @@ export async function prepareStudioOutput(bytes: Buffer, task: { id: string; own
   const format = studioOutputFormat(originalFormat);
   if (!format) throw new StudioImageDeliveryError('generated_output_format_unavailable', bytes.length);
   const hash = createHash('sha256').update(bytes).digest('hex');
-  const thumb = await sharp(bytes, { failOn: 'warning', limitInputPixels: 40_000_000 })
+  const thumb = await (await openUntrustedImage(bytes, 'ordinary'))
     .timeout({ seconds: 45 }).resize(640, 640, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
   if (!thumb.length) throw new StudioImageDeliveryError('generated_thumbnail_failed', bytes.length);
   const thumbHash = createHash('sha256').update(thumb).digest('hex');
   const originalUrl = `/uploads/assets/${hash}.${format.extension}`;
   const thumbnailUrl = `/uploads/thumbs/${thumbHash}_thumb.webp`;
   await assertLease();
-  await publishFile(path.join(process.cwd(), 'public', originalUrl), bytes);
+  await publishFile((await import('@/lib/media/storage-roots')).localMediaPath(originalUrl), bytes);
   await assertLease();
-  await publishFile(path.join(process.cwd(), 'public', thumbnailUrl), thumb);
+  await publishFile((await import('@/lib/media/storage-roots')).localMediaPath(thumbnailUrl), thumb);
   await assertLease();
   return { id: `studio-${task.id}`, owner_id: task.owner_id, type: 'image', hash,
     original_url: originalUrl, thumbnail_url: thumbnailUrl, file_name: `image-${task.id}.${format.extension}`, mime_type: format.mimeType,

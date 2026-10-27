@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -5,13 +8,17 @@ import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProjectAssets, getAccessibleProjectIds, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import { assertPageOwner, authorizedPage, PaginationError, seekWhere } from '@/lib/pagination/cursor';
+import { requireSecret } from '@/lib/security/secrets';
+import { readAlbumCover, readAlbumImagePage } from '@/lib/reference-albums/image-page';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertPageOwner(request.headers, user.id);
 
     const scope = request.nextUrl.searchParams.get('scope') || 'mine';
     const requestedProjectId = request.nextUrl.searchParams.get('project_id');
@@ -48,11 +55,14 @@ export async function GET(request: NextRequest) {
           ],
         };
 
-    const albums = await prisma.referenceAlbum.findMany({
-      where: baseWhere,
-      orderBy: { updated_at: 'desc' },
+    const columns = [{ name: 'updated_at', direction: 'desc' as const, date: true }, { name: 'id', direction: 'desc' as const }];
+    const page = await authorizedPage({ params: request.nextUrl.searchParams,
+      context: JSON.stringify(['albums', user.id, scope, requestedProjectId, requestedPublicFolderId]), secret: requireSecret('media'),
+      fetch: (after, take) => prisma.referenceAlbum.findMany({
+      where: { AND: [baseWhere, seekWhere(columns, after)] },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], take,
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
         project: { select: { id: true, name: true, owner_user_id: true, status: true } },
         publicFolder: { select: { id: true, name: true, description: true, sort_order: true, status: true } },
         shares: {
@@ -63,30 +73,19 @@ export async function GET(request: NextRequest) {
         },
         images: {
           where: { status: 'active', AND: [visibleReferences] },
-          orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }],
+          orderBy: [{ sort_order: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
           select: { id: true },
           take: 1,
         },
         _count: { select: { images: { where: { status: 'active', AND: [visibleReferences] } } } },
       },
+      }),
+      key: album => [album.updated_at.toISOString(), album.id],
+      visible: async album => matchesScope(album, scope, user.id, user.role, accessibleProjectIds, requestedProjectId, requestedPublicFolderId)
+        && (await getAlbumAccess(user, album)).permissions.view,
     });
+    const albums = page.items;
 
-    const activeCoverIds = new Set(
-      (
-        await prisma.referenceImage.findMany({
-          where: {
-            id: {
-              in: albums
-                .map((album) => album.cover_image_id)
-                .filter((id): id is string => Boolean(id)),
-            },
-            status: 'active',
-            AND: [visibleReferences],
-          },
-          select: { id: true },
-        })
-      ).map((image) => image.id),
-    );
     const activeShareCounts = albums.length > 0
       ? await prisma.albumShare.groupBy({
           by: ['album_id'],
@@ -104,23 +103,21 @@ export async function GET(request: NextRequest) {
 
     const filtered = [];
     for (const album of albums) {
-      if (!matchesScope(album, scope, user.id, user.role, accessibleProjectIds, requestedProjectId, requestedPublicFolderId)) continue;
       const access = await getAlbumAccess(user, album);
-      if (!access.permissions.view) continue;
-      filtered.push(serializeAlbum(album, access, activeCoverIds, activeShareCountByAlbumId.get(album.id) || 0));
+      const contents = await readAlbumImagePage(user, album, new URLSearchParams({ limit: '1' }));
+      const cover = await readAlbumCover(user, album, contents.images[0]?.id || null);
+      filtered.push(serializeAlbum({ ...album, cover_image_id: cover, _count: { images: contents.pagination.total }, images: contents.images.map(image => ({ id: image.id })) }, access, cover ? new Set([cover]) : new Set(), activeShareCountByAlbumId.get(album.id) || 0));
     }
 
-    return NextResponse.json({ albums: filtered });
+    return NextResponse.json({ albums: filtered, pagination: page.pagination }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    console.error('[ReferenceAlbums] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
+    if (error instanceof PaginationError) return NextResponse.json({ error: error.message }, { status: error.status });
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -207,13 +204,10 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbums] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});
 
 function matchesScope(
   album: {
@@ -271,7 +265,7 @@ function serializeAlbum(
     status: string;
     created_at: Date;
     updated_at: Date;
-    owner: { id: string; name: string; username: string; email: string; avatar_url: string | null; account_type: string };
+    owner: { id: string; name: string; username: string; avatar_url: string | null; account_type: string };
     project: { id: string; name: string; owner_user_id: string; status: string } | null;
     publicFolder: { id: string; name: string; description: string | null; sort_order: number; status: string } | null;
     images: Array<{ id: string }>;

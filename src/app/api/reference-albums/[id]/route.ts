@@ -1,8 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import { readAlbumCover, readAlbumImagePage } from '@/lib/reference-albums/image-page';
+import { assertPageOwner, PaginationError } from '@/lib/pagination/cursor';
 import {
   assertCanEditAlbum,
   assertCanViewAlbum,
@@ -11,11 +14,12 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertPageOwner(request.headers, user.id);
 
     const album = await assertCanViewAlbum(user, params.id);
     const access = await getAlbumAccess(user, album);
@@ -25,14 +29,8 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
           select: { id: true, name: true, description: true, sort_order: true, status: true },
         })
       : null;
-    const images = await prisma.referenceImage.findMany({
-      where: { album_id: album.id, status: 'active', AND: [await studioVisibleReferenceWhere(user)] },
-      orderBy: { sort_order: 'asc' },
-      include: { asset: { select: { id: true, type: true, file_name: true, width: true, height: true, file_size: true, mime_type: true } } },
-    });
-    const coverImageId = album.cover_image_id && images.some((image) => image.id === album.cover_image_id)
-      ? album.cover_image_id
-      : images[0]?.id || null;
+    const page = await readAlbumImagePage(user, album, request.nextUrl.searchParams);
+    const coverImageId = await readAlbumCover(user, album, page.images[0]?.id || null);
     const activeShareCount = await prisma.albumShare.count({
       where: {
         album_id: album.id,
@@ -60,42 +58,25 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
         owner: album.owner,
         project: album.project,
         public_folder: publicFolder,
-        image_count: images.length,
+        image_count: page.pagination.total,
         permissions: access.permissions,
         can_share: access.canShare,
         active_share_count: activeShareCount,
         access_role: access.role,
       },
-      images: images.map((image) => ({
-        id: image.id,
-        album_id: image.album_id,
-        asset_id: image.asset_id,
-        source_type: image.source_type,
-        source_content_id: image.source_content_id,
-        source_image_id: image.source_image_id,
-        sort_order: image.sort_order,
-        metadata_json: access.permissions.viewSource ? image.metadata_json : null,
-        status: image.status,
-        created_at: image.created_at,
-        updated_at: image.updated_at,
-        image_url: `/api/reference-images/${image.id}/content`,
-        thumbnail_url: `/api/reference-images/${image.id}/content?variant=thumbnail`,
-        asset: image.asset,
-      })),
-    });
+      images: page.images,
+      pagination: page.pagination,
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof PaginationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbums] Detail error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -148,15 +129,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbums] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -183,10 +161,7 @@ export async function DELETE(_request: NextRequest, props: { params: Promise<{ i
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbums] Delete error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

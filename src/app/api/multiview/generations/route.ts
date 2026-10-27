@@ -1,10 +1,12 @@
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
-import { privateMultiviewTaskWhere, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { privateMultiviewTaskWhere } from '@/lib/video/multiview-task-privacy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,7 +41,7 @@ function numberOrNull(value: unknown) { return typeof value === 'number' && Numb
 const deliveryLabels = { generating: '生成中', preparing: '已生成，正在准备稳定下载', ready: '稳定下载已就绪',
   failed: '稳定下载准备失败，可重试', unavailable: '视频暂未就绪' } as const;
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers });
   try {
     const user = await getSession();
@@ -62,19 +64,7 @@ export async function GET(request: NextRequest) {
       ] },
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
       take: PAGE_SIZE + 1,
-      select: {
-        id: true, user_id: true, owner_user_id: true, source_metadata_json: true,
-        provider: true, model: true, generation_mode: true, ratio: true, duration: true, resolution: true, seed: true,
-        generate_audio: true, return_last_frame: true, watermark: true,
-        local_status: true, provider_status: true, retention_status: true, visibility: true,
-        estimated_cost: true, frozen_cost: true, actual_cost: true, pricing_snapshot: true,
-        billing_scope: true, billing_account_id: true,
-        project_id: true, video_card_id: true, created_at: true, updated_at: true, completed_at: true,
-        public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, delivery_status: true,
-        error_message: true, error_code: true,
-        project: { select: { id: true, name: true, type: true } },
-        video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
-      },
+      select: videoTaskViewSelect,
     });
     const visible = tasks.slice(0, PAGE_SIZE);
     const taskIds = visible.map(item => item.id);
@@ -88,7 +78,7 @@ export async function GET(request: NextRequest) {
     const savedByTask = new Map<string, typeof saved[number]>();
     for (const work of saved) if (work.mutations.length && !savedByTask.has(work.source_task_id)) savedByTask.set(work.source_task_id, work);
     const items = visible.map(task => {
-      const safe = projectPrivateMultiviewTask(task) as unknown as Record<string, unknown>;
+      const safe = toVideoTaskView(task, user) as unknown as Record<string, unknown>;
       const work = savedByTask.get(task.id);
       const project = safe.project && typeof safe.project === 'object' ? safe.project as Record<string, unknown> : null;
       const card = safe.video_card && typeof safe.video_card === 'object' ? safe.video_card as Record<string, unknown> : null;
@@ -132,4 +122,4 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: '本人生成记录暂时无法读取，请稍后重试。' }, 503);
   }
-}
+});

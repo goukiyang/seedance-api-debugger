@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -40,7 +41,7 @@ function invalidSettings() {
   return new StudioError('风格模板的模型、质量、分辨率、张数和画幅已锁定；请重新选择模板，或移除风格恢复普通图片设置。', 409);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const body = await readCanvasStyleJson(request);
@@ -202,4 +203,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return canvasStyleFailure(error, '提交风格生成失败，请通过结果查询确认任务状态后再操作');
   }
-}
+});

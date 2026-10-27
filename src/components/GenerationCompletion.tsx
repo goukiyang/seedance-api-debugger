@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Bell, Volume2 } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -108,19 +108,23 @@ async function poll() {
 }
 export function GenerationCompletionRuntime() {
   const { user, hasLoadedUser, userLoadError } = useAppSession(); const pathname = usePathname();
-  useEffect(() => { setImageReadSessionOwner(hasLoadedUser && !userLoadError ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : ''); }, [user?.id, user?.role, user?.account_type, hasLoadedUser, userLoadError]);
+  const authUncertain = useRef(true);
+  authUncertain.current = !hasLoadedUser || Boolean(userLoadError);
   useEffect(() => {
-    const confirmedOwner = hasLoadedUser && !userLoadError ? user?.id || null : null;
+    if (hasLoadedUser && !userLoadError) setImageReadSessionOwner(`${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}`);
+  }, [user?.id, user?.role, user?.account_type, hasLoadedUser, userLoadError]);
+  useEffect(() => {
+    const confirmedOwner = hasLoadedUser ? user?.id || null : null;
     if (owner !== confirmedOwner) { generation++; jobs.clear(); clearTitle(); }
     if (owner !== confirmedOwner && audio) { void audio.close(); audio = null; }
     owner = confirmedOwner;
-    const visible = () => { revalidateActiveImages(60000); if (!document.hidden) { clearTitle(); void poll(); } };
+    const visible = () => { if (authUncertain.current) return; revalidateActiveImages(60000); if (!document.hidden) { clearTitle(); void poll(); } };
     const changed = (event: StorageEvent) => { if (owner && event.key === prefKey(owner) && !preferences(owner).background) clearTitle(); };
     let timer: ReturnType<typeof setTimeout>, active = true;
-    const schedule = () => { if (active) timer = setTimeout(() => { if (!document.hidden) revalidateActiveImages(60000); void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
+    const schedule = () => { if (active) timer = setTimeout(() => { if (authUncertain.current) { schedule(); return; } if (!document.hidden) revalidateActiveImages(60000); void poll().finally(schedule); }, document.hidden ? 15000 : 5000); };
     schedule(); document.addEventListener('visibilitychange', visible); window.addEventListener('focus', visible); window.addEventListener('storage', changed);
     return () => { active = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('focus', visible); window.removeEventListener('storage', changed); generation++; jobs.clear(); clearTitle(); };
-  }, [user?.id, hasLoadedUser, userLoadError]);
+  }, [user?.id, hasLoadedUser]);
   useEffect(() => { clearTitle(); }, [pathname]);
   return null;
 }

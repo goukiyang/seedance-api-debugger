@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -12,7 +14,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getAiMediaKitApiSettings();
@@ -28,9 +30,9 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/AiMediaKitIntegration] GET failed:', error);
     return NextResponse.json({ error: '读取 AI MediaKit 配置失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -74,13 +76,11 @@ export async function PUT(request: NextRequest) {
     if (error instanceof Error && error.message.startsWith('AI MediaKit API 地址')) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Admin/AiMediaKitIntegration] PUT failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : '保存 AI MediaKit 配置失败',
-    }, { status: 500 });
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   return PUT(request);
-}
+});

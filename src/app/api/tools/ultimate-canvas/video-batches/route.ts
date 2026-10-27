@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { CreationError } from '@/lib/creation/contract';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -25,11 +26,11 @@ async function actor(request: NextRequest) {
   if (expected && expected !== user.id) throw new CanvasVideoBatchError('账号已变化，请保留输入并重新确认账号', 409, 'pricing_actor_changed');
   return user;
 }
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try { return json(await queryCanvasVideoBatches(await actor(request), request.nextUrl.searchParams)); }
   catch (error) { return failure(error); }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await actor(request);
     if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new AuthError('请使用 JSON 参数', 415);
@@ -52,4 +53,4 @@ export async function POST(request: NextRequest) {
     if (body.action === 'prepare') return json(await prepareCanvasVideoBatch(user, body));
     throw new AuthError('批次操作无效', 400);
   } catch (error) { return failure(error); }
-}
+});

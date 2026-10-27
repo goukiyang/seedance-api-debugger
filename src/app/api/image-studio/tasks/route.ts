@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { deleteStudioResult, listStudioTasks, cancelQueuedChannelTask, StudioError, submitStudioBatch, studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
@@ -12,7 +13,7 @@ import { STUDIO_RESULT_FEED } from '@/lib/image-studio/result-pin-types';
 import { requestStudioAsyncRecheck, StudioAsyncRecoveryError } from '@/lib/image-studio/async-recovery';
 
 export const dynamic = 'force-dynamic';
-export async function PATCH(request: NextRequest) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片任务' }, { status: 403 });
@@ -37,8 +38,8 @@ export async function PATCH(request: NextRequest) {
     ...(error instanceof StudioAsyncRecoveryError ? { code: error.code } : {}) },
     { status: expected ? error.status : 503, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
-}
-export async function DELETE(request: NextRequest) {
+});
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
@@ -47,8 +48,8 @@ export async function DELETE(request: NextRequest) {
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '删除未确认，请重试；不会重复删除其他图片' }, { status: 503 });
   }
-}
-export async function GET(request: NextRequest) {
+});
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
@@ -65,8 +66,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ...result, ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
   catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
@@ -83,4 +84,4 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error && error.message.startsWith('点数不足')) return NextResponse.json({ error: error.message }, { status: 409 });
     return NextResponse.json({ error: '提交结果待确认，请查询这次提交，不要重复新建任务' }, { status: 503 });
   }
-}
+});

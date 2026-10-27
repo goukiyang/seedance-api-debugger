@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -11,7 +12,7 @@ const json = (value: unknown, status = 200) => NextResponse.json(value, {
   status, headers: { 'Cache-Control': 'private, no-store' },
 });
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
@@ -47,10 +48,10 @@ export async function GET(request: NextRequest) {
     if ((storedProvider && task.provider !== storedProvider) || (submission.input?.model && task.model !== submission.input.model)) throw new AuthError('任务模型或通道与原请求不匹配', 403);
     await assertCanViewTask(user, task);
     const unknown = task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
-      || (['queued', 'submitted', 'running', 'processing', 'pending', 'failed'].includes(task.local_status) && !task.provider_task_id);
+      || (['created', 'submitting', 'unknown', 'queued', 'submitted', 'running', 'processing', 'pending', 'failed'].includes(task.local_status) && !task.provider_task_id);
     return json({ state: unknown ? 'unconfirmed' : 'accepted', task: { id: task.id, local_status: task.local_status, provider_task_id: task.provider_task_id, error_code: task.error_code } });
   } catch (error) {
     if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: '请求状态暂时无法读取，请保留原请求后重试' }, 500);
   }
-}
+});

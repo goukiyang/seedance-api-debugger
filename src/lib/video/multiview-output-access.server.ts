@@ -52,13 +52,17 @@ export async function multiviewOutputFileAccess(user: Reader, rawUrl: string, or
   const refs = await db.referenceImage.findMany({ where: { asset_id: { in: active.map(asset => asset.id) }, status: 'active', album: { status: { not: 'deleted' } } },
     select: { album_id: true } });
   if (!refs.length) return { protected: true, allowed: false };
-  const { getAlbumByIdForAccess, getAlbumAccess } = await import('@/lib/reference-albums/permissions');
+  const { getReferenceImageByIdForAccess } = await import('@/lib/reference-albums/permissions');
+  const { referenceContentRights } = await import('@/lib/access/media-policy');
   const actor = { ...user, status: user.status || 'active' } as SessionUser;
   for (const albumId of Array.from(new Set(refs.map(ref => ref.album_id)))) {
-    const album = await getAlbumByIdForAccess(albumId, db);
-    if (!album) continue;
-    const access = await getAlbumAccess(actor, album, db);
-    if (original ? access.permissions.download : access.permissions.view) return { protected: true, allowed: true };
+    const references = await db.referenceImage.findMany({ where: { album_id: albumId, asset_id: { in: active.map(asset => asset.id) }, status: 'active' }, select: { id: true } });
+    for (const ref of references) {
+      const image = await getReferenceImageByIdForAccess(ref.id, db);
+      if (!image) continue;
+      const rights = await referenceContentRights(actor, image, db);
+      if (original ? rights.download : rights.view) return { protected: true, allowed: true };
+    }
   }
   return { protected: true, allowed: false };
 }

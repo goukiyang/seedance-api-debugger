@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { withStudioRoute, readStudioJson } from '@/lib/template-studio/common';
 import { getVideoContext, saveVideoContext } from '@/lib/template-studio/context';
@@ -7,7 +8,7 @@ import { StudioError } from '@/lib/template-studio/errors';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'internal', rateLimit: false }, async function GET(request: NextRequest) {
   return withStudioRoute(async user => {
     const params = request.nextUrl.searchParams, mode = params.get('mode');
     if (mode === 'private-editor') return NextResponse.json(await readPrivateVideoContextEditor(user, params.get('id') || ''), { headers });
@@ -15,8 +16,8 @@ export async function GET(request: NextRequest) {
       await privateVideoContextStatus(user, params.get('id') || '', params.get('requestId') || '', mode === 'private-draft-status'), { headers });
     return NextResponse.json(await getVideoContext(user, params.get('draftId') || undefined, params.get('private') === '1'), { headers });
   });
-}
-export async function PUT(request: NextRequest) {
+});
+export const PUT = declaredRoute({ access: 'internal', rateLimit: false }, async function PUT(request: NextRequest) {
   return withStudioRoute(async user => {
     const body = await readStudioJson(request);
     if (body?.action === 'save-private-draft' || body?.action === 'save-private-definition') {
@@ -29,4 +30,4 @@ export async function PUT(request: NextRequest) {
     }
     return NextResponse.json(await saveVideoContext(user, body, request.nextUrl.searchParams.get('draftId') || undefined), { headers });
   });
-}
+});

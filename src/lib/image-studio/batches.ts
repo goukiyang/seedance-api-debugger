@@ -1,3 +1,4 @@
+import { writeHoldLedger } from '@/lib/billing/holds';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -720,14 +721,14 @@ export async function dispatchStudioBatches() {
         if (isChannelBatch(batch) && (channelApi?.modelCapabilities[String(data.model) as keyof typeof channelApi.modelCapabilities]?.fixedPoints !== data.unit_credits
           && batch.billingMode !== 'actual' && !batch.pricing)) throw new StudioError('本通道固定点数已变化，停止新派发；请重新核对预算');
         const channelStatus = studioTaskState({ billing_contract_json: String(data.billing_contract_json) }, isChannelBatch(batch) ? 'channel_queued' : 'queued');
-        const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
+        const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId, 'image') : null;
         await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
         const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
         await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: taskId,
           actorUserId: batch.ownerId, ownerUserId: batch.ownerId, billingSubjectType: 'user', billingSubjectId: batch.ownerId,
           projectId: batch.usageContext?.projectId ?? null, occurredAt: created.created_at,
           contextOrigin: batch.usageContext ? 'image-parent-batch' : 'legacy-parent-unassigned' });
-        if (freeze) await tx.creditLedger.create({ data: { user_id: batch.ownerId, type: 'task_freeze', amount: -Number(data.unit_credits), balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after, related_task_id: taskId, idempotency_key: `image-studio:freeze:${taskId}`, reason: '图片生成冻结积分', metadata_json: JSON.stringify({ allocations: freeze.allocations }) } });
+        if (freeze) await writeHoldLedger(tx, { data: { user_id: batch.ownerId, type: 'task_freeze', amount: -Number(data.unit_credits), balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after, related_task_id: taskId, idempotency_key: `image-studio:freeze:${taskId}`, reason: '图片生成冻结积分', metadata_json: JSON.stringify({ allocations: freeze.allocations }) } });
         item.taskId = taskId; batch.committedCredits = addCredits(batch.committedCredits, Number(data.unit_credits));
         await writeBatch(tx, row, batch);
       }, { timeout: 15000 });

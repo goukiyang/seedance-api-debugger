@@ -5,24 +5,13 @@
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import fs from 'fs';
-import path from 'path';
 import { createHash } from 'node:crypto';
-import { sameOriginPublicUrlForSiteUpload, siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { AuthError, type SessionUser } from '@/lib/auth/session';
+import { browserAssetMedia } from '@/lib/media/browser-projection.server';
 
 // ============================================================================
 // Workspace 管理
 // ============================================================================
-
-function localUploadExists(url: string | null): boolean {
-  const uploadPath = siteUploadPathFromUrl(url);
-  if (!url || !uploadPath) return true;
-  return fs.existsSync(path.join(process.cwd(), 'public', uploadPath.replace(/^\/+/, '')));
-}
-
-function publicAssetUrl(url: string | null) {
-  return url ? (sameOriginPublicUrlForSiteUpload(url) || url) : null;
-}
 
 function workspaceNameForTab(tabId: string) {
   const normalized = typeof tabId === 'string' && tabId.trim()
@@ -88,12 +77,13 @@ export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-use
 /**
  * 获取 workspace 及其所有素材（按 sort_order 排序）
  */
-export async function getWorkspaceWithAssets(workspaceId: string) {
+export async function getWorkspaceWithAssets(workspaceId: string, user: SessionUser) {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
   });
 
   if (!workspace) return null;
+  if (workspace.owner_id !== user.id || workspace.status !== 'active') throw new AuthError('工作区不存在或无权查看', 403);
 
   const workspaceAssets = await prisma.workspaceAsset.findMany({
     where: { workspace_id: workspaceId },
@@ -112,11 +102,11 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
 
   return {
     ...workspace,
-    assets: workspaceAssets.map((wa) => {
-      const originalUrl = publicAssetUrl(wa.asset.original_url) || wa.asset.original_url;
-      const thumbnailUrl = localUploadExists(wa.asset.thumbnail_url)
-        ? publicAssetUrl(wa.asset.thumbnail_url)
-        : null;
+    assets: (await Promise.all(workspaceAssets.map(async (wa) => {
+      const media = await browserAssetMedia(user, wa.asset.id, wa.reference_image_id);
+      if (!media) return null;
+      const originalUrl = media.originalUrl || media.previewUrl;
+      const thumbnailUrl = media.thumbnailUrl;
       return {
         id: wa.id,
         assetId: wa.asset.id,
@@ -134,8 +124,9 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
         fileSize: wa.asset.file_size,
         mimeType: wa.asset.mime_type,
         createdAt: wa.asset.created_at,
+        media,
       };
-    }),
+    }))).filter((asset): asset is NonNullable<typeof asset> => asset !== null),
   };
 }
 

@@ -1,9 +1,10 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { multiviewWorkRoute, multiviewWorkHeaders } from '@/lib/video/multiview-work-api';
 import { readMultiviewShareFile } from '@/lib/video/multiview-share.server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(
   request: NextRequest,
   props: { params: Promise<{ shareId: string; role: string }> }
 ) {
@@ -12,5 +13,5 @@ export async function GET(
     const file = await readMultiviewShareFile(user, params.shareId, params.role);
     return new NextResponse(request.method === 'HEAD' ? null : new Uint8Array(file.bytes), { headers: { ...multiviewWorkHeaders, 'Content-Type': file.mime, 'Content-Length': String(file.bytes.length) } });
   });
-}
+});
 export const HEAD = GET;

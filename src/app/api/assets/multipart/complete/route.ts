@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/multipart/complete
  * 完成 R2 multipart 合并并登记 Asset。
@@ -8,6 +9,7 @@ import { getSession } from '@/lib/auth/session';
 import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { completeMultipartUpload } from '@/lib/assets/direct-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +25,7 @@ type MultipartCompleteBody = {
   parts?: Array<{ partNumber?: number; eTag?: string }>;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let partCount: number | null = null;
@@ -71,7 +73,7 @@ export async function POST(request: NextRequest) {
       uploadMode: 'multipart',
       totalParts: partCount,
     });
-    return NextResponse.json({
+    return NextResponse.json(await browserUploadResponse(user, {
       success: true,
       upload: uploadResult.upload,
       similarity: uploadResult.similarity,
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
         upload: uploadResult.upload,
         similarity: uploadResult.similarity,
       },
-    });
+    }), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) {
       if (userId) await recordAssetUploadLog({ operatorId: userId, stage: 'multipart_complete', status: 'failed',
@@ -116,4 +118,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: '上传登记暂不可用，原上传结果待确认；请核对原上传', code: 'UPLOAD_RESULT_UNKNOWN', errorStage: 'multipart_complete' }, { status: 400 });
   }
-}
+});

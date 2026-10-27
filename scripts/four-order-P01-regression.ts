@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -12,7 +13,7 @@ async function main() {
   process.env.DATABASE_URL = url;
   const db = new PrismaClient({ datasources: { db: { url } } });
   const fixtureGlobal = globalThis as typeof globalThis & { prisma?: PrismaClient; prismaSqlitePragmasStarted?: boolean };
-  fixtureGlobal.prisma = db;
+  setFixtureDatabase(db);
   fixtureGlobal.prismaSqlitePragmasStarted = true;
   let checks = 0;
   const check = (condition: unknown, message: string) => { assert.ok(condition, message); checks++; };

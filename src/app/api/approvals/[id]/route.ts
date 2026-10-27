@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -12,8 +15,8 @@ const APPROVAL_INCLUDE = {
   project: { select: { id: true, name: true, type: true, status: true, owner_user_id: true } },
   videoCard: { select: { id: true, title: true, status: true, project_id: true } },
   task: { select: { id: true, source_metadata_json: true, prompt: true, local_status: true } },
-  requester: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-  approver: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+  requester: { select: userSummarySelect },
+  approver: { select: userSummarySelect },
 } as const;
 
 function optionalString(value: unknown) {
@@ -27,7 +30,7 @@ function parseDate(value: unknown) {
   return date;
 }
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -78,10 +81,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (error instanceof Error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Approvals] Decide error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

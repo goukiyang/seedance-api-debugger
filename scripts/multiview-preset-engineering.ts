@@ -40,7 +40,7 @@ async function main() {
   // Keep one real module graph, including route/service error constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
-  const { createSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
+  const { createSession, SESSION_COOKIE } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const contract = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
   const service = require('../src/lib/video/multiview-preset.server') as typeof import('../src/lib/video/multiview-preset.server');
   const adminRoute = require('../src/app/api/admin/multiview/preset/route') as typeof import('../src/app/api/admin/multiview/preset/route');
@@ -64,7 +64,7 @@ async function main() {
     }
     const invoke = async (route: 'admin' | 'public', method: 'GET' | 'PUT', actor: string | null,
       body?: unknown, query = '') => {
-      const headers = new Headers({ ...(actor ? { Cookie: `session=${tokens[actor]}` } : {}),
+      const headers = new Headers({ ...(actor ? { Cookie: `${SESSION_COOKIE}=${tokens[actor]}` } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) });
       const request = new NextRequest(`http://mv-prompt-isolated.invalid/api/${route === 'admin' ? 'admin/' : ''}multiview/preset${query}`, {
         method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),

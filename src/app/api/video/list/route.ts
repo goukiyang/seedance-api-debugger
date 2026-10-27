@@ -1,3 +1,8 @@
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
+import { createdPageOrder, createdPageRequest } from '@/lib/pagination/created-page';
+import { PaginationError } from '@/lib/pagination/cursor';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -6,9 +11,8 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
-import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
-import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
-import { projectSelectedMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
+import type { DtoViewer } from '@/lib/dto/user';
+import type { TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,20 +28,14 @@ function serializeTaskListItem<T extends {
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
   error_message?: string | null;
-} & TaskProtectionSource>(task: T, currentUserId: string) {
+} & TaskProtectionSource>(task: T, viewer: DtoViewer) {
   const ownerId = task.owner_user_id || task.user_id || null;
 
-  return projectSelectedMultiviewTask({
-    ...task,
-    can_delete: Boolean(ownerId && ownerId === currentUserId && task.retention_status !== 'admin_hidden'),
-    error_message: task.local_status === 'failed'
-      ? visibleProviderErrorMessage(task.error_message)
-      : task.error_message,
-    ...taskThumbnailProjection(task),
-  });
+  return { ...toVideoTaskView(task, viewer),
+    can_delete: Boolean(ownerId && ownerId === viewer.id && task.retention_status !== 'admin_hidden') };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) {
@@ -49,9 +47,6 @@ export async function GET(request: NextRequest) {
     assertInternalOnly(user, '外部账号请使用 IP 任务列表。');
 
     const searchParams = request.nextUrl.searchParams;
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const skip = (page - 1) * limit;
     const projectId = searchParams.get('project_id');
     const videoCardId = searchParams.get('video_card_id');
     const includeAll = user.role === 'admin' && searchParams.get('include_all') === 'true';
@@ -69,99 +64,33 @@ export async function GET(request: NextRequest) {
       ],
     };
 
+    const paging = createdPageRequest(request, user, ['video-tasks', projectId, videoCardId, includeAll, includeDeleted], { defaultLimit: 20, maxLimit: 100 });
+    if (paging.anchor) paging.assertAnchor(await prisma.videoTask.findFirst({ where: { AND: [where, paging.anchor] }, select: { id: true } }));
+
     const total = await prisma.videoTask.count({ where });
 
     const tasks = await prisma.videoTask.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      skip,
-      take: limit,
-      select: {
-        id: true,
-        source_metadata_json: true,
-        provider: true,
-        model: true,
-        provider_task_id: true,
-        is_draft: true,
-        provider_draft_task_id: true,
-        draft_upgrade_mode: true,
-        source_draft_task_id: true,
-        draft_contract_version: true,
-        prompt: true,
-        generation_mode: true,
-        ratio: true,
-        duration: true,
-        resolution: true,
-        local_status: true,
-        public_video_url: true,
-        public_video_storage_provider: true,
-        public_video_cached_at: true,
-        delivery_status: true,
-        result_video_url: true,
-        result_last_frame_url: true,
-        local_video_path: true,
-        error_message: true,
-        estimated_cost: true,
-        actual_cost: true,
-        frozen_cost: true,
-        refund_amount: true,
-        provider_cost_currency: true,
-        provider_official_amount_minor: true,
-        provider_final_amount_minor: true,
-        provider_official_amount_micros: true,
-        provider_final_amount_micros: true,
-        reference_image_ids: true,
-        reference_image_urls: true,
-        created_at: true,
-        completed_at: true,
-        retention_status: true,
-        user_deleted_at: true,
-        user_deleted_by: true,
-        admin_hidden_at: true,
-        admin_hidden_by: true,
-        restored_at: true,
-        restored_by: true,
-        delete_reason: true,
-        user_id: true,
-        owner_user_id: true,
-        project_id: true,
-        video_card_id: true,
-        template_id: true,
-        agent_run_id: true,
-        selected_agent_plan_key: true,
-        prompt_user_edited: true,
-        project: {
-          select: { id: true, name: true, type: true },
-        },
-        video_card: {
-          select: { id: true, title: true, objective: true, status: true, project_id: true },
-        },
-        generation_template: {
-          select: { id: true, name: true, template_key: true, version: true },
-        },
-      },
+      where: paging.anchor ? { AND: [where, paging.seek] } : where,
+      orderBy: createdPageOrder,
+      skip: paging.skip,
+      take: paging.take,
+      select: videoTaskViewSelect,
     });
 
+    const result = paging.finish(tasks, total);
     return NextResponse.json({
-      tasks: tasks.map((task) => serializeTaskListItem(task, user.id)),
-      pagination: {
-        page,
-        limit,
-        total,
-        total_pages: Math.ceil(total / limit),
-      },
+      tasks: result.items.map((task) => serializeTaskListItem(task, user)),
+      pagination: result.pagination,
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof PaginationError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof AuthError) {
       return NextResponse.json(
         { error: 'Forbidden', message: error.message },
         { status: error.status },
       );
     }
-    console.error('List tasks error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

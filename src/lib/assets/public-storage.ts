@@ -1,3 +1,4 @@
+import { publicHttpUrl } from '@/lib/net/public-address';
 /**
  * 公网上传模块
  *
@@ -21,7 +22,10 @@ import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import sharp from '../media/sharp';
 import { TosClient } from '@volcengine/tos-sdk';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { mediaRoot } from '@/lib/media/storage-roots';
+import { signSupplierMedia } from '@/lib/media/signed-media';
 import { resolveSitePublicBaseUrl } from '@/lib/assets/site-url';
 
 const PUBLIC_VIDEO_STREAM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -34,44 +38,7 @@ const PUBLIC_VIDEO_STREAM_TIMEOUT_MS = 5 * 60 * 1000;
  * 基础判断 URL 是否可能公网可访问（不含 100% 准确判断）
  */
 export function isPubliclyReachableUrl(url: string): boolean {
-  if (!url) return false;
-  try {
-    const u = new URL(url);
-    // 私有网络地址不是公网
-    if (
-      u.hostname === 'localhost' ||
-      u.hostname === '127.0.0.1' ||
-      u.hostname === '0.0.0.0' ||
-      u.hostname === '[::1]' ||
-      u.hostname.startsWith('192.168.') ||
-      u.hostname.startsWith('10.') ||
-      u.hostname.startsWith('172.16.') ||
-      u.hostname.startsWith('172.17.') ||
-      u.hostname.startsWith('172.18.') ||
-      u.hostname.startsWith('172.19.') ||
-      u.hostname.startsWith('172.20.') ||
-      u.hostname.startsWith('172.21.') ||
-      u.hostname.startsWith('172.22.') ||
-      u.hostname.startsWith('172.23.') ||
-      u.hostname.startsWith('172.24.') ||
-      u.hostname.startsWith('172.25.') ||
-      u.hostname.startsWith('172.26.') ||
-      u.hostname.startsWith('172.27.') ||
-      u.hostname.startsWith('172.28.') ||
-      u.hostname.startsWith('172.29.') ||
-      u.hostname.startsWith('172.30.') ||
-      u.hostname.startsWith('172.31.') ||
-      u.hostname.startsWith('127.') ||
-      u.hostname.startsWith('169.254.') ||
-      u.hostname.endsWith('.local') ||
-      u.hostname.match(/^10\.\d+\.\d+\.\d+$/) !== null
-    ) {
-      return false;
-    }
-    return u.protocol === 'https:' || u.protocol === 'http:';
-  } catch {
-    return false;
-  }
+  return Boolean(publicHttpUrl(url));
 }
 
 // ============================================================================
@@ -144,8 +111,7 @@ async function uploadToTOS(buffer: Buffer, fileName: string, mimeType: string): 
     contentType: mimeType,
   });
 
-  const publicBase = TOS_PUBLIC_BASE_URL || `https://${bucket}.${endpoint}`;
-  const publicUrl = `${publicBase.replace(/\/$/, '')}/${key}`;
+  const publicUrl = client.getPreSignedUrl({ bucket, key, method: 'GET', expires: 3600 });
 
   return { publicUrl, key };
 }
@@ -181,7 +147,7 @@ async function uploadToR2(buffer: Buffer, fileName: string, mimeType: string): P
     ContentType: mimeType,
   }));
 
-  const publicUrl = `${R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${key}`;
+  const publicUrl = await getSignedUrl(client, new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }), { expiresIn: 3600 });
 
   return { publicUrl, key };
 }
@@ -190,9 +156,9 @@ async function uploadToR2(buffer: Buffer, fileName: string, mimeType: string): P
 // 本地上传（public 目录）
 // ============================================================================
 
-const LOCAL_UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'assets');
+const LOCAL_UPLOAD_DIR = mediaRoot('supplier');
 
-function uploadToLocalPublic(buffer: Buffer, fileName: string, mimeType: string): { publicUrl: string; key: string } {
+async function uploadToLocalPublic(buffer: Buffer, fileName: string, mimeType: string): Promise<{ publicUrl: string; key: string }> {
   if (!fs.existsSync(LOCAL_UPLOAD_DIR)) {
     fs.mkdirSync(LOCAL_UPLOAD_DIR, { recursive: true });
   }
@@ -207,9 +173,9 @@ function uploadToLocalPublic(buffer: Buffer, fileName: string, mimeType: string)
     fs.writeFileSync(filePath, buffer);
   }
 
-  const key = `uploads/assets/${storedFileName}`;
+  const key = storedFileName;
   const baseUrl = resolveSitePublicBaseUrl() || 'http://localhost:3000';
-  const publicUrl = `${baseUrl}/${key}`;
+  const publicUrl = `${baseUrl}${await signSupplierMedia(hash, storedFileName, mimeType, fileName)}`;
 
   return { publicUrl, key };
 }
@@ -358,13 +324,14 @@ async function uploadStreamToLocalPublic(
   key: string,
   mimeType: string,
 ) {
-  const targetPath = path.join(process.cwd(), 'public', key);
+  const relative = path.basename(key);
+  const targetPath = path.join(mediaRoot('supplier'), relative);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   await pipeline(toNodeReadable(body), createWriteStream(targetPath));
   const info = await stat(targetPath);
   const baseUrl = resolveSitePublicBaseUrl() || 'http://localhost:3000';
   return {
-    publicUrl: `${baseUrl}/${key}`,
+    publicUrl: `${baseUrl}${await signSupplierMedia(crypto.createHash('sha256').update(key).digest('hex'), relative, mimeType, relative)}`,
     key,
     size: info.size,
     mimeType,
@@ -575,7 +542,7 @@ export async function uploadPublicAsset(
     }
 
     case 'local-public': {
-      const result = uploadToLocalPublic(buffer, fileName, mimeType);
+      const result = await uploadToLocalPublic(buffer, fileName, mimeType);
       const reachable = isPubliclyReachableUrl(result.publicUrl);
       return {
         publicUrl: result.publicUrl,
@@ -593,7 +560,7 @@ export async function uploadPublicAsset(
     case 'local':
     default: {
       // 最后 fallback：尝试本地上传（即使不可公网访问）
-      const result = uploadToLocalPublic(buffer, fileName, mimeType);
+      const result = await uploadToLocalPublic(buffer, fileName, mimeType);
       return {
         publicUrl: result.publicUrl,
         storageProvider: 'local',

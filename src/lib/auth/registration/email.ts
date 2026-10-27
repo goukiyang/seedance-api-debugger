@@ -12,7 +12,7 @@ function emailFromAddress(): string {
 }
 
 function shouldExposeDebugCode(): boolean {
-  return process.env.REGISTER_EMAIL_DEBUG === 'true';
+  return process.env.NODE_ENV !== 'production' && process.env.REGISTER_EMAIL_DEBUG === 'true';
 }
 
 function emailHtml(code: string): string {
@@ -61,7 +61,6 @@ export async function sendRegistrationCode(email: string, code: string): Promise
   }
 
   if (shouldExposeDebugCode()) {
-    console.info(`[Register] Verification code for ${email}: ${code}`);
     return { delivered: true, provider: 'console', debugCode: code };
   }
 

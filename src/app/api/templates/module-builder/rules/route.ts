@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -12,7 +13,7 @@ function cleanString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
 }
 
-export async function GET() {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET() {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -25,9 +26,9 @@ export async function GET() {
     console.error('[ModuleBuilder] Load rules failed:', error);
     return NextResponse.json({ error: '读取模块生成规则失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -53,4 +54,4 @@ export async function PUT(request: NextRequest) {
     console.error('[ModuleBuilder] Save rules failed:', error);
     return NextResponse.json({ error: '保存模块生成规则失败' }, { status: 500 });
   }
-}
+});

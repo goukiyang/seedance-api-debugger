@@ -1,7 +1,11 @@
+import { route as declaredRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { displayUserName } from '@/lib/users/display';
+import { assertPageOwner, PaginationError } from '@/lib/pagination/cursor';
+import { readSubmissionPage } from '@/lib/reference-albums/governance-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,19 +16,13 @@ async function assertAdmin() {
   return { error: null, user };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
-    const { error } = await assertAdmin();
+    const { error, user } = await assertAdmin();
     if (error) return error;
-
-    const status = request.nextUrl.searchParams.get('status') || 'pending';
-    const where = status === 'all' ? {} : { status };
-    const submissions = await prisma.publicAlbumSubmission.findMany({
-      where,
-      orderBy: [{ created_at: 'desc' }],
-      take: 80,
-      include: { publicFolder: true },
-    });
+    if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertPageOwner(request.headers, user.id);
+    const { items: submissions, pagination } = await readSubmissionPage(user, request.nextUrl.searchParams);
 
     const sourceAlbumIds = Array.from(new Set(submissions.map((item) => item.source_album_id)));
     const submittedByIds = Array.from(new Set(submissions.map((item) => item.submitted_by_user_id)));
@@ -57,6 +55,7 @@ export async function GET(request: NextRequest) {
     const submitterById = new Map(submitters.map((user) => [user.id, user]));
 
     return NextResponse.json({
+      pagination,
       submissions: submissions.map((submission) => {
         const album = albumById.get(submission.source_album_id);
         const submitter = submitterById.get(submission.submitted_by_user_id);
@@ -85,10 +84,7 @@ export async function GET(request: NextRequest) {
       }),
     });
   } catch (error) {
-    console.error('[AdminPublicAlbumSubmissions] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    if (error instanceof PaginationError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return apiErrorResponse(error);
   }
-}
+});

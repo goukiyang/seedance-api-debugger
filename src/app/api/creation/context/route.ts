@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { readCreationContext } from '@/lib/creation/context';
 import { CreationError, creationIdentity } from '@/lib/creation/contract';
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
   try {
     const user = await getSession(); if (!user) return NextResponse.json({ error: '未登录' }, { status: 401, headers });
@@ -16,4 +17,4 @@ export async function GET(request: NextRequest) {
       code: error instanceof CreationError ? error.code : 'creation_context_unavailable', stage: 'context', attemptedSend: false },
     { status: known ? error.status : 503, headers });
   }
-}
+});

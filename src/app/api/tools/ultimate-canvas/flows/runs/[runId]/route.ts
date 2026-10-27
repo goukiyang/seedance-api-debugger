@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -6,7 +7,7 @@ import { getToolFlowRun, updateToolFlowRun, toolFlowQuoteCookieName } from '@/li
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: { params: Promise<{ runId: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -18,9 +19,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ runI
     console.error('[ToolFlow] Run read failed:', error);
     return NextResponse.json({ error: '工具流运行读取失败' }, { status: 500 });
   }
-}
+});
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -38,4 +39,4 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ run
     console.error('[ToolFlow] Run update failed:', error);
     return NextResponse.json({ error: '工具流运行更新失败' }, { status: 500 });
   }
-}
+});

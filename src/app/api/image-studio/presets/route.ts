@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing, studioSharingCommandStatus, studioPresetDeletionStatus, studioPresetLifecycleHistory } from '@/lib/image-studio/presets';
@@ -13,7 +14,7 @@ import { listAdminStudioDefinitionDirectory, readStudioTemplateAuthorContact, re
 
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -52,8 +53,8 @@ export async function GET(request: NextRequest) {
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -80,4 +81,4 @@ export async function POST(request: NextRequest) {
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板操作结果未确认，请保留原请求编号查询', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
-}
+});

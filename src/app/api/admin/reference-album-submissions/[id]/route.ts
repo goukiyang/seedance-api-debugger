@@ -1,3 +1,5 @@
+import { route as declaredRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -15,7 +17,7 @@ async function assertAdmin() {
   return { error: null, user };
 }
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = declaredRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const { error, user } = await assertAdmin();
@@ -109,10 +111,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (error instanceof PublicAlbumWorkflowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[AdminPublicAlbumSubmissions] Review error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

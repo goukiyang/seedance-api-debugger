@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PublicApiError } from '@/lib/http/public-error';
 import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -42,9 +43,9 @@ type Prepared = { input: PricingAdminPreviewInput; next: Policy; rows: PricingAd
   affected: string[]; changes: PricingAdminPreview['changes']; skipped: PricingAdminPreview['skipped'];
   simulation: PricingAdminSimulation | null; scenarios: PricingAdminSimulation[]; authoring: PricingAuthoring; authoringChanged: boolean; inputFingerprint: string; confirmationTime: string };
 
-export class PricingAdminServiceError extends Error {
+export class PricingAdminServiceError extends PublicApiError {
   constructor(message: string, public readonly status = 400, public readonly code = 'pricing_invalid',
-    public readonly fields?: Record<string, string>, public readonly currentRevision?: string) { super(message); }
+    public readonly fields?: Record<string, string>, public readonly currentRevision?: string) { super(message, status, code); }
 }
 function fail(message: string, code = 'pricing_invalid'): never { throw new PricingAdminServiceError(message, 400, code); }
 function corrupt(): never { throw new PricingAdminServiceError('费率配置损坏或版本不兼容，未按空配置覆盖', 503, 'pricing_policy_invalid'); }

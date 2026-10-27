@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
@@ -65,7 +66,7 @@ async function run(action: (owner: string) => Promise<unknown>) {
     return NextResponse.json({ error: e instanceof StudioError ? e.message : '操作未确认，请重新读取；不要重复新建出图任务' }, { status: e instanceof StudioError ? e.status : 503 });
   }
 }
-export async function GET(req: NextRequest) { return run(async owner => {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(req: NextRequest) { return run(async owner => {
   const imageTaskId=req.nextUrl.searchParams.get('imageTask');
   if(imageTaskId){if(!/^[a-zA-Z0-9-]{1,100}$/.test(imageTaskId))throw new StudioError('图片记录无效');return {sourceTask:await sourceTask(owner,imageTaskId), resultRecords: await avatarResultRecords(owner, [imageTaskId])};}
   const planId = req.nextUrl.searchParams.get('plan');
@@ -88,8 +89,8 @@ export async function GET(req: NextRequest) { return run(async owner => {
   const byId=new Set(assets.map(a=>a.id));
   const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:publicImageTaskStatus(t.status),error:t.error,snapshot:historicalImageSupplier(t.snapshot_json),billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
   return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await getPricingImageChannelOptions(), billingReadiness: await imageBillingReadinessPayload() } };
-}); }
-export async function POST(req: NextRequest) { return run(async owner => {
+}); });
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
   if (!body || typeof body !== 'object'||Array.isArray(body)) throw new StudioError('请求无效');
   if (body.action === 'billing-quote') {
@@ -185,4 +186,4 @@ export async function POST(req: NextRequest) { return run(async owner => {
     body.record = { kind: 'character', rules:candidate.rules,candidate: { ...candidate, baselineAssetId: candidate.baselineAssetId || result.asset.id }, assetId: result.asset.id,planId:plan!.id,taskId:result.id };
   } else if (body.action === 'save' && body.record && body.record.kind !== 'config') throw new StudioError('不能新建或改写历史结果');
   return { record: await mutateAvatarRecord(owner, body) };
-}); }
+}); });

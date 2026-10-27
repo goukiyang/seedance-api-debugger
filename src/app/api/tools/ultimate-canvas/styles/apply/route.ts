@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { applyStudioPreset } from '@/lib/image-studio/presets';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
@@ -10,7 +11,7 @@ import { AuthError } from '@/lib/auth/session';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const body = await readCanvasStyleJson(request);
@@ -51,4 +52,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return canvasStyleFailure(error, '应用风格模板失败，请重试');
   }
-}
+});

@@ -1,0 +1,18 @@
+const assert = require('node:assert/strict');
+const { inspectRoute } = require('./check-route-policies.cjs');
+const inspect = text => inspectRoute('src/app/api/synthetic/route.ts', text);
+const imported = "import { route as gate } from '@/lib/http/route';\n";
+const valid = imported + "export const GET = gate({ access: 'user', rateLimit: false }, async () => new Response()); export const HEAD = GET;";
+assert.deepEqual(inspect(valid).findings, []);
+assert.equal(inspect(valid).declarations.length, 2);
+assert.equal(inspect("export async function GET() { return new Response(); }").findings.length, 1);
+assert.equal(inspect(imported + "export const GET = gate({access:'user'}, handler);").findings.length, 1);
+assert.equal(inspect(imported + "export const GET = gate({access:'other',rateLimit:false}, handler);").findings.length, 1);
+assert.equal(inspect(imported + "export const GET = gate({access:'user',rateLimit:'invented'}, handler);").findings.length, 1);
+assert.equal(inspect(imported + "export const GET = gate({access:'service',rateLimit:false}, handler);").findings.length, 1);
+assert.deepEqual(inspect(imported + "export const POST = gate({access:'service',rateLimit:false,authenticate:verify}, handler);").findings, []);
+assert.equal(inspect(imported + "export const GET = gate({access:'user',rateLimit:false,...unknown}, handler);").findings.length, 1);
+assert.equal(inspect(imported + "export { GET } from './unreviewed';").findings.length, 1);
+assert.equal(inspect("const GET = HEAD; export const HEAD = GET;").findings.length, 1);
+assert.deepEqual(inspect(imported + "const handler = gate({access:'public',rateLimit:'auth'}, run); export { handler as GET };").findings, []);
+console.log('PASS route declaration checker: missing policies, invalid policies, service verifier, aliases and unchecked spreads');

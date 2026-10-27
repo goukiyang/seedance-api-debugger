@@ -255,8 +255,9 @@ export async function retainSettledStudioDimensionMismatch(taskId: string, expec
       || existing.original_url !== `/uploads/assets/${expectedSha256}.png` || !existing.thumbnail_url
       || existing.file_size !== mismatch.originalBytes || existing.width !== mismatch.validation.width
       || existing.height !== mismatch.validation.height) throw Error('dimension_retention_asset_invalid');
-    if (!original.equals(await fs.readFile(path.join(process.cwd(), 'public', existing.original_url)))) throw Error('dimension_retention_published_file_changed');
-    await fs.access(path.join(process.cwd(), 'public', existing.thumbnail_url));
+    const { localMediaPath } = await import('@/lib/media/storage-roots');
+    if (!original.equals(await fs.readFile(localMediaPath(existing.original_url)))) throw Error('dimension_retention_published_file_changed');
+    await fs.access(localMediaPath(existing.thumbnail_url));
     if (restore) {
       const changed = await prisma.imageStudioTask.updateMany({ where: { id: task.id, asset_id: existing.id,
         deleted_at: task.deleted_at, updated_at: task.updated_at }, data: { deleted_at: null } });

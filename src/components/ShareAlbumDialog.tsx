@@ -3,6 +3,9 @@ import { useProductDialog } from '@/components/useProductDialog';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { AlbumPageError, appendAlbumPage } from '@/lib/reference-albums/client-pages';
+import { fetchGovernancePage, loadAllFolderPages } from '@/lib/reference-albums/governance-client';
 
 type PermissionKey = 'view' | 'use' | 'copy' | 'download' | 'viewSource' | 'edit';
 type PermissionPreset = 'view' | 'generate' | 'edit' | 'custom';
@@ -79,11 +82,28 @@ const PRESETS: Array<{ value: PermissionPreset; label: string; description: stri
 
 export default function ShareAlbumDialog({ open, album, onClose, onChanged }: ShareAlbumDialogProps) {
   const { confirm, productDialog } = useProductDialog();
+  const { user } = useAppSession();
+  const accountId = user?.id || '';
+  const boundaryKey = JSON.stringify([accountId, album?.id, open]);
+  const boundaryRef = useRef({ key: boundaryKey, epoch: 0 });
+  if (boundaryRef.current.key !== boundaryKey) boundaryRef.current = { key: boundaryKey, epoch: boundaryRef.current.epoch + 1 };
+  const boundaryEpoch = boundaryRef.current.epoch;
   const [shares, setShares] = useState<ShareItem[]>([]);
+  const [loadedShareEpoch, setLoadedShareEpoch] = useState(-1);
+  const [loadedOptionsEpoch, setLoadedOptionsEpoch] = useState(-1);
+  const [shareReadFailed, setShareReadFailed] = useState(false);
+  const [shareTotal, setShareTotal] = useState(0);
+  const [shareCursor, setShareCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const sharePageRef = useRef({ cursor: null as string | null, depth: 24, busy: false });
+  const shareRequestRef = useRef<AbortController | null>(null);
+  const targetsRequestRef = useRef<AbortController | null>(null);
   const [targetType, setTargetType] = useState<ShareTargetType>('project');
   const [targetId, setTargetId] = useState('');
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
-  const [publicFolders, setPublicFolders] = useState<PublicFolderOption[]>([]);
+  const [projectRows, setProjects] = useState<ProjectOption[]>([]);
+  const [publicFolderRows, setPublicFolders] = useState<PublicFolderOption[]>([]);
+  const projects = loadedOptionsEpoch === boundaryEpoch ? projectRows : [];
+  const publicFolders = loadedOptionsEpoch === boundaryEpoch ? publicFolderRows : [];
   const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [folderLoadError, setFolderLoadError] = useState<string | null>(null);
   const [publicFolderId, setPublicFolderId] = useState('');
@@ -101,7 +121,8 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
 
-  const shareCount = shares.length;
+  const currentShares = loadedShareEpoch === boundaryEpoch ? shares : [];
+  const shareCount = loadedShareEpoch === boundaryEpoch ? shareTotal : 0;
   const permissionSummary = useMemo(() => formatPermissions(draftPermissions), [draftPermissions]);
   const shareableProjects = useMemo(
     () => projects.filter((project) => project.status !== 'deleted' && project.type !== 'system'),
@@ -112,31 +133,63 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     return teamProject?.id || shareableProjects[0]?.id || '';
   }, [shareableProjects]);
 
-  const loadShares = useCallback(async () => {
-    if (!album) return;
-    setLoading(true);
-    setError(null);
+  const loadShares = useCallback(async (append = false) => {
+    if (!open || !album || !accountId || boundaryRef.current.epoch !== boundaryEpoch || append && (sharePageRef.current.busy || !sharePageRef.current.cursor)) return;
+    shareRequestRef.current?.abort();
+    const controller = new AbortController(); shareRequestRef.current = controller;
+    sharePageRef.current.busy = true;
+    if (append) setLoadingMore(true); else setLoading(true);
+    setError(null); setShareReadFailed(false);
     try {
-      const res = await fetch(`/api/reference-albums/${album.id}/shares`, { cache: 'no-store' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || data.message || '共享列表读取失败');
-      setShares(data.shares || []);
+      const address = `/api/reference-albums/${album.id}/shares`;
+      let data = await fetchGovernancePage<ShareItem>(address, 'shares', {
+        ownerId: accountId, signal: controller.signal, cursor: append ? sharePageRef.current.cursor : null,
+      });
+      let list = data.items;
+      const depth = Math.min(sharePageRef.current.depth, data.pagination.total);
+      const cursors = new Set<string>();
+      while (!append && list.length < depth && data.pagination.nextCursor) {
+        if (cursors.has(data.pagination.nextCursor)) throw new Error('共享分页未前进，请重试');
+        cursors.add(data.pagination.nextCursor);
+        const next = await fetchGovernancePage<ShareItem>(address, 'shares', {
+          ownerId: accountId, signal: controller.signal, cursor: data.pagination.nextCursor, limit: Math.min(100, depth - list.length),
+        });
+        if (data.pagination.total !== next.pagination.total) throw new Error('共享列表已变化，请重试');
+        const combined = appendAlbumPage(list, next.items);
+        if (combined.length === list.length) throw new Error('共享分页未前进，请重试');
+        list = combined; data = next;
+      }
+      if (controller.signal.aborted || boundaryRef.current.epoch !== boundaryEpoch) return;
+      setShares(current => append ? appendAlbumPage(current, list) : list);
+      sharePageRef.current.cursor = data.pagination.nextCursor;
+      sharePageRef.current.depth = append ? sharePageRef.current.depth + list.length : list.length;
+      setShareCursor(data.pagination.nextCursor); setShareTotal(data.pagination.total);
+      setLoadedShareEpoch(boundaryEpoch);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '共享列表读取失败');
+      if (!controller.signal.aborted && boundaryRef.current.epoch === boundaryEpoch) {
+        if (err instanceof AlbumPageError && [401, 403, 404].includes(err.status)) { setShares([]); setShareTotal(0); setShareCursor(null); sharePageRef.current.cursor = null; }
+        setError(err instanceof Error ? err.message : '共享列表读取失败');
+        setShareReadFailed(true);
+      }
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted && boundaryRef.current.epoch === boundaryEpoch) { sharePageRef.current.busy = false; setLoading(false); setLoadingMore(false); }
     }
-  }, [album]);
+  }, [accountId, album, boundaryEpoch, open]);
 
   const loadShareTargets = useCallback(async () => {
+    if (!accountId || !open || boundaryRef.current.epoch !== boundaryEpoch) return;
+    targetsRequestRef.current?.abort();
+    const controller = new AbortController(); targetsRequestRef.current = controller;
     setOptionsLoading(true);
     setProjectLoadError(null);
     setFolderLoadError(null);
     try {
       const [projectsResult, foldersResult] = await Promise.allSettled([
-        fetchJson<{ projects?: ProjectOption[] }>('/api/projects', '项目列表读取失败'),
-        fetchJson<{ folders?: PublicFolderOption[] }>('/api/reference-album-folders', '共享文件夹读取失败'),
+        fetchJson<{ projects?: ProjectOption[] }>('/api/projects', '项目列表读取失败', { signal: controller.signal, headers: { 'x-upload-owner-id': accountId } }),
+        loadAllFolderPages<PublicFolderOption>({ ownerId: accountId, signal: controller.signal }),
       ]);
+      if (controller.signal.aborted || boundaryRef.current.epoch !== boundaryEpoch) return;
+      setLoadedOptionsEpoch(boundaryEpoch);
 
       if (projectsResult.status === 'fulfilled') {
         setProjects(Array.isArray(projectsResult.value.projects) ? projectsResult.value.projects : []);
@@ -146,20 +199,28 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
       }
 
       if (foldersResult.status === 'fulfilled') {
-        setPublicFolders(Array.isArray(foldersResult.value.folders) ? foldersResult.value.folders : []);
+        const list = foldersResult.value.folders;
+        setPublicFolders(list);
+        setPublicFolderId(current => current || list[0]?.id || '');
       } else {
         setPublicFolders([]);
         setFolderLoadError(foldersResult.reason instanceof Error ? foldersResult.reason.message : '共享文件夹读取失败');
       }
     } catch (err) {
-      setProjectLoadError(err instanceof Error ? err.message : '共享目标读取失败');
-      setFolderLoadError(err instanceof Error ? err.message : '共享目标读取失败');
+      if (!controller.signal.aborted && boundaryRef.current.epoch === boundaryEpoch) {
+        setProjectLoadError(err instanceof Error ? err.message : '共享目标读取失败');
+        setFolderLoadError(err instanceof Error ? err.message : '共享目标读取失败');
+      }
     } finally {
-      setOptionsLoading(false);
+      if (!controller.signal.aborted && boundaryRef.current.epoch === boundaryEpoch) setOptionsLoading(false);
     }
-  }, []);
+  }, [accountId, boundaryEpoch, open]);
 
   useEffect(() => {
+    setShares([]); setShareTotal(0); setShareCursor(null); setLoadingMore(false);
+    setLoadedShareEpoch(-1); setLoadedOptionsEpoch(-1); setShareReadFailed(false); setError(null);
+    sharePageRef.current = { cursor: null, depth: 24, busy: false };
+    setProjects([]); setPublicFolders([]);
     if (!open || !album) return;
     setTargetType('project');
     setTargetId('');
@@ -173,6 +234,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     setNotice(null);
     loadShares();
     loadShareTargets();
+    return () => { shareRequestRef.current?.abort(); targetsRequestRef.current?.abort(); };
   }, [album, loadShareTargets, loadShares, open]);
 
   useEffect(() => {
@@ -194,10 +256,10 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     dismissOnEscape: savingKey === null,
   });
 
-  if (!open || !album) return null;
+  if (!open || !album || !accountId) return null;
 
   const canSubmit = targetType === 'public_folder'
-    ? Boolean(publicFolderId && publicName.trim() && publicFolders.length > 0 && !folderLoadError)
+    ? Boolean(publicFolders.some(folder => folder.id === publicFolderId) && publicName.trim() && !folderLoadError && !optionsLoading)
     : targetType === 'project'
       ? Boolean(targetId.trim() && shareableProjects.length > 0 && !projectLoadError)
       : Boolean(targetId.trim());
@@ -233,7 +295,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   const createShare = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (targetType === 'public_folder') {
-      if (!publicFolderId) {
+      if (optionsLoading || folderLoadError || !publicFolders.some(folder => folder.id === publicFolderId)) {
         setError('请选择共享文件夹');
         return;
       }
@@ -351,7 +413,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   };
 
   const revokeAllShares = async () => {
-    if (shares.length === 0) return;
+    if (shareCount === 0) return;
     if (!await confirm(`关闭「${album.name}」的全部共享？所有被授权对象都会失去访问权限。`, { title: '关闭全部共享', confirmLabel: '关闭共享' })) return;
 
     setSavingKey('revoke-all');
@@ -561,7 +623,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
         </form>
 
         {notice && <div className="share-dialog-notice">{notice}</div>}
-        {error && <div className="share-dialog-error">{error}</div>}
+        {error && <div className="share-dialog-error">{error} {shareReadFailed && <button type="button" onClick={() => void loadShares()} disabled={loading || loadingMore}>刷新列表</button>}</div>}
 
         <div className="share-dialog-list-head">
           <h3>已共享对象</h3>
@@ -575,10 +637,10 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
         <div className="share-dialog-list">
           {loading ? (
             <div className="share-dialog-empty">读取共享对象...</div>
-          ) : shares.length === 0 ? (
+          ) : currentShares.length === 0 ? (
             <div className="share-dialog-empty">暂无共享对象。添加第一个对象后，私有图集会自动转为共享图集。</div>
           ) : (
-            shares.map((share) => {
+            currentShares.map((share) => {
               const currentPermissions = normalizePermissions(share.permissions);
               const sharePreset = presetFromPermissions(currentPermissions);
               const saving = savingKey === `share-${share.id}`;
@@ -614,6 +676,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
             })
           )}
         </div>
+        {loadedShareEpoch === boundaryEpoch && shareCursor && <button type="button" onClick={() => void loadShares(true)} disabled={loading || loadingMore || shareReadFailed}>{loadingMore ? '读取中...' : '加载更多'}</button>}
       </section>
     </div>
   );
@@ -667,8 +730,8 @@ function formatExpiresAt(value: string) {
   return `${date.toLocaleString('zh-CN')} 过期`;
 }
 
-async function fetchJson<T>(url: string, fallbackMessage: string): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store' });
+async function fetchJson<T>(url: string, fallbackMessage: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, { ...options, cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof data.error === 'string'

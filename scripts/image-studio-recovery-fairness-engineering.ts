@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -74,7 +75,7 @@ async function main() {
       return rows;
     },
   } } });
-  Reflect.set(globalThis, 'prisma', observedDatabase);
+  setFixtureDatabase(observedDatabase);
   const originalCwd = process.cwd();
   process.chdir(directory);
   const checks: string[] = [];
@@ -172,6 +173,8 @@ async function main() {
         snapshot_json: JSON.stringify({ imageChannel: { channelId, configRevision } }), error: 'Original query retained',
         created_at: new Date(createdAt), lease_until: new Date(leaseUntil), lease_token: `dead-worker-${id}` } });
       markPhase('synthetic_task_row_created', id);
+      await database.creditHold.create({ data: { business_type: 'image', business_id: id, payer_type: 'user', payer_id: owner,
+        operator_id: owner, amount: task.unit_credits, freeze_snapshot: task.freeze_snapshot || '[]', opening_receipt: '{}' } });
       const providerTaskId = `provider-${id}`;
       markPhase('synthetic_async_receipt_start', id);
       await delivery.createStudioAsyncReceipt(task, { taskId: providerTaskId, pollAfterMs: 2000 });

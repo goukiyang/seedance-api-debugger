@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'node:stream';
 import { ZipFile } from 'yazl';
@@ -9,7 +10,7 @@ import { readStudioImage } from '@/lib/image-studio/media';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const ids = Array.from(new Set(request.nextUrl.searchParams.getAll('id')));
@@ -39,4 +40,4 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '审计图片准备失败，请重试' }, { status: 503 });
   }
-}
+});

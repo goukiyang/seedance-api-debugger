@@ -55,7 +55,7 @@ const directUpload = read('src/lib/assets/direct-upload.ts');
 assert.match(directUpload, /fillMissingAssetDimensions/);
 assert.match(directUpload, /kind === 'audio' \? null : normalizeOptionalInt/);
 
-const taskCreate = read('src/app/api/tasks/create/route.ts');
+const taskCreate = read('src/server/video-tasks/standard-create.ts');
 assert.match(taskCreate, /validateReferenceMediaResolution/);
 assert.match(taskCreate, /validateReferenceMediaProviderPreflight/);
 assert.match(taskCreate, /validateSeedanceReferenceMediaPreflight/);

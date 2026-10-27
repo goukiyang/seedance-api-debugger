@@ -1,10 +1,10 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, statfs } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
-import sharp from '../media/sharp';
 import { AuthError } from '@/lib/auth/session';
 import { multiviewDimensions } from './multiview-contract';
 import { MultiviewError, multiviewInfoForWork, multiviewSourceVersion, renderMultiviewWork } from './multiview';
@@ -149,7 +149,7 @@ async function readPrivate(file: string, maximumBytes: number) {
 async function imageMetadata(data: Buffer, mime: 'image/png' | 'image/jpeg', width?: number, height?: number, decode = true) {
   const magic = mime === 'image/png' ? data.subarray(0, 8).equals(pngMagic) : data[0] === 255 && data[1] === 216 && data[data.length - 2] === 255 && data[data.length - 1] === 217;
   if (!magic) throw unavailable('作品图片格式校验未完成，未标记为已保存。');
-  const image = sharp(data, { limitInputPixels: 64000000, failOn: 'warning' }).timeout({ seconds: 60 });
+  const image = (await openUntrustedImage(data, 'multiview-output')).timeout({ seconds: 60 });
   const metadata = await image.metadata();
   if (metadata.format !== (mime === 'image/png' ? 'png' : 'jpeg') || !metadata.width || !metadata.height
     || width !== undefined && metadata.width !== width || height !== undefined && metadata.height !== height) throw unavailable('作品图片尺寸校验未完成。');
@@ -254,7 +254,7 @@ async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
   const estimate = Math.ceil((dimensions.width * dimensions.height + lease.info!.width * lease.info!.height * lease.recipe!.slots.length * 2) * 4 + 1024 * 1024);
   await assertCapacity(root, estimate);
   let rendered: Awaited<ReturnType<typeof renderMultiviewWork>> | null = await renderMultiviewWork(user, lease.sourceTaskId, lease.recipe!, signal, access);
-  const thumbnail = await sharp(rendered.collage, { limitInputPixels: 64000000 }).resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).timeout({ seconds: 60 }).jpeg({ quality: 82 }).toBuffer();
+  const thumbnail = await (await openUntrustedImage(rendered.collage, 'multiview-output')).resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true }).timeout({ seconds: 60 }).jpeg({ quality: 82 }).toBuffer();
   signal.throwIfAborted();
   const parent = path.dirname(destination);
   await secureDirectory(parent);

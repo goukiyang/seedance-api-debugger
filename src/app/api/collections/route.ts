@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * Collection API Routes
  *
@@ -12,7 +14,7 @@ import { getSession } from '@/lib/auth/session';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET() {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -20,15 +22,12 @@ export async function GET() {
     const collections = await getCollections(user.id);
     return NextResponse.json({ collections });
   } catch (error) {
-    console.error('[GetCollections] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -47,10 +46,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ collection }, { status: 201 });
   } catch (error) {
-    console.error('[CreateCollection] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

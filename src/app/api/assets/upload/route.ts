@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { readMultipartUpload, streamToTemporaryUpload, UploadStreamError } from '@/lib/assets/streamed-upload';
 /**
  * POST /api/assets/upload
  * 上传单个文件（图片/视频/音频）
@@ -9,16 +11,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
-import { assertUploadOwner, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { assertUploadOwner, privateUploadDirectory, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, rawUploadRecoveryToken, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import {
   getSiteUploadKind,
-  uploadSiteAsset,
-  validateSiteUploadInput,
+  uploadSiteAssetFile,
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { requestHd } from '@/lib/media/hd-derivatives';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +30,7 @@ const MULTIPART_COMPAT_MAX_SIZE_BYTES = 8 * 1024 * 1024;
 
 // Read the original receipt and preparation state without changing either.
 // Absence alone never proves that the original request was not accepted.
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -37,17 +39,19 @@ export async function GET(request: NextRequest) {
     const query = request.nextUrl.searchParams;
     const identity = rawUploadIdentity(user.id, { requestId: query.get('requestId'), hash: query.get('hash'), fileSize: query.get('fileSize'), mimeType: query.get('mimeType') });
     const asset = await readRawUploadResult(identity);
-    if (asset) return NextResponse.json({ success: true, asset }, { headers: { 'Cache-Control': 'private, no-store' } });
+    if (asset) return NextResponse.json(await browserUploadResponse(user, { success: true, asset }), { headers: { 'Cache-Control': 'private, no-store' } });
     const state = await readRawUploadState(identity);
     return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' }, recoveryToken: await rawUploadRecoveryToken(identity) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json({ ...verifiedUploadFailure(error), errorStage: 'recovery' }, { status: error.status });
     return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });
   }
-}
+});
 
 type UploadPayload = {
-  buffer: Buffer;
+  file: string;
+  hash: string;
+  cleanup: () => Promise<void>;
   fileName: string;
   mimeType: string;
   fileSize: number;
@@ -66,29 +70,6 @@ function parseContentLength(value: string | null) {
   if (!value) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
-async function readBoundedBody(request: NextRequest, expected: number) {
-  if (!request.body) throw new VerifiedUploadError('UPLOAD_BODY_MISSING', '没有收到上传文件', 400);
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = []; let size = 0;
-  try {
-    while (true) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.byteLength;
-      if (size > expected) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '实际文件大小与声明不一致', 400);
-      chunks.push(part.value);
-    }
-    if (size !== expected) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '文件没有完整上传', 400);
-    return Buffer.concat(chunks, size);
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    if (error instanceof VerifiedUploadError) throw error;
-    // This request has stopped receiving bytes in memory and has not acquired
-    // writing. Only its current receiving nonce may record this rejection.
-    throw new VerifiedUploadError('UPLOAD_BODY_INTERRUPTED', '文件接收已中断，尚未保存；请重新选择后重试', 400);
-  }
-  finally { reader.releaseLock(); }
 }
 
 async function readUploadPayload(request: NextRequest): Promise<
@@ -116,25 +97,10 @@ async function readUploadPayload(request: NextRequest): Promise<
         ),
       };
     }
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-
-    if (!file) {
-      return { response: NextResponse.json({ error: 'No file provided' }, { status: 400 }) };
-    }
-
-    const validationError = validateSiteUploadInput(file);
-    if (validationError) return { response: NextResponse.json({ error: validationError }, { status: 400 }) };
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    return {
-      payload: {
-        buffer,
-        fileName: file.name,
-        mimeType: file.type,
-        fileSize: file.size,
-      },
-    };
+    const received = await readMultipartUpload(request, multipartContentLength, MULTIPART_COMPAT_MAX_SIZE_BYTES);
+    const validationError = validateSiteUploadMetadata({ mimeType: received.mimeType, fileSize: received.fileSize });
+    if (validationError) { await received.cleanup(); return { response: NextResponse.json({ error: validationError }, { status: 400 }) }; }
+    return { payload: received };
   }
 
   const fileName = decodeFileName(request.headers.get('x-file-name'));
@@ -150,31 +116,18 @@ async function readUploadPayload(request: NextRequest): Promise<
     return { response: NextResponse.json({ error: metadataError }, { status: 400 }) };
   }
 
-  const buffer = await readBoundedBody(request, declaredSize!);
-  const actualValidationError = validateSiteUploadMetadata({
-    mimeType: contentType,
-    fileSize: buffer.byteLength,
-  });
-  if (actualValidationError) {
-    return { response: NextResponse.json({ error: actualValidationError }, { status: 400 }) };
-  }
-
-  return {
-    payload: {
-      buffer,
-      fileName,
-      mimeType: contentType,
-      fileSize: buffer.byteLength,
-    },
-  };
+  if (!request.body) throw new VerifiedUploadError('UPLOAD_BODY_MISSING', '没有收到上传文件', 400);
+  const received = await streamToTemporaryUpload(request.body, { expectedBytes: declaredSize!, maxBytes: declaredSize!, signal: request.signal });
+  return { payload: { ...received, fileName, mimeType: contentType, fileSize: received.bytes } };
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let fileName: string | null = decodeFileName(request.headers.get('x-file-name'));
   let mimeType: string | null = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() || null;
   let fileSize: number | null = parseContentLength(request.headers.get('x-file-size') || request.headers.get('content-length'));
+  let temporary: UploadPayload | undefined;
   let receiving: { identity: RawUploadIdentity; nonce: string } | null = null;
   let originalRequestId: string | null = null;
   let errorStage = 'validation';
@@ -192,7 +145,7 @@ export async function POST(request: NextRequest) {
       if (request.headers.get('x-raw-upload-version') !== '2' || !suppliedNonce || !/^[a-f0-9]{48}$/.test(suppliedNonce)) throw new VerifiedUploadError('UPLOAD_PREPARATION_REQUIRED', '原上传准备信息无法确认，未接收文件', 409);
       const identity = rawUploadIdentity(user.id, { requestId, hash: request.headers.get('x-file-hash'), fileSize, mimeType });
       const asset = await readRawUploadResult(identity);
-      if (asset) return NextResponse.json({ success: true, asset });
+      if (asset) return NextResponse.json(await browserUploadResponse(user, { success: true, asset }), { headers: { 'Cache-Control': 'private, no-store' } });
       await transitionRawUpload(identity, suppliedNonce, 'prepared', 'receiving');
       receiving = { identity, nonce: suppliedNonce };
     }
@@ -208,9 +161,10 @@ export async function POST(request: NextRequest) {
       return upload.response;
     }
 
+    temporary = upload.payload;
     ({ fileName, mimeType, fileSize } = upload.payload);
-    const { buffer } = upload.payload;
-    const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash: uploadDigest(buffer), fileSize, mimeType });
+    const { file, hash } = upload.payload;
+    const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash, fileSize, mimeType });
     originalRequestId = identity.requestId;
     if (receiving) {
       if (identity.hash !== receiving.identity.hash || identity.fileSize !== receiving.identity.fileSize || identity.mimeType !== receiving.identity.mimeType) {
@@ -218,7 +172,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       const asset = await readRawUploadResult(identity);
-      if (asset) return NextResponse.json({ success: true, asset });
+      if (asset) return NextResponse.json(await browserUploadResponse(user, { success: true, asset }), { headers: { 'Cache-Control': 'private, no-store' } });
       const claim = await claimLegacyRawUpload(identity);
       receiving = { identity, nonce: claim.nonce };
     }
@@ -244,7 +198,7 @@ export async function POST(request: NextRequest) {
     // Once writing has been acquired, no failure may declare notAccepted.
     const writing = receiving;
     receiving = null;
-    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId);
+    const uploadResult = await uploadSiteAssetFile(file, fileName, mimeType, fileSize, hash, user.id, identity.requestId);
     await transitionRawUpload(identity, writing.nonce, 'writing', 'completed').catch(() => {});
     if (mimeType.startsWith('image/')) void prisma.asset.findFirst({
       where: { id: uploadResult.assetId, owner_id: user.id, status: 'active', type: 'image' },
@@ -268,7 +222,7 @@ export async function POST(request: NextRequest) {
       skippedProxy: true,
       fileKind: getSiteUploadKind(uploadResult.mimeType),
     });
-    return NextResponse.json({
+    return NextResponse.json(await browserUploadResponse(user, {
       success: true,
       upload: uploadResult.upload,
       similarity: uploadResult.similarity,
@@ -289,8 +243,9 @@ export async function POST(request: NextRequest) {
         upload: uploadResult.upload,
         similarity: uploadResult.similarity,
       },
-    });
-  } catch (error) {
+    }), { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (caught) {
+    const error = caught instanceof UploadStreamError ? new VerifiedUploadError(caught.code, caught.message, caught.status) : caught;
     if (receiving && error instanceof VerifiedUploadError && error.status === 400
       && ['UPLOAD_BODY_MISSING', 'UPLOAD_SIZE_MISMATCH', 'UPLOAD_HASH_MISMATCH', 'UPLOAD_BODY_INTERRUPTED'].includes(error.code)) {
       try {
@@ -332,5 +287,5 @@ export async function POST(request: NextRequest) {
       { error: '上传服务暂不可用，原上传结果待确认；请核对原上传，不要重新发送文件', code: 'UPLOAD_RESULT_UNKNOWN', errorStage },
       { status: 500 }
     );
-  }
-}
+  } finally { await temporary?.cleanup().catch(() => {}); }
+});

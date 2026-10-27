@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
@@ -6,7 +7,7 @@ import { readCreationContext } from '@/lib/creation/context';
 import { readCreationSource } from '@/lib/creation/lineage';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   return creationHttp(async user => {
     const projectId = request.nextUrl.searchParams.get('project_id');
     await readCreationContext(user, projectId);
@@ -23,4 +24,4 @@ export async function GET(request: NextRequest) {
     }
     return { items };
   });
-}
+});

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
@@ -6,7 +7,7 @@ import { getCreditSummary } from '@/lib/credits/policy';
 // Concurrent polls from one account share a single summary transaction (no caching beyond the in-flight request).
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof getCreditSummary>>>>();
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   let user: { id: string } | null = null;
   try {
     user = await getSessionUser(request);
@@ -50,4 +51,4 @@ export async function GET(request: NextRequest) {
       frozen: account.frozen_credits,
     },
   });
-}
+});

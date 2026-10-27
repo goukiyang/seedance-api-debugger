@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -14,7 +15,7 @@ function rangeKey(value: string | null): DashboardRangeKey | undefined {
   return undefined;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
 
@@ -40,4 +41,4 @@ export async function GET(request: NextRequest) {
     console.error('[AdminGenerationDashboard] Load error:', error);
     return NextResponse.json({ error: '加载驾驶舱失败' }, { status: 500 });
   }
-}
+});

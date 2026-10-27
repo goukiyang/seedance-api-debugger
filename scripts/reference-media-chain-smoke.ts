@@ -200,8 +200,8 @@ async function main() {
   assertIncludes(templateGeneratePage, 'reference_video_urls: params.referenceVideoUrls || []', '模板生成页必须把参考视频 URL 传给创建任务接口');
   assertIncludes(templateGeneratePage, 'reference_audio_urls: params.referenceAudioUrls || []', '模板生成页必须把参考音频 URL 传给创建任务接口');
 
-  const tasksCreate = read('src/app/api/tasks/create/route.ts');
-  const ipTasksCreate = read('src/app/api/ip/tasks/create/route.ts');
+  const tasksCreate = read('src/server/video-tasks/standard-create.ts');
+  const ipTasksCreate = read('src/server/video-tasks/ip-create.ts');
   const referenceMediaPolicy = read('src/lib/provider/reference-media-policy.ts');
   assertIncludes(tasksCreate, 'validateReferenceMediaProviderPreflight', 'Seedance 任务创建必须集中执行生成服务参考素材准入校验');
   assertIncludes(tasksCreate, 'validateSeedanceReferenceMediaPreflight', 'Seedance 任务创建必须复用官方规则表进行准入校验');

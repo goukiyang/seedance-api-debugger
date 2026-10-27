@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { Readable } from 'node:stream';
 import { ZipFile } from 'yazl';
@@ -12,7 +13,7 @@ import { studioTaskHasViewableOutput, studioOutputFormatForMime } from '@/lib/im
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers: privateImageHeaders });
   const ids = Array.from(new Set(request.nextUrl.searchParams.getAll('id')));
@@ -70,5 +71,5 @@ export async function GET(request: NextRequest) {
       ...privateImageHeaders, 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="generated-images.zip"', ...(length >= 0 ? { 'Content-Length': String(length) } : {}),
     } });
   } catch { return NextResponse.json({ error: '图片包准备失败，请重试；已有图片不会丢失' }, { status: 503, headers: privateImageHeaders }); }
-}
+});
 export const HEAD = GET;

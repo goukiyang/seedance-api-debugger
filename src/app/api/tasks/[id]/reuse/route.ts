@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { isPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
@@ -237,7 +239,7 @@ function asString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
 }
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -715,10 +717,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
     }
-    console.error('[ReuseTask]', error);
-    return NextResponse.json(
-      { error: '复用任务失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * POST /api/collections/[id]/load
  * 加载图片集到当前工作区
@@ -8,7 +10,7 @@ import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { loadCollectionIntoWorkspace, getCollectionById } from '@/lib/assets/collection';
 import { getSession } from '@/lib/auth/session';
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -26,10 +28,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
     return NextResponse.json({ success: true, count: result.count });
   } catch (error) {
-    console.error('[LoadCollection] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

@@ -30,7 +30,7 @@ async function main() {
   Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   await fs.mkdir(process.env.HD_DERIVATIVES_ROOT, { recursive: true, mode: 0o700 });
-  await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+  await fs.mkdir(path.join(directory, '.media/uploads'), { recursive: true });
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL,
     PRISMA_GENERATE_SKIP_AUTOINSTALL: '1', NEXT_TELEMETRY_DISABLED: '1' };
   for (const name of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[name]) env[name] = process.env[name];
@@ -39,7 +39,7 @@ async function main() {
     path.join(applicationRoot, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   await fs.writeFile(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
-  const { hdReadonlyDb } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');
+  const { hdReadRepository } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');
   const core = require('../src/lib/media/hd-derivatives') as typeof import('../src/lib/media/hd-derivatives');
   const { registerCommittedStudioHd } = require('../src/lib/media/hd-registration') as typeof import('../src/lib/media/hd-registration');
   const { finishStudioTask } = require('../src/lib/image-studio/tasks') as typeof import('../src/lib/image-studio/tasks');
@@ -58,12 +58,18 @@ async function main() {
       email: 'hd-owner@isolated.invalid', password_hash: 'synthetic-not-a-password' } });
     await prisma.creditAccount.create({ data: { user_id: 'hd-owner', balance: 100, frozen_credits: 5 } });
     const original = await sharp({ create: { width: 16, height: 16, channels: 3, background: { r: 41, g: 93, b: 120 } } }).png().toBuffer();
-    const createTask = (id: string, unitCredits = 0) => prisma.imageStudioTask.create({ data: {
+    const createTask = async (id: string, unitCredits = 0) => {
+      const task = await prisma.imageStudioTask.create({ data: {
       id, batch_id: id, owner_id: 'hd-owner', ordinal: 1, fingerprint: `synthetic-${id}`, prompt: '', context: '', revision: 0,
       model: 'gpt-image-2.5-flare', reference_ids: '[]', unit_credits: unitCredits, status: 'running',
       lease_token: `lease-${id}`, lease_until: new Date(Date.now() + 600_000),
       ...(unitCredits ? { freeze_snapshot: JSON.stringify([{ source_type: 'balance', amount: unitCredits }]) } : {}),
-    } });
+      } });
+      // This isolated fixture starts after reservation; represent its already-frozen money explicitly.
+      await prisma.creditHold.create({ data: { business_type: 'image', business_id: id, payer_type: 'user', payer_id: task.owner_id,
+        operator_id: task.owner_id, amount: unitCredits, freeze_snapshot: task.freeze_snapshot || '[]', opening_receipt: '{}' } });
+      return task;
+    };
     const snapshot = async (taskId: string) => JSON.stringify({
       task: await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: taskId } }),
       account: await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: 'hd-owner' } }),
@@ -158,7 +164,7 @@ async function main() {
     await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt), { mode: 0o600 });
     console.log(JSON.stringify(receipt));
   } finally {
-    mock.restoreAll(); await prisma.$disconnect(); await hdReadonlyDb.$disconnect();
+    mock.restoreAll(); await prisma.$disconnect(); await hdReadRepository.close();
     process.chdir(applicationRoot); process.umask(oldUmask);
   }
 }

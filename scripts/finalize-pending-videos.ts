@@ -1,3 +1,4 @@
+import { reconcileVideoTask, reconcileVideoBilling } from '../src/lib/video/reconciler';
 import { loadEnvConfig } from '@next/env';
 import {
   isStaleSubmittedWithoutProvider,
@@ -8,9 +9,6 @@ import {
 } from '../src/lib/video/finalize-pending-candidates';
 
 loadEnvConfig(process.cwd());
-
-type AppPrismaClient = (typeof import('../src/lib/prisma'))['prisma'];
-type SettleTaskFn = typeof import('../src/lib/video/task-finalizer').settleTask;
 
 type PendingTask = PendingFinalizeCandidate & {
   id: string;
@@ -48,61 +46,6 @@ function log(message: string, details?: Record<string, unknown>) {
   console.log(`[finalize-pending-videos] ${message}`);
 }
 
-async function failStaleSubmittedWithoutProvider(
-  prisma: AppPrismaClient,
-  settleTask: SettleTaskFn,
-  taskId: string,
-  orphanMinAgeMinutes: number,
-) {
-  const now = new Date();
-  const failedTask = await prisma.$transaction(async (tx) => {
-    const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
-    if (!freshTask || !isStaleSubmittedWithoutProvider(freshTask, now, orphanMinAgeMinutes)) {
-      return null;
-    }
-
-    const consumedApprovals = await tx.approvalUsage.findMany({
-      where: { task_id: taskId },
-      select: { approval_id: true },
-    });
-    if (consumedApprovals.length > 0) {
-      await tx.approvalUsage.deleteMany({ where: { task_id: taskId } });
-      for (const usage of consumedApprovals) {
-        await tx.approvalRecord.updateMany({
-          where: { id: usage.approval_id, used_count: { gt: 0 } },
-          data: { used_count: { decrement: 1 } },
-        });
-      }
-    }
-
-    return tx.videoTask.update({
-      where: { id: taskId },
-      data: {
-        local_status: 'failed',
-        provider_status: 'failed',
-        error_code: 'MISSING_PROVIDER_TASK_ID',
-        error_message: '任务提交后没有拿到外部任务号，已自动失败并返还冻结点数。',
-        raw_status_response: JSON.stringify({
-          error: 'MISSING_PROVIDER_TASK_ID',
-          finalized_by: 'finalize-pending-videos',
-        }),
-        completed_at: now,
-      },
-    });
-  });
-
-  if (!failedTask) {
-    return { task: null, settled: false };
-  }
-
-  if (failedTask.user_id && failedTask.frozen_cost && failedTask.frozen_cost > 0) {
-    await settleTask(taskId, failedTask.user_id, failedTask.frozen_cost, 'failed');
-  }
-
-  const settledTask = await prisma.videoTask.findUnique({ where: { id: taskId } });
-  return { task: settledTask || failedTask, settled: Boolean(failedTask.frozen_cost && failedTask.frozen_cost > 0) };
-}
-
 async function main() {
   const limit = numberArg('--limit', 20);
   const maxSeconds = numberArg('--max-seconds', 1800);
@@ -113,8 +56,9 @@ async function main() {
   const taskId = stringArg('--task-id');
   const dryRun = hasArg('--dry-run');
   const startedAt = Date.now();
+  if (!dryRun) await reconcileVideoBilling({ limit });
   const { prisma } = await import('../src/lib/prisma');
-  const { finalizeVideoTaskStatus, settleTask } = await import('../src/lib/video/task-finalizer');
+  const { finalizeVideoTaskStatus } = await import('../src/lib/video/task-finalizer');
 
   const select = {
     id: true,
@@ -160,7 +104,6 @@ async function main() {
       ? await prisma.videoTask.findMany({
           where: {
             provider_task_id: null,
-            OR: [{ error_code: null }, { error_code: { not: 'IP_SUBMISSION_UNCONFIRMED' } }],
             local_status: 'submitted',
             frozen_cost: { gt: 0 },
             created_at: { lte: new Date(Date.now() - orphanMinAgeMinutes * 60 * 1000) },
@@ -248,16 +191,13 @@ async function main() {
 
     try {
       if (isStaleOrphan) {
-        const result = await failStaleSubmittedWithoutProvider(prisma, settleTask, task.id, orphanMinAgeMinutes);
-        processed += result.task ? 1 : 0;
-        terminal += result.task ? 1 : 0;
-
-        log('Finalized stale submitted task without provider id.', {
+        const result = await reconcileVideoTask(task.id);
+        processed += 1;
+        if (result.repaired && ['terminal', 'authoritative_non_acceptance'].includes(result.reason)) terminal += 1;
+        log('Checked original submission without provider id.', {
           taskId: task.id,
-          currentStatus: result.task?.local_status || null,
-          frozenCost: result.task?.frozen_cost || null,
-          refundAmount: result.task?.refund_amount || null,
-          settled: result.settled,
+          repaired: result.repaired,
+          reason: result.reason,
         });
         continue;
       }

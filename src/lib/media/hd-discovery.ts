@@ -3,8 +3,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { assertHdDirectoryAccess, atomicHdJson, hdCapacity, hdControl, hdDirectory, requestHd, withHdLease } from './hd-derivatives';
 import { HD_RESOURCE_POLICY } from './hd-resource-state';
-import { hdReadonlyDb } from './hd-readonly-db';
-import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '../image-studio/dimension-mismatch';
+import { hdReadRepository } from './hd-readonly-db';
+import { studioTaskHasViewableOutput } from '../image-studio/dimension-mismatch';
 
 export type HdDiscoveryItem = { id: string; source: string; preserveText: boolean; ownerId?: string };
 export type HdDiscoveryIsolation = HdDiscoveryItem & {
@@ -42,18 +42,15 @@ export async function hdDiscoveryStatus(checkpoint: HdDiscoveryCheckpoint | null
   if (!checkpoint) return { checkedAt: checkedAt.toISOString(), current: null };
   try {
     const [asset, task] = await Promise.all([
-      hdReadonlyDb.asset.findFirst({ where: { status: 'active', type: 'image', created_at: { lte: checkedAt },
-        OR: [{ created_at: { gt: new Date(checkpoint.assets.at) } }, { created_at: new Date(checkpoint.assets.at), id: { gt: checkpoint.assets.id } }] }, select: { id: true } }),
-      hdReadonlyDb.imageStudioTask.findFirst({ where: { AND: [studioOutputTaskWhere,
-        { deleted_at: null, asset_id: { not: null }, finished_at: { lte: checkedAt },
-          OR: [{ finished_at: { gt: new Date(checkpoint.tasks.at) } }, { finished_at: new Date(checkpoint.tasks.at), id: { gt: checkpoint.tasks.id } }] }] }, select: { id: true } }),
+      hdReadRepository.nextAssets(checkpoint.assets, checkedAt, 1),
+      hdReadRepository.nextTasks(checkpoint.tasks, checkedAt, 1),
     ]);
     // A moving cursor means the queue snapshot and discovery view may straddle a
     // registration. Report unknown until the next read instead of claiming idle.
     const after = await readHdDiscoveryCheckpoint();
     const same = after.assets.at === checkpoint.assets.at && after.assets.id === checkpoint.assets.id
       && after.tasks.at === checkpoint.tasks.at && after.tasks.id === checkpoint.tasks.id;
-    return { checkedAt: checkedAt.toISOString(), current: same ? !asset && !task : null };
+    return { checkedAt: checkedAt.toISOString(), current: same ? !asset.length && !task.length : null };
   } catch {
     return { checkedAt: checkedAt.toISOString(), current: null };
   }
@@ -142,10 +139,7 @@ export async function discoverHdBatch(stopping: () => boolean = () => false) {
     // 100-per-round budget, so a permanent new-asset stream cannot starve them.
     const isolationBudget = Math.min(10, HD_RESOURCE_POLICY.discoveryLimit);
     const streamLimit = Math.floor((HD_RESOURCE_POLICY.discoveryLimit - isolationBudget) / 2);
-    const assets = await hdReadonlyDb.asset.findMany({ where: { status: 'active', type: 'image', created_at: { lte: captured },
-      OR: [{ created_at: { gt: new Date(checkpoint.assets.at) } }, { created_at: new Date(checkpoint.assets.at), id: { gt: checkpoint.assets.id } }] },
-      orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: streamLimit,
-      select: { id: true, owner_id: true, created_at: true, original_url: true, metadata_json: true } });
+    const assets = await hdReadRepository.nextAssets(checkpoint.assets, captured, streamLimit);
     const preserveText = (json: string | null) => { try { return JSON.parse(json || '{}').preserveText === true; } catch { return false; } };
     const allowed = async () => !stopping() && ['active', 'resource_wait'].includes((await hdControl()).state);
     for (const asset of assets) {
@@ -154,17 +148,11 @@ export async function discoverHdBatch(stopping: () => boolean = () => false) {
         { id: asset.id, ownerId: asset.owner_id, source: asset.original_url, preserveText: preserveText(asset.metadata_json) });
       if (!outcome.durable) break;
     }
-    const tasks = await hdReadonlyDb.imageStudioTask.findMany({ where: { AND: [studioOutputTaskWhere,
-      { deleted_at: null, asset_id: { not: null }, finished_at: { lte: captured },
-        OR: [{ finished_at: { gt: new Date(checkpoint.tasks.at) } }, { finished_at: new Date(checkpoint.tasks.at), id: { gt: checkpoint.tasks.id } }] }] },
-      orderBy: [{ finished_at: 'asc' }, { id: 'asc' }], take: streamLimit,
-      select: { id: true, owner_id: true, status: true, usage_json: true, finished_at: true, asset_id: true } });
+    const tasks = await hdReadRepository.nextTasks(checkpoint.tasks, captured, streamLimit);
     for (const task of tasks) {
       if (!await allowed()) return;
       const cursor = { at: task.finished_at!.toISOString(), id: task.id };
-      const asset = studioTaskHasViewableOutput(task) ? await hdReadonlyDb.asset.findFirst({
-        where: { id: task.asset_id!, owner_id: task.owner_id, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, metadata_json: true },
-      }) : null;
+      const asset = studioTaskHasViewableOutput(task) ? await hdReadRepository.taskAsset(task.asset_id!, task.owner_id) : null;
       if (!asset) {
         await atomicHdJson(path.join(hdDirectory(), 'discovery-exclusions', task.id.replace(/[^a-zA-Z0-9_-]/g, '_') + '.json'),
           { taskId: task.id, assetId: task.asset_id, reason: studioTaskHasViewableOutput(task) ? 'inactive_or_missing' : 'no_viewable_output', at: captured.toISOString() });

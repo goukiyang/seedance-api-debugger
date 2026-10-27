@@ -6,10 +6,18 @@
 
 import { prisma } from '@/lib/prisma';
 import { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
+import { createdPageOrder, type CreatedPageRequest } from '@/lib/pagination/created-page';
+
+function visibleSeedanceWhere(includeDeleted: boolean, ownerId: string, adminQuarantine: boolean) {
+  return { ...(adminQuarantine ? {} : { owner_id: ownerId, ownership_status: 'owned' }),
+    ...(includeDeleted ? {} : { local_status: { notIn: ['Deleted', 'ProviderDeleted'] } }) };
+}
 
 // DB record → API response 格式转换
 function toApiRecord(r: {
   id: string;
+  owner_id: string | null;
+  ownership_status: string;
   provider: string;
   provider_asset_id: string;
   asset_type: string;
@@ -33,6 +41,8 @@ function toApiRecord(r: {
 }): LocalAssetRecord {
   return {
     localId: r.id,
+    ownerId: r.owner_id,
+    ownershipStatus: r.ownership_status,
     provider: r.provider as 'seedance',
     providerAssetId: r.provider_asset_id,
     assetType: r.asset_type as 'Image' | 'Video' | 'Audio',
@@ -51,6 +61,7 @@ function toApiRecord(r: {
 export const seedanceAssetRepository = {
   /** 创建记录 */
   async create(data: {
+    ownerId: string;
     providerAssetId: string;
     assetType: string;
     name: string;
@@ -61,6 +72,8 @@ export const seedanceAssetRepository = {
   }): Promise<LocalAssetRecord> {
     const record = await prisma.seedanceAsset.create({
       data: {
+        owner_id: data.ownerId,
+        ownership_status: 'owned',
         provider: 'seedance',
         provider_asset_id: data.providerAssetId,
         asset_type: data.assetType,
@@ -96,14 +109,25 @@ export const seedanceAssetRepository = {
   },
 
   /** 列出记录（默认过滤已删除） */
-  async list(includeDeleted = false): Promise<LocalAssetRecord[]> {
+  async list(includeDeleted = false, ownerId?: string, adminQuarantine = false): Promise<LocalAssetRecord[]> {
+    if (!ownerId) return [];
     const records = await prisma.seedanceAsset.findMany({
-      where: includeDeleted
-        ? {}
-        : { local_status: { notIn: ['Deleted', 'ProviderDeleted'] } },
-      orderBy: { created_at: 'desc' },
+      where: visibleSeedanceWhere(includeDeleted, ownerId, adminQuarantine),
+      orderBy: createdPageOrder,
+      take: 100,
     });
     return records.map(toApiRecord);
+  },
+
+  async listPage(paging: CreatedPageRequest, includeDeleted: boolean, ownerId: string, adminQuarantine = false) {
+    if (!ownerId) { paging.assertAnchor(null); return { records: [], pagination: paging.finish([], 0).pagination }; }
+    const where = visibleSeedanceWhere(includeDeleted, ownerId, adminQuarantine);
+    if (paging.anchor) paging.assertAnchor(await prisma.seedanceAsset.findFirst({ where: { AND: [where, paging.anchor] }, select: { id: true } }));
+    const total = await prisma.seedanceAsset.count({ where });
+    const records = await prisma.seedanceAsset.findMany({ where: paging.anchor ? { AND: [where, paging.seek] } : where,
+      orderBy: createdPageOrder, skip: paging.skip, take: paging.take });
+    const result = paging.finish(records, total);
+    return { records: result.items.map(toApiRecord), pagination: result.pagination };
   },
 
   /** 按 localId 更新（同步官方详情用） */
@@ -172,8 +196,9 @@ export const seedanceAssetRepository = {
   },
 
   /** 统计 */
-  async count(includeDeleted = false): Promise<number> {
-    const where = includeDeleted ? {} : { local_status: { notIn: ['Deleted', 'ProviderDeleted'] } };
+  async count(includeDeleted = false, ownerId?: string, adminQuarantine = false): Promise<number> {
+    if (!ownerId) return 0;
+    const where = visibleSeedanceWhere(includeDeleted, ownerId, adminQuarantine);
     return prisma.seedanceAsset.count({ where });
   },
 
@@ -182,10 +207,11 @@ export const seedanceAssetRepository = {
   // ============================================================================
 
   /** 按 fileHash 查找 Active 资产 */
-  async findActiveByFileHash(fileHash: string): Promise<LocalAssetRecord | null> {
+  async findActiveByFileHash(fileHash: string, ownerId: string): Promise<LocalAssetRecord | null> {
     const record = await prisma.seedanceAsset.findFirst({
       where: {
         file_hash: fileHash,
+        owner_id: ownerId, ownership_status: 'owned',
         local_status: 'Active',
         provider: 'seedance',
       },
@@ -194,10 +220,11 @@ export const seedanceAssetRepository = {
   },
 
   /** 按 originalUrl 查找 Active 资产 */
-  async findActiveByOriginalUrl(originalUrl: string): Promise<LocalAssetRecord | null> {
+  async findActiveByOriginalUrl(originalUrl: string, ownerId: string): Promise<LocalAssetRecord | null> {
     const record = await prisma.seedanceAsset.findFirst({
       where: {
         original_url: originalUrl,
+        owner_id: ownerId, ownership_status: 'owned',
         local_status: 'Active',
         provider: 'seedance',
       },
@@ -206,10 +233,11 @@ export const seedanceAssetRepository = {
   },
 
   /** 按 storageProvider + storageKey 查找 Active 资产 */
-  async findActiveByStorageKey(storageProvider: string, storageKey: string): Promise<LocalAssetRecord | null> {
+  async findActiveByStorageKey(storageProvider: string, storageKey: string, ownerId: string): Promise<LocalAssetRecord | null> {
     const record = await prisma.seedanceAsset.findFirst({
       where: {
         storage_provider: storageProvider,
+        owner_id: ownerId, ownership_status: 'owned',
         storage_key: storageKey,
         local_status: 'Active',
         provider: 'seedance',
@@ -224,6 +252,7 @@ export const seedanceAssetRepository = {
 
   /** 创建记录（带存储元数据） */
   async createWithStorageMetadata(data: {
+    ownerId: string;
     providerAssetId: string;
     assetType: string;
     name: string;
@@ -237,6 +266,8 @@ export const seedanceAssetRepository = {
   }): Promise<LocalAssetRecord> {
     const record = await prisma.seedanceAsset.create({
       data: {
+        owner_id: data.ownerId,
+        ownership_status: 'owned',
         provider: 'seedance',
         provider_asset_id: data.providerAssetId,
         asset_type: data.assetType,

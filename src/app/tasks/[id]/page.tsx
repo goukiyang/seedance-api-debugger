@@ -84,8 +84,12 @@ interface VideoTask {
   public_video_storage_key?: string | null;
   public_video_file_size?: number | null;
   public_video_cached_at?: string | null;
-  raw_create_response: string | null;
-  raw_status_response: string | null;
+  provider_billing?: ProviderBillingMeta | null;
+  h3_runtime?: H3RuntimeMeta | null;
+  enhance_source_task_id?: string | null;
+  enhance_details?: { tool_version: string | null; scene: string | null; source_video_kind: string | null; fps: number | null } | null;
+  resolved_mode?: string | null;
+  reference_assets?: ReferenceAssetMeta[];
   error_code: string | null;
   error_message: string | null;
   project_id: string | null;
@@ -114,7 +118,6 @@ interface VideoTask {
   provider_cost_confirmed_at: string | null;
   provider_billing_status?: string | null;
   provider_billing_time?: string | number | null;
-  provider_usage_snapshot?: string | null;
   provider_client_request_id?: string | null;
   cost_allocation_status: string;
   retention_status: string;
@@ -127,9 +130,6 @@ interface VideoTask {
   delete_reason: string | null;
   cost_ledgers?: OfficialChargeLedger[];
   costLedgers?: OfficialChargeLedger[];
-  params_json: string | null;
-  reference_images_json: string | null;
-  provider_payload_json: string | null;
   created_at: string;
   updated_at: string;
   delivery_status?: string | null;
@@ -226,7 +226,7 @@ interface ProviderPayloadDebug {
 }
 
 interface ReferenceImageDebugProps {
-  task: VideoTask;
+  task: Pick<VideoTask, 'reference_image_urls' | 'generation_mode'> & { raw_create_response: string | null };
   refImagesDebug: RefImageDebugEntry[];
   providerPayload: ProviderPayloadDebug;
 }
@@ -405,6 +405,73 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
   );
 }
 
+interface TaskDebugData {
+  id: string;
+  raw_create_response: string | null;
+  raw_status_response: string | null;
+  reference_images_json: string | null;
+  provider_payload_json: string | null;
+}
+
+function AdminTaskDebug({ task }: { task: Pick<VideoTask, 'id' | 'reference_image_urls' | 'generation_mode'> }) {
+  const taskId = task.id;
+  const [open, setOpen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [data, setData] = useState<TaskDebugData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    if (!open) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/admin/tasks/${encodeURIComponent(taskId)}/debug`, {
+          cache: 'no-store', signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(response.status === 403 || response.status === 404
+          ? '调试信息不可访问' : '调试信息暂时无法加载');
+        const result = await response.json() as TaskDebugData;
+        if (result.id !== taskId) throw new Error('调试信息与当前任务不匹配');
+        if (!controller.signal.aborted) setData(result);
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '调试信息暂时无法加载');
+      }
+    })();
+    return () => controller.abort();
+  }, [taskId, open, attempt]);
+  let references: RefImageDebugEntry[] = [];
+  let payload: ProviderPayloadDebug = {};
+  if (data) {
+    try {
+      const parsed = JSON.parse(data.reference_images_json || '[]');
+      if (Array.isArray(parsed)) references = parsed;
+    } catch { /* Invalid optional debug fields do not hide the other response. */ }
+    try {
+      const parsed = JSON.parse(data.provider_payload_json || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) payload = parsed;
+    } catch { /* Keep the independently available raw response visible. */ }
+  }
+  return <details className="task-subdetails task-technical-panel" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>技术调试与原始响应</summary>
+    {open && !data && !error && <p role="status">正在加载调试信息...</p>}
+    {open && error && <p role="status">{error} <button type="button" className="btn btn-secondary" onClick={() => setAttempt(value => value + 1)}>重试</button></p>}
+    {open && data && <>
+      <ReferenceImageDebug task={{ raw_create_response: data.raw_create_response,
+        reference_image_urls: task.reference_image_urls, generation_mode: task.generation_mode }}
+        refImagesDebug={references} providerPayload={payload} />
+      <div className="task-raw-grid">
+        <details className="collapsible"><summary className="collapsible-header">创建任务响应</summary>
+          <div className="collapsible-content"><div className="json-viewer">{formatJson(data.raw_create_response)}</div></div>
+        </details>
+        <details className="collapsible"><summary className="collapsible-header">状态查询响应</summary>
+          <div className="collapsible-content"><div className="json-viewer">{formatJson(data.raw_status_response)}</div></div>
+        </details>
+      </div>
+    </>}
+  </details>;
+}
+
 function getStatusClass(status: string) {
   const statusMap: Record<string, string> = {
     draft: 'status-draft',
@@ -420,6 +487,9 @@ function getStatusClass(status: string) {
 function getStatusText(status: string) {
   const textMap: Record<string, string> = {
     draft: '草稿',
+    created: '准备提交',
+    submitting: '提交中',
+    unknown: '提交待确认',
     submitted: '已提交',
     running: '生成中',
     succeeded: '已完成',
@@ -560,15 +630,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function parseJsonObject(value: string | null | undefined): Record<string, unknown> | null {
-  if (!value) return null;
-  try {
-    return asRecord(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
-
 function pickStringValue(record: Record<string, unknown> | null, keys: string[]): string | null {
   if (!record) return null;
   for (const key of keys) {
@@ -592,52 +653,6 @@ function pickNumberValue(record: Record<string, unknown> | null, keys: string[])
   return null;
 }
 
-function usageTotalTokensFrom(value: unknown): { total: number | null; completion: number | null } {
-  const usage = typeof value === 'string' ? parseJsonObject(value) : asRecord(value);
-  return {
-    total: pickNumberValue(usage, ['total_tokens', 'totalTokens']),
-    completion: pickNumberValue(usage, ['completion_tokens', 'completionTokens']),
-  };
-}
-
-function extractProviderBilling(task: VideoTask): ProviderBillingMeta {
-  const raw = parseJsonObject(task.raw_status_response);
-  const rawCandidates = [
-    raw,
-    asRecord(raw?.data),
-    asRecord(raw?.result),
-    asRecord(raw?.response),
-  ].filter(Boolean) as Record<string, unknown>[];
-  const firstWithValue = (keys: string[]) => {
-    for (const candidate of rawCandidates) {
-      const value = pickStringValue(candidate, keys);
-      if (value) return value;
-    }
-    return null;
-  };
-  const firstNumberWithValue = (keys: string[]) => {
-    for (const candidate of rawCandidates) {
-      const value = pickNumberValue(candidate, keys);
-      if (value !== null) return value;
-    }
-    return null;
-  };
-  const usageSnapshot = parseJsonObject(task.provider_usage_snapshot);
-  const usageFromRaw = rawCandidates.map((candidate) => candidate.usage).find((value) => value !== undefined);
-  const usage = usageTotalTokensFrom(usageSnapshot || usageFromRaw);
-
-  return {
-    actualCost: firstNumberWithValue(['actual_cost', 'actualCost']),
-    currency: task.provider_cost_currency || firstWithValue(['currency_or_credit_type', 'currencyOrCreditType', 'currency']),
-    billingStatus: task.provider_billing_status || firstWithValue(['billing_status', 'billingStatus']),
-    billingTime: task.provider_billing_time || firstNumberWithValue(['billing_time', 'billingTime']) || firstWithValue(['billing_time', 'billingTime']),
-    usageTotalTokens: usage.total,
-    completionTokens: usage.completion,
-    providerTaskId: task.provider_task_id || firstWithValue(['provider_task_id', 'providerTaskId', 'task_id', 'id']),
-    clientRequestId: task.provider_client_request_id || firstWithValue(['clientRequestId', 'client_request_id', 'client_requestId']),
-  };
-}
-
 type H3RuntimeMeta = {
   progressText: string | null;
   estimatedRuntimeText: string | null;
@@ -645,65 +660,6 @@ type H3RuntimeMeta = {
   riskText: string | null;
   errorCode: string | null;
 };
-
-function formatRuntimeSeconds(value: number | null) {
-  if (value === null) return null;
-  if (value < 60) return `${Math.round(value)} 秒`;
-  return `约 ${Math.round(value / 60)} 分钟`;
-}
-
-function h3RiskLabel(flag: string) {
-  if (flag === 'long_720p_oom_risk') return '15 秒 720P 显存风险高，建议改用 LightX2V、降低分辨率或缩短秒数';
-  if (flag === 'high_vram_margin') return '显存余量偏低';
-  if (flag === 'above_benchmark_frame_count') return '帧数超过当前 benchmark 范围';
-  return flag;
-}
-
-function extractH3RuntimeMeta(task: VideoTask): H3RuntimeMeta | null {
-  if (task.provider !== 'h3') return null;
-  const raw = parseJsonObject(task.raw_status_response);
-  const rawCandidates = [
-    raw,
-    asRecord(raw?.data),
-    asRecord(raw?.result),
-    asRecord(raw?.response),
-  ].filter(Boolean) as Record<string, unknown>[];
-  const firstNumberWithValue = (keys: string[]) => {
-    for (const candidate of rawCandidates) {
-      const value = pickNumberValue(candidate, keys);
-      if (value !== null) return value;
-    }
-    return null;
-  };
-  const firstStringWithValue = (keys: string[]) => {
-    for (const candidate of rawCandidates) {
-      const value = pickStringValue(candidate, keys);
-      if (value) return value;
-    }
-    return null;
-  };
-  const progressDetail = rawCandidates
-    .map((candidate) => asRecord(candidate.progress_detail))
-    .find(Boolean) || null;
-  const progressRatio = firstNumberWithValue(['progress', 'percent']);
-  const progressText = progressDetail
-    ? [
-        pickStringValue(progressDetail, ['stage', 'phase', 'label']),
-        formatRuntimeSeconds(pickNumberValue(progressDetail, ['elapsed_sec', 'elapsed_seconds'])),
-      ].filter(Boolean).join(' · ') || null
-    : progressRatio !== null ? `${Math.round(progressRatio * 100)}%` : null;
-  const riskFlags = rawCandidates
-    .flatMap((candidate) => Array.isArray(candidate.risk_flags) ? candidate.risk_flags : [])
-    .filter((item): item is string => typeof item === 'string');
-
-  return {
-    progressText,
-    estimatedRuntimeText: formatRuntimeSeconds(firstNumberWithValue(['estimated_runtime_sec'])),
-    recommendedTimeoutText: formatRuntimeSeconds(firstNumberWithValue(['recommended_timeout_sec'])),
-    riskText: riskFlags.length > 0 ? riskFlags.map(h3RiskLabel).join('；') : null,
-    errorCode: firstStringWithValue(['error_code', 'code']),
-  };
-}
 
 function normalizeOfficialChargeLedger(value: unknown): OfficialChargeLedger | null {
   const record = asRecord(value);
@@ -930,14 +886,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const compareRestartingRef = useRef(false);
   const compareCycleRef = useRef(0);
 
-  // 显示原始响应
-  const [showCreateResponse, setShowCreateResponse] = useState(false);
-  const [showStatusResponse, setShowStatusResponse] = useState(false);
-
-  const currentTaskParams = parseJsonObject(task?.params_json);
   const currentIsEnhanceTask = Boolean(task && (task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit'));
   const currentEnhanceSourceTaskId = currentIsEnhanceTask
-    ? pickStringValue(currentTaskParams, ['source_task_id'])
+    ? task?.enhance_source_task_id ?? null
     : null;
 
   useEffect(() => {
@@ -1687,55 +1638,17 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     && Boolean(task.public_video_storage_provider);
   
   // 从 provider_payload_json 解析 resolved_mode
-  const resolvedMode = (() => {
-    if (!task.provider_payload_json) return null;
-    try {
-      const payload = JSON.parse(task.provider_payload_json);
-      return payload.resolved_mode || null;
-    } catch {
-      return null;
-    }
-  })();
+  const resolvedMode = task.resolved_mode ?? null;
 
-  const referenceAssets: ReferenceAssetMeta[] = (() => {
-    if (!task.params_json) return [];
-    try {
-      const params = JSON.parse(task.params_json);
-      if (!Array.isArray(params.referenceAssets)) return [];
-      return [...params.referenceAssets].sort((a, b) => a.order - b.order);
-    } catch {
-      return [];
-    }
-  })();
-
-  const refImagesDebug: RefImageDebugEntry[] = (() => {
-    if (!task.reference_images_json) return [];
-    try {
-      const parsed = JSON.parse(task.reference_images_json);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  })();
-
-  const providerPayload: ProviderPayloadDebug = (() => {
-    if (!task.provider_payload_json) return {};
-    try {
-      return JSON.parse(task.provider_payload_json);
-    } catch {
-      return {};
-    }
-  })();
-
-  const taskParams = currentTaskParams;
+  const referenceAssets: ReferenceAssetMeta[] = task.reference_assets ?? [];
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
-  const enhanceSourceTaskId = pickStringValue(taskParams, ['source_task_id']);
-  const enhanceToolVersion = pickStringValue(taskParams, ['tool_version']);
-  const enhanceScene = pickStringValue(taskParams, ['scene']);
-  const enhanceSourceKind = pickStringValue(taskParams, ['source_video_kind']);
-  const enhanceFps = pickNumberValue(taskParams, ['fps']);
-  const providerBilling = extractProviderBilling(task);
-  const h3RuntimeMeta = extractH3RuntimeMeta(task);
+  const enhanceSourceTaskId = task.enhance_source_task_id ?? null;
+  const enhanceToolVersion = task.enhance_details?.tool_version ?? null;
+  const enhanceScene = task.enhance_details?.scene ?? null;
+  const enhanceSourceKind = task.enhance_details?.source_video_kind ?? null;
+  const enhanceFps = task.enhance_details?.fps ?? null;
+  const providerBilling = task.provider_billing ?? { actualCost: null, currency: null, billingStatus: null, billingTime: null, usageTotalTokens: null, completionTokens: null, providerTaskId: null, clientRequestId: null };
+  const h3RuntimeMeta = task.h3_runtime ?? null;
   const hasResultVideo = task.local_status === 'succeeded' && !!videoSrc && !isPublicVideoPreparing;
   const enhanceSourceVideoSrc = taskVideoSource(enhanceSourceTask);
   const showEnhanceCompare = isEnhanceTask && hasResultVideo && Boolean(enhanceSourceVideoSrc);
@@ -1745,7 +1658,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       : (enhanceSourceLoadError || '源视频不可用，暂时只显示超分结果。')
     : '';
   const canUseVideoActions = hasPlayableVideo && !isPublicVideoPreparing;
-  const isSubmissionUnknown = Boolean(task.error_code?.includes('SUBMISSION_UNCONFIRMED') || task.error_code?.includes('SUBMIT_UNCONFIRMED') || task.local_status === 'unknown');
+  const isSubmissionUnknown = Boolean(task.error_code?.includes('SUBMISSION_UNCONFIRMED') || task.error_code?.includes('SUBMIT_UNCONFIRMED') || ['created', 'submitting', 'unknown'].includes(task.local_status));
   const isProcessing = !isSubmissionUnknown && ['submitted', 'running'].includes(task.local_status);
   const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
   const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
@@ -2661,50 +2574,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
             </div>
             </details>
 
-            <details className="task-subdetails task-technical-panel">
-            <summary>技术调试与原始响应</summary>
-            <ReferenceImageDebug
-              task={task}
-              refImagesDebug={refImagesDebug}
-              providerPayload={providerPayload}
-            />
-
-            <div className="task-raw-grid">
-              <div className="collapsible">
-                <div
-                  className="collapsible-header"
-                  onClick={() => setShowCreateResponse(!showCreateResponse)}
-                >
-                  <span>创建任务响应</span>
-                  <span>{showCreateResponse ? '收起' : '展开'}</span>
-                </div>
-                {showCreateResponse && (
-                  <div className="collapsible-content">
-                    <div className="json-viewer">
-                      {formatJson(task.raw_create_response)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="collapsible">
-                <div
-                  className="collapsible-header"
-                  onClick={() => setShowStatusResponse(!showStatusResponse)}
-                >
-                  <span>状态查询响应</span>
-                  <span>{showStatusResponse ? '收起' : '展开'}</span>
-                </div>
-                {showStatusResponse && (
-                  <div className="collapsible-content">
-                    <div className="json-viewer">
-                      {formatJson(task.raw_status_response)}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            </details>
+            {isAdmin && <AdminTaskDebug key={task.id} task={task} />}
           </details>
         </main>
       </div>

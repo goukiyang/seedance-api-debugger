@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -5,7 +7,7 @@ import { AuthError } from '@/lib/auth/session';
 import { assertProjectActiveInTransaction, getProjectAccess, logProjectActionInTransaction } from '@/lib/projects/permissions';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 
-export async function DELETE(
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(
   request: NextRequest,
   props: { params: Promise<{ id: string; userId: string }> }
 ) {
@@ -41,10 +43,7 @@ export async function DELETE(
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ProjectMembers] Remove error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

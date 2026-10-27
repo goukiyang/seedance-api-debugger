@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextResponse } from 'next/server';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
@@ -8,7 +9,7 @@ import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-model
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET() {
   const config = getProviderConfig();
   const aiMediaKitConfig = safeAiMediaKitConfigDto(await getAiMediaKitApiSettings());
   const h3Config = safeH3ConfigDto(await getH3ApiSettings());
@@ -74,4 +75,4 @@ export async function GET() {
       'Cache-Control': 'no-store, max-age=0',
     },
   });
-}
+});

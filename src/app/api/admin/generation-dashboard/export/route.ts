@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -61,7 +62,7 @@ function taskOfficialCostCnyText(task: {
   return '';
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
 
@@ -140,4 +141,4 @@ export async function GET(request: NextRequest) {
     console.error('[AdminGenerationDashboardExport] Failed:', error);
     return NextResponse.json({ error: '导出驾驶舱失败' }, { status: 500 });
   }
-}
+});

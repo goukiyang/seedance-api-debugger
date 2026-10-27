@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { PublicApiError } from '@/lib/http/public-error';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,11 +27,11 @@ export type PricingWorkerCapability = {
   expiresAt: string;
 };
 
-export class PricingRuntimeError extends Error {
+export class PricingRuntimeError extends PublicApiError {
   readonly status = 503;
   readonly code = 'pricing_consumer_unavailable';
   constructor(readonly processFailure?: ProcessFailure) {
-    super('新版收费处理服务尚未就绪，原价格和已有任务不变；请稍后重新预览');
+    super('新版收费处理服务尚未就绪，原价格和已有任务不变；请稍后重新预览', 503, 'pricing_consumer_unavailable');
   }
 }
 

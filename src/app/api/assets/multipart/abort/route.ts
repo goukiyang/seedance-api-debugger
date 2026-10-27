@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/multipart/abort
  * 放弃 R2 multipart 上传并清理对象存储未完成分片。
@@ -17,7 +18,7 @@ type MultipartAbortBody = {
   uploadToken?: string;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   try {
@@ -61,4 +62,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: message }, { status: 400 });
   }
-}
+});

@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextResponse } from 'next/server';
 import { reactionError, reactionUser } from '@/lib/content-reactions/http';
 import { parseContentKey, ReactionError, resolveContent } from '@/lib/content-reactions/content';
@@ -5,14 +6,19 @@ import { readStudioThumbnail } from '@/lib/image-studio/media';
 import { authorizedImageResponse, discardHdViewingInterest, type ImageVariant } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
+import { redirectMedia } from '@/lib/media/outlet';
+import { tryContentKeyParts } from '@/lib/content-reactions/key';
 export const dynamic = 'force-dynamic';
-export async function GET(request: Request) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: Request) {
   let requesterId: string | undefined;
   try {
     const started = performance.now();
     const params = new URL(request.url).searchParams;
     const user = await reactionUser();
     requesterId = user.id;
+    const key = tryContentKeyParts(params.get('key'));
+    const direct = key && ({ asset: 'asset', reference_image: 'reference', video_task: 'video', image_studio_task: 'image-task' } as const)[key.type as 'asset' | 'reference_image' | 'video_task' | 'image_studio_task'];
+    if (key && direct) return redirectMedia(request, user, { type: direct, id: key.id }, params.get('variant') || 'preview');
     const resolved = await resolveContent(user, parseContentKey(params.get('key')));
     if (!resolved?.source) throw new ReactionError('内容已不可用或无权访问', 404);
     const variant = params.get('variant') || 'preview';
@@ -43,5 +49,5 @@ export async function GET(request: Request) {
     if (requesterId && [401, 403, 404].includes(response.status)) await discardHdViewingInterest(request, requesterId);
     return response;
   }
-}
+});
 export const HEAD = GET;

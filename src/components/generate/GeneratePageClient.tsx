@@ -97,6 +97,7 @@ interface SeedanceDraftCapability {
 }
 
 type CreateTaskResponse = CreateResponse & {
+  local_status?: string;
   error?: string;
   message?: string;
   code?: string;
@@ -332,7 +333,7 @@ const RECENT_TASK_PAGE_SIZE = 12;
 const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
 const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
-const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+const POLLABLE_TASK_STATUSES = new Set(['created', 'submitting', 'unknown', 'submitted', 'running']);
 
 type GenerateSurface = 'standard' | 'ip';
 
@@ -2701,7 +2702,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (activeAccountIdRef.current !== currentUser.id) return;
       if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
       if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
-      const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED';
+      const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED'
+        || ['created', 'submitting', 'unknown'].includes(data.task.local_status || data.task.status);
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed); setResult(unconfirmed ? null : data.task);
       setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
@@ -2732,7 +2734,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       return payload.task || null;
     };
     const acceptRecoveredTask = (task: CreateTaskResponse) => {
-      const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
+      const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true
+        || ['created', 'submitting', 'unknown'].includes(task.local_status || task.status);
       if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
@@ -3855,6 +3858,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                             <span className={`composer-task-card-status ${task.local_status}`}>
                               {task.error_code === 'IP_SUBMISSION_UNCONFIRMED' ? '提交待确认' :
                                 task.error_code === 'IP_CANCEL_UNCONFIRMED' ? '取消待确认' :
+                                task.local_status === 'unknown' ? '提交待确认' :
+                                task.local_status === 'created' ? '准备提交' :
+                                task.local_status === 'submitting' ? '提交中' :
                                 task.local_status === 'submitted' ? '排队中' :
                                 task.local_status === 'running' ? '生成中' :
                                 task.local_status === 'succeeded' ? (task.delivery_stage?.label || '已生成') :

@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
@@ -62,6 +63,6 @@ async function handle(request: NextRequest, write = false) {
     return NextResponse.json({ error: write ? '操作结果待确认，请查询原批次，不要重复新建' : '批次读取失败，请重试' }, { status: 503 });
   }
 }
-export const GET = (request: NextRequest) => handle(request);
-export const POST = (request: NextRequest) => handle(request, true);
-export const PATCH = (request: NextRequest) => handle(request, true);
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => handle(request));
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => handle(request, true));
+export const PATCH = declaredRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => handle(request, true));

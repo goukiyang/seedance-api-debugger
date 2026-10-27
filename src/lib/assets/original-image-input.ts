@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { assertCanUseReferenceImage, canDownloadOriginal, getReferenceImageByIdForAccess } from '@/lib/reference-albums/permissions';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { sameOriginPublicUrlForSiteUpload, siteUploadBaseUrls } from './site-url';
+import { assertMedia, MEDIA_TYPES, type MediaType } from '@/lib/access/media-policy';
 
 function siteImageIdentity(raw: string) {
   let url: URL;
@@ -27,6 +28,26 @@ function siteImageIdentity(raw: string) {
 
 // Only identities carried by known media routes are resolved; filenames/thumbnail paths are never guessed.
 export async function originalImageInputUrl(user: SessionUser, raw: string): Promise<string> {
+  const parsed = new URL(raw, 'https://sd2.youdooart.com');
+  if (siteUploadBaseUrls().includes(parsed.origin)) {
+    const outlet = /^\/m\/([a-z-]+)\/([a-zA-Z0-9_-]+)\/([a-z-]+)$/.exec(parsed.pathname);
+    if (outlet) {
+      if (!(MEDIA_TYPES as readonly string[]).includes(outlet[1])) throw new AuthError('此地址没有可用的原件编号', 400);
+      const decision = await assertMedia(user, { type: outlet[1] as MediaType, id: outlet[2] }, 'download-original');
+      if (decision.source?.kind !== 'image' || !decision.source.url) throw new AuthError('不是可用的原图', 400);
+      return sameOriginPublicUrlForSiteUpload(decision.source.url) || decision.source.url;
+    }
+    if (parsed.pathname.startsWith('/uploads/')) {
+      const aliases = [parsed.pathname, ...siteUploadBaseUrls().map(base => base + parsed.pathname)];
+      const assets = await prisma.asset.findMany({ where: { original_url: { in: aliases }, type: 'image', status: 'active' }, select: { id: true }, take: 101 });
+      if (assets.length <= 100) for (const asset of assets) {
+        try { const decision = await assertMedia(user, { type: 'asset', id: asset.id }, 'download-original');
+          return sameOriginPublicUrlForSiteUpload(decision.source!.url) || decision.source!.url;
+        } catch (error) { if (!(error instanceof AuthError)) throw error; }
+      }
+      throw new AuthError('原图不存在或无权读取，请使用参考图编号', 403);
+    }
+  }
   const identity = siteImageIdentity(raw);
   if (!identity) return raw;
   let source: string;
@@ -71,5 +92,23 @@ export async function resolveImageInputUrls(user: SessionUser, body: Record<stri
   }
   for (const key of ['first_frame_url', 'last_frame_url']) {
     if (typeof body[key] === 'string' && body[key]) body[key] = await resolve(body[key] as string);
+  }
+  for (const [key, kind] of [['reference_video_urls', 'video'], ['referenceVideoUrls', 'video'],
+    ['reference_audio_urls', 'audio'], ['referenceAudioUrls', 'audio']] as const) {
+    const values = body[key];
+    if (!Array.isArray(values)) continue;
+    if (values.length > 80) throw new AuthError('参考素材数量过多，请减少选择', 400);
+    const next = [];
+    for (const value of values) {
+      if (typeof value !== 'string') { next.push(value); continue; }
+      const url = new URL(value, 'https://sd2.youdooart.com');
+      const outlet = siteUploadBaseUrls().includes(url.origin) && /^\/m\/([a-z-]+)\/([a-zA-Z0-9_-]+)\/([a-z-]+)$/.exec(url.pathname);
+      if (!outlet) { next.push(value); continue; }
+      if (url.username || url.password || !(MEDIA_TYPES as readonly string[]).includes(outlet[1])) throw new AuthError('参考素材地址无效', 400);
+      const decision = await assertMedia(user, { type: outlet[1] as MediaType, id: outlet[2] }, 'use');
+      if (decision.source?.kind !== kind || !decision.source.url) throw new AuthError('参考素材类型不匹配', 400);
+      next.push(sameOriginPublicUrlForSiteUpload(decision.source.url) || decision.source.url);
+    }
+    body[key] = next;
   }
 }

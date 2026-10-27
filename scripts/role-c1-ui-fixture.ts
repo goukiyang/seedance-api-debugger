@@ -27,7 +27,7 @@ async function main() {
   const mutation = () => randomUUID();
   try {
     await prisma.user.create({ data: { ...{ id: owner.id, name: owner.name, username: owner.username, email: owner.email },
-      password_hash: hashPassword(randomBytes(32).toString('hex')), account_type: 'internal', status: 'active',
+      password_hash: await hashPassword(randomBytes(32).toString('hex')), account_type: 'internal', status: 'active',
       feature_profile_id: INTERNAL_EMAIL_FEATURE_PROFILE_ID } });
     await prisma.creditAccount.create({ data: { user_id: owner.id, balance: 100 } });
     const project = await prisma.project.create({ data: { name: '角色候选隔离项目', type: 'personal', owner_user_id: owner.id, created_by: owner.id } });

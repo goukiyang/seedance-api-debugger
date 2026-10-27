@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,7 +34,7 @@ async function main() {
   const db = new PrismaClient({ datasources: { db: { url: `file:${databasePath}` } }, log: [{ level: 'query', emit: 'event' }] });
   db.$on('query', event => { if (/^(BEGIN|COMMIT|ROLLBACK)\b/.test(event.query)) pricingTransactionQueries.push(event.query); });
   assert.equal(await db.user.count(), 0); assert.equal(await db.platformSetting.count(), 0);
-  Reflect.set(globalThis, 'prisma', db);
+  setFixtureDatabase(db);
   const math = fixtureRequire('@/lib/pricing/math') as typeof import('@/lib/pricing/math');
   const { selectPricingRule, assertNoRuleAmbiguity } = fixtureRequire('@/lib/pricing/resolve') as typeof import('@/lib/pricing/resolve');
   const precision = fixtureRequire('@/lib/credits/precision') as typeof import('@/lib/credits/precision');
@@ -167,8 +168,8 @@ async function main() {
         frozenAmount: amount, terminalStatus: status, freezeSnapshot: frozen.snapshot });
       equal(precision.creditCents(settled.frozenBefore) - precision.creditCents(settled.frozenAfter), precision.creditCents(amount));
       equal(settled.actualCost, status === 'succeeded' ? amount : 0);
-      const budget = await allocateProjectTaskBudget(tx, { projectId: project.id, taskId: `precision-${index}`, amount, operatorId: user.id });
-      await settleProjectTaskBudget(tx, { projectId: project.id, taskId: `precision-${index}`, frozenAmount: amount,
+      const budget = await allocateProjectTaskBudget(tx, { projectId: project.id, taskId: `project-precision-${index}`, amount, operatorId: user.id });
+      await settleProjectTaskBudget(tx, { projectId: project.id, taskId: `project-precision-${index}`, frozenAmount: amount,
         freezeSnapshot: budget.snapshot, terminalStatus: status, operatorId: user.id });
     });
     if (status === 'succeeded') consumed = precision.addCredits(consumed, amount);

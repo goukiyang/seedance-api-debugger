@@ -19,10 +19,10 @@ async function main() {
   mock.method(dns, 'lookup', async () => mode === 'private'
     ? [{ address: '127.0.0.1', family: 4 }]
     : [{ address: '1.1.1.1', family: 4 }, { address: '8.8.8.8', family: 4 }]);
-  mock.method(https, 'get', (_url: URL, options: { signal: AbortSignal; lookup: Function }, onResponse: (response: EventEmitter) => void) => {
+  mock.method(https, 'request', (_url: URL, options: { signal: AbortSignal; lookup: Function }, onResponse: (response: EventEmitter) => void) => {
     requests++;
     options.lookup('', {}, (_error: unknown, address: string) => pinned.push(address));
-    const request = new EventEmitter() as EventEmitter & { destroy: () => void; reusedSocket: boolean };
+    const request = new EventEmitter() as EventEmitter & { destroy: (error?: Error) => void; end: () => void; reusedSocket: boolean };
     const response = new PassThrough() as PassThrough & { statusCode: number; headers: Record<string, string>; complete: boolean; setTimeout: (ms: number, callback: () => void) => void };
     let idle: ReturnType<typeof realTimeout> | undefined;
     let idleMs = 0;
@@ -40,7 +40,8 @@ async function main() {
       request.emit('close');
     };
     const abort = () => { const error = Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }); request.emit('error', error); response.destroy(error); close(); };
-    request.destroy = close;
+    request.destroy = (error) => { if (error) request.emit('error', error); close(); };
+    request.end = () => {};
     request.reusedSocket = false;
     response.once('close', close);
     response.statusCode = 200;

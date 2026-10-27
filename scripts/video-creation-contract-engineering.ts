@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { setFixtureDatabase } from './fixtures/database-client';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,8 @@ async function main() {
   let forbiddenCalls = 0;
   const forbidden = () => { forbiddenCalls++; throw new Error('Offline creation gate cannot open business services'); };
   const globalDb = new Proxy({}, { get: () => forbidden });
-  Object.assign(globalThis, { prisma: globalDb, prismaSqlitePragmasStarted: true, fetch: forbidden });
+  setFixtureDatabase(globalDb);
+  Object.assign(globalThis, { prismaSqlitePragmasStarted: true, fetch: forbidden });
   const { isCreationV2, creationIdentity } = await import('../src/lib/creation/contract');
   const { normalizeVideoCreationSpec, creationSpecHash } = await import('../src/lib/creation/intents');
   const { videoCreationSchemaReady } = await import('../src/lib/creation/context');
@@ -76,7 +78,7 @@ async function main() {
   await assert.rejects(() => consume({ pricingRevision: 'changed' }), /范围/);
   failCas = true; await assert.rejects(() => consume(), /余量/); assert.equal(writes, 2);
   checks.push('approval_actual_helper_expiry_revoke_scope_cost_cas_and_same_task_once');
-  const acceptanceSources = ['src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts',
+  const acceptanceSources = ['src/server/video-tasks/standard-create.ts', 'src/server/video-tasks/ip-create.ts',
     'src/app/api/tasks/enhance-video/create/route.ts', 'src/lib/tasks/seedance-draft-upgrade.ts'];
   for (const file of acceptanceSources) {
     const source = ts.createSourceFile(file, readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
@@ -91,9 +93,15 @@ async function main() {
     }
     assert.ok(transaction, `${file} acceptance must remain in the original transaction`);
     let createsTask = false;
-    const findTask = (node: ts.Node) => { if (ts.isCallExpression(node) && node.expression.getText(source) === 'tx.videoTask.create') createsTask = true; ts.forEachChild(node, findTask); };
+    const findTask = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && (node.expression.getText(source) === 'tx.videoTask.create'
+        || node.expression.getText(source) === 'createVideoTaskRecord' && node.arguments[0]?.getText(source) === 'tx')) createsTask = true;
+      ts.forEachChild(node, findTask);
+    };
     findTask(transaction); assert.ok(createsTask, `${file} must create the task in the same transaction`);
   }
+  const taskStateSource = readFileSync(path.join(root, 'src/lib/video/task-state.ts'), 'utf8');
+  assert.match(taskStateSource, /createVideoTaskRecord\(tx:[\s\S]*?tx\.videoTask\.create\(/, 'shared create must use the supplied transaction');
   checks.push('all_four_acceptors_bind_real_task_and_approval_in_original_transaction');
   // The original receipt hash includes owner, source, workspace, nonce and expected items.
   const operation = await buildTaskReuseOperationRequest('owner', 'task', { surface: 'normal', tabId: 'tab', workspaceId: 'workspace', expectedWorkspaceAssets: [] });

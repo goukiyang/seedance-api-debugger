@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { CreationError } from '@/lib/creation/contract';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -25,12 +26,12 @@ async function actor(request: NextRequest) {
   if (expected && expected !== user.id) throw new CanvasVideoBatchError('账号已变化，请重新确认账号', 409, 'pricing_actor_changed');
   return user;
 }
-export async function GET(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
   const params = await props.params;
   try { return json(await readCanvasVideoBatch(await actor(request), params.batchId, request.nextUrl.searchParams.get('operation_id'))); }
   catch (error) { return failure(error); }
-}
-export async function PATCH(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
+});
+export const PATCH = declaredRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
   const params = await props.params;
   try {
     const user = await actor(request);
@@ -51,4 +52,4 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ bat
     if (!canvasBatchObject(body)) throw new AuthError('请求参数无效', 400);
     return json(await mutateCanvasVideoBatch(user, params.batchId, body));
   } catch (error) { return failure(error); }
-}
+});

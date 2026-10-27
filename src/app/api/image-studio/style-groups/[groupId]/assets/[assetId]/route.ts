@@ -1,11 +1,13 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { canManageStudioStyle, getStudioStyleGroup } from '@/lib/image-studio/style-groups';
 import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders } from '@/lib/media/authorized-image-response';
+import { redirectMedia } from '@/lib/media/outlet';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(
+export const GET = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function GET(
   request: Request,
   props: { params: Promise<{ groupId: string; assetId: string }> }
 ) {
@@ -24,8 +26,7 @@ export async function GET(
     const query = new URL(request.url).searchParams;
     const hd = ['hd', 'hd-description', 'hd-download'].find(key => query.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
     const variant = hd || (query.get('thumbnail') === '1' ? 'thumbnail' : query.get('preview') === '1' ? 'preview' : query.get('detail') === '1' ? 'detail' : query.get('download') === '1' ? 'download' : 'original');
-    return await authorizedImageResponse(request, asset.original_url, variant, asset.mime_type || 'application/octet-stream', asset.file_name, undefined,
-      { requesterId: user.id, owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
+    return await redirectMedia(request, user, { type: 'asset', id: asset.id }, variant);
   } catch { return unavailable(); }
-}
+});
 export const HEAD = GET;

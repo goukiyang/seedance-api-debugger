@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
+import { loadAllAlbumPages } from '@/lib/reference-albums/client-pages';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
 import { handBulkVideoZipToBrowser } from '@/lib/video/native-bulk-download';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
@@ -1163,11 +1164,10 @@ function AssetsPageContent() {
   useEffect(() => {
     if (!user || !movePanelOpen || bulkTarget !== 'album') return;
     let cancelled = false;
-    fetch('/api/reference-albums?scope=all', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => {
+    loadAllAlbumPages<ReferenceAlbumItem>('/api/reference-albums?scope=all', 'albums', { ownerId: user.id })
+      .then((albums) => {
         if (cancelled) return;
-        const editableAlbums = ((data?.albums || []) as ReferenceAlbumItem[])
+        const editableAlbums = albums
           .filter((album) => album.permissions?.edit && album.status !== 'deleted');
         setReferenceAlbums(editableAlbums);
         setTargetAlbumId((current) => (

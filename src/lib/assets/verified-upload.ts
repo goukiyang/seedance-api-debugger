@@ -1,8 +1,10 @@
+import { openUntrustedImage, inspectUntrustedImageHeader } from '@/lib/media/decode-image';
+import { streamToTemporaryUpload, UploadStreamError } from './streamed-upload';
+import { mediaInputFlags } from '@/lib/media/probe-remote';
 import fs from 'node:fs/promises';
 import { constants as fsConstants, createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from '../media/sharp';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -334,13 +336,13 @@ async function verifyBitmap(file: string, bytes: number) {
   const offset = header.readUInt32LE(10);
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || width * height > 40_000_000
     || planes !== 1 || ![1, 4, 8, 16, 24, 32].includes(bpp) || offset < 14 + dibSize || offset >= bytes) throw new Error('bmp_bounds');
-  const { stdout } = await execFileAsync(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', '-f', 'bmp_pipe', '-show_entries',
+  const { stdout } = await execFileAsync(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', ...mediaInputFlags('image'), '-f', 'bmp_pipe', '-show_entries',
     'stream=codec_name,codec_type,width,height', '-of', 'json', file], { timeout: 15000, maxBuffer: 65536 });
   const metadata = JSON.parse(stdout) as { streams?: Array<{ codec_name?: string; codec_type?: string; width?: number; height?: number }> };
   const stream = metadata.streams?.[0];
   if (metadata.streams?.length !== 1 || stream?.codec_name !== 'bmp' || stream.codec_type !== 'video'
     || stream.width !== width || stream.height !== height) throw new Error('bmp_codec');
-  const decoded = await execFileAsync(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
+  const decoded = await execFileAsync(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', ...mediaInputFlags('image'), '-xerror', '-err_detect', 'explode',
     '-threads', '2', '-f', 'bmp_pipe', '-i', file, '-map', '0:v:0', '-threads', '2', '-progress', 'pipe:1', '-nostats', '-f', 'null', '-'], { timeout: 45000, maxBuffer: 65536 });
   const frames = Array.from(decoded.stdout.matchAll(/^frame=(\d+)\s*$/gm));
   if (frames.length === 0 || frames[frames.length - 1][1] !== '1' || !/^progress=end\s*$/m.test(decoded.stdout)) throw new Error('bmp_complete_frame');
@@ -354,10 +356,11 @@ async function inspectUpload(file: string, declared: string, hash: string, bytes
   let extension = '';
   if (type === 'image') {
     try {
+      await inspectUntrustedImageHeader(file);
       if (mimeType === 'image/bmp') {
         ({ width, height } = await verifyBitmap(file, bytes)); extension = 'bmp';
       } else {
-        const image = sharp(file, { animated: true, limitInputPixels: 40_000_000, failOn: 'warning' }).timeout({ seconds: 45 });
+        const image = (await openUntrustedImage(file, 'ordinary', { animated: true })).timeout({ seconds: 45 });
         const meta = await image.metadata();
         if (!meta.format || formats[meta.format] !== mimeType || !meta.width || !meta.height
           || meta.width * meta.height > 40_000_000 || (meta.pages || 1) > 100) throw new Error('format');
@@ -380,7 +383,7 @@ async function inspectUpload(file: string, declared: string, hash: string, bytes
     // a demuxer. Probe the actual container family rather than its first brand.
     if (!movFamily && detected !== mimeType) throw new VerifiedUploadError('UPLOAD_TYPE_MISMATCH', '文件实际类型与上传声明不一致', 400);
     try {
-      const { stdout } = await execFileAsync(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height:format=format_name,duration', '-of', 'json', file], { timeout: 15000, maxBuffer: 65536 });
+      const { stdout } = await execFileAsync(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', ...mediaInputFlags(type), '-show_entries', 'stream=codec_type,width,height:format=format_name,duration', '-of', 'json', file], { timeout: 15000, maxBuffer: 65536 });
       const metadata = JSON.parse(stdout);
       const streams = metadata.streams as Array<{ codec_type: string; width?: number; height?: number }>;
       const primary = streams?.find(stream => stream.codec_type === type);
@@ -391,7 +394,7 @@ async function inspectUpload(file: string, declared: string, hash: string, bytes
         || type === 'video' && (!primary.width || !primary.height || primary.width * primary.height > 40_000_000)) throw new Error('media_metadata');
       // Read every stream packet/frame, with strict decoder errors and bounded
       // CPU time. A valid header alone is not a complete media upload.
-      await execFileAsync(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode', '-threads', '2', '-i', file, '-map', type === 'video' ? '0:v:0' : '0:a:0', '-threads', '2', '-f', 'null', '-'], { timeout: 90000, maxBuffer: 65536 });
+      await execFileAsync(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode', '-threads', '2', ...mediaInputFlags(type), '-i', file, '-map', type === 'video' ? '0:v:0' : '0:a:0', '-threads', '2', '-f', 'null', '-'], { timeout: 90000, maxBuffer: 65536 });
       if (type === 'video') { width = primary.width!; height = primary.height!; }
     } catch { throw new VerifiedUploadError('UPLOAD_MEDIA_INVALID', '媒体无法完整验证，请检查文件或稍后重试', 400); }
     extension = ({ 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/mpeg': 'mp3', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' } as Record<string, string>)[mimeType];
@@ -399,32 +402,25 @@ async function inspectUpload(file: string, declared: string, hash: string, bytes
   if (await uploadFileVersion(file) !== version) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '文件验证期间已变化');
   return { file, hash, bytes, mimeType, type, width, height, version, extension };
 }
+export async function verifyUploadFile(file: string, declaredMime: string, hash: string, bytes: number) {
+  if (await uploadFileHash(file) !== hash) throw new VerifiedUploadError('UPLOAD_HASH_MISMATCH', '上传文件校验不一致', 400);
+  return inspectUpload(file, declaredMime, hash, bytes);
+}
 export async function stageVerifiedUpload(body: AsyncIterable<Uint8Array>, declaredMime: string, expectedBytes: number, expectedHash?: string) {
   const type = uploadKind(declaredMime), directory = await privateUploadDirectory();
   if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > limits[type]
     || expectedHash !== undefined && !/^[a-f0-9]{64}$/.test(expectedHash)) throw new VerifiedUploadError('UPLOAD_IDENTITY_INVALID', '文件身份或大小无效', 400);
-  const file = path.join(directory, `${randomUUID()}.upload`), handle = await fs.open(file, 'wx', 0o600);
-  const digest = createHash('sha256'); let bytes = 0;
+  let received: Awaited<ReturnType<typeof streamToTemporaryUpload>> | undefined;
   try {
-    const iterator = body[Symbol.asyncIterator]();
-    const deadline = Date.now() + 180000;
-    while (true) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const item = await Promise.race([iterator.next(), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new VerifiedUploadError('UPLOAD_BODY_TIMEOUT', '上传文件接收超时，未登记', 408)), Math.max(1, deadline - Date.now()));
-      })]).finally(() => clearTimeout(timer));
-      if (item.done) break;
-      const chunk = item.value;
-      bytes += chunk.byteLength;
-      if (bytes > expectedBytes || bytes > limits[type]) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '上传文件大小不一致', 400);
-      digest.update(chunk); await handle.writeFile(chunk);
-    }
-    await handle.sync(); await handle.close();
-    const hash = digest.digest('hex');
-    if (bytes !== expectedBytes || expectedHash && hash !== expectedHash) throw new VerifiedUploadError('UPLOAD_HASH_MISMATCH', '上传内容与文件校验信息不一致', 400);
-    return { ...await inspectUpload(file, declaredMime, hash, bytes), temporary: true };
-  } catch (error) { await handle.close().catch(() => {}); await fs.unlink(file).catch(() => {}); throw error; }
+    received = await streamToTemporaryUpload(body, { expectedBytes, expectedHash, maxBytes: limits[type], directory });
+    return { ...await inspectUpload(received.file, declaredMime, received.hash, received.bytes), temporary: true };
+  } catch (error) {
+    await received?.cleanup();
+    if (error instanceof UploadStreamError) throw new VerifiedUploadError(error.code, error.message, error.status);
+    throw error;
+  }
 }
+
 export async function verifyExistingUpload(asset: Asset, ownerId: string) {
   if (asset.owner_id !== ownerId || asset.status !== 'active' || !asset.hash) throw new VerifiedUploadError('UPLOAD_EXISTING_INACTIVE', '相同图片的原记录已隐藏或移除，原记录保留');
   const user = await uploadIdentity(ownerId);
@@ -452,8 +448,9 @@ export async function verifyExistingUpload(asset: Asset, ownerId: string) {
       return { ...proof, sourceVersion: `r2:${uploadDigest(key)}:${head.ETag}:${head.ContentLength}:${asset.hash}` };
     } catch (error) { await releaseVerifiedUpload(proof); throw error; }
   }
-  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-  const file = await fs.realpath(path.join(process.cwd(), 'public', local.replace(/^\/+/, ''))).catch(() => null);
+  const { mediaRoot, localMediaPath } = await import('@/lib/media/storage-roots');
+  const root = await fs.realpath(mediaRoot('uploads'));
+  const file = await fs.realpath(localMediaPath(local)).catch(() => null);
   if (!file || !file.startsWith(`${root}${path.sep}`)) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有原文件无法验证，未修改原记录');
   const version = await uploadFileVersion(file), stat = await fs.stat(file);
   if (stat.size !== asset.file_size || await uploadFileHash(file) !== asset.hash) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有原文件校验异常，未覆盖原文件');
@@ -473,7 +470,7 @@ export async function publishVerifiedFile(proof: VerifiedUpload, directory: stri
   await privateUploadDirectory();
   await fs.mkdir(directory, { recursive: true });
   const root = await fs.realpath(directory), file = path.join(root, name);
-  const uploadRoot = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
+  const uploadRoot = await fs.realpath((await import('@/lib/media/storage-roots')).mediaRoot('uploads'));
   if (!root.startsWith(`${uploadRoot}${path.sep}`) || process.platform === 'linux' && (!root.startsWith('/data/video-api-debugger/')
     || (await fs.stat(root)).dev === (await fs.stat('/')).dev)) throw new VerifiedUploadError('UPLOAD_DATA_MOUNT_REQUIRED', '原文件数据目录暂不可用', 503);
   if (path.basename(name) !== name || await uploadFileVersion(proof.file) !== proof.version) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '上传源已变化');

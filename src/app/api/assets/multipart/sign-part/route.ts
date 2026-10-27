@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/multipart/sign-part
  * 为单个 multipart part 生成短期 PUT 地址。
@@ -18,7 +19,7 @@ type MultipartSignPartBody = {
   partNumber?: number;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let partNumber: number | null = null;
@@ -66,4 +67,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ error: message }, { status: 400 });
   }
-}
+});

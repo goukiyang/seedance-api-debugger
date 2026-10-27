@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { assertUploadOwner, VerifiedUploadError } from '@/lib/assets/verified-upload';
@@ -10,7 +11,7 @@ function failure(error: unknown) {
   return error instanceof VerifiedUploadError ? NextResponse.json({ error: error.code, message: error.message }, { status: error.status })
     : NextResponse.json({ error: 'SIMILARITY_UNAVAILABLE', message: '相似图片检查暂不可用，已上传图片保留' }, { status: 503 });
 }
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -19,8 +20,8 @@ export async function GET(request: NextRequest) {
     if (!validId(assetId)) return NextResponse.json({ error: '素材编号无效' }, { status: 400 });
     return NextResponse.json(await uploadSimilarityCandidates(user.id, assetId, request.nextUrl.searchParams.get('cursor') || undefined));
   } catch (error) { return failure(error); }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -34,4 +35,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(await keepUploadSimilarityPair(user.id, body));
   } catch (error) { return failure(error); }
-}
+});

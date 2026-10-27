@@ -1,3 +1,6 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
+import { videoTaskViewSelect } from '@/lib/dto/video-task';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -60,7 +63,7 @@ function moveError(taskId: string, message: string) {
   return { task_id: taskId, ok: false, message };
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -115,9 +118,9 @@ export async function POST(request: NextRequest) {
 
     const tasks = await prisma.videoTask.findMany({
       where: { id: { in: taskIds } },
-      include: {
-        project: { select: { id: true, name: true, type: true } },
-        video_card: { select: { id: true, project_id: true, current_best_task_id: true, final_task_id: true } },
+      select: {
+        ...videoTaskViewSelect,
+        video_card: { select: { ...videoTaskViewSelect.video_card.select, current_best_task_id: true, final_task_id: true } },
       },
     });
     const taskById = new Map(tasks.map((task) => [task.id, task]));
@@ -195,10 +198,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[AssetLibraryBulkMove] Failed:', error);
-    return NextResponse.json(
-      { error: '批量移动失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

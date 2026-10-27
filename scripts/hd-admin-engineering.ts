@@ -30,7 +30,7 @@ async function main() {
   Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   await fs.mkdir(process.env.HD_DERIVATIVES_ROOT, { recursive: true, mode: 0o700 });
-  await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+  await fs.mkdir(path.join(directory, '.media/uploads'), { recursive: true });
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL,
     PRISMA_GENERATE_SKIP_AUTOINSTALL: '1', NEXT_TELEMETRY_DISABLED: '1' };
   for (const name of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[name]) env[name] = process.env[name];
@@ -41,8 +41,8 @@ async function main() {
   const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
-  const { hdReadonlyDb } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');
-  const { createSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
+  const { hdReadRepository } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');
+  const { createSession, SESSION_COOKIE } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const core = require('../src/lib/media/hd-derivatives') as typeof import('../src/lib/media/hd-derivatives');
   const route = require('../src/app/api/admin/hd-derivatives/route') as typeof import('../src/app/api/admin/hd-derivatives/route');
   let forbiddenCalls = 0;
@@ -59,7 +59,7 @@ async function main() {
       tokens[id] = await createSession(id);
     }
     const invoke = async (actor: string | null, action?: string, token?: string, sameOrigin = true) => {
-      const headers = new Headers({ Host: 'hd-admin-isolated.invalid', ...(actor ? { Cookie: `session=${tokens[actor]}` } : {}),
+      const headers = new Headers({ Host: 'hd-admin-isolated.invalid', ...(actor ? { Cookie: `${SESSION_COOKIE}=${tokens[actor]}` } : {}),
         ...(action ? { 'Content-Type': 'application/json', Origin: sameOrigin ? 'http://hd-admin-isolated.invalid' : 'http://other.invalid' } : {}) });
       const request = new Request('http://hd-admin-isolated.invalid/api/admin/hd-derivatives', {
         method: action ? 'POST' : 'GET', headers, ...(action ? { body: JSON.stringify({ action, token }) } : {}),
@@ -82,7 +82,7 @@ async function main() {
 
     const image = await sharp({ create: { width: 16, height: 16, channels: 3, background: { r: 51, g: 82, b: 115 } } }).png().toBuffer();
     const writeJob = async (name: string, overrides: Record<string, unknown>) => {
-      await fs.writeFile(path.join(directory, 'public/uploads', `${name}.png`), image);
+      await fs.writeFile(path.join(directory, '.media/uploads', `${name}.png`), image);
       const job = await core.requestHd(`/uploads/${name}.png`, 0, false); assert.ok(job);
       await core.atomicHdJson(path.join(core.hdDirectory(), `${job.key}.json`), {
         ...job, status: 'failed', attempts: 3, attemptLimit: 3, updatedAt: new Date().toISOString(), ...overrides,
@@ -160,7 +160,7 @@ async function main() {
     await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt), { mode: 0o600 });
     console.log(JSON.stringify(receipt));
   } finally {
-    mock.restoreAll(); await prisma.$disconnect(); await hdReadonlyDb.$disconnect();
+    mock.restoreAll(); await prisma.$disconnect(); await hdReadRepository.close();
     process.chdir(applicationRoot); process.umask(oldUmask);
   }
 }

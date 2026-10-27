@@ -1,5 +1,6 @@
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
 import { createVideoCallbackToken } from './callback-auth';
+import { validatePublicUrl } from '@/lib/net/safe-fetch';
 
 const SYSTEM_CALLBACK_PATH = '/api/provider/seedance/callback';
 
@@ -51,6 +52,11 @@ function normalizeExternalCallbackUrl(value: string | null | undefined) {
   const url = value?.trim();
   if (!url || !isPubliclyReachableUrl(url)) return null;
   return url;
+}
+
+// DNS-only registration check. Delivery repeats the same checks and pins the connection.
+export async function validateExternalCallbackUrl(value: string | null | undefined) {
+  if (value?.trim()) await validatePublicUrl(value.trim());
 }
 
 export function resolveVideoDeliveryCallbackConfig(input: CallbackConfigInput): VideoDeliveryCallbackConfig {

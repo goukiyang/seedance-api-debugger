@@ -1,9 +1,12 @@
-import crypto from 'crypto';
 import { cookies } from 'next/headers';
+import { PublicApiError } from '@/lib/http/public-error';
 import { prisma } from '@/lib/prisma';
-import { verifyPassword } from './password';
-import { sessionAccountPayload, sessionAccountPayloadMatches, type SessionAccount } from './session-account-binding';
 import { authenticatePrivateIdentity, PRIVATE_IDENTITY_COOKIE } from '@/lib/security/private-prompt-identity.server';
+import { verifyPassword } from './password';
+import { completeLogin, LoginRejectedError, toSessionUser } from './complete-login';
+import { resolveSession, revokeSession, type SessionDevice } from './session-store';
+import { sessionCookieName } from './session-cookie-name';
+import { SessionUnavailableError } from './session-errors';
 
 export interface SessionUser {
   id: string;
@@ -29,190 +32,45 @@ export interface SessionUser {
   };
 }
 
-export const SESSION_COOKIE = 'session';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
+export { createSession } from './session-store';
+export { SessionUnavailableError } from './session-errors';
+export const SESSION_COOKIE = sessionCookieName();
 
 export function parseSessionCookie(rawCookie: string): string | null {
-  const cookieHeader = rawCookie.trim();
-  const prefix = `${SESSION_COOKIE}=`;
-  const match = cookieHeader
-    .split(';')
-    .map((item) => item.trim())
-    .find((item) => item.startsWith(prefix));
-  if (!match) return null;
-  return match.slice(prefix.length);
-}
-
-function parseJsonArray(value: string | null): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
+  const prefix = `${sessionCookieName()}=`;
+  return rawCookie.split(';').map((part) => part.trim()).find((part) => part.startsWith(prefix))?.slice(prefix.length) || null;
 }
 
 export async function getSession(): Promise<SessionUser | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  const store = await cookies();
+  const token = store.get(sessionCookieName())?.value;
   if (!token) return null;
   const user = await getSessionByToken(token);
-  if (user) authenticatePrivateIdentity(user, cookieStore.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
+  if (user) authenticatePrivateIdentity(user, store.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
   return user;
 }
 
 export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
-  if (!token) return null;
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 2) return null;
-    const [userIdB64, sig] = parts;
-    // 注意：createSession 签名时 update 的是 base64 字符串本身（payload），
-    // 因此这里也必须用 userIdB64 做 HMAC，不能先解码。
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(userIdB64).digest('base64');
-    const providedBuffer = Buffer.from(sig);
-    const expectedBuffer = Buffer.from(expected);
-    if (
-      providedBuffer.length !== expectedBuffer.length ||
-      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
-    ) {
-      return null;
-    }
-
-    const decodedPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
-    const [accountPayload, nonce, extra] = decodedPayload.split('~');
-    if (extra !== undefined || nonce !== undefined && !/^[A-Za-z0-9_-]{32}$/.test(nonce)) return null;
-    const userId = accountPayload.split(':')[0];
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        password_hash: true,
-        name: true,
-        username: true,
-        email: true,
-        role: true,
-        account_type: true,
-        user_profile: true,
-        feature_profile_id: true,
-        status: true,
-        expires_at: true,
-        mobile: true,
-        avatar_url: true,
-        feishu_user_id: true,
-        feishu_open_id: true,
-        feishu_union_id: true,
-        feishu_tenant_key: true,
-        feishu_employee_no: true,
-        feishu_department_ids: true,
-        last_feishu_sync_at: true,
-      },
-    });
-    if (!user || user.status !== 'active') return null;
-    if (user.expires_at && user.expires_at.getTime() <= Date.now()) return null;
-
-    if (user.role !== 'admin' && user.role !== 'user') return null;
-    if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
-    if (!sessionAccountPayloadMatches(accountPayload, user, SESSION_SECRET)) return null;
-    return {
-      id: user.id,
-      name: user.name,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      account_type: user.account_type,
-      user_profile: user.user_profile,
-      feature_profile_id: user.feature_profile_id,
-      status: user.status,
-      expires_at: user.expires_at,
-      mobile: user.mobile,
-      avatar_url: user.avatar_url,
-      feishu: {
-        user_id: user.feishu_user_id,
-        open_id: user.feishu_open_id,
-        union_id: user.feishu_union_id,
-        tenant_key: user.feishu_tenant_key,
-        employee_no: user.feishu_employee_no,
-        department_ids: parseJsonArray(user.feishu_department_ids),
-        last_sync_at: user.last_feishu_sync_at,
-      },
-    };
-  } catch {
-    return null;
-  }
+  const user = await resolveSession(token);
+  return user ? toSessionUser(user) : null;
 }
 
-export async function createSession(userId: string, authenticatedAccount?: SessionAccount): Promise<string> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, role: true, account_type: true, feature_profile_id: true, password_hash: true,
-      user_profile: true, status: true, expires_at: true },
-  });
-  if (!user || user.status !== 'active' || (user.expires_at && user.expires_at.getTime() <= Date.now())) {
-    throw new Error('Cannot create a session for an unavailable account');
-  }
-  if (authenticatedAccount && sessionAccountPayload(user, SESSION_SECRET) !== sessionAccountPayload(authenticatedAccount, SESSION_SECRET)) {
-    throw new Error('Account changed during authentication');
-  }
-  const payload = Buffer.from(`${sessionAccountPayload(user, SESSION_SECRET)}~${crypto.randomBytes(24).toString('base64url')}`).toString('base64');
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
-  return `${payload}.${sig}`;
-}
-
-export async function login(
-  identifier: string,
-  password: string
-): Promise<{ user: SessionUser; token: string } | { error: string; status: number }> {
-  const user = await prisma.user.findFirst({
-    where: {
-      OR: [{ username: identifier }, { email: identifier }],
-    },
-  });
-  if (!user) return { error: '账号或密码错误', status: 401 };
-  if (user.status === 'disabled') return { error: '账号已被禁用', status: 403 };
-  if (user.status === 'deleted') return { error: '账号或密码错误', status: 401 };
-  if (user.status === 'pending') return { error: '账号待开通，请联系管理员', status: 403 };
-  if (user.status === 'expired') return { error: '账号已过期，请联系管理员', status: 403 };
-  if (user.status !== 'active') return { error: '账号当前不可用', status: 403 };
-  if (user.expires_at && user.expires_at.getTime() <= Date.now()) {
-    return { error: '账号已过期，请联系管理员', status: 403 };
-  }
-
-  if (!verifyPassword(password, user.password_hash)) {
-    return { error: '账号或密码错误', status: 401 };
-  }
-
-  let token: string;
+export async function login(identifier: string, password: string, device?: SessionDevice): Promise<{ user: SessionUser; token: string } | { error: string; status: number }> {
   try {
-    // Do not mint a new bound cookie from a password verified before a reset.
-    const changed = await prisma.user.updateMany({
-      where: { id: user.id, password_hash: user.password_hash, status: 'active' },
-      data: { last_login_at: new Date() },
-    });
-    if (changed.count !== 1) return { error: '账号状态已变化，请重新登录', status: 401 };
-    token = await createSession(user.id, user);
-  } catch {
-    return { error: '账号状态已变化，请重新登录', status: 401 };
+    const user = await prisma.user.findFirst({ where: { OR: [{ username: identifier }, { email: identifier }] } });
+    const passwordValid = await verifyPassword(password, user?.password_hash);
+    if (!passwordValid || !user) return { error: '账号或密码错误', status: 401 };
+    return await completeLogin({ userId: user.id, expectedAccount: user, device }, 'password');
+  } catch (error) {
+    if (error instanceof LoginRejectedError) return { error: error.message, status: error.status };
+    throw new SessionUnavailableError();
   }
-  const role = user.role === 'admin' ? 'admin' : 'user';
-  const accountType = user.account_type === 'external' ? 'external' : 'internal';
-  return {
-    user: {
-      id: user.id, name: user.name, username: user.username,
-      email: user.email, role, account_type: accountType,
-      user_profile: user.user_profile || 'other',
-      feature_profile_id: user.feature_profile_id,
-      status: 'active',
-      expires_at: user.expires_at,
-      avatar_url: user.avatar_url,
-    },
-    token,
-  };
 }
 
 export async function logout(): Promise<void> {
-  // 服务端无状态，cookie 清除由前端处理
+  const store = await cookies();
+  const token = store.get(sessionCookieName())?.value;
+  if (token) await revokeSession(token);
 }
 
 export function requireAuth(user: SessionUser | null): asserts user is SessionUser {
@@ -220,12 +78,10 @@ export function requireAuth(user: SessionUser | null): asserts user is SessionUs
 }
 
 export function requireAdmin(user: SessionUser | null): asserts user is SessionUser {
-  if (!user) throw new AuthError('未登录', 401);
+  requireAuth(user);
   if (user.role !== 'admin') throw new AuthError('权限不足', 403);
 }
 
-export class AuthError extends Error {
-  constructor(message: string, public readonly status: number) {
-    super(message);
-  }
+export class AuthError extends PublicApiError {
+  constructor(message: string, public readonly status: number) { super(message, status); }
 }

@@ -1,3 +1,4 @@
+import { publicHttpUrl } from '@/lib/net/public-address';
 import type {
   EnhanceVideoCreateInput,
   EnhanceVideoResolution,
@@ -60,18 +61,6 @@ function readOptionalInteger(value: unknown, label: string, min: number, max: nu
   return number;
 }
 
-function isPrivateHttpHost(hostname: string) {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) return true;
-
-  const match = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!match) return false;
-  const [first, second] = match.slice(1, 3).map(Number);
-  if (first === 10 || first === 127 || first === 0 || first === 169) return true;
-  if (first === 192 && second === 168) return true;
-  if (first === 172 && second >= 16 && second <= 31) return true;
-  return false;
-}
 
 export function validateEnhanceVideoUrl(videoUrl: string) {
   let parsed: URL;
@@ -84,7 +73,7 @@ export function validateEnhanceVideoUrl(videoUrl: string) {
   if (!ALLOWED_VIDEO_URL_PROTOCOLS.includes(parsed.protocol as typeof ALLOWED_VIDEO_URL_PROTOCOLS[number])) {
     throw new Error(`video_url 协议只支持 ${ALLOWED_VIDEO_URL_PROTOCOLS.join(', ')}`);
   }
-  if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && isPrivateHttpHost(parsed.hostname)) {
+  if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !publicHttpUrl(videoUrl)) {
     throw new Error('video_url 不能指向本机或内网地址');
   }
 

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
@@ -6,11 +7,12 @@ import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders 
 import { performance } from 'node:perf_hooks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { redirectMedia } from '@/lib/media/outlet';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ assetId: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: { params: Promise<{ assetId: string }> }) {
   const params = await props.params;
   const started = performance.now();
   const user = await getSession();
@@ -37,10 +39,9 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ asse
     const detail = _request.nextUrl.searchParams.get('detail') === '1';
     const download = _request.nextUrl.searchParams.get('download') === '1';
     const hd = ['hd', 'hd-description', 'hd-download'].find(key => _request.nextUrl.searchParams.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
-    return await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started,
-      { requesterId: user.id, owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
+    return await redirectMedia(_request, user, { type: 'asset', id: asset.id }, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'));
   } catch {
     return NextResponse.json({ error: '图片读取失败，请重试' }, { status: 503, headers: privateImageHeaders });
   }
-}
+});
 export const HEAD = GET;

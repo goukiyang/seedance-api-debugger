@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
@@ -8,7 +9,7 @@ function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     await getAdminUser(request);
@@ -22,9 +23,9 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
   });
   if (!feedback) return errorJson('反馈不存在', 404);
   return NextResponse.json({ feedback });
-}
+});
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = apiRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   let admin;
   try {
@@ -69,5 +70,5 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     console.error('[Admin Feedback PATCH]', error);
     return errorJson('更新失败', 500);
   }
-}
+});
 

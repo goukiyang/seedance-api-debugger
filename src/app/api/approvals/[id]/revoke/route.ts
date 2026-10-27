@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { prisma } from '@/lib/prisma';
 import { getProjectAccess } from '@/lib/projects/permissions';
 import { CreationError, creationIdentity } from '@/lib/creation/contract';
@@ -5,7 +6,7 @@ import { assertVideoCreationReady } from '@/lib/creation/context';
 import { creationHttp, creationBody } from '@/lib/creation/http';
 import { readCreationOperation, writeCreationOperation } from '@/lib/creation/receipts';
 export const dynamic = 'force-dynamic';
-export async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return creationHttp(async user => {
     await assertVideoCreationReady();
@@ -27,13 +28,13 @@ export async function POST(request: Request, props: { params: Promise<{ id: stri
         { approval_id: approval.id, status: 'cancelled', used_count: approval.used_count, used_cost_cents: approval.used_cost_cents }) };
     });
   });
-}
+});
 
-export async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: Request, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return creationHttp(async user => {
     const requestId = creationIdentity(new URL(request.url).searchParams.get('request_id'), 'request_id')!;
     const original = await readCreationOperation(prisma, user.id, `approval:${params.id}`, requestId);
     return { operation: original ? { state: original.state, requestId: original.requestId, observedAt: original.observedAt } : null };
   });
-}
+});

@@ -6,6 +6,9 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { uploadFileAsAsset, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import type { LocalAssetRecord } from '@/lib/provider/seedance-assets-types';
+import { useSeedanceAssetPages } from '@/lib/pagination/use-seedance-pages';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { ChevronDown, Loader2, RotateCcw } from 'lucide-react';
 
 interface AssetPanelProps {
   visible: boolean;
@@ -40,14 +43,16 @@ function buildAssetUploadProgress(file: File, progress: UploadProgressSnapshot):
 
 export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const { confirm, productDialog } = useProductDialog();
-  const [assets, setAssets] = useState<LocalAssetRecord[]>([]);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [includeDeleted, setIncludeDeleted] = useState(false);
+  const pages = useSeedanceAssetPages(visible, includeDeleted);
+  const { assets, loading, loadingMore, pagination, error: listError, refresh: loadAssets } = pages;
+  const listScope = useRef(pages.scope); listScope.current = pages.scope;
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ asset?: LocalAssetRecord; error?: string; providerSyncError?: string } | null>(null);
+  const [detailScope, setDetailScope] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -60,21 +65,9 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   const [uploadProgress, setUploadProgress] = useState<AssetUploadProgress | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 加载列表
-  const loadAssets = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/assets/list?includeDeleted=${includeDeleted}`);
-      const data = await res.json();
-      setAssets(data.assets || []);
-    } finally {
-      setLoading(false);
-    }
-  }, [includeDeleted]);
-
   useEffect(() => {
-    if (visible) loadAssets();
-  }, [visible, loadAssets]);
+    setDetail(null); setDetailId(null); setEditId(null);
+  }, [pages.scope]);
 
   // 创建资产
   const handleCreate = useCallback(async () => {
@@ -109,14 +102,17 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
 
   // 查看详情（同步官方）
   const handleGetDetail = useCallback(async (localId: string) => {
+    const scope = listScope.current;
+    setDetailScope(scope);
     setDetailId(localId);
     setDetail(null);
     try {
       const res = await fetch(`/api/assets/${localId}`);
       const data = await res.json();
+      if (listScope.current !== scope || isClientSessionBlocked()) return;
       setDetail(data);
     } catch {
-      setDetail({ error: '网络错误' });
+      if (listScope.current === scope && !isClientSessionBlocked()) setDetail({ error: '网络错误' });
     }
   }, []);
 
@@ -167,7 +163,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
     if (!ok) return;
     setActionMsg(null);
     try {
-      const res = await fetch(`/api/assets/${localId}/provider-delete`, { method: 'DELETE' });
+      const res = await fetch(`/api/assets/${localId}/provider-delete`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm_asset_id: localId }) });
       const data = await res.json();
       if (!res.ok) {
         setActionMsg(`× 彻底删除失败：${data.error}`);
@@ -254,6 +250,8 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
   }, [uploadFile, uploadName, loadAssets]);
 
   if (!visible) return null;
+  const shownDetail = detailScope === pages.scope ? detail : null;
+  const shownDetailId = detailScope === pages.scope ? detailId : null;
 
   const statusBadge = (s: string) => {
     const cls = s === 'Active' ? 'bg-green-900 text-green-300'
@@ -279,7 +277,8 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
         <div style={{ fontSize: 14, fontWeight: 600, color: 'white' }}>Seedance 资产管理（测试）</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
-            onClick={loadAssets}
+            onClick={() => void loadAssets()}
+            disabled={loading}
             style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 8, padding: '4px 12px', cursor: 'pointer' }}
           >
             {loading ? '加载中...' : '刷新列表'}
@@ -379,7 +378,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
           {/* 列表 */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.5)' }}>
-              本地资产列表（{assets.length}）
+              本地资产列表（{assets.length}{pagination ? ` / ${pagination.total}` : ''}）
             </div>
             <button
               onClick={() => { setIncludeDeleted(!includeDeleted); }}
@@ -388,7 +387,7 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               {includeDeleted ? '已显示已删除' : '显示已删除'}
             </button>
           </div>
-          {assets.length === 0 ? (
+          {loading && assets.length === 0 ? <div role="status" style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', padding: '20px 0', textAlign: 'center' }}>加载中...</div> : assets.length === 0 && !listError && pagination?.total === 0 ? (
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '20px 0' }}>暂无资产，上方创建</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -471,38 +470,50 @@ export function SeedanceAssetPanel({ visible, onClose }: AssetPanelProps) {
               })}
             </div>
           )}
+          {listError && <div role="status" style={{ marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.76)' }}>
+            {listError.message}
+            <button type="button" onClick={() => void pages.retry()} disabled={loading || loadingMore}
+              style={{ marginLeft: 8, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <RotateCcw size={12} aria-hidden="true" />重试
+            </button>
+          </div>}
+          {pagination?.hasMore && !listError && <button type="button" onClick={() => void pages.more()} disabled={loading || loadingMore}
+            style={{ width: '100%', marginTop: 10, padding: '7px 12px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.15)', background: 'none', color: 'rgba(255,255,255,0.76)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            {loadingMore ? <Loader2 size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}{loadingMore ? '加载中...' : '加载更多'}
+          </button>}
+          {pagination && !pagination.hasMore && assets.length > 0 && !loading && !listError && <div role="status" style={{ marginTop: 10, fontSize: 11, color: 'rgba(255,255,255,0.45)', textAlign: 'center' }}>已显示全部 {pagination.total} 项</div>}
         </div>
 
         {/* 右侧：详情 */}
         <div style={{ overflowY: 'auto', borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.5)', marginBottom: 12 }}>
-            官方详情 {detailId ? `#${detailId.slice(0, 8)}` : ''}
+            官方详情 {shownDetailId ? `#${shownDetailId.slice(0, 8)}` : ''}
           </div>
-          {!detail ? (
+          {!shownDetail ? (
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', textAlign: 'center', padding: '40px 0' }}>
               点击「查详情」获取官方同步信息
             </div>
-          ) : detail.error ? (
+          ) : shownDetail.error ? (
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.76)', padding: 12, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.18)' }}>
-              官方查询失败：{detail.error}
+              官方查询失败：{shownDetail.error}
             </div>
-          ) : detail.asset ? (
+          ) : shownDetail.asset ? (
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {detail.providerSyncError && (
+              {shownDetail.providerSyncError && (
                 <div style={{ fontSize: 11, color: '#fbbf24', padding: '4px 8px', backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: 6, border: '1px solid rgba(245,158,11,0.2)' }}>
-                  同步警告：{detail.providerSyncError}
+                  同步警告：{shownDetail.providerSyncError}
                 </div>
               )}
               {[
-                ['官方ID', detail.asset.providerAssetId],
-                ['名称', detail.asset.name],
-                ['类型', detail.asset.assetType],
-                ['本地状态', detail.asset.status],
-                ['官方状态', detail.asset.providerStatus || '(无)'],
-                ['官方预览', detail.asset.providerPreviewUrl || '(无)'],
-                ['用户URL', detail.asset.originalUrl],
-                ['创建时间', detail.asset.createdAt],
-                ['更新时间', detail.asset.updatedAt],
+                ['官方ID', shownDetail.asset.providerAssetId],
+                ['名称', shownDetail.asset.name],
+                ['类型', shownDetail.asset.assetType],
+                ['本地状态', shownDetail.asset.status],
+                ['官方状态', shownDetail.asset.providerStatus || '(无)'],
+                ['官方预览', shownDetail.asset.providerPreviewUrl || '(无)'],
+                ['用户URL', shownDetail.asset.originalUrl],
+                ['创建时间', shownDetail.asset.createdAt],
+                ['更新时间', shownDetail.asset.updatedAt],
               ].map(([k, v]) => (
                 <div key={k} style={{ display: 'flex', gap: 8 }}>
                   <span style={{ color: 'rgba(255,255,255,0.4)', minWidth: 60 }}>{k}</span>

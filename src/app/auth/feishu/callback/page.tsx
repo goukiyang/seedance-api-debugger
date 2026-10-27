@@ -12,6 +12,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   access_denied: '你已取消飞书授权',
   missing_code: '飞书回调缺少授权码',
   invalid_state: '飞书登录状态已失效，请重新发起登录',
+  binding_required: '请先用原账号登录，再在个人信息中选择绑定飞书。',
+  binding_session_expired: '原账号登录状态已变化，请重新登录后绑定飞书。',
   disabled: '飞书登录暂未启用',
   not_configured: '飞书登录配置不完整',
   cli_login_disabled: '飞书 CLI 登录未启用',

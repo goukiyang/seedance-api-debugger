@@ -1,13 +1,16 @@
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
+import { toUserSummary, userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
-import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_TASK_STATUSES = new Set(['draft', 'submitted', 'running', 'succeeded', 'failed', 'cancelled']);
+const VALID_TASK_STATUSES = new Set(['draft', 'created', 'submitting', 'unknown', 'submitted', 'running', 'succeeded', 'failed', 'cancelled']);
 const VALID_RETENTION_STATUSES = new Set(['active', 'user_deleted', 'admin_hidden', 'retained']);
 const VALID_RESOLUTIONS = new Set(['480p', '720p', '1080p', 'unknown']);
 
@@ -139,28 +142,9 @@ function buildWhere(searchParams: URLSearchParams): Prisma.VideoTaskWhereInput {
   return where;
 }
 
-function userSummary(user: {
-  id: string;
-  name: string | null;
-  username: string;
-  email: string;
-  avatar_url: string | null;
-  account_type: string;
-} | null | undefined) {
-  if (!user) return null;
-  return {
-    id: user.id,
-    name: user.name,
-    username: user.username,
-    email: user.email,
-    avatar_url: user.avatar_url,
-    account_type: user.account_type,
-  };
-}
-
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
-    await getAdminUser(request);
+    const admin = await getAdminUser(request);
 
     const searchParams = request.nextUrl.searchParams;
     if (searchParams.has('page') && (!/^\d+$/.test(searchParams.get('page') || '') || Number(searchParams.get('page')) < 1 || Number(searchParams.get('page')) > 10000)
@@ -187,55 +171,9 @@ export async function GET(request: NextRequest) {
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
-        select: {
-          id: true,
-          prompt: true,
-          provider: true,
-          source_type: true,
-          source_label: true,
-          source_request_id: true,
-          local_status: true,
-          delivery_status: true,
-          provider_task_id: true,
-          provider_status: true,
-          model: true,
-          is_draft: true,
-          draft_upgrade_mode: true,
-          source_draft_task_id: true,
-          generation_mode: true,
-          resolution: true,
-          duration: true,
-          ratio: true,
-          estimated_cost: true,
-          actual_cost: true,
-          frozen_cost: true,
-          refund_amount: true,
-          provider_cost_status: true,
-          provider_official_amount_minor: true,
-          provider_official_amount_micros: true,
-          provider_cost_currency: true,
-          public_video_url: true,
-          result_video_url: true,
-          result_last_frame_url: true,
-          local_video_path: true,
-          reference_image_ids: true,
-          reference_album_ids: true,
-          project_id: true,
-          owner_user_id: true,
-          user_id: true,
-          retention_status: true,
-          user_deleted_at: true,
-          user_deleted_by: true,
-          admin_hidden_at: true,
-          admin_hidden_by: true,
-          restored_at: true,
-          restored_by: true,
-          delete_reason: true,
-          created_at: true,
-          completed_at: true,
-          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-          project: { select: { id: true, name: true, type: true, status: true } },
+        select: { ...videoTaskViewSelect,
+          owner: { select: { ...userSummarySelect, email: true } },
+          user: { select: { ...userSummarySelect, email: true } },
         },
       }),
       retentionQuery,
@@ -257,14 +195,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       outputs: tasks.map((task) => ({
-        ...task,
-        ...taskThumbnailProjection(task),
+        ...toVideoTaskView(task, admin),
         is_enhance_task: task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit',
-        owner: userSummary(task.owner || task.user),
-        submitted_user: userSummary(task.user),
-        user_deleted_by_user: userSummary(task.user_deleted_by ? actorById.get(task.user_deleted_by) : null),
-        admin_hidden_by_user: userSummary(task.admin_hidden_by ? actorById.get(task.admin_hidden_by) : null),
-        restored_by_user: userSummary(task.restored_by ? actorById.get(task.restored_by) : null),
+        owner: toUserSummary(task.owner || task.user, admin),
+        submitted_user: toUserSummary(task.user, admin),
+        user_deleted_by_user: toUserSummary(task.user_deleted_by ? actorById.get(task.user_deleted_by) : null, admin),
+        admin_hidden_by_user: toUserSummary(task.admin_hidden_by ? actorById.get(task.admin_hidden_by) : null, admin),
+        restored_by_user: toUserSummary(task.restored_by ? actorById.get(task.restored_by) : null, admin),
       })),
       summary: {
         total_all: retentionGroups.reduce((sum, item) => sum + item._count._all, 0),
@@ -279,13 +216,6 @@ export async function GET(request: NextRequest) {
       },
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    console.error('[AdminOutputs] List error:', error);
-    const status = error && typeof error === 'object' && 'status' in error
-      ? Number((error as { status?: number }).status) || 500
-      : 500;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '加载产出失败' },
-      { status },
-    );
+    return apiErrorResponse(error);
   }
-}
+});

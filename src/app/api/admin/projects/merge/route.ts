@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import { mergeProjects } from '@/lib/projects/merge';
@@ -10,7 +11,7 @@ function normalizeIds(value: unknown) {
     : [];
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin;
   try {
     admin = await getAdminUser(request);
@@ -42,4 +43,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return errorJson(error instanceof Error ? error.message : '项目合并失败', 400);
   }
-}
+});

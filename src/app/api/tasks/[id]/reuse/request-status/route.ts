@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -5,7 +6,7 @@ import { parseTaskReuseOperationRequest } from '@/lib/navigation/task-reuse-inte
 import { readTaskReuseOperation, legacyTaskReuseCloseCapability, TaskReuseOperationError, taskReusePrivateHeaders } from '@/lib/navigation/task-reuse-operation.server';
 
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -28,4 +29,4 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     console.error('[TaskReuseStatus]', error);
     return NextResponse.json({ code: 'REUSE_RESULT_UNKNOWN', error: '原复用结果暂时无法核对，请保留原操作。' }, { status: 503, headers: taskReusePrivateHeaders });
   }
-}
+});

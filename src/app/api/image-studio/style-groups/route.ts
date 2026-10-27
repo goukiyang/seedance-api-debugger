@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, listStudioStyleGroupsPage, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO } from '@/lib/image-studio/style-groups';
@@ -8,7 +9,7 @@ function failure(error: unknown) {
   if (error instanceof SyntaxError) return NextResponse.json({ error: '风格组内容无效' }, { status: 400 });
   return NextResponse.json({ error: '风格组操作未确认，请重试' }, { status: 503 });
 }
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
@@ -34,8 +35,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(await listStudioStyleGroups(user, params.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
   }
   catch (error) { return failure(error); }
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
@@ -43,9 +44,9 @@ export async function POST(request: NextRequest) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioStyleError('风格组内容无效');
     return NextResponse.json(await saveStudioStyleGroup(user, body));
   } catch (error) { return failure(error); }
-}
+});
 export const PUT = POST;
-export async function DELETE(request: NextRequest) {
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
@@ -53,4 +54,4 @@ export async function DELETE(request: NextRequest) {
     await deleteStudioStyleGroup(user, String(body?.id || ''), body?.revision);
     return NextResponse.json({ deleted: true });
   } catch (error) { return failure(error); }
-}
+});

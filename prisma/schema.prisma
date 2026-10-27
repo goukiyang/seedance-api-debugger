@@ -60,6 +60,8 @@ model VideoTask {
   execution_expires_after Int?
 
   local_status          String  @default("draft")
+  state_version         Int     @default(0)
+  last_provider_refresh_at DateTime?
   provider_task_id      String?
   is_draft              Boolean @default(false)
   provider_draft_task_id String?
@@ -316,6 +318,8 @@ model User {
   username              String    @unique
   email                 String    @unique
   password_hash         String
+  auth_origin           String    @default("legacy") // legacy | admin | self_register | feishu
+  email_verified_at     DateTime?
   role                  String    @default("user") // admin | user
   account_type          String    @default("internal") // internal | external
   status                String    @default("active") // active | disabled | pending | expired
@@ -342,6 +346,7 @@ model User {
   last_login_at         DateTime?
 
   credit_account          CreditAccount?
+  sessions                UserSession[]
   credit_ledger           CreditLedger[]
   credit_buckets          CreditBucket[]
   operation_logs          OperationLog[]
@@ -976,6 +981,39 @@ model TemplateMemory {
   @@index([video_task_id])
   @@index([memory_type])
   @@index([created_at])
+}
+
+model UserSession {
+  token_digest     String    @id
+  user_id          String
+  account_digest   String
+  created_at       DateTime  @default(now())
+  last_activity_at DateTime  @default(now())
+  expires_at       DateTime
+  revoked_at       DateTime?
+  revoke_reason    String?
+  browser          String?
+  ip_prefix        String?
+  user             User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, revoked_at])
+  @@index([expires_at])
+}
+
+model RegistrationChallenge {
+  token_digest  String    @id
+  email         String
+  name          String
+  password_hash String
+  code_hash     String
+  nonce         String
+  created_at    DateTime  @default(now())
+  expires_at    DateTime
+  attempts      Int       @default(0)
+  consumed_at   DateTime?
+
+  @@index([email, expires_at])
+  @@index([expires_at])
 }
 
 model UserPreference {
@@ -1782,7 +1820,7 @@ model CreditLedger {
   related_task_id String?
   operator_id     String?
   reason          String?
-  idempotency_key String?
+  idempotency_key String?  @unique
   metadata_json   String?
   created_at      DateTime @default(now())
 
@@ -1791,7 +1829,34 @@ model CreditLedger {
   @@index([user_id])
   @@index([type])
   @@index([created_at])
-  @@index([idempotency_key])
+}
+
+// Only newly opened reservations enter this contract. Historical rows require D4 approval.
+model CreditHold {
+  id                    String   @id @default(cuid())
+  business_type         String
+  business_id           String
+  payer_type            String
+  payer_id              String
+  operator_id           String?
+  amount                Float
+  freeze_snapshot       String
+  opening_receipt       String
+  state                 String   @default("held")
+  actual_cost           Float    @default(0)
+  refunded_amount       Float    @default(0)
+  expired_closed_amount Float    @default(0)
+  settlement_receipt    String?
+  review_reason         String?
+  version               Int      @default(0)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  settled_at            DateTime?
+  review_notified_at    DateTime?
+
+  @@unique([business_type, business_id])
+  @@index([payer_type, payer_id, state])
+  @@index([state, created_at])
 }
 
 // 项目预算账户。公共项目从这里冻结、实扣和返还，避免混用个人点数余额。
@@ -2212,6 +2277,8 @@ model ProviderAccountSnapshot {
 // 与本地 Asset 表（存储本地上传文件）是两套独立系统
 model SeedanceAsset {
   id                String @id @default(cuid())
+  owner_id          String?
+  ownership_status  String @default("quarantined")
   provider          String @default("seedance") // 固定 seedance
   provider_asset_id String // 官方返回的 asset-xxxx
   asset_type        String @default("Image") // Image | Video | Audio
@@ -2257,6 +2324,7 @@ model SeedanceAsset {
   updated_at DateTime @updatedAt
 
   @@index([provider_asset_id])
+  @@index([owner_id, ownership_status, local_status])
   @@index([provider, provider_asset_id])
   @@index([file_hash])
   @@index([original_url])
@@ -2302,6 +2370,7 @@ model Asset {
 
   @@unique([owner_id, hash])
   @@index([hash])
+  @@index([original_url])
   @@index([owner_id, type, status, created_at])
   @@index([status])
 }
@@ -2430,6 +2499,7 @@ model ReferenceImage {
   source_type       String   @default("upload") // upload | generated | copied | shared
   source_content_id String?
   source_image_id   String?
+  rights_ceiling    String?
   sort_order        Int      @default(0)
   metadata_json     String?
   status            String   @default("active") // active | deleted
@@ -2448,6 +2518,7 @@ model ReferenceImage {
   @@index([owner_user_id])
   @@index([asset_id])
   @@index([source_image_id])
+  @@index([url])
   @@index([status])
 }
 
@@ -2504,6 +2575,15 @@ model AssetCollectionItem {
 }
 
 // 任务快照：生成时的参数 + 素材状态冻结
+model ApiRateLimit {
+  key           String @id
+  count         Int
+  expires_at_ms BigInt
+  updated_at_ms BigInt
+
+  @@index([expires_at_ms])
+}
+
 model GenerationTaskSnapshot {
   id           String  @id @default(cuid())
   task_id      String? // 可选关联 VideoTask

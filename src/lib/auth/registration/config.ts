@@ -6,6 +6,10 @@ export function isRegisterEmailVerificationEnabled(): boolean {
   return process.env.REGISTER_EMAIL_VERIFICATION === 'true';
 }
 
+export function isSelfRegistrationEnabled(): boolean {
+  return process.env.SELF_REGISTRATION_ENABLED !== 'false';
+}
+
 export function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }

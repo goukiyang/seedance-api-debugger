@@ -16,6 +16,8 @@ export interface SeedanceAssetItem {
 
 /** 本地资产记录 */
 export interface LocalAssetRecord {
+  ownerId?: string | null;
+  ownershipStatus?: string;
   localId: string; // 本地唯一 ID
   provider: 'seedance'; // 固定为 seedance
   providerAssetId: string; // 官方 asset-xxxx

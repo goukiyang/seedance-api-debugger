@@ -532,7 +532,7 @@ async function browserJson(page: any, url: string, method: string, body?: unknow
   }, { url, method, body });
 }
 
-async function createAccount(prismaClient: any, hashPassword: (password: string) => string, role: 'admin' | 'user', accountType: 'internal' | 'external', feishuTenant?: string) {
+async function createAccount(prismaClient: any, hashPassword: (password: string) => Promise<string>, role: 'admin' | 'user', accountType: 'internal' | 'external', feishuTenant?: string) {
   const username = `studio-smoke-${randomUUID().replace(/-/g, '').slice(0, 20)}`;
   const email = `${username}@example.invalid`;
   const password = randomBytes(24).toString('base64url');
@@ -551,7 +551,7 @@ async function createAccount(prismaClient: any, hashPassword: (password: string)
       name: `Template Studio ${role}`,
       username,
       email,
-      password_hash: hashPassword(password),
+      password_hash: await hashPassword(password),
       role,
       account_type: accountType,
       ...feishuIdentity,

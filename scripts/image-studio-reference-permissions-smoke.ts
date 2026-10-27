@@ -28,7 +28,7 @@ async function main() {
   }
   try {
     process.chdir(directory);
-    await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+    await fs.mkdir(path.join(directory, '.media/uploads'), { recursive: true });
     const admin = await user('admin');
     const creator = await user();
     const member = await user();

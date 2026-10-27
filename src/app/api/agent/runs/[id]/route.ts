@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -7,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_request: NextRequest, props: Params) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: Params) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -80,7 +81,7 @@ export async function GET(_request: NextRequest, props: Params) {
     console.error('[AgentRuns] Detail error:', error);
     return NextResponse.json({ error: '执行记录暂时无法读取，请稍后重试' }, { status: 500 });
   }
-}
+});
 
 function safeJson(value: string | null, fallback: unknown) {
   if (!value) return fallback;

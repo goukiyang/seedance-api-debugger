@@ -44,7 +44,7 @@ assert.equal(taskCostFailureClassification({
   raw_status_response: JSON.stringify({ code: 'h3_done_without_output' }),
 }, 'failed').eventType, 'output_download_failed');
 
-const routeSource = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+const routeSource = readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
 const auditSource = readFileSync('src/lib/costs/audit.ts', 'utf8');
 assert.match(routeSource, /calculateH3EstimatedCost\(duration, selectedModel\)/, 'H3 创建任务必须走独立成本计算');
 assert.match(routeSource, /if \(estimatedCost > 0\)/, 'H3 0 成本任务必须跳过点数或项目预算冻结');

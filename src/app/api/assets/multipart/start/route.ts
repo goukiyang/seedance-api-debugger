@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/multipart/start
  * 初始化大文件 R2 multipart 上传，不接收文件体。
@@ -9,6 +10,7 @@ import { assertUploadOwner, uploadRequestId, verifiedUploadFailure, VerifiedUplo
 import { createMultipartUploadTicket } from '@/lib/assets/direct-upload';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +26,7 @@ type MultipartStartBody = {
   height?: number | null;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let fileName = 'upload.bin';
@@ -90,7 +92,7 @@ export async function POST(request: NextRequest) {
       fileKind: getSiteUploadKind(mimeType),
       totalParts: 'partCount' in ticket ? ticket.partCount : null,
     });
-    return NextResponse.json(ticket);
+    return NextResponse.json(await browserUploadResponse(user, ticket), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
     const message = error instanceof Error ? error.message : '分块上传初始化失败';
@@ -118,4 +120,4 @@ export async function POST(request: NextRequest) {
     ) ? 400 : 503;
     return NextResponse.json({ error: message }, { status });
   }
-}
+});

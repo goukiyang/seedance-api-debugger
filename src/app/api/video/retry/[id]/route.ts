@@ -1,3 +1,7 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
+import { createVideoTask } from '@/server/video-tasks/create';
+import { resolveSitePublicBaseUrl } from '@/lib/assets/site-url';
 import { CreationError } from '@/lib/creation/contract';
 import { prepareVideoCreationIntent } from '@/lib/creation/intents';
 import { assertCreationLineageUnlocked } from '@/lib/creation/lineage';
@@ -56,7 +60,7 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -69,6 +73,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       where: { id: params.id },
       select: {
         id: true,
+        owner_user_id: true,
+        user_id: true,
+        retention_status: true,
         source_metadata_json: true,
         provider: true,
         model: true,
@@ -268,12 +275,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const cookie = request.headers.get('cookie');
     if (cookie) headers.set('cookie', cookie);
 
-    const createResponse = await fetch(new URL('/api/tasks/create', request.url), {
+    const createRequest = new NextRequest(new URL('/api/tasks/create', resolveSitePublicBaseUrl() || 'http://localhost'), {
       method: 'POST',
       headers,
       body: JSON.stringify(retryBody),
       cache: 'no-store',
     });
+    const createResponse = await createVideoTask(createRequest);
 
     const data = await createResponse.json();
     if (!createResponse.ok) {
@@ -288,10 +296,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof CreationError) return NextResponse.json({ error: error.code, code: error.code, message: error.message }, { status: error.status });
     const pricingError = videoPricingError(error);
     if (pricingError) return NextResponse.json({ error: pricingError.message, code: pricingError.code }, { status: pricingError.status });
-    console.error('[RetryTask]', error);
-    return NextResponse.json(
-      { error: '内部服务异常', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

@@ -87,7 +87,7 @@ async function originalTransport() {
   assert.ok(!JSON.stringify(echo).includes(bytes.toString('base64')));
   assert.ok(JSON.stringify(echo).includes('provider-fixture'));
   assert.ok(JSON.stringify(echo).includes('content[1].image_url'));
-  const taskRoute = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+  const taskRoute = readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
   const ledgerPayload = taskRoute.slice(taskRoute.indexOf('    const providerRequest = await createProviderApiRequest'), taskRoute.indexOf('    providerRequestId = providerRequest.id;'));
   assert.ok(ledgerPayload.length, 'actual ledger boundary exists');
   assert.ok(!ledgerPayload.includes('seedanceReferenceTransport'), 'original URL-based ledger hash remains unchanged');

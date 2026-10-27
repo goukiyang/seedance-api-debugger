@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { COMMANDS, fingerprint, verifyEquivalentCi, hashFile } = require('./equivalent-ci.cjs');
+const { COMMANDS, fingerprint, verifyEquivalentCi, hashFile, reusablePrebuild } = require('./equivalent-ci.cjs');
 const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'equivalent-ci-contract-'));
 try {
   const source = 'a'.repeat(40);
@@ -36,5 +36,21 @@ try {
   fs.writeFileSync(path.join(root, 'node_modules/.package-lock.json'), '{}');
   fs.appendFileSync(path.join(root, results[0].log), 'changed log');
   assert.equal(verifyEquivalentCi(root, source, file), false);
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { prebuild: 'node scripts/check-image-recovery.mjs' } }));
+  const contractLog = path.join(root, results[2].log);
+  const summary = { schema: 'contract-suites.v1', results: [{ suite: 'scripts/check-image-recovery.mjs', exitCode: 0, passed: true }] };
+  fs.writeFileSync(contractLog, JSON.stringify(summary));
+  results[2].logSha256 = hashFile(contractLog);
+  assert.equal(reusablePrebuild(root, results), true);
+  results[2].exitCode = 1;
+  assert.equal(reusablePrebuild(root, results), false);
+  results[2].exitCode = 0;
+  summary.results[0].passed = false;
+  fs.writeFileSync(contractLog, JSON.stringify(summary));
+  assert.equal(reusablePrebuild(root, results), false);
+  results[2].logSha256 = hashFile(contractLog);
+  assert.equal(reusablePrebuild(root, results), false);
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { prebuild: 'node another-gate.cjs' } }));
+  assert.equal(reusablePrebuild(root, results), false);
   console.log('PASS equivalent CI source, lock, runtime, command results and log binding');
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

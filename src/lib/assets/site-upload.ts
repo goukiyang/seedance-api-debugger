@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { uploadAsset } from '@/lib/assets/storage';
+import { uploadAsset, uploadAssetFile, type UploadDestination } from '@/lib/assets/storage';
 import type { UploadReceipt } from './verified-upload';
 import type { UploadSimilarityStatus } from './upload-similarity';
 import { isPubliclyReachableUrl, uploadPublicAsset } from '@/lib/assets/public-storage';
@@ -13,6 +13,7 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
+import { localMediaPath } from '@/lib/media/storage-roots';
 
 const execFileAsync = promisify(execFile);
 
@@ -90,12 +91,7 @@ function resolveLocalPublicPath(url: string) {
   if (!uploadPath) {
     throw new Error('本地素材路径非法');
   }
-  const publicRoot = path.resolve(process.cwd(), 'public');
-  const resolvedPath = path.resolve(publicRoot, uploadPath.replace(/^\/+/, ''));
-  if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) {
-    throw new Error('本地素材路径非法');
-  }
-  return resolvedPath;
+  return localMediaPath(uploadPath);
 }
 
 export function getSiteUploadKind(mimeType: string): SiteUploadKind | null {
@@ -181,50 +177,7 @@ export async function ensureSiteAssetPublicUrl(assetId: string): Promise<SiteAss
   if (!asset) {
     throw new Error(`素材不存在: ${assetId}`);
   }
-  const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(asset.original_url);
-  if (sameOriginPublicUrl) {
-    try {
-      await access(resolveLocalPublicPath(asset.original_url));
-    } catch {
-      throw new Error(`历史素材本地文件不存在，无法补公网 URL: ${asset.file_name}`);
-    }
-    const data: { original_url?: string; thumbnail_url?: string | null } = {};
-    if (asset.original_url !== sameOriginPublicUrl) data.original_url = sameOriginPublicUrl;
-    const sameOriginThumbnailUrl = asset.thumbnail_url
-      ? sameOriginPublicUrlForLocalUpload(asset.thumbnail_url)
-      : null;
-    if (asset.thumbnail_url && sameOriginThumbnailUrl && asset.thumbnail_url !== sameOriginThumbnailUrl) {
-      try {
-        await access(resolveLocalPublicPath(asset.thumbnail_url));
-        data.thumbnail_url = sameOriginThumbnailUrl;
-      } catch {
-        data.thumbnail_url = null;
-      }
-    }
-    const updatedAsset = Object.keys(data).length > 0
-      ? await prisma.asset.update({
-          where: { id: asset.id },
-          data,
-          select: {
-            id: true,
-            type: true,
-            original_url: true,
-            thumbnail_url: true,
-            file_name: true,
-            mime_type: true,
-            file_size: true,
-          },
-        })
-      : asset;
-
-    return {
-      asset: updatedAsset,
-      isPubliclyReachable: true,
-      storageProvider: 'local-public',
-    };
-  }
-
-  if (isPubliclyReachableUrl(asset.original_url)) {
+  if (!isLocalPublicUploadUrl(asset.original_url) && isPubliclyReachableUrl(asset.original_url)) {
     return { asset, isPubliclyReachable: true };
   }
   if (!isLocalPublicUploadUrl(asset.original_url)) {
@@ -239,22 +192,9 @@ export async function ensureSiteAssetPublicUrl(assetId: string): Promise<SiteAss
     throw new Error(`历史素材本地文件不存在，无法补公网 URL: ${asset.file_name}`);
   }
   const pubResult = await uploadPublicAsset(buffer, asset.file_name, asset.mime_type);
-  const updatedAsset = await prisma.asset.update({
-    where: { id: asset.id },
-    data: { original_url: pubResult.publicUrl },
-    select: {
-      id: true,
-      type: true,
-      original_url: true,
-      thumbnail_url: true,
-      file_name: true,
-      mime_type: true,
-      file_size: true,
-    },
-  });
-
   return {
-    asset: updatedAsset,
+    // Temporary delivery is never persisted as the Asset's original identity.
+    asset: { ...asset, original_url: pubResult.publicUrl },
     isPubliclyReachable: pubResult.isPubliclyReachable,
     storageProvider: pubResult.storageProvider,
     publicUploadWarning: pubResult.warning,
@@ -319,21 +259,15 @@ export async function uploadSiteAsset(
   requestId?: string,
 ): Promise<SiteUploadResult> {
   const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata, requestId);
-  const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(localResult.originalUrl);
-  if (sameOriginPublicUrl) {
-    const sameOriginThumbnailUrl = localResult.thumbnailUrl
-      ? sameOriginPublicUrlForLocalUpload(localResult.thumbnailUrl)
-      : null;
-    return {
-      ...localResult,
-      originalUrl: sameOriginPublicUrl,
-      thumbnailUrl: sameOriginThumbnailUrl || localResult.thumbnailUrl,
-      isPubliclyReachable: true,
-      storageProvider: 'local-public',
-    };
-  }
+  return siteUploadResult(localResult);
+}
 
-  const localUrlIsPublic = isPubliclyReachableUrl(localResult.originalUrl);
+export async function uploadSiteAssetFile(file: string, fileName: string, mimeType: string, fileSize: number, hash: string,
+  ownerId: string, requestId?: string, destination?: UploadDestination): Promise<SiteUploadResult> {
+  return siteUploadResult(await uploadAssetFile(file, fileName, mimeType, fileSize, hash, ownerId, requestId, destination));
+}
+function siteUploadResult(localResult: Awaited<ReturnType<typeof uploadAsset>>): SiteUploadResult {
+  const localUrlIsPublic = !isLocalPublicUploadUrl(localResult.originalUrl) && isPubliclyReachableUrl(localResult.originalUrl);
   if (localUrlIsPublic) {
     return {
       ...localResult,

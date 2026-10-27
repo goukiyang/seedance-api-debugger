@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
 import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
@@ -17,7 +18,7 @@ import { assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCan
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const params = request.nextUrl.searchParams;
@@ -28,9 +29,9 @@ export async function GET(request: NextRequest) {
     await resolveCanvasStudioReferenceUse(user, ids);
     return canvasStyleJson({ durable: true });
   } catch (error) { return canvasStyleFailure(error, '参考图状态未确认，未生成'); }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const body = await readCanvasStyleJson(request);
@@ -94,4 +95,4 @@ export async function POST(request: NextRequest) {
       body.roleMediaContext === undefined ? undefined : { user, context: body.roleMediaContext, generationNodeId: context.nodeId });
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }
-}
+});

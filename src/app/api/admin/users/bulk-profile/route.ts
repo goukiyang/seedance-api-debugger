@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
-import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
+import { getAdminUser, errorJson, authFailureResponse } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
-import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
+import { revokeAllSessions } from '@/lib/auth/session-store';
 import {
   getDefaultFeatureProfileId,
   normalizeFeatureProfileId,
@@ -27,12 +28,12 @@ function normalizeUserIds(input: unknown): string[] {
   return ids;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   try {
@@ -84,12 +85,12 @@ export async function POST(request: NextRequest) {
           data: {
             user_profile: nextUserProfile,
             feature_profile_id: nextFeatureProfileId,
-            password_hash: maintainAccountSessionBinding(user, {
-              ...user, user_profile: nextUserProfile, feature_profile_id: nextFeatureProfileId,
-            }),
           },
         });
         if (changed.count !== 1) throw new Error('Account changed concurrently');
+        if (user.user_profile !== nextUserProfile || user.feature_profile_id !== nextFeatureProfileId) {
+          await revokeAllSessions(user.id, 'account_profile_changed', tx);
+        }
         const updated = await tx.user.findUniqueOrThrow({
           where: { id: user.id },
           select: {
@@ -149,4 +150,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin/Users/BulkProfile]', err);
     return errorJson('服务器错误', 500);
   }
-}
+});

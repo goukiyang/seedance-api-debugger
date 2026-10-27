@@ -1,3 +1,5 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
@@ -35,7 +37,7 @@ type LibraryUser = {
   id: string;
   name: string | null;
   username: string;
-  email: string;
+  email?: string;
   avatar_url?: string | null;
   account_type?: string | null;
 };
@@ -119,7 +121,7 @@ function optionalText(value: string | null) {
 function userSummary(user: LibraryUser | null | undefined) {
   if (!user) return null;
   return {
-    ...user,
+    id: user.id, name: user.name, username: user.username, avatar_url: user.avatar_url, account_type: user.account_type,
     displayName: displayUserName(user),
     subtitle: displayUserSubtitle(user),
   };
@@ -561,8 +563,8 @@ async function loadVideoItems(options: {
     const rows = await prisma.videoTask.findMany({ where, take: DIRECTORY_LIMIT + 1,
       select: { id: true, created_at: true, completed_at: true, duration: true,
         project: { select: { id: true, name: true } },
-        owner: { select: { id: true, name: true, username: true, email: true } },
-        user: { select: { id: true, name: true, username: true, email: true } } } });
+        owner: { select: userSummarySelect },
+        user: { select: userSummarySelect } } });
     return boundedDirectory(rows.map(row => ({ id: `video_task:${row.id}`, createdAt: row.created_at.toISOString(),
       completedAt: row.completed_at?.toISOString() || null, duration: row.duration, project: row.project, owner: userSummary(row.owner || row.user) })));
   }
@@ -609,8 +611,8 @@ async function loadVideoItems(options: {
         public_video_cached_at: true,
         delivery_completed_at: true,
         project: { select: { id: true, name: true, type: true, status: true } },
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
+        user: { select: userSummarySelect },
       },
     }),
     prisma.videoTask.count({ where }),
@@ -775,7 +777,7 @@ async function loadAssetItems(options: {
   const owners = ownerIds.length > 0
     ? await prisma.user.findMany({
         where: { id: { in: ownerIds } },
-        select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true },
+        select: userSummarySelect,
       })
     : [];
   const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
@@ -805,7 +807,7 @@ async function assetDirectory(rows: Array<{ id: string; created_at: Date | strin
   const byId = new Map<string, LibraryUser>();
   for (let start = 0; start < ownerIds.length; start += 500) {
     const owners = await prisma.user.findMany({ where: { id: { in: ownerIds.slice(start, start + 500) } },
-      select: { id: true, name: true, username: true, email: true } });
+      select: userSummarySelect });
     owners.forEach(owner => byId.set(owner.id, owner));
   }
   return boundedDirectory(rows.map(row => ({ id: `asset:${row.id}`, createdAt: new Date(row.created_at).toISOString(),
@@ -870,7 +872,7 @@ async function loadReferenceItems(options: {
   if (options.directory) {
     const rows = await prisma.referenceImage.findMany({ where, take: DIRECTORY_LIMIT + 1,
       select: { id: true, created_at: true, project: { select: { id: true, name: true } },
-        owner: { select: { id: true, name: true, username: true, email: true } } } });
+        owner: { select: userSummarySelect } } });
     return boundedDirectory(rows.map(row => ({ id: `reference_image:${row.id}`, createdAt: row.created_at.toISOString(),
       completedAt: null, duration: null, project: row.project, owner: userSummary(row.owner) })));
   }
@@ -890,7 +892,7 @@ async function loadReferenceItems(options: {
         asset_id: true,
         asset: { select: { id: true, owner_id: true, metadata_json: true, width: true, height: true } },
         project: { select: { id: true, name: true, type: true, status: true } },
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
         album: { select: { id: true, name: true } },
       },
     }),
@@ -901,7 +903,7 @@ async function loadReferenceItems(options: {
   return { items: images.map(image => ({ ...serializeReferenceImage(image), generationOrigin: image.asset ? assetGenerationOrigin(image.asset, origins) : image.source_type === 'generated' ? { kind: 'unknown' as const, label: '来源待识别' } : undefined })), total };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -1022,4 +1024,4 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
-}
+});

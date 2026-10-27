@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { originalPreparationRejection, recordPreparationRejection } from '@/lib/creation/preparation-receipts';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -6,7 +7,7 @@ import { creationIdentity } from '@/lib/creation/contract';
 import { creationHttp, creationBody } from '@/lib/creation/http';
 import { prepareVideoCreationIntent } from '@/lib/creation/intents';
 export const dynamic = 'force-dynamic';
-export async function POST(request: Request) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: Request) {
   return creationHttp(async user => { const body = await creationBody(request);
     try { return { intent: await prepareVideoCreationIntent(user, body) }; }
     catch (cause) {
@@ -15,13 +16,13 @@ export async function POST(request: Request) {
       throw cause;
     }
   });
-}
+});
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   return creationHttp(async user => {
     const requestId = creationIdentity(request.nextUrl.searchParams.get('request_id'), 'request_id')!;
     const original = await prisma.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
     const rejected = !original ? await originalPreparationRejection(prisma, user.id, requestId) : null;
     return original ? { state: original.state, intent: await getVideoCreationIntent(user, original.id) } : rejected ? { state: 'rejected', intent: null, rejection: rejected.result } : { state: 'unconfirmed', intent: null };
   });
-}
+});

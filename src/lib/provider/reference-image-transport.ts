@@ -2,6 +2,8 @@ import type { CreateVideoInput } from '@/types';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { mediaRoot } from '@/lib/media/storage-roots';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import { buildSeedanceVideoPayload, SEEDANCE_INLINE_REQUEST_MAX_BYTES } from './jimeng';
 
 type AuthorizedImage = { url: string; asset?: {
@@ -15,8 +17,8 @@ const TASK_METADATA_RESERVE_BYTES = 8192;
 async function readLocalOriginal(url: string): Promise<Buffer> {
   const local = siteUploadPathFromUrl(url);
   if (!local) throw Error('原图不是已授权的本地素材，尚未提交视频生成');
-  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-  const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
+  const root = await fs.realpath(mediaRoot('uploads'));
+  const file = await resolveInside(root, decodeURIComponent(local.slice('/uploads/'.length)));
   if (!file.startsWith(`${root}${path.sep}`)) throw Error('原图路径无效，尚未提交视频生成');
   const handle = await fs.open(file, 'r');
   try {

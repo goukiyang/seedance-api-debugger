@@ -28,7 +28,7 @@ export const MULTIVIEW_SETTINGS_FIXTURE_SOURCES = [
   "src/lib/media/media-preview-state-contract.ts",
   "src/lib/pricing/video-context.ts",
   "src/app/api/tasks/estimate/route.ts",
-  "src/app/api/tasks/create/route.ts",
+  "src/server/video-tasks/standard-create.ts",
   "src/app/api/multiview/settings/route.ts",
   "src/app/api/multiview/settings/[id]/route.ts",
   "src/app/api/multiview/settings/[id]/apply/route.ts",

@@ -1,10 +1,11 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { listAdminStudioRuns, withAdminStudioRoute } from '@/lib/template-studio/admin-runs';
 import type { StudioRunStatus, StudioTemplateSource } from '@/lib/template-studio/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   return withAdminStudioRoute(async (user) => {
     const params = request.nextUrl.searchParams;
     const result = await listAdminStudioRuns(user, {
@@ -20,4 +21,4 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json(result);
   });
-}
+});

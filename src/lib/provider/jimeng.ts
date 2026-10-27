@@ -177,6 +177,12 @@ export function buildProviderHttpErrorStatus(
     || httpStatus >= 500;
   if (isTransientProviderError) return null;
 
+  // A failed status lookup is not a failed generation, especially not a proof
+  // of no charge. Require an explicit terminal observation for this exact job.
+  const observedId = data.id ?? data.task_id ?? data.provider_task_id;
+  const observedStatus = typeof data.status === 'string' ? data.status.toLowerCase() : '';
+  if (observedId !== providerTaskId || !['failed', 'cancelled', 'canceled'].includes(observedStatus)) return null;
+
   const errorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
   if (!errorMessage) return null;
   const userFacingError = providerFailureUserMessage(errorMessage, {
@@ -533,7 +539,7 @@ export async function createVideoTask(
     phase = 'response_validation';
     if (!response.ok) {
       const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
-      throw new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`);
+      throw Object.assign(new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`), { statusCode: response.status });
     }
 
     // 关键：只解析 id
@@ -619,7 +625,7 @@ export async function createSeedanceDraftUpgradeTask(input: {
   }
   if (!response.ok) {
     const message = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
-    throw new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`);
+    throw Object.assign(new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`), { statusCode: response.status });
   }
   const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
   if (!providerTaskId) {

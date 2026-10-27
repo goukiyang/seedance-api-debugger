@@ -1,8 +1,9 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sumCredits, addCredits, normalizeCredits, assertCreditWriteback } from '@/lib/credits/precision';
-import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
-import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
+import { errorJson, getAdminUser, authFailureResponse } from '@/lib/auth/api-helpers';
+import { revokeAllSessions } from '@/lib/auth/session-store';
 
 const MAX_SOURCE_USERS = 20;
 
@@ -133,12 +134,12 @@ function pickPrimaryFeishuIdentity(users: MergeUserIdentity[]) {
     })[0] || null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -527,9 +528,11 @@ export async function POST(request: NextRequest) {
     for (const source of sourceUsers) {
       await tx.user.update({
         where: { id: source.id, password_hash: source.password_hash },
-        data: { status: 'deleted', password_hash: maintainAccountSessionBinding(source, { ...source, status: 'deleted' }) },
+        data: { status: 'deleted' },
       });
+      await revokeAllSessions(source.id, 'account_merged', tx);
     }
+    await revokeAllSessions(targetUserId, 'account_merge_target', tx);
 
     await tx.operationLog.create({
       data: {
@@ -585,4 +588,4 @@ export async function POST(request: NextRequest) {
 
   if ('quota_conflict' in result) return errorJson('合并期间额度状态发生变化，已停止合并，请重新读取账号。', 409);
   return NextResponse.json(result);
-}
+});

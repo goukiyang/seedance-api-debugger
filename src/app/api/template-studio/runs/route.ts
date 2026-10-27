@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { withStudioRoute, readStudioJson } from '@/lib/template-studio/common';
 import { createStudioRun, listStudioRuns } from '@/lib/template-studio/runs';
@@ -5,7 +6,7 @@ import type { CreateStudioRunRequest, StudioRunStatus, StudioTemplateSource } fr
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'internal', rateLimit: false }, async function GET(request: NextRequest) {
   return withStudioRoute(async (user) => {
     const query = request.nextUrl.searchParams;
     return NextResponse.json(await listStudioRuns(user, {
@@ -19,11 +20,11 @@ export async function GET(request: NextRequest) {
       createdBefore: query.get('created_before') || undefined,
     }));
   });
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'internal', rateLimit: false }, async function POST(request: NextRequest) {
   return withStudioRoute(async (user) => {
     const result = await createStudioRun(user, await readStudioJson(request) as CreateStudioRunRequest);
     return NextResponse.json({ run: result.run }, { status: result.status });
   });
-}
+});

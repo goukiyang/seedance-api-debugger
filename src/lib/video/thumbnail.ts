@@ -1,12 +1,14 @@
+import { resolveInsideSync } from '@/lib/fs/resolve-inside';
+import { mediaInputFlags, withRemoteMediaFile } from '@/lib/media/probe-remote';
 import { execFile } from 'child_process';
 import path from 'path';
 import { promisify } from 'util';
 import { mkdir, rename, stat, unlink } from 'fs/promises';
 import { isPublicHttpUrl } from '@/lib/media/public-url';
+import { mediaRoot } from '@/lib/media/storage-roots';
 
 const execFileAsync = promisify(execFile);
-const PUBLIC_VIDEO_ROOT = path.join(process.cwd(), 'public');
-const THUMBNAIL_DIR = path.join(PUBLIC_VIDEO_ROOT, 'videos', 'thumbnails');
+const THUMBNAIL_DIR = path.join(mediaRoot('videos'), 'thumbnails');
 const DEFAULT_FFMPEG_BIN = 'ffmpeg';
 const THUMBNAIL_SEEK_SECONDS = ['2.5', '0.5'];
 
@@ -45,13 +47,14 @@ export function thumbnailPublicPath(taskId: string) {
 }
 
 export function thumbnailFilePath(taskId: string) {
-  return path.join(THUMBNAIL_DIR, `${taskId}.jpg`);
+  if (!isSafeTaskId(taskId)) throw new Error('INVALID_LOCAL_PATH');
+  return resolveInsideSync(mediaRoot('videos'), `thumbnails/${taskId}.jpg`);
 }
 
 export function localPublicVideoPath(localVideoPath: string | null) {
   if (!localVideoPath || !localVideoPath.startsWith('/videos/')) return null;
-  if (localVideoPath.includes('..')) return null;
-  return path.join(PUBLIC_VIDEO_ROOT, localVideoPath.slice(1));
+  try { return resolveInsideSync(mediaRoot('videos'), decodeURIComponent(localVideoPath.slice('/videos/'.length))); }
+  catch { return null; }
 }
 
 export async function resolveThumbnailSources(
@@ -71,7 +74,7 @@ export async function resolveThumbnailSources(
   return sources;
 }
 
-async function generateThumbnailAtSeek(source: string, outputPath: string, seekSeconds: string) {
+async function generateThumbnailAtSeek(source: string, outputPath: string, seekSeconds: string, kind: 'video' | 'image') {
   const tempPath = `${outputPath}.${process.pid}.${Date.now()}.tmp.jpg`;
   try {
     await execFileAsync(process.env.FFMPEG_PATH || DEFAULT_FFMPEG_BIN, [
@@ -79,6 +82,7 @@ async function generateThumbnailAtSeek(source: string, outputPath: string, seekS
       '-loglevel',
       'error',
       '-y',
+      ...mediaInputFlags(kind),
       '-ss',
       seekSeconds,
       '-i',
@@ -98,11 +102,12 @@ async function generateThumbnailAtSeek(source: string, outputPath: string, seekS
   }
 }
 
-async function generateThumbnail(source: string, outputPath: string) {
+async function generateThumbnail(source: string, outputPath: string, kind: 'video' | 'image'): Promise<void> {
+  if (/^https?:/i.test(source)) return withRemoteMediaFile(source, kind, file => generateThumbnail(file, outputPath, kind));
   let lastError: unknown;
   for (const seekSeconds of THUMBNAIL_SEEK_SECONDS) {
     try {
-      await generateThumbnailAtSeek(source, outputPath, seekSeconds);
+      await generateThumbnailAtSeek(source, outputPath, seekSeconds, kind);
       return;
     } catch (error) {
       lastError = error;
@@ -144,7 +149,7 @@ export async function ensureTaskThumbnail(
 
   for (const source of sources) {
     try {
-      await generateThumbnail(source, thumbnailPath);
+      await generateThumbnail(source, thumbnailPath, source === task.result_last_frame_url ? 'image' : 'video');
       return {
         success: true,
         thumbnail_path: thumbnailPublicPath(task.id),

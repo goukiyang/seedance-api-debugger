@@ -1,3 +1,5 @@
+import { route as declaredRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -11,7 +13,7 @@ async function assertAdmin() {
   return { error: null, user };
 }
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = declaredRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const { error, user } = await assertAdmin();
@@ -49,15 +51,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
 
     return NextResponse.json({ folder });
   } catch (error) {
-    console.error('[ReferenceAlbumFolders] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const DELETE = declaredRoute({ access: 'user', rateLimit: false }, async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const { error, user } = await assertAdmin();
@@ -93,10 +92,7 @@ export async function DELETE(_request: NextRequest, props: { params: Promise<{ i
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('[ReferenceAlbumFolders] Delete error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

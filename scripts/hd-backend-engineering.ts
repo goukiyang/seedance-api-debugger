@@ -1,6 +1,7 @@
 // Offline HD backend gates. All data/process fixtures use new private roots;
 // no SQL, provider requests, application service or production path is opened.
 import assert from 'node:assert/strict';
+import { setFixtureDatabase } from './fixtures/database-client';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -21,11 +22,12 @@ async function main() {
 // Complete authoritative lookup fixture: scheduler ownership is exercised
 // without opening the application's SQL database.
 let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }> = [];
-(globalThis as unknown as { hdReadonlyDb?: unknown }).hdReadonlyDb = {
-  asset: { findMany: async () => ownerBindings, findFirst: async () => null },
+setFixtureDatabase({
+  asset: { findMany: async ({ where, take }: { where: { original_url: { in: string[] } }; take: number }) => ownerBindings
+    .filter(row => where.original_url.in.includes(row.original_url)).slice(0, take).map(row => ({ ...row, status: 'active', type: 'image' })), findFirst: async () => null },
   referenceImage: { findMany: async () => [] }, imageStudioTask: { findFirst: async () => null },
   $disconnect: async () => {},
-};
+});
   const core = await import('../src/lib/media/hd-derivatives');
   const storage = await import('../src/lib/media/hd-storage-root');
   const results: Array<{ name: string; passed: boolean; error?: string }> = [];
@@ -43,14 +45,14 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     ownerBindings = [];
     const directory = await fs.mkdtemp(path.join(evidenceRoot, 'case-'));
     await fs.chmod(directory, 0o700);
-    await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+    await fs.mkdir(path.join(directory, '.media/uploads'), { recursive: true });
     await fs.mkdir(path.join(directory, 'storage/hd-derivatives'), { recursive: true, mode: 0o700 });
     await fs.mkdir(path.join(directory, 'src/lib/media'), { recursive: true });
     await fs.copyFile(path.join(applicationRoot, 'src/lib/media/hd-encoder.ts'), path.join(directory, 'src/lib/media/hd-encoder.ts'));
     process.chdir(directory); return directory;
   };
   const image = async (name: string) => {
-    const file = path.join(process.cwd(), 'public/uploads', name + '.png');
+    const file = path.join(process.cwd(), '.media/uploads', name + '.png');
     await sharp({ create: { width: 128, height: 96, channels: 4, background: { r: 45, g: 84, b: 152, alpha: 0.5 } } }).png().toFile(file);
     return { file, source: '/uploads/' + name + '.png' };
   };
@@ -85,8 +87,8 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     const ready = (await core.readHdJob(job.key))!; assert.equal(ready.status, 'ready');
     const bytes = await fs.readFile(path.join(fixedRoot, ready.file!));
     const second = await fs.mkdtemp(path.join(evidenceRoot, 'release-'));
-    await fs.mkdir(path.join(second, 'public'), { recursive: true });
-    await fs.symlink(path.join(first, 'public/uploads'), path.join(second, 'public/uploads'));
+    await fs.mkdir(path.join(second, '.media'), { recursive: true });
+    await fs.symlink(path.join(first, '.media/uploads'), path.join(second, '.media/uploads'));
     process.chdir(second);
     const secondIdentity = (await core.hdRequestIdentity(original.source, false))!;
     assert.equal(secondIdentity.key, identity.key); assert.equal(secondIdentity.current.file, identity.current.file);
@@ -367,7 +369,7 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     await core.atomicHdJson(path.join(core.hdDirectory(), job.key + '.json'), duplicate);
     await assert.rejects(core.readHdJob(job.key), /invalid_hd_manifest/);
     await core.atomicHdJson(path.join(core.hdDirectory(), job.key + '.json'), recovered);
-    const originalOnlySource = '/uploads/verification-original.png', originalOnlyFile = path.join(process.cwd(), 'public' + originalOnlySource);
+    const originalOnlySource = '/uploads/verification-original.png', originalOnlyFile = path.join(process.cwd(), '.media' + originalOnlySource);
     await sharp({ create: { width: 1, height: 1, channels: 3, background: { r: 11, g: 32, b: 53 } } }).png().toFile(originalOnlyFile);
     const originalOnly = (await core.requestHd(originalOnlySource, 0, false))!; await processJob(originalOnly.key);
     const originalReady = (await core.readHdJob(originalOnly.key))!; assert.equal(originalReady.format, 'original');
@@ -427,7 +429,7 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     assert.equal(await exists(path.join(core.hdDirectory(), job.key + '.publish.json')), false);
   });
   process.chdir(applicationRoot);
-  await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();
+  await (await import('../src/lib/media/hd-readonly-db')).hdReadRepository.close();
   const summary = { completed: true, checks: results.map(value => value.name), results, total: results.length,
     passed: results.filter(value => value.passed).length, evidenceRoot, productionWrites: 0, providerRequests: 0, dbQueries: 0 };
   await fs.writeFile(path.join(evidenceRoot, 'results.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });

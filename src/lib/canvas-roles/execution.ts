@@ -1,3 +1,5 @@
+import { writeHoldLedger, increaseTaskHold } from '@/lib/billing/holds';
+import { authorizeLegacyInflight } from '@/lib/billing/legacy-inflight';
 import { randomUUID } from 'crypto';
 import type { CanvasRoleTaskRun, CanvasRoleWork } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -213,7 +215,7 @@ export async function executeWork(user: SessionUser, workId: string, body: JsonR
     if (Buffer.byteLength(JSON.stringify(input)) + 2048 > q.contract.maxInputBytes) throw new RoleError('材料超出报价输入范围', 409, 'quote_input_limit');
     const id = randomUUID();
     const freeze = await allocateTaskCredits(db, user, q.contract.reservePointCents / 100, `role-attempt:${id}`);
-    await db.creditLedger.create({ data: { user_id: user.id, type: 'task_freeze', amount: 0,
+    await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_freeze', amount: 0,
       balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before, frozen_after: freeze.frozen_after,
       related_task_id: `role-attempt:${id}`, idempotency_key: `role-freeze:${id}`, reason: '本次角色文字请求预留', metadata_json: JSON.stringify({ roleTaskRunId: run.id, allocations: freeze.allocations }) } });
     const createdAttempt = await db.canvasRoleAttempt.create({ data: { id, work_id: work.id, round: work.round, purpose,
@@ -304,9 +306,10 @@ export async function executeWork(user: SessionUser, workId: string, body: JsonR
         const current = await db.canvasRoleAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
         if (current.state !== 'sending' || current.settlement_applied) return;
         if (await db.user.findUnique({ where: { id: user.id }, select: { id: true } })) {
+          await authorizeLegacyInflight(db, 'role', current.id);
           const released = await settleTaskCredits(db, { taskId: `role-attempt:${current.id}`, userId: user.id, terminalStatus: 'failed',
             frozenAmount: current.reserved_points / 100, freezeSnapshot: quote.freezeSnapshot, actualCost: 0 });
-          await db.creditLedger.create({ data: { user_id: user.id, type: 'task_billing_release', amount: released.refundedAmount,
+          await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_billing_release', amount: released.refundedAmount,
             balance_before: released.balanceBefore, balance_after: released.balanceAfter, frozen_before: released.frozenBefore, frozen_after: released.frozenAfter,
             related_task_id: `role-attempt:${current.id}`, idempotency_key: `role-settle:${current.id}`, reason: '发送前校验未通过，未调用供应商', metadata_json: '{}' } });
         }
@@ -383,9 +386,10 @@ async function releaseUnsentAttempt(db: RoleDb, user: SessionUser, attemptId: st
   const current = await db.canvasRoleAttempt.findUniqueOrThrow({ where: { id: attemptId } });
   if (current.settlement_applied || !['reserved', 'sending'].includes(current.state)) return;
   const quote = JSON.parse(current.quote_json);
+  await authorizeLegacyInflight(db, 'role', current.id);
   const settlement = await settleTaskCredits(db, { taskId: `role-attempt:${current.id}`, userId: user.id, terminalStatus: 'failed',
     frozenAmount: current.reserved_points / 100, freezeSnapshot: quote.freezeSnapshot, actualCost: 0 });
-  await db.creditLedger.create({ data: { user_id: user.id, type: 'task_billing_release', amount: settlement.refundedAmount,
+  await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_billing_release', amount: settlement.refundedAmount,
     balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter, frozen_before: settlement.frozenBefore,
     frozen_after: settlement.frozenAfter, related_task_id: `role-attempt:${current.id}`, idempotency_key: `role-settle:${current.id}`,
     reason: '角色请求未发送，释放原预留', metadata_json: JSON.stringify({ code }) } });
@@ -439,7 +443,7 @@ export async function executeReservedDispatch(user: SessionUser, dispatchId: str
         || c.run.settled_usd_micros + c.run.reserved_usd_micros + c.contract.reserveUsdMicros > c.grant.usdMicrosLimit) throw new RoleError('本次额度或次数已用完，等待本人处理', 409, 'budget_exceeded');
       const id = randomUUID();
       const freeze = await allocateTaskCredits(db, user, c.contract.reservePointCents / 100, `role-attempt:${id}`);
-      await db.creditLedger.create({ data: { user_id: user.id, type: 'task_freeze', amount: 0,
+      await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_freeze', amount: 0,
         balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before,
         frozen_after: freeze.frozen_after, related_task_id: `role-attempt:${id}`, idempotency_key: `role-freeze:${id}`,
         reason: '角色文字授权预留，不是报价', metadata_json: JSON.stringify({ roleTaskRunId: c.run.id, allocations: freeze.allocations }) } });
@@ -607,9 +611,10 @@ export async function reconcileAttempt(user: SessionUser, attemptId: string, opt
     }
     // Quote expiry gates new sends, not settlement of a previously authorized send.
     // Result adoption and actual supplier consumption are independent facts.
+    await authorizeLegacyInflight(db, 'role', current.id);
     const settlement = await settleTaskCredits(db, { taskId: `role-attempt:${current.id}`, userId: user.id, terminalStatus: 'succeeded',
       frozenAmount: current.reserved_points / 100, freezeSnapshot: quote.freezeSnapshot, actualCost: actualCents / 100 });
-    await db.creditLedger.create({ data: { user_id: user.id, type: 'task_success_deduct',
+    await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_success_deduct',
       amount: -actualCents / 100, balance_before: settlement.balanceBefore, balance_after: settlement.balanceAfter,
       frozen_before: settlement.frozenBefore, frozen_after: settlement.frozenAfter, related_task_id: `role-attempt:${current.id}`,
       idempotency_key: `role-settle:${current.id}`, reason: '角色文字原账单精确结算；不以成果是否采用免除已授权费用',
@@ -645,11 +650,11 @@ export async function authorizeRoleSettlement(user: SessionUser, attemptId: stri
     const extra = Math.max(0, actualCents - attempt.reserved_points);
     let freezeSnapshot = quote.freezeSnapshot;
     if (extra > 0) {
-      const freeze = await allocateTaskCredits(db, user, extra / 100, `role-attempt:${attempt.id}`);
+      const freeze = await increaseTaskHold(db, user, extra / 100, `role-attempt:${attempt.id}`, String(body.receipt_digest));
       const original = JSON.parse(freezeSnapshot);
       if (!Array.isArray(original)) throw new RoleError('原冻结来源无效', 409, 'billing_conflict');
       freezeSnapshot = JSON.stringify([...original, ...freeze.allocations]);
-      await db.creditLedger.create({ data: { user_id: user.id, type: 'task_freeze', amount: 0,
+      await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_freeze', amount: 0,
         balance_before: freeze.balance_before, balance_after: freeze.balance_after, frozen_before: freeze.frozen_before,
         frozen_after: freeze.frozen_after, related_task_id: `role-attempt:${attempt.id}`,
         idempotency_key: `role-extra-freeze:${attempt.id}`, reason: '本人确认原账单差额；不发送新请求',
@@ -661,9 +666,10 @@ export async function authorizeRoleSettlement(user: SessionUser, attemptId: stri
         originalReservedPoints: attempt.reserved_points / 100, actualPoints: actualCents / 100, extraPoints: extra / 100,
         actualUsdMicros: amountMicros, authorizedTotalPoints: pointLimit / 100, authorizedTotalUsdMicros: usdLimit,
         extraFreezeSnapshot: extra ? JSON.parse(freezeSnapshot).slice(JSON.parse(quote.freezeSnapshot).length) : [], providerCalls: 0 }) } });
+    await authorizeLegacyInflight(db, 'role', attempt.id);
     const settled = await settleTaskCredits(db, { taskId: `role-attempt:${attempt.id}`, userId: user.id, terminalStatus: 'succeeded',
       frozenAmount: (attempt.reserved_points + extra) / 100, freezeSnapshot, actualCost: actualCents / 100 });
-    await db.creditLedger.create({ data: { user_id: user.id, type: 'task_success_deduct', amount: -actualCents / 100,
+    await writeHoldLedger(db, { data: { user_id: user.id, type: 'task_success_deduct', amount: -actualCents / 100,
       balance_before: settled.balanceBefore, balance_after: settled.balanceAfter, frozen_before: settled.frozenBefore,
       frozen_after: settled.frozenAfter, related_task_id: `role-attempt:${attempt.id}`, idempotency_key: `role-settle:${attempt.id}`,
       reason: '本人确认差额后一次结算原请求', metadata_json: JSON.stringify({ authorizationEventId: authorization.id }) } });

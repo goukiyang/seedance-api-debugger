@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -22,7 +23,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const body = await readCanvasStyleJson(request);
@@ -173,4 +174,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return canvasStyleFailure(error, '读取风格生成结果失败，请稍后重试');
   }
-}
+});

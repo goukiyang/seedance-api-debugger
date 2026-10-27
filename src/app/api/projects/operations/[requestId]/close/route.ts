@@ -1,10 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { closeProjectCreateOperation, ProjectOperationError } from '@/lib/projects/operations';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(_request: NextRequest, props: { params: Promise<{ requestId: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(_request: NextRequest, props: { params: Promise<{ requestId: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -14,4 +15,4 @@ export async function POST(_request: NextRequest, props: { params: Promise<{ req
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error instanceof ProjectOperationError ? { code: error.code } : {}) }, { status: error.status });
     return NextResponse.json({ error: '尚未确认结束，请保留原创建信息并继续核对' }, { status: 500 });
   }
-}
+});

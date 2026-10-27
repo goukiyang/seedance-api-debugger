@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
-import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { errorJson, getAdminUser, authFailureResponse } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
-import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
+import { revokeAllSessions } from '@/lib/auth/session-store';
 
 type RouteContext = {
   params: Promise<{
@@ -17,12 +18,12 @@ function canUseAdminSession(user: { role: string; status: string; expires_at: Da
     && (!user.expires_at || user.expires_at.getTime() > Date.now());
 }
 
-export async function POST(request: NextRequest, context: RouteContext) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest, context: RouteContext) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   const { id } = (await context.params);
@@ -48,8 +49,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   await prisma.$transaction(async (tx) => {
     const changed = await tx.user.updateMany({ where: { id, updated_at: user.updated_at, password_hash: user.password_hash },
-      data: { status: 'disabled', password_hash: maintainAccountSessionBinding(user, { ...user, status: 'disabled' }) } });
+      data: { status: 'disabled' } });
     if (changed.count !== 1) throw new Error('Account changed concurrently');
+    await revokeAllSessions(id, 'account_disabled', tx);
     await refreshQuotaMembership(tx, id);
     await tx.operationLog.create({
       data: {
@@ -63,4 +65,4 @@ export async function POST(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

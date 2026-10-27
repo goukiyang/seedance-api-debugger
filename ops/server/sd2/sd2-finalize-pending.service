@@ -6,7 +6,8 @@ After=network.target sd2-gray.service
 Type=oneshot
 User=gouki
 Group=gouki
-WorkingDirectory=/srv/video-api-debugger/app
+# Render this template for the exact candidate release; never install it verbatim.
+WorkingDirectory=@RELEASE_ROOT@
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/npm run video:finalize-pending -- --limit 20 --max-seconds 900 --missing-local-limit 2
 TimeoutStartSec=1200

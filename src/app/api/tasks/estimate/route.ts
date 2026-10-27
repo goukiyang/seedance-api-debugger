@@ -1,3 +1,7 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { resolveImageInputUrls } from '@/lib/assets/original-image-input';
+import { apiErrorResponse } from '@/lib/http/api-error';
+import { cookieOrCodexIdentity } from '@/lib/http/route-identities';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -17,10 +21,10 @@ import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPric
 import { prisma } from '@/lib/prisma';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', identity: cookieOrCodexIdentity, rateLimit: false }, async function GET(request: NextRequest) {
   return estimate(request);
-}
-export async function POST(request: NextRequest) {
+});
+export const POST = apiRoute({ access: 'user', identity: cookieOrCodexIdentity, rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const reader = request.body?.getReader();
     if (!reader) return errorJson('报价输入为空', 400);
@@ -46,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     return errorJson('报价输入无法读取，原参数未改变', 400);
   }
-}
+});
 async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   const { searchParams } = new URL(request.url);
   const provider = searchParams.get('provider') || 'seedance';
@@ -64,7 +68,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     if (error instanceof CodexApiAuthError) return errorJson(error.message, error.status);
-    return errorJson('未登录', 401);
+    return apiErrorResponse(error);
   }
   const expectedActor = request.headers.get('x-app-session-user');
   if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请重新确认当前账号后报价；原输入保留', code: 'pricing_actor_changed' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
@@ -124,6 +128,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
       if (task.model !== parsedModel.model || task.duration !== duration || task.resolution !== resolution) throw new AuthError('重试报价与原任务不同', 409);
       body = savedVideoPricingContextInput(task);
     }
+    if (body) await resolveImageInputUrls(user, body);
     const context = body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
       ...body, provider, model: parsedModel.model, resolution, duration,
     }) : undefined;

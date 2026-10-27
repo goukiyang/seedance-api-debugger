@@ -1,8 +1,12 @@
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
+import { createdPageOrder, createdPageRequest } from '@/lib/pagination/created-page';
+import { PaginationError } from '@/lib/pagination/cursor';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
-import { isExternalUser } from '@/lib/access/external-role';
 import {
   VOLCENGINE_IP_VIDEO_PROVIDER,
   safeVolcengineIpUserMessage,
@@ -13,24 +17,7 @@ import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
 
-function redactIpTaskForExternal<T extends Record<string, unknown>>(task: T) {
-  return {
-    ...task,
-    provider_task_id: null,
-    public_video_storage_key: null,
-    provider_cost_currency: null,
-    provider_official_amount_minor: null,
-    provider_final_amount_minor: null,
-    provider_official_amount_micros: null,
-    provider_final_amount_micros: null,
-    template_id: null,
-    agent_run_id: null,
-    selected_agent_plan_key: null,
-    generation_template: null,
-  };
-}
-
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) {
@@ -41,9 +28,6 @@ export async function GET(request: NextRequest) {
     }
 
     const searchParams = request.nextUrl.searchParams;
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)));
-    const skip = (page - 1) * limit;
     const projectId = searchParams.get('project_id');
     const videoCardId = searchParams.get('video_card_id');
     const includeAll = user.role === 'admin' && searchParams.get('include_all') === 'true';
@@ -61,110 +45,44 @@ export async function GET(request: NextRequest) {
       ],
     };
 
+    const paging = createdPageRequest(request, user, ['ip-video-tasks', projectId, videoCardId, includeAll, includeDeleted], { defaultLimit: 20, maxLimit: 50, minOnePage: true });
+    if (paging.anchor) paging.assertAnchor(await prisma.videoTask.findFirst({ where: { AND: [where, paging.anchor] }, select: { id: true } }));
+
     const total = await prisma.videoTask.count({ where });
 
     const tasks = await prisma.videoTask.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      skip,
-      take: limit,
-      select: {
-        id: true,
-        provider: true,
-        model: true,
-        provider_status: true,
-        error_code: true,
-        provider_task_id: true,
-        prompt: true,
-        generation_mode: true,
-        ratio: true,
-        duration: true,
-        resolution: true,
-        local_status: true,
-        delivery_status: true,
-        delivery_error: true,
-        local_video_path: true,
-        public_video_url: true,
-        public_video_storage_provider: true,
-        public_video_storage_key: true,
-        public_video_file_size: true,
-        public_video_cached_at: true,
-        error_message: true,
-        estimated_cost: true,
-        actual_cost: true,
-        frozen_cost: true,
-        refund_amount: true,
-        provider_cost_currency: true,
-        provider_official_amount_minor: true,
-        provider_final_amount_minor: true,
-        provider_official_amount_micros: true,
-        provider_final_amount_micros: true,
-        reference_image_ids: true,
-        reference_image_urls: true,
-        created_at: true,
-        completed_at: true,
-        retention_status: true,
-        user_deleted_at: true,
-        user_deleted_by: true,
-        admin_hidden_at: true,
-        admin_hidden_by: true,
-        restored_at: true,
-        restored_by: true,
-        delete_reason: true,
-        user_id: true,
-        owner_user_id: true,
-        project_id: true,
-        video_card_id: true,
-        template_id: true,
-        agent_run_id: true,
-        selected_agent_plan_key: true,
-        prompt_user_edited: true,
-        project: {
-          select: { id: true, name: true, type: true },
-        },
-        video_card: {
-          select: { id: true, title: true, objective: true, status: true, project_id: true },
-        },
-        generation_template: {
-          select: { id: true, name: true, template_key: true, version: true },
-        },
-      },
+      where: paging.anchor ? { AND: [where, paging.seek] } : where,
+      orderBy: createdPageOrder,
+      skip: paging.skip,
+      take: paging.take,
+      select: videoTaskViewSelect,
     });
 
-    const external = isExternalUser(user);
+    const result = paging.finish(tasks, total);
     return NextResponse.json({
-      tasks: tasks.map((task) => {
-        const visibleTask = external ? redactIpTaskForExternal(task) : task;
+      tasks: result.items.map((task) => {
         return {
-        ...visibleTask,
+        ...toVideoTaskView(task, user),
         result_video_url: null,
         result_last_frame_url: null,
         ...taskThumbnailProjection({
-          ...visibleTask,
-          result_video_url: null,
-          result_last_frame_url: null,
+          id: task.id, local_status: task.local_status, delivery_status: task.delivery_status,
+          public_video_url: task.public_video_url, local_video_path: task.local_video_path,
         }),
         error_message: safeVolcengineIpUserMessage(task.error_message),
       };
       }),
-      pagination: {
-        page,
-        limit,
-        total,
-        total_pages: Math.max(1, Math.ceil(total / limit)),
-      },
+      pagination: result.pagination,
     });
   } catch (error) {
+    if (error instanceof PaginationError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof AuthError) {
       return NextResponse.json(
         { error: 'Forbidden', message: error.message },
         { status: error.status },
       );
     }
-    console.error('[IpVideoList] List tasks error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

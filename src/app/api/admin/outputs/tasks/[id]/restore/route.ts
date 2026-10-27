@@ -1,13 +1,15 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { prisma } from '@/lib/prisma';
 import { recordContentAuditLog } from '@/lib/content-audit';
-import { publicVideoTaskPricing } from '@/lib/pricing/video';
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
 import { TASK_RETENTION_ACTIVE } from '@/lib/tasks/retention';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const admin = await getAdminUser(request);
@@ -26,6 +28,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const ownerId = task.owner_user_id || task.user_id || null;
     const updated = await prisma.$transaction(async (tx) => {
       const nextTask = await tx.videoTask.update({
+        select: videoTaskViewSelect,
         where: { id: task.id },
         data: {
           retention_status: TASK_RETENTION_ACTIVE,
@@ -52,15 +55,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       return nextTask;
     });
 
-    return NextResponse.json({ success: true, task: publicVideoTaskPricing(updated) });
+    return NextResponse.json({ success: true, task: toVideoTaskView(updated, admin) });
   } catch (error) {
-    console.error('[AdminOutputs] Restore task error:', error);
-    const status = error && typeof error === 'object' && 'status' in error
-      ? Number((error as { status?: number }).status) || 500
-      : 500;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : '恢复任务失败' },
-      { status },
-    );
+    return apiErrorResponse(error);
   }
-}
+});

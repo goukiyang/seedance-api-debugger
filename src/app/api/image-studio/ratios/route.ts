@@ -1,15 +1,16 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { changeStudioRatio, listStudioRatios } from '@/lib/image-studio/ratio-preferences';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 
 export const dynamic = 'force-dynamic';
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET() {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try { return NextResponse.json({ ratios: await listStudioRatios(user.id) }, { headers: { 'Cache-Control': 'no-store' } }); }
   catch { return NextResponse.json({ error: '比例读取失败，请重试' }, { status: 503 }); }
-}
+});
 async function change(request: NextRequest, remove: boolean) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
@@ -23,5 +24,5 @@ async function change(request: NextRequest, remove: boolean) {
     return NextResponse.json({ error: expected ? message : '比例未保存，请重试' }, { status: expected ? 400 : 503 });
   }
 }
-export const POST = (request: NextRequest) => change(request, false);
-export const DELETE = (request: NextRequest) => change(request, true);
+export const POST = apiRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => change(request, false));
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => change(request, true));

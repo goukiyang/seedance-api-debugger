@@ -67,7 +67,7 @@ function main() {
   if (!source || !/^[a-f0-9]{40}$/.test(source)) throw new Error('preflight-source-required');
   const load = createRequire(path.join(root, 'package.json'));
   load('@next/env').loadEnvConfig(root, false, { info() {}, error() {} });
-  const next = load('next/package.json').version, sharp = load('sharp/package.json').version;
+  const next = load('next/package.json').version, sharp = load('sharp').versions.sharp;
   const checks = {
     source: sourceAt(root) === source,
     next: next.startsWith('15.') && atLeast(next, '15.5.28'),

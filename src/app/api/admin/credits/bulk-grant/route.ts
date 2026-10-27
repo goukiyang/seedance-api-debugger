@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { addCredits, assertCreditWriteback } from '@/lib/credits/precision';
@@ -21,7 +22,7 @@ function normalizeUserIds(input: unknown): string[] {
   return ids;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
@@ -151,4 +152,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin/Credits/BulkGrant]', err);
     return errorJson('服务器错误', 500);
   }
-}
+});

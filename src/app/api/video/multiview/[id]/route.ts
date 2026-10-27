@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { multiviewInfo, multiviewFrame, multiviewExport, multiviewFailure } from '@/lib/video/multiview';
@@ -17,7 +18,7 @@ async function boundedBody(request: Request) {
     return Buffer.concat(chunks).toString('utf8');
   } finally { await reader.cancel().catch(() => undefined); }
 }
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
@@ -31,8 +32,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     }
     return NextResponse.json({ info: await multiviewInfo(user, params.id, request) }, { headers });
   } catch (error) { const failure = multiviewFailure(error); return NextResponse.json({ error: failure.message }, { status: failure.status, headers }); }
-}
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+});
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
@@ -47,4 +48,4 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return new NextResponse(new Uint8Array(result.data), { headers: { ...headers, 'Content-Type': result.mime, 'Content-Length': String(result.data.length),
       'Content-Disposition': `attachment; filename="${result.name}"` } });
   } catch (error) { const failure = multiviewFailure(error); return NextResponse.json({ error: failure.message }, { status: failure.status, headers }); }
-}
+});

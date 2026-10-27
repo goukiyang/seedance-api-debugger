@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
@@ -6,7 +7,7 @@ import { defaultStudioModuleId, validStudioModuleId } from '@/lib/image-studio/m
 import { ContextVersionError, resolveModuleContextVersion, snapshotModuleContextVersion } from '@/lib/image-studio/context-version';
 
 export const dynamic = 'force-dynamic';
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403 });
@@ -33,4 +34,4 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json({ error: error instanceof ContextVersionError ? error.message : '模块上下文版本读取失败，请重试' }, { status: 503 });
   }
-}
+});

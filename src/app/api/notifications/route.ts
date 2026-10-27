@@ -1,3 +1,6 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -13,7 +16,7 @@ function boundedLimit(value: string | null) {
   return Math.min(100, Math.max(1, Number.isFinite(parsed) ? Math.floor(parsed) : 50));
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -36,7 +39,7 @@ export async function GET(request: NextRequest) {
           project: { select: { id: true, name: true, type: true, status: true } },
           videoCard: { select: { id: true, title: true, status: true, project_id: true } },
           approval: { select: { id: true, type: true, status: true } },
-          actor: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+          actor: { select: userSummarySelect },
         },
       }),
       prisma.notification.count({
@@ -51,15 +54,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ notifications, unread_count });
   } catch (error) {
-    console.error('[Notifications] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -83,10 +83,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ updated_count: result.count });
   } catch (error) {
-    console.error('[Notifications] Bulk update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

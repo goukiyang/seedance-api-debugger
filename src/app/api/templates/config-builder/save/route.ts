@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -55,7 +56,7 @@ async function uniqueTemplateKey(
   return `${base}_${Date.now()}`;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -261,4 +262,4 @@ export async function POST(request: NextRequest) {
     console.error('[TemplateConfig] Save failed:', error);
     return NextResponse.json({ error: '保存模板配置失败' }, { status: 500 });
   }
-}
+});

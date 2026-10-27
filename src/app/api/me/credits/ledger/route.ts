@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { isPrivateMultiviewTask, privateMultiviewLedgerMetadata } from '@/lib/video/multiview-task-privacy';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   let user: { id: string } | null = null;
   try {
     user = await getSessionUser(request);
@@ -33,4 +34,4 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ records: records.map(record => ({ ...record,
     metadata_json: privateMultiviewLedgerMetadata(record.metadata_json, Boolean(record.related_task_id && protectedTaskIds.has(record.related_task_id))),
   })), total, page, page_size: pageSize }, { headers: { 'Cache-Control': 'private, no-store' } });
-}
+});

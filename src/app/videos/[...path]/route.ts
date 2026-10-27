@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import path from 'path';
@@ -135,12 +136,12 @@ async function videoResponse(
   );
 }
 
-export async function GET(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function GET(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
   const params = await props.params;
   return videoResponse(request, params, true);
-}
+});
 
-export async function HEAD(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+export const HEAD = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function HEAD(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
   const params = await props.params;
   return videoResponse(request, params, false);
-}
+});

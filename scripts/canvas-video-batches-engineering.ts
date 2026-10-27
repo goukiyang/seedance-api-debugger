@@ -254,7 +254,7 @@ async function main() {
       process.env.CANVAS_VIDEO_BATCH_CREATE_ENABLED = '1';
     });
     await check('W5 actual ordinary/IP create paths retain original reserve, receipt, pricing and usage engines', () => {
-      for (const filename of ['src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts']) {
+      for (const filename of ['src/server/video-tasks/standard-create.ts', 'src/server/video-tasks/ip-create.ts']) {
         const source = readFileSync(path.resolve(filename), 'utf8');
         assert.ok(source.indexOf('restoreCanvasVideoBatchCreate(user') < source.indexOf('const body = restoredBatch.body'));
         const tx = source.indexOf('const result = await prisma.$transaction');

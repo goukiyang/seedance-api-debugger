@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { videoCreationSchemaReady } from '@/lib/creation/context';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -152,7 +153,7 @@ function savedVideoCardId(documentJson: string | null | undefined) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   try {
@@ -583,4 +584,4 @@ export async function GET(request: NextRequest) {
       },
     },
   });
-}
+});

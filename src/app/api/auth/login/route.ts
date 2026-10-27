@@ -1,6 +1,8 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
-import { login } from '@/lib/auth/session';
+import { login, SessionUnavailableError } from '@/lib/auth/session';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
+import { requestSessionDevice } from '@/lib/auth/session-store';
 
 function safeRedirectPath(value: unknown, fallback: string) {
   if (typeof value !== 'string' || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
@@ -18,7 +20,7 @@ function loginErrorRedirect(request: NextRequest, code: string) {
   });
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'public', rateLimit: "login" }, async function POST(request: NextRequest) {
   try {
     const contentType = request.headers.get('content-type') || '';
     const isFormSubmit = contentType.includes('application/x-www-form-urlencoded') || contentType.includes('multipart/form-data');
@@ -32,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '账号和密码不能为空' }, { status: 400 });
     }
 
-    const result = await login(String(identifier), String(password));
+    const result = await login(String(identifier), String(password), requestSessionDevice(request));
 
     if ('error' in result) {
       if (isFormSubmit) return loginErrorRedirect(request, 'invalid');
@@ -51,7 +53,7 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({ user: result.user });
     return setSessionCookie(response, result.token);
   } catch (err) {
-    console.error('[Login]', err);
+    if (err instanceof SessionUnavailableError) return NextResponse.json({ error: '服务暂时不可用', code: err.code }, { status: 503 });
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
-}
+});

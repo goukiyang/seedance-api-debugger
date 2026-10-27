@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { Readable } from 'stream';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
@@ -9,7 +11,7 @@ import {
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) {
@@ -48,14 +50,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[BulkVideoDownload] Error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: '批量下载失败',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

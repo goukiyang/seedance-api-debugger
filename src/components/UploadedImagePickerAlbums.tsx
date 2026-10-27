@@ -6,6 +6,8 @@ import { ArrowLeft, FolderOpen, RefreshCw } from 'lucide-react';
 import { readJsonResponse } from '@/lib/http/json-response';
 import type { UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import styles from './UploadedImagePickerAlbums.module.css';
+import { appendAlbumPage, fetchAlbumPage, loadAllAlbumPages } from '@/lib/reference-albums/client-pages';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type PrivateAlbum = {
   id: string;
@@ -37,8 +39,6 @@ type HistoryAsset = UploadedAssetSelection & {
   height?: number | null;
 };
 
-type AlbumListResponse = { albums?: PrivateAlbum[]; error?: string; message?: string };
-type AlbumImagesResponse = { images?: AlbumImage[]; error?: string; message?: string };
 type HistoryResponse = {
   assets?: HistoryAsset[];
   error?: string;
@@ -79,7 +79,13 @@ export function UploadedImagePickerAlbums({
   maxSelection,
   onToggleAsset,
 }: Props) {
+  const { user, userLoadError, sessionChanged } = useAppSession();
+  const accountId = !userLoadError && !sessionChanged ? user?.id || '' : '';
+  const ownerRef = useRef(accountId); ownerRef.current = accountId;
+  const albumLoadSequence = useRef(0);
   const [albums, setAlbums] = useState<PrivateAlbum[]>([]);
+  const [albumNext, setAlbumNext] = useState<string | null>(null);
+  const [imageNext, setImageNext] = useState<string | null>(null);
   const [albumsLoading, setAlbumsLoading] = useState(false);
   const [albumsError, setAlbumsError] = useState<string | null>(null);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
@@ -111,29 +117,32 @@ export function UploadedImagePickerAlbums({
   const availableCount = visibleImages.filter((image) => image.asset).length;
   const unavailableCount = visibleImages.length - availableCount;
 
-  const loadAlbums = useCallback(async () => {
+  const loadAlbums = useCallback(async (cursor?: string | null) => {
+    if (!accountId) return;
+    const sequence = ++albumLoadSequence.current;
     setAlbumsLoading(true);
     setAlbumsError(null);
     try {
-      const res = await fetch('/api/reference-albums?scope=mine', { cache: 'no-store' });
-      const data = await readJsonResponse<AlbumListResponse>(res, { invalidJsonMessage: ALBUMS_INVALID_JSON });
-      if (!res.ok) throw new Error(apiError(data, '私人图集读取失败'));
-      const privateAlbums = (data.albums || []).filter((album) => (
+      const data = await fetchAlbumPage<PrivateAlbum>('/api/reference-albums?scope=mine', 'albums', { cursor, ownerId: accountId, limit: PAGE_SIZE });
+      if (sequence !== albumLoadSequence.current || ownerRef.current !== accountId) return;
+      const privateAlbums = data.items.filter((album) => (
         album.album_type === 'personal' && album.visibility === 'private' && album.status === 'active'
       ));
-      setAlbums(privateAlbums);
-      setVisibleAlbumCount(PAGE_SIZE);
+      setAlbums(current => cursor ? appendAlbumPage(current, privateAlbums) : privateAlbums);
+      setAlbumNext(data.pagination.nextCursor);
+      setVisibleAlbumCount(count => cursor ? count + PAGE_SIZE : PAGE_SIZE);
       setTargetAlbumId((current) => (
-        privateAlbums.some((album) => album.id === current) ? current : privateAlbums[0]?.id || ''
+        (cursor && current) || privateAlbums.some((album) => album.id === current) ? current : privateAlbums[0]?.id || ''
       ));
     } catch (error) {
-      setAlbumsError(error instanceof Error ? error.message : '私人图集读取失败');
+      if (sequence === albumLoadSequence.current && ownerRef.current === accountId) setAlbumsError(error instanceof Error ? error.message : '私人图集读取失败');
     } finally {
-      setAlbumsLoading(false);
+      if (sequence === albumLoadSequence.current && ownerRef.current === accountId) setAlbumsLoading(false);
     }
-  }, []);
+  }, [accountId]);
 
   const resolveAlbumImagePage = useCallback(async (images: AlbumImageSelection[], start: number, sequence: number) => {
+    const expectedOwner = ownerRef.current;
     const page = images.slice(start, start + PAGE_SIZE);
     const assetIds = Array.from(new Set(page.map((image) => image.assetId).filter((id): id is string => Boolean(id))));
     const ownedAssets = new Map<string, HistoryAsset>();
@@ -153,7 +162,7 @@ export function UploadedImagePickerAlbums({
       }
     }
 
-    if (sequence !== imageLoadSequence.current) return false;
+    if (sequence !== imageLoadSequence.current || ownerRef.current !== expectedOwner) return false;
     const pageReferenceIds = new Set(page.map((image) => image.referenceId));
     setAlbumImages((current) => current.map((image) => pageReferenceIds.has(image.referenceId)
       ? { ...image, asset: image.assetId ? ownedAssets.get(image.assetId) ?? null : null }
@@ -161,41 +170,43 @@ export function UploadedImagePickerAlbums({
     return true;
   }, []);
 
-  const loadAlbumImages = useCallback(async (albumId: string) => {
+  const loadAlbumImages = useCallback(async (albumId: string, cursor?: string | null) => {
+    if (!accountId) return;
     const sequence = ++imageLoadSequence.current;
     setSelectedAlbumId(albumId);
-    setAlbumImages([]);
-    setVisibleImageCount(0);
-    setImagePageStart(0);
+    if (!cursor) { setAlbumImages([]); setVisibleImageCount(0); setImageNext(null); }
+    const start = cursor ? albumImages.length : 0;
+    setImagePageStart(start);
     setAlbumImagesLoading(true);
     setAlbumImagesError(null);
     setActionError(null);
     setActionMessage(null);
 
     try {
-      const res = await fetch(`/api/reference-albums/${albumId}/images`, { cache: 'no-store' });
-      const data = await readJsonResponse<AlbumImagesResponse>(res, { invalidJsonMessage: ALBUMS_INVALID_JSON });
-      if (!res.ok) throw new Error(apiError(data, '图集图片读取失败'));
-      if (sequence !== imageLoadSequence.current) return;
+      const data = await fetchAlbumPage<AlbumImage>(`/api/reference-albums/${encodeURIComponent(albumId)}/images`, 'images', { cursor, ownerId: accountId, limit: PAGE_SIZE });
+      if (sequence !== imageLoadSequence.current || ownerRef.current !== accountId) return;
 
-      const images = (data.images || []).map((image) => ({
+      const incoming = data.items.map((image) => ({
         referenceId: image.id,
         assetId: image.asset_id && image.asset?.id === image.asset_id && image.asset.type === 'image' ? image.asset_id : null,
         asset: null,
       }));
+      const images = cursor ? [...albumImages, ...incoming.filter(image => !albumImages.some(previous => previous.referenceId === image.referenceId))] : incoming;
       setAlbumImages(images);
-      const resolved = await resolveAlbumImagePage(images, 0, sequence);
-      if (resolved && sequence === imageLoadSequence.current) setVisibleImageCount(Math.min(PAGE_SIZE, images.length));
+      setImageNext(data.pagination.nextCursor);
+      const resolved = await resolveAlbumImagePage(images, start, sequence);
+      if (resolved && sequence === imageLoadSequence.current) setVisibleImageCount(Math.min(start + PAGE_SIZE, images.length));
     } catch (error) {
       if (sequence !== imageLoadSequence.current) return;
       setAlbumImagesError(error instanceof Error ? error.message : '图集图片读取失败');
     } finally {
       if (sequence === imageLoadSequence.current) setAlbumImagesLoading(false);
     }
-  }, [resolveAlbumImagePage]);
+  }, [accountId, albumImages, resolveAlbumImagePage]);
 
   const resolveNextImagePage = useCallback(async (start: number) => {
     if (!selectedAlbumId || albumImagesLoading) return;
+    if (start >= albumImages.length && imageNext) { await loadAlbumImages(selectedAlbumId, imageNext); return; }
     const sequence = ++imageLoadSequence.current;
     setImagePageStart(start);
     setAlbumImagesLoading(true);
@@ -210,19 +221,20 @@ export function UploadedImagePickerAlbums({
     } finally {
       if (sequence === imageLoadSequence.current) setAlbumImagesLoading(false);
     }
-  }, [albumImages, albumImagesLoading, resolveAlbumImagePage, selectedAlbumId]);
+  }, [albumImages, albumImagesLoading, imageNext, loadAlbumImages, resolveAlbumImagePage, selectedAlbumId]);
 
   useEffect(() => {
+    imageLoadSequence.current += 1;
+    setAlbums([]); setAlbumNext(null); setAlbumImages([]); setImageNext(null); setSelectedAlbumId(null); setTargetAlbumId('');
+    setActionError(null); setActionMessage(null); setRetryCreatedAlbumId(null); setRetryExistingAlbumId(null);
     void loadAlbums();
-    return () => { imageLoadSequence.current += 1; };
+    return () => { imageLoadSequence.current += 1; albumLoadSequence.current += 1; };
   }, [loadAlbums]);
 
   const postAssetsToAlbum = async (albumId: string, assetIds: string[]) => {
-    const existingRes = await fetch(`/api/reference-albums/${albumId}/images`, { cache: 'no-store' });
-    const existingData = await readJsonResponse<AlbumImagesResponse>(existingRes, { invalidJsonMessage: ALBUMS_INVALID_JSON });
-    if (!existingRes.ok) throw new Error(apiError(existingData, '无法读取图集现有图片，请重试'));
-
-    const existingAssetIds = new Set((existingData.images || []).map((image) => image.asset_id).filter(Boolean));
+    const existing = await loadAllAlbumPages<AlbumImage>(`/api/reference-albums/${encodeURIComponent(albumId)}/images`, 'images', { ownerId: accountId });
+    if (ownerRef.current !== accountId) throw new Error('当前账号已变化，未加入素材');
+    const existingAssetIds = new Set(existing.map((image) => image.asset_id).filter(Boolean));
     const pendingAssetIds = Array.from(new Set(assetIds)).filter((id) => !existingAssetIds.has(id));
     if (pendingAssetIds.length === 0) return 0;
 
@@ -437,7 +449,7 @@ export function UploadedImagePickerAlbums({
                   );
                 })}
               </div>
-              {albumImages.length > visibleImageCount && (
+              {(albumImages.length > visibleImageCount || imageNext) && (
                 <button type="button" className={styles.loadMore} onClick={() => { void resolveNextImagePage(visibleImageCount); }} disabled={albumImagesLoading}>
                   {albumImagesLoading ? '核对中…' : '加载更多图片'}
                 </button>
@@ -505,8 +517,9 @@ export function UploadedImagePickerAlbums({
             <div className={styles.status}>图集尚未读取，请使用上方按钮重试。</div>
           ) : albums.length === 0 ? (
             <div className={styles.empty}>
-              <strong>还没有私人图集</strong>
-              <span>创建图集后，可加入已选图片，也能从图集中选择图片。</span>
+              <strong>{albumNext ? '当前页没有私人图集' : '还没有私人图集'}</strong>
+              {albumNext ? <button type="button" className={styles.loadMore} onClick={() => void loadAlbums(albumNext)} disabled={albumsLoading}>加载更多图集</button>
+                : <span>创建图集后，可加入已选图片，也能从图集中选择图片。</span>}
             </div>
           ) : (
             <div className={styles.albumList}>
@@ -520,8 +533,8 @@ export function UploadedImagePickerAlbums({
                   <a href={`/collections/${album.id}`} target="_blank" rel="noreferrer">管理图集</a>
                 </div>
               ))}
-              {albums.length > visibleAlbumCount && (
-                <button type="button" className={styles.loadMore} onClick={() => setVisibleAlbumCount((count) => count + PAGE_SIZE)}>
+              {(albums.length > visibleAlbumCount || albumNext) && (
+                <button type="button" className={styles.loadMore} disabled={albumsLoading} onClick={() => { if (albumNext) void loadAlbums(albumNext); else setVisibleAlbumCount((count) => count + PAGE_SIZE); }}>
                   加载更多图集
                 </button>
               )}

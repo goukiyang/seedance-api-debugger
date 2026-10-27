@@ -1,44 +1,43 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
+import { SessionUnavailableError } from './session-errors';
 
-const SALT_LEN = 32;
-const KEY_LEN = 64;
-const N = 2 ** 14;
-const R = 8;
-const P = 1;
+const SALT_LEN = 32, KEY_LEN = 64;
+const CONCURRENCY = 2, MAX_WAITING = 128;
+const waiting: (() => void)[] = [];
+let active = 0;
 
-export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(SALT_LEN);
-  const derived = crypto.scryptSync(password, salt, KEY_LEN, {
-    N,
-    r: R,
-    p: P,
-    maxmem: 128 * 1024 * 1024,
-  });
-  const hash = derived.toString('base64');
-  return `scrypt:${salt.toString('base64')}:${hash}`;
-}
-
-export function hasSessionPasswordBinding(stored: string): boolean {
-  const parts = stored.split(':');
-  return parts.length === 4 && parts[0] === 'scrypt' && /^session-v1-[a-f0-9]{32}$/.test(parts[3]);
-}
-
-export function verifyPassword(password: string, stored: string): boolean {
-  const parts = stored.split(':');
-  if ((parts.length !== 3 && !hasSessionPasswordBinding(stored)) || parts[0] !== 'scrypt') return false;
-  const [, saltB64, hashB64] = parts;
+async function derive(password: string, salt: Buffer): Promise<Buffer> {
+  if (active >= CONCURRENCY) {
+    if (waiting.length >= MAX_WAITING) throw new SessionUnavailableError();
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  } else active++;
   try {
-    const salt = Buffer.from(saltB64, 'base64');
-    const targetHash = Buffer.from(hashB64, 'base64');
-    const derived = crypto.scryptSync(password, salt, KEY_LEN, {
-      N,
-      r: R,
-      p: P,
-      maxmem: 128 * 1024 * 1024,
+    return await new Promise<Buffer>((resolve, reject) => {
+      crypto.scrypt(password, salt, KEY_LEN, { N: 2 ** 14, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
+        (error, result) => error ? reject(error) : resolve(result));
     });
-    if (derived.length !== targetHash.length) return false;
-    return crypto.timingSafeEqual(derived, targetHash);
-  } catch {
-    return false;
+  } finally {
+    const next = waiting.shift();
+    if (next) next(); else active--;
   }
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  if (Buffer.byteLength(password) > 1024) throw new Error('密码过长');
+  const salt = crypto.randomBytes(SALT_LEN);
+  const hash = await derive(password, salt);
+  return `scrypt:${salt.toString('base64')}:${hash.toString('base64')}`;
+}
+
+export async function verifyPassword(password: string, stored?: string | null): Promise<boolean> {
+  const parts = stored?.split(':') || [];
+  // Read old password envelopes without trusting their obsolete fourth field.
+  // New writes contain only the KDF, salt, and derived password bytes.
+  const salt = Buffer.from(parts[1] || '', 'base64');
+  const target = Buffer.from(parts[2] || '', 'base64');
+  const valid = (parts.length === 3 || parts.length === 4) && parts[0] === 'scrypt'
+    && salt.length === SALT_LEN && target.length === KEY_LEN && Buffer.byteLength(password) <= 1024;
+  const derived = await derive(Buffer.byteLength(password) <= 1024 ? password : 'invalid-password', valid ? salt : Buffer.alloc(SALT_LEN, 127));
+  const equal = crypto.timingSafeEqual(derived, valid ? target : Buffer.alloc(KEY_LEN));
+  return valid && equal;
 }

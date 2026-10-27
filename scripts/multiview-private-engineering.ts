@@ -26,7 +26,7 @@ const SINK_WIRING = Object.freeze([
   ['src/app/api/provider/seedance/callback/route.ts', ['projectPrivateMultiviewTask', 'isPublicHttpUrl']],
   ['src/app/api/tasks/[id]/reuse/route.ts', ['isPrivateMultiviewTask', 'readSafePrivateMultiviewInput']],
   ['src/app/api/tasks/[id]/route.ts', ['projectPrivateMultiviewTask', 'projectSelectedMultiviewTask']],
-  ['src/app/api/tasks/create/route.ts', ['readMultiviewSystemReference', 'consumeTrustedMultiviewRetry', 'multiviewPrivateTaskMarker', 'privateNoStore']],
+  ['src/server/video-tasks/standard-create.ts', ['readMultiviewSystemReference', 'consumeTrustedMultiviewRetry', 'multiviewPrivateTaskMarker', 'privateNoStore']],
   ['src/app/api/tasks/enhance-video/create/route.ts', ['readMultiviewPrivateTaskMarker', 'MULTIVIEW_PUBLIC_TASK_TITLE']],
   ['src/app/api/video-cards/[id]/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
   ['src/app/api/video-cards/[id]/tasks/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
@@ -401,9 +401,9 @@ async function main() {
     assert.equal(JSON.stringify(privacy.projectPrivateMultiviewTask(unknownProtected)).includes(secret), false);
 
     const ordinaryFull = { id: 'ordinary-full', prompt: 'ordinary prompt', source_metadata_json: null, legacy: { kept: true } };
-    assert.equal(privacy.projectPrivateMultiviewTask(ordinaryFull), ordinaryFull);
+    assert.deepEqual(privacy.projectPrivateMultiviewTask(ordinaryFull), { id: ordinaryFull.id, prompt: ordinaryFull.prompt });
     const ordinaryPartial = { id: 'ordinary-partial', prompt: 'ordinary prompt', source_metadata_json: null, legacy: 'kept' };
-    assert.deepEqual(privacy.projectSelectedMultiviewTask(ordinaryPartial), { id: ordinaryPartial.id, prompt: ordinaryPartial.prompt, legacy: 'kept' });
+    assert.deepEqual(privacy.projectSelectedMultiviewTask(ordinaryPartial), { id: ordinaryPartial.id, prompt: ordinaryPartial.prompt });
 
     const keywordWhere = privacy.safeVideoTaskKeywordWhere(secret) as UnknownRecord;
     assert.deepEqual(keywordWhere, { OR: [

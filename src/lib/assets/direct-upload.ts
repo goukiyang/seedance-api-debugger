@@ -1,3 +1,4 @@
+import { createUploadHash, UploadStreamError } from './streamed-upload';
 import crypto from 'crypto';
 import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import path from 'path';
@@ -16,6 +17,7 @@ import {
   type PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { mediaRoot } from '@/lib/media/storage-roots';
 import { v4 as uuidv4 } from 'uuid';
 import {
   getSiteUploadKind,
@@ -480,7 +482,7 @@ async function createAssetFromCompletedUpload(input: {
   }
   // A presigned PUT can remain writable after completion. Freeze only new upload
   // bytes at the immutable local content address before exposing an Asset URL.
-  await publishVerifiedFile(input.proof, path.join(process.cwd(), 'public/uploads/assets'), `${input.proof.hash}.${input.proof.extension}`);
+  await publishVerifiedFile(input.proof, path.join(mediaRoot('uploads'), 'assets'), `${input.proof.hash}.${input.proof.extension}`);
   const publicUrl = `/uploads/assets/${input.proof.hash}.${input.proof.extension}`;
   const requestId = input.payload.requestId || input.payload.key;
   const fingerprint = completedUploadFingerprint(input.payload);
@@ -507,37 +509,29 @@ async function completedUploadReceipt(ownerId: string, payload: DirectUploadToke
 }
 
 function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']>, expectedBytes: number) {
-  const hash = crypto.createHash('sha256');
-  let byteLength = 0;
-  let finalized = false;
-
-  const updateHash = (chunk: Buffer) => {
-    byteLength += chunk.length;
-    if (byteLength > expectedBytes) throw new VerifiedUploadError('UPLOAD_SIZE_MISMATCH', '上传内容超过票据规定大小', 400);
-    hash.update(chunk);
+  const hashing = createUploadHash(expectedBytes);
+  const rethrow = (error: unknown): never => {
+    if (error instanceof UploadStreamError) throw new VerifiedUploadError(error.code, error.message, error.status);
+    throw error;
   };
-
-  const digest = () => {
-    if (finalized) throw new Error('上传文件校验信息已读取，请重新上传。');
-    finalized = true;
-    return hash.digest('hex');
-  };
+  const updateHash = (chunk: Buffer) => { try { hashing.update(chunk); } catch (error) { rethrow(error); } };
+  const digest = () => { try { return hashing.digest(); } catch (error) { return rethrow(error); } };
 
   if (Buffer.isBuffer(body)) {
     updateHash(body);
-    return { body, digest, byteLength: () => byteLength };
+    return { body, digest, byteLength: hashing.byteLength };
   }
 
   if (body instanceof Uint8Array) {
     const buffer = Buffer.from(body);
     updateHash(buffer);
-    return { body, digest, byteLength: () => byteLength };
+    return { body, digest, byteLength: hashing.byteLength };
   }
 
   if (typeof body === 'string') {
     const buffer = Buffer.from(body);
     updateHash(buffer);
-    return { body, digest, byteLength: () => byteLength };
+    return { body, digest, byteLength: hashing.byteLength };
   }
 
   const source = body as NodeJS.ReadableStream;
@@ -558,7 +552,7 @@ function createHashingUploadBody(body: NonNullable<PutObjectCommandInput['Body']
   return {
     body: source.pipe(hashingStream) as NonNullable<PutObjectCommandInput['Body']>,
     digest,
-    byteLength: () => byteLength,
+    byteLength: hashing.byteLength,
   };
 }
 

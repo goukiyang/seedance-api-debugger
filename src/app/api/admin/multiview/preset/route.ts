@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -26,7 +27,7 @@ async function manager(request: NextRequest) {
   await requirePrivatePromptRequest(user.id, origins);
   return user;
 }
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await manager(request);
     const mutationId = request.nextUrl.searchParams.get('mutationId');
@@ -36,12 +37,12 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json(await readMultiviewRotationPreset(), { headers });
   } catch (error) { return failure(error); }
-}
-export async function PUT(request: NextRequest) {
+});
+export const PUT = declaredRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const user = await manager(request);
     let body: unknown;
     try { body = await request.json(); } catch { throw new MultiviewPresetError('保存内容无法读取，请保留输入。'); }
     return NextResponse.json(await saveMultiviewRotationPreset(body, user.id), { headers });
   } catch (error) { return failure(error); }
-}
+});

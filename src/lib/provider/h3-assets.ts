@@ -1,7 +1,8 @@
+import { safeFetch } from '@/lib/net/safe-fetch';
 import { createHash } from 'crypto';
 import { uploadH3ReferenceImage, type H3ReferenceImageUploadResult } from './h3';
 
-const MAX_H3_REFERENCE_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_H3_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024;
 
 export type H3ReferenceImageRole = 'first_frame' | 'last_frame';
 
@@ -35,8 +36,11 @@ function sha256(buffer: Buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-export async function fetchH3ReferenceImageBytes(url: string, fetchImpl: typeof fetch = fetch) {
-  const response = await fetchImpl(url, {
+export async function fetchH3ReferenceImageBytes(url: string, _fetchImpl?: typeof fetch) {
+  // The legacy injection remains for call compatibility, but must not bypass resource validation.
+  void _fetchImpl;
+  const response = await safeFetch(url, {
+    maxBytes: 20 * 1024 * 1024, timeoutMs: 90_000, allowRedirects: true,
     method: 'GET',
     headers: { Accept: 'image/png,image/jpeg,image/webp,image/*' },
   });
@@ -45,12 +49,13 @@ export async function fetchH3ReferenceImageBytes(url: string, fetchImpl: typeof 
   }
   const contentType = response.headers.get('content-type') || '';
   if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+    await response.body?.cancel();
     throw new Error('H3 参考图只支持图片类型');
   }
   const arrayBuffer = await response.arrayBuffer();
   if (arrayBuffer.byteLength <= 0) throw new Error('H3 参考图文件为空');
   if (arrayBuffer.byteLength > MAX_H3_REFERENCE_IMAGE_BYTES) {
-    throw new Error('H3 参考图超过 25MB，请先压缩后再上传');
+    throw new Error('H3 参考图超过 20MB，请先压缩后再上传');
   }
   return Buffer.from(arrayBuffer);
 }

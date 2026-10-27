@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -43,7 +44,7 @@ function snapshotDto(snapshot: {
   };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const searchParams = request.nextUrl.searchParams;
@@ -68,9 +69,9 @@ export async function GET(request: NextRequest) {
     console.error('[ProviderBalance] GET failed:', error);
     return NextResponse.json({ error: '读取供应商额度快照失败' }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -137,4 +138,4 @@ export async function POST(request: NextRequest) {
     console.error('[ProviderBalance] POST failed:', error);
     return NextResponse.json({ error: '保存供应商额度快照失败' }, { status: 500 });
   }
-}
+});

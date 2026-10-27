@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -116,7 +117,7 @@ async function main() {
       async findUnique({ args, query }) { check('toolflow', args.where.id); return query(args); },
     },
   } });
-  Reflect.set(globalThis, 'prisma', observed);
+  setFixtureDatabase(observed);
   const originalCwd = process.cwd();
   process.chdir(directory);
   let forbiddenCalls = 0, completed = false;

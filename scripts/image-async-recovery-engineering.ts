@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -67,7 +68,7 @@ async function main() {
     }
     return rows;
   } } } });
-  Reflect.set(globalThis, 'prisma', observed);
+  setFixtureDatabase(observed);
   process.chdir(directory);
   const checks: string[] = [], queries: Array<{ id: string; path: string }> = [];
   const recordCheck = (name: string) => { checks.push(name); markPhase('check_complete', name); };
@@ -158,6 +159,8 @@ async function main() {
         deleted_at: id === 'original-0' ? new Date(clock - 5000) : null, lease_token: `old-${id}`, lease_until: new Date(1000),
         created_at: new Date(clock - acceptedAge - 10000) } });
       await db.creditAccount.update({ where: { user_id: owner }, data: { balance: { decrement: 1 }, frozen_credits: { increment: 1 } } });
+      await db.creditHold.create({ data: { business_type: 'image', business_id: id, payer_type: 'user', payer_id: owner,
+        operator_id: owner, amount: task.unit_credits, freeze_snapshot: task.freeze_snapshot || '[]', opening_receipt: '{}' } });
       await delivery.beginStudioRequest(task); await delivery.setStudioUnsentRequestState(task, 'attempted');
       const receipt = await delivery.createStudioAsyncReceipt(task, { taskId: `provider-${id}`, pollAfterMs: 2000,
         ...(expired ? { expiresAt: new Date(clock - 1000).toISOString() } : {}) });

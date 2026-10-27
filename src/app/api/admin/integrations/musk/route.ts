@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -96,7 +98,7 @@ function safeConfigDto(settings: Awaited<ReturnType<typeof getMuskApiSettings>>)
   };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getMuskApiSettings();
@@ -119,9 +121,9 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/MuskIntegration] GET failed:', error);
     return NextResponse.json({ error: '读取 Musk API 配置失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -172,14 +174,12 @@ export async function PUT(request: NextRequest) {
     if (error instanceof Error && error.message.startsWith('Musk API 地址')) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Admin/MuskIntegration] PUT failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : '保存 Musk API 配置失败',
-    }, { status: 500 });
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let adminId: string | null = null;
   const startedAt = Date.now();
 
@@ -281,9 +281,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof MuskApiError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
-    console.error('[Admin/MuskIntegration] POST failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : 'Musk API 测试失败',
-    }, { status: 500 });
+
+    return apiErrorResponse(error);
   }
-}
+});

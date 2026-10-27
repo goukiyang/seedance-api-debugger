@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { FEEDBACK_NOTIFICATION_TYPE, LEASE_MS, SEND_WINDOW_MS,
-  feedbackPrisma as prisma, feedbackConfig, feedbackDeliveryMessage, feedbackImageCard, parseFeedbackDelivery, validFeedbackRecipient, type FeedbackDelivery } from './notification';
+  feedbackPrisma as prisma, feedbackConfig, feedbackDeliveryMessage, feedbackImageCard, parseFeedbackDelivery, validFeedbackRecipient,
+  anonymousFeedbackMessage, type FeedbackDelivery } from './notification';
 import { attachmentSelect, feedbackAttachmentStillValid, FeedbackImageError, FEEDBACK_IMAGE_ATTEMPTS,
   readFeedbackImage, uploadFeedbackImage, type FeedbackAttachment } from './attachments';
 
@@ -86,6 +87,12 @@ export async function processFeedbackDeliveries(limit = 10) {
         id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
       } });
       if (!validFeedbackRecipient(recipient, config) || meta.identity !== config.identity) throw new DeliveryError('feedback_identity_changed', false, false);
+      if (meta.anonymousDigest && !meta.message) {
+        if (Date.now() < meta.anonymousDigest.end || meta.firstSendAt !== null) throw new DeliveryError('feedback_digest_window_invalid', false, false);
+        const count = await prisma.feedback.count({ where: { user_id: null,
+          created_at: { gte: new Date(meta.anonymousDigest.start), lt: new Date(meta.anonymousDigest.end) } } });
+        await persist({ ...meta, message: anonymousFeedbackMessage(count) }, 'pending', null);
+      }
       let token: string | undefined;
       const getToken = async () => token ?? (token = await feedbackTenantToken());
       const attachmentValid = async (item: FeedbackAttachment) => {

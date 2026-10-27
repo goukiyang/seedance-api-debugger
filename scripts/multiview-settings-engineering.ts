@@ -42,7 +42,7 @@ async function main() {
   // dynamic ESM imports with alias-loaded CJS creates duplicate constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
-  const { createSession, getSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
+  const { createSession, getSession, SESSION_COOKIE } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const contract = require('../src/lib/video/multiview-settings-contract') as typeof import('../src/lib/video/multiview-settings-contract');
   const generation = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
   const service = require('../src/lib/video/multiview-settings.server') as typeof import('../src/lib/video/multiview-settings.server');
@@ -71,12 +71,12 @@ async function main() {
       tokens[id] = await createSession(id);
     }
     const withActor = async <T>(actor: string, callback: (user: NonNullable<Awaited<ReturnType<typeof getSession>>>) => Promise<T>) => {
-      const headers = new Headers({ Cookie: `session=${tokens[actor]}` });
+      const headers = new Headers({ Cookie: `${SESSION_COOKIE}=${tokens[actor]}` });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       return requestAsyncStorage.run(store, async () => { const user = await getSession(); assert.ok(user); return callback(user); });
     };
     const invoke = async (actor: string | null, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, body?: unknown, sameOrigin = true) => {
-      const headers = new Headers({ ...(actor ? { Cookie: `session=${tokens[actor]}`, 'x-app-session-user': actor } : {}),
+      const headers = new Headers({ ...(actor ? { Cookie: `${SESSION_COOKIE}=${tokens[actor]}`, 'x-app-session-user': actor } : {}),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: sameOrigin ? 'http://mv-settings-isolated.invalid' : 'http://other.invalid' }),
         Host: 'mv-settings-isolated.invalid' });
       const request = new NextRequest(`http://mv-settings-isolated.invalid/api/multiview/settings${url}`, {

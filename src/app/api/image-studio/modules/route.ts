@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { listStudioModules, saveStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
@@ -45,7 +46,7 @@ function openNotAppliedProjection(error: unknown): { openCommandOutcome: StudioO
     || !/^[A-Za-z0-9:_-]{1,160}$/.test(proof.requestId)) return {};
   return { openCommandOutcome: { status: 'not-applied', actorId: proof.actorId, presetId: proof.presetId, requestId: proof.requestId } };
 }
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       code: error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^P\d{4}$/.test(error.code) ? error.code : undefined });
     return NextResponse.json({ error: '模块读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
-}
+});
 async function save(request: NextRequest, createOnly: boolean) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
@@ -106,10 +107,10 @@ async function save(request: NextRequest, createOnly: boolean) {
     return NextResponse.json({ error: '保存未确认，草稿仍保留，请保留原请求编号查询', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
 }
-export const POST = (request: NextRequest) => save(request, true);
-export const PUT = (request: NextRequest) => save(request, false);
+export const POST = apiRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => save(request, true));
+export const PUT = apiRoute({ access: 'user', rateLimit: false }, (request: NextRequest) => save(request, false));
 
-export async function DELETE(request: NextRequest) {
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -128,4 +129,4 @@ export async function DELETE(request: NextRequest) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '模板参数无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ error: '删除结果未确认，请保留原请求编号查询，不会自动重新删除', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
-}
+});

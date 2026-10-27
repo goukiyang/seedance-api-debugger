@@ -1,7 +1,12 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
+import { assertPageOwner, PaginationError } from '@/lib/pagination/cursor';
+import { readSharePage } from '@/lib/reference-albums/governance-page';
 import {
   assertCanShareAlbum,
   normalizeAlbumPermissions,
@@ -11,38 +16,28 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const now = new Date();
     await assertCanShareAlbum(user, params.id);
-    const shares = await prisma.albumShare.findMany({
-      where: {
-        album_id: params.id,
-        status: 'active',
-        OR: [{ expires_at: null }, { expires_at: { gt: now } }],
-      },
-      orderBy: { created_at: 'desc' },
-    });
+    assertPageOwner(request.headers, user.id);
+    const { items: shares, pagination } = await readSharePage(user, params.id, request.nextUrl.searchParams);
     const grantees = await loadShareGrantees(shares);
 
-    return NextResponse.json({ shares: shares.map((share) => serializeShare(share, grantees)) });
+    return NextResponse.json({ shares: shares.map((share) => serializeShare(share, grantees)), pagination });
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof PaginationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[AlbumShares] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -124,13 +119,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[AlbumShares] Create error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});
 
 type ShareRecord = Awaited<ReturnType<typeof prisma.albumShare.findMany>>[number];
 
@@ -150,7 +142,7 @@ async function loadShareGrantees(shares: ShareRecord[]) {
     userIds.length > 0
       ? prisma.user.findMany({
           where: { id: { in: userIds } },
-          select: { id: true, name: true, username: true, email: true, status: true, account_type: true },
+          select: { ...userSummarySelect, status: true },
         })
       : [],
     projectIds.length > 0
@@ -166,8 +158,8 @@ async function loadShareGrantees(shares: ShareRecord[]) {
     grantees.set(`user:${user.id}`, {
       id: user.id,
       type: 'user',
-      label: user.name || user.username || user.email || user.id,
-      subtitle: user.email || user.username,
+      label: user.name || user.username || user.id,
+      subtitle: user.username,
       status: user.status,
       account_type: user.account_type,
     });

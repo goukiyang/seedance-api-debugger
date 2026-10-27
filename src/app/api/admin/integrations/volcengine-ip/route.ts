@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -12,7 +14,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getVolcengineIpApiSettings();
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/VolcengineIpIntegration] GET failed:', error);
     return NextResponse.json({ error: '读取火山 IP 生成配置失败' }, { status: 500 });
   }
-}
+});
 
 async function updateVolcengineIpConfig(request: NextRequest) {
   try {
@@ -78,17 +80,15 @@ async function updateVolcengineIpConfig(request: NextRequest) {
     if (error instanceof Error && error.message.startsWith('火山 API 地址')) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Admin/VolcengineIpIntegration] Update failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : '保存火山 IP 生成配置失败',
-    }, { status: 500 });
+
+    return apiErrorResponse(error);
   }
 }
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   return updateVolcengineIpConfig(request);
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   return updateVolcengineIpConfig(request);
-}
+});

@@ -1,12 +1,10 @@
 import { createHash } from 'node:crypto';
-import { PrismaClient, type Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
+import { prisma as feedbackPrisma } from '@/lib/prisma';
 import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 import { feedbackAttachmentNotice, validFeedbackAttachments, type FeedbackAttachments } from './attachments';
 
-const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
-// Feedback may contain pasted credentials. Never let database errors print it.
-export const feedbackPrisma = feedbackGlobal.feedbackPrisma ?? new PrismaClient({ log: [], errorFormat: 'minimal' });
-if (process.env.NODE_ENV !== 'production') feedbackGlobal.feedbackPrisma = feedbackPrisma;
+export { feedbackPrisma };
 
 export const FEEDBACK_NOTIFICATION_TYPE = 'feedback_feishu_v1';
 export const FEEDBACK_SITE = 'https://sd2.youdooart.com';
@@ -32,6 +30,7 @@ export type FeedbackDelivery = {
   ambiguousSend: boolean;
   lastErrorCode: string | null;
   message?: FeedbackMessage;
+  anonymousDigest?: { start: number; end: number };
   preparation?: {
     authorId: string | null;
     author: string;
@@ -71,6 +70,19 @@ export function validFeedbackRecipient(user: Recipient | null, config = feedback
 
 export function feedbackEventId(feedbackId: string) {
   return createHash('sha256').update(`${FEEDBACK_NOTIFICATION_TYPE}:${feedbackId}`).digest('hex').slice(0, 32);
+}
+
+export function anonymousFeedbackBucket(createdAt: Date) {
+  const start = createdAt.getTime();
+  if (!Number.isSafeInteger(start) || start < 0) throw new Error('feedback_created_at_invalid');
+  const hour = Math.floor(start / 3_600_000);
+  return { feedbackId: `anonymous-hour-${hour}`, start: hour * 3_600_000, end: (hour + 1) * 3_600_000 };
+}
+
+export function anonymousFeedbackMessage(count: number): FeedbackMessage {
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error('feedback_digest_count_invalid');
+  return { msgType: 'text', content: JSON.stringify({ text:
+    `匿名反馈汇总：本时段收到 ${count} 条反馈。\n后台查看：${FEEDBACK_SITE}/admin/feedback` }) };
 }
 
 export function safeFeedbackSummary(content: string) {
@@ -184,6 +196,13 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
         || (data.message && prep.attachments.items.some(item => ['pending', 'uploading'].includes(item.state)))
         || (!data.message && (data.firstSendAt !== null || data.ambiguousSend))) return null;
     }
+    if (data.anonymousDigest) {
+      const digest = data.anonymousDigest;
+      if (data.version !== 1 || !Number.isSafeInteger(digest.start) || digest.start < 0
+        || !Number.isSafeInteger(digest.end) || digest.end <= digest.start || digest.end - digest.start > 3_600_000
+        || anonymousFeedbackBucket(new Date(digest.start)).feedbackId !== data.feedbackId
+        || anonymousFeedbackBucket(new Date(digest.start)).end !== digest.end) return null;
+    }
     // Older metadata lacking the flag is conservative once a send was attempted.
     return { ...data, ambiguousSend: data.ambiguousSend ?? (data.firstSendAt !== null), lastErrorCode: data.lastErrorCode ?? null };
   } catch { return null; }
@@ -191,7 +210,7 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
 
 export async function enqueueFeedbackNotification(
   tx: Prisma.TransactionClient,
-  feedback: { id: string; content: string; pathname: string | null },
+  feedback: { id: string; content: string; pathname: string | null; created_at?: Date },
   author: { name?: string | null; id: string } | null,
   attachments: FeedbackAttachments | number,
 ) {
@@ -204,6 +223,23 @@ export async function enqueueFeedbackNotification(
   // A deleted FK target cannot own an outbox row. Never redirect to another user.
   if (!recipient) { console.warn('feedback_recipient_missing'); return; }
   const valid = validFeedbackRecipient(recipient, config);
+  if (!author) {
+    const bucket = anonymousFeedbackBucket(feedback.created_at || new Date());
+    const digest: FeedbackDelivery = {
+      version: 1, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${bucket.feedbackId}`, feedbackId: bucket.feedbackId,
+      uuid: feedbackEventId(bucket.feedbackId), identity: config.identity, state: valid ? 'pending' : 'failed',
+      attempts: 0, nextAttemptAt: bucket.end, firstSendAt: null, leaseToken: null, leaseUntil: null,
+      receiptId: null, ambiguousSend: false, lastErrorCode: null,
+      anonymousDigest: { start: bucket.start, end: bucket.end },
+    };
+    // The unique hourly key is created in the feedback transaction; later submissions never reset a send receipt.
+    await tx.notification.upsert({ where: { id: digest.uuid }, update: {}, create: {
+      id: digest.uuid, type: FEEDBACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
+      target_user_id: config.recipientId, title: '匿名反馈汇总', body: null,
+      metadata_json: JSON.stringify(digest), error_message: valid ? null : 'feedback_identity_invalid',
+    } });
+    return;
+  }
   const safeAuthor = safeFeedbackAuthor(author?.name, Boolean(author));
   const summary = safeFeedbackSummary(feedback.content);
   const page = feedbackPageName(feedback.pathname);

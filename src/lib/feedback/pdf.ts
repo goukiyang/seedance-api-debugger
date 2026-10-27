@@ -1,3 +1,5 @@
+import { safeFetch } from '@/lib/net/safe-fetch';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import fs from 'fs';
 import path from 'path';
 import type PDFDocumentType from 'pdfkit';
@@ -58,21 +60,22 @@ function submitterText(feedback: FeedbackForPdf) {
 }
 
 async function imageBufferFromUrl(url: string) {
-  if (url.startsWith('/')) {
-    const filePath = path.join(process.cwd(), 'public', url.replace(/^\/+/, ''));
-    if (!fs.existsSync(filePath)) return null;
-    return fs.readFileSync(filePath);
-  }
-
   try {
-    const response = await fetch(url);
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      const relative = decodeURIComponent(url.split(/[?#]/)[0]).slice(1);
+      const stored = /^(uploads|videos)\/(.+)$/.exec(relative);
+      if (!stored) return null;
+      const { mediaRoot } = await import('@/lib/media/storage-roots');
+      const filePath = await resolveInside(mediaRoot(stored[1] as 'uploads' | 'videos'), stored[2]);
+      const info = await fs.promises.stat(filePath);
+      if (!info.isFile() || info.size > 20 * 1024 * 1024) return null;
+      return await fs.promises.readFile(filePath);
+    }
+    const response = await safeFetch(url, { maxBytes: 20 * 1024 * 1024, timeoutMs: 15_000, allowRedirects: true });
     if (!response.ok) return null;
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.startsWith('image/')) return null;
+    if (!(response.headers.get('content-type') || '').startsWith('image/')) { await response.body?.cancel(); return null; }
     return Buffer.from(await response.arrayBuffer());
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 async function drawFeedbackBlock(doc: PDFKit.PDFDocument, feedback: FeedbackForPdf, index?: number) {

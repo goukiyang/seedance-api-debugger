@@ -1,8 +1,9 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { queryStudioGallery } from '@/lib/image-studio/gallery';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { reactionUser, reactionJson, reactionError } from '@/lib/content-reactions/http';
 export const dynamic = 'force-dynamic';
-export async function POST(request: Request) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: Request) {
   try {
     const user = await reactionUser(request);
     const expectedActor = request.headers.get('x-app-session-user');
@@ -22,4 +23,4 @@ export async function POST(request: Request) {
     if (error instanceof StudioSharingError) return reactionJson({ error: error.message, code: error.reasonCode }, error.status);
     return reactionError(error);
   }
-}
+});

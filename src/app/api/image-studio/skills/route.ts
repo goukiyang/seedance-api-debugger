@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getSession } from '@/lib/auth/session';
 import { deleteSkill, getSkill, skillDTO, listSkills, listSkillsPage, parseSkillIds, saveSkill } from '@/lib/image-studio/skills';
 import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
@@ -60,4 +61,4 @@ async function handle(request: Request) {
     if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return Response.json({ error: error.message, code: error.code }, { status: error.status, headers });
     return Response.json({ error: error instanceof StudioStyleError ? error.message : error instanceof SyntaxError ? '提示词组内容无效' : '提示词组操作尚未确认，请重新读取' }, { status: error instanceof StudioStyleError ? error.status : error instanceof SyntaxError ? 400 : 503, headers }); }
 }
-export const GET = handle, POST = handle, PUT = handle, DELETE = handle;
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, handle), POST = declaredRoute({ access: 'user', rateLimit: false }, handle), PUT = declaredRoute({ access: 'user', rateLimit: false }, handle), DELETE = declaredRoute({ access: 'user', rateLimit: false }, handle);

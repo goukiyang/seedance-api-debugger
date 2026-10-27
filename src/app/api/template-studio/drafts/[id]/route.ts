@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { withStudioRoute, readStudioJson } from '@/lib/template-studio/common';
 import { getStudioDraft, updateStudioDraft } from '@/lib/template-studio/drafts';
@@ -6,7 +7,7 @@ import type { UpdateStudioDraftRequest } from '@/lib/template-studio/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = declaredRoute({ access: 'internal', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return withStudioRoute(async (user) => {
     const draft = await getStudioDraft(user, params.id);
@@ -17,12 +18,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     }
     return NextResponse.json({ draft });
   });
-}
+});
 
-export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PUT = declaredRoute({ access: 'internal', rateLimit: false }, async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return withStudioRoute(async (user) => {
     const draft = await updateStudioDraft(user, params.id, await readStudioJson(request) as UpdateStudioDraftRequest);
     return NextResponse.json({ draft });
   });
-}
+});

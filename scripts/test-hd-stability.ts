@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from '../src/lib/media/sharp';
+import { mock } from 'node:test';
 import * as runner from '../src/lib/media/hd-image-processor';
 import type { HdControl, HdResourceSample } from '../src/lib/media/hd-resource-state';
 import { HD_CONTROL_PROTOCOL, HD_RESOURCE_POLICY, classifyHdResources, hdResourceTransition } from '../src/lib/media/hd-resource-state';
@@ -15,15 +16,16 @@ Object.assign(process.env, { NODE_ENV: 'test' });
 delete process.env.HD_DERIVATIVES_ROOT;
 const evidenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'sd2-hd-stability-'));
 await fs.chmod(evidenceRoot, 0o700);
-// Set before importing the readonly client. The suite does not execute any SQL.
+// Set before importing the repository. The suite does not execute any SQL.
 process.env.DATABASE_URL = `file:${path.join(evidenceRoot, 'unused-private.db')}`;
 // Complete authoritative lookup fixture: scheduler ownership is exercised
 // without opening the application's SQL database.
-(globalThis as unknown as { hdReadonlyDb?: unknown }).hdReadonlyDb = {
-  asset: { findMany: async () => [], findFirst: async () => null },
-  referenceImage: { findMany: async () => [] }, imageStudioTask: { findFirst: async () => null },
-  $disconnect: async () => {},
-};
+const { hdReadRepository } = await import('../src/lib/media/hd-readonly-db');
+mock.method(hdReadRepository, 'assetsAtUrls', async () => []);
+mock.method(hdReadRepository, 'referencesAtUrls', async () => []);
+mock.method(hdReadRepository, 'nextAssets', async () => []);
+mock.method(hdReadRepository, 'nextTasks', async () => []);
+mock.method(hdReadRepository, 'close', async () => {});
 const moduleCore = await import('../src/lib/media/hd-derivatives');
 const core = { ...moduleCore, processHdJob: (...args: Parameters<typeof moduleCore.processHdJob>) => moduleCore.processHdJob(args[0], args[1], {
   ...args[2], processor: (request, options) => runner.runHdImageProcessor(request, { ...options, applicationRoot }),
@@ -48,7 +50,7 @@ async function check(name: string, run: () => Promise<void> | void) {
 async function inPrivateRoot(name: string, run: () => Promise<void>) {
   const directory = await fs.mkdtemp(path.join(evidenceRoot, 'case-'));
   await fs.chmod(directory, 0o700);
-  await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
+  await fs.mkdir(path.join(directory, '.media/uploads'), { recursive: true });
   await fs.mkdir(path.join(directory, 'storage/hd-derivatives'), { recursive: true, mode: 0o700 });
   await fs.mkdir(path.join(directory, 'src/lib/media'), { recursive: true });
   await fs.copyFile(path.join(applicationRoot, 'src/lib/media/hd-derivatives.ts'), path.join(directory, 'src/lib/media/hd-derivatives.ts'));
@@ -67,7 +69,7 @@ async function image(name: string, alpha: 'none' | 'opaque' | 'transparent' = 'n
     bytes[pixel * channels + 2] = 93;
     if (channels === 4) bytes[pixel * channels + 3] = alpha === 'transparent' && pixel % 3 === 0 ? 80 : 255;
   }
-  const file = path.join(process.cwd(), 'public/uploads', `${name}.png`);
+  const file = path.join(process.cwd(), '.media/uploads', `${name}.png`);
   await sharp(bytes, { raw: { width, height, channels: channels as 3 | 4 } }).png().toFile(file);
   return { file, source: `/uploads/${name}.png` };
 }
@@ -256,7 +258,7 @@ await inPrivateRoot('missing/incompatible source does not stop good work; transp
     assert.equal(ready.status, 'ready'); assert.equal(ready.integrity!.version, core.HD_VALIDATION_VERSION); assert.deepEqual(ready.integrity!.failedChecks, []);
     if (input === transparent || input === opaque) assert.equal(ready.format, 'webp');
   }
-  await fs.writeFile(path.join(process.cwd(), 'public/uploads/invalid.png'), 'not an image');
+  await fs.writeFile(path.join(process.cwd(), '.media/uploads/invalid.png'), 'not an image');
   const incompatible = (await core.requestHd('/uploads/invalid.png', 0, false))!;
   await core.processHdJob(incompatible.key, undefined, { capacity: safeCapacity });
   assert.equal((await core.readHdJob(incompatible.key))!.status, 'skipped'); assert.equal((await core.hdControl()).paused, false);
@@ -346,7 +348,8 @@ await inPrivateRoot('legacy discovery boundary replays safely; malformed checkpo
   await assert.rejects(discovery.readHdDiscoveryCheckpoint(), /invalid_discovery_checkpoint/);
 });
 process.chdir(applicationRoot);
-await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();
+await hdReadRepository.close();
+mock.restoreAll();
 const summary = { completed: true, checks: results.map(result => result.name), results, evidenceRoot, total: results.length, passed: results.filter(result => result.passed).length,
   productionWrites: 0, providerRequests: 0, dbQueries: 0 };
 await fs.writeFile(path.join(evidenceRoot, 'results.json'), JSON.stringify(summary, null, 2), { mode: 0o600 });

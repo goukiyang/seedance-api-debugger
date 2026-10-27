@@ -1,7 +1,7 @@
+import { openUntrustedImage, openTrustedRawImage, createTrustedImageCanvas, compositeCheckedImageTiles } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from '../media/sharp';
 import type { Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
@@ -149,8 +149,9 @@ async function sourceVersion(asset: Asset) {
   // originals for every card or silently accepting a mutable remote source.
   if (!local) throw new ModuleCoverError('这张原图尚未存到本地素材库，请先导入原件再设置封面', 409);
   if (local) {
-    const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-    const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
+    const { mediaRoot, localMediaPath } = await import('@/lib/media/storage-roots');
+    const root = await fs.realpath(mediaRoot('uploads'));
+    const file = await fs.realpath(localMediaPath(local));
     if (!file.startsWith(`${root}${path.sep}`)) throw new ModuleCoverError('原图路径无法确认', 409);
     const stat = await fs.stat(file);
     if (!stat.isFile() || stat.size <= 0 || stat.size > 40 * 1024 * 1024) throw new ModuleCoverError('封面原图过大或不可用', 409);
@@ -222,7 +223,7 @@ async function inspectSources(actor: ImageStudioIdentity, state: TargetState, id
     for (const { asset, version } of sources) {
       const bytes = await readStudioImage(asset.original_url, AbortSignal.timeout(30000));
       if (bytes.length > 40 * 1024 * 1024) throw new ModuleCoverError('封面原图过大');
-      const metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
+      const metadata = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).metadata();
       if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new ModuleCoverError('请选择普通静态图片');
       if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
       const swapped = [5, 6, 7, 8].includes(metadata.orientation ?? 1);
@@ -321,14 +322,14 @@ async function renderCover(actor: ImageStudioIdentity, state: TargetState, recip
       if (input.version !== version) throw new ModuleCoverError('原图已变化，请重新选择后保存', 409);
       const bytes = await readStudioImage(asset.original_url, AbortSignal.timeout(30000));
       if (bytes.length > 40 * 1024 * 1024) throw new ModuleCoverError('封面原图过大');
-      const metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
+      const metadata = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).metadata();
       if ((metadata.pages ?? 1) > 1) throw new ModuleCoverError('请选择普通静态图片');
-      const oriented = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).timeout({ seconds: 30 }).rotate().raw().toBuffer({ resolveWithObject: true });
+      const oriented = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).timeout({ seconds: 30 }).rotate().raw().toBuffer({ resolveWithObject: true });
       const { width, height, channels } = oriented.info;
       const tileWidth = recipe.layout === 'horizontal' ? output.width / 2 : output.width;
       const tileHeight = recipe.layout === 'vertical' ? output.height / 2 : output.height;
       if (recipe.version === 3) {
-        const tile = await sharp(oriented.data, { raw: { width, height, channels } }).timeout({ seconds: 30 })
+        const tile = await openTrustedRawImage(oriented.data, { width, height, channels }).timeout({ seconds: 30 })
           .resize(tileWidth, tileHeight, { fit: 'contain', background: '#0b0e0f', withoutEnlargement: true }).png().toBuffer();
         tiles.push({ input: tile, left: 0, top: 0 });
         if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
@@ -342,14 +343,14 @@ async function renderCover(actor: ImageStudioIdentity, state: TargetState, recip
       if (cropWidth < 1 || cropHeight < 1 || Math.abs(cropWidth / cropHeight - tileWidth / tileHeight) > Math.max(0.01, 3 / cropHeight)) {
         throw new ModuleCoverError('裁剪比例与封面格子不一致，请重新调整');
       }
-      const tile = await sharp(oriented.data, { raw: { width, height, channels } }).timeout({ seconds: 30 })
+      const tile = await openTrustedRawImage(oriented.data, { width, height, channels }).timeout({ seconds: 30 })
         .extract({ left, top, width: cropWidth, height: cropHeight }).resize(tileWidth, tileHeight, { fit: 'fill' }).png().toBuffer();
       tiles.push({ input: tile, left: recipe.layout === 'horizontal' ? index * tileWidth : 0, top: recipe.layout === 'vertical' ? index * tileHeight : 0 });
       if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
     }
-    const image = await sharp({ create: { width: output.width, height: output.height, channels: 4, background: '#0b0e0f' } })
-      .composite(tiles).timeout({ seconds: 30 }).webp({ quality: 84 }).toBuffer();
-    const thumbnail = await sharp(image).resize(output.thumbnailWidth, output.thumbnailHeight).webp({ quality: 80 }).toBuffer();
+    const image = await (await compositeCheckedImageTiles(createTrustedImageCanvas({ width: output.width, height: output.height, channels: 4, background: '#0b0e0f' }, 'ordinary'), tiles))
+      .timeout({ seconds: 30 }).webp({ quality: 84 }).toBuffer();
+    const thumbnail = await (await openUntrustedImage(image, 'ordinary')).resize(output.thumbnailWidth, output.thumbnailHeight).webp({ quality: 80 }).toBuffer();
     return { image, thumbnail };
   } finally { activeJobs -= 1; }
 }
@@ -694,7 +695,7 @@ export async function readModuleCoverImage(user: ImageStudioIdentity, target: Mo
   const width = size === 640 ? output.thumbnailWidth : output.width;
   const height = size === 640 ? output.thumbnailHeight : output.height;
   let metadata;
-  try { metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata(); }
+  try { metadata = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).metadata(); }
   catch { throw new ModuleCoverError('封面文件无法读取，请管理者重新设置', 503); }
   if (metadata.format !== 'webp' || metadata.width !== width || metadata.height !== height || (metadata.pages ?? 1) > 1) {
     throw new ModuleCoverError('封面文件尺寸与保存记录不一致，请管理者重新设置', 503);
@@ -805,10 +806,10 @@ async function assertFrozenBytes(asset: Asset, item: FrozenSharedCoverItem) {
     const bytes = await readStudioImage(asset.original_url, AbortSignal.timeout(30000));
     if (before !== item.sourceVersion || bytes.length !== item.bytes || createHash('sha256').update(bytes).digest('hex') !== item.sha256)
       throw new ModuleCoverError('冻结原图字节已变化，跳过原清单项', 409);
-    const metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
+    const metadata = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).metadata();
     if (metadata.width !== item.width || metadata.height !== item.height || (metadata.pages ?? 1) > 1)
       throw new ModuleCoverError('冻结原图尺寸已变化，跳过原清单项', 409);
-    await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).timeout({ seconds: 30 }).stats();
+    await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).timeout({ seconds: 30 }).stats();
     if (await sourceVersion(asset) !== before) throw new ModuleCoverError('冻结原图读取时发生变化，跳过原清单项', 409);
   } catch (error) {
     if (error instanceof ModuleCoverError) throw error;

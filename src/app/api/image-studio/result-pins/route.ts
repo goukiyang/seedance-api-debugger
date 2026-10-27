@@ -1,10 +1,11 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextResponse } from 'next/server';
 import { AuthError } from '@/lib/auth/session';
 import { reactionUser, reactionJson } from '@/lib/content-reactions/http';
 import { ReactionError } from '@/lib/content-reactions/content';
 import { mutateStudioPin, StudioPinError } from '@/lib/image-studio/result-pins';
 export const dynamic = 'force-dynamic';
-export async function PUT(request: Request) {
+export const PUT = declaredRoute({ access: 'user', rateLimit: false }, async function PUT(request: Request) {
   try {
     const user = await reactionUser(request);
     return NextResponse.json({ ...await mutateStudioPin(user, await request.json()), viewerId: user.id },
@@ -15,4 +16,4 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: error instanceof StudioPinError ? error.message : '置顶结果尚未确认，请按原操作重试' },
       { status: error instanceof StudioPinError ? error.status : 503 });
   }
-}
+});

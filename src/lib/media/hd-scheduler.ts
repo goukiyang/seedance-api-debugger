@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { atomicHdJson, hdDirectory, hdRequestIdentity, hdSource, withHdLease, type HdJob, type HdRequestContext } from './hd-derivatives';
-import { hdReadonlyDb } from './hd-readonly-db';
+import { lookupLegacyHdOwner, validHdOwnerEvidence, validateHdOwner } from './hd-owner';
 import { hdEncoderStrategy } from './hd-encoder';
 
 export const HD_SCHEDULER_PROTOCOL = 'hd-user-round-robin-v1';
@@ -66,23 +66,15 @@ async function mutate<T>(action: (state: Scheduler) => Promise<T> | T): Promise<
   }
   throw new Error('hd_scheduler_contention');
 }
-async function resolveOwner(job: HdJob): Promise<OwnerEvidence> {
+async function resolveOwner(job: HdJob, context?: HdRequestContext): Promise<OwnerEvidence> {
   const source = await hdSource(job.source);
   if (!source || source.version !== job.version) throw new Error('hd_scheduler_source_changed');
-  const assets = await hdReadonlyDb.asset.findMany({ where: { status: 'active', type: 'image' },
-    orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_id: true, original_url: true } })
-    .catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
-  const matches = async (url: string) => {
-    try { const value = await hdSource(url); return value?.file === source.file && value.version === source.version; }
-    catch (error) { if (['source_missing', 'source_unreadable'].includes((error as Error).message)) return false; throw error; }
-  };
-  const checkedAt = new Date().toISOString();
-  for (const asset of assets) if (await matches(asset.original_url)) return { kind: 'asset', id: asset.id, ownerId: asset.owner_id, checkedAt };
-  const references = await hdReadonlyDb.referenceImage.findMany({ where: { status: 'active', asset_id: null, album: { status: 'active' } },
-    orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_user_id: true, url: true } })
-    .catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
-  for (const reference of references) if (await matches(reference.url)) return { kind: 'reference', id: reference.id, ownerId: reference.owner_user_id, checkedAt };
-  return { kind: 'legacy', checkedAt };
+  if (job.ownerEvidence) {
+    if (!validHdOwnerEvidence(job.ownerEvidence, job.version)) throw new Error('invalid_hd_owner_evidence');
+    return job.ownerEvidence;
+  }
+  if (context?.owner) return validateHdOwner(job.source, job.version, context.owner);
+  return lookupLegacyHdOwner(job.source, job.version);
 }
 function queuedAt(job: HdJob) {
   const values = [job.attemptHistory?.[0]?.startedAt, job.updatedAt].filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)));
@@ -100,7 +92,7 @@ export async function registerHdScheduling(job: HdJob, context?: HdRequestContex
   // No database operation is permitted inside the short scheduler lease. A
   // successful complete lookup alone can establish/upgrade a legacy bucket.
   const evidence = !prior || prior.ownerEvidence.kind === 'legacy' && Date.now() - Date.parse(prior.ownerEvidence.checkedAt) >= 60000
-    ? await resolveOwner(job) : prior.ownerEvidence;
+    ? await resolveOwner(job, context) : prior.ownerEvidence;
   await mutate(state => {
     const expected = identity(job), existing = state.entries[job.key];
     if (existing && (existing.sourceVersion !== expected.sourceVersion || existing.strategy !== expected.strategy)) throw new Error('invalid_hd_scheduler_identity');

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -11,7 +12,7 @@ function numberParam(value: string | null, fallback: number, max: number) {
   return Math.min(Math.floor(parsed), max);
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
   } catch {
@@ -82,4 +83,4 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({ items, total, page, pageSize }, { headers: { 'Cache-Control': 'private, no-store' } });
-}
+});

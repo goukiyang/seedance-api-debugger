@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { createHash } from 'crypto';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -35,7 +36,7 @@ function failure(error: unknown) {
   return reactionJson({ error: '图片分享暂时失败，请重试' }, 503);
 }
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await reactionUser();
     const asset = await ownedImage(user, request.nextUrl.searchParams.get('key') || '');
@@ -44,9 +45,9 @@ export async function GET(request: NextRequest) {
     const album = await prisma.referenceAlbum.findUnique({ where: { id } });
     return reactionJson({ canShare: true, shared: album?.status === 'active' && album.visibility === 'public', href: `/collections/${id}` });
   } catch (error) { return failure(error); }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = declaredRoute({ access: 'user', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const user = await reactionUser(request);
     const body = await request.json();
@@ -74,4 +75,4 @@ export async function PUT(request: NextRequest) {
     });
     return reactionJson({ canShare: true, shared: body.active, href: `/collections/${id}` });
   } catch (error) { return failure(error); }
-}
+});

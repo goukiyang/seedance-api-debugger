@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * POST /api/assets/create-from-url
  * 公网图片 URL → 创建 Seedance asset → 数据库保存
@@ -13,6 +15,7 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { createAsset } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
+import { seedanceMediaDTO } from '@/lib/media/seedance-projection';
 import { normalizeAssetUrl } from '@/lib/assets/normalizeAssetUrl';
 import { originalImageInputUrl } from '@/lib/assets/original-image-input';
 
@@ -47,7 +50,7 @@ function inferAssetTypeFromUrl(url: string): SeedanceCreateAssetType {
   return 'Image';
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -84,14 +87,14 @@ export async function POST(request: NextRequest) {
     if (resolvedAssetType === 'Image') normalizedUrl = normalizeAssetUrl(await originalImageInputUrl(user, normalizedUrl));
 
     // Step 2: 按 originalUrl 查 Active 资产
-    const existing = await seedanceAssetRepository.findActiveByOriginalUrl(normalizedUrl);
+    const existing = await seedanceAssetRepository.findActiveByOriginalUrl(normalizedUrl, user.id);
     if (existing) {
       return NextResponse.json({
         success: true,
         reused: true,
         reuseReason: 'ORIGINAL_URL_MATCH',
         message: '该 URL 已创建过资产，已复用已有资产。',
-        asset: existing,
+        asset: await seedanceMediaDTO(user, existing),
         providerAssetId: existing.providerAssetId,
       });
     }
@@ -111,6 +114,7 @@ export async function POST(request: NextRequest) {
 
     // Step 4: 写入数据库
     const record = await seedanceAssetRepository.create({
+      ownerId: user.id,
       providerAssetId,
       assetType: resolvedAssetType,
       name: name.trim(),
@@ -122,17 +126,14 @@ export async function POST(request: NextRequest) {
       success: true,
       reused: false,
       message: '资产创建成功。',
-      asset: record,
+      asset: await seedanceMediaDTO(user, record),
       providerAssetId,
     });
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    console.error('[SeedanceCreateAsset] Error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : '创建资产失败' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(err);
   }
-}
+});

@@ -1,0 +1,110 @@
+[
+  {
+    "file": "src/app/api/auth/feishu/authorize-url/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": "auth"
+  },
+  {
+    "file": "src/app/api/auth/feishu/authorize/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": "auth"
+  },
+  {
+    "file": "src/app/api/auth/feishu/callback/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": "auth"
+  },
+  {
+    "file": "src/app/api/auth/login/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": "login"
+  },
+  {
+    "file": "src/app/api/auth/logout/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/auth/me/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/auth/register/request-code/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": "registration-code"
+  },
+  {
+    "file": "src/app/api/auth/register/verify/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": "auth"
+  },
+  {
+    "file": "src/app/api/codex/assets/upload/route.ts",
+    "method": "POST",
+    "access": "service",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/codex/config/route.ts",
+    "method": "GET",
+    "access": "service",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/feedback/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": "feedback"
+  },
+  {
+    "file": "src/app/api/feedback/upload/route.ts",
+    "method": "POST",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/feishu/credit-actions/route.ts",
+    "method": "POST",
+    "access": "service",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/health/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/provider/seedance/callback/route.ts",
+    "method": "POST",
+    "access": "service",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/api/release/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/m/[type]/[id]/[variant]/route.ts",
+    "method": "GET",
+    "access": "public",
+    "rateLimit": false
+  },
+  {
+    "file": "src/app/m/[type]/[id]/[variant]/route.ts",
+    "method": "HEAD",
+    "access": "public",
+    "rateLimit": false
+  }
+]

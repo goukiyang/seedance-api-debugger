@@ -100,51 +100,7 @@ function LoginContent() {
     setFeishuLoading(true);
 
     const next = new URLSearchParams(window.location.search).get('next');
-    if (!shouldUseLocalFeishuFallback()) {
-      window.location.assign(feishuAuthorizePath(next));
-      return;
-    }
-
-    try {
-      const params = new URLSearchParams();
-      const safeNext = safeLandingPath(next, '');
-      if (safeNext) params.set('next', safeNext);
-
-      const res = await fetch(`/api/auth/feishu/authorize-url${params.size ? `?${params.toString()}` : ''}`, {
-        cache: 'no-store',
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.code === 'disabled' || data.code === 'not_configured') {
-          if (!data.cli_login_available) {
-            setError(data.error || '飞书登录暂不可用');
-            setFeishuLoading(false);
-            return;
-          }
-
-          const cliRes = await fetch('/api/auth/feishu/cli-login', {
-            method: 'POST',
-            cache: 'no-store',
-          });
-          const cliData = await cliRes.json();
-          if (!cliRes.ok) {
-            setError(cliData.error || data.error || '飞书登录暂不可用');
-            setFeishuLoading(false);
-            return;
-          }
-          window.location.assign(currentOriginLandingUrl(safeNext, defaultLanding(cliData.user)));
-          return;
-        }
-
-        setError(data.error || '飞书登录暂不可用');
-        setFeishuLoading(false);
-        return;
-      }
-      window.location.assign(data.authorize_url);
-    } catch {
-      setError('飞书登录初始化失败，请重试');
-      setFeishuLoading(false);
-    }
+    window.location.assign(feishuAuthorizePath(next));
   };
 
   return (

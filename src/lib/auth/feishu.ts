@@ -4,7 +4,10 @@ import { grantInitialCredits } from '@/lib/credits/policy';
 import { prisma } from '@/lib/prisma';
 import { getDefaultFeatureProfileId } from '@/lib/users/profiles';
 import { hashPassword } from './password';
-import { createSession, type SessionUser } from './session';
+import { type SessionUser } from './session';
+import { completeLogin } from './complete-login';
+import { requireSecret } from '@/lib/security/secrets';
+import { accountSessionDigest, SESSION_IDLE_MS, type SessionDevice } from './session-store';
 
 const DEFAULT_AUTHORIZE_URL = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize';
 const DEFAULT_OPENAPI_BASE_URL = 'https://open.feishu.cn';
@@ -43,6 +46,7 @@ export type FeishuProfile = {
   avatarUrl: string | null;
   mobile: string | null;
   email: string | null;
+  emailVerified?: boolean;
   departmentIds: string[];
   raw: Record<string, unknown>;
 };
@@ -50,10 +54,14 @@ export type FeishuProfile = {
 export type FeishuOAuthState = {
   state: string;
   next: string;
+  binding?: { userId: string; sessionDigest: string };
 };
 
 type CompleteLoginOptions = {
   autoCreateUser?: boolean;
+  binding?: { userId: string; sessionDigest: string };
+  device?: SessionDevice;
+  method?: 'feishu_cli';
 };
 
 export class FeishuAuthError extends Error {
@@ -74,8 +82,6 @@ function envBool(value: string | undefined, fallback = false) {
 }
 
 export function isFeishuCliLoginEnabledForHost(hostname: string) {
-  const explicit = process.env.FEISHU_CLI_LOGIN_ENABLED;
-  if (explicit != null && explicit !== '') return envBool(explicit);
   return process.env.NODE_ENV !== 'production' && ['localhost', '127.0.0.1', '::1'].includes(hostname);
 }
 
@@ -87,7 +93,7 @@ function splitEnvList(value: string | undefined) {
 }
 
 function getAuthSecret() {
-  return process.env.FEISHU_STATE_SECRET || process.env.SESSION_SECRET || 'dev-secret-change-in-production';
+  return requireSecret('feishuState');
 }
 
 function signPayload(payload: string) {
@@ -95,7 +101,7 @@ function signPayload(payload: string) {
 }
 
 function safeRedirectPath(value: unknown, fallback = '') {
-  if (typeof value !== 'string') return fallback;
+  if (typeof value !== 'string' || /[\\\u0000-\u001f\u007f]/.test(value)) return fallback;
   const trimmed = value.trim();
   if (!trimmed || !trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
   return trimmed;
@@ -123,7 +129,7 @@ function normalizeBaseUrl(value: string) {
 
 export function getFeishuConfig(requestOrigin?: string): FeishuConfig {
   const redirectUri = process.env.FEISHU_REDIRECT_URI
-    || (requestOrigin ? `${requestOrigin}/api/auth/feishu/callback` : '');
+    || (process.env.NODE_ENV !== 'production' && requestOrigin ? `${requestOrigin}/api/auth/feishu/callback` : '');
 
   return {
     enabled: envBool(process.env.FEISHU_LOGIN_ENABLED, false),
@@ -159,12 +165,13 @@ export function buildFeishuAuthorizeUrl(state: string, requestOrigin?: string) {
   return url.toString();
 }
 
-export function createFeishuOAuthState(nextValue: unknown) {
+export function createFeishuOAuthState(nextValue: unknown, binding?: FeishuOAuthState['binding']) {
   const state = crypto.randomBytes(24).toString('base64url');
   const payload = Buffer.from(JSON.stringify({
     state,
     next: safeRedirectPath(nextValue, ''),
     createdAt: Date.now(),
+    ...(binding ? { binding } : {}),
   })).toString('base64url');
   const signature = signPayload(payload);
   return {
@@ -176,7 +183,9 @@ export function createFeishuOAuthState(nextValue: unknown) {
 
 export function verifyFeishuOAuthState(cookieValue: string | undefined, returnedState: string | null): FeishuOAuthState | null {
   if (!cookieValue || !returnedState) return null;
-  const [payload, signature] = cookieValue.split('.');
+  const parts = cookieValue.split('.');
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
   if (!payload || !signature) return null;
 
   const expected = signPayload(payload);
@@ -194,14 +203,22 @@ export function verifyFeishuOAuthState(cookieValue: string | undefined, returned
       state?: unknown;
       next?: unknown;
       createdAt?: unknown;
+      binding?: unknown;
     };
     if (parsed.state !== returnedState) return null;
-    if (typeof parsed.createdAt !== 'number' || Date.now() - parsed.createdAt > FEISHU_STATE_MAX_AGE_MS) {
+    if (typeof parsed.createdAt !== 'number' || !Number.isFinite(parsed.createdAt) || parsed.createdAt > Date.now() + 1000 || Date.now() - parsed.createdAt >= FEISHU_STATE_MAX_AGE_MS) {
       return null;
+    }
+    let binding: FeishuOAuthState['binding'];
+    if (parsed.binding !== undefined) {
+      const value = parsed.binding as { userId?: unknown; sessionDigest?: unknown };
+      if (!value || typeof value.userId !== 'string' || !value.userId || typeof value.sessionDigest !== 'string' || !/^[a-f\d]{64}$/.test(value.sessionDigest)) return null;
+      binding = { userId: value.userId, sessionDigest: value.sessionDigest };
     }
     return {
       state: returnedState,
       next: safeRedirectPath(parsed.next, ''),
+      ...(binding ? { binding } : {}),
     };
   } catch {
     return null;
@@ -294,6 +311,7 @@ function normalizeProfile(rawValue: unknown): FeishuProfile {
     avatarUrl: stringValue(raw.avatar_url) || stringValue(raw.picture),
     mobile: stringValue(raw.mobile),
     email: stringValue(raw.email)?.toLowerCase() || null,
+    emailVerified: raw.email_verified === true,
     departmentIds: stringArray(raw.department_ids),
     raw,
   };
@@ -332,7 +350,8 @@ function mergeContactProfile(base: FeishuProfile, contactRaw: Record<string, unk
       || stringValue(avatar.avatar_72)
       || base.avatarUrl,
     mobile: stringValue(user.mobile) || base.mobile,
-    email: stringValue(user.email)?.toLowerCase() || base.email,
+    // Contact-directory email alone is not proof of mailbox verification.
+    email: base.email,
     departmentIds: stringArray(user.department_ids).length > 0
       ? stringArray(user.department_ids)
       : base.departmentIds,
@@ -362,6 +381,9 @@ async function enrichFeishuProfile(profile: FeishuProfile, config: FeishuConfig)
 }
 
 function enforceFeishuAccessPolicy(profile: FeishuProfile, config: FeishuConfig) {
+  if (process.env.NODE_ENV === 'production' && !config.allowedTenantKey) {
+    throw new FeishuAuthError('飞书登录配置不完整', 503, 'tenant_not_configured');
+  }
   if (config.allowedTenantKey && profile.tenantKey !== config.allowedTenantKey) {
     throw new FeishuAuthError('当前飞书企业未被允许登录', 403, 'tenant_not_allowed');
   }
@@ -445,7 +467,7 @@ async function resolveCreateEmail(tx: Prisma.TransactionClient, profile: FeishuP
   return `${name}_${Date.now().toString(36)}@${domain}`;
 }
 
-async function findFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfile) {
+async function findFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfile, binding?: CompleteLoginOptions['binding']) {
   const conditions: Prisma.UserWhereInput[] = [
     ...(profile.userId ? [{ feishu_user_id: profile.userId }] : []),
     { feishu_open_id: profile.openId },
@@ -457,7 +479,31 @@ async function findFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfi
   if (matches.length > 1) {
     throw new FeishuAuthError('飞书身份已绑定到多个账号，请联系管理员', 409, 'identity_conflict');
   }
-  if (matches[0]) return matches[0];
+  if (matches[0]) {
+    const user = matches[0];
+    if ((user.feishu_tenant_key && user.feishu_tenant_key !== profile.tenantKey)
+      || (!user.feishu_open_id && user.feishu_tenant_key !== profile.tenantKey)
+      || (user.feishu_open_id && user.feishu_open_id !== profile.openId)
+      || (user.feishu_user_id && user.feishu_user_id !== profile.userId)
+      || (binding && binding.userId !== user.id)) {
+      throw new FeishuAuthError('飞书身份绑定不一致，请联系管理员', 409, 'identity_conflict');
+    }
+    return user;
+  }
+
+  if (binding) {
+    const current = await tx.userSession.findUnique({ where: { token_digest: binding.sessionDigest }, include: { user: true } });
+    const now = new Date();
+    if (!current || current.user_id !== binding.userId || current.revoked_at || current.expires_at <= now
+      || current.last_activity_at.getTime() <= now.getTime() - SESSION_IDLE_MS
+      || current.account_digest !== accountSessionDigest(current.user)) {
+      throw new FeishuAuthError('请重新登录原账号后确认绑定', 401, 'binding_session_expired');
+    }
+    if (current.user.feishu_open_id || current.user.feishu_user_id) {
+      throw new FeishuAuthError('原账号已绑定其他飞书身份', 409, 'identity_conflict');
+    }
+    return current.user;
+  }
 
   if (profile.email) {
     const emailUser = await tx.user.findUnique({ where: { email: profile.email } });
@@ -468,27 +514,8 @@ async function findFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfi
       ) {
         throw new FeishuAuthError('邮箱对应账号已绑定其他飞书身份，请联系管理员', 409, 'identity_conflict');
       }
-      return emailUser;
-    }
-  }
-
-  if (profile.mobile) {
-    const mobileMatches = await tx.user.findMany({
-      where: { mobile: profile.mobile },
-      take: 2,
-    });
-    if (mobileMatches.length > 1) {
-      throw new FeishuAuthError('手机号匹配到多个账号，请联系管理员', 409, 'identity_conflict');
-    }
-    const [mobileUser] = mobileMatches;
-    if (mobileUser) {
-      if (
-        (mobileUser.feishu_user_id && mobileUser.feishu_user_id !== profile.userId) ||
-        (mobileUser.feishu_open_id && mobileUser.feishu_open_id !== profile.openId)
-      ) {
-        throw new FeishuAuthError('手机号对应账号已绑定其他飞书身份，请联系管理员', 409, 'identity_conflict');
-      }
-      return mobileUser;
+      if (emailUser.auth_origin === 'admin' && profile.emailVerified === true && profile.tenantKey === process.env.FEISHU_ALLOWED_TENANT_KEY) return emailUser;
+      throw new FeishuAuthError('请先登录原账号，再在个人资料中确认绑定飞书', 409, 'binding_required');
     }
   }
 
@@ -520,7 +547,7 @@ async function syncExistingUser(tx: Prisma.TransactionClient, user: User, profil
     last_login_at: new Date(),
   };
 
-  if (profile.email && profile.email !== user.email) {
+  if (profile.emailVerified === true && profile.email && profile.email !== user.email) {
     const conflict = await tx.user.findUnique({ where: { email: profile.email }, select: { id: true } });
     if (!conflict) data.email = profile.email;
   }
@@ -533,7 +560,7 @@ async function syncExistingUser(tx: Prisma.TransactionClient, user: User, profil
   await tx.operationLog.create({
     data: {
       operator_id: user.id,
-      action: 'feishu_login',
+        action: 'feishu_profile_sync',
       target_type: 'User',
       target_id: user.id,
       detail: JSON.stringify({
@@ -548,10 +575,9 @@ async function syncExistingUser(tx: Prisma.TransactionClient, user: User, profil
   return updated;
 }
 
-async function createFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfile) {
+async function createFeishuUser(tx: Prisma.TransactionClient, profile: FeishuProfile, passwordHash: string) {
   const username = await generateUniqueUsername(tx, profile);
   const email = await resolveCreateEmail(tx, profile);
-  const passwordHash = hashPassword(crypto.randomBytes(32).toString('base64url'));
   const featureProfileId = getDefaultFeatureProfileId('internal', 'other');
 
   const user = await tx.user.create({
@@ -560,6 +586,8 @@ async function createFeishuUser(tx: Prisma.TransactionClient, profile: FeishuPro
       username,
       email,
       password_hash: passwordHash,
+      auth_origin: 'feishu',
+      email_verified_at: profile.emailVerified ? new Date() : null,
       role: 'user',
       account_type: 'internal',
       user_profile: 'other',
@@ -692,20 +720,20 @@ async function completeFeishuLogin(profileInput: FeishuProfile, config: FeishuCo
 
   enforceFeishuAccessPolicy(profile, config);
 
-  const user = await prisma.$transaction(async (tx) => {
-    const existing = await findFeishuUser(tx, profile);
-    if (existing) return syncExistingUser(tx, existing, profile);
+  const passwordHash = await hashPassword(crypto.randomBytes(32).toString('base64url'));
+  return prisma.$transaction(async (tx) => {
+    const existing = await findFeishuUser(tx, profile, options?.binding);
+    if (existing) {
+      const user = await syncExistingUser(tx, existing, profile);
+      return completeLogin({ userId: user.id, device: options?.device }, options?.binding ? 'feishu_bind' : options?.method || 'feishu', tx);
+    }
     const autoCreateUser = options?.autoCreateUser ?? config.autoCreateUser;
     if (!autoCreateUser) {
       throw new FeishuAuthError('飞书账号未开通，请联系管理员', 403, 'not_provisioned');
     }
-    return createFeishuUser(tx, profile);
+    const user = await createFeishuUser(tx, profile, passwordHash);
+    return completeLogin({ userId: user.id, device: options?.device }, options?.method || 'feishu', tx);
   });
-
-  return {
-    user: toSessionUser(user),
-    token: await createSession(user.id),
-  };
 }
 
 export async function loginWithFeishuProfile(profile: FeishuProfile, options?: CompleteLoginOptions) {
@@ -713,13 +741,13 @@ export async function loginWithFeishuProfile(profile: FeishuProfile, options?: C
   return completeFeishuLogin(profile, config, options);
 }
 
-export async function loginWithFeishuCode(code: string, requestOrigin?: string) {
+export async function loginWithFeishuCode(code: string, requestOrigin?: string, options?: CompleteLoginOptions) {
   const config = getFeishuConfig(requestOrigin);
   assertConfigReady(config);
 
   const userAccessToken = await exchangeCodeForUserAccessToken(code, config);
   const profile = await getFeishuUserInfo(userAccessToken, config);
-  const result = await completeFeishuLogin(profile, config);
+  const result = await completeFeishuLogin(profile, config, options);
   const { signVerifiedFeishuIdentity } = await import('@/lib/security/private-prompt-identity.server');
   let privateIdentityProof: string | null = null;
   try {

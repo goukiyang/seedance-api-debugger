@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -21,7 +22,7 @@ async function main() {
   let forbiddenCalls = 0;
   const forbidden = () => { forbiddenCalls++; throw new Error('Offline media fixture cannot access business services'); };
   Object.assign(process.env, { NODE_ENV: 'test', DATABASE_URL: 'file:/nonexistent/usage-video-media-offline.db', FEISHU_ALLOWED_TENANT_KEY: 'fixture' });
-  Reflect.set(globalThis, 'prisma', new Proxy({}, { get: () => forbidden }));
+  setFixtureDatabase(new Proxy({}, { get: () => forbidden }));
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   const { readUsageMedia } = await import('../src/lib/usage/media');

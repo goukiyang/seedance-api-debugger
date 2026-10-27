@@ -4,40 +4,17 @@ const distDir = process.env.NEXT_DIST_DIR?.trim();
 const nextConfig = {
   ...(distDir ? { distDir } : {}),
 
-  // 允许访问 public 目录下的上传文件
-  // 文件保存到 public/uploads/，通过 /uploads/... 路径访问
-
-  // 开发环境：确保上传目录存在
-  webpack: (config, { dev }) => {
-    if (dev) {
-      const path = require('path');
-      const fs = require('fs');
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-      ['uploads', 'uploads/assets', 'uploads/thumbs'].forEach((sub) => {
-        const dir = path.join(process.cwd(), 'public', sub);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-      });
-    }
-    return config;
+  images: { unoptimized: true },
+  async rewrites() {
+    // beforeFiles also shadows old tracked videos until D2 is decided.
+    return { beforeFiles: [
+      { source: '/uploads/:path*', destination: '/api/media/legacy?path=/uploads/:path*' },
+      { source: '/videos/:path*', destination: '/api/media/legacy?path=/videos/:path*' },
+    ], afterFiles: [], fallback: [] };
   },
 
   async headers() {
     return [
-      {
-        source: '/uploads/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-          {
-            key: 'Cross-Origin-Resource-Policy',
-            value: 'cross-origin',
-          },
-        ],
-      },
       {
         source: '/storage/:path*',
         headers: [

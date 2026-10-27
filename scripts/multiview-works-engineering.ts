@@ -31,7 +31,7 @@ async function main() {
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
   const { prisma } = await import('../src/lib/prisma');
-  const { createSession } = await import('../src/lib/auth/session');
+  const { createSession, SESSION_COOKIE } = await import('../src/lib/auth/session');
   const work = await import('../src/lib/video/multiview-works');
   const contract = await import('../src/lib/video/multiview-work-contract');
   const { multiviewSourceVersion } = await import('../src/lib/video/multiview');
@@ -40,9 +40,9 @@ async function main() {
   const originalCwd = process.cwd();
   // Source stat/hash is exercised on an isolated synthetic file, not decoded.
   // Full ffmpeg/frame/file acceptance belongs to the companion render package.
-  mkdirSync(path.join(directory, 'public', 'videos'), { recursive: true });
-  mkdirSync(path.join(directory, 'public', 'uploads'), { recursive: true });
-  writeFileSync(path.join(directory, 'public', 'videos', 'synthetic.mp4'), 'isolated source identity fixture', { mode: 0o600 });
+  mkdirSync(path.join(directory, '.media', 'videos'), { recursive: true });
+  mkdirSync(path.join(directory, '.media', 'uploads'), { recursive: true });
+  writeFileSync(path.join(directory, '.media', 'videos', 'synthetic.mp4'), 'isolated source identity fixture', { mode: 0o600 });
   process.chdir(directory);
   let completed = false;
   try {
@@ -117,7 +117,7 @@ async function main() {
 
     const token = await createSession('mv05-owner');
     const invokeList = async (ownerHeader: string, session: string) => {
-      const headers = new Headers({ host: 'isolated.invalid', ...(session ? { Cookie: `session=${session}` } : {}), 'x-app-session-user': ownerHeader });
+      const headers = new Headers({ host: 'isolated.invalid', ...(session ? { Cookie: `${SESSION_COOKIE}=${session}` } : {}), 'x-app-session-user': ownerHeader });
       const request = new NextRequest('http://isolated.invalid/api/video/multiview/works', { headers });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       return requestAsyncStorage.run(store, () => listRoute.GET(request));

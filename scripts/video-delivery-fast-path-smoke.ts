@@ -170,7 +170,7 @@ assert.match(assetLibrarySource, /videoDeliveryStageForTask/, 'asset library mus
 assert.match(assetLibrarySource, /stableDownloadReady/, 'asset library items must expose stable download readiness');
 assert.match(assetLibrarySource, /deliveryCompletedAt/, 'asset library items must expose stable download completion time for hover stats');
 
-const createRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/tasks/create/route.ts'), 'utf8');
+const createRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/server/video-tasks/standard-create.ts'), 'utf8');
 assert.match(createRouteSource, /resolveVideoDeliveryCallbackConfig/, 'ordinary create route must set the system callback URL');
 assert.doesNotMatch(
   createRouteSource,

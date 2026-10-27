@@ -1,3 +1,5 @@
+import { route as declaredRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { Readable } from 'stream';
@@ -11,6 +13,8 @@ import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
+import { assertMedia } from '@/lib/access/media-policy';
+import { redirectMedia } from '@/lib/media/outlet';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,6 +69,7 @@ async function loadAuthorizedTask(taskId: string) {
 
   try {
     await assertCanViewTask(user, task);
+    await assertMedia(user, { type: 'video', id: task.id }, 'download-original');
   } catch (error) {
     if (error instanceof AuthError) {
       return {
@@ -81,7 +86,7 @@ async function loadAuthorizedTask(taskId: string) {
   return { error: null, task };
 }
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   void request;
   const taskId = params.id;
@@ -109,10 +114,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
         info = null;
       }
       if (info?.isFile() && info.size > 0) {
-        return new NextResponse(nodeStreamToWebReadable(createReadStream(absolutePath)), {
-          status: 200,
-          headers: downloadHeaders(taskId, info.size),
-        });
+        return redirectMedia(request, await getSession(), { type: 'video', id: task.id }, 'download');
       }
     }
 
@@ -121,17 +123,10 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       { status: 404 },
     );
   } catch (error) {
-    console.error('[Download] GET Error:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Download failed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});
 
 /**
  * POST /api/video/download/[id]
@@ -140,7 +135,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
  * 保存路径: public/videos/{task_id}.mp4
  * 更新数据库 local_video_path 字段
  */
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const taskId = params.id;
 
@@ -239,4 +234,4 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
       { status: 500 }
     );
   }
-}
+});

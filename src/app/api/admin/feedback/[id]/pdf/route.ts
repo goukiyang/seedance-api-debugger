@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
@@ -6,7 +7,7 @@ import { createFeedbackPdf } from '@/lib/feedback/pdf';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     await getAdminUser(request);
@@ -27,5 +28,5 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       'Content-Disposition': `attachment; filename="feedback-${feedback.id}.pdf"`,
     },
   });
-}
+});
 

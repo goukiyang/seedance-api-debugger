@@ -75,7 +75,7 @@ assert.ok(!json.includes('temporary.example.invalid'), 'diagnostic must not expo
 assert.ok(!json.includes('127.0.0.1:8793'), 'diagnostic must not expose worker URL values');
 
 const h3Source = readFileSync('src/lib/provider/h3.ts', 'utf8');
-const createRouteSource = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+const createRouteSource = readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
 const finalizerSource = readFileSync('src/lib/video/task-finalizer.ts', 'utf8');
 
 assert.match(h3Source, /h3_diagnostic/, 'H3 status polling must attach diagnostic snapshot');

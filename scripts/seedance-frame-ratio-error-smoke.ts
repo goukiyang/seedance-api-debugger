@@ -27,7 +27,7 @@ for (const selectedModel of [SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID]) {
   }));
   assert.equal(html.includes('跟随首帧'), selectedModel === SEEDANCE_2_5_MODEL_ID);
 }
-const route = fs.readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+const route = fs.readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
 assert.ok(route.includes("const ratio = body.ratio || '16:9'"), 'Business ratio must remain immutable for video card locks');
 assert.ok(route.includes('requested_ratio: ratio'), 'Provider snapshot must retain business ratio');
 assert.ok(route.includes("ratio: seedanceRatioFollowsFirstFrame(selectedModel, generationMode) ? 'adaptive' : ratio"));

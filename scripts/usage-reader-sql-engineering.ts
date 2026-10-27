@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
@@ -15,7 +16,7 @@ async function main() {
   let forbiddenCalls = 0, queries = 0;
   const forbidden = () => { forbiddenCalls++; throw new Error('SQL fixture cannot access application services'); };
   Object.assign(process.env, { NODE_ENV: 'test', DATABASE_URL: 'file:/nonexistent/usage-reader-sql.db', FEISHU_ALLOWED_TENANT_KEY: '' });
-  Reflect.set(globalThis, 'prisma', new Proxy({}, { get: () => forbidden }));
+  setFixtureDatabase(new Proxy({}, { get: () => forbidden }));
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   // Use the same marker-only resolution as the existing server engineering

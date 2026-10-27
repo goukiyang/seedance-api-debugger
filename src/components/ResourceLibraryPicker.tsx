@@ -17,6 +17,7 @@ import { describeUploadFileError, uniqueUploadFiles, type UploadFileFailure, typ
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
 import { templateFilterId } from '@/lib/assets/picker-types';
+import { pickerWithDirectories } from '@/lib/assets/picker-client';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
 import styles from './ResourceLibraryPicker.module.css';
 import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
@@ -274,16 +275,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   useEffect(() => { if (!sessionReady || !ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey, sessionReady]);
   useEffect(() => { if (sessionReady && ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify({ ...prefs, scroll: 0, pages: 1 })); localStorage.setItem(`${positionScope}:position:v2:${filterKey}`, JSON.stringify({ scroll: prefs.scroll, pages: prefs.pages })); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner, sessionReady, positionScope, filterKey]);
   const readCursor = useRef<string | null>(null);
+  const directoryRequest = useRef<AbortController | null>(null);
   const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
+    directoryRequest.current?.abort();
+    const controller = new AbortController(); directoryRequest.current = controller;
     const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
     if (prefs.album) params.set('album', prefs.album); if (prefs.project) params.set('project', prefs.project);
     if (after) params.set('after', after);
     if (prefs.template && prefs.source === 'template-image') params.set('template', prefs.template);
+    if (templateContextId) params.set('template_context', templateContextId);
     if (prefs.view === 'recent') params.set('keys', validKeys(stored(recentKey, [])).join(','));
-    const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
-    const data = await readJsonResponse<PickerResponse & { error?: string }>(response, { invalidJsonMessage: '素材库服务返回了无效内容，请刷新或重新登录' });
-    if (!response.ok) throw new Error(data.error || '素材库读取失败'); return data;
-  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
+    return pickerWithDirectories(params, user?.id || '', controller.signal);
+  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey, templateContextId, user?.id]);
   useEffect(() => {
     if (!open || !sessionReady || !ready || sessionOwner !== prefsKey) return;
     const token = ++sequence.current; setLoading(true); setDirectoryError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
@@ -317,7 +320,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       } catch (e) { if (token === sequence.current) setDirectoryError(e instanceof Error ? e.message : '素材库读取失败'); }
       finally { if (token === sequence.current) setLoading(false); }
     })();
-    return () => { sequence.current++; };
+    return () => { sequence.current++; directoryRequest.current?.abort(); };
   }, [open, sessionReady, ready, sessionOwner, prefsKey, fetchPage, epoch]);
 
   const currentIds = new Set(currentAssetIds), currentRefs = new Set(currentReferenceImageIds);

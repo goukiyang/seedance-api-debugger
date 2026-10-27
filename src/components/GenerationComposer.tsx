@@ -1,4 +1,5 @@
 'use client';
+import { loadAllAlbumPages } from '@/lib/reference-albums/client-pages';
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type {
@@ -1221,15 +1222,16 @@ export function GenerationComposer({
   }, [workspace.assets]);
 
   const refreshReferenceAlbums = useCallback(async () => {
+    const session = uploadSession();
+    if (!session.ownerId) { setReferenceAlbums([]); return; }
     try {
-      const res = await fetch('/api/reference-albums?scope=all');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.message || '图集读取失败');
-      setReferenceAlbums(dedupeReferenceAlbums(data.albums || []));
+      const albums = await loadAllAlbumPages<ReferenceAlbumOption>('/api/reference-albums?scope=all', 'albums', { ownerId: session.ownerId });
+      if (uploadSession().ownerId !== session.ownerId || uploadSession().epoch !== session.epoch) return;
+      setReferenceAlbums(dedupeReferenceAlbums(albums));
     } catch {
-      setReferenceAlbums([]);
+      if (uploadSession().ownerId === session.ownerId && uploadSession().epoch === session.epoch) setReferenceAlbums([]);
     }
-  }, []);
+  }, [workspace.workspace?.owner_id]);
 
   const loadTemplates = useCallback(async (preferredTemplateId?: string | null) => {
     setTemplateLoading(true);

@@ -28,7 +28,7 @@ async function main() {
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
   const { prisma } = await import('../src/lib/prisma');
-  const { createSession } = await import('../src/lib/auth/session');
+  const { createSession, SESSION_COOKIE } = await import('../src/lib/auth/session');
   const service = await import('../src/lib/video/multiview-works');
   const contract = await import('../src/lib/video/multiview-work-contract');
   const client = await import('../src/app/multiview/multiview-work-client');
@@ -36,9 +36,9 @@ async function main() {
   const collection = await import('../src/app/api/video/multiview/works/route');
   const item = await import('../src/app/api/video/multiview/works/[workId]/route');
   const mutations = await import('../src/app/api/video/multiview/works/mutations/[mutationId]/route');
-  mkdirSync(path.join(directory, 'public', 'videos'), { recursive: true });
-  mkdirSync(path.join(directory, 'public', 'uploads'), { recursive: true });
-  writeFileSync(path.join(directory, 'public', 'videos', 'source.mp4'), 'synthetic source identity bytes', { mode: 0o600 });
+  mkdirSync(path.join(directory, '.media', 'videos'), { recursive: true });
+  mkdirSync(path.join(directory, '.media', 'uploads'), { recursive: true });
+  writeFileSync(path.join(directory, '.media', 'videos', 'source.mp4'), 'synthetic source identity bytes', { mode: 0o600 });
   process.chdir(directory);
   const checks: string[] = [], evidencePath = path.join(directory, 'receipt.json');
   let completed = false;
@@ -60,7 +60,7 @@ async function main() {
     const cache = path.join(directory, '.cache', 'multiview', version); mkdirSync(cache, { recursive: true });
     writeFileSync(path.join(cache, 'info.json'), JSON.stringify(info), { mode: 0o600 });
     const invoke = async (actor: string, method: 'GET' | 'POST' | 'PATCH', route: string, body?: unknown) => {
-      const headers = new Headers({ Cookie: `session=${tokens[actor]}`, 'x-app-session-user': actor, Host: 'mv17-isolated.invalid',
+      const headers = new Headers({ Cookie: `${SESSION_COOKIE}=${tokens[actor]}`, 'x-app-session-user': actor, Host: 'mv17-isolated.invalid',
         ...(body === undefined ? {} : { Origin: 'http://mv17-isolated.invalid', 'Content-Type': 'application/json' }) });
       const request = new NextRequest(`http://mv17-isolated.invalid/api/video/multiview/works${route}`, {
         method, headers, ...(body === undefined ? {} : { body: JSON.stringify({ ...(body as Record<string, unknown>), protocol: contract.MULTIVIEW_SAVE_PROTOCOL }) }),

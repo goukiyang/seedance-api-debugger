@@ -142,8 +142,8 @@ assertIncludes(localStorage, 'findVerifiedOwnUpload', '重复素材必须沿当�
 assertIncludes(localStorage, 'registerVerifiedUpload', '上传登记必须沿当前验证与原请求回执事务。');
 assertIncludes(localStorage, 'siteUploadPathFromUrl', '历史已经写入本站公网 URL，底层恢复逻辑必须兼容新旧站内上传域名。');
 
-const tasksCreate = read('src/app/api/tasks/create/route.ts');
-const ipTasksCreate = read('src/app/api/ip/tasks/create/route.ts');
+const tasksCreate = read('src/server/video-tasks/standard-create.ts');
+const ipTasksCreate = read('src/server/video-tasks/ip-create.ts');
 for (const source of [tasksCreate, ipTasksCreate]) {
   assertIncludes(source, 'sameOriginPublicUrlForLocalUpload', '任务创建本地参考素材必须优先转成本站公网 URL。');
   assertIncludes(source, 'ensureSiteAssetPublicUrl', '任务创建本地参考素材有关联 asset 时必须复用统一补公网 helper。');
@@ -160,8 +160,10 @@ assertIncludes(referenceImageContentRoute, 'mediaPreviewResponse', '参考图其
 assertIncludes(referenceImageContentRoute, 'canDownloadOriginal', '共享读取不得绕过原件下载权限。');
 const mediaPreviewResponse = read('src/lib/media/preview-response.ts');
 assertIncludes(mediaPreviewResponse, 'siteUploadPathFromUrl', '实际媒体读取helper须识别历史站内上传域名。');
-assertIncludes(mediaPreviewResponse, 'path.resolve(publicRoot', '实际媒体读取helper必须保留本地路径边界校验。');
-assertIncludes(mediaPreviewResponse, 'file.startsWith', '媒体读取还须在realpath后核准实际允许根。');
+assertIncludes(mediaPreviewResponse, 'resolveInside(path.join(publicRoot', '实际媒体读取helper必须经过统一的本地路径边界校验。');
+const localPathBoundary = read('src/lib/fs/resolve-inside.ts');
+assertIncludes(localPathBoundary, 'realpath', '统一路径校验必须核准真实路径。');
+assertIncludes(localPathBoundary, 'path.relative', '统一路径校验必须核准路径属于允许根。');
 
 const localUploadBackfill = read('scripts/backfill-local-upload-asset-urls.ts');
 assertIncludes(localUploadBackfill, 'dry-run', '历史 /uploads 资产回填脚本默认必须是 dry-run。');

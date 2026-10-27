@@ -52,7 +52,7 @@ export const MULTIVIEW_PRIVATE_FIXTURE_SOURCES = Object.freeze([
   'src/app/api/provider/seedance/callback/route.ts',
   'src/app/api/tasks/[id]/reuse/route.ts',
   'src/app/api/tasks/[id]/route.ts',
-  'src/app/api/tasks/create/route.ts',
+  'src/server/video-tasks/standard-create.ts',
   'src/app/api/tasks/enhance-video/create/route.ts',
   'src/app/api/video-cards/[id]/route.ts',
   'src/app/api/video-cards/[id]/tasks/route.ts',

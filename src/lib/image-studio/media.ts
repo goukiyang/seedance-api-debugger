@@ -1,15 +1,16 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import https from 'node:https';
-import { lookup } from 'node:dns/promises';
-import sharp from '../media/sharp';
+import { Readable } from 'node:stream';
+import { safeFetch, SafeFetchError } from '@/lib/net/safe-fetch';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import type { Metadata } from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
-import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { setTimeout as delay } from 'node:timers/promises';
 import { imageStatEtag } from '@/lib/media/image-validators';
+import { mediaRoot } from '@/lib/media/storage-roots';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -45,15 +46,15 @@ async function studioDisplayLocation(url: string, variant: StudioDisplayVariant)
   let version = `remote-${Math.floor(Date.now() / 60000)}`;
   const local = siteUploadPathFromUrl(url);
   if (local) {
-    const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-    const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
+    const root = await fs.realpath(mediaRoot('uploads'));
+    const file = await resolveInside(root, decodeURIComponent(local.slice('/uploads/'.length)));
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error('素材路径无效');
     const stat = await fs.stat(file);
     if (!stat.isFile() || !stat.size) throw new Error('图片文件不可用');
     version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
   }
   const key = createHash('sha256').update(`webp-${size}-q${quality}-v2:${version}:${url}`).digest('hex');
-  const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
+  const directory = mediaRoot('display');
   const file = path.join(directory, `${key}.webp`);
   return { size, quality, directory, file, key };
 }
@@ -72,6 +73,13 @@ export async function statStudioDisplayImage(url: string, variant: StudioDisplay
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 
+export async function preparedStudioDisplayFile(url: string, variant: StudioDisplayVariant) {
+  const location = await studioDisplayLocation(url, variant);
+  const file = await fs.realpath(location.file);
+  if (file !== location.file || !(await fs.stat(file)).isFile()) throw new Error('display_boundary');
+  return file;
+}
+
 async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant): Promise<Buffer> {
   const { size, quality, directory, file, key } = await studioDisplayLocation(url, variant);
   try { return await fs.readFile(file); } catch (error) {
@@ -85,7 +93,7 @@ async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant
     else thumbnailActive += 1;
     try {
       const original = await readStudioImage(url);
-      const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false })
+      const bytes = await (await openUntrustedImage(original, 'ordinary', { animated: false }))
         .rotate().resize(size, size, { fit: 'inside', withoutEnlargement: true }).webp({ quality }).toBuffer();
       await fs.mkdir(directory, { recursive: true });
       const temporary = `${file}.${randomUUID()}.tmp`;
@@ -105,8 +113,8 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
   signal?.throwIfAborted();
   const local = siteUploadPathFromUrl(url);
   if (local) {
-    const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
-    const file = await fs.realpath(path.resolve(process.cwd(), 'public', local.replace(/^\/+/, '')));
+    const root = await fs.realpath(mediaRoot('uploads'));
+    const file = await resolveInside(root, decodeURIComponent(local.slice('/uploads/'.length)));
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error('素材路径无效');
     const stat = await fs.stat(file);
     if (stat.size > MAX_STUDIO_GENERATED_BYTES || !stat.isFile()) throw new Error('图片文件过大');
@@ -144,21 +152,17 @@ export class StudioImageDownloadError extends Error {
 
 export function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {
   if (error instanceof StudioImageDownloadError) return error;
+  if (error instanceof SafeFetchError) return new StudioImageDownloadError(
+    error.code === 'TOO_LARGE' ? 'download_size_limit' : error.code === 'ADDRESS_NOT_ALLOWED' ? 'download_unsafe_address'
+      : error.code === 'TIMEOUT' ? error.phase === 'connect' ? 'download_connect_timeout'
+        : error.phase === 'headers' ? 'download_headers_timeout' : error.phase === 'body' ? 'download_body_timeout' : 'download_total_timeout' : 'download_network_failed', undefined,
+    error.code === 'TIMEOUT' || error.code === 'UPSTREAM_ERROR');
   const code = (error as NodeJS.ErrnoException)?.code;
   if (code === 'ABORT_ERR') return new StudioImageDownloadError('download_aborted');
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new StudioImageDownloadError('download_dns_failed', undefined, true);
   if (code === 'ETIMEDOUT') return new StudioImageDownloadError('download_timeout', undefined, true);
   if (code && /CERT|TLS|SSL/.test(code)) return new StudioImageDownloadError('download_tls_failed');
   return new StudioImageDownloadError('download_network_failed', undefined, true);
-}
-
-function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason);
-    if (signal.aborted) { pending.catch(() => {}); reject(signal.reason); return; }
-    signal.addEventListener('abort', abort, { once: true });
-    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-  });
 }
 
 async function downloadStudioImage(url: string, signal: AbortSignal, redirects: number, metrics: StudioDownloadDiagnostics): Promise<Buffer> {
@@ -179,78 +183,40 @@ async function downloadStudioImage(url: string, signal: AbortSignal, redirects: 
 // Shared SSRF boundary for memory reads and recoverable file downloads.
 export async function openStudioImageStream(url: string, signal: AbortSignal, metrics: StudioDownloadDiagnostics,
   headers: Record<string, string> = {}, redirects = 0): Promise<import('node:http').IncomingMessage> {
-  signal.throwIfAborted();
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new StudioImageDownloadError('download_invalid_url'); }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || isPrivateNetworkHost(parsed.hostname)) throw new StudioImageDownloadError('download_unsafe_url');
-  metrics.host = parsed.hostname;
-  metrics.phase = 'dns'; metrics.redirects = redirects; metrics.receivedBytes = 0;
+  if (redirects !== 0 || !url.startsWith('https:')) throw new StudioImageDownloadError('download_unsafe_url');
+  metrics.phase = 'dns'; metrics.redirects = 0; metrics.receivedBytes = 0;
   metrics.expectedBytes = undefined; metrics.httpStatus = undefined;
-  const dnsDeadline = AbortSignal.timeout(10000);
-  let addresses;
-  try { addresses = await abortable(lookup(parsed.hostname, { all: true, family: 4 }), AbortSignal.any([signal, dnsDeadline])); }
-  catch (error) {
-    if (dnsDeadline.aborted && !signal.aborted) throw new StudioImageDownloadError('download_dns_timeout', undefined, true);
+  try {
+    // Paid 4K outputs retain their existing 96MB delivery ceiling; reference probes use 20MB.
+    const response = await safeFetch(url, { headers, signal, maxBytes: MAX_STUDIO_GENERATED_BYTES,
+      timeoutMs: 600_000, allowRedirects: true, addressIndex: metrics.attempt - 1, headersTimeoutMs: 60_000,
+      onPhase: (phase, hops) => { metrics.phase = phase; metrics.redirects = hops; } });
+    const status = response.status;
+    metrics.httpStatus = status; metrics.phase = 'body';
+    if (status !== 200 && status !== 206 && !(status === 416 && headers.Range)) {
+      await response.body?.cancel();
+      throw new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status));
+    }
+    const length = response.headers.get('content-length');
+    if (length !== null) metrics.expectedBytes = Number(length);
+    // Keep the existing Node stream/status/header/complete contract for resumable delivery.
+    const stream = (response.body ? Readable.fromWeb(response.body as import('node:stream/web').ReadableStream) : Readable.from([])) as import('node:http').IncomingMessage;
+    stream.statusCode = status;
+    stream.headers = Object.fromEntries(response.headers);
+    stream.complete = !response.body;
+    stream.once('end', () => { stream.complete = true; });
+    return stream;
+  } catch (error) {
+    if (error instanceof SafeFetchError) {
+      throw classifyStudioDownloadError(error);
+    }
     throw error;
   }
-  signal.throwIfAborted();
-  if (!addresses.length || addresses.some(entry => isPrivateNetworkHost(entry.address)
-    || /^(0\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|1(9[28])\.0\.0\.|198\.(18|19)\.|2(2[4-9]|[3-5]\d)\.)/.test(entry.address))) throw new StudioImageDownloadError('download_unsafe_address');
-  // Pin the vetted address so DNS cannot change between validation and download.
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const clearTimer = () => { if (timer) clearTimeout(timer); };
-    const fail = (error: unknown) => { if (!settled) { settled = true; clearTimer(); reject(error); } };
-    const address = addresses[(metrics.attempt - 1) % addresses.length];
-    metrics.phase = 'connect';
-    const request = https.get(parsed, {
-      // The vetted lookup returns one IPv4 address, not an auto-family address list.
-      family: 4, signal, headers,
-      lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
-    }, response => {
-      if (settled) { response.destroy(); return; }
-      const status = response.statusCode || 0;
-      clearTimer(); metrics.httpStatus = status;
-      if ([301, 302, 303, 307, 308].includes(status)) {
-        const location = response.headers.location;
-        response.destroy();
-        if (!location || redirects >= 3) { fail(new StudioImageDownloadError('download_redirect_limit', status)); return; }
-        let next: string;
-        try { next = new URL(location, parsed).href; }
-        catch { fail(new StudioImageDownloadError('download_invalid_url')); return; }
-        // Every hop is revalidated and DNS-pinned; never forward API credentials.
-        settled = true;
-        resolve(openStudioImageStream(next, signal, metrics, headers, redirects + 1));
-        return;
-      }
-      if (status !== 200 && status !== 206 && !(status === 416 && headers.Range)) { fail(new StudioImageDownloadError('download_http_error', status, [408, 429, 500, 502, 503, 504].includes(status))); response.destroy(); return; }
-      metrics.phase = 'body';
-      const length = Number(response.headers['content-length']);
-      if (Number.isSafeInteger(length) && length >= 0) metrics.expectedBytes = length;
-      if (length > MAX_STUDIO_GENERATED_BYTES) { fail(new StudioImageDownloadError('download_size_limit', status)); response.destroy(); return; }
-      response.setTimeout(60000, () => response.destroy(new StudioImageDownloadError('download_body_timeout', status, true)));
-      settled = true;
-      resolve(response);
-    });
-    function armTimer(ms: number, code: string) {
-      clearTimer();
-      if (settled) return;
-      timer = setTimeout(() => { fail(new StudioImageDownloadError(code, metrics.httpStatus, true)); request.destroy(); }, ms);
-    }
-    armTimer(20000, 'download_connect_timeout');
-    request.once('socket', socket => {
-      const connected = () => { if (!settled && metrics.phase === 'connect') { metrics.phase = 'headers'; armTimer(60000, 'download_headers_timeout'); } };
-      if (request.reusedSocket) connected(); else socket.once('secureConnect', connected);
-    });
-    request.on('close', clearTimer);
-    request.on('error', fail);
-  });
 }
 
 export async function normalizeStudioImage(bytes: Buffer) {
   if (!bytes.length || bytes.length > MAX_BYTES) throw new Error('图片文件大小无效');
-  const png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false }).png().toBuffer();
+  const png = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).png().toBuffer();
   if (png.length > MAX_BYTES) throw new Error('图片转换后超过 20MB，请压缩后重试');
   return png;
 }
@@ -273,9 +239,9 @@ export async function validateGeneratedStudioImage(bytes: Buffer, requirements: 
   let png: Buffer;
   let metadata: Metadata;
   try {
-    metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
+    metadata = await (await openUntrustedImage(bytes, 'ordinary', { animated: false })).metadata();
     if (!['png', 'jpeg', 'webp', 'avif', 'tiff'].includes(metadata.format || '') || (metadata.pages || 1) !== 1) throw new Error('Unsupported output');
-    png = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' })
+    png = await (await openUntrustedImage(bytes, 'ordinary', { animated: false }))
       .timeout({ seconds: 45 })
       .png({ compressionLevel: 6 }).toBuffer();
   } catch {
@@ -293,7 +259,7 @@ export async function validateGeneratedStudioImage(bytes: Buffer, requirements: 
   }
   if (requirements.transparent) {
     if (!metadata.hasAlpha) throw new StudioImageDeliveryError('generated_alpha_missing', bytes.length);
-    const { data, info } = await sharp(png, { failOn: 'warning', limitInputPixels: 40_000_000 })
+    const { data, info } = await (await openUntrustedImage(png, 'ordinary'))
       .timeout({ seconds: 45 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     let transparentPixels = 0;
     for (let i = info.channels - 1; i < data.length; i += info.channels) if (data[i] < 255) transparentPixels++;

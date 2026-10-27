@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getTaskWhereForUser } from '@/lib/projects/permissions';
@@ -6,7 +7,7 @@ import { assertVideoCreationReady } from '@/lib/creation/context';
 import { CreationError } from '@/lib/creation/contract';
 import { readCreationSource, creationVersionSummary } from '@/lib/creation/lineage';
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return creationHttp(async user => {
     await assertVideoCreationReady(prisma, false);
@@ -43,4 +44,4 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     return { items, sameBatchItems, total: await prisma.videoTask.count({ where }), hasMore,
       nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ root: rootId, id: last.id, created_at: last.created_at.toISOString() })).toString('base64url') : null };
   });
-}
+});

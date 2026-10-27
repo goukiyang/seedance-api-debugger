@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -133,7 +134,7 @@ async function assertCanUseCanvasDocument(
   }
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录，请先登录后再使用无限画布 LLM' }, { status: 401 });
   try {
@@ -367,4 +368,4 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ error: message }, { status });
   }
-}
+});

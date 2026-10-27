@@ -1,10 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { recordContentAuditLog } from '@/lib/content-audit';
-import { publicVideoTaskPricing } from '@/lib/pricing/video';
-import { projectPrivateMultiviewTask, projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
 import {
   normalizeTaskDeleteReason,
   TASK_RETENTION_ADMIN_HIDDEN,
@@ -13,7 +14,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -47,11 +48,12 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
     }
 
     if (task.retention_status === TASK_RETENTION_USER_DELETED) {
-      return NextResponse.json({ success: true, task: projectSelectedMultiviewTask(task), unchanged: true }, { headers: { 'Cache-Control': 'private, no-store' } });
+      return NextResponse.json({ success: true, task: toVideoTaskView(task, user), unchanged: true }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
       const nextTask = await tx.videoTask.update({
+        select: videoTaskViewSelect,
         where: { id: task.id },
         data: {
           retention_status: TASK_RETENTION_USER_DELETED,
@@ -74,15 +76,12 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
       return nextTask;
     });
 
-    return NextResponse.json({ success: true, task: projectPrivateMultiviewTask(publicVideoTaskPricing(updated)) }, { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json({ success: true, task: toVideoTaskView(updated, user) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[TaskRetention] Delete error:', error);
-    return NextResponse.json(
-      { error: '任务移除失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

@@ -1,3 +1,7 @@
+import { userSummarySelect } from '@/lib/dto/user';
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -8,9 +12,8 @@ import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-cards/summary';
 import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
-import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
-import { readProjectAlbumPage } from '@/lib/projects/album-projection';
-import { isPrivateMultiviewTask, projectSelectedMultiviewTask, safeVideoTaskKeywordWhere, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
+import { readProjectAlbumDirectory } from '@/lib/projects/album-projection';
+import { projectSelectedMultiviewTask, safeVideoTaskKeywordWhere, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,15 +64,10 @@ function safeTaskProjection<T extends {
   result_last_frame_url?: string | null;
   delivery_status?: string | null;
 } & TaskProtectionSource>(task: T) {
-  if (isPrivateMultiviewTask(task)) return projectSelectedMultiviewTask(task);
-  const {
-    public_video_url: _publicVideoUrl,
-    local_video_path: _localVideoPath,
-    result_video_url: _resultVideoUrl,
-    result_last_frame_url: _resultLastFrameUrl,
-    ...safeTask
-  } = task;
-  return projectSelectedMultiviewTask({ ...safeTask, ...taskThumbnailProjection(task) });
+  const view = toVideoTaskView(task);
+  const { public_video_url: _publicVideoUrl, local_video_path: _localVideoPath,
+    result_video_url: _resultVideoUrl, result_last_frame_url: _resultLastFrameUrl, ...safeView } = view;
+  return safeView;
 }
 
 async function getProjectSection(
@@ -110,7 +108,7 @@ async function getProjectSection(
           user_id: true,
           role: true,
           joined_at: true,
-          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, role: true, status: true, account_type: true } },
+          user: { select: { ...userSummarySelect, role: true, status: true } },
         },
       },
       invites: canReturnInvites ? {
@@ -155,7 +153,7 @@ async function getProjectSection(
     };
     const runningTaskWhere = {
       OR: [
-        { local_status: { in: ['submitted', 'running'] } },
+        { local_status: { in: ['created', 'submitting', 'unknown', 'submitted', 'running'] } },
         {
           local_status: 'succeeded',
           AND: [
@@ -205,19 +203,7 @@ async function getProjectSection(
       orderBy: sort === 'oldest' ? [{ created_at: 'asc' }, { id: 'asc' }] : [{ created_at: 'desc' }, { id: 'desc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
-      select: {
-        id: true, source_metadata_json: true, prompt: true, provider: true, model: true, generation_mode: true,
-        ratio: true, duration: true, resolution: true, local_status: true, delivery_status: true,
-        provider_task_id: true, public_video_url: true, result_video_url: true,
-        result_last_frame_url: true, local_video_path: true, owner_user_id: true, user_id: true,
-        estimated_cost: true, actual_cost: true, refund_amount: true, provider_cost_status: true,
-        provider_official_amount_minor: true, provider_final_amount_minor: true,
-        provider_official_amount_micros: true, provider_final_amount_micros: true,
-        provider_cost_currency: true, provider_billing_status: true, created_at: true,
-        video_card_id: true, video_branch_id: true,
-        owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-      },
+      select: videoTaskViewSelect,
     });
     return NextResponse.json({ ...common,
       tasks: tasks.map(safeTaskProjection),
@@ -228,12 +214,9 @@ async function getProjectSection(
   }
 
   if (section === 'albums') {
-    const where = { project_id: projectId, status: { not: 'deleted' } };
-    const total = await prisma.referenceAlbum.count({ where });
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const page = Math.min(requestedPage, totalPages);
-    const pagedAlbums = await readProjectAlbumPage(user, projectId, (page - 1) * pageSize);
+    const { albums: pagedAlbums, total, totalPages, page } = await readProjectAlbumDirectory(user, projectId, requestedPage);
     return NextResponse.json({ ...common,
+      project: { ...common.project, _count: { ...common.project._count, reference_albums: total } },
       reference_albums: pagedAlbums,
       pagination: { page, page_size: pageSize, total, total_pages: totalPages },
     });
@@ -255,7 +238,7 @@ async function getProjectSection(
     prisma.videoTask.count({ where: taskWhere }),
     prisma.videoTask.count({ where: { ...taskWhere, local_status: 'succeeded' } }),
     prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['failed', 'cancelled'] } } }),
-    prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['submitted', 'running'] } } }),
+    prisma.videoTask.count({ where: { ...taskWhere, local_status: { in: ['created', 'submitting', 'unknown', 'submitted', 'running'] } } }),
     prisma.videoTask.aggregate({ where: taskWhere, _sum: { estimated_cost: true, actual_cost: true, refund_amount: true } }),
     prisma.costAllocation.groupBy({
       by: ['currency'],
@@ -284,13 +267,7 @@ async function getProjectSection(
       where: taskWhere,
       orderBy: [{ actual_cost: 'desc' }, { estimated_cost: 'desc' }, { created_at: 'desc' }, { id: 'desc' }],
       take: 8,
-      select: {
-        id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true,
-        estimated_cost: true, actual_cost: true, provider_cost_status: true, public_video_url: true,
-        result_video_url: true, result_last_frame_url: true, local_video_path: true, created_at: true,
-        owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
-      },
+      select: videoTaskViewSelect,
     }),
     prisma.costLedger.findMany({
       where: ledgerWhere,
@@ -429,7 +406,7 @@ function serializeTaskPreview(task: null | {
   });
 }
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -446,12 +423,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     const project = await prisma.project.findUnique({
       where: { id: params.id },
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
         members: {
           where: { status: 'active' },
           orderBy: { joined_at: 'asc' },
           include: {
-            user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, role: true, status: true, account_type: true } },
+            user: { select: { ...userSummarySelect, role: true, status: true } },
           },
         },
         invites: access.canManageMembers ? {
@@ -469,7 +446,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       },
     });
 
-    const referenceAlbums = await readProjectAlbumPage(user, params.id);
+    const { albums: referenceAlbums, total: referenceAlbumTotal } = await readProjectAlbumDirectory(user, params.id);
     const taskVisibilityWhere = user.role === 'admin'
       ? { project_id: params.id }
       : { project_id: params.id, retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } };
@@ -478,45 +455,14 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       where: taskVisibilityWhere,
       orderBy: { created_at: 'desc' },
       take: 50,
-      select: {
-        id: true,
-        prompt: true,
-        source_metadata_json: true,
-        provider: true,
-        generation_mode: true,
-        local_status: true,
-        delivery_status: true,
-        provider_task_id: true,
-        public_video_url: true,
-        result_video_url: true,
-        result_last_frame_url: true,
-        local_video_path: true,
-        owner_user_id: true,
-        user_id: true,
-        estimated_cost: true,
-        actual_cost: true,
-        refund_amount: true,
-        provider_cost_status: true,
-        provider_official_amount_minor: true,
-        provider_final_amount_minor: true,
-        provider_official_amount_micros: true,
-        provider_final_amount_micros: true,
-        provider_cost_currency: true,
-        provider_billing_status: true,
-        created_at: true,
-        completed_at: true,
-        video_card_id: true,
-        video_card: { select: { id: true, title: true, objective: true, status: true } },
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      },
+      select: videoTaskViewSelect,
     });
 
     const videoCards = await prisma.videoCard.findMany({
       where: { project_id: params.id },
       orderBy: [{ is_fallback: 'asc' }, { updated_at: 'desc' }],
       include: {
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+        owner: { select: userSummarySelect },
         current_best_task: {
           select: { id: true, source_metadata_json: true, prompt: true, provider: true, generation_mode: true, local_status: true, delivery_status: true, public_video_url: true, local_video_path: true, result_video_url: true, result_last_frame_url: true, created_at: true },
         },
@@ -556,7 +502,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       prisma.videoTask.count({ where: taskVisibilityWhere }),
       prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: 'succeeded' } }),
       prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: { in: ['failed', 'cancelled'] } } }),
-      prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: { in: ['submitted', 'running'] } } }),
+      prisma.videoTask.count({ where: { ...taskVisibilityWhere, local_status: { in: ['created', 'submitting', 'unknown', 'submitted', 'running'] } } }),
       prisma.videoTask.aggregate({
         where: taskVisibilityWhere,
         _sum: {
@@ -630,7 +576,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
           reason: true,
           occurred_at: true,
           created_at: true,
-          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+          user: { select: userSummarySelect },
           task: {
             select: {
               id: true,
@@ -653,8 +599,8 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
               provider_cost_currency: true,
               provider_billing_status: true,
               created_at: true,
-              owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-              user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
+              owner: { select: userSummarySelect },
+              user: { select: userSummarySelect },
             },
           },
           allocations: {
@@ -685,48 +631,13 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
         where: taskVisibilityWhere,
         orderBy: [{ actual_cost: 'desc' }, { estimated_cost: 'desc' }, { created_at: 'desc' }],
         take: 8,
-        select: {
-          id: true,
-          prompt: true,
-          source_metadata_json: true,
-          provider: true,
-          generation_mode: true,
-          local_status: true,
-          delivery_status: true,
-          estimated_cost: true,
-          actual_cost: true,
-          provider_cost_status: true,
-          public_video_url: true,
-          result_video_url: true,
-          result_last_frame_url: true,
-          local_video_path: true,
-          created_at: true,
-          owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-          user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        },
+        select: videoTaskViewSelect,
       }),
       prisma.videoTask.findMany({
         where: { ...taskVisibilityWhere, local_status: { in: ['failed', 'cancelled'] } },
         orderBy: { created_at: 'desc' },
         take: 8,
-        select: {
-          id: true,
-          prompt: true,
-          source_metadata_json: true,
-          provider: true,
-          generation_mode: true,
-          local_status: true,
-          delivery_status: true,
-          error_message: true,
-          estimated_cost: true,
-          refund_amount: true,
-          provider_cost_status: true,
-          public_video_url: true,
-          result_video_url: true,
-          result_last_frame_url: true,
-          local_video_path: true,
-          created_at: true,
-        },
+        select: videoTaskViewSelect,
       }),
     ]);
 
@@ -739,25 +650,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
       archiveAnomalies: await getVideoCardArchiveAnomalies(tx, params.id),
     }));
     const primaryOfficialCost = officialCostTotals[0] || null;
-    const projectedTasks = tasks.map((task) => projectSelectedMultiviewTask({
-      ...task,
-      ...taskThumbnailProjection(task),
-    }));
-    const projectedHighCostTasks = highCostTasks.map((task) => projectSelectedMultiviewTask({
-      ...task,
-      ...taskThumbnailProjection(task),
-    }));
-    const projectedFailedTasks = failedTasks.map((task) => projectSelectedMultiviewTask({
-      ...task,
-      error_message: visibleProviderErrorMessage(task.error_message),
-      ...taskThumbnailProjection(task),
-    }));
+    const projectedTasks = tasks.map((task) => toVideoTaskView(task, user));
+    const projectedHighCostTasks = highCostTasks.map((task) => toVideoTaskView(task, user));
+    const projectedFailedTasks = failedTasks.map((task) => toVideoTaskView(task, user));
     const projectedCostLedgers = costLedgers.map((ledger) => ({
       ...ledger,
-      task: ledger.task ? projectSelectedMultiviewTask({
-        ...ledger.task,
-        ...taskThumbnailProjection(ledger.task),
-      }) : null,
+      task: ledger.task ? toVideoTaskView(ledger.task, user) : null,
     }));
     const reviewSummary = {
       task_count: taskCount,
@@ -779,7 +677,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     };
 
     return NextResponse.json({
-      project: project ? { ...project, status_version: projectStatusVersion(project) } : null,
+      project: project ? { ...project, _count: { ...project._count, reference_albums: referenceAlbumTotal }, status_version: projectStatusVersion(project) } : null,
       reference_albums: referenceAlbums,
       video_cards: videoCards.map((card) => {
         const summary = videoCardSummaryMap.get(card.id);
@@ -820,15 +718,12 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[Projects] Detail error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -884,15 +779,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message, ...(error instanceof ProjectMutationError || error instanceof ProjectVersionConflictError ? error.details : {}) }, { status: error.status });
     }
-    console.error('[Projects] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -919,10 +811,7 @@ export async function DELETE(request: NextRequest, props: { params: Promise<{ id
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message, ...(error instanceof ProjectMutationError || error instanceof ProjectVersionConflictError ? error.details : {}) }, { status: error.status });
     }
-    console.error('[Projects] Delete error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

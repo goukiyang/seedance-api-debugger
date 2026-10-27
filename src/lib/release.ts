@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '安全更新', outline: [
-  '升级基础组件并加固图片处理',
-  '增加服务启动和发布前安全检查',
-  '保留原生成记录、素材和费用，不重新提交历史任务',
+const notice = { title: '安全与数据更新', outline: [
+  '登录与素材访问增加安全保护，更新后需重新登录',
+  '统一任务费用与状态处理，保留原请求和历史记录',
+  '图集分批加载，改进图片处理与服务稳定性',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

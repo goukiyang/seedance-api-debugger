@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { LogOut } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
 import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -1022,6 +1023,15 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
     }
   };
 
+  const revokeUserSessions = async (user: AdminUser) => {
+    setError('');
+    setMessage('');
+    const response = await fetch(`/api/admin/users/${user.id}/revoke-sessions`, { method: 'POST', signal: AbortSignal.timeout(20000) });
+    const data = await response.json();
+    if (!response.ok || data.ok !== true) { setError(data.error || '强制下线未成功确认，请重试。'); return; }
+    setMessage(`${displayUserName(user)}已退出所有设备`);
+  };
+
   const toggleUser = async (user: AdminUser) => {
     const action = user.status === 'active' ? 'disable' : 'enable';
     const label = action === 'disable' ? '禁用' : '启用';
@@ -1404,6 +1414,7 @@ function AccountManagement({ currentUser, selectedMemberId }: { currentUser: Ses
                   <button type="button" className="admin-users-button admin-users-button-secondary" disabled={actionBusy} onClick={() => void runUserAction(() => toggleUser(focusedUser))}>
                     {focusedUser.status === 'active' ? '禁用账号' : '启用账号'}
                   </button>
+                  <button type="button" className="admin-users-button admin-users-button-secondary" disabled={actionBusy} onClick={() => void runUserAction(() => revokeUserSessions(focusedUser))}><LogOut size={16} aria-hidden="true" />强制下线</button>
                 </div>
                 <div className="admin-users-mini-ledger">
                   <div className="admin-users-section-title">最近流水</div>

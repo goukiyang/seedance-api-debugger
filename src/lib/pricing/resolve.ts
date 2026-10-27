@@ -1,10 +1,11 @@
 import type { PricingAdminIdentity } from './admin-contract';
+import { PublicApiError } from '@/lib/http/public-error';
 
 type Rule = { id: string; identity: PricingAdminIdentity };
-export class PricingRuleConflict extends Error {
+export class PricingRuleConflict extends PublicApiError {
   readonly status = 409;
   readonly code = 'pricing_rule_ambiguous';
-  constructor(public readonly ruleIds: string[]) { super(`收费规则存在同级冲突：${ruleIds.join('、')}`); }
+  constructor(public readonly ruleIds: string[]) { super(`收费规则存在同级冲突：${ruleIds.join('、')}`, 409, 'pricing_rule_ambiguous'); }
 }
 
 function sameScope(left: PricingAdminIdentity, right: PricingAdminIdentity) {

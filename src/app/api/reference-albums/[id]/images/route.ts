@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -10,60 +12,38 @@ import {
   getReferenceImageByIdForAccess,
 } from '@/lib/reference-albums/permissions';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
-import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import type { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { assertProjectActiveInTransaction, getProjectAccess } from '@/lib/projects/permissions';
 import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 import { parseAlbumPermissions } from '@/lib/reference-albums/permissions';
+import { referenceCopyCeiling } from '@/lib/access/media-policy';
+import { readAlbumImagePage } from '@/lib/reference-albums/image-page';
+import { assertPageOwner, PaginationError } from '@/lib/pagination/cursor';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    assertPageOwner(request.headers, user.id);
 
-    await assertCanViewAlbum(user, params.id);
-    const images = await prisma.referenceImage.findMany({
-      where: { album_id: params.id, status: 'active', AND: [await studioVisibleReferenceWhere(user)] },
-      orderBy: { sort_order: 'asc' },
-      include: { asset: { select: { id: true, type: true, file_name: true, width: true, height: true, file_size: true, mime_type: true } } },
-    });
-
-    return NextResponse.json({
-      images: images.map((image) => ({
-        id: image.id,
-        album_id: image.album_id,
-        asset_id: image.asset_id,
-        source_type: image.source_type,
-        source_content_id: image.source_content_id,
-        source_image_id: image.source_image_id,
-        sort_order: image.sort_order,
-        status: image.status,
-        created_at: image.created_at,
-        updated_at: image.updated_at,
-        image_url: `/api/reference-images/${image.id}/content`,
-        thumbnail_url: `/api/reference-images/${image.id}/content?variant=thumbnail`,
-        asset: image.asset,
-      })),
-    });
+    const album = await assertCanViewAlbum(user, params.id);
+    return NextResponse.json(await readAlbumImagePage(user, album, request.nextUrl.searchParams), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof PaginationError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbumImages] List error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
-  }
-}
 
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const startedAt = Date.now();
   let userId: string | null = null;
@@ -120,6 +100,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
           source_type: 'copied',
           source_content_id: sourceImage.source_content_id,
           source_image_id: sourceImage.id,
+          rights_ceiling: await referenceCopyCeiling(user, sourceImage),
           metadata_json: JSON.stringify({ copied_from_album_id: sourceImage.album_id }),
           status: 'active',
       });
@@ -160,7 +141,15 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     const currentMax = await tx.referenceImage.aggregate({ where: { album_id: album.id }, _max: { sort_order: true } });
     let sortOrder = currentMax._max.sort_order ?? -1;
     const images = [];
-    for (const data of pending) images.push(await tx.referenceImage.create({ data: { ...data, sort_order: ++sortOrder } }));
+    for (const data of pending) {
+      if (data.source_image_id && data.source_type === 'copied') {
+        const freshSource = await getReferenceImageByIdForAccess(data.source_image_id, tx);
+        if (!freshSource) throw new AuthError('来源已不可用', 403);
+        const ceiling = await referenceCopyCeiling(user, freshSource, tx);
+        if (!JSON.parse(ceiling).copy || ceiling !== data.rights_ceiling) throw new AuthError('来源权限已变化，请重新选择', 409);
+      }
+      images.push(await tx.referenceImage.create({ data: { ...data, sort_order: ++sortOrder } }));
+    }
     if (!freshAlbum.cover_image_id && images[0]) {
       await tx.referenceAlbum.update({
         where: { id: album.id },
@@ -216,7 +205,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[ReferenceAlbumImages] Add error:', error);
+
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
@@ -227,12 +216,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
       });
     }
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+    return apiErrorResponse(error);
   }
-}
+});
 
 async function albumForWrite(tx: Prisma.TransactionClient, user: SessionUser, albumId: string) {
   const album = await tx.referenceAlbum.findFirst({ where: { id: albumId, status: { not: 'deleted' } }, include: {

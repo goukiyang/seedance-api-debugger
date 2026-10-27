@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -193,7 +194,7 @@ async function updateImageGenerationConfig(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const qualityOperation = request.nextUrl.searchParams.get('quality_operation_id');
@@ -252,17 +253,17 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/ImageGenerationIntegration] GET failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({ error: '读取图形生成 API 配置失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   return updateImageGenerationConfig(request);
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   return updateImageGenerationConfig(request);
-}
+});
 
-export async function DELETE(request: NextRequest) {
+export const DELETE = apiRoute({ access: 'admin', rateLimit: false }, async function DELETE(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -279,4 +280,4 @@ export async function DELETE(request: NextRequest) {
     console.error('[Admin/ImageGenerationIntegration] Delete failed:', error instanceof Error ? error.name : 'unknown');
     return NextResponse.json({ error: '归档图片供应商配置失败' }, { status: 500 });
   }
-}
+});

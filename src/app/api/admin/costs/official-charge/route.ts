@@ -1,8 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { recordTaskOfficialCharge } from '@/lib/costs/ledger';
+import { toVideoTaskView } from '@/lib/dto/video-task';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +26,7 @@ function parseAmountMinor(body: Record<string, unknown>): number | null {
   return Math.round(numericAmount * 100);
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -87,6 +90,7 @@ export async function POST(request: NextRequest) {
         where: { id: task.id },
         select: {
           id: true,
+          source_metadata_json: true,
           provider_cost_status: true,
           provider_official_amount_minor: true,
           provider_final_amount_minor: true,
@@ -108,16 +112,13 @@ export async function POST(request: NextRequest) {
         amount_minor: result.ledger.amount_minor,
         currency: result.ledger.currency,
       },
-      task: result.task,
+      task: result.task ? toVideoTaskView(result.task, user) : null,
     });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[AdminOfficialCharge] Failed:', error);
-    return NextResponse.json(
-      { error: '录入官方扣费失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

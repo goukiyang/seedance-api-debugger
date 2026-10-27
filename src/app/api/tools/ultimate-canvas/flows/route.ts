@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -12,7 +13,7 @@ function clean(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -35,9 +36,9 @@ export async function GET(request: NextRequest) {
     console.error('[ToolFlow] List failed:', error);
     return NextResponse.json({ error: '工具流读取失败' }, { status: 500 });
   }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -72,4 +73,4 @@ export async function POST(request: NextRequest) {
     console.error('[ToolFlow] Save failed:', error);
     return NextResponse.json({ error: '工具流保存失败' }, { status: 500 });
   }
-}
+});

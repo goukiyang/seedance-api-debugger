@@ -1,8 +1,8 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from '../media/sharp';
 import type { StudioReceipt } from './delivery';
 import { MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
@@ -165,12 +165,12 @@ function decode(value: unknown): Buffer | null {
 }
 async function imageMetadata(bytes: Buffer) {
   const options = { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' as const };
-  const metadata = await sharp(bytes, options).metadata();
+  const metadata = await (await openUntrustedImage(bytes, 'ordinary', options)).metadata();
   if (!FORMATS.includes(metadata.format || '') || (metadata.pages || 1) !== 1
     || !integer(metadata.width) || !integer(metadata.height) || metadata.width < 1 || metadata.height < 1
     || metadata.width > 16384 || metadata.height > 16384 || metadata.width * metadata.height > 40_000_000) throw failure('invalid');
   // Force full decoding, but retain the supplier's exact original bytes.
-  await sharp(bytes, options).timeout({ seconds: 45 }).stats();
+  await (await openUntrustedImage(bytes, 'ordinary', options)).timeout({ seconds: 45 }).stats();
   return { format: metadata.format!, mimeType: MIME[metadata.format!], width: metadata.width, height: metadata.height };
 }
 function safeEvidence(manifest: Manifest, diagnostic: StudioResponseDiagnostics): StudioResponseEvidence {

@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -36,7 +37,7 @@ async function main() {
   const runtime = globalThis as any;
   const previousPrisma = runtime.prisma;
   const previousPragmas = runtime.prismaSqlitePragmasStarted;
-  runtime.prisma = new Proxy({}, { get() { throw new Error('Smoke must not access any database'); } });
+  setFixtureDatabase(new Proxy({}, { get() { throw new Error('Smoke must not access any database'); } }));
   runtime.prismaSqlitePragmasStarted = true;
   try {
     const { buildCodexVideoApiSettingsPatch } = await import('../src/lib/integrations/codex');
@@ -60,7 +61,7 @@ async function main() {
     assert.equal(disable.settings.video_edit_pilot?.enabled, false);
     assert.equal(buildCodexVideoApiSettingsPatch(existing, { enabled: true }).settings.video_edit_pilot?.enabled, false);
   } finally {
-    runtime.prisma = previousPrisma;
+    setFixtureDatabase(previousPrisma);
     runtime.prismaSqlitePragmasStarted = previousPragmas;
   }
   assert.equal(validateSeedanceEditMode(mode), null);
@@ -152,7 +153,7 @@ async function main() {
   }
 
   // Wiring checks supplement executed pure validation/provider tests, not DB acceptance.
-  const route = fs.readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+  const route = fs.readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
   assert.ok(route.indexOf('if (editReferenceError)') < route.indexOf('const result = await prisma.$transaction'));
   assert.ok(route.indexOf('if (costCeilingError)') < route.indexOf('const result = await prisma.$transaction'));
   assert.ok(route.includes('editPilotSettings = codexContext.settings.video_edit_pilot'));

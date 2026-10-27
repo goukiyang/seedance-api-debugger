@@ -19,6 +19,7 @@ import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
 import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
 import { resolveStudioPinnedAsset } from '@/lib/image-studio/result-pins';
+import { referenceContentRights } from '@/lib/access/media-policy';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -46,8 +47,8 @@ function withMedia(item: ContentSummary, downloadable: boolean): ContentSummary 
 async function referenceAccess(user: SessionUser, id: string) {
   const ref = await getReferenceImageByIdForAccess(id);
   if (!ref || (ref.asset && ref.asset.status !== 'active')) return null;
-  const access = await getAlbumAccess(user, ref.album);
-  return access.permissions.view ? { ref, permissions: access.permissions } : null;
+  const permissions = await referenceContentRights(user, ref);
+  return permissions.view ? { ref, permissions } : null;
 }
 
 // Resolve identity and current authorization together; never persist content snapshots in reactions.

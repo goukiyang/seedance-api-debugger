@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders } from '@/lib/media/authorized-image-response';
@@ -9,11 +10,12 @@ import { homeTemplateCover } from '@/lib/content-reactions/home-templates';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 import { assertStudioActor } from '@/lib/image-studio/shared-contract';
 import { getStudioPresetReferencePolicy } from '@/lib/image-studio/reference-policy';
+import { redirectMedia } from '@/lib/media/outlet';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: Request, props: { params: Promise<{ assetId: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function GET(_request: Request, props: { params: Promise<{ assetId: string }> }) {
   const params = await props.params;
   const started = performance.now();
   const user = await getSession();
@@ -29,7 +31,7 @@ export async function GET(_request: Request, props: { params: Promise<{ assetId:
     try {
       const asset = await homeTemplateCover(user, homeKey, params.assetId);
       if (!asset) return unavailable();
-      return await authorizedImageResponse(_request, asset.original_url, 'thumbnail', asset.mime_type || 'application/octet-stream', asset.file_name, started);
+      return await redirectMedia(_request, user, { type: 'template-cover', id: params.assetId, homeContentKey: homeKey }, 'thumbnail');
     } catch { return unavailable(); }
   }
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
@@ -68,10 +70,9 @@ export async function GET(_request: Request, props: { params: Promise<{ assetId:
     const detail = new URL(_request.url).searchParams.get('detail') === '1';
     const download = new URL(_request.url).searchParams.get('download') === '1';
     const hd = ['hd', 'hd-description', 'hd-download'].find(key => new URL(_request.url).searchParams.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
-    return await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started,
-      { requesterId: user.id, owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
+    return await redirectMedia(_request, user, { type: 'template-cover', id: asset.id }, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'));
   } catch {
     return new Response('Image unavailable', { status: 503, headers: privateImageHeaders });
   }
-}
+});
 export const HEAD = GET;

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { AuthError } from '@/lib/auth/session';
@@ -86,7 +87,7 @@ function projectProviderErrorDiagnostics(diagnostics: StudioProviderErrorDiagnos
   };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const params = request.nextUrl.searchParams;
@@ -192,4 +193,4 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/ImageStudioTasks] List failed');
     return adminJson({ error: '图片任务审计读取失败，请重试' }, 503);
   }
-}
+});

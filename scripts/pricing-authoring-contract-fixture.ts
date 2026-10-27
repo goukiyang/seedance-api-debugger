@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +32,7 @@ export async function runPricingAuthoringContractFixture(): Promise<{
   process.env.SESSION_SECRET = 'authoring-fixture-only-not-a-production-secret';
   process.env.SEEDANCE_API_KEY = 'authoring-fixture-not-a-provider-key';
   process.env.SEEDANCE_BASE_URL = 'https://fixture.invalid/seedance';
-  Reflect.set(globalThis, 'prisma', db);
+  setFixtureDatabase(db);
   let assertions = 0;
   const evidence: string[] = [];
   const equal = (actual: unknown, expected: unknown, message?: string) => { assert.deepEqual(actual, expected, message); assertions++; };
@@ -414,7 +415,7 @@ export async function runPricingAuthoringContractFixture(): Promise<{
       }
     } finally {
       await db.$disconnect();
-      Reflect.deleteProperty(globalThis, 'prisma');
+      setFixtureDatabase(undefined);
       if (previousPragmas === undefined) Reflect.deleteProperty(globalThis, 'prismaSqlitePragmasStarted');
       else Reflect.set(globalThis, 'prismaSqlitePragmasStarted', previousPragmas);
       for (const [key, value] of Object.entries(previousEnvironment)) {

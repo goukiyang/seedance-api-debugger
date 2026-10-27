@@ -113,7 +113,7 @@ export function consumeTrustedMultiviewRetry(request: NextRequest): TrustedMulti
 }
 
 /** Server-only adapter. Request headers or JSON cannot create this WeakMap identity. */
-export async function createPrivateMultiviewRetry(request: NextRequest, input: TrustedMultiviewRetryInput): Promise<NextResponse> {
+export async function createPrivateMultiviewRetry(request: NextRequest, input: TrustedMultiviewRetryInput): Promise<Response> {
   if (!identity(input.originalTaskId) || input.idempotencyKey !== `video-retry:${input.originalTaskId}`
     || typeof input.maxEstimatedCost !== 'number' || !Number.isFinite(input.maxEstimatedCost) || input.maxEstimatedCost < 0
     || input.pricingRevision !== undefined && (typeof input.pricingRevision !== 'string' || input.pricingRevision.length > 160)
@@ -130,8 +130,8 @@ export async function createPrivateMultiviewRetry(request: NextRequest, input: T
   });
   trustedRetries.set(trustedRequest, { ...input });
   try {
-    const route = await import('@/app/api/tasks/create/route');
-    return await route.POST(trustedRequest);
+    const { createVideoTask } = await import('@/server/video-tasks/create');
+    return await createVideoTask(trustedRequest);
   } finally {
     trustedRetries.delete(trustedRequest);
   }

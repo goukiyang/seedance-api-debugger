@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const routeSource = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+const routeSource = readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
 const h3AssetsSource = readFileSync('src/lib/provider/h3-assets.ts', 'utf8');
 const pricingSource = readFileSync('src/lib/pricing.ts', 'utf8');
 

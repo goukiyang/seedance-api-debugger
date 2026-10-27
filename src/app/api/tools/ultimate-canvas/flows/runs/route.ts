@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -6,7 +7,7 @@ import { listToolFlowRuns } from '@/lib/tools/toolflow-runtime';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -19,4 +20,4 @@ export async function GET(request: NextRequest) {
     console.error('[ToolFlow] Runs list failed:', error);
     return NextResponse.json({ error: '工具流运行读取失败' }, { status: 500 });
   }
-}
+});

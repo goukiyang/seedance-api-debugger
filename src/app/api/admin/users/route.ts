@@ -1,8 +1,8 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { errorJson, getAdminUser, authFailureResponse } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
-import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 import type { SessionUser } from '@/lib/auth/session';
 import { grantInitialCredits, getCreditPolicy, resolveInitialGrantAmount } from '@/lib/credits/policy';
 import {
@@ -15,11 +15,11 @@ function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   if (request.nextUrl.searchParams.get('lite') === 'true') {
@@ -100,14 +100,14 @@ export async function GET(request: NextRequest) {
       credit_buckets: undefined,
     })),
   });
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   try {
@@ -144,16 +144,15 @@ export async function POST(request: NextRequest) {
     });
     if (existing) return errorJson('用户名或邮箱已存在', 409);
 
+    const passwordHash = await hashPassword(password);
     const created = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           name,
           username,
           email,
-	          password_hash: maintainAccountSessionBinding(
-              { id: '', password_hash: '', role: 'user', account_type: 'external' },
-              { id: '', password_hash: '', role, account_type: accountType, feature_profile_id: featureProfileId },
-              hashPassword(password)),
+            password_hash: passwordHash,
+            auth_origin: 'admin',
 	          role,
 	          account_type: accountType,
 	          user_profile: userProfile,
@@ -254,4 +253,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin/Users POST]', err);
     return errorJson('服务器错误', 500);
   }
-}
+});

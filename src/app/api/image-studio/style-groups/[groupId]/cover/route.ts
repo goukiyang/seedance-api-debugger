@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { getStudioStyleGroup } from '@/lib/image-studio/style-groups';
@@ -6,7 +7,7 @@ import { privateImageHeaders } from '@/lib/media/authorized-image-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(_request: Request, props: { params: Promise<{ groupId: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function GET(_request: Request, props: { params: Promise<{ groupId: string }> }) {
   const params = await props.params;
   const user = await getSession();
   if (!user) return new Response('Not found', { status: 404, headers: privateImageHeaders });
@@ -17,5 +18,5 @@ export async function GET(_request: Request, props: { params: Promise<{ groupId:
     const bytes = await readStudioThumbnail(asset.original_url);
     return new Response(_request.method === 'HEAD' ? null : new Uint8Array(bytes), { headers: { ...privateImageHeaders, 'Content-Type': 'image/webp', 'Content-Length': String(bytes.length) } });
   } catch { return new Response('Not found', { status: 404, headers: privateImageHeaders }); }
-}
+});
 export const HEAD = GET;

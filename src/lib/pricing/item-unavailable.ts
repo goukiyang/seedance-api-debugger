@@ -1,15 +1,16 @@
 import type { PricingAdminIdentity } from './admin-contract';
+import { PublicApiError } from '@/lib/http/public-error';
 
 export type PricingItemUnavailableReason = 'configuration_missing' | 'disabled' | 'model_not_enabled'
   | 'specification_unsupported' | 'price_unconfigured' | 'evidence_unconfirmed' | 'count_exceeds_limit';
 
 /** Only a successfully read, legal configuration may establish item-level unavailability. */
-export class PricingItemUnavailableError extends Error {
+export class PricingItemUnavailableError extends PublicApiError {
   readonly status = 409;
   readonly code = 'pricing_item_unavailable';
   readonly identity: PricingAdminIdentity;
   constructor(identity: PricingAdminIdentity, readonly reason: PricingItemUnavailableReason, message: string) {
-    super(message);
+    super(message, 409, 'pricing_item_unavailable');
     this.name = 'PricingItemUnavailableError';
     this.identity = Object.freeze({ ...identity, specifications: Object.freeze({ ...identity.specifications }) });
   }

@@ -1,9 +1,9 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import sharp from '../media/sharp';
 import { createMultiviewPreviewManifest, MULTIVIEW_PREVIEW_CHUNK_SIZE, MULTIVIEW_PREVIEW_COLUMNS,
   MULTIVIEW_PREVIEW_MAX_BYTES, MULTIVIEW_PREVIEW_ROWS, type MultiviewPreviewManifest } from './multiview-preview-contract';
 import type { MultiviewInfo } from './multiview-contract';
@@ -22,7 +22,7 @@ async function atomicWrite(file: string, data: Buffer | string) {
 async function validateAtlas(file: string, manifest: MultiviewPreviewManifest) {
   const data = await readFile(file);
   if (!data.length || data.length > MULTIVIEW_PREVIEW_MAX_BYTES) throw new Error('preview_atlas_invalid_size');
-  const metadata = await sharp(data, { limitInputPixels: 64 * 1024 * 1024 }).metadata();
+  const metadata = await (await openUntrustedImage(data, 'multiview-output')).metadata();
   if (metadata.format !== 'jpeg' || metadata.width !== manifest.cellWidth * MULTIVIEW_PREVIEW_COLUMNS
     || metadata.height !== manifest.cellHeight * MULTIVIEW_PREVIEW_ROWS) throw new Error('preview_atlas_invalid_dimensions');
   return { data, bytes: data.length, etag: jpegDigest(data) };

@@ -85,7 +85,7 @@ export async function getVideoCardSummaryMap(
     summary.task_count += 1;
     if (task.local_status === 'succeeded') summary.succeeded_count += 1;
     if (task.local_status === 'failed' || task.local_status === 'cancelled') summary.failed_count += 1;
-    if (task.local_status === 'submitted' || task.local_status === 'running') summary.running_count += 1;
+    if (['created', 'submitting', 'unknown', 'submitted', 'running'].includes(task.local_status)) summary.running_count += 1;
     summary.estimated_credits += task.estimated_cost || 0;
     summary.charged_credits += task.actual_cost || 0;
     summary.refunded_credits += task.refund_amount || 0;

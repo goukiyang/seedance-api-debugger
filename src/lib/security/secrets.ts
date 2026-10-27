@@ -1,4 +1,4 @@
-export type SecretPurpose = 'session' | 'upload' | 'feishuState' | 'registration' | 'pricing' | 'media' | 'videoCallback' | 'privateIdentity' | 'errorLog';
+export type SecretPurpose = 'session' | 'upload' | 'feishuState' | 'registration' | 'pricing' | 'media' | 'videoCallback' | 'privateIdentity' | 'errorLog' | 'rateLimit';
 const secrets: {
   requireSecret(purpose: SecretPurpose): Buffer;
   assertStartupSecrets(): Record<SecretPurpose, true>;

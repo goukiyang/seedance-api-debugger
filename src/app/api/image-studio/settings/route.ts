@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -26,7 +27,7 @@ async function settingsForModel(channels: Awaited<ReturnType<typeof getImageGene
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
@@ -54,9 +55,9 @@ export async function GET(request: NextRequest) {
     if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json();
@@ -93,4 +94,4 @@ export async function PUT(request: NextRequest) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') return NextResponse.json({ error: '设置已在其他页面更新，请重新读取后修改' }, { status: 409 });
     return NextResponse.json({ error: '保存失败，修改仍保留在当前页面，请重试' }, { status: 500 });
   }
-}
+});

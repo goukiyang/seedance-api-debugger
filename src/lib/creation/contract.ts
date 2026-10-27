@@ -1,3 +1,5 @@
+import { PublicApiError } from '@/lib/http/public-error';
+
 export const VIDEO_CREATION_CAPABILITY = 'video_creation_flow_v2' as const;
 export const VIDEO_CREATION_CONTRACT_VERSION = 2 as const;
 export type CreationAction = 'generate' | 'enhance' | 'draft_upgrade';
@@ -22,9 +24,9 @@ export type VideoCreationIntentDTO = {
   approval?: { id: string; status: string; reason: string | null; expires_at: string | null; remaining_count: number; authorization_round?: number; batch_revision?: number | null };
   quote?: { estimated_cost: number; pricing_revision: string; pricing_quote_token?: string }; created_at: string; updated_at: string;
 };
-export class CreationError extends Error {
+export class CreationError extends PublicApiError {
   constructor(message: string, public readonly status = 409, public readonly code = 'creation_conflict',
-    public readonly field = 'creation', public readonly action: AvailabilityReason['action'] = 'fix_input') { super(message); }
+    public readonly field = 'creation', public readonly action: AvailabilityReason['action'] = 'fix_input') { super(message, status, code); }
 }
 export function creationIdentity(value: unknown, label: string, optional = false): string | null {
   if (optional && (value === null || value === undefined || value === '')) return null;

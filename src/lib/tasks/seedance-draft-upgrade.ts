@@ -1,3 +1,6 @@
+import { transitionVideoTask, createVideoTaskRecord } from '@/lib/video/task-state';
+import { submitToProvider, acceptedSubmission, ProviderSubmissionError, recordSubmissionSideEffect } from '@/lib/video/submission';
+import { writeHoldLedger } from '@/lib/billing/holds';
 import { isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
@@ -12,8 +15,8 @@ import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { getProjectForGeneration, assertCanViewTask, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { validateRequestCostCeiling } from '@/lib/provider/seedance-video-edit';
 import { consumeApprovalForTask, findUsableApproval } from '@/lib/approvals';
-import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
-import { allocateProjectTaskBudget, settleProjectTaskBudget, shouldBillProjectBudget } from '@/lib/projects/budget';
+import { allocateTaskCredits } from '@/lib/credits/policy';
+import { allocateProjectTaskBudget, shouldBillProjectBudget } from '@/lib/projects/budget';
 import {
   createProviderApiRequest,
   markProviderApiRequestAccepted,
@@ -87,11 +90,6 @@ type DraftTaskForUpgrade = {
   retention_status: string;
 };
 
-function isAmbiguousProviderError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /超时|timeout|timed out|fetch failed|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(message);
-}
-
 function isValidApprovalBase(task: { id: string; video_card_id: string | null; version_role: string }, draft: DraftTaskForUpgrade, videoCardId: string) {
   return task.video_card_id === videoCardId
     && (['candidate', 'current_best', 'final'].includes(task.version_role) || task.id === draft.id);
@@ -151,18 +149,9 @@ async function settleDraftUpgradeFailure(input: {
   errorMessage: string;
   errorCode: string;
 }) {
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async tx => {
     const task = await tx.videoTask.findUnique({ where: { id: input.taskId } });
     if (!task || ['succeeded', 'failed', 'cancelled'].includes(task.local_status)) return;
-
-    const existingSettlement = await tx.creditLedger.findFirst({
-      where: {
-        related_task_id: input.taskId,
-        type: { in: ['task_success_deduct', 'task_failed_refund'] },
-      },
-    });
-    if (existingSettlement) return;
-
     const consumedApprovals = await tx.approvalUsage.findMany({
       where: { task_id: input.taskId, creation_intent_id: null },
       select: { approval_id: true },
@@ -177,69 +166,7 @@ async function settleDraftUpgradeFailure(input: {
       }
     }
 
-    await tx.videoTask.update({
-      where: { id: input.taskId },
-      data: {
-        local_status: 'failed',
-        error_code: input.errorCode,
-        error_message: input.errorMessage,
-        completed_at: new Date(),
-      },
-    });
-
-    const frozenAmount = Math.max(0, Number(task.frozen_cost ?? input.frozenAmount));
-    if (frozenAmount <= 0) {
-      const failedTask = await tx.videoTask.update({
-        where: { id: input.taskId },
-        data: { frozen_cost: 0, actual_cost: 0, refund_amount: 0 },
-      });
-      await recordTaskCostSettlement(tx, failedTask, 'failed', input.userId);
-      return;
-    }
-
-    if (task.billing_scope === 'project' && task.project_id) {
-      const settlement = await settleProjectTaskBudget(tx, {
-        projectId: task.project_id,
-        taskId: task.id,
-        terminalStatus: 'failed',
-        frozenAmount,
-        freezeSnapshot: task.credit_freeze_snapshot,
-        operatorId: input.userId,
-      });
-      const failedTask = await tx.videoTask.update({
-        where: { id: task.id },
-        data: { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
-      });
-      await recordTaskCostSettlement(tx, failedTask, 'failed', input.userId);
-      return;
-    }
-
-    const settlement = await settleTaskCredits(tx, {
-      taskId: task.id,
-      userId: input.userId,
-      terminalStatus: 'failed',
-      frozenAmount,
-      freezeSnapshot: task.credit_freeze_snapshot,
-    });
-    const failedTask = await tx.videoTask.update({
-      where: { id: task.id },
-      data: { frozen_cost: 0, actual_cost: 0, refund_amount: settlement.refundedAmount },
-    });
-    await tx.creditLedger.create({
-      data: {
-        user_id: input.userId,
-        type: 'task_failed_refund',
-        amount: settlement.refundedAmount,
-        balance_before: settlement.balanceBefore,
-        balance_after: settlement.balanceAfter,
-        frozen_before: settlement.frozenBefore,
-        frozen_after: settlement.frozenAfter,
-        related_task_id: task.id,
-        reason: `Draft 升级提交失败，返还 ${settlement.refundedAmount} 点`,
-        metadata_json: JSON.stringify({ error_code: input.errorCode, allocations: settlement.allocations, expired_closed: settlement.expiredClosedAmount }),
-      },
-    });
-    await recordTaskCostSettlement(tx, failedTask, 'failed', input.userId);
+    await transitionVideoTask(input.taskId, task, 'failed', { error_message: input.errorMessage, error_code: input.errorCode }, tx);
   });
 }
 
@@ -291,7 +218,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     where: { user_id: input.user.id, idempotency_key: idempotencyKey, source_draft_task_id: draft.id },
     select: { id: true, provider_task_id: true, local_status: true, estimated_cost: true, source_draft_task_id: true },
   });
-  if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
+  if (existing) return { ...existing, deduplicated: true, pending_confirmation: ['created', 'submitting', 'unknown', 'submitted'].includes(existing.local_status) && !existing.provider_task_id };
   if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('供应商 Draft 升级接口尚未完成核验，暂不能生成 1080p', 503, 'DRAFT_UPGRADE_DISABLED');
   if (!input.resolutionApprovalConfirmed) throw new DraftUpgradeError('1080p 生成需要先确认审批通过', 403, 'RESOLUTION_APPROVAL_REQUIRED');
   if (draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || !draft.is_draft) {
@@ -361,7 +288,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       const freshContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(freshDraft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade');
       verifyVideoPricingCredential(input.pricingQuoteToken, freshContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
     }
-    const created = await tx.videoTask.create({
+    const created = await createVideoTaskRecord(tx, {
       data: {
         provider: 'seedance',
         model: draft.model,
@@ -461,7 +388,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
           status: input.user.status,
         }, estimatedCost, created.id);
         freezeSnapshot = freeze.snapshot;
-        await tx.creditLedger.create({
+        await writeHoldLedger(tx, {
           data: {
             user_id: input.user.id,
             type: 'task_freeze',
@@ -487,12 +414,14 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   });
 
   const clientRequestId = task.id;
+  const providerDraftTaskId = draft.provider_draft_task_id;
   const providerPayload = buildSeedanceDraftUpgradePayload({
     model: draft.model,
     providerDraftTaskId: draft.provider_draft_task_id,
     clientRequestId,
   });
   let providerRequest: Awaited<ReturnType<typeof createProviderApiRequest>> | null = null;
+  let providerSubmissionAttempted = false;
   try {
     providerRequest = await createProviderApiRequest({
       task,
@@ -505,25 +434,23 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       where: { id: task.id },
       data: { provider_client_request_id: clientRequestId },
     });
-    const providerResult = await createSeedanceDraftUpgradeTask({
+    providerSubmissionAttempted = true;
+    const providerResult = acceptedSubmission(await submitToProvider({
+      taskId: task.id, send: async () => await createSeedanceDraftUpgradeTask({
       model: draft.model,
-      providerDraftTaskId: draft.provider_draft_task_id,
+      providerDraftTaskId,
       clientRequestId,
-    });
-    task = await prisma.videoTask.update({
-      where: { id: task.id },
-      data: {
-        provider_task_id: providerResult.provider_task_id,
-        raw_create_response: JSON.stringify(providerResult.raw),
-        local_status: 'submitted',
-      },
-    });
-    await markProviderApiRequestAccepted({
-      requestId: providerRequest.id,
+    }),
+      acceptedPatch: value => ({ raw_create_response: JSON.stringify(value.raw) }),
+    }));
+    task = await prisma.videoTask.findUniqueOrThrow({ where: { id: task.id } });
+    const providerRequestId = providerRequest.id;
+    await recordSubmissionSideEffect(task.id, () => markProviderApiRequestAccepted({
+      requestId: providerRequestId,
       task,
       providerTaskId: providerResult.provider_task_id,
       responseSummary: { provider_task_id: providerResult.provider_task_id, source_draft_task_id: draft.id },
-    });
+    }));
     startTaskLocalization(task.id);
     return {
       id: task.id,
@@ -535,54 +462,9 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       deduplicated: false,
     };
   } catch (error) {
-    if (providerRequest && isAmbiguousProviderError(error)) {
-      try {
-        const recovered = await getVideoTaskStatusByClientRequestId(clientRequestId);
-        if (recovered.provider_task_id && recovered.provider_task_id !== clientRequestId) {
-          task = await prisma.videoTask.update({
-            where: { id: task.id },
-            data: {
-              provider_task_id: recovered.provider_task_id,
-              provider_status: recovered.provider_status,
-              raw_status_response: JSON.stringify(recovered.raw),
-              error_message: null,
-            },
-          });
-          await markProviderApiRequestAccepted({
-            requestId: providerRequest.id,
-            task,
-            providerTaskId: recovered.provider_task_id,
-            responseSummary: { recovered_by: 'clientRequestId', source_draft_task_id: draft.id },
-          });
-          startTaskLocalization(task.id);
-          return {
-            id: task.id,
-            task_id: task.id,
-            provider_task_id: recovered.provider_task_id,
-            source_draft_task_id: draft.id,
-            status: recovered.local_status,
-            estimated_cost: estimatedCost,
-            pending_confirmation: false,
-            recovered_by_client_request_id: true,
-          };
-        }
-      } catch {
-        // 查询也失败时保留 submitted + provider request pending，交给恢复任务重试。
-      }
-
-      await prisma.videoTask.update({
-        where: { id: task.id },
-        data: { error_message: '提交结果待确认，系统会按请求 ID 自动恢复，请勿重复提交。' },
-      });
-      return {
-        id: task.id,
-        task_id: task.id,
-        provider_task_id: null,
-        source_draft_task_id: draft.id,
-        status: 'pending_confirmation',
-        estimated_cost: estimatedCost,
-        pending_confirmation: true,
-      };
+    if (providerSubmissionAttempted && !(error instanceof ProviderSubmissionError && error.outcome === 'rejected')) {
+      return { id: task.id, task_id: task.id, provider_task_id: null, source_draft_task_id: draft.id,
+        status: 'pending_confirmation', estimated_cost: estimatedCost, pending_confirmation: true };
     }
 
     const message = error instanceof Error ? error.message : 'Seedance Draft 升级提交失败';

@@ -1,10 +1,12 @@
+import './hd-readonly-runtime.cjs';
 import './server-runtime.cjs';
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from '../src/lib/media/sharp';
-import { hdReadonlyDb as prisma } from '../src/lib/media/hd-readonly-db';
+import { hdReadRepository } from '../src/lib/media/hd-readonly-db';
+import { openUntrustedImage, UntrustedImageError } from '../src/lib/media/decode-image';
 import { assertHdDirectoryAccess, assertHdWorkerLock, atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, hdWorkerFailureSummary, listHdJobs, processHdJob, readHdJob, recordHdWorkerFailure, recheckHdResources, requestHd, retryFailedHd, retryHdKey, setHdControl, type HdFairnessState, type HdRequestContext } from '../src/lib/media/hd-derivatives';
 import { claimHdScheduledJob, finishHdScheduledClaim, readHdScheduler, seedHdSchedulerFairness } from '../src/lib/media/hd-scheduler';
 import { stopHdImageProcessors } from '../src/lib/media/hd-image-processor';
@@ -25,11 +27,9 @@ const textFlag = (json: string | null) => {
 };
 async function inventory(enqueue: boolean) {
   const sources = new Map<string, { source: string; preserveText: boolean; context: HdRequestContext }>();
-  const owners = await prisma.user.findMany({ where: { status: 'active' }, select: { id: true } });
-  const activeImageAssets = await prisma.asset.count({ where: { status: 'active', type: 'image' } });
-  const assets = await prisma.asset.findMany({ where: { status: 'active', type: 'image', owner_id: { in: owners.map(owner => owner.id) } },
-    orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_id: true, original_url: true, metadata_json: true } });
-  const refs = await prisma.referenceImage.findMany({ where: { status: 'active', asset_id: null, owner: { status: 'active' }, album: { status: 'active' } }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_user_id: true, url: true } });
+  const activeImageAssets = await hdReadRepository.countActiveImageAssets();
+  const assets = await hdReadRepository.inventoryAssets();
+  const refs = await hdReadRepository.inventoryReferences();
   const remoteSources = new Set<string>();
   let unavailable = 0;
   for (const item of [...assets.map(a => ({ source: a.original_url, preserveText: textFlag(a.metadata_json), context: { owner: { kind: 'asset' as const, id: a.id, ownerId: a.owner_id } } })), ...refs.map(r => ({ source: r.url, preserveText: false, context: { owner: { kind: 'reference' as const, id: r.id, ownerId: r.owner_user_id } } }))]) {
@@ -49,7 +49,7 @@ async function inventory(enqueue: boolean) {
     try {
       const input = (await hdSource(item.source))!;
       result.totalBytes += input.size;
-      const meta = await sharp(input.file, { animated: true, limitInputPixels: false }).metadata();
+      const meta = await (await openUntrustedImage(input.file, 'hd', { animated: true })).metadata();
       result.types[meta.format || 'unknown'] = (result.types[meta.format || 'unknown'] || 0) + 1;
       const reason = hdEligibility(meta);
       if (reason) { result.skipped++; result.reasons[reason] = (result.reasons[reason] || 0) + 1; }
@@ -57,7 +57,14 @@ async function inventory(enqueue: boolean) {
       const cached = existing.get(item.source);
       if (cached?.status === 'ready' && cached.version === input.version && cached.preserveText === item.preserveText) result.cacheHits++;
       if (enqueue) { const job = await requestHd(item.source, 3, item.preserveText, batch, item.context); if (job) result.jobs.push(job.key); }
-    } catch (error) { if (!hdSourceIsolationReason(error)) throw error; result.skipped++; result.reasons.unreadable = (result.reasons.unreadable || 0) + 1; }
+    } catch (error) {
+      if (error instanceof UntrustedImageError) {
+        const reason = error.code === 'IMAGE_PIXEL_LIMIT' ? 'pixel_limit' : 'source_incompatible';
+        result.skipped++; result.reasons[reason] = (result.reasons[reason] || 0) + 1;
+      } else {
+        if (!hdSourceIsolationReason(error)) throw error; result.skipped++; result.reasons.unreadable = (result.reasons.unreadable || 0) + 1;
+      }
+    }
   }
   if (enqueue) await atomicHdJson(path.join(hdDirectory(), `${batch}.inventory.json`), result);
   return result;
@@ -211,4 +218,4 @@ main().catch(async error => {
   }
   console.error(JSON.stringify({ error: 'hd_worker_failed', diagnostic }));
   process.exitCode = 1;
-}).finally(() => prisma.$disconnect());
+}).finally(() => hdReadRepository.close());

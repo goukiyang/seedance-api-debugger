@@ -11,7 +11,7 @@ import type { CreateVideoInput } from '../src/types';
 
 async function main() {
   const root = process.cwd();
-  const source = readFileSync('src/app/api/tasks/create/route.ts', 'utf8');
+  const source = readFileSync('src/server/video-tasks/standard-create.ts', 'utf8');
   const ast = ts.createSourceFile('route.ts', source, ts.ScriptTarget.Latest, true);
   const branches: ts.IfStatement[] = [];
   const calls: ts.CallExpression[] = [], declarations: ts.VariableDeclaration[] = [], assignments: ts.BinaryExpression[] = [];
@@ -35,7 +35,8 @@ async function main() {
   const branch = branches[0];
   const authorization = source.indexOf('await getAuthorizedReferenceImagesForUse(user, generationReferenceImageIds)');
   assert.ok(authorization > 0 && authorization < branch.pos);
-  assert.ok(branch.end < source.indexOf('const task = await tx.videoTask.create('), 'prepare before accepting/freezing a new task');
+  const taskCreation = calls.find(call => identifier(call.expression, 'createVideoTaskRecord') && call.arguments[0]?.getText(ast) === 'tx');
+  assert.ok(taskCreation && branch.end < taskCreation.pos, 'prepare before accepting/freezing a new task');
   const ledger = source.slice(source.indexOf('const providerRequest = await createProviderApiRequest('), source.indexOf('providerRequestId = providerRequest.id;'));
   assert.ok(ledger.length > 0 && !ledger.includes('seedanceReferenceTransport'), 'durable identity must remain URL-based');
   const createCalls = calls.filter(call => identifier(call.expression, 'createVideoTask'));
@@ -107,7 +108,7 @@ async function main() {
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true });
   const folder = mkdtempSync(path.join(scratch, 'multiview-original-'));
-  mkdirSync(path.join(folder, 'public/uploads/assets'), { recursive: true });
+  mkdirSync(path.join(folder, '.media/uploads/assets'), { recursive: true });
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
   const guideBytes = await sharp({ create: { width: 2, height: 2, channels: 4,
     background: { r: 64, g: 32, b: 16, alpha: 1 } } }).png().toBuffer();
@@ -162,7 +163,7 @@ async function main() {
     checks.push('actual_multiview_branch_both_models_exact_original_bytes_no_url_fetch_or_snapshot_mutation');
     const authorizedBefore = structuredClone(context.generationReferenceImages), guideBefore = Buffer.from(guideBytes);
     context.multiviewSystemReference = guide;
-    assert.equal(existsSync(path.join(folder, 'public/uploads/assets/private-guide-not-a-public-file.png')), false);
+    assert.equal(existsSync(path.join(folder, '.media/uploads/assets/private-guide-not-a-public-file.png')), false);
     for (const model of ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628']) {
       context.providerInput = { ...input, model };
       const providerBefore = structuredClone(context.providerInput);
@@ -213,7 +214,7 @@ async function main() {
     context.generationReferenceImages = [{ url, asset: { ...asset, file_size: 30_000_000 } }];
     assert.equal((await context.prepare()).status, 400);
     const outside = path.join(folder, 'outside.png'); writeFileSync(outside, bytes, { flag: 'wx' });
-    symlinkSync(outside, path.join(folder, 'public/uploads/assets/escape.png'));
+    symlinkSync(outside, path.join(folder, '.media/uploads/assets/escape.png'));
     const escape = 'https://sd2.youdooart.com/uploads/assets/escape.png';
     context.providerInput = { ...input, reference_image_urls: [escape] };
     context.generationReferenceImages = [{ url: escape, asset: { ...asset, original_url: escape } }];

@@ -25,7 +25,7 @@ export function recentTaskVisualRank(task: RecentTaskCardOrderItem): number {
   const status = task.local_status || '';
   if (recentTaskHasVisualPreview(task)) return 0;
   if (status === 'succeeded' || task.preview_available || task.stable_download_ready) return 1;
-  if (status === 'submitted' || status === 'running' || status === 'queued') return 2;
+  if (['created', 'submitting', 'unknown', 'submitted', 'running', 'queued'].includes(status)) return 2;
   if (status === 'failed' || status === 'cancelled') return 3;
   return 4;
 }

@@ -13,7 +13,7 @@ export type VideoDuration = 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15
 export type VideoResolution = '480p' | '720p' | '1080p';
 
 // Local status enum
-export type LocalStatus = 'draft' | 'submitted' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type LocalStatus = 'draft' | 'created' | 'submitting' | 'unknown' | 'submitted' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 // Create video task input
 export interface CreateVideoInput {

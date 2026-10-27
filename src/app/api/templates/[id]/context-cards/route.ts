@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -132,7 +134,7 @@ function assetsFromCards(cards: TemplateContextCard[], existing: SerializedGener
   return [...cardAssets, ...preservedAssets];
 }
 
-export async function PATCH(request: NextRequest, props: Params) {
+export const PATCH = apiRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest, props: Params) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -223,10 +225,7 @@ export async function PATCH(request: NextRequest, props: Params) {
     if (error instanceof Error && error.message === 'TEMPLATE_NOT_FOUND') {
       return NextResponse.json({ error: '模板不存在' }, { status: 404 });
     }
-    console.error('[TemplateContextCards] Update error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

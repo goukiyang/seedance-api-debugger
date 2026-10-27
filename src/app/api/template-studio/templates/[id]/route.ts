@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { withStudioRoute, readStudioJson } from '@/lib/template-studio/common';
 import { getStudioTemplate, patchStudioTemplate } from '@/lib/template-studio/templates';
@@ -9,7 +10,7 @@ const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = declaredRoute({ access: 'internal', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return withStudioRoute(async (user) => {
     const mode = request.nextUrl.searchParams.get('mode');
@@ -20,9 +21,9 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     return NextResponse.json(await getStudioTemplate(user, params.id, source, request.nextUrl.searchParams.get('private') === '1'),
       { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   });
-}
+});
 
-export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PUT = declaredRoute({ access: 'internal', rateLimit: false }, async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return withStudioRoute(async user => {
     const origin = request.headers.get('origin'), host = request.headers.get('host');
@@ -35,12 +36,12 @@ export async function PUT(request: NextRequest, props: { params: Promise<{ id: s
     if (body.action === 'save-private-definition') return NextResponse.json(await savePrivateTemplateEditor(user, params.id, body), { headers });
     throw new StudioError('操作无效', 400, 'INVALID');
   });
-}
+});
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = declaredRoute({ access: 'internal', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   return withStudioRoute(async (user) => {
     const template = await patchStudioTemplate(user, params.id, await readStudioJson(request) as PatchStudioTemplateRequest);
     return NextResponse.json({ template });
   });
-}
+});

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
@@ -11,7 +12,7 @@ function exportFilename(date = new Date()) {
   return `feedback_export_${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}.pdf`;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     await getAdminUser(request);
   } catch {
@@ -52,4 +53,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin Feedback Export PDF]', error);
     return errorJson('导出失败', 500);
   }
-}
+});

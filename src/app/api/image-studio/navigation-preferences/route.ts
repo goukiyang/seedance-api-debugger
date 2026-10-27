@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
@@ -10,14 +11,14 @@ function failure(cause: unknown) {
   if (cause instanceof StudioNavigationPreferenceError) return NextResponse.json({ error: cause.message }, { status: cause.status, headers });
   return NextResponse.json({ error: '侧栏设置未能确认，请重新读取；模块和历史仍保留' }, { status: 503, headers });
 }
-export async function GET() {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET() {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
   try { return NextResponse.json({ viewerId: user.id, preference: await readStudioNavigationPreference(user.id) }, { headers }); }
   catch (cause) { return failure(cause); }
-}
-export async function PATCH(request: NextRequest) {
+});
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
@@ -31,4 +32,4 @@ export async function PATCH(request: NextRequest) {
     if (cause instanceof SyntaxError) return NextResponse.json({ error: '侧栏设置参数无效' }, { status: 400, headers });
     return failure(cause);
   }
-}
+});

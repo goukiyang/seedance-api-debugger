@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -78,7 +79,7 @@ async function main() {
     try { return await fn(tx as unknown as Prisma.TransactionClient); }
     catch (error) { ({ projects, members, logs, settings } = before); throw error; }
   } }, { get(target, property) { return property in target ? Reflect.get(target, property) : forbidden; } });
-  Reflect.set(globalThis, 'prisma', mock);
+  setFixtureDatabase(mock);
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   const { createTeamProject, getProjectCreateOperation, closeProjectCreateOperation, joinProjectInvite } = await import('../src/lib/projects/operations');

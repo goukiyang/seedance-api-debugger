@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -12,7 +13,7 @@ const safeConfig = (settings: Awaited<ReturnType<typeof getImageGenerationApiSet
   base_url: settings.base_url, api_key_configured: Boolean(settings.api_key),
 });
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     return NextResponse.json({ config: safeConfig(await getImageGenerationApiSettings(prisma, 'banana')) }, { headers: { 'Cache-Control': 'no-store' } });
@@ -20,9 +21,9 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '读取 Banana 通道失败，请重试' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json();
@@ -62,4 +63,4 @@ export async function PUT(request: NextRequest) {
     if (error instanceof SyntaxError) return NextResponse.json({ error: '通道设置格式无效' }, { status: 400 });
     return NextResponse.json({ error: '保存 Banana 通道失败，请重试' }, { status: 500 });
   }
-}
+});

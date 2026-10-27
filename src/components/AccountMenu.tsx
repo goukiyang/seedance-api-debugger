@@ -3,7 +3,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, X } from 'lucide-react';
+import { Camera, X, LogOut, Link2 } from 'lucide-react';
 import { AvatarEditor } from './AvatarEditor';
 import { useOptionalAppSession } from '@/lib/context/AppSessionContext';
 import Link from 'next/link';
@@ -69,6 +69,7 @@ export default function AccountMenu({
 }: AccountMenuProps) {
   const { confirm, productDialog } = useProductDialog();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [bindingFeishu, setBindingFeishu] = useState(false);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
@@ -87,7 +88,7 @@ export default function AccountMenu({
     setAvatarFailed(false);
   }, [avatarUrl]);
 
-  const handleLogout = async (switchAccount = false) => {
+  const handleLogout = async (switchAccount = false, allDevices = false) => {
     if (logoutLock.current) return;
     logoutLock.current = true;
     setDetailsOpen(true);
@@ -107,7 +108,7 @@ export default function AccountMenu({
       }
       setLoggingOut(true);
       outcome = 'unknown';
-      const response = await fetch('/api/auth/logout', { method: 'POST', signal: AbortSignal.timeout(20000) });
+      const response = await fetch(allDevices ? '/api/auth/logout-all' : '/api/auth/logout', { method: 'POST', signal: AbortSignal.timeout(20000) });
       const result = await response.json();
       outcome = logoutResponseOutcome(response, result);
       if (outcome !== 'confirmed') throw new Error('退出未成功确认');
@@ -128,6 +129,23 @@ export default function AccountMenu({
       logoutLock.current = false;
       setLoggingOut(false);
     }
+  };
+
+  const handleBindFeishu = async () => {
+    if (logoutLock.current) return;
+    logoutLock.current = true;
+    setLogoutError('');
+    try {
+      const risk = getPageExitRisk();
+      if (risk.busy.length) { setLogoutError('请等当前操作确认完成后再绑定飞书。'); return; }
+      if (risk.unsaved.length && !await confirm('前往飞书会离开本页，尚未保存的输入可能丢失。确定继续吗？', { title: '绑定飞书', confirmLabel: '继续绑定', anchor: null })) return;
+      setBindingFeishu(true);
+      const response = await fetch('/api/auth/feishu/bind', { method: 'POST', signal: AbortSignal.timeout(20000) });
+      const data = await response.json();
+      if (!response.ok || typeof data.authorize_url !== 'string') { setLogoutError(data.error || '暂时无法发起绑定，请重试。'); return; }
+      if (!runApprovedPageExit(() => window.location.assign(data.authorize_url), risk.signature)) setLogoutError('页面状态已变化，请确认后重试。');
+    } catch { setLogoutError('暂时无法发起绑定，请重试。当前输入仍保留。'); }
+    finally { logoutLock.current = false; setBindingFeishu(false); }
   };
 
   if (loading) {
@@ -164,19 +182,20 @@ export default function AccountMenu({
           {role && <span className="account-menu-role">{role}</span>}
         </span>
       </button>
-      {detailsOpen && <AccountDetails busy={loggingOut} onClose={() => setDetailsOpen(false)}>
+      {detailsOpen && <AccountDetails busy={loggingOut || bindingFeishu} onClose={() => setDetailsOpen(false)}>
         <div className={styles.identity}><button type="button" className={styles.avatarButton} data-tip="更换头像" aria-label="更换头像" onClick={() => setAvatarEditorOpen(true)}><span className="account-menu-avatar" style={{ backgroundColor: fallbackColor }} aria-hidden="true">{avatarUrl && !avatarFailed ? <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} /> : label}</span><span className={styles.avatarCamera} aria-hidden="true"><Camera size={12} /></span></button><strong>{displayName}</strong></div>
         <dl className={styles.info}>{user?.username && <><dt>账号</dt><dd>{user.username}</dd></>}{role && <><dt>角色</dt><dd>{role}</dd></>}</dl>
+        {!user?.feishu?.open_id && <button type="button" className={styles.secondary} disabled={loggingOut || bindingFeishu} onClick={() => void handleBindFeishu()}><Link2 size={16} aria-hidden="true" />{bindingFeishu ? '正在前往飞书...' : '绑定飞书'}</button>}
         <p className={styles.hint}>切换账号会退出当前账号，再前往登录页选择账号。同站其它已打开的页面也会退出；按账号保存的草稿会保留。</p>
         {logoutError && <p className={styles.error} role="alert">{logoutError}</p>}
-        <footer className={styles.actions}><Link href="/account" className={styles.secondary}>管理个人资料</Link><button type="button" className={styles.primary} disabled={loggingOut} onClick={() => void handleLogout(true)}>{loggingOut ? '退出中…' : '切换账号'}</button></footer>
+        <footer className={styles.actions}><Link href="/account" className={styles.secondary}>管理个人资料</Link><button type="button" className={styles.secondary} disabled={loggingOut || bindingFeishu} onClick={() => void handleLogout(false, true)}><LogOut size={16} aria-hidden="true" />退出所有设备</button><button type="button" className={styles.primary} disabled={loggingOut || bindingFeishu} onClick={() => void handleLogout(true)}>{loggingOut ? '退出中…' : '切换账号'}</button></footer>
       </AccountDetails>}
       {avatarEditorOpen && user?.id && <AvatarEditor userId={user.id} hasFeishu onClose={() => setAvatarEditorOpen(false)} onChanged={() => { if (appSession) void appSession.refreshUser(); else window.location.reload(); }} />}
       <button
         type="button"
         className="account-menu-logout"
         onClick={() => void handleLogout()}
-        disabled={loggingOut}
+        disabled={loggingOut || bindingFeishu}
       >
         {loggingOut ? '退出中...' : '退出'}
       </button>

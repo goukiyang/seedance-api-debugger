@@ -132,7 +132,7 @@ const RECENT_TASK_PAGE_SIZE = 12;
 const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
 const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
-const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+const POLLABLE_TASK_STATUSES = new Set(['created', 'submitting', 'unknown', 'submitted', 'running']);
 
 function shouldContinuePollingStableDelivery(task: {
   local_status?: string | null;
@@ -871,10 +871,15 @@ export function TemplateGenerateClient() {
     if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
     setPendingRequestKey(pending.key);
     const response = await fetch(`/api/tasks/request-status?${new URLSearchParams({ idempotency_key: pending.key })}`, { cache: 'no-store', headers: { 'x-app-session-user': currentUser!.id } });
-    const data = await readJsonResponse<{ task?: { id: string } | null; error?: string; message?: string }>(response);
+    const data = await readJsonResponse<{ task?: { id: string; local_status?: string } | null; error?: string; message?: string }>(response);
     if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请回到原账号核对原请求');
     if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认，请继续查询原号');
     if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+    if (['created', 'submitting', 'unknown'].includes(data.task.local_status || '')) {
+      setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+      void loadRecentTasksPage(1, 'replace');
+      throw new Error('提交待确认，请继续查询原请求；不会重新生成');
+    }
     sessionStorage.removeItem(requestStorageKey);
     setPendingRequestKey(null);
     setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
@@ -1026,7 +1031,9 @@ export function TemplateGenerateClient() {
         throw new Error(data.message || data.error || `创建失败 (HTTP ${response.status})`);
       }
       if (!data.id) throw new Error('受理结果待确认，请查询原请求；不会重新生成');
-      sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
+      if (!['created', 'submitting', 'unknown'].includes(data.status || '')) {
+        sessionStorage.removeItem(requestStorageKey!); setPendingRequestKey(null);
+      }
       setResult(data);
       setErrorDebug(null);
       setPolledResult(null);
@@ -1399,7 +1406,10 @@ export function TemplateGenerateClient() {
                           <div className="composer-task-card-meta">
                             {recentTaskChargeText && <span className="composer-task-card-charge">{recentTaskChargeText}</span>}
                             <span className={`composer-task-card-status ${task.local_status}`}>
-                              {task.local_status === 'submitted' ? '排队中'
+                              {task.local_status === 'unknown' ? '提交待确认'
+                                : task.local_status === 'created' ? '准备提交'
+                                : task.local_status === 'submitting' ? '提交中'
+                                : task.local_status === 'submitted' ? '排队中'
                                 : task.local_status === 'running' ? '生成中'
                                   : task.local_status === 'succeeded' ? '已完成'
                                     : task.local_status === 'failed' ? '失败'

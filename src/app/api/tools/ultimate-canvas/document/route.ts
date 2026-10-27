@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -32,7 +33,7 @@ async function session() {
   return user;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await session();
     const params = request.nextUrl.searchParams;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     if (document) await requireCanvasVideoBatchDocumentCapability(prisma, document.id, capabilities);
     return json({ document: document ? canvasDetail(document, capabilities) : null });
   } catch (error) { return failure(error); }
-}
+});
 
 async function mutate(request: NextRequest, method: 'POST' | 'PATCH') {
   try {
@@ -84,5 +85,5 @@ async function mutate(request: NextRequest, method: 'POST' | 'PATCH') {
   } catch (error) { return failure(error); }
 }
 
-export async function POST(request: NextRequest) { return mutate(request, 'POST'); }
-export async function PATCH(request: NextRequest) { return mutate(request, 'PATCH'); }
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) { return mutate(request, 'POST'); });
+export const PATCH = declaredRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) { return mutate(request, 'PATCH'); });

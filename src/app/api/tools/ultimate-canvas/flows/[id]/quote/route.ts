@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -6,7 +7,7 @@ import { createToolFlowQuoteProof, getToolFlowQuote, toolFlowQuoteCookieName } f
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -32,4 +33,4 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     console.error('[ToolFlow] Quote failed:', error);
     return NextResponse.json({ error: '工具流报价读取失败' }, { status: 500 });
   }
-}
+});

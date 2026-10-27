@@ -430,6 +430,11 @@ export default async function AdminCostsPage(
 
   const auditChecks = [
     {
+      label: '站内已退款但供应商已收费',
+      count: auditSummary.refunded_but_provider_charged_count,
+      detail: '只记录异常供管理员核对，不自动向用户补扣。',
+    },
+    {
       label: '有金额账本缺少分摊',
       count: auditSummary.amount_ledgers_without_allocation_count,
       detail: '任何已经有真实金额的总账行，都应该能归属到项目、用户、任务或未归属池。',

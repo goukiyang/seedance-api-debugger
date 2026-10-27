@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * POST /api/workspace/validate
  * 验证 prompt 中引用的图号是否存在
@@ -10,7 +12,7 @@ import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences } from '@/lib/assets/collection';
 import { getSession } from '@/lib/auth/session';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -29,10 +31,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error('[ValidatePrompt] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

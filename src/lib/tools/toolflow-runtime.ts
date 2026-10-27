@@ -1,5 +1,7 @@
+import { writeHoldLedger } from '@/lib/billing/holds';
 import { createHash, randomUUID } from 'node:crypto';
 import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
+import { authorizeLegacyInflight } from '@/lib/billing/legacy-inflight';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assertUsageProject, inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
@@ -652,7 +654,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
         prompt: config.prompt, context: config.context, referenceIds: config.referenceIds })).digest('hex') }) };
   const taskState = { id, billing_contract_json: stringify(billingContract) };
   const freeze = unitCredits > 0
-    ? await allocateTaskCredits(tx, creditUser, unitCredits, id)
+    ? await allocateTaskCredits(tx, creditUser, unitCredits, id, 'tool_flow')
     : null;
   const createdTask = await tx.imageStudioTask.create({
     data: {
@@ -708,7 +710,7 @@ async function createQueuedTask(tx: Tx, ownerId: string, creditUser: CreditPolic
     actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
     occurredAt: createdTask.created_at, parentSourceKind: 'toolflow_run', parentSourceId: runId });
   if (freeze) {
-    await tx.creditLedger.create({ data: {
+    await writeHoldLedger(tx, { data: {
       user_id: ownerId,
       type: 'task_freeze',
       amount: -unitCredits,
@@ -1085,13 +1087,14 @@ export async function listToolFlowRuns(user: SessionUser, flowId?: string) {
 }
 
 async function cancelQueuedTask(tx: Tx, task: { id: string; owner_id: string; unit_credits: number; freeze_snapshot: string | null; status: string }) {
+  await authorizeLegacyInflight(tx, 'image', task.id);
   const changed = await tx.imageStudioTask.updateMany({ where: { id: task.id, status: task.status }, data: {
     status: 'cancelled', billing_status: studioBillingState(task, 'cancelled'), actual_credits: 0, billing_settled_at: new Date(),
     error: '工具流已取消，未请求上游图片服务。', finished_at: new Date(),
   } });
   if (!changed.count || task.unit_credits <= 0) return;
   const settlement = await settleTaskCredits(tx, { taskId: task.id, userId: task.owner_id, terminalStatus: 'cancelled', frozenAmount: task.unit_credits, freezeSnapshot: task.freeze_snapshot });
-  await tx.creditLedger.create({ data: {
+  await writeHoldLedger(tx, { data: {
     user_id: task.owner_id,
     type: 'task_failed_refund',
     amount: settlement.refundedAmount,

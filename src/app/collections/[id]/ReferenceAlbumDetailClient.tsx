@@ -1,4 +1,6 @@
 'use client';
+import { AlbumPageError, appendAlbumPage, fetchAlbumPage } from '@/lib/reference-albums/client-pages';
+import { usePageSentinel } from '@/lib/hooks/usePageSentinel';
 import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 
@@ -169,6 +171,10 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
   const [album, setAlbum] = useState<AlbumDetail | null>(null);
   const [loadedContextKey, setLoadedContextKey] = useState('');
   const [images, setImages] = useState<ReferenceImageItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const imageRequest = useRef<AbortController | null>(null);
+  const loadedDepth = useRef(0);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<ReferenceImageItem | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -185,12 +191,14 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
 
   useEffect(() => {
     aliveRef.current = true;
-    return () => { aliveRef.current = false; contextRef.current.epoch += 1; };
+    return () => { aliveRef.current = false; contextRef.current.epoch += 1; imageRequest.current?.abort(); };
   }, []);
 
   useEffect(() => {
     setAlbum(null);
     setImages([]);
+    loadedDepth.current = 0;
+    setNextCursor(null); setLoadingMore(false); imageRequest.current?.abort();
     setLoadedContextKey('');
     setSelectedImageIds([]);
     setPreviewImage(null);
@@ -206,35 +214,53 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
   const loadAlbum = useCallback(async () => {
     if (!accountId || contextRef.current.key !== contextKey || !aliveRef.current) return null;
     const epoch = contextRef.current.epoch;
+    imageRequest.current?.abort();
+    const controller = new AbortController(); imageRequest.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reference-albums/${encodeURIComponent(albumId)}`, { cache: 'no-store' });
-      const data = await res.json().catch(() => ({}));
-      if (!aliveRef.current || !isCurrent(epoch)) return null;
-      if (!res.ok) {
-        if ([401, 403, 404].includes(res.status)) {
-          setAlbum(null);
-          setImages([]);
-          setSelectedImageIds([]);
-          setPreviewImage(null);
-          setShareDialogAlbum(null);
-          setLoadedContextKey('');
-        }
-        throw new Error(data.error || data.message || '图集读取失败');
+      let page = await fetchAlbumPage<ReferenceImageItem>(`/api/reference-albums/${encodeURIComponent(albumId)}`, 'images', { ownerId: accountId, signal: controller.signal });
+      const detail = page.album as AlbumDetail;
+      let items = page.items;
+      while (items.length < loadedDepth.current && page.pagination.nextCursor) {
+        page = await fetchAlbumPage<ReferenceImageItem>(`/api/reference-albums/${encodeURIComponent(albumId)}/images`, 'images', { ownerId: accountId, signal: controller.signal, cursor: page.pagination.nextCursor });
+        items = appendAlbumPage(items, page.items);
       }
+      const data = { album: detail, images: items };
+      if (!aliveRef.current || !isCurrent(epoch) || controller.signal.aborted) return null;
       if (data.album?.id !== albumId) throw new Error('图集读取未能确认，请重试。');
       setAlbum(data.album);
       setLoadedContextKey(contextKey);
       setImages(data.images || []);
+      loadedDepth.current = items.length;
+      setNextCursor(page.pagination.nextCursor);
       return data;
     } catch (err) {
-      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '图集读取失败');
+      if (!controller.signal.aborted && isCurrent(epoch) && err instanceof AlbumPageError && [401, 403, 404].includes(err.status)) {
+        setAlbum(null); setImages([]); setNextCursor(null); setSelectedImageIds([]); setPreviewImage(null); setShareDialogAlbum(null); setLoadedContextKey('');
+      }
+      if (aliveRef.current && isCurrent(epoch) && !controller.signal.aborted) setError(err instanceof Error ? err.message : '图集读取失败');
       throw err;
     } finally {
-      if (aliveRef.current && isCurrent(epoch)) setLoading(false);
+      if (aliveRef.current && isCurrent(epoch) && !controller.signal.aborted) setLoading(false);
     }
   }, [accountId, albumId, contextKey, isCurrent]);
+
+  const moreBusy = useRef(false);
+  const loadMoreImages = useCallback(async () => {
+    if (!nextCursor || loading || moreBusy.current || loadedContextKey !== contextKey) return;
+    const epoch = contextRef.current.epoch, controller = new AbortController();
+    imageRequest.current?.abort(); imageRequest.current = controller;
+    moreBusy.current = true; setLoadingMore(true);
+    try {
+      const page = await fetchAlbumPage<ReferenceImageItem>(`/api/reference-albums/${encodeURIComponent(albumId)}/images`, 'images', { ownerId: accountId, cursor: nextCursor, signal: controller.signal });
+      if (!aliveRef.current || !isCurrent(epoch) || controller.signal.aborted) return;
+      setImages(current => { const all = appendAlbumPage(current, page.items); loadedDepth.current = all.length; return all; }); setNextCursor(page.pagination.nextCursor);
+      setAlbum(current => current ? { ...current, image_count: page.pagination.total } : current);
+    } catch (err) { if (!controller.signal.aborted && isCurrent(epoch)) setError(err instanceof Error ? err.message : '素材读取失败'); }
+    finally { moreBusy.current = false; if (!controller.signal.aborted && isCurrent(epoch)) setLoadingMore(false); }
+  }, [accountId, albumId, contextKey, isCurrent, loadedContextKey, loading, nextCursor]);
+  const moreRef = usePageSentinel(() => { void loadMoreImages(); }, Boolean(nextCursor && !loading && !loadingMore && !error && loadedContextKey === contextKey));
 
   useEffect(() => {
     void loadAlbum().catch(() => {});
@@ -573,6 +599,7 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
               })
             )}
           </div>
+          {nextCursor && <button ref={moreRef} type="button" onClick={() => void loadMoreImages()} disabled={loadingMore}>{loadingMore ? '读取中...' : '加载更多素材'}</button>}
           {previewImage && <MediaPreview
             src={`/api/reference-images/${encodeURIComponent(previewImage.id)}/content?variant=preview`}
             type={isImageItem(previewImage) ? 'image' : previewImage.asset?.type === 'video' ? 'video' : 'audio'}

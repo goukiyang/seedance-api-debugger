@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { roleRoute } from '@/lib/canvas-roles/api';
 import { deliveryAttachmentSource } from '@/lib/canvas-roles/media';
@@ -7,7 +8,7 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export async function GET(
+export const GET = declaredRoute({ access: 'internal', rateLimit: false }, async function GET(
   request: NextRequest,
   props: { params: Promise<{ deliveryId: string; index: string }> }
 ) {
@@ -44,5 +45,5 @@ export async function GET(
     }
     return response;
   });
-}
+});
 export const HEAD = GET;

@@ -1,10 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getAdminUser, errorJson } from '@/lib/auth/api-helpers';
 import type { SessionUser } from '@/lib/auth/session';
 import { addCredits, subtractCredits, creditCents, assertCreditWriteback } from '@/lib/credits/precision';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
@@ -106,4 +107,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin/Credits/Adjust]', err);
     return errorJson('服务器错误', 500);
   }
-}
+});

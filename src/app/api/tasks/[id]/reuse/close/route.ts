@@ -1,10 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { finishTaskReuseOperation, closeLegacyTaskReuseScope, taskReuseRequest, TaskReuseOperationError, taskReusePrivateHeaders } from '@/lib/navigation/task-reuse-operation.server';
 
 export const dynamic = 'force-dynamic';
-export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -25,4 +26,4 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     console.error('[TaskReuseClose]', error);
     return NextResponse.json({ code: 'REUSE_CLOSE_UNKNOWN', error: '暂未确认结束，原复用记录保留，请继续核对原操作。' }, { status: 503, headers: taskReusePrivateHeaders });
   }
-}
+});

@@ -1,7 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
+import { useSeedanceAssetPages } from '@/lib/pagination/use-seedance-pages';
+import { seedancePageScopeKey } from '@/lib/pagination/seedance-pages';
+import { uploadSession } from '@/lib/http/upload-session';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { ChevronDown, Loader2, RotateCcw } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -64,35 +69,41 @@ function ThumbnailCard({
 
   return (
     <div
-      className="relative flex-shrink-0 cursor-pointer group"
+      className="relative flex-shrink-0 group"
       style={{ width: 52, height: 68 }}
-      onClick={onSelect}
-      title={asset.name}
     >
-      <img
-        src={thumbUrl}
-        alt={asset.name}
-        className="w-full h-full object-cover rounded"
-        style={{
-          border: isSelected
-            ? '2px solid #3b82f6'
-            : '1px solid rgba(255,255,255,0.15)',
-          background: 'rgba(255,255,255,0.05)',
-        }}
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      {isSelected && (
-        <div
-          className="absolute top-0 left-0 w-full h-full rounded flex items-center justify-center"
-          style={{ background: 'rgba(59,130,246,0.6)' }}
-        >
-          {order !== undefined && (
-            <span className="text-white font-bold text-sm">{order + 1}</span>
-          )}
-        </div>
-      )}
+      <button
+        type="button"
+        className="block w-full h-full rounded cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
+        onClick={onSelect}
+        title={asset.name}
+        aria-label={`选择 ${asset.name}`}
+      >
+        <img
+          src={thumbUrl}
+          alt={asset.name}
+          className="w-full h-full object-cover rounded"
+          style={{
+            border: isSelected
+              ? '2px solid #3b82f6'
+              : '1px solid rgba(255,255,255,0.15)',
+            background: 'rgba(255,255,255,0.05)',
+          }}
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+        {isSelected && (
+          <div
+            className="absolute top-0 left-0 w-full h-full rounded flex items-center justify-center"
+            style={{ background: 'rgba(59,130,246,0.6)' }}
+          >
+            {order !== undefined && (
+              <span className="text-white font-bold text-sm">{order + 1}</span>
+            )}
+          </div>
+        )}
+      </button>
       {showRemove && !isSelected && (
         <button
           className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-gray-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -121,9 +132,26 @@ function AssetGrid({
 }) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [assets, setAssets] = useState<SeedanceAssetRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const pages = useSeedanceAssetPages(true, false);
+  const { loading, loadingMore, pagination, error } = pages;
+  const selectionTarget = useRef(onSelect);
+  selectionTarget.current = onSelect;
+  const assets: SeedanceAssetRecord[] = pages.assets
+    .filter((asset) => asset.assetType === 'Image' && asset.status === 'Active'
+      && asset.ownershipStatus === 'owned' && Boolean(asset.ownerId) && Boolean(asset.originalUrl))
+    .map((asset) => ({
+      id: asset.localId,
+      provider: asset.provider,
+      providerAssetId: asset.providerAssetId,
+      assetType: asset.assetType,
+      name: asset.name,
+      originalUrl: asset.originalUrl,
+      providerPreviewUrl: asset.providerPreviewUrl,
+      providerStatus: asset.providerStatus,
+      localStatus: asset.status,
+      storageProvider: null,
+      createdAt: asset.createdAt,
+    }));
 
   useDialogDismiss({
     open: true,
@@ -131,20 +159,6 @@ function AssetGrid({
     dismissSurfaceRef: backdropRef,
     onDismiss: onClose,
   });
-
-  useEffect(() => {
-    fetch('/api/assets/list')
-      .then((r) => r.json())
-      .then((d) => {
-        const imageAssets = (d.assets || []).filter(
-          (a: SeedanceAssetRecord) =>
-            a.assetType === 'Image' && a.localStatus === 'Active'
-        );
-        setAssets(imageAssets);
-      })
-      .catch(() => setError('加载失败'))
-      .finally(() => setLoading(false));
-  }, []);
 
   return (
     <div ref={backdropRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
@@ -173,19 +187,16 @@ function AssetGrid({
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-5">
-            {loading && (
-              <div className="text-center text-white/50 py-8">加载中...</div>
+          <div className="flex-1 overflow-y-auto p-5" aria-busy={loading || loadingMore}>
+            {loading && assets.length === 0 && (
+              <div role="status" className="text-center text-white/50 py-8">加载中...</div>
             )}
-            {error && (
-              <div className="text-center text-gray py-8">{error}</div>
-            )}
-            {!loading && !error && assets.length === 0 && (
+            {!loading && !error && pagination && !pagination.hasMore && assets.length === 0 && (
               <div className="text-center text-white/40 py-8">
                 暂无可用资产，请先在「资产管理」中上传
               </div>
             )}
-            {!loading && !error && assets.length > 0 && (
+            {assets.length > 0 && (
               <div className="grid grid-cols-5 gap-3">
                 {assets.map((asset) => (
                   <div key={asset.id} className="flex flex-col items-center gap-1.5">
@@ -193,6 +204,8 @@ function AssetGrid({
                       asset={asset}
                       isSelected={false}
                       onSelect={() => {
+                        const currentScope = seedancePageScopeKey({ ...uploadSession(), includeDeleted: false, visible: true });
+                        if (selectionTarget.current !== onSelect || isClientSessionBlocked() || pages.scope !== currentScope) return;
                         onSelect(asset);
                         onClose();
                       }}
@@ -212,6 +225,29 @@ function AssetGrid({
                   </div>
                 ))}
               </div>
+            )}
+            {error && (
+              <div role="alert" className="text-center text-white/60 py-4 text-xs">
+                <div>{error.message}</div>
+                <button type="button" aria-label="重试" onClick={() => pages.retry()}
+                  disabled={loading || loadingMore}
+                  className="inline-flex items-center justify-center gap-1.5 min-h-9 px-3 mt-2 text-white/70 hover:text-white disabled:opacity-50">
+                  <RotateCcw size={14} aria-hidden="true" />重试
+                </button>
+              </div>
+            )}
+            {!error && pagination?.hasMore && (
+              <div className="text-center pt-4">
+                <button type="button" aria-label="加载更多" onClick={() => pages.more()}
+                  disabled={loading || loadingMore}
+                  className="inline-flex items-center justify-center gap-1.5 min-h-9 px-3 text-xs text-white/60 hover:text-white disabled:opacity-50">
+                  {loadingMore ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                  {loadingMore ? '加载中...' : '加载更多'}
+                </button>
+              </div>
+            )}
+            {!loading && !error && pagination && !pagination.hasMore && assets.length > 0 && (
+              <div role="status" className="text-center text-white/40 text-xs pt-4">已显示全部可用图片</div>
             )}
           </div>
         </div>

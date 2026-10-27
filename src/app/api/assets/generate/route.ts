@@ -1,6 +1,9 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { safeFetch } from '@/lib/net/safe-fetch';
 import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import fs from 'fs';
+import { localMediaPath } from '@/lib/media/storage-roots';
 import path from 'path';
 import { createHash } from 'node:crypto';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
@@ -114,11 +117,7 @@ function inferMimeFromPath(value: string) {
 
 function localUploadPath(url: string) {
   if (!url.startsWith('/uploads/')) return null;
-  const publicRoot = path.join(process.cwd(), 'public');
-  const uploadsRoot = path.join(publicRoot, 'uploads');
-  const filePath = path.normalize(path.join(publicRoot, url.replace(/^\/+/, '')));
-  const relativePath = path.relative(uploadsRoot, filePath);
-  return relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath) ? filePath : null;
+  try { return localMediaPath(url); } catch { return null; }
 }
 
 function localUploadDataUrl(url: string, mimeType?: string | null) {
@@ -236,12 +235,13 @@ async function downloadGeneratedImage(output: { url?: string; b64Json?: string; 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
   try {
-    const response = await fetch(output.url, { signal: controller.signal });
+    const response = await safeFetch(output.url, { signal: controller.signal, maxBytes: 20 * 1024 * 1024, timeoutMs: 30_000, allowRedirects: true });
     if (!response.ok) {
       throw new ImageGenerationApiError(`下载生成图片失败 (HTTP ${response.status})`, 502, 'image_generation_download_failed');
     }
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || output.mimeType || 'image/png';
     if (!contentType.startsWith('image/')) {
+      await response.body?.cancel();
       throw new ImageGenerationApiError('图形生成 API 返回的文件不是图片', 502, 'image_generation_non_image_output');
     }
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -357,7 +357,7 @@ async function assertCanAttachCanvasContext(user: SessionUser, canvasDocumentId:
   return canvas;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
   let synchronousAdmission: { key: string; requestId: string } | undefined;
@@ -683,4 +683,4 @@ export async function POST(request: NextRequest) {
       console.error('[ImageGeneration] Synchronous admission finalization failed; administrator reconciliation required');
     });
   }
-}
+});

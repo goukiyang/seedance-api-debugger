@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ async function main() {
   const forbidden = () => { forbiddenCalls++; throw new Error('Offline fixture cannot open business services'); };
   process.env.DATABASE_URL = 'file:/nonexistent/personal-usage-offline.db';
   Object.assign(process.env, { NODE_ENV: 'test' });
-  Reflect.set(globalThis, 'prisma', new Proxy({}, { get: () => forbidden }));
+  setFixtureDatabase(new Proxy({}, { get: () => forbidden }));
   Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   globalThis.fetch = forbidden;
   const { parseUsageQuery, usageMonthRange } = await import('../src/lib/usage/query');

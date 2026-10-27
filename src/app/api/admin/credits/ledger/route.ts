@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { canvasSourceJsonMarkers } from '@/lib/canvas-source';
@@ -13,7 +14,7 @@ function parseDateParam(value: string | null, endOfDay = false) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
   } catch {
@@ -80,4 +81,4 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({ records, total, page, page_size: pageSize });
-}
+});

@@ -59,6 +59,20 @@ function verifyEquivalentCi(root, source, file) {
     });
   } catch { return false; }
 }
+function reusablePrebuild(root, results) {
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  if (config.scripts.prebuild !== 'node scripts/check-image-recovery.mjs') return false;
+  const contracts = results.find(entry => entry.command === 'npm run test:contracts' && entry.exitCode === 0);
+  if (!contracts) return false;
+  const log = withinEvidence(root, path.resolve(root, contracts.log));
+  if (hashFile(log) !== contracts.logSha256) return false;
+  const summaries = fs.readFileSync(log, 'utf8').split('\n').flatMap(line => {
+    try { const value = JSON.parse(line); return value.schema === 'contract-suites.v1' ? [value] : []; } catch { return []; }
+  });
+  const summary = summaries.at(-1);
+  return summary?.results?.some(entry => entry.suite === 'scripts/check-image-recovery.mjs' && entry.exitCode === 0 && entry.passed === true) === true
+    && summary.results.every(entry => entry.exitCode === 0 && entry.passed === true);
+}
 function main() {
   const root = fs.realpathSync(process.cwd());
   if (!/^\/data\/video-api-debugger\/managed-releases\/[a-f0-9]{40}$/.test(root) || process.getuid() === 0) {
@@ -73,19 +87,41 @@ function main() {
   const directory = fs.mkdtempSync(path.join(root, '.role-tests', 'equivalent-ci-'));
   const receiptFile = path.join(directory, 'receipt.json');
   const receipt = { schema: 'equivalent-ci.v1', source, root, fingerprint: fingerprint(root), results: [], completed: false };
+  const resumeFile = process.argv.find(arg => arg.startsWith('--resume='))?.slice('--resume='.length);
+  if (resumeFile) {
+    const previousFile = withinEvidence(root, resumeFile);
+    const previous = JSON.parse(fs.readFileSync(previousFile, 'utf8'));
+    if (previous.source !== source || previous.root !== root || previous.results?.length !== 5
+      || Object.keys(receipt.fingerprint).some(key => previous.fingerprint?.[key] !== receipt.fingerprint[key])) throw new Error('equivalent-ci-resume-mismatch');
+    for (let index = 0; index < 4; index++) {
+      const entry = previous.results[index];
+      if (entry.command !== `npm run ${COMMANDS[index]}` || entry.exitCode !== 0 || entry.signal !== null
+        || hashFile(withinEvidence(root, path.resolve(root, entry.log))) !== entry.logSha256) throw new Error('equivalent-ci-resume-failed-check');
+    }
+    const failed = previous.results[4];
+    const failedLog = withinEvidence(root, path.resolve(root, failed.log));
+    if (failed.command !== 'npm run build' || failed.exitCode === 0 || hashFile(failedLog) !== failed.logSha256
+      || !fs.readFileSync(failedLog, 'utf8').includes('Root inputs have already been consumed; prepare a fresh isolated run')
+      || !reusablePrebuild(root, previous.results)) throw new Error('equivalent-ci-resume-not-consumed-prebuild');
+    receipt.results = previous.results.slice(0, 4);
+    receipt.resumedFrom = { file: path.relative(root, previousFile), sha256: hashFile(previousFile) };
+  }
   const save = () => fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2), { mode: 0o600 });
   save();
-  for (const name of COMMANDS) {
+  for (const name of COMMANDS.slice(receipt.results.length)) {
     const log = path.join(directory, name.replace(':', '-') + '.log');
     const fd = fs.openSync(log, 'wx', 0o600);
     const startedAt = new Date().toISOString();
     let result;
+    const reusePrebuild = name === 'build' && reusablePrebuild(root, receipt.results);
     try {
       result = spawnSync('npm', ['run', name], { cwd: root, stdio: ['ignore', fd, fd],
-        env: { ...process.env, PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}` } });
+        env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
+          ...(reusePrebuild ? { npm_config_ignore_scripts: 'true' } : {}) } });
     } finally { fs.closeSync(fd); }
     receipt.results.push({ command: `npm run ${name}`, startedAt, finishedAt: new Date().toISOString(),
-      exitCode: result.status, signal: result.signal, log: path.relative(root, log), logSha256: hashFile(log) });
+      exitCode: result.status, signal: result.signal, log: path.relative(root, log), logSha256: hashFile(log),
+      ...(reusePrebuild ? { prebuildReusedFrom: 'npm run test:contracts' } : {}) });
     save();
     console.log(JSON.stringify(receipt.results.at(-1)));
     if (result.error || result.status !== 0 || result.signal) { process.exitCode = 1; return; }
@@ -96,7 +132,7 @@ function main() {
   save();
   console.log(`EQUIVALENT_CI_RECEIPT=${receiptFile}`);
 }
-module.exports = { COMMANDS, fingerprint, verifyEquivalentCi, hashFile };
+module.exports = { COMMANDS, fingerprint, verifyEquivalentCi, hashFile, reusablePrebuild };
 if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -8,7 +9,7 @@ import { privatePromptRequestCapabilities } from '@/lib/security/private-prompt-
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store' };
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
     if (user.status !== 'active') throw new AuthError('账号已被禁用', 403);
@@ -20,4 +21,4 @@ export async function GET(request: NextRequest) {
       ...(error instanceof MultiviewPresetError ? { code: error.code } : {}) }, { status: error.status, headers });
     return NextResponse.json({ error: '模板提示词暂时无法读取，请稍后重试。' }, { status: 503, headers });
   }
-}
+});

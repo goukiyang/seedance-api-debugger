@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { readModuleCoverImage } from '@/lib/image-studio/module-cover';
@@ -6,7 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Never browser-cache protected derivatives: source/share revocation is checked on every display.
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
-export async function GET(
+export const GET = declaredRoute({ access: 'user', rateLimit: false, unauthenticatedStatus: 404 }, async function GET(
   request: NextRequest,
   props: { params: Promise<{ kind: string; targetId: string }> }
 ) {
@@ -19,5 +20,5 @@ export async function GET(
     const bytes = await readModuleCoverImage(user, { kind: params.kind as 'module' | 'preset', id: params.targetId }, revision, size as 640 | 1280);
     return new Response(request.method === 'HEAD' ? null : new Uint8Array(bytes), { headers: { ...headers, 'Content-Type': 'image/webp', 'Content-Length': String(bytes.length) } });
   } catch { return new Response('Not found', { status: 404, headers }); }
-}
+});
 export const HEAD = GET;

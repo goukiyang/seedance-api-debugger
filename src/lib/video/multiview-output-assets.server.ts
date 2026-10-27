@@ -1,14 +1,15 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from '../media/sharp';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { assertMultiviewWorkReference, multiviewWorkActor, readMultiviewWorkFile } from './multiview-works';
 import { parseMultiviewWorkManifest } from './multiview-work-contract';
+import { mediaRoot } from '@/lib/media/storage-roots';
 
 const PREFIX = 'multiview_output_registration_v1:';
 const ACTIVATION = PREFIX + 'activation';
@@ -29,7 +30,7 @@ async function activation() {
 }
 
 async function uploadsRoot() {
-  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
+  const root = await fs.realpath(mediaRoot('uploads'));
   const entry = await fs.lstat(root);
   if (!entry.isDirectory() || entry.isSymbolicLink()) throw unavailable();
   if (process.env.NODE_ENV === 'production') {
@@ -122,7 +123,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     let bytes: Buffer;
     try { bytes = await file.handle.readFile(); } finally { await file.handle.close(); }
     if (bytes.length !== entry.bytes || sha(bytes) !== entry.sha256) throw unavailable();
-    const thumbnail = await sharp(bytes, { animated: false, limitInputPixels: 64_000_000 }).timeout({ seconds: 45 })
+    const thumbnail = await (await openUntrustedImage(bytes, 'multiview-output', { animated: false })).timeout({ seconds: 45 })
       .resize(640, 640, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 78 }).toBuffer();
     const originalUrl = await publish(root, user.id, bytes, 'png');
     const thumbnailUrl = await publish(root, user.id, thumbnail, 'webp');
@@ -142,7 +143,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     await readLocal(root, asset.original_url, item.sha256, item.bytes);
     const thumbnailUrl = asset.thumbnail_url || item.thumbnailUrl;
     const thumbnail = await readLocal(root, thumbnailUrl);
-    const thumbnailInfo = await sharp(thumbnail, { animated: false, limitInputPixels: 40_000_000 }).metadata();
+    const thumbnailInfo = await (await openUntrustedImage(thumbnail, 'multiview-output', { animated: false })).metadata();
     if (!['png', 'jpeg', 'webp'].includes(thumbnailInfo.format || '')) throw unavailable();
     checked.set(item.role, { ...item, originalUrl: asset.original_url, thumbnailUrl,
       thumbnailSha256: sha(thumbnail), thumbnailBytes: thumbnail.length });

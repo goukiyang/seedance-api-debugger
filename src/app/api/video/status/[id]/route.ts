@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -9,39 +11,13 @@ import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
-import { publicVideoTaskPricing } from '@/lib/pricing/video';
+import { toVideoTaskDetail, videoTaskDetailSelect } from '@/lib/dto/video-task-detail';
 import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
-import { isPrivateMultiviewTask, privateMultiviewFailure, projectPrivateMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
-import {
-  taskThumbnailProjection,
-  type TaskThumbnailProjectionSource,
-} from '@/lib/video/task-thumbnail-projection';
+import { isPrivateMultiviewTask, privateMultiviewFailure } from '@/lib/video/multiview-task-privacy';
 
 export const dynamic = 'force-dynamic';
 
-function serializeTaskIdentity<T extends {
-  id: string;
-  owner?: unknown;
-  user?: unknown;
-  public_video_url?: string | null;
-  local_video_path?: string | null;
-  result_video_url?: string | null;
-  result_last_frame_url?: string | null;
-  error_message?: string | null;
-  local_status?: string | null;
-} & TaskProtectionSource>(task: T) {
-  return projectPrivateMultiviewTask({
-    ...publicVideoTaskPricing(task),
-    owner: task.owner || task.user || null,
-    submitted_user: task.user || null,
-    error_message: task.local_status === 'failed'
-      ? visibleProviderErrorMessage(task.error_message)
-      : task.error_message,
-    ...taskThumbnailProjection(task as T & TaskThumbnailProjectionSource),
-  });
-}
-
-export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   let protectedTask = false;
   try {
@@ -61,13 +37,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
-      include: {
-        project: { select: { id: true, name: true, type: true } },
-        video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
-        generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      },
+      select: videoTaskDetailSelect,
     });
 
     if (!task) {
@@ -109,27 +79,21 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
             });
             const recoveredTask = await prisma.videoTask.findUnique({
               where: { id: task.id },
-              include: {
-                project: { select: { id: true, name: true, type: true } },
-                video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
-                generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
-                owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-                user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-              },
+              select: videoTaskDetailSelect,
             });
-            if (recoveredTask) return NextResponse.json(serializeTaskIdentity(recoveredTask), { headers: { 'Cache-Control': 'private, no-store' } });
+            if (recoveredTask) return NextResponse.json(toVideoTaskDetail(recoveredTask, user), { headers: { 'Cache-Control': 'private, no-store' } });
           }
         } catch {
           // Provider 查询失败时保留 submitted，下一次轮询继续按 clientRequestId 恢复。
         }
       }
-      return NextResponse.json(serializeTaskIdentity(task), { headers: { 'Cache-Control': 'private, no-store' } });
+      return NextResponse.json(toVideoTaskDetail(task, user), { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
     const fastPathDelivery = isVideoDeliveryFastPathTask(task);
     const shouldRefreshProvider = forceProviderRefresh && !isTerminalLocalStatus(task.local_status);
     const shouldFinalizeProviderStatus = !(fastPathDelivery && isTerminalLocalStatus(task.local_status));
-    const finalizeResult: Awaited<ReturnType<typeof finalizeVideoTaskStatus>> = shouldFinalizeProviderStatus
+    const finalizeResult = shouldFinalizeProviderStatus
       ? await finalizeVideoTaskStatus(taskId, {
           forceProviderRefresh: shouldRefreshProvider,
           cacheOnSuccess: !fastPathDelivery,
@@ -141,6 +105,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
           statusRefreshed: false,
           terminal: true,
           skippedReason: 'terminal_fast_path_status_cached',
+          providerError: undefined,
         };
 
     if (
@@ -156,13 +121,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
 
     const responseTask = await prisma.videoTask.findUnique({
       where: { id: taskId },
-      include: {
-        project: { select: { id: true, name: true, type: true } },
-        video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
-        generation_template: { select: { id: true, name: true, template_key: true, version: true, status: true } },
-        owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-        user: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
-      },
+      select: videoTaskDetailSelect,
     });
 
     if (!responseTask || !finalizeResult.task) {
@@ -173,13 +132,14 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
     }
 
     if (finalizeResult.providerError) {
-      return NextResponse.json(serializeTaskIdentity({
-        ...responseTask,
-        error_message: visibleProviderErrorMessage(responseTask.error_message || finalizeResult.providerError),
-      }), { headers: { 'Cache-Control': 'private, no-store' } });
+      return NextResponse.json({ ...toVideoTaskDetail(responseTask, user),
+        error_message: protectedTask
+          ? privateMultiviewFailure(responseTask.error_message || finalizeResult.providerError, responseTask.local_status)?.message ?? null
+          : visibleProviderErrorMessage(responseTask.error_message || finalizeResult.providerError),
+      }, { headers: { 'Cache-Control': 'private, no-store' } });
     }
 
-    return NextResponse.json(serializeTaskIdentity(responseTask), { headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json(toVideoTaskDetail(responseTask, user), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (protectedTask) {
       const failure = privateMultiviewFailure(error instanceof Error ? error.message : '', 'unknown');
@@ -188,10 +148,7 @@ export async function GET(request: NextRequest, props: { params: Promise<{ id: s
         message: failure?.message || '原任务状态暂时无法确认，请稍后继续核对这个任务。' },
       { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
     }
-    console.error('Get task status error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

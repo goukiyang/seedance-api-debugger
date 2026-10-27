@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError, type SessionUser } from '@/lib/auth/session';
 import { MultiviewError } from './multiview';
 import { MultiviewWorkError } from './multiview-works';
+import { apiErrorResponse } from '@/lib/http/api-error';
+import { PaginationError } from '@/lib/pagination/cursor';
 
 export const multiviewWorkHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
 export async function multiviewWorkRoute(request: NextRequest, mutate: boolean,
@@ -38,9 +40,11 @@ export async function multiviewWorkRoute(request: NextRequest, mutate: boolean,
     const result = await action(user, body);
     return result instanceof Response ? result : json(result);
   } catch (error) {
+    if (error instanceof PaginationError) return json({ error: error.message }, error.status);
     if (error instanceof MultiviewWorkError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
     if (error instanceof AuthError || error instanceof MultiviewError) return json({ error: error.message }, error.status);
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2021') return json({ error: '作品存储尚未就绪，请稍后重试，原生成与选帧功能仍可用。', code: 'WORK_STORAGE_PENDING' }, 503);
-    return json({ error: '作品操作结果暂时无法确认，请保留本机修改并查询原保存编号。', code: 'WORK_SAVE_UNKNOWN' }, 503);
+    const diagnostic = await apiErrorResponse(error).json() as { errorId?: string };
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2021') return json({ error: '作品存储尚未就绪，请稍后重试，原生成与选帧功能仍可用。', code: 'WORK_STORAGE_PENDING', errorId: diagnostic.errorId }, 503);
+    return json({ error: '作品操作结果暂时无法确认，请保留本机修改并查询原保存编号。', code: 'WORK_SAVE_UNKNOWN', errorId: diagnostic.errorId }, 503);
   }
 }

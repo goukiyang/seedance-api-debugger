@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -30,7 +31,7 @@ function snapshotDto(snapshot: {
   };
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -127,4 +128,4 @@ export async function POST(request: NextRequest) {
     console.error('[ProviderBalanceSync] Failed:', error);
     return NextResponse.json({ error: '拉取供应商账户额度失败' }, { status: 500 });
   }
-}
+});

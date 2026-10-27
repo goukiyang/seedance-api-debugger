@@ -3,12 +3,14 @@ import { getSession } from '@/lib/auth/session';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { enqueueFeedbackNotification, feedbackPrisma as prisma } from '@/lib/feedback/notification';
 import { snapshotFeedbackAttachments } from '@/lib/feedback/attachments';
+import { route } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 
 function text(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export async function POST(request: NextRequest) {
+export const POST = route({ access: 'public', rateLimit: 'feedback' }, async (request: NextRequest) => {
   const startedAt = Date.now();
   let userId: string | null = null;
   try {
@@ -64,6 +66,6 @@ export async function POST(request: NextRequest) {
         errorMessage: '提交失败',
       }).catch(() => console.warn('feedback_auxiliary_log_failed'));
     }
-    return NextResponse.json({ error: '提交失败，请稍后重试。' }, { status: 500 });
+    return apiErrorResponse(error);
   }
-}
+});

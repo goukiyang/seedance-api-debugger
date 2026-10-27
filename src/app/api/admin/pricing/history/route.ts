@@ -1,10 +1,11 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest } from 'next/server';
 import { pricingAdminRoute } from '@/lib/pricing/admin-api';
 import { getAdminPricingHistory, PricingAdminServiceError } from '@/lib/pricing/policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'admin', rateLimit: false }, function GET(request: NextRequest) {
   return pricingAdminRoute(request, false, actor => {
     const url = new URL(request.url);
     if (Array.from(url.searchParams.keys()).some(key => !['cursor', 'limit'].includes(key))
@@ -14,4 +15,4 @@ export function GET(request: NextRequest) {
     return getAdminPricingHistory(actor, { ...(url.searchParams.has('cursor') ? { cursor: url.searchParams.get('cursor')! } : {}),
       ...(limit !== null ? { limit: Number(limit) } : {}) });
   });
-}
+});

@@ -62,7 +62,7 @@ export function isTerminalStatus(status: LocalStatus): boolean {
  * Check if task is still in progress
  */
 export function isInProgress(status: LocalStatus): boolean {
-  return ['submitted', 'running'].includes(status);
+  return ['created', 'submitting', 'unknown', 'submitted', 'running'].includes(status);
 }
 
 /**
@@ -71,6 +71,9 @@ export function isInProgress(status: LocalStatus): boolean {
 export function getStatusDisplayText(status: LocalStatus): string {
   const displayMap: Record<LocalStatus, string> = {
     draft: '草稿',
+    created: '准备提交',
+    submitting: '提交中',
+    unknown: '提交待确认',
     submitted: '已提交',
     running: '生成中',
     succeeded: '已完成',
@@ -86,6 +89,9 @@ export function getStatusDisplayText(status: LocalStatus): string {
 export function getStatusColor(status: LocalStatus): string {
   const colorMap: Record<LocalStatus, string> = {
     draft: 'bg-gray-100 text-gray-800',
+    created: 'bg-gray-100 text-gray-800',
+    submitting: 'bg-blue-100 text-blue-800',
+    unknown: 'bg-gray-100 text-gray-800',
     submitted: 'bg-blue-100 text-blue-800',
     running: 'bg-yellow-100 text-yellow-800',
     succeeded: 'bg-green-100 text-green-800',

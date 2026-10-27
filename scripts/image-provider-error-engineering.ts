@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -41,7 +42,7 @@ async function main() {
   execFileSync(process.execPath, [path.join(path.dirname(prismaPackage), 'build/index.js'), 'db', 'push', '--skip-generate',
     '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   assert.equal(statSync(databasePath).mode & 0o777, 0o600);
-  const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient(); Reflect.set(globalThis, 'prisma', db);
+  const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient(); setFixtureDatabase(db);
   process.chdir(directory);
   let forbiddenCalls = 0, completed = false;
   const blocked = () => { forbiddenCalls++; throw new Error('Synthetic fixture network forbidden'); };

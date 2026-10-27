@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-export async function POST(_request: NextRequest) {
+export const POST = apiRoute({ access: 'public', rateLimit: false }, async function POST(_request: NextRequest) {
   return NextResponse.json(
     {
       success: false,
@@ -12,4 +13,4 @@ export async function POST(_request: NextRequest) {
     },
     { status: 400 },
   );
-}
+});

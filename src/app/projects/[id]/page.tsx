@@ -499,6 +499,9 @@ function costEventLabel(eventType: string): string {
 }
 
 function projectTaskStatusLabel(task: TaskItem) {
+  if (task.local_status === 'unknown') return '提交待确认';
+  if (task.local_status === 'created') return '准备提交';
+  if (task.local_status === 'submitting') return '提交中';
   if (task.local_status === 'failed') return '失败';
   if (task.local_status === 'cancelled') return '已取消';
   if (task.local_status === 'submitted') return '排队中';

@@ -1,4 +1,6 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
 import { getMuskApiSettings, isMuskApiReady, MuskApiError } from '@/lib/integrations/musk';
@@ -40,7 +42,7 @@ function normalizeContextAssetIds(value: unknown) {
     : [];
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   const user = await getSession();
   try {
     requireAdmin(user);
@@ -243,10 +245,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof MuskApiError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
-    if (error instanceof Error && error.message.startsWith('LLM ')) {
-      return NextResponse.json({ error: error.message }, { status: 502 });
-    }
-    console.error('[ModuleBuilder] Generate failed:', error);
-    return NextResponse.json({ error: 'Module Builder 生成失败' }, { status: 500 });
+    return apiErrorResponse(error);
   }
-}
+});

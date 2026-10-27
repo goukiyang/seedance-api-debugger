@@ -1,8 +1,9 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 import fs from 'node:fs/promises';
-import sharp from './sharp';
 import type { Metadata } from 'sharp';
 
-export const HD_MAX_PIXELS = 40_000_000;
+export { HD_MAX_PIXELS } from './image-limits';
+import { HD_MAX_PIXELS } from './image-limits';
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
 export type HdEncoderStrategy = 'hd-legacy-e6-v1' | 'hd-avif-e4-v1';
 export const HD_LEGACY_ENCODER_STRATEGY: HdEncoderStrategy = 'hd-legacy-e6-v1';
@@ -40,7 +41,7 @@ export function hdEncoderParameters(format: 'avif' | 'webp', strategy?: HdEncode
 // integrity rules, extracted without changing quality, alpha or colour policy.
 export async function encodeHdOutput(input: string, output: string, format: 'avif' | 'webp', strategy?: HdEncoderStrategy) {
   const parameters = hdEncoderParameters(format, strategy);
-  const image = sharp(input, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: 120 });
+  const image = (await openUntrustedImage(input, 'hd')).rotate().timeout({ seconds: 120 });
   await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
   await fs.chmod(output, 0o600);
 }
@@ -52,7 +53,7 @@ export async function validateHdOutput(inputFile: string, meta: Metadata, output
   };
   let output: Metadata;
   try {
-    output = await sharp(outputFile, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).metadata();
+    output = await (await openUntrustedImage(outputFile, 'hd')).metadata();
     check('output_metadata', 'readable', 'readable', true);
   } catch {
     check('output_metadata', 'readable', 'decode_failed', false);
@@ -65,7 +66,7 @@ export async function validateHdOutput(inputFile: string, meta: Metadata, output
   let inputIsOpaque: boolean | null = null;
   if (meta.hasAlpha && !output.hasAlpha && format === 'webp' && output.format === 'webp') {
     try {
-      inputIsOpaque = (await sharp(inputFile, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).timeout({ seconds: 120 }).stats()).isOpaque;
+      inputIsOpaque = (await (await openUntrustedImage(inputFile, 'hd')).timeout({ seconds: 120 }).stats()).isOpaque;
       check('input_opaque_decode', true, inputIsOpaque, inputIsOpaque === true);
       alphaMatches = inputIsOpaque === true;
     } catch { check('input_opaque_decode', true, 'decode_failed', false); }
@@ -77,7 +78,7 @@ export async function validateHdOutput(inputFile: string, meta: Metadata, output
   check('depth', 'uchar', output.depth ?? null, output.depth === 'uchar');
   check('format', format === 'avif' ? 'heif' : 'webp', output.format ?? null, output.format === (format === 'avif' ? 'heif' : 'webp'));
   try {
-    await sharp(outputFile, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).timeout({ seconds: 120 }).stats();
+    await (await openUntrustedImage(outputFile, 'hd')).timeout({ seconds: 120 }).stats();
     check('output_full_decode', 'complete', 'complete', true);
   } catch { check('output_full_decode', 'complete', 'decode_failed', false); }
   if (integrity.failedChecks.length) throw new HdOutputIntegrityError(integrity);

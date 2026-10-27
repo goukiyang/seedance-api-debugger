@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * GET /api/assets/[id]          — 查询单条资产 + 同步官方详情
  * PATCH /api/assets/[id]        — 更新资产（名称）
@@ -11,8 +13,10 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { getAsset, updateAsset as providerUpdate } from '@/lib/provider/seedance-assets';
 import { seedanceAssetRepository } from '@/lib/assets/seedanceAssetRepository';
+import { assertMedia } from '@/lib/access/media-policy';
+import { seedanceMediaDTO } from '@/lib/media/seedance-projection';
 
-export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -23,6 +27,10 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
     if (!record) {
       return NextResponse.json({ error: '资产不存在' }, { status: 404 });
     }
+    await assertMedia(user, { type: 'seedance', id: params.id }, 'view-preview');
+    if (record.ownershipStatus !== 'owned' || !record.ownerId) {
+      return NextResponse.json({ asset: await seedanceMediaDTO(user, record), quarantined: true });
+    }
 
     // 同步查询官方最新详情
     const result = await getAsset({ providerAssetId: record.providerAssetId });
@@ -31,7 +39,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
       const syncFailed = result.statusCode === 404 ? 'ProviderDeleted' : 'Unknown';
       return NextResponse.json({
         asset: {
-          ...record,
+          ...await seedanceMediaDTO(user, record),
           status: syncFailed,
           providerPreviewUrl: '',
         },
@@ -48,20 +56,17 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ id: 
       lastSyncedAt: new Date(),
     });
 
-    return NextResponse.json({ asset: updated ?? record });
+    return NextResponse.json({ asset: await seedanceMediaDTO(user, updated ?? record) });
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    console.error('[GetAsset] Error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : '查询失败' },
-      { status: 500 }
-    );
-  }
-}
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(err);
+  }
+});
+
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -69,6 +74,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     assertInternalOnly(user, '外部账号无权修改旧版 Seedance 官方素材。');
 
     const body = await request.json();
+    await assertMedia(user, { type: 'seedance', id: params.id }, 'edit');
     const { name } = body as { name?: string };
 
     const record = await seedanceAssetRepository.get(params.id);
@@ -92,20 +98,17 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
       name: name ? name.trim() : record.name,
     });
 
-    return NextResponse.json({ asset: updated });
+    return NextResponse.json({ asset: updated ? await seedanceMediaDTO(user, updated) : null });
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    console.error('[PatchAsset] Error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : '更新失败' },
-      { status: 500 }
-    );
-  }
-}
 
-export async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+    return apiErrorResponse(err);
+  }
+});
+
+export const DELETE = apiRoute({ access: 'user', rateLimit: false }, async function DELETE(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -118,21 +121,19 @@ export async function DELETE(_request: NextRequest, props: { params: Promise<{ i
     }
 
     // 软删除：只改状态，不删官方 asset
+    await assertMedia(user, { type: 'seedance', id: params.id }, 'delete');
     const updated = await seedanceAssetRepository.softDelete(params.id);
 
     return NextResponse.json({
       success: true,
-      asset: updated,
+      asset: updated ? await seedanceMediaDTO(user, updated) : null,
       message: '已从素材库移除，官方资产保留',
     });
   } catch (err) {
     if (err instanceof AuthError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
-    console.error('[DeleteAsset] Error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : '删除失败' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(err);
   }
-}
+});

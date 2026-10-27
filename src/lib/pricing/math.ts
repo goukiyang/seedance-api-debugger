@@ -1,11 +1,13 @@
+import { PublicApiError } from '@/lib/http/public-error';
+
 export type DecimalOptions = { maxScale?: number; min?: string; max?: string; allowZero?: boolean; maxLength?: number };
 type Decimal = { coefficient: bigint; scale: number };
 const ZERO = BigInt(0), ONE = BigInt(1), TEN = BigInt(10);
 
-export class PricingNumberError extends Error {
+export class PricingNumberError extends PublicApiError {
   readonly status = 400;
   readonly code = 'pricing_number_invalid';
-  constructor(message = '请输入范围内的普通十进制数，不使用负数、指数或多余小数位') { super(message); }
+  constructor(message = '请输入范围内的普通十进制数，不使用负数、指数或多余小数位') { super(message, 400, 'pricing_number_invalid'); }
 }
 
 function power(scale: number) {

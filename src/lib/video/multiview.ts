@@ -1,14 +1,15 @@
+import { openUntrustedImage, createTrustedImageCanvas, compositeCheckedImageTiles } from '@/lib/media/decode-image';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, stat, realpath, readFile, writeFile, rename, readdir, rm } from 'node:fs/promises';
+import { mkdir, stat, readFile, writeFile, rename, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import sharp from '../media/sharp';
 import { ZipFile } from 'yazl';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
-import { mediaPreviewResponse } from '@/lib/media/preview-response';
+import { downloadRemoteMedia, probeMediaFile, mediaInputFlags } from '@/lib/media/probe-remote';
+import { resolveInside } from '@/lib/fs/resolve-inside';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isSafeTaskId } from './thumbnail';
 import { multiviewDimensions, validMultiviewLayout, type MultiviewInfo, type MultiviewLayout } from './multiview-contract';
@@ -49,12 +50,11 @@ async function authorizedSource(user: SessionUser, id: string, access?: Multivie
   if (!source || source.startsWith('h3-internal-output:')) throw new MultiviewError('原视频还在保存，请稍后从原视频重试', 409);
   const relative = siteUploadPathFromUrl(source) || (source.startsWith('/') && !source.startsWith('//') ? source : null);
   if (relative) {
-    const root = path.resolve(process.cwd(), 'public');
-    const candidate = path.resolve(root, decodeURIComponent(relative.split(/[?#]/)[0]).replace(/^\/+/, ''));
-    if (!candidate.startsWith(`${root}${path.sep}`)) throw new MultiviewError('原视频路径无效');
-    const file = await realpath(candidate).catch(() => null);
-    const allowed = await Promise.all(['videos', 'uploads'].map(dir => realpath(path.join(root, dir)).catch(() => null)));
-    if (!file || !allowed.some(base => base && file.startsWith(`${base}${path.sep}`))) throw new MultiviewError('原视频文件暂不可用', 404);
+    const { mediaRoot } = await import('@/lib/media/storage-roots');
+    const match = /^\/(videos|uploads)\/(.+)$/.exec(decodeURIComponent(relative.split(/[?#]/)[0]));
+    if (!match) throw new MultiviewError('原视频路径无效');
+    const file = await resolveInside(mediaRoot(match[1] as 'uploads' | 'videos'), match[2]).catch(() => null);
+    if (!file) throw new MultiviewError('原视频文件暂不可用', 404);
     const info = await stat(file);
     if (!info.isFile() || !info.size || info.size > MAX_VIDEO) throw new MultiviewError('3D多视图目前支持 128MB 以内的视频');
     return { source, local: file, version: digest(`${id}:${file}:${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`) };
@@ -120,29 +120,16 @@ async function downloadSource(source: Source, dir: string, request: MultiviewCon
   const target = path.join(dir, 'source.mp4');
   if (await stat(target).then(info => info.size > 0 && info.size <= MAX_VIDEO).catch(() => false)) return target;
   if (!request.url) throw new MultiviewError('原视频还在保存，作品会在原片就绪后继续准备', 409);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const temp = `${target}.${randomUUID()}.tmp`;
   try {
-    const response = await mediaPreviewResponse(new Request(request.url, { signal: AbortSignal.any([request.signal, controller.signal]) }), source.source, 'video/mp4');
-    if (!response.ok || !response.body || Number(response.headers.get('content-length')) > MAX_VIDEO) {
-      await response.body?.cancel(); throw new MultiviewError('原视频暂无法读取或超过 128MB', 503);
-    }
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = []; let bytes = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read(); if (chunk.done) break;
-        bytes += chunk.value.length;
-        if (bytes > MAX_VIDEO) throw new MultiviewError('3D多视图目前支持 128MB 以内的视频');
-        chunks.push(Buffer.from(chunk.value));
-      }
-    } finally { await reader.cancel().catch(() => undefined); }
-    if (!bytes) throw new MultiviewError('原视频文件为空', 503);
-    await atomicWrite(target, Buffer.concat(chunks));
+    await downloadRemoteMedia(source.source, 'video', temp, { maxBytes: MAX_VIDEO, signal: request.signal });
+    if (!(await stat(temp)).size) throw new MultiviewError('原视频文件为空', 503);
+    await rename(temp, target);
     return target;
-  } finally { clearTimeout(timeout); controller.abort(); }
+  } finally { await rm(temp, { force: true }); }
 }
-const inputFlags = ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,avi'];
+const inputFlags = mediaInputFlags('video');
+
 async function preparation(user: SessionUser, id: string, request: MultiviewContext, expected?: string | null) {
   const source = await authorizedSource(user, id, request.access);
   if (expected && expected !== source.version) throw new MultiviewError('原视频版本已改变，请重新打开；旧选帧不会覆盖新原片', 409);
@@ -160,10 +147,7 @@ async function preparation(user: SessionUser, id: string, request: MultiviewCont
   if (!info) info = await once(`${source.cacheKey || source.version}:prepare`, async () => {
     await pruneCache(root, source.cacheKey || source.version);
     const file = await downloadSource(source, dir, request);
-    const { stdout } = await exec(process.env.FFPROBE_PATH || 'ffprobe', ['-v', 'error', ...inputFlags, '-threads', '1', '-select_streams', 'v:0',
-      '-show_frames', '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration:frame=best_effort_timestamp_time', '-of', 'json', file],
-    { timeout: 60000, maxBuffer: 4 * 1024 * 1024, signal: request.signal });
-    const raw = JSON.parse(stdout) as { streams?: Array<{ width?: number; height?: number; tags?: { rotate?: string }; side_data_list?: Array<{ rotation?: number }> }>; format?: { duration?: string }; frames?: Array<{ best_effort_timestamp_time?: string }> };
+    const raw = await probeMediaFile(file, 'video', { signal: request.signal, frames: true });
     const stream = raw.streams?.[0]; const duration = Number(raw.format?.duration);
     let width = Number(stream?.width), height = Number(stream?.height);
     const rotation = Number(stream?.side_data_list?.find(item => typeof item.rotation === 'number')?.rotation ?? stream?.tags?.rotate ?? 0);
@@ -222,7 +206,7 @@ async function frameFile(prepared: Awaited<ReturnType<typeof preparation>>, fram
       await exec(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-v', 'error', '-threads', '1', ...inputFlags, '-i', file,
         '-an', '-sn', '-dn', '-vf', `select=eq(n\\,${frame})`, '-frames:v', '1', '-fps_mode', 'vfr', '-filter_threads', '1', '-threads', '1', '-compression_level', '3', temp],
       { timeout: 60000, maxBuffer: 512 * 1024, signal: request.signal });
-      const metadata = await sharp(temp, { limitInputPixels: 16777216 }).metadata();
+      const metadata = await (await openUntrustedImage(temp, 'video-frame')).metadata();
       if (metadata.width !== prepared.info.width || metadata.height !== prepared.info.height) throw new MultiviewError('原帧尺寸发生变化，请重开原视频', 409);
       await rename(temp, output);
     } finally { await rm(temp, { force: true }); }
@@ -276,13 +260,13 @@ export async function multiviewExport(user: SessionUser, id: string, request: Re
   try { return await createMultiviewExport(user, id, request, body, access); }
   finally { exportCount -= 1; }
 }
-function composeMultiviewPng(info: MultiviewInfo, files: Buffer[], layout: MultiviewLayout) {
+async function composeMultiviewPng(info: MultiviewInfo, files: Buffer[], layout: MultiviewLayout) {
   const dimensions = multiviewDimensions(info, files.length, layout);
   if (dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白，或下载原尺寸单图包；不会缩小原图');
   const columns = Math.min(layout.columns, files.length);
-  return sharp({ create: { ...dimensions, channels: 3, background: layout.background } }).composite(files.map((input, index) => ({ input,
+  return (await compositeCheckedImageTiles(createTrustedImageCanvas({ ...dimensions, channels: 3, background: layout.background }, 'multiview-output'), files.map((input, index) => ({ input,
     left: layout.margin + (index % columns) * (info.width + layout.gap),
-    top: layout.margin + Math.floor(index / columns) * (info.height + layout.gap) }))).timeout({ seconds: 60 }).png().toBuffer();
+    top: layout.margin + Math.floor(index / columns) * (info.height + layout.gap) })), 'multiview-output')).timeout({ seconds: 60 }).png().toBuffer();
 }
 function packMultiviewFrames(info: MultiviewInfo, files: Buffer[], frames: number[], names: string[]) {
   const zip = new ZipFile();

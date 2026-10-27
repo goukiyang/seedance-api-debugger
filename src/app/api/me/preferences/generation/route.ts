@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -46,7 +47,7 @@ function authError(error: unknown) {
   return null;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
     const surface = requestSurface(request.nextUrl.searchParams.get('surface'));
@@ -84,9 +85,9 @@ export async function GET(request: NextRequest) {
     console.error('[GenerationPreference] GET error:', error);
     return NextResponse.json({ error: '读取生成偏好失败' }, { status: 500 });
   }
-}
+});
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) {
   try {
     const user = await getSessionUser(request);
     const body = await request.json().catch(() => ({}));
@@ -131,4 +132,4 @@ export async function PATCH(request: NextRequest) {
     console.error('[GenerationPreference] PATCH error:', error);
     return NextResponse.json({ error: '保存生成偏好失败' }, { status: 500 });
   }
-}
+});

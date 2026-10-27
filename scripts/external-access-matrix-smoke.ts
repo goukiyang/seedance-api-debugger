@@ -67,7 +67,7 @@ const routeMatrix = [
   ['external_scoped_dependency', 'src/app/api/projects/[id]/route.ts'],
   ['external_scoped_dependency', 'src/app/api/projects/[id]/video-cards/route.ts'],
 
-  ['internal_only', 'src/app/api/tasks/create/route.ts'],
+  ['internal_only', 'src/server/video-tasks/standard-create.ts'],
   ['internal_only', 'src/app/api/tasks/enhance-video/create/route.ts'],
   ['internal_only', 'src/app/api/tasks/estimate/route.ts'],
   ['internal_only', 'src/app/api/tasks/[id]/reuse/route.ts'],
@@ -148,7 +148,7 @@ for (const route of mustUseInternalOnly) {
   assert.match(read(route), /assertInternalOnly|assertFeatureAllowed/, `${route} 缺少外部权限守门`);
 }
 
-assert.match(read('src/app/api/tasks/create/route.ts'), /assertFeatureAllowed\(user,\s*['"]standard_generate['"]/, '普通生成接口必须显式禁止外部用户');
+assert.match(read('src/server/video-tasks/standard-create.ts'), /assertFeatureAllowed\(user,\s*['"]standard_generate['"]/, '普通生成接口必须显式禁止外部用户');
 assert.match(read('src/app/api/video/play/[id]/route.ts'), /getSession|getSessionUser/, '视频播放接口必须要求登录');
 assert.match(read('src/app/api/video/play/[id]/route.ts'), /assertCanViewTask/, '视频播放接口必须校验任务归属');
 

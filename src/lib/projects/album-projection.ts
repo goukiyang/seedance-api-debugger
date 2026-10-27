@@ -2,12 +2,16 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { getAlbumAccess } from '@/lib/reference-albums/permissions';
 import { studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
+import { seekWhere, type PageKey } from '@/lib/pagination/cursor';
 
-export async function readProjectAlbumPage(user: SessionUser, projectId: string, skip = 0) {
+export async function readProjectAlbumDirectory(user: SessionUser, projectId: string, requestedPage = 1) {
   const visible = await studioVisibleReferenceWhere(user);
-  const albums = await prisma.referenceAlbum.findMany({
-    where: { project_id: projectId, status: { not: 'deleted' } },
-    orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], skip, take: 20,
+  const pageSize = 20;
+  const readBatch = (after: PageKey | null) => prisma.referenceAlbum.findMany({
+    where: { project_id: projectId, status: { not: 'deleted' }, AND: [seekWhere([
+      { name: 'updated_at', direction: 'desc', date: true }, { name: 'id', direction: 'desc' },
+    ], after)] },
+    orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], take: 100,
     include: {
       owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
       project: { select: { id: true, name: true, owner_user_id: true, status: true } },
@@ -16,12 +20,30 @@ export async function readProjectAlbumPage(user: SessionUser, projectId: string,
       _count: { select: { images: { where: { status: 'active', AND: [visible] } } } },
     },
   });
+  let after: PageKey | null = null, total = 0;
+  const requested: Awaited<ReturnType<typeof readBatch>> = [];
+  let tail: typeof requested = [];
+  for (;;) {
+    const batch = await readBatch(after);
+    for (const album of batch) {
+      if (!(await getAlbumAccess(user, album)).permissions.view) continue;
+      if (total % pageSize === 0) tail = [];
+      tail.push(album);
+      if (Math.floor(total / pageSize) === requestedPage - 1) requested.push(album);
+      total++;
+    }
+    if (batch.length < 100) break;
+    const last = batch[batch.length - 1];
+    after = [last.updated_at.toISOString(), last.id];
+  }
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const albums = requestedPage > totalPages ? tail : requested;
   const covers = await prisma.referenceImage.findMany({
     where: { id: { in: albums.flatMap((album) => album.cover_image_id ? [album.cover_image_id] : []) }, status: 'active', AND: [visible] },
     select: { id: true, album_id: true }, take: 20,
   });
   const projected = await Promise.all(albums.map(async (album) => {
-    if (!(await getAlbumAccess(user, album)).permissions.view) return null;
     const cover = covers.find((image) => image.id === album.cover_image_id && image.album_id === album.id);
     const ids = Array.from(new Set([...(cover ? [cover.id] : []), ...album.images.map((image) => image.id)])).slice(0, 4);
     return {
@@ -32,5 +54,11 @@ export async function readProjectAlbumPage(user: SessionUser, projectId: string,
       thumbnail_urls: ids.map((id) => `/api/reference-images/${encodeURIComponent(id)}/content?variant=thumbnail`),
     };
   }));
-  return projected.filter((album): album is NonNullable<typeof album> => album !== null);
+  return { albums: projected, total, page, totalPages };
+}
+
+// Keep the existing preview interface and fixed20/4 projection contract.
+export async function readProjectAlbumPage(user: SessionUser, projectId: string, skip = 0) {
+  const result = await readProjectAlbumDirectory(user, projectId, Math.floor(skip / 20) + 1);
+  return skip >= result.total ? [] : result.albums;
 }

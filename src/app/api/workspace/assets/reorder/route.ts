@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * PATCH /api/workspace/assets/reorder
  * 更新工作区素材排序
@@ -9,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getOrCreateWorkspace, updateWorkspaceAssetOrder } from '@/lib/assets/workspace';
 import { getSession } from '@/lib/auth/session';
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -28,10 +30,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('[ReorderAssets] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

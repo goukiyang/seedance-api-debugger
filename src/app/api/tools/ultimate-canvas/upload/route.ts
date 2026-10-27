@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -34,7 +36,7 @@ function parseContentLength(value: string | null) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -231,16 +233,13 @@ export async function POST(request: NextRequest) {
     if (error instanceof ReferenceImportError) {
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
-    console.error('[UltimateCanvasUpload] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Upload failed' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});
 
 // Unknown upload responses are resolved by an exact owned-file identity, never by reposting bytes.
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -268,4 +267,4 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '上传恢复暂不可用，未重新上传' }, { status: 500 });
   }
-}
+});

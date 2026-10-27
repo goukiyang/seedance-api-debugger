@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 /**
  * POST /api/assets/upload-complete
  * 浏览器直传 R2 完成后，校验对象并登记到用户上传历史。
@@ -10,6 +11,7 @@ import { completeDirectUpload, directUploadRequestId } from '@/lib/assets/direct
 import { directUploadFailure } from '@/lib/assets/direct-upload-error';
 import { getSiteUploadKind } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
+import { browserUploadResponse } from '@/lib/media/browser-projection.server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +26,7 @@ type UploadCompleteBody = {
   durationSeconds?: number | null;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   let originalRequestId: string | null = null;
@@ -71,7 +73,7 @@ export async function POST(request: NextRequest) {
       fileKind: getSiteUploadKind(uploadResult.mimeType),
       requestId: originalRequestId,
     });
-    return NextResponse.json({
+    return NextResponse.json(await browserUploadResponse(user, {
       success: true,
       upload: uploadResult.upload,
       similarity: uploadResult.similarity,
@@ -91,7 +93,7 @@ export async function POST(request: NextRequest) {
         upload: uploadResult.upload,
         similarity: uploadResult.similarity,
       },
-    });
+    }), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) {
       if (userId) await recordAssetUploadLog({ operatorId: userId, stage: 'complete', status: 'failed',
@@ -118,4 +120,4 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(diagnostic, { status: 503 });
   }
-}
+});

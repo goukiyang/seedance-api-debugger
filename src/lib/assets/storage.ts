@@ -1,3 +1,4 @@
+import { openUntrustedImage } from '@/lib/media/decode-image';
 /**
  * 资产存储服务
  * - 图片：原始文件 + 2:3 缩略图
@@ -8,21 +9,21 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import sharp from '../media/sharp';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { generateAssetVideoThumbnail } from '@/lib/assets/video-thumbnail';
 import { assertStudioCoverAssetNotReferenced } from '@/lib/image-studio/protected-assets';
-import { findVerifiedOwnUpload, privateUploadDirectory, publishVerifiedFile, registerVerifiedUpload, releaseVerifiedUpload, stageVerifiedUpload, uploadFileVersion, uploadIdentity, VerifiedUploadError, type UploadReceipt, type VerifiedUpload } from './verified-upload';
+import { findVerifiedOwnUpload, privateUploadDirectory, publishVerifiedFile, registerVerifiedUpload, releaseVerifiedUpload, stageVerifiedUpload, verifyUploadFile, uploadFileVersion, uploadIdentity, VerifiedUploadError, type UploadReceipt, type VerifiedUpload } from './verified-upload';
 import { enqueueUploadSimilarity, uploadSimilarityStatus, type UploadSimilarityStatus } from './upload-similarity';
+import { mediaRoot, localMediaPath } from '@/lib/media/storage-roots';
 
 // ============================================================================
 // 目录配置
 // ============================================================================
 
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
+const UPLOAD_DIR = mediaRoot('uploads');
 const ASSETS_DIR = path.join(UPLOAD_DIR, 'assets');
 const THUMBS_DIR = path.join(UPLOAD_DIR, 'thumbs');
 const execFileAsync = promisify(execFile);
@@ -43,12 +44,7 @@ function localUploadUrlFromAssetUrl(url: string | null | undefined): string | nu
 function localPublicPath(url: string): string {
   const localUrl = localUploadUrlFromAssetUrl(url);
   if (!localUrl) throw new Error(`Not a local upload URL: ${url}`);
-  const publicRoot = path.resolve(process.cwd(), 'public');
-  const resolvedPath = path.resolve(publicRoot, localUrl.replace(/^\/+/, ''));
-  if (!resolvedPath.startsWith(`${publicRoot}${path.sep}`)) {
-    throw new Error(`Unsafe local upload URL: ${url}`);
-  }
-  return resolvedPath;
+  return localMediaPath(localUrl);
 }
 
 
@@ -65,13 +61,13 @@ function computeHash(buffer: Buffer): string {
 // ============================================================================
 
 async function generateThumbnail(
-  buffer: Buffer,
+  buffer: Buffer | string,
   mimeType: string
 ): Promise<{ thumbPath: string; width: number; height: number }> {
   const thumbWidth = 640;
   const thumbHeight = 640;
 
-  const { data: thumbBuffer, info } = await sharp(buffer, { animated: false, limitInputPixels: 40_000_000 }).timeout({ seconds: 45 }).rotate()
+  const { data: thumbBuffer, info } = await (await openUntrustedImage(buffer, 'ordinary', { animated: false })).timeout({ seconds: 45 }).rotate()
     .resize(thumbWidth, thumbHeight, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -119,7 +115,7 @@ export async function prepareVerifiedUploadThumbnail(proof: VerifiedUpload) {
       await fs.promises.rmdir(directory).catch(() => {});
     }
   }
-  if (proof.type === 'image') return (await generateThumbnail(await fs.promises.readFile(proof.file), proof.mimeType)).thumbPath;
+  if (proof.type === 'image') return (await generateThumbnail(proof.file, proof.mimeType)).thumbPath;
   if (proof.type === 'video') return generateVideoThumbnailFromFile(proof.file, proof.hash);
   return null;
 }
@@ -187,17 +183,30 @@ export async function uploadAsset(
 ): Promise<UploadResult> {
   await uploadIdentity(ownerId);
   await privateUploadDirectory();
-  ensureDirs();
   const proof = await stageVerifiedUpload((async function* () { yield buffer; })(), mimeType, buffer.length);
+  return persistUploadProof(proof, fileName, ownerId, mediaMetadata, requestId, receiptFingerprint);
+}
+
+export type UploadDestination = { directory: string; originalUrl: (name: string) => string };
+export async function uploadAssetFile(file: string, fileName: string, mimeType: string, fileSize: number, hash: string,
+  ownerId: string, requestId?: string, destination?: UploadDestination): Promise<UploadResult> {
+  await uploadIdentity(ownerId);
+  await privateUploadDirectory();
+  const proof = await verifyUploadFile(file, mimeType, hash, fileSize);
+  return persistUploadProof(proof, fileName, ownerId, null, requestId, undefined, destination);
+}
+async function persistUploadProof(proof: VerifiedUpload, fileName: string, ownerId: string,
+  mediaMetadata: UploadAssetMetadata | null, requestId?: string, receiptFingerprint?: string, destination?: UploadDestination): Promise<UploadResult> {
   let reusedProof: VerifiedUpload | undefined;
   try {
+    ensureDirs();
     const existing = await findVerifiedOwnUpload(ownerId, proof.hash, proof.mimeType, proof.bytes);
     reusedProof = existing?.proof;
     let originalUrl = existing?.asset.original_url || '', thumbnailUrl = existing?.asset.thumbnail_url || null;
     if (!existing) {
       const filename = `${proof.hash}.${proof.extension}`;
-      const original = await publishVerifiedFile(proof, ASSETS_DIR, filename);
-      originalUrl = `/uploads/assets/${filename}`;
+      const original = await publishVerifiedFile(proof, destination?.directory || ASSETS_DIR, filename);
+      originalUrl = destination ? destination.originalUrl(filename) : `/uploads/assets/${filename}`;
       thumbnailUrl = proof.type === 'image' ? await prepareVerifiedUploadThumbnail(proof)
         : proof.type === 'video' ? await generateVideoThumbnailFromFile(original, proof.hash) : null;
     }
@@ -209,7 +218,7 @@ export async function uploadAsset(
     const similarity = await uploadSimilarityStatus(ownerId, asset.id).catch(() => ({ state: 'unavailable' as const, coverage: 'new_uploads_only' as const }));
     const source = siteUploadPathFromUrl(asset.original_url);
     const sourceVersion = existing && existing.asset.id === asset.id ? existing.proof.sourceVersion || existing.proof.version
-      : source ? await uploadFileVersion(path.join(process.cwd(), 'public', source.replace(/^\/+/, ''))) : '';
+      : source ? await uploadFileVersion(localMediaPath(source)) : '';
     if (!sourceVersion) throw new Error('原文件身份暂无法确认');
     return { assetId: asset.id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url, hash: proof.hash,
       fileName: asset.file_name, fileSize: asset.file_size, mimeType: asset.mime_type,

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   FEISHU_STATE_COOKIE,
@@ -6,6 +7,8 @@ import {
   verifyFeishuOAuthState,
 } from '@/lib/auth/feishu';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
+import { getSession, parseSessionCookie, SessionUnavailableError } from '@/lib/auth/session';
+import { sessionTokenDigest, requestSessionDevice } from '@/lib/auth/session-store';
 import { PRIVATE_IDENTITY_COOKIE, PRIVATE_IDENTITY_SECONDS } from '@/lib/security/private-prompt-identity.server';
 
 export const dynamic = 'force-dynamic';
@@ -45,11 +48,12 @@ function clearStateCookie(response: NextResponse) {
     sameSite: 'lax',
     maxAge: 0,
     path: '/',
+    secure: process.env.NODE_ENV === 'production',
   });
   return response;
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'public', rateLimit: "auth" }, async function GET(request: NextRequest) {
   const returnedError = request.nextUrl.searchParams.get('error');
   if (returnedError) {
     return clearStateCookie(redirectToCallbackPage(request, { error: 'access_denied' }));
@@ -63,7 +67,14 @@ export async function GET(request: NextRequest) {
   if (!storedState) return clearStateCookie(redirectToCallbackPage(request, { error: 'invalid_state' }));
 
   try {
-    const result = await loginWithFeishuCode(code, publicAuthOrigin(request));
+    if (storedState.binding) {
+      const user = await getSession();
+      const token = parseSessionCookie(request.headers.get('cookie') || '');
+      if (!user || !token || user.id !== storedState.binding.userId || sessionTokenDigest(token) !== storedState.binding.sessionDigest) {
+        return clearStateCookie(redirectToCallbackPage(request, { error: 'binding_session_expired' }));
+      }
+    }
+    const result = await loginWithFeishuCode(code, publicAuthOrigin(request), { binding: storedState.binding, device: requestSessionDevice(request) });
     const response = redirectToCallbackPage(request, {
       status: 'success',
       next: storedState.next,
@@ -75,10 +86,11 @@ export async function GET(request: NextRequest) {
     });
     return clearStateCookie(response);
   } catch (error) {
+    if (error instanceof SessionUnavailableError) return NextResponse.json({ error: '服务暂时不可用', code: error.code }, { status: 503 });
     if (error instanceof FeishuAuthError) {
       return clearStateCookie(redirectToCallbackPage(request, { error: error.code }));
     }
     console.error('[Feishu callback]', error);
     return clearStateCookie(redirectToCallbackPage(request, { error: 'server_error' }));
   }
-}
+});

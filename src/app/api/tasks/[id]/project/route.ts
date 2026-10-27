@@ -1,10 +1,12 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewTask, getProjectAccess, logProjectAction } from '@/lib/projects/permissions';
 import { recordTaskProjectTransfer } from '@/lib/costs/ledger';
-import { publicVideoTaskPricing } from '@/lib/pricing/video';
+import { toVideoTaskView, videoTaskViewSelect } from '@/lib/dto/video-task';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +37,7 @@ async function assertCanMoveTaskProject(user: NonNullable<Awaited<ReturnType<typ
   }
 }
 
-export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+export const PATCH = apiRoute({ access: 'user', rateLimit: false }, async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   try {
     const user = await getSession();
@@ -63,9 +65,9 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
 
     const task = await prisma.videoTask.findUnique({
       where: { id: params.id },
-      include: {
-        project: { select: { id: true, name: true, type: true } },
-        video_card: { select: { id: true, project_id: true, current_best_task_id: true, final_task_id: true } },
+      select: {
+        ...videoTaskViewSelect,
+        video_card: { select: { ...videoTaskViewSelect.video_card.select, current_best_task_id: true, final_task_id: true } },
       },
     });
     if (!task) return NextResponse.json({ error: '任务不存在' }, { status: 404 });
@@ -98,7 +100,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
     }
 
     if (task.project_id === targetProjectId && task.video_card_id === targetVideoCardId) {
-      return NextResponse.json({ task: publicVideoTaskPricing(task), unchanged: true });
+      return NextResponse.json({ task: toVideoTaskView(task, user), unchanged: true });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -127,10 +129,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
           visibility: targetProject.type === 'personal' ? 'private' : 'project',
           cost_allocation_status: 'allocated',
         },
-        include: {
-          project: { select: { id: true, name: true, type: true } },
-          video_card: { select: { id: true, title: true, objective: true, status: true, project_id: true } },
-        },
+        select: videoTaskViewSelect,
       });
     });
 
@@ -142,15 +141,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ id:
       reason,
     });
 
-    return NextResponse.json({ task: publicVideoTaskPricing(updated) });
+    return NextResponse.json({ task: toVideoTaskView(updated, user) });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[TaskProjectMove] Failed:', error);
-    return NextResponse.json(
-      { error: '移动任务失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
-    );
+
+    return apiErrorResponse(error);
   }
-}
+});

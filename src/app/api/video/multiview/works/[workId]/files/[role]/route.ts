@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import type { ReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,5 +35,5 @@ async function response(request: NextRequest, context: Context, head: boolean) {
     }
   });
 }
-export async function GET(request: NextRequest, context: Context) { return response(request, context, false); }
-export async function HEAD(request: NextRequest, context: Context) { return response(request, context, true); }
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest, context: Context) { return response(request, context, false); });
+export const HEAD = declaredRoute({ access: 'user', rateLimit: false }, async function HEAD(request: NextRequest, context: Context) { return response(request, context, true); });

@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -14,7 +16,7 @@ import { getH3Health, listH3Presets } from '@/lib/provider/h3';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getH3ApiSettings();
@@ -30,9 +32,9 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/H3Integration] GET failed:', error);
     return NextResponse.json({ error: '读取 H3 配置失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -81,14 +83,12 @@ export async function PUT(request: NextRequest) {
     if (error instanceof Error && (error.message.startsWith('H3 API 地址') || error.message.startsWith('H3 preset') || error.message.startsWith('H3 LoRA'))) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    console.error('[Admin/H3Integration] PUT failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : '保存 H3 配置失败',
-    }, { status: 500 });
-  }
-}
 
-export async function POST(request: NextRequest) {
+    return apiErrorResponse(error);
+  }
+});
+
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const settings = await getH3ApiSettings();
@@ -151,9 +151,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    console.error('[Admin/H3Integration] POST failed:', error);
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : 'H3 连接测试失败',
-    }, { status: 500 });
+
+    return apiErrorResponse(error);
   }
-}
+});

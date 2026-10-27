@@ -1,8 +1,9 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   let admin;
   try {
     admin = await getAdminUser(request);
@@ -32,4 +33,4 @@ export async function POST(request: NextRequest) {
     console.error('[Admin Feedback Archive]', error);
     return errorJson('归档失败', 500);
   }
-}
+});

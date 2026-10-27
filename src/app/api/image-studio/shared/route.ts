@@ -1,10 +1,11 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { listSharedStudioCatalog, sharedStudioRevision, StudioSharingError } from '@/lib/image-studio/shared-contract';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers });
   try {
@@ -24,4 +25,4 @@ export async function GET(request: NextRequest) {
       code: error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^P\d{4}$/.test(error.code) ? error.code : undefined });
     return NextResponse.json({ error: '模板同步暂不可用，本人输入仍保留', reasonCode: 'read-unavailable' }, { status: 503, headers });
   }
-}
+});

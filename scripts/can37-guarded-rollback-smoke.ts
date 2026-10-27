@@ -79,8 +79,8 @@ async function main() {
   console.log('PASS rollback actual UI submit guard precedes quote and actual adapter guard precedes all image/video dispatch');
 
   const routes = [
-    ['src/app/api/tasks/create/route.ts', '$transaction'],
-    ['src/app/api/ip/tasks/create/route.ts', '$transaction'],
+    ['src/server/video-tasks/standard-create.ts', '$transaction'],
+    ['src/server/video-tasks/ip-create.ts', '$transaction'],
     ['src/app/api/assets/generate/route.ts', 'getImageGenerationChannels'],
     ['src/app/api/tools/ultimate-canvas/images/generate/route.ts', 'saveStudioModule'],
     ['src/app/api/tools/ultimate-canvas/styles/generate/route.ts', 'submitStudioBatch'],

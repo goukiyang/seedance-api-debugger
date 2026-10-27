@@ -54,7 +54,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
   const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
-  const { createSession } = await import('../src/lib/auth/session');
+  const { createSession, SESSION_COOKIE } = await import('../src/lib/auth/session');
   const { multiviewSourceRoute } = await import('../src/lib/video/multiview-source-api');
   const works = await import('../src/lib/video/multiview-works');
   const share = await import('../src/lib/video/multiview-share.server');
@@ -72,15 +72,15 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
     const tokens = new Map<string, string>();
     for (const actor of [owner, recipient, outsider]) tokens.set(actor.id, await createSession(actor.id));
     const sourceRequest = async (actor: string, shareId: string, method: 'GET' | 'HEAD', range?: string, expectedActor = actor) => {
-      const headers = new Headers({ Cookie: `session=${tokens.get(actor)}`, 'x-app-session-user': expectedActor,
+      const headers = new Headers({ Cookie: `${SESSION_COOKIE}=${tokens.get(actor)}`, 'x-app-session-user': expectedActor,
         Host: 'flow-isolated.invalid', ...(range ? { Range: range } : {}) });
       const request = new NextRequest(`http://flow-isolated.invalid/api/video/multiview/shares/${shareId}/source/video`, { method, headers });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       return requestAsyncStorage.run(store, () => multiviewSourceRoute(request, { kind: 'share', id: shareId }, 'video'));
     };
-    mkdirSync(path.join(scratch, 'public/videos'), { recursive: true });
-    mkdirSync(path.join(scratch, 'public/uploads'), { recursive: true });
-    writeFileSync(path.join(scratch, 'public/videos/synthetic.mp4'), 'synthetic media bytes: storage/auth fixture, not video decoding', { mode: 0o600 });
+    mkdirSync(path.join(scratch, '.media/videos'), { recursive: true });
+    mkdirSync(path.join(scratch, '.media/uploads'), { recursive: true });
+    writeFileSync(path.join(scratch, '.media/videos/synthetic.mp4'), 'synthetic media bytes: storage/auth fixture, not video decoding', { mode: 0o600 });
     await prisma.videoTask.create({ data: { id: 'flow-source-task', owner_user_id: owner.id, user_id: owner.id, provider: 'seedance', model: 'synthetic',
       generation_mode: 'all_in_one_reference', prompt: 'DO_NOT_PROJECT_PRIVATE_PROMPT', local_status: 'succeeded', local_video_path: '/videos/synthetic.mp4' } });
     const version = await media.multiviewSourceVersion(owner, 'flow-source-task');
@@ -194,7 +194,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
       const backup = path.join(backups, 'flow');
       const result = JSON.parse(execFileSync('python3', [path.join(root, 'scripts/backup-multiview-works.py'), '--database', database,
         '--source-root', path.resolve(dir, '../../..'), '--private-source-root', await sources.multiviewSourceRoot(),
-        '--recipe-root', path.join(scratch, 'recipes'), '--uploads-root', path.join(scratch, 'public/uploads'),
+        '--recipe-root', path.join(scratch, 'recipes'), '--uploads-root', path.join(scratch, '.media/uploads'),
         '--destination', backup, '--non-production'], { encoding: 'utf8' }));
       assert.equal(result.complete, true);
       const verified = JSON.parse(execFileSync('python3', [path.join(root, 'scripts/backup-multiview-works.py'), '--verify-backup', backup, '--non-production'], { encoding: 'utf8' }));

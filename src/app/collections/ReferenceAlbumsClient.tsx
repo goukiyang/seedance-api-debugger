@@ -7,7 +7,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Plus, RotateCcw, X } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
-import PaginationControls from '@/components/PaginationControls';
+import { AlbumPageError, appendAlbumPage, fetchAlbumPage, loadAllAlbumPages } from '@/lib/reference-albums/client-pages';
+import { fetchGovernancePage, loadAllFolderPages } from '@/lib/reference-albums/governance-client';
+import { usePageSentinel } from '@/lib/hooks/usePageSentinel';
 import { RelativeTime } from '@/components/RelativeTime';
 import ShareAlbumDialog from '@/components/ShareAlbumDialog';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -174,6 +176,11 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   const anchorId = searchParams.has('anchor') ? (safeId(requestedAnchor) ? requestedAnchor : '') : position.anchorId;
   const [reloadVersion, setReloadVersion] = useState(0);
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [albumTotal, setAlbumTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const requestedDepth = useRef(page);
+  requestedDepth.current = page;
   const [loadedListKey, setLoadedListKey] = useState('');
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [projectDirectoryError, setProjectDirectoryError] = useState('');
@@ -182,9 +189,22 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     project: ProjectOption | null;
     error: string;
   }>({ key: '', project: null, error: '' });
-  const [folders, setFolders] = useState<PublicFolder[]>([]);
-  const [pendingSubmissions, setPendingSubmissions] = useState<PublicSubmission[]>([]);
-  const [canManagePublicFolders, setCanManagePublicFolders] = useState(false);
+  const [folderRows, setFolders] = useState<PublicFolder[]>([]);
+  const [folderEpoch, setFolderEpoch] = useState(-1);
+  const folders = folderEpoch === boundaryRef.current.epoch ? folderRows : [];
+  const [pendingRows, setPendingSubmissions] = useState<PublicSubmission[]>([]);
+  const [pendingEpoch, setPendingEpoch] = useState(-1);
+  const pendingSubmissions = pendingEpoch === boundaryRef.current.epoch ? pendingRows : [];
+  const [pendingCount, setPendingTotal] = useState(0);
+  const pendingTotal = pendingEpoch === boundaryRef.current.epoch ? pendingCount : 0;
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingError, setPendingError] = useState('');
+  const [pendingCursor, setPendingCursor] = useState<string | null>(null);
+  const pendingPageRef = useRef({ cursor: null as string | null, depth: 24, busy: false });
+  const pendingRequestRef = useRef<AbortController | null>(null);
+  const folderRequestRef = useRef<AbortController | null>(null);
+  const [folderManagement, setCanManagePublicFolders] = useState(false);
+  const canManagePublicFolders = folderEpoch === boundaryRef.current.epoch && folderManagement;
   const [loading, setLoading] = useState(false);
   const [folderLoading, setFolderLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -230,12 +250,8 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     () => projects.filter((project) => project.type !== 'system'),
     [projects],
   );
-  const totalPages = Math.max(1, Math.ceil(albums.length / ALBUMS_PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pagedAlbums = albums.slice(
-    (currentPage - 1) * ALBUMS_PAGE_SIZE,
-    currentPage * ALBUMS_PAGE_SIZE,
-  );
+  const currentPage = Math.max(1, Math.ceil(albums.length / ALBUMS_PAGE_SIZE));
+  const pagedAlbums = albums;
   const listKey = `${boundaryKey}:${scope === 'public' ? selectedFolderId : ''}`;
   const projectToVerify = projectContextId || (createOpen && albumType === 'project' ? projectId : '');
   const verificationKey = `${accountId}:${projectToVerify}`;
@@ -263,7 +279,6 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   };
   const setProjectFilterId = (next: string) => updateLocation({ project_id: next === 'all' ? null : next, page: '1', anchor: '' });
   const setSelectedFolderId = (next: string) => updateLocation({ public_folder_id: next, page: '1', anchor: '' });
-  const setPage = (next: number) => updateLocation({ page: String(next), anchor: '' });
 
   const collectionListHref = (albumId: string) => {
     const params = new URLSearchParams({ scope, page: String(currentPage), anchor: albumId });
@@ -304,9 +319,13 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     }
     setPosition(next);
     setAlbums([]);
+    setNextCursor(null); setAlbumTotal(0); setLoadingMore(false);
     setProjects([]);
     setFolders([]);
     setPendingSubmissions([]);
+    pendingRequestRef.current?.abort(); folderRequestRef.current?.abort();
+    pendingPageRef.current = { cursor: null, depth: 24, busy: false };
+    setPendingTotal(0); setPendingCursor(null); setPendingError(''); setPendingLoading(false);
     setCanManagePublicFolders(false);
     setLoadedListKey('');
     setFailedCoverIds(new Set());
@@ -382,13 +401,13 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   }, [albumType, boundaryKey, creating, description, name, pendingCreate, positionReady, projectContextId, projectId]);
 
   useEffect(() => {
-    if (!positionReady || embedded) return;
+    if (!positionReady || embedded || loadedListKey !== listKey || loading) return;
     try {
       window.localStorage.setItem(`${PREFERENCES_PREFIX}:${boundaryKey}`, JSON.stringify({
-        schema: 1, page, folderId: selectedFolderId, anchorId,
+        schema: 1, page: currentPage, folderId: selectedFolderId, anchorId,
       }));
     } catch { /* The explicit list URL still preserves its position. */ }
-  }, [anchorId, boundaryKey, embedded, page, positionReady, selectedFolderId]);
+  }, [anchorId, boundaryKey, currentPage, embedded, listKey, loadedListKey, loading, positionReady, selectedFolderId]);
 
   useEffect(() => {
     if (!accountId || embedded) return;
@@ -440,6 +459,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   useEffect(() => () => {
     boundaryRef.current.epoch += 1;
     albumRequestRef.current?.abort();
+    pendingRequestRef.current?.abort(); folderRequestRef.current?.abort();
   }, []);
 
   function projectDisplayName(project: ProjectOption) {
@@ -457,19 +477,20 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   const loadFolders = useCallback(() => {
     if (!accountId) return;
     const epoch = boundaryRef.current.epoch;
+    folderRequestRef.current?.abort();
+    const controller = new AbortController(); folderRequestRef.current = controller;
     setFolderLoading(true);
-    fetch('/api/reference-album-folders', { cache: 'no-store' })
-      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!isCurrent(epoch)) return;
-        if (!ok) throw new Error(data.error || data.message || '公共文件夹读取失败');
-        const list: PublicFolder[] = data.folders || [];
+    loadAllFolderPages<PublicFolder>({ ownerId: accountId, signal: controller.signal })
+      .then((data) => {
+        if (controller.signal.aborted || !isCurrent(epoch)) return;
+        const list = data.folders;
         setFolders(list);
-        setCanManagePublicFolders(Boolean(data.can_manage));
+        setFolderEpoch(epoch);
+        setCanManagePublicFolders(data.canManage);
         setSubmitFolderId((current) => current || list[0]?.id || '');
       })
-      .catch((err) => { if (isCurrent(epoch)) setError(err instanceof Error ? err.message : '公共文件夹读取失败'); })
-      .finally(() => { if (isCurrent(epoch)) setFolderLoading(false); });
+      .catch((err) => { if (!controller.signal.aborted && isCurrent(epoch)) { setFolders([]); setCanManagePublicFolders(false); setError(err instanceof Error ? err.message : '公共文件夹读取失败'); } })
+      .finally(() => { if (!controller.signal.aborted && isCurrent(epoch)) setFolderLoading(false); });
   }, [accountId, boundaryKey, isCurrent]);
 
   const loadAlbums = useCallback(async () => {
@@ -479,6 +500,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     const controller = new AbortController();
     albumRequestRef.current = controller;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
     const params = new URLSearchParams({ scope });
     if ((scope === 'project' || scope === 'other_project') && projectFilterId !== 'all') {
@@ -486,32 +508,88 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     }
     if (scope === 'public' && selectedFolderId !== 'all') params.set('public_folder_id', selectedFolderId);
     try {
-      const res = await fetch(`/api/reference-albums?${params.toString()}`, { cache: 'no-store', signal: controller.signal });
-      const data = await res.json();
-      if (controller.signal.aborted || !isCurrent(epoch)) return null;
-      if (!res.ok) {
-        if ([401, 403, 404].includes(res.status)) { setAlbums([]); setLoadedListKey(''); }
-        throw new Error(data.error || data.message || '图集读取失败');
+      let data = await fetchAlbumPage<AlbumItem>(`/api/reference-albums?${params}`, 'albums', { signal: controller.signal, ownerId: accountId, limit: ALBUMS_PAGE_SIZE });
+      let list = data.items;
+      // Restore the previously visible depth through the same bounded endpoint.
+      const depth = Math.min(requestedDepth.current * ALBUMS_PAGE_SIZE, data.pagination.total);
+      while (list.length < depth && data.pagination.nextCursor) {
+        data = await fetchAlbumPage<AlbumItem>(`/api/reference-albums?${params}`, 'albums', { signal: controller.signal, ownerId: accountId, limit: Math.min(100, depth - list.length), cursor: data.pagination.nextCursor });
+        list = appendAlbumPage(list, data.items);
       }
-      const list: AlbumItem[] = data.albums || [];
+      if (controller.signal.aborted || !isCurrent(epoch)) return null;
       setAlbums(list);
+      setNextCursor(data.pagination.nextCursor);
+      setAlbumTotal(data.pagination.total);
+      setLoadingMore(false);
       setLoadedListKey(listKey);
       return list;
     } catch (err) {
+      if (!controller.signal.aborted && isCurrent(epoch) && err instanceof AlbumPageError && [401, 403, 404].includes(err.status)) { setAlbums([]); setNextCursor(null); setLoadedListKey(''); }
       if (!controller.signal.aborted && isCurrent(epoch)) setError(err instanceof Error ? err.message : '图集读取失败');
       return null;
     } finally {
       if (!controller.signal.aborted && isCurrent(epoch)) setLoading(false);
     }
-  }, [isCurrent, listKey, positionReady, projectContextBlocked, projectFilterId, scope, selectedFolderId]);
+  }, [accountId, isCurrent, listKey, positionReady, projectContextBlocked, projectFilterId, scope, selectedFolderId]);
 
-  const loadPendingSubmissions = useCallback(() => {
-    if (!accountId || !isAdmin) return;
+  const moreBusy = useRef(false);
+  const loadMoreAlbums = useCallback(async () => {
+    if (!nextCursor || loading || moreBusy.current || loadedListKey !== listKey) return;
     const epoch = boundaryRef.current.epoch;
-    fetch('/api/admin/reference-album-submissions?status=pending', { cache: 'no-store' })
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => { if (isCurrent(epoch)) setPendingSubmissions(data?.submissions || []); })
-      .catch(() => {});
+    const controller = new AbortController();
+    albumRequestRef.current?.abort(); albumRequestRef.current = controller;
+    moreBusy.current = true; setLoadingMore(true);
+    const params = new URLSearchParams({ scope });
+    if (projectFilterId !== 'all') params.set('project_id', projectFilterId);
+    if (scope === 'public' && selectedFolderId !== 'all') params.set('public_folder_id', selectedFolderId);
+    try {
+      const data = await fetchAlbumPage<AlbumItem>(`/api/reference-albums?${params}`, 'albums', { cursor: nextCursor, ownerId: accountId, signal: controller.signal, limit: ALBUMS_PAGE_SIZE });
+      if (controller.signal.aborted || !isCurrent(epoch)) return;
+      setAlbums(current => appendAlbumPage(current, data.items)); setNextCursor(data.pagination.nextCursor); setAlbumTotal(data.pagination.total);
+      updateLocation({ page: String(Math.ceil((albums.length + data.items.length) / ALBUMS_PAGE_SIZE)) });
+    } catch (err) { if (!controller.signal.aborted && isCurrent(epoch)) setError(err instanceof Error ? err.message : '图集读取失败'); }
+    finally { moreBusy.current = false; if (!controller.signal.aborted && isCurrent(epoch)) setLoadingMore(false); }
+  }, [accountId, albums.length, isCurrent, listKey, loadedListKey, loading, nextCursor, projectFilterId, scope, selectedFolderId, updateLocation]);
+  const moreRef = usePageSentinel(() => { void loadMoreAlbums(); }, Boolean(nextCursor && !loading && !loadingMore && !error && loadedListKey === listKey));
+
+  const loadPendingSubmissions = useCallback(async (append = false) => {
+    if (!accountId || !isAdmin || append && (pendingPageRef.current.busy || !pendingPageRef.current.cursor)) return;
+    const epoch = boundaryRef.current.epoch;
+    pendingRequestRef.current?.abort();
+    const controller = new AbortController(); pendingRequestRef.current = controller;
+    pendingPageRef.current.busy = true; setPendingLoading(true); setPendingError('');
+    try {
+      let data = await fetchGovernancePage<PublicSubmission>('/api/admin/reference-album-submissions?status=pending', 'submissions', {
+        ownerId: accountId, signal: controller.signal, cursor: append ? pendingPageRef.current.cursor : null,
+      });
+      let list = data.items;
+      const depth = Math.min(pendingPageRef.current.depth, data.pagination.total);
+      const cursors = new Set<string>();
+      while (!append && list.length < depth && data.pagination.nextCursor) {
+        if (cursors.has(data.pagination.nextCursor)) throw new Error('待审核分页未前进，请重试');
+        cursors.add(data.pagination.nextCursor);
+        const next = await fetchGovernancePage<PublicSubmission>('/api/admin/reference-album-submissions?status=pending', 'submissions', {
+          ownerId: accountId, signal: controller.signal, cursor: data.pagination.nextCursor, limit: Math.min(100, depth - list.length),
+        });
+        if (next.pagination.total !== data.pagination.total) throw new Error('待审核列表已变化，请重试');
+        const combined = appendAlbumPage(list, next.items);
+        if (combined.length === list.length) throw new Error('待审核分页未前进，请重试');
+        list = combined; data = next;
+      }
+      if (controller.signal.aborted || !isCurrent(epoch)) return;
+      setPendingSubmissions(current => append ? appendAlbumPage(current, list) : list);
+      setPendingEpoch(epoch);
+      pendingPageRef.current.cursor = data.pagination.nextCursor;
+      pendingPageRef.current.depth = append ? pendingPageRef.current.depth + list.length : list.length;
+      setPendingCursor(data.pagination.nextCursor); setPendingTotal(data.pagination.total);
+    } catch (err) {
+      if (!controller.signal.aborted && isCurrent(epoch)) {
+        if (err instanceof AlbumPageError && [401, 403].includes(err.status)) { setPendingSubmissions([]); setPendingCursor(null); setPendingTotal(0); pendingPageRef.current.cursor = null; }
+        setPendingError(err instanceof Error ? err.message : '待审核列表读取失败');
+      }
+    } finally {
+      if (!controller.signal.aborted && isCurrent(epoch)) { pendingPageRef.current.busy = false; setPendingLoading(false); }
+    }
   }, [accountId, boundaryKey, isAdmin, isCurrent]);
 
   useEffect(() => {
@@ -534,11 +612,10 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     if (restoredAnchorRef.current === key) return;
     const frame = requestAnimationFrame(() => {
       const element = document.getElementById(`collection-${anchorId}`);
-      if (element) element.scrollIntoView({ block: 'center' });
-      restoredAnchorRef.current = key;
+      if (element) { element.scrollIntoView({ block: 'center' }); restoredAnchorRef.current = key; }
     });
     return () => cancelAnimationFrame(frame);
-  }, [anchorId, boundaryKey, currentPage, listKey, loadedListKey, loading, positionReady]);
+  }, [albums.length, anchorId, boundaryKey, currentPage, listKey, loadedListKey, loading, positionReady]);
 
   const finishCreate = (input: CreateInput, albumId: string) => {
     const remaining = pendingCreates.filter((record) => createIdentity(record) !== createIdentity(input));
@@ -572,11 +649,9 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     try {
       const params = new URLSearchParams({ scope: pendingCreate.album_type === 'project' ? 'project' : 'mine' });
       if (pendingCreate.project_id) params.set('project_id', pendingCreate.project_id);
-      const res = await fetch(`/api/reference-albums?${params.toString()}`, { cache: 'no-store' });
-      const data = await res.json();
+      const all = await loadAllAlbumPages<AlbumItem>(`/api/reference-albums?${params}`, 'albums', { ownerId: accountId });
       if (!isCurrent(epoch)) return;
-      if (!res.ok) throw new Error(data.error || '原图集读取失败，请稍后核对。');
-      const found = (data.albums as AlbumItem[] || []).filter((album) => album.owner?.id === accountId
+      const found = all.filter((album) => album.owner?.id === accountId
         && album.name === pendingCreate.name.trim() && album.album_type === pendingCreate.album_type
         && (album.project_id || null) === (pendingCreate.project_id || null));
       if (found.length) {
@@ -806,7 +881,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
   const handleSubmitToPublic = async (replace = false) => {
     if (!submitAlbum) return;
     const epoch = boundaryRef.current.epoch;
-    if (!submitFolderId) {
+    if (folderLoading || !folders.some(folder => folder.id === submitFolderId)) {
       setError('请先选择公共文件夹');
       return;
     }
@@ -985,12 +1060,14 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
         </section>
       )}
 
-      {scope === 'public' && isAdmin && pendingSubmissions.length > 0 && (
+      {scope === 'public' && isAdmin && (pendingTotal > 0 || pendingError || pendingLoading) && (
         <section className="album-review-panel">
           <div className="album-review-head">
             <h2>待审核提交</h2>
-            <span>{pendingSubmissions.length} 个</span>
+            <span>{pendingTotal} 个</span>
           </div>
+          {pendingError && <p role="alert">{pendingError} <button type="button" onClick={() => void loadPendingSubmissions()} disabled={pendingLoading}>重试</button></p>}
+          {pendingCursor && <button type="button" onClick={() => void loadPendingSubmissions(true)} disabled={pendingLoading}>{pendingLoading ? '读取中...' : '加载更多'}</button>}
           <div className="album-review-list">
             {pendingSubmissions.map((submission) => (
               <article key={submission.id} className="album-review-item">
@@ -1156,12 +1233,12 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
               type="button"
               className="primary"
               onClick={() => handleSubmitToPublic()}
-              disabled={!submitFolderId || !submitName.trim() || actionAlbumId === submitAlbum.id}
+              disabled={folderLoading || !folders.some(folder => folder.id === submitFolderId) || !submitName.trim() || actionAlbumId === submitAlbum.id}
             >
               {isAdmin ? '直接复制到公共库' : '提交审核'}
             </button>
             {submitPendingSubmission && !isAdmin && (
-              <button type="button" onClick={() => handleSubmitToPublic(true)} disabled={!submitFolderId || !submitName.trim() || actionAlbumId === submitAlbum.id}>
+              <button type="button" onClick={() => handleSubmitToPublic(true)} disabled={folderLoading || !folders.some(folder => folder.id === submitFolderId) || !submitName.trim() || actionAlbumId === submitAlbum.id}>
                 覆盖重提
               </button>
             )}
@@ -1264,14 +1341,10 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
           })
         )}
       </div>
-      {loadedListKey === listKey && !projectContextBlocked && <PaginationControls
-        page={currentPage}
-        totalPages={totalPages}
-        total={albums.length}
-        pageSize={ALBUMS_PAGE_SIZE}
-        label="图集"
-        onPageChange={setPage}
-      />}
+      {loadedListKey === listKey && !projectContextBlocked && <div className="album-list-pagination">
+        <span>已显示 {albums.length} / {albumTotal} 个图集</span>
+        {nextCursor && <button type="button" ref={moreRef} onClick={() => void loadMoreAlbums()} disabled={loadingMore}>{loadingMore ? '读取中...' : '加载更多'}</button>}
+      </div>}
       </>}
     </div>
   );

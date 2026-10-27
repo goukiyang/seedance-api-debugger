@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
@@ -34,7 +35,7 @@ function safeConfigDto(settings: Awaited<ReturnType<typeof getCodexVideoApiSetti
   };
 }
 
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     await getAdminUser(request);
     const settings = await getCodexVideoApiSettings();
@@ -51,9 +52,9 @@ export async function GET(request: NextRequest) {
     console.error('[Admin/CodexIntegration] GET failed:', error);
     return NextResponse.json({ error: '读取 Codex 接口配置失败' }, { status: 500 });
   }
-}
+});
 
-export async function PUT(request: NextRequest) {
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const admin = await getAdminUser(request);
     const body = await request.json() as Record<string, unknown>;
@@ -105,4 +106,4 @@ export async function PUT(request: NextRequest) {
     console.error('[Admin/CodexIntegration] PUT failed:', error);
     return NextResponse.json({ error: '保存 Codex 接口配置失败' }, { status: 500 });
   }
-}
+});

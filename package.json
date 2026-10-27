@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.110.1",
+  "version": "0.111.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -43,7 +43,9 @@
     "@radix-ui/react-context-menu": "2.4.1",
     "@volcengine/tos-sdk": "^2.9.1",
     "@xyflow/react": "^12.10.2",
+    "busboy": "1.6.0",
     "dotenv": "^16.4.5",
+    "ipaddr.js": "2.2.0",
     "lucide-react": "^1.16.0",
     "next": "15.5.28",
     "pdfkit": "^0.18.0",
@@ -68,6 +70,7 @@
     "form-data": "4.0.6"
   },
   "devDependencies": {
+    "@types/busboy": "1.5.4",
     "@types/node": "^20",
     "@types/pdfkit": "^0.17.6",
     "@types/react": "^18",

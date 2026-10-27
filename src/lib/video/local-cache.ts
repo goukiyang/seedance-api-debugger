@@ -1,3 +1,6 @@
+import { safeFetch, SafeFetchError } from '@/lib/net/safe-fetch';
+import { resolveInsideSync } from '@/lib/fs/resolve-inside';
+import { isSafeTaskId } from './thumbnail';
 import { createWriteStream } from 'fs';
 import { mkdir, rename, stat, unlink } from 'fs/promises';
 import path from 'path';
@@ -5,9 +8,10 @@ import { once } from 'events';
 import { prisma } from '@/lib/prisma';
 import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 import { downloadH3JobOutput, parseH3InternalOutputUrl } from '@/lib/provider/h3';
+import { mediaRoot } from '@/lib/media/storage-roots';
 
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
-const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
+const PUBLIC_VIDEO_DIR = mediaRoot('videos');
 const activeCacheTasks = new Map<string, Promise<LocalVideoCacheResult>>();
 
 export type CacheableVideoTask = {
@@ -48,11 +52,13 @@ function publicVideoPath(taskId: string) {
 }
 
 function localVideoPath(taskId: string) {
-  return path.join(PUBLIC_VIDEO_DIR, `${taskId}.mp4`);
+  if (!isSafeTaskId(taskId)) throw new Error('INVALID_LOCAL_PATH');
+  return resolveInsideSync(PUBLIC_VIDEO_DIR, `${taskId}.mp4`);
 }
 
-async function fetchVideo(url: string, signal: AbortSignal) {
-  return fetch(url, {
+async function fetchVideo(url: string, signal: AbortSignal, timeoutMs: number) {
+  return safeFetch(url, {
+    maxBytes: 2 * 1024 * 1024 * 1024, timeoutMs, allowRedirects: true,
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
@@ -63,13 +69,7 @@ async function fetchVideo(url: string, signal: AbortSignal) {
 }
 
 async function fetchVideoWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetchVideo(url, controller.signal);
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  return fetchVideo(url, AbortSignal.timeout(timeoutMs), timeoutMs);
 }
 
 function createDownloadTimeoutError(timeoutMs: number) {
@@ -120,7 +120,7 @@ export async function writeResponseToFile(
   }
 
   const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  const stream = createWriteStream(tempPath);
+  const stream = createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
   const reader = body.getReader();
   let receivedBytes = 0;
   const startedAt = Date.now();
@@ -227,6 +227,8 @@ async function cacheTaskVideoToLocalInner(
   const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
   const refreshOnForbidden = options.refreshOnForbidden !== false;
   const publicPath = publicVideoPath(task.id);
+  if (!isSafeTaskId(task.id)) throw new Error('INVALID_LOCAL_PATH');
+  await mkdir(PUBLIC_VIDEO_DIR, { recursive: true });
   const targetPath = localVideoPath(task.id);
 
   const existingSize = await fileSizeIfExists(targetPath);
@@ -293,7 +295,7 @@ async function cacheTaskVideoToLocalInner(
     try {
       response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if ((error instanceof SafeFetchError && error.code === 'TIMEOUT') || (error instanceof Error && error.name === 'AbortError')) {
         return downloadTimeoutResult(timeoutMs);
       }
       throw error;
@@ -309,7 +311,7 @@ async function cacheTaskVideoToLocalInner(
       try {
         response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        if ((error instanceof SafeFetchError && error.code === 'TIMEOUT') || (error instanceof Error && error.name === 'AbortError')) {
           return {
             ...downloadTimeoutResult(timeoutMs),
             refreshed_url: refreshedUrl,

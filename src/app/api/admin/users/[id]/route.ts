@@ -1,9 +1,10 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { refreshQuotaMembership } from '@/lib/credits/periodic';
-import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { errorJson, getAdminUser, authFailureResponse } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
-import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
+import { revokeAllSessions } from '@/lib/auth/session-store';
 import type { SessionUser } from '@/lib/auth/session';
 import {
   getDefaultFeatureProfileId,
@@ -56,11 +57,11 @@ function activeAdminWhere(excludeUserId?: string) {
   };
 }
 
-export async function GET(request: NextRequest, context: RouteContext) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest, context: RouteContext) {
   try {
     await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   const { id } = (await context.params);
@@ -100,14 +101,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   if (!user) return errorJson('用户不存在', 404);
   return NextResponse.json({ user });
-}
+});
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = apiRoute({ access: 'admin', rateLimit: false }, async function PATCH(request: NextRequest, context: RouteContext) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   const { id } = (await context.params);
@@ -199,11 +200,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   if (userProfileWasProvided || accountType || accountTypeChanged) updateData.user_profile = nextUserProfile;
   if (featureProfileWasProvided || accountType || accountTypeChanged || userProfileWasProvided) updateData.feature_profile_id = nextFeatureProfileId;
   if (expiresAtWasProvided) updateData.expires_at = nextExpiresAt;
-  const nextPasswordHash = maintainAccountSessionBinding(existing, {
-    ...existing, role: nextRole, account_type: nextAccountType, status: nextStatus,
-    user_profile: nextUserProfile, feature_profile_id: nextFeatureProfileId, expires_at: nextExpiresAt,
-  }, password ? hashPassword(password) : existing.password_hash);
-  if (nextPasswordHash !== existing.password_hash) updateData.password_hash = nextPasswordHash;
+  if (password) updateData.password_hash = await hashPassword(password);
+  const revokeSessions = Boolean(password) || ['username', 'email', 'role', 'account_type', 'status', 'user_profile', 'feature_profile_id', 'expires_at']
+    .some((key) => key in updateData && String(updateData[key]) !== String(existing[key as keyof typeof existing]));
 
   if (Object.keys(updateData).length === 0) {
     return errorJson('没有可更新的字段', 400);
@@ -215,6 +214,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       data: updateData,
     });
     if (changed.count !== 1) throw new Error('Account changed concurrently');
+    if (revokeSessions) await revokeAllSessions(id, password ? 'password_reset' : 'account_changed', tx);
     const user = await tx.user.findUniqueOrThrow({
       where: { id },
       select: {
@@ -276,14 +276,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ user: updated });
-}
+});
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = apiRoute({ access: 'admin', rateLimit: false }, async function DELETE(request: NextRequest, context: RouteContext) {
   let admin: SessionUser;
   try {
     admin = await getAdminUser(request);
-  } catch {
-    return errorJson('权限不足', 403);
+  } catch (error) {
+    return authFailureResponse(error);
   }
 
   const { id } = (await context.params);
@@ -304,9 +304,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   await prisma.$transaction(async (tx) => {
     const changed = await tx.user.updateMany({
       where: { id, updated_at: user.updated_at, password_hash: user.password_hash },
-      data: { status: 'deleted', password_hash: maintainAccountSessionBinding(user, { ...user, status: 'deleted' }) },
+      data: { status: 'deleted' },
     });
     if (changed.count !== 1) throw new Error('Account changed concurrently');
+    await revokeAllSessions(id, 'account_deleted', tx);
     await refreshQuotaMembership(tx, id);
 
     await tx.operationLog.create({
@@ -327,4 +328,4 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({ ok: true });
-}
+});

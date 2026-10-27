@@ -1,12 +1,13 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { getImageResultNext, prepareVideoWorkspace, ImageResultNextError } from '@/lib/image-result-next/server';
 import { imageNextBody, imageNextError, imageNextJson, imageNextUser } from '@/lib/image-result-next/http';
 export const dynamic = 'force-dynamic';
-export async function GET(request: Request, props: { params: Promise<{ receiptId: string }> }) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: Request, props: { params: Promise<{ receiptId: string }> }) {
   const params = await props.params;
   try { return imageNextJson(await getImageResultNext(await imageNextUser(request), params.receiptId)); }
   catch (error) { return imageNextError(error); }
-}
-export async function POST(request: Request, props: { params: Promise<{ receiptId: string }> }) {
+});
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: Request, props: { params: Promise<{ receiptId: string }> }) {
   const params = await props.params;
   try {
     const user = await imageNextUser(request), body = await imageNextBody(request);
@@ -14,4 +15,4 @@ export async function POST(request: Request, props: { params: Promise<{ receiptI
     await prepareVideoWorkspace(user, params.receiptId);
     return imageNextJson(await getImageResultNext(user, params.receiptId));
   } catch (error) { return imageNextError(error); }
-}
+});

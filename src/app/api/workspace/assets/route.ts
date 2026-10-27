@@ -1,3 +1,5 @@
+import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 /**
  * POST /api/workspace/assets
  * 添加素材到工作区
@@ -41,7 +43,7 @@ async function ensureNonImageAssetReadyForGeneration(assetId: string, type: stri
   }
 }
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   const startedAt = Date.now();
   let userId: string | null = null;
   try {
@@ -255,7 +257,7 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json({ error: error.code, message: error.message }, { status: error.status });
     }
-    console.error('[AddAssetToWorkspace] Error:', error);
+
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
@@ -266,9 +268,6 @@ export async function POST(request: NextRequest) {
         errorMessage: error instanceof Error ? error.message : 'Failed',
       });
     }
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed' },
-      { status: 500 }
-    );
+    return apiErrorResponse(error);
   }
-}
+});

@@ -1,3 +1,4 @@
+import { route as apiRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -10,11 +11,11 @@ import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { publicPricingBillingState } from '@/lib/image-studio/pricing-state';
 
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest) {
+export const GET = apiRoute({ access: 'admin', rateLimit: false }, async function GET(request: NextRequest) {
   try { await getAdminUser(request); return NextResponse.json(await imageBillingReadinessPayload(), { headers: { 'Cache-Control': 'private, no-store' } }); }
   catch (error) { return NextResponse.json({ error: error instanceof AuthError ? error.message : '读取计费状态失败' }, { status: error instanceof AuthError ? error.status : 503 }); }
-}
-export async function PUT(request: NextRequest) {
+});
+export const PUT = apiRoute({ access: 'admin', rateLimit: false }, async function PUT(request: NextRequest) {
   try {
     const user = await getAdminUser(request);
     const body = await request.json();
@@ -25,9 +26,9 @@ export async function PUT(request: NextRequest) {
     if (!saved) return NextResponse.json({ error: '计费设置已变化，请重新读取' }, { status: 409 });
     return NextResponse.json(await imageBillingReadinessPayload(), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return NextResponse.json({ error: error instanceof AuthError ? error.message : '保存计费意向失败，未确认启用' }, { status: error instanceof AuthError ? error.status : 503 }); }
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = apiRoute({ access: 'admin', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     await getAdminUser(request);
     const body = await request.json();
@@ -45,4 +46,4 @@ export async function POST(request: NextRequest) {
     if (match.state !== 'matched') return NextResponse.json({ state: match.state, userCharged: false }, { status: 409 });
     return NextResponse.json({ recorded: await settleImageSupplierCharge(task.id, match.charge, true), userCharged: false }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return NextResponse.json({ error: error instanceof AuthError ? error.message : '账单核对未确认；用户不会被追扣' }, { status: error instanceof AuthError ? error.status : 503 }); }
-}
+});

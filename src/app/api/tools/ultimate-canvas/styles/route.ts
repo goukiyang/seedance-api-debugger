@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -52,7 +53,7 @@ function decodeCursor(value: string, expectedScope: string) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = declaredRoute({ access: 'user', rateLimit: false }, async function GET(request: NextRequest) {
   try {
     const user = await requireCanvasStyleUser();
     const params = request.nextUrl.searchParams;
@@ -169,4 +170,4 @@ export async function GET(request: NextRequest) {
     if (error instanceof Error && error.message === '分页位置已失效，请重新加载风格库') return canvasStyleJson({ error: error.message }, 400);
     return canvasStyleFailure(error, '风格库暂时无法读取，请重试');
   }
-}
+});

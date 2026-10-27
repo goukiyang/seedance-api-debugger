@@ -1,3 +1,4 @@
+import { route as declaredRoute } from '@/lib/http/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
@@ -39,7 +40,7 @@ async function readInput(request: NextRequest) {
   catch { throw new AuthError('报价参数不是有效 JSON', 400); }
 }
 
-export async function POST(request: NextRequest) {
+export const POST = declaredRoute({ access: 'user', rateLimit: false }, async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
@@ -51,4 +52,4 @@ export async function POST(request: NextRequest) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '报价暂时不可用，请稍后重试' }, { status: 503, headers });
   }
-}
+});

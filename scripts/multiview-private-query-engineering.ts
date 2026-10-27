@@ -1,3 +1,4 @@
+import { setFixtureDatabase } from './fixtures/database-client';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -256,7 +257,7 @@ async function main() {
         if (previous.present && previous.value !== undefined) Object.assign(process.env, { [key]: previous.value });
         else delete process.env[key];
       }
-      if (hadPrisma) runtime.prisma = previousPrisma;
+      if (hadPrisma) setFixtureDatabase(previousPrisma);
       else delete runtime.prisma;
       if (hadPrismaSqlitePragmasStarted) runtime.prismaSqlitePragmasStarted = previousPrismaSqlitePragmasStarted;
       else delete runtime.prismaSqlitePragmasStarted;
