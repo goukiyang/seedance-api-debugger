@@ -5,6 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { mock } from 'node:test';
 import type { SessionUser } from '../src/lib/auth/session';
+import { instrumentDatabaseQueries } from './fixtures/audit-query-instrumentation';
 
 async function main() {
   const root = process.cwd(), run = process.env.MEDIA_FIXTURE_RUN_ID || '';
@@ -33,7 +34,7 @@ async function main() {
   const models = new Set(['ReferenceAlbumFolder', 'AlbumShare', 'PublicAlbumSubmission', 'ReferenceAlbum', 'ReferenceImage', 'User']);
   // Authorization's complete relation edges are semantic inputs, not directory pages.
   // Only top-level collection reads are measured; finite id-IN metadata is bounded by the selected page.
-  prisma.$use(async (params, next) => {
+  await instrumentDatabaseQueries(prisma, async (params, next) => {
     const measured = params.action === 'findMany' && models.has(params.model || '');
     if (measured) {
       collectionReads.count++;
@@ -107,6 +108,7 @@ async function main() {
     const seen: string[] = [];
     for (let page = 1; page <= 7; page++) { const data = await readProjectAlbumDirectory(who, project.id, page); assert.equal(data.total, 130); assert(data.albums.every(row => row.thumbnail_urls.length <= 4)); seen.push(...data.albums.map(row => row.id)); }
     assert.equal(seen.length, 130); assert.equal(new Set(seen).size, 130); results.push('real permission function/private personal project albums:120 denied before130 authorized;20/page and exact authorized total');
+    assert(collectionReads.count > 0 && collectionReads.maxRows > 0, 'Query instrumentation must observe actual collection reads and rows');
     assert.equal(collectionReads.unbounded, 0); assert(collectionReads.maxRows <= 100);
     writeFileSync(evidence, JSON.stringify({ syntheticOnly: true, actualPrismaAndHandlers: true, realMediaProviderOrBrowser: false, results, collectionReads }, null, 2), { flag: 'wx' }); console.log(evidence);
   } finally { await prisma.$disconnect(); }

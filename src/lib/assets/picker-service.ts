@@ -210,9 +210,9 @@ export async function readPicker(user: SessionUser, p: URLSearchParams, headers:
     for await (const preset of pickerRows((after, take) => prisma.imageStudioPreset.findMany({ where: { OR: [{ owner_id: user.id }, { is_shared: true }], AND: [pickerSeek(after)] }, orderBy: { id: 'asc' }, take, select: { id: true } }))) {
       const option = await findTemplate(preset.id, false); if (option) yield option;
     }
-    for await (const module of pickerRows((after, take) => prisma.imageStudioModule.findMany({ where: { owner_id: user.id, ...pickerSeek(after) }, orderBy: { id: 'asc' }, take, select: { id: true } }))) {
-      if (await prisma.imageStudioPreset.findUnique({ where: { id: module.id }, select: { id: true } })) continue;
-      const option = await findTemplate(module.id, true); if (option) yield option;
+    for await (const studioModule of pickerRows((after, take) => prisma.imageStudioModule.findMany({ where: { owner_id: user.id, ...pickerSeek(after) }, orderBy: { id: 'asc' }, take, select: { id: true } }))) {
+      if (await prisma.imageStudioPreset.findUnique({ where: { id: studioModule.id }, select: { id: true } })) continue;
+      const option = await findTemplate(studioModule.id, true); if (option) yield option;
     }
   }
   const directory = p.get('directory');

@@ -4,6 +4,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { mock } from 'node:test';
+import { instrumentDatabaseQueries } from './fixtures/audit-query-instrumentation';
 
 async function main() {
   const root = process.cwd(), run = process.env.MEDIA_FIXTURE_RUN_ID || '';
@@ -23,7 +24,7 @@ async function main() {
   const route = await import('../src/app/api/assets/picker/route');
   const models = new Set(['Asset', 'ReferenceAlbum', 'ReferenceImage', 'ImageStudioTask', 'ImageStudioModule', 'ImageStudioPreset', 'VideoTask', 'ContentReaction']);
   const collectionReads = { queries: 0, invalidTake: 0, maxReturned: 0 };
-  prisma.$use(async (params, next) => {
+  await instrumentDatabaseQueries(prisma, async (params, next) => {
     const guarded = params.action === 'findMany' && models.has(params.model || '');
     if (guarded) { collectionReads.queries++; if (!Number.isInteger(params.args?.take) || params.args.take < 1 || params.args.take > 100) collectionReads.invalidTake++; }
     const value = await next(params);
@@ -84,6 +85,7 @@ async function main() {
     const single = await (await get('keys=asset:picker-native-asset-0222')).json(); assert.equal(single.total, 1);
     const context = await (await get(`directory=templates&template=${preset.id}&template_context=picker-native-module-b`)).json();
     assert(context.templates.find((option: { id: string }) => option.id === preset.id)?.aliases.includes('picker-native-module-b'));
+    assert(collectionReads.queries > 0 && collectionReads.maxReturned > 0, 'Query instrumentation must observe actual collection reads and rows');
     assert.equal(collectionReads.invalidTake, 0); assert(collectionReads.maxReturned <= 100);
     writeFileSync(evidence, JSON.stringify({ syntheticOnly: true, actualPrismaAndHandler: true, complete: ids.length, duplicates: 0, copiedCeilingProtected: true,
       deniedCeilingExcluded: true, tamperOwnerFilterRejected: true, favoritesTemplateSearchAndFiniteKeys: true, currentContextAliasPreserved: true,

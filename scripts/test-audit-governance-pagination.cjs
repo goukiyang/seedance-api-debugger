@@ -67,7 +67,7 @@ function load(file) {
       readProjectOperationProjection: async () => ({}), projectStatusVersion: () => 'synthetic-version' };
     if (name === '@/lib/projects/budget') return { getProjectBudgetSummary: async () => null };
     if (name === '@/lib/tasks/retention') return { USER_VISIBLE_TASK_RETENTION_STATUSES: [] };
-    if (full.endsWith('/src/app/api/projects/[id]/route.ts') && ['@/lib/video-cards/summary', '@/lib/video-cards/suggestions', '@/lib/video/task-thumbnail-projection', '@/lib/provider/error-message', '@/lib/video/multiview-task-privacy'].includes(name)) return {};
+    if (full.endsWith('/src/app/api/projects/[id]/route.ts') && ['@/lib/video-cards/summary', '@/lib/video-cards/suggestions', '@/lib/video/task-thumbnail-projection', '@/lib/provider/error-message', '@/lib/video/multiview-task-privacy', '@/lib/dto/video-task'].includes(name)) return {};
     if (name === '@/lib/access/media-policy') return {};
     if (name === '@/lib/image-studio/protected-assets') return { studioVisibleReferenceWhere: async () => ({}) };
     if (name === '@/lib/users/display') return { displayUserName: u => u.name || u.id };

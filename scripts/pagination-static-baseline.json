@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "algorithm": "sha256-exact-source-and-typescript-node-text",
+  "scale": { "ref": "68fa488d", "criticalCallCount": 60, "criticalCallsSha256": "2a1e40a489684b9018bd805504688a171c6fe3e2aad3d97a084e012099ea8aa8" },
+  "nodes": {
+    "src/app/api/video/list/route.ts": { "ref": "b812b064", "kind": "declaration", "sha256": {
+      "serializeTaskListItem": "b4df2020fc75537138271e267cca947fea1a3a93549ab29bcbb62808fb9b6584"
+    } },
+    "src/app/api/video-cards/[id]/tasks/route.ts": { "ref": "b812b064", "kind": "declaration", "sha256": {
+      "PATCH": "b6ac334618257872e6aeb1a2a17655abc0677a0367d5c39e452e193e412ac7a1"
+    } },
+    "src/components/SeedanceAssetPanel.tsx": { "ref": "b812b064", "kind": "declaration", "sha256": {
+      "handleCreate": "d39f737900c639aa66f957f2a8a30d5d356acd7d7e39e6373da391600fa40a96",
+      "handleRename": "437bc60ce08e22c94ecdb871b4085f561d6891ffa3330bb09d967c920c683dd4",
+      "handleRemove": "b96f3f4f91d59349ecdef4d8e7d0c1e26299d84529b5f8228f3b8a7a2c410796",
+      "handleProviderDelete": "4cd111205f0aae6a945b44cb3c3d1b3aa821211206b70b917a60aa31094f4faf",
+      "handleLocalUpload": "41d38affe45d09a83e27769d89fcf003328c050e676698ba5df64ec98e420144"
+    } },
+    "src/lib/assets/seedanceAssetRepository.ts": { "ref": "b812b064", "kind": "declaration", "sha256": {
+      "toApiRecord": "a00bad5e81724935308d57e5d4b0bc58d28105755638c6796124c5064f3639ff",
+      "create": "0f4ac530aeafd0d16efa446f17793833b99f0a9e88b71614d2f2db70025829c3",
+      "update": "4b61a2c0a7bdabaa1eb8c090dfd6ca6779c4db2623cc6aadf4c14e3316f634c7",
+      "updateByProviderId": "cc5b546c37598ada26e6a71436fc7f2408c08747120d7cc1721e0368c6af0df2",
+      "softDelete": "4ff55a29c33d6c7406681c75ba917d1f56a6e605173be52f0fa24a6346c3c435",
+      "markProviderDeleted": "f65419207baf800ff24760208ffb5f69bc69078eb7dcd16513d7c9d3961d71aa",
+      "markDeleteFailed": "9c133f60c6dcf53fc1c75384b4656865754596e14ada5c673e807b378255fcea",
+      "createWithStorageMetadata": "6775ffd9c606490e4f8c89311aadfe9a28e512e46f7c23eceb78d2310e6651a4"
+    } },
+    "src/components/SeedanceAssetSelector.tsx": { "ref": "c47cd971", "kind": "variable", "sha256": {
+      "handleSelect": "210e1466550d84201daf5e76822f111cd348ef0f29be3bc9483b85d3841675fe",
+      "handleRemove": "a84bad9d067f6dfdf3386dc96cf16eae7bc0e711e5c0bf74c74235a7392287c9",
+      "handleMoveUp": "2b600f1507235189afe94e9254bd4bd749444f8c2ca2d49db5b2d96f90ec72b9",
+      "handleMoveDown": "f059887ecfceacc9b0b0401fe633ebc91145e1f2b73a4ceaf47eca7b93ae3fa4"
+    } },
+    "src/app/multiview/MultiviewRecords.tsx": { "ref": "902d4f99", "kind": "function", "sha256": {
+      "RecordCard": "15065d4611f3863893fec3f21e6b1eb1cd1b3683cc88380d821c09829f615b40"
+    } }
+  },
+  "files": {
+    "src/components/SeedanceAssetPanel.tsx": { "ref": "c47cd971", "sha256": "76ae25f5da25c9672478d9b2c90a6e75d9521152fb09788aa85fc8519027b815" },
+    "src/lib/pagination/use-seedance-pages.ts": { "ref": "c47cd971", "sha256": "824c68a4e8781e12b424c49b15d2bbc82d5771b754330b008bdbfa80321eadec" },
+    "src/lib/pagination/seedance-pages.ts": { "ref": "c47cd971", "sha256": "97a26eee048b21533c7aac8ef1150a04792f0fce07ccce0f2a357d3679595921" },
+    "src/lib/assets/seedanceAssetRepository.ts": { "ref": "c47cd971", "sha256": "1337210fa4f3738c8c329aba144d6f83bb0b2e78fa439876bd0d8029835b83b1" },
+    "src/app/api/assets/list/route.ts": { "ref": "c47cd971", "sha256": "4f3926aea9fbe45fcfd7ef159f130da63c0208493cfc75f37d61f51c42fc764d" }
+  }
+}

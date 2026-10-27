@@ -221,7 +221,7 @@ async function main() {
         assert.equal(row.status, 'succeeded'); assert.ok(row.asset_id); assert.equal(row.error, null);
         const asset = await database.asset.findUniqueOrThrow({ where: { id: row.asset_id! } });
         assert.equal(asset.owner_id, owner); assert.equal(asset.status, 'active'); assert.equal(asset.mime_type, 'image/png');
-        assert.equal((await sharp(readFileSync(path.join(directory, 'public', asset.original_url))).metadata()).width, 16);
+        assert.equal((await sharp(readFileSync(path.join(directory, '.media', asset.original_url))).metadata()).width, 16);
         assert.equal(await finishStudioTask(originals[i], 'uncertain'), false, 'A stale original lease cannot undo the delivered result');
       }
     }

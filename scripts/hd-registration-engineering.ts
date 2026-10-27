@@ -106,7 +106,7 @@ async function main() {
     assert.equal(await registerCommittedStudioHd(task.id), true);
     assert.deepEqual(await core.readHdJob(job.key), ready, 'Existing ready result is reused without another encode');
     assert.equal((await core.listHdJobs()).length, 1);
-    assert.deepEqual(await fs.readFile(path.join(directory, 'public', prepared.original_url)), original);
+    assert.deepEqual(await fs.readFile(path.join(directory, '.media', prepared.original_url)), original);
     assert.equal(await snapshot(task.id), committed);
     assert.equal(await finishStudioTask(task, 'succeeded', { preparedAsset: prepared }), false);
     assert.equal(await prisma.creditLedger.count({ where: { related_task_id: task.id, type: 'task_success_deduct' } }), 1);
@@ -119,7 +119,7 @@ async function main() {
     const missingPrepared = await prepareStudioOutput(missingBytes, missingTask, { width: 16, height: 16 }, async () => {});
     assert.equal(await finishStudioTask(missingTask, 'succeeded', { preparedAsset: missingPrepared }), true);
     const delivered = await snapshot(missingTask.id);
-    const sourceFile = path.join(directory, 'public', missingPrepared.original_url);
+    const sourceFile = path.join(directory, '.media', missingPrepared.original_url);
     await fs.rename(sourceFile, `${sourceFile}.held`);
     const logs: string[] = [];
     const logMock = mock.method(console, 'error', (...args: unknown[]) => { logs.push(args.join(' ')); });
@@ -141,7 +141,7 @@ async function main() {
     assert.equal(retained.status, 'uncertain'); assert.ok(retained.asset_id);
     const retainedAsset = await prisma.asset.findUniqueOrThrow({ where: { id: retained.asset_id! } });
     assert.ok((await core.listHdJobs()).some(item => item.source === retainedAsset.original_url));
-    assert.deepEqual(await fs.readFile(path.join(directory, 'public', retainedAsset.original_url)), original);
+    assert.deepEqual(await fs.readFile(path.join(directory, '.media', retainedAsset.original_url)), original);
     const failedTask = await createTask('hd-retained-failed');
     const retainedData = { ...prepared, id: `studio-${failedTask.id}`, metadata_json: JSON.stringify({ preserveText: true }) };
     const usage = { studioDelivery: { code: 'generated_dimensions_mismatch', originalSha256: createHash('sha256').update(original).digest('hex'),

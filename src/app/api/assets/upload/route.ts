@@ -1,4 +1,5 @@
 import { route as apiRoute } from '@/lib/http/route';
+import { apiErrorResponse } from '@/lib/http/api-error';
 import { readMultipartUpload, streamToTemporaryUpload, UploadStreamError } from '@/lib/assets/streamed-upload';
 /**
  * POST /api/assets/upload
@@ -44,7 +45,9 @@ export const GET = apiRoute({ access: 'user', rateLimit: false }, async function
     return NextResponse.json({ rawUpload: state ? rawUploadProof(state) : { ...identity, phase: 'absent' }, recoveryToken: await rawUploadRecoveryToken(identity) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json({ ...verifiedUploadFailure(error), errorStage: 'recovery' }, { status: error.status });
-    return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件' }, { status: 503 });
+    const diagnostic = apiErrorResponse(error);
+    const { errorId } = await diagnostic.json();
+    return NextResponse.json({ error: '原上传结果暂时无法核对，请稍后查询；未重新发送文件', errorId }, { status: 503, headers: diagnostic.headers });
   }
 });
 
@@ -263,7 +266,8 @@ export const POST = apiRoute({ access: 'user', rateLimit: false }, async functio
         errorStage, requestId: originalRequestId, uploadMode: 'raw', fallbackPath: 'raw', skippedProxy: true });
       return NextResponse.json({ ...verifiedUploadFailure(error), errorStage }, { status: error.status });
     }
-    console.error('[Upload] Error:', error);
+    const diagnostic = apiErrorResponse(error);
+    const { errorId } = await diagnostic.json();
     if (userId) {
       await recordAssetUploadLog({
         operatorId: userId,
@@ -274,7 +278,7 @@ export const POST = apiRoute({ access: 'user', rateLimit: false }, async functio
         fileSize,
         durationMs: Date.now() - startedAt,
         errorCode: 'raw_failed',
-        errorMessage: error instanceof Error ? error.message : 'Upload failed',
+        errorMessage: `上传结果待确认；错误编号：${errorId}`,
         errorStage,
         requestId: originalRequestId,
         uploadMode: 'raw',
@@ -284,8 +288,8 @@ export const POST = apiRoute({ access: 'user', rateLimit: false }, async functio
       });
     }
     return NextResponse.json(
-      { error: '上传服务暂不可用，原上传结果待确认；请核对原上传，不要重新发送文件', code: 'UPLOAD_RESULT_UNKNOWN', errorStage },
-      { status: 500 }
+      { error: '上传服务暂不可用，原上传结果待确认；请核对原上传，不要重新发送文件', code: 'UPLOAD_RESULT_UNKNOWN', errorStage, errorId },
+      { status: 500, headers: diagnostic.headers }
     );
   } finally { await temporary?.cleanup().catch(() => {}); }
 });

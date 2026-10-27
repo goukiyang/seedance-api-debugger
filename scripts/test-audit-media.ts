@@ -10,6 +10,7 @@ import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
+import { instrumentDatabaseQueries } from './fixtures/audit-query-instrumentation';
 
 async function main() {
   const root = process.cwd();
@@ -429,7 +430,7 @@ async function main() {
     await test('actual nginx signed outlet serves Range and private thumbnails;100reads add zero resource queries', async () => {
       const m = await import('../src/app/m/[type]/[id]/[variant]/route');
       const counters: Record<string, number> = {};
-      prisma.$use(async (params, next) => { const model = params.model || 'raw'; counters[model] = (counters[model] || 0) + 1; return next(params); });
+      await instrumentDatabaseQueries(prisma, async (params, next) => { const model = params.model || 'raw'; counters[model] = (counters[model] || 0) + 1; return next(params); });
       const token = await session.createSession(owner.id);
       const cookie = `${session.SESSION_COOKIE}=${token}`;
       const address = await outlet.mediaAddress(actors[0], { type: 'asset', id: asset.id }, 'thumbnail');

@@ -43,8 +43,12 @@ function inspect(file, source, client = false) {
       // future variable URL in the same file must still fail this check.
       const databaseAlertCall = file === 'src/lib/database/alerts.ts' && node.arguments[0] && ts.isStringLiteral(node.arguments[0])
         && node.arguments[0].text === 'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id';
+      // This exact bounded callback reads database pages, not an HTTP URL.
+      const paginationSourceCall = file === 'src/lib/pagination/cursor.ts' && callee === 'options.fetch'
+        && node.arguments.length === 2 && node.arguments[0].getText(tree) === 'after'
+        && ts.isNumericLiteral(node.arguments[1]) && node.arguments[1].text === '100';
       if (/^(fetch|fetchImpl|fetcher)$|^(globalThis|resolved|options)\.fetch(Impl)?$/.test(callee)
-        && !client && !trustedDispatch[file] && !deferred[file] && !databaseAlertCall) failures.push(`${file}:${tree.getLineAndCharacterOfPosition(node.pos).line + 1}: unclassified direct fetch`);
+        && !client && !trustedDispatch[file] && !deferred[file] && !databaseAlertCall && !paginationSourceCall) failures.push(`${file}:${tree.getLineAndCharacterOfPosition(node.pos).line + 1}: unclassified direct fetch`);
       if (/^(http|https)\.(request|get)$/.test(callee) && file !== 'src/lib/net/safe-fetch.ts' && file !== 'src/lib/image-studio/provider.ts') {
         failures.push(`${file}: unclassified native HTTP transport`);
       }

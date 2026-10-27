@@ -80,10 +80,11 @@ test('actual publisher atomically retains exact bytes and never overwrites a con
   const directory=await fsp.mkdtemp(path.join(os.tmpdir(),'aud-publish-'));
   class VerifiedUploadError extends Error { constructor(code,message,status){super(message);Object.assign(this,{code,status});} }
   try {
-    const output=path.join(directory,'public/uploads/assets'); await fsp.mkdir(output,{recursive:true});
+    const output=path.join(directory,'.media/uploads/assets'); await fsp.mkdir(output,{recursive:true});
     const api=functions('src/lib/assets/verified-upload.ts',['uploadFileVersion','uploadFileHash','publishVerifiedFile'],{
       fs:fsp, path, createHash:crypto.createHash, createReadStream:fs.createReadStream, randomUUID:crypto.randomUUID,
       privateUploadDirectory:async()=>directory, VerifiedUploadError, process:{platform:'darwin',cwd:()=>directory},
+      require:name=>{assert.equal(name,'@/lib/media/storage-roots');return {mediaRoot:kind=>path.join(directory,'.media',kind)};},
     });
     const source=path.join(directory,'temporary.upload'), original=Buffer.from('synthetic unchanged bytes');await fsp.writeFile(source,original);
     const proof={file:source,bytes:original.length,hash:crypto.createHash('sha256').update(original).digest('hex'),version:await api.uploadFileVersion(source)};
@@ -119,6 +120,8 @@ test('actual upload validator confines both native video tools to local protocol
   } finally {await fsp.rm(directory,{recursive:true,force:true});}
 });
 test('actual POST recovers original receipt without resending and keeps writing failures unknown', async () => {
+  process.env.SESSION_SECRET = 'synthetic-upload-diagnostics-not-production';
+  delete process.env.ERROR_LOG_SECRET;
   const { NextResponse } = deps('next/server');
   class VerifiedUploadError extends Error { constructor(code,message,status=409){super(message);Object.assign(this,{code,status});} }
   const phases=new Map(), receipts=new Map();let writes=0, fault='after';
@@ -127,6 +130,9 @@ test('actual POST recovers original receipt without resending and keeps writing 
   mocks.set('next/server',{NextResponse}); mocks.set('src/lib/auth/session.ts',{getSession:async()=>({id:'synthetic-owner'})});
   // Authentication is covered by test-api-route; this fixture owns upload receipts.
   mocks.set('src/lib/http/route.ts',{route:(_policy,handler)=>handler});
+  // This suite owns receipt recovery; the real browser projection is covered by
+  // the separate actual-Prisma media matrix, including source-right ceilings.
+  mocks.set('src/lib/media/browser-projection.server.ts',{browserUploadResponse:async(_user,value)=>value});
   mocks.set('src/lib/prisma.ts',{prisma:{asset:{findFirst:async()=>null}}});
   mocks.set('src/lib/assets/verified-upload.ts',{
     VerifiedUploadError, assertUploadOwner:(expected,owner)=>{if(expected!==owner)throw new VerifiedUploadError('SESSION_CHANGED','synthetic changed owner');},
@@ -144,15 +150,21 @@ test('actual POST recovers original receipt without resending and keeps writing 
       writes++;const data=await fsp.readFile(file);assert.equal(data.length,fileSize);assert.equal(crypto.createHash('sha256').update(data).digest('hex'),hash);
       if(fault==='before')throw new VerifiedUploadError('UPLOAD_IMAGE_INVALID','synthetic decode rejection',400);
       const asset={id:'synthetic-asset',assetId:'synthetic-asset',originalUrl:'/uploads/assets/synthetic.mp4',thumbnailUrl:null,fileName,fileSize,mimeType,hash,reused:false,isPubliclyReachable:true,storageProvider:'local-public'};
-      receipts.set(`${ownerId}:${requestId}`,asset);if(fault==='after')throw new Error('synthetic response lost after committed receipt');return asset;
+      receipts.set(`${ownerId}:${requestId}`,asset);if(fault==='after')throw new Error('synthetic response lost after committed receipt Authorization: Bearer SYNTHETIC_UPLOAD_SECRET');return asset;
     },
   });
-  mocks.set('src/lib/assets/upload-log.ts',{recordAssetUploadLog:async()=>{}});mocks.set('src/lib/media/hd-derivatives.ts',{requestHd:async()=>{}});
+  const uploadLogs=[];
+  mocks.set('src/lib/assets/upload-log.ts',{recordAssetUploadLog:async entry=>{uploadLogs.push(entry);}});mocks.set('src/lib/media/hd-derivatives.ts',{requestHd:async()=>{}});
   const {POST}=load('src/app/api/assets/upload/route.ts');const data=Buffer.from('synthetic upload bytes'),hash=crypto.createHash('sha256').update(data).digest('hex'),nonce='a'.repeat(48);
   const identity=rawIdentity('synthetic-owner',{requestId:'original-key',hash,fileSize:data.length,mimeType:'video/mp4'});
   const invoke=(id=identity,onPull=()=>{})=>{let sent=false;const body=new ReadableStream({pull(controller){onPull();if(sent)return controller.close();sent=true;controller.enqueue(data);}}, {highWaterMark:0});return POST(new Request('https://synthetic.invalid/api/assets/upload',{method:'POST',headers:{'content-type':'video/mp4','x-file-size':String(data.length),'x-file-name':'fixture.mp4','x-upload-owner-id':'synthetic-owner','x-upload-request-id':id.requestId,'x-file-hash':id.hash,'x-raw-upload-version':'2','x-raw-upload-nonce':nonce},body,duplex:'half'}));};
   phases.set(key(identity),{...identity,nonce,phase:'prepared'});
-  const unknown=await invoke();assert.equal(unknown.status,500);assert.equal((await unknown.json()).code,'UPLOAD_RESULT_UNKNOWN');assert.equal(phases.get(key(identity)).phase,'writing');
+  const diagnosticLogs=[], originalError=console.error; let unknown;
+  try {console.error=(...args)=>diagnosticLogs.push(args);unknown=await invoke();} finally {console.error=originalError;}
+  assert.equal(unknown.status,500);const unknownBody=await unknown.json();assert.equal(unknownBody.code,'UPLOAD_RESULT_UNKNOWN');assert.equal(phases.get(key(identity)).phase,'writing');
+  assert.doesNotMatch(JSON.stringify([diagnosticLogs,uploadLogs,unknownBody]),/SYNTHETIC_UPLOAD_SECRET/);
+  assert.match(unknownBody.errorId||'',/^[a-f0-9-]{36}$/);
+  assert.equal(diagnosticLogs[0][1].format,'api-error.v1');assert.equal(diagnosticLogs[0][1].errorId,unknownBody.errorId);
   let pulled=0;fault='none';const recovered=await invoke(identity,()=>pulled++);assert.equal(recovered.status,200);assert.equal((await recovered.json()).asset.id,'synthetic-asset');assert.equal(pulled,0);assert.equal(writes,1);
   const failed={...identity,requestId:'decode-failed'};phases.set(key(failed),{...failed,nonce,phase:'prepared'});fault='before';
   const failure=await invoke(failed);assert.equal(failure.status,400);assert.equal((await failure.json()).notAccepted,undefined);assert.equal(phases.get(key(failed)).phase,'writing');

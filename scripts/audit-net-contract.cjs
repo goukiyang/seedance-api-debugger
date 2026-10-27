@@ -71,18 +71,24 @@ const tests = [];
 const test = (name, run) => tests.push({ name, run });
 test('thumbnail output accepts the configured video root symlink but refuses nested escapes', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aud-net-thumbnail-'));
+  const previous = process.env.MEDIA_DATA_ROOT;
   try {
-    await fsp.mkdir(path.join(dir, 'public'));
-    await fsp.mkdir(path.join(dir, 'data/videos/thumbnails'), { recursive: true });
-    await fsp.symlink(path.join(dir, 'data/videos'), path.join(dir, 'public/videos'));
+    await fsp.mkdir(path.join(dir, 'data'));
+    await fsp.mkdir(path.join(dir, 'video-data/thumbnails'), { recursive: true });
+    await fsp.symlink(path.join(dir, 'video-data'), path.join(dir, 'data/videos'));
+    process.env.MEDIA_DATA_ROOT = path.join(dir, 'data');
     const { resolveInsideSync } = load('src/lib/fs/resolve-inside.ts');
+    const { mediaRoot } = load('src/lib/media/storage-roots.ts');
     const { thumbnailFilePath } = loadFunctions('src/lib/video/thumbnail.ts', ['thumbnailFilePath'], {
-      exports: {}, PUBLIC_VIDEO_ROOT: path.join(dir, 'public'), path, resolveInsideSync, isSafeTaskId: value => /^[a-z0-9-]+$/.test(value),
+      exports: {}, mediaRoot, path, resolveInsideSync, isSafeTaskId: value => /^[a-z0-9-]+$/.test(value),
     });
-    assert.equal(thumbnailFilePath('synthetic-task'), path.join(await fsp.realpath(dir), 'data/videos/thumbnails/synthetic-task.jpg'));
-    await fsp.symlink(path.join(dir, 'outside.jpg'), path.join(dir, 'data/videos/thumbnails/escape.jpg'));
+    assert.equal(thumbnailFilePath('synthetic-task'), path.join(await fsp.realpath(dir), 'video-data/thumbnails/synthetic-task.jpg'));
+    await fsp.symlink(path.join(dir, 'outside.jpg'), path.join(dir, 'video-data/thumbnails/escape.jpg'));
     assert.throws(() => thumbnailFilePath('escape'), /INVALID_LOCAL_PATH/);
-  } finally { await fsp.rm(dir, { recursive: true, force: true }); }
+  } finally {
+    if (previous === undefined) delete process.env.MEDIA_DATA_ROOT; else process.env.MEDIA_DATA_ROOT = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
 });
 test('actual public URL helper rejects mapped IPv6 and reserved CIDRs', () => {
   const { isPrivateNetworkHost, isPublicHttpUrl } = load('src/lib/media/public-url.ts');
@@ -229,6 +235,9 @@ test('static guard rejects a new raw variable fetch and native HTTP transport', 
   const { inspect } = require('./check-audit-net.cjs');
   assert.equal(inspect('src/lib/new-resource.ts', 'async function read(url) { return fetch(url); }').length, 1);
   assert.equal(inspect('src/lib/new-resource.ts', 'https.get(url);').length, 1);
+  assert.equal(inspect('src/lib/pagination/cursor.ts', 'options.fetch(after, 100);').length, 0);
+  assert.equal(inspect('src/lib/pagination/cursor.ts', 'options.fetch(url);').length, 1);
+  assert.equal(inspect('src/lib/pagination/cursor.ts', 'fetch(url);').length, 1);
 });
 test('actual H3 resource handoff cannot bypass safeFetch via provider injection', async () => {
   const providerFetch = async () => { throw new Error('Resource download must not use provider fetch override'); };

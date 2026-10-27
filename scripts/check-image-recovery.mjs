@@ -95,7 +95,7 @@ const fixtures = [
       'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/output.ts', 'src/lib/image-studio/delivery.ts',
       'src/app/api/image-studio/assets/[assetId]/route.ts', 'src/app/api/image-studio/download/route.ts',
       'src/app/image-studio/studio.tsx', 'src/components/GeneratedImageResults.tsx', 'src/lib/image-studio/worker.ts',
-      'src/app/api/image-studio/upload-access/route.ts', 'src/lib/image-studio/input-main.ts', 'src/lib/image-studio/result-pins.ts',
+      'src/app/api/media/legacy/route.ts', 'src/lib/media/legacy.ts', 'src/lib/access/media-policy.ts', 'src/lib/image-studio/input-main.ts', 'src/lib/image-studio/result-pins.ts',
       'src/lib/image-studio/result-feed.ts', 'src/lib/image-studio/result-attention.ts', 'src/lib/image-studio/viewer-receipts.ts',
       'src/lib/image-result-next/server.ts', 'src/lib/assets/generation-origin.ts', 'src/lib/image-studio/modules.ts',
       'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/app/image-studio/batch-results.tsx',

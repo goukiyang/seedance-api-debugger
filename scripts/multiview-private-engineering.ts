@@ -17,22 +17,22 @@ const SINK_WIRING = Object.freeze([
   ['src/app/api/approvals/[id]/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
   ['src/app/api/approvals/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
   ['src/app/api/assets/library/route.ts', ['ordinaryVideoTaskWhere', 'safeVideoTaskKeywordWhere', 'multiviewOutputsOnly']],
-  ['src/app/api/assets/picker/route.ts', ['ordinaryVideoTaskWhere', 'safeVideoTaskKeywordWhere']],
-  ['src/app/api/image-studio/upload-access/route.ts', ['multiviewSystemReferenceFileAccess', 'multiviewOutputFileAccess']],
+  ['src/app/api/assets/picker/route.ts', ['readPicker']],
+  ['src/app/api/media/legacy/route.ts', ['legacyMediaResponse']],
   ['src/app/api/me/credits/ledger/route.ts', ['isPrivateMultiviewTask', 'privateMultiviewLedgerMetadata']],
   ['src/app/api/multiview/preset/route.ts', ['readPublicMultiviewRotationPreset']],
   ['src/app/api/projects/[id]/route.ts', ['projectSelectedMultiviewTask', 'safeVideoTaskKeywordWhere', 'source_metadata_json']],
   ['src/app/api/projects/[id]/video-cards/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
   ['src/app/api/provider/seedance/callback/route.ts', ['projectPrivateMultiviewTask', 'isPublicHttpUrl']],
   ['src/app/api/tasks/[id]/reuse/route.ts', ['isPrivateMultiviewTask', 'readSafePrivateMultiviewInput']],
-  ['src/app/api/tasks/[id]/route.ts', ['projectPrivateMultiviewTask', 'projectSelectedMultiviewTask']],
+  ['src/app/api/tasks/[id]/route.ts', ['toVideoTaskView', 'videoTaskViewSelect']],
   ['src/server/video-tasks/standard-create.ts', ['readMultiviewSystemReference', 'consumeTrustedMultiviewRetry', 'multiviewPrivateTaskMarker', 'privateNoStore']],
   ['src/app/api/tasks/enhance-video/create/route.ts', ['readMultiviewPrivateTaskMarker', 'MULTIVIEW_PUBLIC_TASK_TITLE']],
   ['src/app/api/video-cards/[id]/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
-  ['src/app/api/video-cards/[id]/tasks/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
-  ['src/app/api/video/list/route.ts', ['projectSelectedMultiviewTask', 'source_metadata_json']],
+  ['src/app/api/video-cards/[id]/tasks/route.ts', ['toVideoTaskView', 'videoTaskViewSelect']],
+  ['src/app/api/video/list/route.ts', ['toVideoTaskView', 'videoTaskViewSelect']],
   ['src/app/api/video/retry/[id]/route.ts', ['createPrivateMultiviewRetry', 'readMultiviewPrivateTaskMarker', 'projectSelectedMultiviewTask']],
-  ['src/app/api/video/status/[id]/route.ts', ['privateMultiviewFailure', 'projectPrivateMultiviewTask']],
+  ['src/app/api/video/status/[id]/route.ts', ['privateMultiviewFailure', 'toVideoTaskDetail', 'videoTaskDetailSelect']],
   ['src/app/uploads/[...path]/route.ts', ['multiviewSystemReferenceFileAccess', 'multiviewOutputFileAccess']],
 ] as const);
 
@@ -245,6 +245,11 @@ function assertSinkSyntax(source: string, file: string, tokens: readonly string[
       || ts.isFunctionDeclaration(node) && named(node.name, token) && Boolean(node.body)
       || ts.isVariableDeclaration(node) && named(node.name, token) && Boolean(node.initializer));
     assert.ok(declared, `${file}: missing runtime import/definition for ${token}`);
+    if (token === 'videoTaskViewSelect' || token === 'videoTaskDetailSelect') {
+      assert.ok(nodes.some(node => ts.isPropertyAssignment(node) && named(node.name, 'select')
+        && ts.isIdentifier(node.initializer) && node.initializer.text === token), `${file}: missing DTO select use`);
+      continue;
+    }
     if (token === 'multiviewOutputsOnly' || token === 'MULTIVIEW_PUBLIC_TASK_TITLE') {
       const used = nodes.some(node => {
         if (!ts.isIdentifier(node) || node.text !== token) return false;
@@ -269,6 +274,12 @@ function assertSinkSyntax(source: string, file: string, tokens: readonly string[
 }
 
 function assertSinkSyntaxRefusals() {
+  const dto = "import { toVideoTaskView, videoTaskViewSelect } from 'synthetic'; const args = { select: videoTaskViewSelect }; const view = toVideoTaskView(task);";
+  assertSinkSyntax(dto, 'synthetic-dto.ts', ['toVideoTaskView', 'videoTaskViewSelect']);
+  assert.throws(() => assertSinkSyntax(dto.replace('select: videoTaskViewSelect', "select: 'videoTaskViewSelect'"),
+    'synthetic-dto.ts', ['toVideoTaskView', 'videoTaskViewSelect']));
+  assert.throws(() => assertSinkSyntax(dto.replace('toVideoTaskView(task)', 'task /* toVideoTaskView(task) */'),
+    'synthetic-dto.ts', ['toVideoTaskView', 'videoTaskViewSelect']));
   const tokens = ['source_metadata_json', 'projectSelectedMultiviewTask', 'multiviewOutputsOnly'];
   const source = `import { projectSelectedMultiviewTask } from 'synthetic';
     const args = { select: { id: true, source_metadata_json: true } };
@@ -302,6 +313,13 @@ function assertTwentySinkStaticWiring(root: string) {
   assert.equal(SINK_WIRING.length, 20, 'The static sink inventory must stay at the reviewed 20 endpoints');
   assertSinkSyntaxRefusals();
   for (const [file, tokens] of SINK_WIRING) assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, tokens);
+  for (const [file, tokens] of [
+    ['src/lib/assets/picker-service.ts', ['ordinaryVideoTaskWhere', 'safeVideoTaskKeywordWhere', 'decideMedia']],
+    ['src/lib/dto/video-task.ts', ['isPrivateMultiviewTask', 'projectPrivateMultiviewTask']],
+    ['src/lib/dto/video-task-detail.ts', ['toVideoTaskView']],
+    ['src/lib/media/legacy.ts', ['decideMedia']],
+    ['src/lib/access/media-policy.ts', ['protectedSource', 'multiviewSystemReferenceFileAccess']],
+  ] as const) assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, tokens);
   for (const file of ['src/lib/video/multiview-output-assets.server.ts', 'src/lib/video/multiview-work-render.ts']) {
     assertSinkSyntax(readFileSync(path.join(root, file), 'utf8'), file, ['parseMultiviewWorkManifest']);
   }

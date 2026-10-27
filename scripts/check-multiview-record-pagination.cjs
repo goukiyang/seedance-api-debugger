@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
 const { ts, sharedCursor } = require('./audit-task-pagination-loader.cjs');
+const { assertOriginalNode } = require('./pagination-static-baseline.cjs');
 const service = 'src/lib/video/multiview-records.server.ts', ui = 'src/app/multiview/MultiviewRecords.tsx';
 const files = [service, ui, 'src/app/multiview/multiview-record-pages.ts', 'src/app/api/video/multiview/records/route.ts'];
 const read = file => fs.readFileSync(file, 'utf8');
@@ -20,12 +20,7 @@ assert.match(server, /items\.length === limit/); assert.match(server, /items\.po
 assert.match(server, /source_id: ''/); assert.match(server, /by: \['source_id', 'source_task_id'\]/);
 assert.match(server, /row\?\.project_id === projectId && await allowed/);
 assert.match(server, /raw\[width\] !== fingerprint/);
-function nodeText(source, name) {
-  const tree = ts.createSourceFile(ui, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX); let result;
-  const visit = node => { if (ts.isFunctionDeclaration(node) && node.name?.text === name) result = node.getText(tree); ts.forEachChild(node, visit); };
-  visit(tree); assert.ok(result); return result;
-}
-assert.equal(nodeText(client, 'RecordCard'), nodeText(execFileSync('git', ['show', '902d4f99:' + ui], { encoding: 'utf8' }), 'RecordCard'));
+assertOriginalNode(ui, 'RecordCard');
 assert.match(client, /await loadMultiviewRecordProjects/); assert.match(client, /setProjectId\(previous =>/);
 assert.match(client, /loadedScope === recordScope \? items : \[\]/); assert.match(client, /captured === directoryScopeRef\.current/);
 assert.match(client, /captured === recordScopeRef\.current/); assert.match(client, /\[400, 401, 403, 409\]/);

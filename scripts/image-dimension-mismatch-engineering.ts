@@ -21,7 +21,7 @@ const sourcePaths = ['src/lib/image-studio/dimension-rejection.ts', 'src/lib/ima
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/output.ts', 'src/lib/image-studio/delivery.ts',
   'src/app/api/image-studio/assets/[assetId]/route.ts', 'src/app/api/image-studio/download/route.ts',
   'src/app/image-studio/studio.tsx', 'src/components/GeneratedImageResults.tsx', 'src/lib/image-studio/worker.ts',
-  'src/app/api/image-studio/upload-access/route.ts', 'src/lib/image-studio/input-main.ts', 'src/lib/image-studio/result-pins.ts',
+  'src/app/api/media/legacy/route.ts', 'src/lib/media/legacy.ts', 'src/lib/access/media-policy.ts', 'src/lib/image-studio/input-main.ts', 'src/lib/image-studio/result-pins.ts',
   'src/lib/image-studio/result-feed.ts', 'src/lib/image-studio/result-attention.ts', 'src/lib/image-studio/viewer-receipts.ts',
   'src/lib/image-result-next/server.ts', 'src/lib/assets/generation-origin.ts', 'src/lib/image-studio/modules.ts',
   'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/app/image-studio/batch-results.tsx',
@@ -90,7 +90,7 @@ async function main() {
     const asset = await db.asset.findUniqueOrThrow({ where: { id: finished.asset_id! } });
     assert.equal(asset.hash, originalSha256); assert.equal(asset.width, 16); assert.equal(asset.height, 16);
     assert.equal(JSON.parse(asset.metadata_json || '{}').deliveryDisposition, 'generated_dimensions_mismatch');
-    assert.ok(existsSync(path.join(directory, 'public', asset.original_url)) && existsSync(path.join(directory, 'public', asset.thumbnail_url!)));
+    assert.ok(existsSync(path.join(directory, '.media', asset.original_url)) && existsSync(path.join(directory, '.media', asset.thumbnail_url!)));
     assert.ok(existsSync(path.join(directory, 'storage/studio-billing', active.id, `rejected-dimensions-${originalSha256}.png`)));
     assert.equal(await db.creditLedger.count({ where: { related_task_id: active.id } }), 2);
     assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }).then(row => [row.balance, row.frozen_credits]), [10, 0]);
@@ -141,7 +141,7 @@ async function main() {
     const interrupted = await seed('publication-interrupted');
     const realRename = fs.rename.bind(fs);
     const injected = mock.method(fs, 'rename', async (from: Parameters<typeof fs.rename>[0], to: Parameters<typeof fs.rename>[1]) => {
-      if (String(to).includes(`${path.sep}public${path.sep}`)) throw Error('synthetic_publication_failure');
+      if (String(to).startsWith(path.join(directory, '.media', 'uploads') + path.sep)) throw Error('synthetic_publication_failure');
       return realRename(from, to);
     });
     await assert.rejects(finishRejectedStudioDimensions(interrupted, png), /synthetic_publication_failure/);
@@ -166,7 +166,7 @@ async function main() {
     assert.equal(await db.creditLedger.count({ where: { related_task_id: wrongFormat.id } }), 1);
     const jpegAsset = await db.asset.findUniqueOrThrow({ where: { id: formatFinished.asset_id! } });
     assert.equal(jpegAsset.mime_type, 'image/jpeg'); assert.ok(jpegAsset.original_url.endsWith('.jpg') && jpegAsset.file_name.endsWith('.jpg'));
-    assert.deepEqual(readFileSync(path.join(directory, 'public', jpegAsset.original_url)), jpeg);
+    assert.deepEqual(readFileSync(path.join(directory, '.media', jpegAsset.original_url)), jpeg);
     assert.equal(jpegAsset.hash, sha(jpeg));
     const { mediaPreviewResponse } = await import('../src/lib/media/preview-response');
     const jpegDownload = await mediaPreviewResponse(new Request('http://fixture.invalid/file'), jpegAsset.original_url, jpegAsset.mime_type);

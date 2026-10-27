@@ -8,6 +8,7 @@ let phase = 'guard';
 async function main() {
   if (process.platform !== 'linux' || process.env.NODE_ENV !== 'test' || process.env.SD2_DATABASE_MODE !== 'writer'
     || process.env.AUD_MV_RECORDS_SYNTHETIC_SERVER !== '1') throw Error('isolated_linux_opt_in_required');
+  require('./server-runtime.cjs');
   const root = path.resolve(__dirname, '..');
   assert.ok(fs.existsSync(path.join(root, 'src/lib/pagination/cursor.ts')), 'integrate final shared helper first');
   assert.equal(Reflect.get(globalThis, Symbol.for('video-api.database-client.v1')), undefined);
