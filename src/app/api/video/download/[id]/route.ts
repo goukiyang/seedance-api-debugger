@@ -81,10 +81,8 @@ async function loadAuthorizedTask(taskId: string) {
   return { error: null, task };
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   void request;
   const taskId = params.id;
 
@@ -142,10 +140,8 @@ export async function GET(
  * 保存路径: public/videos/{task_id}.mp4
  * 更新数据库 local_video_path 字段
  */
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const taskId = params.id;
 
   try {

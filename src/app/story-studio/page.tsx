@@ -7,9 +7,12 @@ import { getMuskApiSettings } from '@/lib/integrations/musk';
 
 export const dynamic = 'force-dynamic';
 
-export default async function StoryStudioPage({ searchParams = {} }: {
-  searchParams?: { document_id?: string; node_id?: string };
-}) {
+export default async function StoryStudioPage(
+  props: {
+    searchParams?: Promise<{ document_id?: string; node_id?: string }>;
+  }
+) {
+  const searchParams = (await props.searchParams) ?? {};
   const valid = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : '';
   const documentId = valid(searchParams.document_id);
   const nodeId = valid(searchParams.node_id);

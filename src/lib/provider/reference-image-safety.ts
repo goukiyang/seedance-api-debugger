@@ -1,5 +1,5 @@
 import path from 'path';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { uploadSiteAsset } from '@/lib/assets/site-upload';
 
 export const PROVIDER_REFERENCE_IMAGE_MAX_PIXELS = 36_000_000;

@@ -9,7 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { mock } from 'node:test';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 
 process.exitCode = 1;
 

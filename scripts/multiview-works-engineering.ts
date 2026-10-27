@@ -27,7 +27,7 @@ async function main() {
   const schema = JSON.parse(execFileSync('python3', [path.join(root, 'scripts/check-multiview-works-schema.py'), '--database', databasePath], { cwd: directory, env, encoding: 'utf8' }));
   assert.equal(schema.state, 'compatible'); assert.equal(schema.writes, 0);
   const require = createRequire(import.meta.url);
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
   const { prisma } = await import('../src/lib/prisma');

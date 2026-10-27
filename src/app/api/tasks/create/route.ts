@@ -1937,7 +1937,6 @@ export async function POST(request: NextRequest) {
     try {
       resolveVideoDeliveryCallbackConfig({
         taskId: 'preflight',
-        callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,
       });
     } catch (error) {
       return NextResponse.json(
@@ -2584,7 +2583,6 @@ export async function POST(request: NextRequest) {
       const callbackConfig = resolveVideoDeliveryCallbackConfig({
         taskId,
         requestCallbackUrl,
-        callbackSecret: process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || null,
       });
       providerInput.callback_url = callbackConfig.providerCallbackUrl;
       callbackParamsJson = mergeVideoDeliveryCallbackParams(JSON.stringify(taskParams), callbackConfig);
@@ -2596,7 +2594,7 @@ export async function POST(request: NextRequest) {
       where: { id: taskId },
       data: {
         provider_client_request_id: taskId,
-        callback_url: providerInput.callback_url || null,
+        callback_url: requestedProvider === 'seedance' && isFastPathDelivery ? null : providerInput.callback_url || null,
         ...(callbackParamsJson ? { params_json: callbackParamsJson } : {}),
       },
     });
@@ -2624,6 +2622,7 @@ export async function POST(request: NextRequest) {
               requestId: sourceRequestId, paidGenerationGuard: paidGenerationGuard.metadata },
           } : {
             ...providerInput,
+            ...(requestedProvider === 'seedance' && isFastPathDelivery ? { callback_url: undefined } : {}),
             ...(videoEditRequested ? { requested_ratio: ratio, requested_duration: duration, ...seedanceVideoEditParameters(providerInput) } : {}),
             source: {
               type: requestSource.source_type,

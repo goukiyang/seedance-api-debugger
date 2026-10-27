@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { prisma } from '../src/lib/prisma';
 import { canReadStudioAsset, studioHiddenAssetUrls, studioVisibleReferenceWhere } from '../src/lib/image-studio/protected-assets';
 import { assertCanViewReferenceImage, canUseDirectAsset } from '../src/lib/reference-albums/permissions';

@@ -292,7 +292,7 @@ async function main() {
   const siteURL = evaluate('src/lib/assets/site-url.ts', {});
   const renderAttempts: string[] = [], protectedURLs = new Set<string>();
   const cover = evaluate('src/lib/image-studio/module-cover.ts', { 'node:fs/promises': { __esModule: true, default: syntheticFs }, 'node:path': path,
-    'node:crypto': crypto, sharp: () => forbidden('image-encoder'), '@/lib/prisma': { prisma }, '@/lib/assets/site-url': siteURL,
+    'node:crypto': crypto, '../media/sharp': () => forbidden('image-encoder'), '@/lib/prisma': { prisma }, '@/lib/assets/site-url': siteURL,
     './access': access, './shared-contract': shared, './shared-command-storage': storage, './preset-lifecycle': lifecycle,
     './workspace-deletion': deletion, './protected-assets': { studioHiddenAssetUrls: async (viewer: Row) => {
       assert.equal(viewer.id, 'module-cover-audience'); return Array.from(protectedURLs);

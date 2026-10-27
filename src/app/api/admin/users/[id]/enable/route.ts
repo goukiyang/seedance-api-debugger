@@ -6,9 +6,9 @@ import type { SessionUser } from '@/lib/auth/session';
 import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 export async function POST(request: NextRequest, context: RouteContext) {
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorJson('权限不足', 403);
   }
 
-  const { id } = context.params;
+  const { id } = (await context.params);
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return errorJson('用户不存在', 404);
   if (user.status === 'deleted') return errorJson('已删除用户不能启用', 400);

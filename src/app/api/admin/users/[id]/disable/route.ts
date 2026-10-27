@@ -6,9 +6,9 @@ import type { SessionUser } from '@/lib/auth/session';
 import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 function canUseAdminSession(user: { role: string; status: string; expires_at: Date | null }) {
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return errorJson('权限不足', 403);
   }
 
-  const { id } = context.params;
+  const { id } = (await context.params);
   if (id === admin.id) return errorJson('不能禁用当前登录账号', 400);
 
   const user = await prisma.user.findUnique({ where: { id } });

@@ -27,7 +27,8 @@ function safeWorkbenchQuery(params: SearchParams) {
   return query.toString();
 }
 
-export default async function TemplateStudioPage({ searchParams = {} }: { searchParams?: SearchParams }) {
+export default async function TemplateStudioPage(props: { searchParams?: Promise<SearchParams> }) {
+  const searchParams = (await props.searchParams) ?? {};
   const query = safeWorkbenchQuery(searchParams);
   const next = `/template-studio${query ? `?${query}` : ''}`;
   const user = await getSession();

@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '提示词管理', outline: [
-  '新增创作者和管理员验证身份后管理模板原文的入口',
-  '受保护提示词的编辑草稿由服务器保存',
+const notice = { title: '安全更新', outline: [
+  '升级基础组件并加固图片处理',
+  '增加服务启动和发布前安全检查',
   '保留原生成记录、素材和费用，不重新提交历史任务',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

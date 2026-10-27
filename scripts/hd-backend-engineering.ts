@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import * as runner from '../src/lib/media/hd-image-processor';
 
 async function main() {
@@ -285,12 +285,20 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     const holder = path.join(evidenceRoot, 'holder.mts');
     const request = { protocol: runner.HD_IMAGE_PROTOCOL, key: identity.key, executionId: randomUUID(), sourceVersion: identity.current.version,
       inputFile: identity.current.file, workDirectory, preserveText: false };
-    await fs.writeFile(holder, `import fs from 'node:fs/promises';import {runHdImageProcessor} from ${JSON.stringify(pathToFileURL(path.join(applicationRoot, 'src/lib/media/hd-image-processor.ts')).href)};await runHdImageProcessor(${JSON.stringify(request)},{applicationRoot:${JSON.stringify(applicationRoot)},onSpawn:async i=>{await fs.writeFile(${JSON.stringify(identityFile)},JSON.stringify(i))},onPrepared:async()=>{await fs.writeFile(${JSON.stringify(prepared)},'prepared');return new Promise(()=>{})}});`, { mode: 0o600 });
+    await fs.writeFile(holder, `import fs from 'node:fs/promises';import processor from ${JSON.stringify(pathToFileURL(path.join(applicationRoot, 'src/lib/media/hd-image-processor.ts')).href)};await processor.runHdImageProcessor(${JSON.stringify(request)},{applicationRoot:${JSON.stringify(applicationRoot)},onSpawn:async i=>{await fs.writeFile(${JSON.stringify(identityFile)},JSON.stringify(i))},onPrepared:async()=>{await fs.writeFile(${JSON.stringify(prepared)},'prepared');return new Promise(()=>{})}});`, { mode: 0o600 });
     const loader = createRequire(path.join(applicationRoot, 'package.json')).resolve('tsx');
-    const parent = spawn(process.execPath, ['--import', loader, holder], { stdio: 'ignore' });
+    const parent = spawn(process.execPath, ['--import', loader, holder], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let parentError = '';
+    parent.stderr.on('data', chunk => { parentError = (parentError + chunk.toString()).slice(-8192); });
     const exited = new Promise<void>((resolve, reject) => { parent.once('error', reject); parent.once('exit', () => resolve()); });
     try {
-      await waitFor(() => exists(prepared));
+      await waitFor(async () => {
+        if (await exists(prepared)) return true;
+        if (parent.exitCode !== null || parent.signalCode !== null) {
+          throw new Error(`fixture_holder_exited:${parent.exitCode}:${parent.signalCode}:${parentError}`);
+        }
+        return false;
+      });
       const child = JSON.parse(await fs.readFile(identityFile, 'utf8'));
       parent.kill('SIGKILL'); await exited;
       // Passive exit proof first: assertHdExecutionExited may terminate a known

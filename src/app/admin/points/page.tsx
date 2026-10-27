@@ -15,11 +15,12 @@ function firstParam(value: string | string[] | undefined) {
   return value || '';
 }
 
-export default async function AdminPointsPage({
-  searchParams,
-}: {
-  searchParams?: Record<string, string | string[] | undefined>;
-}) {
+export default async function AdminPointsPage(
+  props: {
+    searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getSession();
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');

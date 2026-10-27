@@ -10,7 +10,10 @@ import '../admin-usage.css';
 
 export const dynamic = 'force-dynamic';
 
-export default async function UnlinkedUsageCostsPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+export default async function UnlinkedUsageCostsPage(
+  props: { searchParams: Promise<Record<string, string | string[] | undefined>> }
+) {
+  const searchParams = await props.searchParams;
   const user = await getSession();
   if (!user) redirect('/login?next=%2Fadmin');
   if (user.role !== 'admin') redirect('/');

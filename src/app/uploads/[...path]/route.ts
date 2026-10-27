@@ -185,16 +185,12 @@ async function uploadResponse(
   );
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { path?: string[] } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+  const params = await props.params;
   return uploadResponse(request, params, true);
 }
 
-export async function HEAD(
-  request: NextRequest,
-  { params }: { params: { path?: string[] } },
-) {
+export async function HEAD(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+  const params = await props.params;
   return uploadResponse(request, params, false);
 }

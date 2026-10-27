@@ -9,7 +9,8 @@ const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => {
     const mode = request.nextUrl.searchParams.get('mode');
     if (mode === 'private-editor') return NextResponse.json(await readPrivateTemplateEditor(user, params.id), { headers });
@@ -21,7 +22,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   });
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async user => {
     const origin = request.headers.get('origin'), host = request.headers.get('host');
     const protocol = request.headers.get('x-forwarded-proto') || request.nextUrl.protocol.replace(':', '');
@@ -35,7 +37,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   });
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => {
     const template = await patchStudioTemplate(user, params.id, await readStudioJson(request) as PatchStudioTemplateRequest);
     return NextResponse.json({ template });

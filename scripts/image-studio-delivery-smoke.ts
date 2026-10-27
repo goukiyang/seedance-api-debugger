@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { mock } from 'node:test';
 import https from 'node:https';
 import dns from 'node:dns/promises';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { createStudioDelivery, readStudioDelivery, downloadStudioDelivery, discardStudioDelivery, studioDeliveryCanRetry } from '../src/lib/image-studio/delivery';
 import { StudioImageDownloadError, type openStudioImageStream } from '../src/lib/image-studio/media';
 

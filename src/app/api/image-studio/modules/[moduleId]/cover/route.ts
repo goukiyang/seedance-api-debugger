@@ -12,7 +12,8 @@ function failure(error: unknown) {
   if (error instanceof ModuleCoverError || error instanceof StudioSharingError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
   return NextResponse.json({ error: '封面保存或读取未确认，请核对本次保存结果；输入仍保留' }, { status: 503, headers });
 }
-export async function GET(request: NextRequest, { params }: { params: { moduleId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ moduleId: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {
@@ -50,7 +51,8 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
     return NextResponse.json(await readModuleCoverEditor(user, params.moduleId, sourceIds === null ? undefined : sourceIds.split(',')), { headers });
   } catch (error) { return failure(error); }
 }
-export async function PUT(request: NextRequest, { params }: { params: { moduleId: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ moduleId: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {

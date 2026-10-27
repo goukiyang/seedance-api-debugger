@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFil
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { seedanceLocalReferenceTransport } from '../src/lib/provider/reference-image-transport';
 import { buildSeedanceVideoPayload, redactInlineImageTransport } from '../src/lib/provider/jimeng';
 import type { CreateVideoInput } from '../src/types';

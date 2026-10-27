@@ -7,7 +7,11 @@ import { isPrivateNetworkHost } from '@/lib/media/public-url';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest, { params }: { params: { deliveryId: string; index: string } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ deliveryId: string; index: string }> }
+) {
+  const params = await props.params;
   return roleRoute(request, false, async user => {
     if (!/^\d{1,2}$/.test(params.index)) throw new RoleError('原件位置无效');
     const source = await deliveryAttachmentSource(user, params.deliveryId, Number(params.index));

@@ -5,7 +5,8 @@ import { parseTaskReuseOperationRequest } from '@/lib/navigation/task-reuse-inte
 import { readTaskReuseOperation, legacyTaskReuseCloseCapability, TaskReuseOperationError, taskReusePrivateHeaders } from '@/lib/navigation/task-reuse-operation.server';
 
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401, headers: taskReusePrivateHeaders });

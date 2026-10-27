@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from 'sharp';
+import sharp from './media/sharp';
 import { prisma } from '@/lib/prisma';
 import { readStudioImage } from '@/lib/image-studio/media';
 

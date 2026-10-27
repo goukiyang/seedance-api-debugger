@@ -20,11 +20,12 @@ function safeImageStudioParams(searchParams: ImageStudioSearchParams) {
   return params.toString();
 }
 
-export default async function ImageStudioPage({
-  searchParams = {},
-}: {
-  searchParams?: ImageStudioSearchParams;
-}) {
+export default async function ImageStudioPage(
+  props: {
+    searchParams?: Promise<ImageStudioSearchParams>;
+  }
+) {
+  const searchParams = (await props.searchParams) ?? {};
   const legacyQuery = new URLSearchParams();
   for (const key of ['moduleId', 'presetId'] as const) {
     const value = searchParams[key];

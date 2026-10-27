@@ -35,7 +35,7 @@ async function main() {
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
 
   const require = createRequire(import.meta.url);
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   // Keep one real module graph, including route/service error constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
@@ -45,7 +45,7 @@ async function main() {
   const service = require('../src/lib/video/multiview-preset.server') as typeof import('../src/lib/video/multiview-preset.server');
   const adminRoute = require('../src/app/api/admin/multiview/preset/route') as typeof import('../src/app/api/admin/multiview/preset/route');
   const publicRoute = require('../src/app/api/multiview/preset/route') as typeof import('../src/app/api/multiview/preset/route');
-  const sharp = require('sharp') as typeof import('sharp');
+  const sharp = require('../src/lib/media/image-decoder-policy.cjs') as typeof import('sharp').default;
   const checks: string[] = [];
   const evidencePath = path.join(directory, 'receipt.json');
   let concurrentOutcome: unknown = null;

@@ -5,7 +5,11 @@ import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders 
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(request: Request, { params }: { params: { groupId: string; assetId: string } }) {
+export async function GET(
+  request: Request,
+  props: { params: Promise<{ groupId: string; assetId: string }> }
+) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return new Response('Not found', { status: 404, headers: privateImageHeaders });
   const unavailable = async () => {

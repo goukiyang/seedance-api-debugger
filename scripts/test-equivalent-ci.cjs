@@ -1,0 +1,40 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { COMMANDS, fingerprint, verifyEquivalentCi, hashFile } = require('./equivalent-ci.cjs');
+const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'equivalent-ci-contract-'));
+try {
+  const source = 'a'.repeat(40);
+  fs.mkdirSync(path.join(root, '.role-tests'));
+  fs.mkdirSync(path.join(root, 'node_modules'));
+  fs.mkdirSync(path.join(root, 'src/app/uploads'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/app/uploads/route.ts'), 'synthetic-source');
+  fs.writeFileSync(path.join(root, '.deployed-commit'), source);
+  fs.writeFileSync(path.join(root, 'package-lock.json'), '{}');
+  fs.writeFileSync(path.join(root, 'node_modules/.package-lock.json'), '{}');
+  const now = new Date().toISOString();
+  const results = COMMANDS.map((name, index) => {
+    const log = `.role-tests/${index}.log`;
+    fs.writeFileSync(path.join(root, log), `synthetic ${name} output`);
+    return { command: `npm run ${name}`, exitCode: 0, signal: null, startedAt: now, finishedAt: now, log, logSha256: hashFile(path.join(root, log)) };
+  });
+  const receipt = { schema: 'equivalent-ci.v1', source, root, fingerprint: fingerprint(root), results, completed: true };
+  const file = path.join(root, '.role-tests/receipt.json');
+  const save = () => fs.writeFileSync(file, JSON.stringify(receipt));
+  save();
+  assert.equal(verifyEquivalentCi(root, source, file), true);
+  assert.equal(verifyEquivalentCi(root, 'b'.repeat(40), file), false);
+  receipt.results[0].exitCode = 1; save();
+  assert.equal(verifyEquivalentCi(root, source, file), false);
+  receipt.results[0].exitCode = 0; save();
+  fs.writeFileSync(path.join(root, 'src/app/uploads/route.ts'), 'changed-source');
+  assert.equal(verifyEquivalentCi(root, source, file), false);
+  fs.writeFileSync(path.join(root, 'src/app/uploads/route.ts'), 'synthetic-source');
+  fs.writeFileSync(path.join(root, 'node_modules/.package-lock.json'), '{"changed":true}');
+  assert.equal(verifyEquivalentCi(root, source, file), false);
+  fs.writeFileSync(path.join(root, 'node_modules/.package-lock.json'), '{}');
+  fs.appendFileSync(path.join(root, results[0].log), 'changed log');
+  assert.equal(verifyEquivalentCi(root, source, file), false);
+  console.log('PASS equivalent CI source, lock, runtime, command results and log binding');
+} finally { fs.rmSync(root, { recursive: true, force: true }); }

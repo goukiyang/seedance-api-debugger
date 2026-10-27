@@ -7,10 +7,8 @@ import { TASK_RETENTION_ACTIVE } from '@/lib/tasks/retention';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const admin = await getAdminUser(request);
     const task = await prisma.videoTask.findUnique({

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import type { ImageStudioTask, OperationLog, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { transformPrivateImageTask } from './private-storage.server';

@@ -6,7 +6,8 @@ import { getToolFlowRun, updateToolFlowRun, toolFlowQuoteCookieName } from '@/li
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET(_request: NextRequest, { params }: { params: { runId: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -19,7 +20,8 @@ export async function GET(_request: NextRequest, { params }: { params: { runId: 
   }
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { runId: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ runId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });

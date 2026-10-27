@@ -1,4 +1,5 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { PricingItemUnavailableError } from './item-unavailable';
@@ -653,12 +654,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     simulation: simulate(input.simulation, state.rows, rows, scopeIds), scenarios: (input.scenarios || []).map(item => simulate(item, state.rows, rows, scopeIds)!),
     authoring, authoringChanged: pricingAuthoringContent(authoring) !== pricingAuthoringContent(state.authoring), inputFingerprint: pricingFingerprint(input), confirmationTime: now };
 }
-function signingSecret() {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 16) throw new PricingAdminServiceError('服务器未配置安全的预览签名密钥，费率未保存', 503, 'pricing_signing_unavailable');
-  return secret;
-}
-function signature(body: string) { return createHmac('sha256', signingSecret()).update(`pricing-preview-v1\0${body}`).digest('base64url'); }
+function signature(body: string) { return signPurpose('pricing', `pricing-preview-v1\0${body}`); }
 function signedPreview(actor: PricingAdminActor, prepared: Prepared, state: State) {
   const confirmedAt = prepared.confirmationTime;
   const expiresAt = new Date(Date.parse(confirmedAt) + PRICING_ADMIN_LIMITS.previewTtlMs).toISOString();
@@ -670,8 +666,7 @@ function signedPreview(actor: PricingAdminActor, prepared: Prepared, state: Stat
 function previewPayload(token: string) {
   const parts = token.split('.');
   if (parts.length !== 2) conflict();
-  const expected = Buffer.from(signature(parts[0])), provided = Buffer.from(parts[1]);
-  if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) conflict();
+  if (!verifyPurpose('pricing', `pricing-preview-v1\0${parts[0]}`, parts[1], { legacy: true })) conflict();
   try {
     const value = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
     if (value.v !== 1 || !Number.isFinite(Date.parse(value.confirmedAt)) || Date.parse(value.confirmedAt) > Date.now()

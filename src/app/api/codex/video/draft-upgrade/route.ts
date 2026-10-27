@@ -21,5 +21,5 @@ export async function POST(request: NextRequest) {
     headers: request.headers,
     body: JSON.stringify(body),
   });
-  return upgradeDraft(forwarded, { params: { id: draftTaskId } });
+  return upgradeDraft(forwarded, { params: Promise.resolve({ id: draftTaskId }) });
 }

@@ -13,6 +13,7 @@ import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateRespo
 import { assertPrivateSend, privatePromptFetch } from '@/lib/security/private-prompt-send.server';
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
+import { redactVideoCallbackEcho } from '@/lib/video/callback-auth';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
 import {
   DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
@@ -509,7 +510,7 @@ export async function createVideoTask(
 
     httpStatus = response.status;
     phase = 'response_body';
-    const responseText = await response.text();
+    const responseText = redactVideoCallbackEcho(await response.text(), input.callback_url);
     
     // 处理空响应或非 JSON 响应
     let data: Record<string, unknown> = {};

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { multiviewWorkRoute, multiviewWorkHeaders } from '@/lib/video/multiview-work-api';
 import { multiviewInfo, multiviewFrame } from '@/lib/video/multiview';
-import sharp from 'sharp';
+import sharp from '../../../../../../../lib/media/sharp';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export function GET(request: NextRequest, { params }: { params: { taskId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ taskId: string }> }) {
+  const params = await props.params;
   return multiviewWorkRoute(request, false, async user => {
     const info = await multiviewInfo(user, params.taskId, request);
     const frame = await multiviewFrame(user, params.taskId, request, info.sourceVersion, 0);

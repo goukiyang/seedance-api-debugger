@@ -24,7 +24,7 @@ async function main() {
   execFileSync(process.execPath, [path.join(root, 'node_modules/prisma/build/index.js'), 'db', 'push', '--skip-generate',
     '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, stdio: 'pipe', timeout: 120000 });
   const require = createRequire(import.meta.url);
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
   const { prisma } = await import('../src/lib/prisma');
@@ -67,9 +67,9 @@ async function main() {
       });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       const response = await requestAsyncStorage.run(store, () => route.startsWith('/mutations/')
-        ? mutations.GET(request, { params: { mutationId: route.slice('/mutations/'.length) } })
-        : route.startsWith('/') ? method === 'GET' ? item.GET(request, { params: { workId: route.slice(1) } })
-          : item.PATCH(request, { params: { workId: route.slice(1) } })
+        ? mutations.GET(request, { params: Promise.resolve({ mutationId: route.slice('/mutations/'.length) }) })
+        : route.startsWith('/') ? method === 'GET' ? item.GET(request, { params: Promise.resolve({ workId: route.slice(1) }) })
+          : item.PATCH(request, { params: Promise.resolve({ workId: route.slice(1) }) })
           : method === 'GET' ? collection.GET(request) : collection.POST(request));
       return { status: response.status, body: await response.json() };
     };

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants as fsConstants, createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';

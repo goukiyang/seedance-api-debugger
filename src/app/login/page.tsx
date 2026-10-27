@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 type LoginUser = {
   role?: string;
@@ -36,11 +37,13 @@ function shouldUseLocalFeishuFallback() {
   return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 }
 
-export default function LoginPage({
-  searchParams,
-}: {
-  searchParams?: { error?: string; next?: string };
-}) {
+export default function LoginPage() {
+  return <Suspense fallback={null}><LoginContent /></Suspense>;
+}
+
+function LoginContent() {
+  const query = useSearchParams();
+  const searchParams = { error: query.get('error'), next: query.get('next') };
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(searchParams?.error ? LOGIN_ERROR_MESSAGES[searchParams.error] || '登录失败，请重试' : '');

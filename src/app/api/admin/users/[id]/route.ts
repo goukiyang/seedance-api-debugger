@@ -12,9 +12,9 @@ import {
 } from '@/lib/users/profiles';
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 const EDITABLE_STATUSES = new Set(['active', 'disabled', 'pending', 'expired']);
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return errorJson('权限不足', 403);
   }
 
-  const { id } = context.params;
+  const { id } = (await context.params);
   const user = await prisma.user.findUnique({
     where: { id },
     select: {
@@ -110,7 +110,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return errorJson('权限不足', 403);
   }
 
-  const { id } = context.params;
+  const { id } = (await context.params);
   const body = await request.json() as Record<string, unknown>;
   const name = normalizeText(body.name);
   const username = normalizeText(body.username);
@@ -286,7 +286,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return errorJson('权限不足', 403);
   }
 
-  const { id } = context.params;
+  const { id } = (await context.params);
   if (id === admin.id) {
     return errorJson('不能删除当前登录的管理员账号', 400);
   }

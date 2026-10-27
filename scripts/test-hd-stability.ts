@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import * as runner from '../src/lib/media/hd-image-processor';
 import type { HdControl, HdResourceSample } from '../src/lib/media/hd-resource-state';
 import { HD_CONTROL_PROTOCOL, HD_RESOURCE_POLICY, classifyHdResources, hdResourceTransition } from '../src/lib/media/hd-resource-state';

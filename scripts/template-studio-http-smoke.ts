@@ -5,7 +5,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, rmdirSync, unlin
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 
 const DATABASE_PREFIX = '/tmp/sd2-template-studio-test-';
 const PROVIDER_API_KEY = 'template-studio-http-smoke-local-only';

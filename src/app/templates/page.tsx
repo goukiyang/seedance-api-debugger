@@ -7,7 +7,10 @@ import styles from './template-entry.module.css';
 
 export const dynamic = 'force-dynamic';
 
-export default async function TemplatesPage({ searchParams }: { searchParams?: { templateId?: string; template_id?: string } }) {
+export default async function TemplatesPage(
+  props: { searchParams?: Promise<{ templateId?: string; template_id?: string }> }
+) {
+  const searchParams = await props.searchParams;
   const user = await getSession();
   if (isExternalUser(user)) redirect(externalFallbackPath());
   const templateId = searchParams?.templateId || searchParams?.template_id;

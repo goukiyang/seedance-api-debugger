@@ -3,8 +3,11 @@ import { prisma } from '@/lib/prisma';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { getExternalCallbackUrlFromParams } from '@/lib/video/delivery-policy';
-import { isPrivateMultiviewTask, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
 import { isPublicHttpUrl } from '@/lib/media/public-url';
+import { verifyVideoCallbackToken } from '@/lib/video/callback-auth';
+import { requireSecret } from '@/lib/security/secrets';
+import { withApiErrors } from '@/lib/http/api-error';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -40,16 +43,6 @@ async function readCallbackPayload(request: NextRequest) {
   } catch {
     return { raw: text.slice(0, 4000) };
   }
-}
-
-function callbackSecret() {
-  const expected = (process.env.VIDEO_DELIVERY_CALLBACK_SECRET || process.env.SEEDANCE_CALLBACK_SECRET || '').trim();
-  return expected || null;
-}
-
-function verifyCallbackRequest(request: NextRequest, expected: string) {
-  const token = request.nextUrl.searchParams.get('token') || request.headers.get('x-video-delivery-token');
-  return token === expected;
 }
 
 function mergeForwardStatus(
@@ -108,7 +101,7 @@ async function forwardExternalCallback(input: {
   } catch (error) {
     const status = {
       forwarded: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'external_callback_failed',
       at: new Date().toISOString(),
     };
     await prisma.videoTask.update({
@@ -121,32 +114,27 @@ async function forwardExternalCallback(input: {
   }
 }
 
-export async function POST(request: NextRequest) {
-  const expectedSecret = callbackSecret();
-  if (!expectedSecret) {
+export const POST = withApiErrors(async (request: NextRequest) => {
+  try { requireSecret('videoCallback'); } catch {
     return NextResponse.json(
       { error: 'callback_secret_not_configured', message: '视频回调密钥未配置' },
       { status: 503 },
     );
   }
-  if (!verifyCallbackRequest(request, expectedSecret)) {
+  const token = request.nextUrl.searchParams.get('token') || request.headers.get('x-video-delivery-token');
+  const taskIdFromQuery = request.nextUrl.searchParams.get('taskId')?.trim() || null;
+  if (!token || !taskIdFromQuery || taskIdFromQuery.length > 200) {
     return NextResponse.json({ error: 'invalid_callback_token' }, { status: 401 });
   }
 
+  const task = await prisma.videoTask.findUnique({ where: { id: taskIdFromQuery } });
+  if (!task || !verifyVideoCallbackToken({ taskId: task.id, createdAt: task.created_at, token })) {
+    return NextResponse.json({ error: 'invalid_callback_token' }, { status: 401 });
+  }
   const payload = await readCallbackPayload(request);
-  const taskIdFromQuery = request.nextUrl.searchParams.get('taskId')?.trim() || null;
   const providerTaskId = extractProviderTaskId(payload);
-  const task = taskIdFromQuery
-    ? await prisma.videoTask.findUnique({ where: { id: taskIdFromQuery } })
-    : providerTaskId
-      ? await prisma.videoTask.findFirst({ where: { provider_task_id: providerTaskId } })
-      : null;
-
-  if (!task) {
-    return NextResponse.json(
-      { error: 'task_not_found', message: '未找到对应的视频任务' },
-      { status: 404 },
-    );
+  if (providerTaskId && task.provider_task_id && providerTaskId !== task.provider_task_id) {
+    return NextResponse.json({ error: 'callback_task_mismatch' }, { status: 409 });
   }
 
   const finalizeResult = await finalizeVideoTaskStatus(task.id, {
@@ -167,7 +155,7 @@ export async function POST(request: NextRequest) {
   const forwardResult = await forwardExternalCallback({
     taskId: task.id,
     paramsJson: finalTask.params_json || task.params_json,
-    payload: isPrivateMultiviewTask(task) ? (() => {
+    payload: (() => {
       const safe = projectPrivateMultiviewTask({ ...finalTask, source_metadata_json: task.source_metadata_json }) as unknown as Record<string, unknown>;
       const resultVideoUrl = finalTask.local_status === 'succeeded'
         ? [finalTask.public_video_url, finalTask.result_video_url].find(value => {
@@ -179,8 +167,9 @@ export async function POST(request: NextRequest) {
         result_video_url: resultVideoUrl,
         play_url: safe.play_url, download_url: safe.download_url, thumbnail_url: safe.thumbnail_url,
         delivery_status: safe.delivery_status,
-        error_code: safe.error_code, error_message: safe.error_message };
-    })() : payload,
+        error_code: safe.local_status === 'failed' ? 'VIDEO_TASK_FAILED' : null,
+        error_message: safe.local_status === 'failed' ? '视频生成失败，请在任务详情查看。' : null };
+    })(),
   });
 
   return NextResponse.json({
@@ -191,4 +180,4 @@ export async function POST(request: NextRequest) {
     delivery_skipped_reason: enqueueResult?.skippedReason ?? null,
     external_callback: forwardResult,
   });
-}
+});

@@ -18,13 +18,13 @@ fs.writeFileSync(filePath, jpgBytes);
 async function main() {
   try {
     const request = new NextRequest(`http://localhost/videos/thumbnails/${fileName}`);
-    const response = await GET(request, { params: { path: ['thumbnails', fileName] } });
+    const response = await GET(request, { params: Promise.resolve({ path: ['thumbnails', fileName] }) });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'image/jpeg');
     assert.equal(response.headers.get('content-length'), String(jpgBytes.length));
     assert.equal(Buffer.compare(Buffer.from(await response.arrayBuffer()), jpgBytes), 0);
 
-    const headResponse = await HEAD(request, { params: { path: ['thumbnails', fileName] } });
+    const headResponse = await HEAD(request, { params: Promise.resolve({ path: ['thumbnails', fileName] }) });
     assert.equal(headResponse.status, 200);
     assert.equal(headResponse.headers.get('content-type'), 'image/jpeg');
     assert.equal(headResponse.headers.get('content-length'), String(jpgBytes.length));
@@ -32,12 +32,12 @@ async function main() {
     const rangeRequest = new NextRequest(`http://localhost/videos/thumbnails/${fileName}`, {
       headers: { range: 'bytes=0-9' },
     });
-    const rangeResponse = await GET(rangeRequest, { params: { path: ['thumbnails', fileName] } });
+    const rangeResponse = await GET(rangeRequest, { params: Promise.resolve({ path: ['thumbnails', fileName] }) });
     assert.equal(rangeResponse.status, 206);
     assert.equal(rangeResponse.headers.get('content-range'), `bytes 0-9/${jpgBytes.length}`);
     assert.equal(rangeResponse.headers.get('content-length'), '10');
 
-    const traversal = await GET(request, { params: { path: ['..', 'secret.mp4'] } });
+    const traversal = await GET(request, { params: Promise.resolve({ path: ['..', 'secret.mp4'] }) });
     assert.equal(traversal.status, 400);
   } finally {
     fs.rmSync(filePath, { force: true });

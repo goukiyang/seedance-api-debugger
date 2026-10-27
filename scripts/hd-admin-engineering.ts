@@ -9,7 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { mock } from 'node:test';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 
 process.exitCode = 1;
 
@@ -38,7 +38,7 @@ async function main() {
   const schemaLog = execFileSync(process.execPath, [prismaCli, 'db', 'push', '--skip-generate', '--schema',
     path.join(applicationRoot, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   await fs.writeFile(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
   const { hdReadonlyDb } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');

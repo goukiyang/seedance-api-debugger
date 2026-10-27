@@ -18,8 +18,9 @@ function optionalString(value: unknown) {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; branchId: string } },
+  props: { params: Promise<{ id: string; branchId: string }> }
 ) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });

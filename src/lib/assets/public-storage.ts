@@ -19,7 +19,7 @@ import { tmpdir } from 'os';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { TosClient } from '@volcengine/tos-sdk';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { resolveSitePublicBaseUrl } from '@/lib/assets/site-url';

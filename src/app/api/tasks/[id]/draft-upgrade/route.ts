@@ -18,7 +18,8 @@ import { resolveVideoPricingContext, savedVideoPricingContextInput, issueVideoPr
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = hasCodexApiAuthSignal(request) ? (await authenticateCodexVideoApi(request)).user : await getSessionUser(request);
     const draft = await prisma.videoTask.findUnique({ where: { id: params.id } });
@@ -48,10 +49,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     let user;
     let source: GenerationRequestSource = webRequestSource(request);

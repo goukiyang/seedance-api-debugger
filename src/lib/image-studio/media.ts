@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
+import type { Metadata } from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';
@@ -270,7 +271,7 @@ export async function validateGeneratedStudioImage(bytes: Buffer, requirements: 
     throw new StudioImageDeliveryError('generated_input_size_limit', bytes.length);
   }
   let png: Buffer;
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
     if (!['png', 'jpeg', 'webp', 'avif', 'tiff'].includes(metadata.format || '') || (metadata.pages || 1) !== 1) throw new Error('Unsupported output');

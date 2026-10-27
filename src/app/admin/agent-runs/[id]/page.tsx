@@ -7,7 +7,7 @@ import { AgentRunTraceActions } from '@/components/agent/AgentRunTraceActions';
 
 export const dynamic = 'force-dynamic';
 
-type PageProps = { params: { id: string } };
+type PageProps = { params: Promise<{ id: string }> };
 
 function safeJson(value: string | null, fallback: unknown) {
   if (!value) return fallback;
@@ -80,7 +80,8 @@ function ruleTypeLabel(type: string) {
   return 'SUGGEST';
 }
 
-export default async function AdminAgentRunDetailPage({ params }: PageProps) {
+export default async function AdminAgentRunDetailPage(props: PageProps) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) redirect(`/login?next=/admin/agent-runs/${params.id}`);
   if (user.role !== 'admin') redirect('/generate');

@@ -5,11 +5,13 @@ import type { CancelStudioRunRequest } from '@/lib/template-studio/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => NextResponse.json(await getStudioRun(user, params.id)));
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => {
     const body = await readStudioJson(request) as CancelStudioRunRequest;
     if (!body || body.action !== 'cancel') {

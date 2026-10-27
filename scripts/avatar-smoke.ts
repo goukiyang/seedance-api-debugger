@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { AvatarError, customAvatarUrl, parseAvatarCrop, renderAvatar, restoreAvatar } from '../src/lib/avatar';
 
 async function main() {

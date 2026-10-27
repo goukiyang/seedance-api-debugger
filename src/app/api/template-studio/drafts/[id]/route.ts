@@ -6,7 +6,8 @@ import type { UpdateStudioDraftRequest } from '@/lib/template-studio/types';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => {
     const draft = await getStudioDraft(user, params.id);
     if (request.nextUrl.searchParams.has('assetIds')) {
@@ -18,7 +19,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   });
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withStudioRoute(async (user) => {
     const draft = await updateStudioDraft(user, params.id, await readStudioJson(request) as UpdateStudioDraftRequest);
     return NextResponse.json({ draft });

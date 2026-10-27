@@ -2,7 +2,7 @@
 // only read one source and write a private run output; publication is parent-only.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { HD_IMAGE_PROTOCOL, type HdImageMetadata, type HdImageRequest, type HdImageResult } from '../src/lib/media/hd-image-processor';
 import { HD_MAX_PIXELS, HdOutputIntegrityError, encodeHdOutput, hdEligibility, hdEncoderParameters, hdEncoderStrategy, validateHdOutput } from '../src/lib/media/hd-encoder';
 

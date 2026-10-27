@@ -135,16 +135,12 @@ async function videoResponse(
   );
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { path?: string[] } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+  const params = await props.params;
   return videoResponse(request, params, true);
 }
 
-export async function HEAD(
-  request: NextRequest,
-  { params }: { params: { path?: string[] } },
-) {
+export async function HEAD(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+  const params = await props.params;
   return videoResponse(request, params, false);
 }

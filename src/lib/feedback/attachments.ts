@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import type { Prisma } from '@prisma/client';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 

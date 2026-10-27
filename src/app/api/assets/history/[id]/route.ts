@@ -5,10 +5,8 @@ import { canReadStudioAsset, assertStudioCoverAssetNotReferenced, StudioCoverRef
 
 export const dynamic = 'force-dynamic';
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(_request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
@@ -20,7 +18,7 @@ export async function DELETE(
     if (!asset || asset.type !== 'image') {
       return NextResponse.json({ error: '图片不存在' }, { status: 404 });
     }
-    if (!await canReadStudioAsset(user, asset)) return NextResponse.json({ error: '图片不存在' }, { status: 404 });
+    if (!(await canReadStudioAsset(user, asset))) return NextResponse.json({ error: '图片不存在' }, { status: 404 });
     if (asset.owner_id !== user.id && user.role !== 'admin') {
       return NextResponse.json({ error: '无权删除此图片' }, { status: 403 });
     }

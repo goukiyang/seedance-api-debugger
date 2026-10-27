@@ -13,7 +13,8 @@ import { getStudioPresetReferencePolicy } from '@/lib/image-studio/reference-pol
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: Request, { params }: { params: { assetId: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ assetId: string }> }) {
+  const params = await props.params;
   const started = performance.now();
   const user = await getSession();
   if (!user) return new Response('Not found', { status: 404, headers: privateImageHeaders });
@@ -33,7 +34,7 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   }
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
   if (!asset) return unavailable();
-  if (!await canReadStudioAsset(user, asset)) return unavailable();
+  if (!(await canReadStudioAsset(user, asset))) return unavailable();
   if (asset.owner_id !== user.id) {
     let actor: ImageStudioIdentity;
     try { actor = await assertStudioActor(user.id); }

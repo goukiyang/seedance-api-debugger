@@ -3,7 +3,8 @@ import { getAdminStudioRun, withAdminStudioRoute } from '@/lib/template-studio/a
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: Request, { params }: { params: { id: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return withAdminStudioRoute(async (user) => {
     const result = await getAdminStudioRun(user, params.id);
     return NextResponse.json(result);

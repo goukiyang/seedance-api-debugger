@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { multiviewWorkRoute, multiviewWorkHeaders } from './multiview-work-api';

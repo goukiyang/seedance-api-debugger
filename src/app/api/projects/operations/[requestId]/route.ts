@@ -4,7 +4,8 @@ import { getProjectCreateOperation, ProjectOperationError } from '@/lib/projects
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, { params }: { params: { requestId: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ requestId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });

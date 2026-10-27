@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assertUsageProject, inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
@@ -159,13 +160,6 @@ class FrozenToolFlowContractError extends AuthError {
   constructor(message = '原工具流缺少完整的受理合同，已保留现场；请核对原运行，不会自动补建或重新生成。') { super(message, 409); }
 }
 
-function toolFlowQuoteSecret() {
-  const secret = process.env.SESSION_SECRET?.trim();
-  if (secret) return secret;
-  if (process.env.NODE_ENV === 'production') throw new AuthError('工具流报价校验暂不可用', 503);
-  return 'dev-secret-change-in-production';
-}
-
 function clean(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -217,14 +211,11 @@ export function toolFlowQuoteCookieName(flowId: string, expiresAt: string) {
 }
 
 export function createToolFlowQuoteProof(userId: string, quote: ToolFlowQuote) {
-  return createHmac('sha256', toolFlowQuoteSecret()).update(quoteProofPayload(userId, quote)).digest('base64url');
+  return signPurpose('pricing', quoteProofPayload(userId, quote));
 }
 
 export function assertToolFlowQuoteProof(userId: string, quote: unknown, proof: string | undefined) {
-  if (!proof || !/^[A-Za-z0-9_-]{43}$/.test(proof)) throw new AuthError('工具流报价凭据无效或已过期，请重新报价', 409);
-  const expected = createHmac('sha256', toolFlowQuoteSecret()).update(quoteProofPayload(userId, quote)).digest();
-  const received = Buffer.from(proof, 'base64url');
-  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+  if (!proof || !verifyPurpose('pricing', quoteProofPayload(userId, quote), proof, { legacy: true, trimLegacy: true })) {
     throw new AuthError('工具流报价凭据无效或已过期，请重新报价', 409);
   }
 }

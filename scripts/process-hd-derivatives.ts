@@ -1,8 +1,9 @@
+import './server-runtime.cjs';
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { hdReadonlyDb as prisma } from '../src/lib/media/hd-readonly-db';
 import { assertHdDirectoryAccess, assertHdWorkerLock, atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, hdWorkerFailureSummary, listHdJobs, processHdJob, readHdJob, recordHdWorkerFailure, recheckHdResources, requestHd, retryFailedHd, retryHdKey, setHdControl, type HdFairnessState, type HdRequestContext } from '../src/lib/media/hd-derivatives';
 import { claimHdScheduledJob, finishHdScheduledClaim, readHdScheduler, seedHdSchedulerFairness } from '../src/lib/media/hd-scheduler';

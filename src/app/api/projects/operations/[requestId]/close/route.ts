@@ -4,7 +4,8 @@ import { closeProjectCreateOperation, ProjectOperationError } from '@/lib/projec
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(_request: NextRequest, { params }: { params: { requestId: string } }) {
+export async function POST(_request: NextRequest, props: { params: Promise<{ requestId: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });

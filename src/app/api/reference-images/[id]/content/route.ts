@@ -15,8 +15,9 @@ export const runtime = 'nodejs';
 
 async function content(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
+  const params = await context.params;
   const started = performance.now();
   let requesterId: string | undefined;
   try {

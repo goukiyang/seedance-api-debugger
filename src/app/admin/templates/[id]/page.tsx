@@ -3,9 +3,10 @@ import { AdminTemplatesClient } from '@/components/templates/AdminTemplatesClien
 export const dynamic = 'force-dynamic';
 
 type Props = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
-export default function AdminTemplateDetailPage({ params }: Props) {
+export default async function AdminTemplateDetailPage(props: Props) {
+  const params = await props.params;
   return <AdminTemplatesClient initialTemplateId={params.id} />;
 }

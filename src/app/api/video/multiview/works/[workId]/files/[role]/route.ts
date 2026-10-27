@@ -5,8 +5,9 @@ import { multiviewWorkRoute, multiviewWorkHeaders } from '@/lib/video/multiview-
 import { readMultiviewWorkFile, MultiviewWorkError } from '@/lib/video/multiview-works';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-type Context = { params: { workId: string; role: string } };
-async function response(request: NextRequest, { params }: Context, head: boolean) {
+type Context = { params: Promise<{ workId: string; role: string }> };
+async function response(request: NextRequest, context: Context, head: boolean) {
+  const params = await context.params;
   return multiviewWorkRoute(request, false, async user => {
     const revision = request.nextUrl.searchParams.get('readyRevision');
     if (!revision || !/^[1-9]\d{0,9}$/.test(revision)) throw new MultiviewWorkError('作品成品版本无效。');

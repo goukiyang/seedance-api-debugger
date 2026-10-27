@@ -14,7 +14,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 const CARD_PROMPT_BLOCKS = new Set<TemplatePromptBlockType>([
   'character',
@@ -132,7 +132,8 @@ function assetsFromCards(cards: TemplateContextCard[], existing: SerializedGener
   return [...cardAssets, ...preservedAssets];
 }
 
-export async function PATCH(request: NextRequest, { params }: Params) {
+export async function PATCH(request: NextRequest, props: Params) {
+  const params = await props.params;
   try {
     const user = await getSession();
     requireAdmin(user);

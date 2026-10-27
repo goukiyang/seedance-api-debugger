@@ -1,5 +1,7 @@
 import { settleVideoCreationBatch } from '@/lib/creation/settlement';
 import { createHash, createHmac } from 'node:crypto';
+import { requireLegacySessionSecret } from '@/lib/security/secrets';
+import { signPurpose } from '@/lib/security/signatures';
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -31,7 +33,7 @@ export function canvasBatchCanonical(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 export function canvasBatchHash(value: unknown) { return createHash('sha256').update(canvasBatchCanonical(value)).digest('hex'); }
-export async function canvasVideoRouteFingerprint(provider: unknown, db: CanvasBatchDb = prisma) {
+export async function canvasVideoRouteFingerprint(provider: unknown, db: CanvasBatchDb = prisma, existing?: string) {
   let routing: unknown;
   if (provider === 'volcengine_ip') routing = await getVolcengineIpApiSettings(db);
   else if (provider === 'h3') {
@@ -39,10 +41,12 @@ export async function canvasVideoRouteFingerprint(provider: unknown, db: CanvasB
     routing = { enabled: settings.enabled, base_url: settings.base_url, api_token: settings.api_token,
       default_preset_id: settings.default_preset_id, default_lora_id: settings.default_lora_id };
   } else routing = { base_url: process.env.SEEDANCE_BASE_URL || 'https://etc.seedance-api.net/server/api', api_key: process.env.SEEDANCE_API_KEY || '' };
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 16) throw new CanvasVideoBatchError('安全报价服务未就绪', 503);
   // Only a keyed irreversible identity is stored; never provider credentials themselves.
-  return createHmac('sha256', secret).update(canvasBatchCanonical({ provider, routing })).digest('hex');
+  const payload = canvasBatchCanonical({ provider, routing });
+  if (existing && /^[a-f0-9]{64}$/.test(existing)) {
+    return createHmac('sha256', requireLegacySessionSecret()).update(payload).digest('hex');
+  }
+  return signPurpose('pricing', payload, 'hex');
 }
 export function canvasBatchBusinessFingerprint(body: Record<string, unknown>) {
   const { pricing_quote_token: _token, pricing_revision: _revision, pricing_fingerprint_version: _version,
@@ -122,7 +126,7 @@ export async function restoreCanvasVideoBatchCreate(user: SessionUser, received:
   if (ref.child_revision !== child.revision) throw new CanvasVideoBatchError('原子请求报价版本已结束，请查询原批次', 409, 'canvas_video_batch_child_changed');
   assertCanvasVideoBatchCreateEnabled();
   const admission = { reference: ref, childRevision: child.revision, fingerprint: child.business_fingerprint };
-  if (await canvasVideoRouteFingerprint(frozen.provider) !== child.route_fingerprint || child.quote_expires_at.getTime() <= Date.now()) {
+  if (await canvasVideoRouteFingerprint(frozen.provider, prisma, child.route_fingerprint) !== child.route_fingerprint || child.quote_expires_at.getTime() <= Date.now()) {
     await sealCanvasVideoQuoteAttempt(user, admission);
     throw new CanvasVideoBatchError('原报价已过期或通道配置已变化，请重新确认未开始子项报价', 409, 'canvas_video_batch_requote_required');
   }
@@ -180,8 +184,8 @@ export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: Sessio
     || child.business_fingerprint !== admission.fingerprint) throw new CanvasVideoBatchError('原批次归属或输入不一致，尚未生成');
   if (child.task_id) throw new CanvasVideoBatchError('原子任务已受理，请查询该任务', 409, 'canvas_video_batch_child_accepted', { existing_task_id: child.task_id });
   if (child.state !== 'prepared' || child.revision !== admission.childRevision) throw new CanvasVideoBatchError('本子项已停止或报价已更新，请查询原批次', 409, 'canvas_video_batch_child_changed');
-  if (await canvasVideoRouteFingerprint(body.provider) !== child.route_fingerprint
-    || await canvasVideoRouteFingerprint(body.provider, db) !== child.route_fingerprint) throw new CanvasVideoBatchError('原通道配置已变化，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
+  if (await canvasVideoRouteFingerprint(body.provider, prisma, child.route_fingerprint) !== child.route_fingerprint
+    || await canvasVideoRouteFingerprint(body.provider, db, child.route_fingerprint) !== child.route_fingerprint) throw new CanvasVideoBatchError('原通道配置已变化，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
   if (child.quote_expires_at.getTime() <= Date.now()) throw new CanvasVideoBatchError('报价已过期，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
   const amount = creditCents(input.amount);
   if (amount < 0 || amount > child.authorized_maximum || child.batch.admitted_total + amount > child.batch.authorized_total) {

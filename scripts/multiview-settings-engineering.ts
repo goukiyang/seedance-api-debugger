@@ -36,7 +36,7 @@ async function main() {
       ? serverOnlyEmpty : originalResolveFilename.call(moduleLoader, request, ...arguments_);
   };
   try {
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   // One module graph keeps real error class identity under Node20/tsx. Mixing
   // dynamic ESM imports with alias-loaded CJS creates duplicate constructors.
@@ -55,7 +55,7 @@ async function main() {
   const estimateRoute = require('../src/app/api/tasks/estimate/route') as typeof import('../src/app/api/tasks/estimate/route');
   const createRoute = require('../src/app/api/tasks/create/route') as typeof import('../src/app/api/tasks/create/route');
   const privacy = require('../src/lib/video/multiview-task-privacy') as typeof import('../src/lib/video/multiview-task-privacy');
-  const sharp = require('sharp') as typeof import('sharp');
+  const sharp = require('../src/lib/media/image-decoder-policy.cjs') as typeof import('sharp').default;
   const checks: string[] = [];
   const evidencePath = path.join(directory, 'receipt.json');
   let completed = false;
@@ -85,10 +85,10 @@ async function main() {
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
       const response = await requestAsyncStorage.run(store, () => {
         const pathOnly = url.split('?')[0];
-        if (pathOnly.startsWith('/mutations/')) return mutation.GET(request, { params: { mutationId: pathOnly.slice('/mutations/'.length) } });
-        if (pathOnly.endsWith('/apply')) return apply.POST(request, { params: { id: pathOnly.split('/')[1] } });
-        if (pathOnly.length > 1) return method === 'GET' ? item.GET(request, { params: { id: pathOnly.slice(1) } })
-          : method === 'DELETE' ? item.DELETE(request, { params: { id: pathOnly.slice(1) } }) : item.PATCH(request, { params: { id: pathOnly.slice(1) } });
+        if (pathOnly.startsWith('/mutations/')) return mutation.GET(request, { params: Promise.resolve({ mutationId: pathOnly.slice('/mutations/'.length) }) });
+        if (pathOnly.endsWith('/apply')) return apply.POST(request, { params: Promise.resolve({ id: pathOnly.split('/')[1] }) });
+        if (pathOnly.length > 1) return method === 'GET' ? item.GET(request, { params: Promise.resolve({ id: pathOnly.slice(1) }) })
+          : method === 'DELETE' ? item.DELETE(request, { params: Promise.resolve({ id: pathOnly.slice(1) }) }) : item.PATCH(request, { params: Promise.resolve({ id: pathOnly.slice(1) }) });
         return method === 'GET' ? collection.GET(request) : collection.POST(request);
       });
       assert.match(response.headers.get('cache-control') || '', /private.*no-store/);

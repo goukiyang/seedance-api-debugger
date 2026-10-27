@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
-import sharp from 'sharp';
+import sharp from './sharp';
+import type { Metadata } from 'sharp';
 
 export const HD_MAX_PIXELS = 40_000_000;
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
@@ -21,7 +22,7 @@ export type HdEncoderParameters = { format: 'avif' | 'webp'; lossless: boolean; 
 export class HdOutputIntegrityError extends Error {
   constructor(readonly integrity: HdIntegrity) { super('output_integrity'); }
 }
-export function hdEligibility(meta: sharp.Metadata) {
+export function hdEligibility(meta: Metadata) {
   if (meta.format === 'webp') return 'existing_webp';
   if ((meta.pages || 1) !== 1) return 'multi_frame';
   if (!meta.width || !meta.height || meta.width * meta.height > HD_MAX_PIXELS) return 'pixel_limit';
@@ -43,13 +44,13 @@ export async function encodeHdOutput(input: string, output: string, format: 'avi
   await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
   await fs.chmod(output, 0o600);
 }
-export async function validateHdOutput(inputFile: string, meta: sharp.Metadata, outputFile: string, format: 'avif' | 'webp'): Promise<HdIntegrity> {
+export async function validateHdOutput(inputFile: string, meta: Metadata, outputFile: string, format: 'avif' | 'webp'): Promise<HdIntegrity> {
   const integrity: HdIntegrity = { version: HD_VALIDATION_VERSION, checks: {}, failedChecks: [] };
   const check = (name: string, expected: unknown, actual: unknown, ok: boolean) => {
     integrity.checks[name] = { expected, actual, ok };
     if (!ok) integrity.failedChecks.push(name);
   };
-  let output: sharp.Metadata;
+  let output: Metadata;
   try {
     output = await sharp(outputFile, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).metadata();
     check('output_metadata', 'readable', 'readable', true);

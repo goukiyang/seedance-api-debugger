@@ -10,7 +10,8 @@ import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(_request: NextRequest, { params }: { params: { assetId: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ assetId: string }> }) {
+  const params = await props.params;
   const started = performance.now();
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers: privateImageHeaders });
@@ -28,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
     return unavailable();
   }
   const asset = await prisma.asset.findFirst({ where: { id: assetId, owner_id: user.id, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
-  if (asset && !await canReadStudioAsset(user, asset)) return unavailable();
+  if (asset && !(await canReadStudioAsset(user, asset))) return unavailable();
   if (!asset) return unavailable();
   try {
     const thumbnail = _request.nextUrl.searchParams.get('thumbnail') === '1';

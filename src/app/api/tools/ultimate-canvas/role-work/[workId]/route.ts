@@ -3,5 +3,11 @@ import { roleRoute } from '@/lib/canvas-roles/api';
 import { readWork, actOnWork } from '@/lib/canvas-roles/work';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest, { params }: { params: { workId: string } }) { return roleRoute(request, false, user => readWork(user, params.workId, request.nextUrl.searchParams)); }
-export function POST(request: NextRequest, { params }: { params: { workId: string } }) { return roleRoute(request, true, (user, body) => actOnWork(user, params.workId, body)); }
+export async function GET(request: NextRequest, props: { params: Promise<{ workId: string }> }) {
+  const params = await props.params;
+  return roleRoute(request, false, user => readWork(user, params.workId, request.nextUrl.searchParams));
+}
+export async function POST(request: NextRequest, props: { params: Promise<{ workId: string }> }) {
+  const params = await props.params;
+  return roleRoute(request, true, (user, body) => actOnWork(user, params.workId, body));
+}

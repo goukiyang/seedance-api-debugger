@@ -3,7 +3,7 @@ import { assertVideoCreationReady, readCreationContext } from '@/lib/creation/co
 import { creationSpecHash, creationSubmissionSpec } from '@/lib/creation/intents';
 import { validateCreationBatchApproval } from '@/lib/creation/approval';
 import { creationParent, assertCreationLineageUnlocked } from '@/lib/creation/lineage';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import { Prisma, type CanvasVideoBatch, type CanvasVideoBatchChild } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -150,9 +150,7 @@ async function quoteChild(user: SessionUser, input: Body) {
   return { quote, token: context ? issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) : null };
 }
 function signQuote(encoded: string) {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 16) throw new CanvasVideoBatchError('安全报价服务未就绪', 503);
-  return createHmac('sha256', secret).update(`canvas-video-batch-v1\0${encoded}`).digest('base64url');
+  return signPurpose('pricing', `canvas-video-batch-v1\0${encoded}`);
 }
 function issueQuote(value: QuoteEnvelope) {
   const encoded = Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -163,8 +161,7 @@ function verifyQuote(raw: unknown, user: SessionUser): QuoteEnvelope {
     if (typeof raw !== 'string' || raw.length > 32768) throw new Error();
     const parts = raw.split('.');
     if (parts.length !== 2) throw new Error();
-    const expected = Buffer.from(signQuote(parts[0])), given = Buffer.from(parts[1]);
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error();
+    if (!verifyPurpose('pricing', `canvas-video-batch-v1\0${parts[0]}`, parts[1], { legacy: true })) throw new Error();
     const value: QuoteEnvelope = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
     if (value.v !== 1 || value.actor !== user.id || !Number.isSafeInteger(value.expires) || value.expires <= Date.now()
       || value.expires > Date.now() + QUOTE_TTL + 1000 || ![2, 4].includes(value.children.length)
@@ -310,7 +307,7 @@ export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
           source_request_id: `ultimate_canvas:${nodeId}:${child.request_id}` };
         if (canvasBatchBusinessFingerprint(childInput) !== child.fingerprint) throw new CanvasVideoBatchError('子项报价输入不一致');
         const fresh = await quoteChild(user, childInput);
-        if (await canvasVideoRouteFingerprint(input.provider, db) !== child.route_fingerprint) throw new CanvasVideoBatchError('视频通道配置已变化，请重新确认报价');
+        if (await canvasVideoRouteFingerprint(input.provider, db, child.route_fingerprint) !== child.route_fingerprint) throw new CanvasVideoBatchError('视频通道配置已变化，请重新确认报价');
         await assertVideoPricingAcceptance(fresh.quote, child.pricing_revision, db);
         if (creditCents(fresh.quote.pricing.estimatedCost) !== child.amount) throw new CanvasVideoBatchError('子项价格已变化，请重新确认', 409, 'canvas_video_batch_requote_required');
         children.push({ id: child.id, ordinal: child.ordinal, request_id: child.request_id, idempotency_key: child.idempotency_key,
@@ -406,7 +403,7 @@ export async function mutateCanvasVideoBatch(user: SessionUser, batchId: string,
         if (!revised || revised.fingerprint !== child.business_fingerprint) throw new CanvasVideoBatchError('原子项输入已变化，未重新生成');
         const frozen = JSON.parse(child.frozen_input_json) as Body;
         const fresh = await quoteChild(user, frozen);
-        if (await canvasVideoRouteFingerprint(input.provider, db) !== revised.route_fingerprint) throw new CanvasVideoBatchError('视频通道再次变化，请重新确认报价');
+        if (await canvasVideoRouteFingerprint(input.provider, db, revised.route_fingerprint) !== revised.route_fingerprint) throw new CanvasVideoBatchError('视频通道再次变化，请重新确认报价');
         await assertVideoPricingAcceptance(fresh.quote, revised.pricing_revision, db);
         if (creditCents(fresh.quote.pricing.estimatedCost) !== revised.amount) throw new CanvasVideoBatchError('价格再次变化，请重新确认');
         if (creationIntent && await db.approvalUsage.count({ where: { creation_intent_id: creationIntent.id, child_key: `intent:${creationIntent.id}:${child.ordinal}` } })) throw new CreationError('此子项已存在原受理证据，请查询原任务');

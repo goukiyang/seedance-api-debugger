@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import type { StudioReceipt } from './delivery';
 import { MAX_STUDIO_GENERATED_BASE64, MAX_STUDIO_GENERATED_BYTES } from './limits';
 import { isPrivateNetworkHost } from '@/lib/media/public-url';

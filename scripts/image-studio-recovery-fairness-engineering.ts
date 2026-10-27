@@ -10,7 +10,7 @@ import https, { type RequestOptions } from 'node:https';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import type { ImageStudioTask } from '@prisma/client';
 import type { StudioPollDiagnostics } from '../src/lib/image-studio/provider';
 

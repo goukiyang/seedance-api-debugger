@@ -10,7 +10,7 @@ import https from 'node:https';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { mock } from 'node:test';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import type { SessionUser } from '../src/lib/auth/session';
 
 process.exitCode = 1;

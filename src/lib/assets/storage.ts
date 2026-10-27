@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { prisma } from '@/lib/prisma';

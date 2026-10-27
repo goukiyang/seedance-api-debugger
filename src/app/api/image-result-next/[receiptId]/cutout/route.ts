@@ -1,11 +1,13 @@
 import { getCutoutImageHandoff, prepareCutoutImageHandoff, startCutoutImageHandoff, ImageResultNextError } from '@/lib/image-result-next/server';
 import { imageNextBody, imageNextError, imageNextJson, imageNextUser } from '@/lib/image-result-next/http';
 export const dynamic = 'force-dynamic';
-export async function GET(request: Request, { params }: { params: { receiptId: string } }) {
+export async function GET(request: Request, props: { params: Promise<{ receiptId: string }> }) {
+  const params = await props.params;
   try { return imageNextJson(await getCutoutImageHandoff(request, await imageNextUser(request), params.receiptId)); }
   catch (error) { return imageNextError(error); }
 }
-export async function POST(request: Request, { params }: { params: { receiptId: string } }) {
+export async function POST(request: Request, props: { params: Promise<{ receiptId: string }> }) {
+  const params = await props.params;
   try {
     const user = await imageNextUser(request), body = await imageNextBody(request);
     if (Object.keys(body).some(key => !['action', 'settings', 'confirmUnknownPrice'].includes(key))) throw new ImageResultNextError('处理内容无效');

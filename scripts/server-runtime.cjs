@@ -1,5 +1,11 @@
 'use strict';
 
+if (process.env.NODE_ENV === 'production') {
+  require('@next/env').loadEnvConfig(process.cwd(), false, { info() {}, error() {} });
+  require('../src/lib/security/secrets.cjs').assertStartupSecrets();
+}
+require('../src/lib/media/image-decoder-policy.cjs');
+
 // Next replaces this build-time marker itself. Standalone Node entrypoints need
 // the same empty marker without enabling React's unsupported server condition.
 const Module = require('node:module');

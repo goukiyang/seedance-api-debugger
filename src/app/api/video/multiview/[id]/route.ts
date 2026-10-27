@@ -17,7 +17,8 @@ async function boundedBody(request: Request) {
     return Buffer.concat(chunks).toString('utf8');
   } finally { await reader.cancel().catch(() => undefined); }
 }
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {
@@ -31,7 +32,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return NextResponse.json({ info: await multiviewInfo(user, params.id, request) }, { headers });
   } catch (error) { const failure = multiviewFailure(error); return NextResponse.json({ error: failure.message }, { status: failure.status, headers }); }
 }
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   const origin = request.headers.get('origin');

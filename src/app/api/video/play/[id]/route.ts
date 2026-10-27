@@ -16,10 +16,8 @@ function isInternalOnlyResultUrl(value: string | null | undefined) {
   return Boolean(value?.startsWith(H3_INTERNAL_OUTPUT_SCHEME));
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const taskId = params.id;
   if (!isSafeTaskId(taskId)) {
     return NextResponse.json({ error: '任务 ID 无效' }, { status: 400 });

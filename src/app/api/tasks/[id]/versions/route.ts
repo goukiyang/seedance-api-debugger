@@ -6,7 +6,8 @@ import { assertVideoCreationReady } from '@/lib/creation/context';
 import { CreationError } from '@/lib/creation/contract';
 import { readCreationSource, creationVersionSummary } from '@/lib/creation/lineage';
 export const dynamic = 'force-dynamic';
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return creationHttp(async user => {
     await assertVideoCreationReady(prisma, false);
     const current = await readCreationSource(prisma, user, params.id), rootId = current.lineage_root_task_id || current.id;

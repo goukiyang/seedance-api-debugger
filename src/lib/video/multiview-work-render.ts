@@ -4,7 +4,7 @@ import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, sta
 import os from 'node:os';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { AuthError } from '@/lib/auth/session';
 import { multiviewDimensions } from './multiview-contract';
 import { MultiviewError, multiviewInfoForWork, multiviewSourceVersion, renderMultiviewWork } from './multiview';

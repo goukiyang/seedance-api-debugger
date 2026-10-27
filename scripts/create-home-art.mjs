@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp from '../src/lib/media/image-decoder-policy.cjs';
 import { mkdir } from 'node:fs/promises';
 
 // Original, synthetic product-use illustrations. No private media or external assets.

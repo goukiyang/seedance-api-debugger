@@ -6,9 +6,10 @@ import { getSession } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
 
-type PageProps = { params: { id: string } };
+type PageProps = { params: Promise<{ id: string }> };
 
-export default async function AdminTemplatePromptRunDetailPage({ params }: PageProps) {
+export default async function AdminTemplatePromptRunDetailPage(props: PageProps) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) redirect(`/login?next=${encodeURIComponent(`/admin/agent-runs/template-prompts/${params.id}`)}`);
   if (user.role !== 'admin') redirect('/generate');

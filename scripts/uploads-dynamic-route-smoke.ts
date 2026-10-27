@@ -18,18 +18,18 @@ fs.writeFileSync(filePath, pngBytes);
 async function main() {
   try {
     const request = new NextRequest(`http://localhost/uploads/smoke-runtime/${fileName}`);
-    const response = await GET(request, { params: { path: ['smoke-runtime', fileName] } });
+    const response = await GET(request, { params: Promise.resolve({ path: ['smoke-runtime', fileName] }) });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'image/png');
     assert.equal(response.headers.get('content-length'), String(pngBytes.length));
     assert.equal(Buffer.compare(Buffer.from(await response.arrayBuffer()), pngBytes), 0);
 
-    const headResponse = await HEAD(request, { params: { path: ['smoke-runtime', fileName] } });
+    const headResponse = await HEAD(request, { params: Promise.resolve({ path: ['smoke-runtime', fileName] }) });
     assert.equal(headResponse.status, 200);
     assert.equal(headResponse.headers.get('content-type'), 'image/png');
     assert.equal(headResponse.headers.get('content-length'), String(pngBytes.length));
 
-    const traversal = await GET(request, { params: { path: ['..', 'secret.png'] } });
+    const traversal = await GET(request, { params: Promise.resolve({ path: ['..', 'secret.png'] }) });
     assert.equal(traversal.status, 400);
   } finally {
     fs.rmSync(filePath, { force: true });

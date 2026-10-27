@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { buildAllMultiviewPreviews, readMultiviewPreviewManifest } from '../src/lib/video/multiview-preview';
 import { createMultiviewLatestTargetGate, createMultiviewPreviewManifest, multiviewPreviewChunkIndex,
   multiviewPreviewRetainedChunks, multiviewPreviewFrameRect, MULTIVIEW_PREVIEW_MAX_BYTES } from '../src/lib/video/multiview-preview-contract';

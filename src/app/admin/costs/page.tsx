@@ -246,11 +246,12 @@ function CostListPager({ filters, total, tasks = false }: { filters: CostListFil
   </nav>;
 }
 
-export default async function AdminCostsPage({
-  searchParams,
-}: {
-  searchParams?: Record<string, string | string[] | undefined>;
-}) {
+export default async function AdminCostsPage(
+  props: {
+    searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await getSession();
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');

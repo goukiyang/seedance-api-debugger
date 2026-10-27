@@ -5,7 +5,10 @@ import CanvasFrame from './CanvasFrame';
 
 export const dynamic = 'force-dynamic';
 
-export default async function UltimateCanvasPage({ searchParams }: { searchParams?: { document_id?: string; focus_node?: string } }) {
+export default async function UltimateCanvasPage(
+  props: { searchParams?: Promise<{ document_id?: string; focus_node?: string }> }
+) {
+  const searchParams = await props.searchParams;
   const user = await getSession();
   const documentId = typeof searchParams?.document_id === 'string' ? searchParams.document_id : undefined;
   const focusNodeId = typeof searchParams?.focus_node === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(searchParams.focus_node)

@@ -6,7 +6,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 
-export async function GET(_request: Request, { params }: { params: { taskId: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ taskId: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   if (user.status !== 'active') return NextResponse.json({ error: '无权读取本次输入主图' }, { status: 403, headers });

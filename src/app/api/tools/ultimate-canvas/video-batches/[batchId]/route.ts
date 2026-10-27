@@ -25,11 +25,13 @@ async function actor(request: NextRequest) {
   if (expected && expected !== user.id) throw new CanvasVideoBatchError('账号已变化，请重新确认账号', 409, 'pricing_actor_changed');
   return user;
 }
-export async function GET(request: NextRequest, { params }: { params: { batchId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
+  const params = await props.params;
   try { return json(await readCanvasVideoBatch(await actor(request), params.batchId, request.nextUrl.searchParams.get('operation_id'))); }
   catch (error) { return failure(error); }
 }
-export async function PATCH(request: NextRequest, { params }: { params: { batchId: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ batchId: string }> }) {
+  const params = await props.params;
   try {
     const user = await actor(request);
     const reader = request.body?.getReader();

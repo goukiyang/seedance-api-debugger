@@ -3,10 +3,8 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { joinProjectInvite } from '@/lib/projects/operations';
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { token: string } },
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ token: string }> }) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) {

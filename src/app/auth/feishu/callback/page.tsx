@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 type CallbackUser = {
   role?: string;
@@ -36,11 +37,13 @@ function safeLandingPath(value: string | null | undefined, fallback: string) {
   return value;
 }
 
-export default function FeishuCallbackPage({
-  searchParams,
-}: {
-  searchParams?: { error?: string; next?: string; status?: string };
-}) {
+export default function FeishuCallbackPage() {
+  return <Suspense fallback={null}><FeishuCallbackContent /></Suspense>;
+}
+
+function FeishuCallbackContent() {
+  const query = useSearchParams();
+  const searchParams = { error: query.get('error'), next: query.get('next') };
   const [message, setMessage] = useState('正在确认飞书登录状态...');
   const errorMessage = useMemo(() => {
     if (!searchParams?.error) return '';

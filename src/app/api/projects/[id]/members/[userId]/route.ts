@@ -7,8 +7,9 @@ import { assertFeatureAllowed } from '@/lib/access/feature-guard';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; userId: string } },
+  props: { params: Promise<{ id: string; userId: string }> }
 ) {
+  const params = await props.params;
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });

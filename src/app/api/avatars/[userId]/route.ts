@@ -4,8 +4,9 @@ import { readAvatarFile } from '@/lib/avatar';
 
 export const dynamic = 'force-dynamic';
 // Visible to signed-in users only; the ?v= in avatar_url changes with every new avatar, so a day of caching is safe.
-export async function GET(request: NextRequest, { params }: { params: { userId: string } }) {
-  if (!await getSession()) return new Response('Not found', { status: 404 });
+export async function GET(request: NextRequest, props: { params: Promise<{ userId: string }> }) {
+  const params = await props.params;
+  if (!(await getSession())) return new Response('Not found', { status: 404 });
   const size = request.nextUrl.searchParams.get('size') === '512' ? 512 : 128;
   const bytes = /^[a-zA-Z0-9_-]{1,100}$/.test(params.userId) ? await readAvatarFile(params.userId, size) : null;
   if (!bytes) return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'private, no-store' } });

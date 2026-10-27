@@ -6,7 +6,8 @@ import { privateImageHeaders } from '@/lib/media/authorized-image-response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export async function GET(_request: Request, { params }: { params: { groupId: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ groupId: string }> }) {
+  const params = await props.params;
   const user = await getSession();
   if (!user) return new Response('Not found', { status: 404, headers: privateImageHeaders });
   try {

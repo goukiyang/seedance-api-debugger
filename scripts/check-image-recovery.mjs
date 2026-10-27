@@ -274,6 +274,9 @@ const projectContractSources = [
   'src/app/api/projects/[id]/usage/export/route.ts', 'src/app/api/projects/[id]/costs/export/route.ts',
 ];
 const sourceFiles = [...new Set(['package.json', entry, pricingGate, ...usageSources, ...projectContractSources,
+  'package-lock.json', 'scripts/fixtures/next-request-context.ts',
+  'src/lib/media/sharp.ts', 'src/lib/media/image-decoder-policy.cjs',
+  'src/lib/security/secrets.ts', 'src/lib/security/secrets.cjs',
   ...publicUsageFixtures.flatMap(fixture => [fixture.file, ...fixture.sources]), ...fixtures.flatMap(fixture => [fixture.file, ...fixture.sources])])];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const hashes = () => Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]));

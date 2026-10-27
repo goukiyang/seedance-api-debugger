@@ -6,7 +6,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Never browser-cache protected derivatives: source/share revocation is checked on every display.
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
-export async function GET(request: NextRequest, { params }: { params: { kind: string; targetId: string } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ kind: string; targetId: string }> }
+) {
+  const params = await props.params;
   const user = await getSession();
   const revision = Number(request.nextUrl.searchParams.get('revision'));
   const size = Number(request.nextUrl.searchParams.get('size') || 640);

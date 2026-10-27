@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import { createMultiviewPreviewManifest, MULTIVIEW_PREVIEW_CHUNK_SIZE, MULTIVIEW_PREVIEW_COLUMNS,
   MULTIVIEW_PREVIEW_MAX_BYTES, MULTIVIEW_PREVIEW_ROWS, type MultiviewPreviewManifest } from './multiview-preview-contract';
 import type { MultiviewInfo } from './multiview-contract';

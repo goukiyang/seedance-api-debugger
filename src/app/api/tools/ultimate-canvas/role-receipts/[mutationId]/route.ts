@@ -3,4 +3,7 @@ import { roleRoute } from '@/lib/canvas-roles/api';
 import { roleReceipt } from '@/lib/canvas-roles/repository';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest, { params }: { params: { mutationId: string } }) { return roleRoute(request, false, user => roleReceipt(user, params.mutationId)); }
+export async function GET(request: NextRequest, props: { params: Promise<{ mutationId: string }> }) {
+  const params = await props.params;
+  return roleRoute(request, false, user => roleReceipt(user, params.mutationId));
+}

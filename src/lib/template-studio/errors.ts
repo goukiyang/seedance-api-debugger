@@ -5,6 +5,7 @@ import type { StudioApiError } from './types';
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
 import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
+import { apiErrorResponse } from '@/lib/http/api-error';
 
 export class StudioError extends Error {
   constructor(
@@ -37,8 +38,7 @@ export function studioErrorResponse(error: unknown) {
   if (error instanceof SyntaxError) {
     return NextResponse.json({ error: '请求内容不是有效 JSON', code: 'INVALID' }, { status: 400 });
   }
-  console.error('[template-studio] request failed:', error instanceof Error ? error.name : 'unknown');
-  return NextResponse.json({ error: '模板工作台暂时无法处理请求', code: 'UNAVAILABLE' }, { status: 500 });
+  return apiErrorResponse(error);
 }
 
 export function toStudioValidationError(error: unknown): never {

@@ -51,7 +51,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
   assert.equal(schema.state, 'compatible'); assert.equal(schema.writes, 0);
   const { prisma } = await import('../src/lib/prisma');
   const require = createRequire(import.meta.url);
-  const { requestAsyncStorage } = require('next/dist/client/components/request-async-storage.external') as typeof import('next/dist/client/components/request-async-storage.external');
+  const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
   const { RequestCookies } = require('next/dist/compiled/@edge-runtime/cookies') as typeof import('next/dist/compiled/@edge-runtime/cookies');
   const { NextRequest } = await import('next/server');
   const { createSession } = await import('../src/lib/auth/session');
@@ -116,7 +116,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
     checks.push('legacy_original_receipt_replayed_before_new_protocol_no_write');
     const dir = await works.multiviewWorkDirectory(owner.id, first.work.id, 1); mkdirSync(dir, { recursive: true, mode: 0o700 });
     const roles = ['thumbnail', 'collage', 'zip', ...recipe.slots.map(slot => `frame-${slot.id}`)];
-    const sharp = (await import('sharp')).default;
+    const sharp = (await import('../src/lib/media/sharp')).default;
     const image = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00ff00' } }).png().toBuffer();
     const manifest = { schema: 1, sourceVersion: version, revision: 1, recipeHash: works.multiviewWorkRecipeHash(recipe), width: 8, height: 4, frameCount: 8,
       files: roles.map(role => { const bytes = role === 'zip' ? Buffer.from('PK\x03\x04synthetic archive') : image, file = `${role}.${role === 'zip' ? 'zip' : 'png'}`;

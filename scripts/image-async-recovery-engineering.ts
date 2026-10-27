@@ -11,7 +11,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import type { ImageStudioTask } from '@prisma/client';
 
 process.exitCode = 1;

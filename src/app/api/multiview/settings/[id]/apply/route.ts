@@ -3,6 +3,7 @@ import { multiviewSettingsRoute } from '@/lib/video/multiview-settings-api';
 import { applyMultiviewSettings } from '@/lib/video/multiview-settings.server';
 
 export const dynamic = 'force-dynamic';
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   return multiviewSettingsRoute(request, true, (user, body) => applyMultiviewSettings(user, params.id, body, request));
 }

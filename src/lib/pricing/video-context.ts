@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
@@ -145,9 +145,7 @@ export async function videoPricingRequiresContext(model: string, channel: string
     && (rule.identity.specifications.referenceVideo !== undefined || rule.identity.specifications.pricingPurpose !== undefined));
 }
 function sign(body: string) {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret.length < 16) throw new PricingChargeError('安全报价服务未就绪');
-  return createHmac('sha256', secret).update(`video-pricing-context-v1\0${body}`).digest('base64url');
+  return signPurpose('pricing', `video-pricing-context-v1\0${body}`);
 }
 export function issueVideoPricingCredential(context: VideoPricingContext, revision: string | null, amount: number) {
   const body = Buffer.from(JSON.stringify({ v: 1, scope: context.fingerprint, actor: context.actorId,
@@ -159,8 +157,7 @@ export function verifyVideoPricingCredential(token: unknown, context: VideoPrici
     if (typeof token !== 'string' || token.length > 4096) throw new Error();
     const parts = token.split('.');
     if (parts.length !== 2) throw new Error();
-    const expected = Buffer.from(sign(parts[0])), given = Buffer.from(parts[1]);
-    if (expected.length !== given.length || !timingSafeEqual(expected, given)) throw new Error();
+    if (!verifyPurpose('pricing', `video-pricing-context-v1\0${parts[0]}`, parts[1], { legacy: true })) throw new Error();
     const value = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
     if (value.v !== 1 || value.actor !== context.actorId || value.scope !== context.fingerprint || value.revision !== revision
       || value.amount !== amount || value.ceiling !== amount || !Number.isSafeInteger(value.expires)

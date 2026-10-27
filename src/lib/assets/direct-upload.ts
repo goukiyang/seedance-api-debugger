@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import path from 'path';
 import { Transform } from 'stream';
 import { Agent } from 'node:https';
@@ -32,7 +33,6 @@ import { enqueueUploadSimilarity, uploadSimilarityStatus, type UploadSimilarityS
 const DIRECT_UPLOAD_EXPIRES_SECONDS = 10 * 60;
 const DIRECT_UPLOAD_PREFIX = 'seedance-direct-uploads';
 const DIRECT_UPLOAD_TOKEN_VERSION = 1;
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 const MULTIPART_UPLOAD_EXPIRES_SECONDS = 24 * 60 * 60;
 export const MULTIPART_UPLOAD_PART_SIZE_BYTES = 8 * 1024 * 1024;
 
@@ -306,20 +306,14 @@ function createObjectKey(ownerId: string, mimeType: string) {
 
 function signToken(payload: DirectUploadTokenPayload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  const signature = signPurpose('upload', body);
   return `${body}.${signature}`;
 }
 
 function verifyToken(token: string, ownerId: string, allowExpired = false): DirectUploadTokenPayload {
-  const [body, signature] = token.split('.');
-  if (!body || !signature) throw new Error('上传票据格式无效，请重新上传。');
-  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
-  const providedBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (
-    providedBuffer.length !== expectedBuffer.length ||
-    !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
-  ) {
+  const [body, signature, extra] = token.split('.');
+  if (!body || !signature || extra !== undefined) throw new Error('上传票据格式无效，请重新上传。');
+  if (!verifyPurpose('upload', body, signature, { legacy: true })) {
     throw new Error('上传票据校验失败，请重新上传。');
   }
 

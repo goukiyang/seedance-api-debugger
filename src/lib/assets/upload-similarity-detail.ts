@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp from '../media/sharp';
 import pixelmatch from 'pixelmatch';
 
 export const UPLOAD_SIMILARITY_DETAIL_ALGORITHM = 'imagehash-phash8-colorhash3-pixelmatch8-rgba384-window32-v2';

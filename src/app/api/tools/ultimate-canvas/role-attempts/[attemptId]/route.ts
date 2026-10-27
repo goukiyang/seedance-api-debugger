@@ -4,10 +4,12 @@ import { authorizeRoleSettlement, reconcileAttempt } from '@/lib/canvas-roles/ex
 import { readRoleAttempt } from '@/lib/canvas-roles/work';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest, { params }: { params: { attemptId: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ attemptId: string }> }) {
+  const params = await props.params;
   return roleRoute(request, false, user => readRoleAttempt(user, params.attemptId));
 }
-export function POST(request: NextRequest, { params }: { params: { attemptId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ attemptId: string }> }) {
+  const params = await props.params;
   return roleRoute(request, true, (user, body) => body.action === 'authorize_settlement'
     ? authorizeRoleSettlement(user, params.attemptId, body) : reconcileAttempt(user, params.attemptId));
 }

@@ -1,4 +1,5 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
+import { randomUUID } from 'crypto';
+import { signPurpose, verifyPurpose } from '@/lib/security/signatures';
 import type { CanvasRoleMediaBinding, CanvasRoleWork } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
@@ -26,9 +27,7 @@ type MediaSource = { kind: 'image' | 'video'; taskId: string; requestId: string;
 const sourceKind = (kind: MediaSource['kind']) => kind === 'image' ? 'image_studio_task' : 'video_task';
 
 function signature(payload: Omit<MediaContext, 'signature'>) {
-  const secret = process.env.SESSION_SECRET;
-  if (!secret || secret === 'dev-secret-change-in-production') throw new RoleError('媒体来源签名尚未配置，未提交生成', 503, 'media_signing_unavailable');
-  return createHmac('sha256', secret).update('canvas-role-media-v1\0' + digest(payload)).digest('hex');
+  return signPurpose('media', 'canvas-role-media-v1\0' + digest(payload), 'hex');
 }
 function readContext(raw: unknown): MediaContext {
   if (!record(raw) || raw.schema !== 'role.media.v1' || !['image', 'video'].includes(String(raw.kind))) throw new RoleError('角色媒体来源无效');
@@ -39,9 +38,9 @@ function readContext(raw: unknown): MediaContext {
     outputSlotId: text(raw.outputSlotId, 160, true), inputDigest: text(raw.inputDigest, 64, true),
     generationNodeId: identifier(raw.generationNodeId), kind: raw.kind as 'image' | 'video', expiresAt: text(raw.expiresAt, 40, true),
   };
-  const supplied = typeof raw.signature === 'string' && /^[a-f0-9]{64}$/.test(raw.signature) ? raw.signature : '';
+  const supplied = typeof raw.signature === 'string' && /^(v2:)?[a-f0-9]{64}$/.test(raw.signature) ? raw.signature : '';
   if (!supplied || !/^[a-f0-9]{64}$/.test(payload.inputDigest) || !Number.isFinite(Date.parse(payload.expiresAt))
-    || !timingSafeEqual(Buffer.from(supplied, 'hex'), Buffer.from(signature(payload), 'hex'))) throw new RoleError('角色媒体来源签名无效', 403, 'media_context_invalid');
+    || !verifyPurpose('media', 'canvas-role-media-v1\0' + digest(payload), supplied, { legacy: true, encoding: 'hex' })) throw new RoleError('角色媒体来源签名无效', 403, 'media_context_invalid');
   return { ...payload, signature: supplied };
 }
 

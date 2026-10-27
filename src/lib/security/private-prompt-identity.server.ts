@@ -1,5 +1,6 @@
 import 'server-only';
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { signPurpose, verifyPurpose } from './signatures';
 import { assertPrivateOrigins, privatePromptPolicy, type PrivateOrigin } from './private-prompts.server';
 
 export const PRIVATE_IDENTITY_COOKIE = 'private_prompt_identity';
@@ -8,13 +9,8 @@ type IdentityProof = { version: 1; authority: 'author' | 'administrator'; userId
 type Principal = { id: string; role?: string };
 const verified = new WeakMap<object, IdentityProof>();
 const digest = (value: string) => createHash('sha256').update(value).digest('base64url');
-function secret() {
-  const value = process.env.SESSION_SECRET;
-  if (!value || value.length < 32 || value === 'dev-secret-change-in-production') throw new Error('本人身份验证暂不可用');
-  return value;
-}
 function signature(payload: string) {
-  return createHmac('sha256', secret()).update('private-prompt-feishu-proof.v1\0').update(payload).digest('base64url');
+  return signPurpose('privateIdentity', 'private-prompt-feishu-proof.v1\0' + payload);
 }
 function exact(a: string, b: string) {
   const left = Buffer.from(a), right = Buffer.from(b);
@@ -41,7 +37,7 @@ export function authenticatePrivateIdentity(user: Principal, raw: string | undef
   if (!raw || raw.length > 4096) return false;
   try {
     const [payload, sig, extra] = raw.split('.');
-    if (extra !== undefined || !payload || !sig || !exact(sig, signature(payload))) return false;
+    if (extra !== undefined || !payload || !sig || !verifyPurpose('privateIdentity', 'private-prompt-feishu-proof.v1\0' + payload, sig)) return false;
     const proof = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as IdentityProof;
     if (!proof || Object.keys(proof).sort().join(',') !== 'authority,expiresAt,issuedAt,session,subject,tenant,userId,version'
       || proof.version !== 1 || proof.userId !== user.id || !exact(proof.session, digest(token))

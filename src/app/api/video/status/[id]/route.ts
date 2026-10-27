@@ -41,10 +41,8 @@ function serializeTaskIdentity<T extends {
   });
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let protectedTask = false;
   try {
     const taskId = params.id;

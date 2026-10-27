@@ -71,7 +71,10 @@ export async function middleware(request: NextRequest) {
     if (accessResponse.status !== 204) {
       return NextResponse.json({ error: '图片不存在或无权访问' }, { status: accessResponse.status === 404 ? 404 : 503 });
     }
-    const response = NextResponse.next();
+    // Authenticated media must not enter Next's shared optimizer cache or its cookie-less fetch.
+    const response = pathname === '/_next/image'
+      ? NextResponse.rewrite(new URL(mediaPath, request.nextUrl.origin))
+      : NextResponse.next();
     response.headers.set('Cache-Control', 'private, no-store');
     return response;
   }

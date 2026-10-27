@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import sharp from 'sharp';
+import sharp from '../src/lib/media/sharp';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../src/lib/prisma';
 import { submitStudioBatch, listStudioTasks, parseStudioRequest, finishStudioTask, deleteStudioResult } from '../src/lib/image-studio/tasks';

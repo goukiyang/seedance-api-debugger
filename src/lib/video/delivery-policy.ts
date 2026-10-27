@@ -1,4 +1,5 @@
 import { isPubliclyReachableUrl } from '@/lib/assets/public-storage';
+import { createVideoCallbackToken } from './callback-auth';
 
 const SYSTEM_CALLBACK_PATH = '/api/provider/seedance/callback';
 
@@ -11,7 +12,6 @@ type CallbackConfigInput = {
   baseUrl?: string | null;
   taskId: string;
   requestCallbackUrl?: string | null;
-  callbackSecret?: string | null;
 };
 
 export type VideoDeliveryCallbackConfig = {
@@ -56,11 +56,7 @@ function normalizeExternalCallbackUrl(value: string | null | undefined) {
 export function resolveVideoDeliveryCallbackConfig(input: CallbackConfigInput): VideoDeliveryCallbackConfig {
   const url = new URL(SYSTEM_CALLBACK_PATH, resolveVideoDeliveryPublicBaseUrl(input.baseUrl));
   url.searchParams.set('taskId', input.taskId);
-  const secret = input.callbackSecret?.trim();
-  if (!secret) {
-    throw new Error('缺少 VIDEO_DELIVERY_CALLBACK_SECRET，无法启用视频生成回调。');
-  }
-  url.searchParams.set('token', secret);
+  url.searchParams.set('token', createVideoCallbackToken(input.taskId));
 
   const systemCallbackUrl = url.toString();
   const externalCallbackUrl = normalizeExternalCallbackUrl(input.requestCallbackUrl);
@@ -92,7 +88,7 @@ export function mergeVideoDeliveryCallbackParams(
   return JSON.stringify({
     ...params,
     videoDeliveryCallback: {
-      systemCallbackUrl: config.systemCallbackUrl,
+      authVersion: 2,
       externalCallbackUrl: config.externalCallbackUrl,
     },
   });

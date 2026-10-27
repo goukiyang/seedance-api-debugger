@@ -4,6 +4,7 @@ import { getAdminPricingOperation } from '@/lib/pricing/policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export function GET(request: NextRequest, context: { params: { id: string } }) {
-  return pricingAdminRoute(request, false, actor => getAdminPricingOperation(actor, context.params.id));
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
+  return pricingAdminRoute(request, false, actor => getAdminPricingOperation(actor, id));
 }

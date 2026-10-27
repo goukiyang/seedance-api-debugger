@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import {
   getExternalCallbackUrlFromParams,
   isVideoDeliveryFastPathTask,
@@ -9,6 +10,11 @@ import {
   resolveVideoDeliveryCallbackConfig,
 } from '@/lib/video/delivery-policy';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
+import { verifyVideoCallbackToken } from '@/lib/video/callback-auth';
+import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
+
+const previousCallbackSecret = process.env.VIDEO_DELIVERY_CALLBACK_SECRET;
+process.env.VIDEO_DELIVERY_CALLBACK_SECRET = 'synthetic-callback-smoke-key-0123456789012345';
 
 assert.equal(
   isVideoDeliveryFastPathTask({ provider: 'seedance', generation_mode: 'text_to_video' }),
@@ -40,9 +46,13 @@ const callbackConfig = resolveVideoDeliveryCallbackConfig({
   baseUrl: 'https://sd2.youdoodesign.com',
   taskId: 'task-fast-001',
   requestCallbackUrl: 'https://client.example.com/original-callback',
-  callbackSecret: 'secret value',
 });
-assert.equal(callbackConfig.systemCallbackUrl, 'https://sd2.youdoodesign.com/api/provider/seedance/callback?taskId=task-fast-001&token=secret+value');
+const callbackUrl = new URL(callbackConfig.systemCallbackUrl);
+assert.equal(callbackUrl.origin, 'https://sd2.youdoodesign.com');
+assert.equal(callbackUrl.pathname, '/api/provider/seedance/callback');
+assert.equal(callbackUrl.searchParams.get('taskId'), 'task-fast-001');
+assert.equal(verifyVideoCallbackToken({ taskId: 'task-fast-001', token: callbackUrl.searchParams.get('token') }), true);
+assert.equal(callbackConfig.systemCallbackUrl.includes(process.env.VIDEO_DELIVERY_CALLBACK_SECRET), false);
 assert.equal(callbackConfig.providerCallbackUrl, callbackConfig.systemCallbackUrl);
 assert.equal(callbackConfig.externalCallbackUrl, 'https://client.example.com/original-callback');
 
@@ -59,11 +69,10 @@ assert.equal(
 );
 const runtimeCallbackConfig = resolveVideoDeliveryCallbackConfig({
   taskId: 'task-runtime-base',
-  callbackSecret: 'secret value',
 });
 assert.equal(
-  runtimeCallbackConfig.systemCallbackUrl,
-  'https://sd2.youdooart.com/api/provider/seedance/callback?taskId=task-runtime-base&token=secret+value',
+  new URL(runtimeCallbackConfig.systemCallbackUrl).origin,
+  'https://sd2.youdooart.com',
   'server-created tasks should use the runtime public host for provider callbacks',
 );
 if (previousBaseUrl === undefined) delete process.env.BASE_URL;
@@ -73,15 +82,17 @@ else process.env.NEXTAUTH_URL = previousNextAuthUrl;
 if (previousNextPublicBaseUrl === undefined) delete process.env.NEXT_PUBLIC_BASE_URL;
 else process.env.NEXT_PUBLIC_BASE_URL = previousNextPublicBaseUrl;
 
+process.env.VIDEO_DELIVERY_CALLBACK_SECRET = '';
 assert.throws(
   () => resolveVideoDeliveryCallbackConfig({
     baseUrl: 'https://sd2.youdoodesign.com',
     taskId: 'task-fast-no-secret',
-    callbackSecret: '',
   }),
-  /VIDEO_DELIVERY_CALLBACK_SECRET/,
+  /SECRET_CONFIGURATION_INVALID/,
   'fast-path callback setup must fail closed when no callback secret is configured',
 );
+if (previousCallbackSecret === undefined) delete process.env.VIDEO_DELIVERY_CALLBACK_SECRET;
+else process.env.VIDEO_DELIVERY_CALLBACK_SECRET = previousCallbackSecret;
 
 const mergedParams = mergeVideoDeliveryCallbackParams(
   JSON.stringify({ existing: true }),
@@ -89,6 +100,8 @@ const mergedParams = mergeVideoDeliveryCallbackParams(
 );
 assert.equal(getExternalCallbackUrlFromParams(mergedParams), 'https://client.example.com/original-callback');
 assert.deepEqual(JSON.parse(mergedParams).existing, true, 'callback metadata merge must preserve existing task params');
+assert.equal(mergedParams.includes(callbackUrl.searchParams.get('token')!), false, 'stored task params must omit callback bearer token');
+assert.equal(JSON.parse(mergedParams).videoDeliveryCallback.authVersion, 2);
 
 assert.deepEqual(
   videoDeliveryStageForTask({ local_status: 'running', public_video_url: null, delivery_status: null }),
@@ -133,19 +146,24 @@ assert.match(statusRouteSource, /const fastPathDelivery = isVideoDeliveryFastPat
 assert.match(statusRouteSource, /cacheOnSuccess:\s*!fastPathDelivery/, 'status route must keep old cache fallback for non-fast-path tasks');
 assert.match(statusRouteSource, /generateThumbnail:\s*!fastPathDelivery/, 'status route must avoid blocking thumbnail work for fast-path status checks');
 assert.match(statusRouteSource, /enqueueVideoDeliveryJob/, 'status route must enqueue stable delivery when provider is already done');
-assert.match(statusRouteSource, /videoDeliveryStageForTask/, 'status route should expose stable delivery stage');
-assert.match(statusRouteSource, /play_url/, 'status route should expose a unified play URL for web, canvas, and external API callers');
-assert.match(statusRouteSource, /download_url/, 'status route should expose a stable download URL only when stable delivery is ready');
-assert.match(statusRouteSource, /thumbnail_url/, 'status route should expose a thumbnail URL when a thumbnail can be requested');
-assert.match(statusRouteSource, /retry_after_ms/, 'status route should tell callers when to poll again without guessing');
+assert.match(statusRouteSource, /\.\.\.taskThumbnailProjection\(/, 'status route must include the shared delivery projection');
+const preparingProjection = taskThumbnailProjection({ id: 'synthetic-video', local_status: 'succeeded',
+  result_video_url: 'https://media.example.invalid/result.mp4', delivery_status: 'queued' });
+assert.equal(preparingProjection.delivery_stage.key, 'preparing');
+assert.equal(preparingProjection.play_url, '/api/video/play/synthetic-video');
+assert.equal(preparingProjection.download_url, null);
+assert.equal(preparingProjection.retry_after_ms, 3000);
+assert.equal(preparingProjection.stable_download_ready, false);
+const readyProjection = taskThumbnailProjection({ id: 'synthetic-video', local_status: 'succeeded',
+  public_video_url: 'https://media.example.invalid/result.mp4', delivery_status: 'succeeded' });
+assert.equal(readyProjection.download_url, '/api/video/download/synthetic-video');
+assert.equal(readyProjection.thumbnail_url, '/api/video/thumbnail/synthetic-video');
+assert.equal(readyProjection.stable_download_ready, true);
 assert.match(statusRouteSource, /isTerminalLocalStatus/, 'status route should know when a task is already terminal');
 assert.match(statusRouteSource, /terminal_fast_path_status_cached/, 'terminal fast-path status checks should not keep refreshing provider status while waiting for stable delivery');
 
 const videoListRouteSource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/video/list/route.ts'), 'utf8');
-assert.match(videoListRouteSource, /videoDeliveryStageForTask/, 'video list should expose delivery stage for refreshed recent-task polling');
-assert.match(videoListRouteSource, /stable_download_ready/, 'video list should expose stable download readiness');
-assert.match(videoListRouteSource, /retry_after_ms/, 'video list should expose backend polling cadence for succeeded-but-preparing tasks');
-assert.match(videoListRouteSource, /download_url:\s*deliveryStage\.stableDownloadReady/, 'video list should only expose download URL when stable delivery is ready');
+assert.match(videoListRouteSource, /\.\.\.taskThumbnailProjection\(/, 'list route must include the same checked delivery projection');
 
 const assetLibrarySource = fs.readFileSync(path.join(process.cwd(), 'src/app/api/assets/library/route.ts'), 'utf8');
 assert.match(assetLibrarySource, /videoDeliveryStageForTask/, 'asset library must distinguish preview availability from stable download readiness');
@@ -199,15 +217,13 @@ assert.match(assetsPageSource, /item\.deliveryStage\?\.key !== 'ready'/, 'asset 
 assert.match(assetsPageSource, /\/api\/video\/download\/\$\{item\.taskId\}/, 'asset page compact download action should use the direct download route');
 assert.match(assetsPageSource, /prepareStableDownload/, 'asset page detail should let users trigger stable-download preparation');
 
-const ultimateCanvasWorkflowSource = fs.readFileSync(path.join(process.cwd(), 'public/tools/ultimate-canvas/generation-node-workflow.js'), 'utf8');
-assert.match(ultimateCanvasWorkflowSource, /task\.play_url/, 'ultimate canvas should use the backend-provided play URL');
-assert.match(ultimateCanvasWorkflowSource, /task\.download_url/, 'ultimate canvas should use the backend-provided stable download URL');
-assert.match(ultimateCanvasWorkflowSource, /stableDownloadReady/, 'ultimate canvas should keep stable download readiness separate from generation success');
-assert.doesNotMatch(
-  ultimateCanvasWorkflowSource,
-  /downloadUrl:\s*taskId\s*\?\s*`\/api\/video\/download/,
-  'ultimate canvas should not expose download before stable delivery is ready',
-);
+const canvasWorkflow = createRequire(path.join(process.cwd(), 'package.json'))('./public/tools/ultimate-canvas/generation-node-workflow.js');
+assert.equal(canvasWorkflow.normalizeVideoStatus({ id: 'synthetic-video', local_status: 'succeeded',
+  ...preparingProjection }).downloadUrl, '', 'canvas must not expose downloads before stable delivery');
+assert.equal(canvasWorkflow.normalizeVideoStatus({ id: 'synthetic-video', local_status: 'succeeded',
+  ...readyProjection }).downloadUrl, '/api/video/download/synthetic-video');
+assert.equal(canvasWorkflow.normalizeVideoStatus({ id: 'synthetic-video', local_status: 'succeeded',
+  ...readyProjection }).playUrl, '/api/video/play/synthetic-video');
 
 const globalStylesSource = fs.readFileSync(path.join(process.cwd(), 'src/app/globals.css'), 'utf8');
 assert.match(globalStylesSource, /asset-card-download-action::after/, 'stable-ready download action should render a custom hover bubble');

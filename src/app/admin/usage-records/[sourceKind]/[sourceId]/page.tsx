@@ -13,10 +13,14 @@ import '../../../admin-usage.css';
 
 export const dynamic = 'force-dynamic';
 
-export default async function UsageRecordPage({ params, searchParams }: {
-  params: { sourceKind: string; sourceId: string };
-  searchParams: { return_to?: string; child_page?: string };
-}) {
+export default async function UsageRecordPage(
+  props: {
+    params: Promise<{ sourceKind: string; sourceId: string }>;
+    searchParams: Promise<{ return_to?: string; child_page?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const user = await getSession();
   if (!user) redirect('/login?next=' + encodeURIComponent(usageRecordHref(params.sourceKind, params.sourceId)));
   if (user.role !== 'admin') redirect('/');
