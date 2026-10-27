@@ -8,9 +8,10 @@ for (const args of [
   ['scripts/test-audit-strict-readonly.cjs'],
   ['--import', 'tsx', 'scripts/verify-audit-scale-db-hd-server.ts'],
   ['--import', 'tsx', 'scripts/verify-task-seedance-pagination-server.cjs'],
+  ['--import', 'tsx', 'scripts/verify-multiview-record-pagination-server.cjs'],
 ]) {
   const result = spawnSync(process.execPath, args, { stdio: 'inherit', env: {
-    ...process.env, NODE_ENV: 'test', SD2_DATABASE_MODE: 'writer', AUD_SCALE_SYNTHETIC_SERVER: '1', AUD_TASK_PAGE_SYNTHETIC_SERVER: '1',
+    ...process.env, NODE_ENV: 'test', SD2_DATABASE_MODE: 'writer', AUD_SCALE_SYNTHETIC_SERVER: '1', AUD_TASK_PAGE_SYNTHETIC_SERVER: '1', AUD_MV_RECORDS_SYNTHETIC_SERVER: '1',
   } });
   if (result.error || result.status !== 0) { process.exitCode = 1; break; }
 }

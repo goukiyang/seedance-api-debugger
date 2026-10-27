@@ -14,6 +14,7 @@ const suites = [
   'scripts/test-signed-media-mime.cjs',
   'scripts/test-api-errors.cjs',
   'scripts/test-multiview-error-boundary.cjs',
+  'scripts/test-multiview-record-pagination.cjs',
   'scripts/test-video-callback-auth.cjs',
   'scripts/test-rate-limit.cjs',
   'scripts/test-api-route.cjs',

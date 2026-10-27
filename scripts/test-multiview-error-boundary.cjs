@@ -40,8 +40,10 @@ const invoke = error => mod.exports.multiviewWorkRoute(new Request('https://synt
     assert.doesNotMatch(JSON.stringify(log), /DATABASE_PRIVATE|SYNTHETIC_PRIVATE|SCHEMA_PRIVATE/);
     const known = await invoke(new MultiviewWorkError('保留原请求', 409, 'WORK_CONFLICT', { notCommitted: true }));
     assert.deepEqual(await known.json(), { error: '保留原请求', code: 'WORK_CONFLICT', notCommitted: true });
-    const cursor = await invoke(new PaginationError('列表已变化', 409));
-    assert.equal(cursor.status, 409); assert.equal((await cursor.json()).error, '列表已变化');
+    for (const status of [400, 409]) {
+      const cursor = await invoke(new PaginationError('列表已变化', status));
+      assert.equal(cursor.status, status); assert.equal((await cursor.json()).error, '列表已变化');
+    }
     assert.equal(log.length, 2);
   } finally { console.error = original; }
   console.log('PASS actual multiview error boundary preserves known receipts/cursor status and encrypts unexpected database diagnostics with errorId');

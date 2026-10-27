@@ -12,6 +12,7 @@ import styles from './multiview-generations.module.css';
 import toolStyles from './multiview.module.css';
 import { MultiviewWorks } from './MultiviewWorks';
 import { readMultiviewWorkBinding } from './multiview-work-client';
+import { loadMultiviewRecordProjects, readMultiviewRecordPage, MultiviewRecordReadError } from './multiview-record-pages';
 
 type RecordAction = 'rename' | 'branch' | 'remove' | 'restore' | 'retry' | 'share';
 type Props = { owner: string; authority: string; onTask: (id: string) => void; onWork: (id: string, taskId: string) => void; onManage: (id: string) => void; onDraft: () => void;
@@ -86,62 +87,101 @@ function RecordCard({ item, owner, onTask, onWork, onManage }: Pick<Props, 'owne
 }
 export function MultiviewRecords(props: Props) {
   const { owner, authority } = props;
-  const identity = `${owner}:${authority}`, identityRef = useRef(identity); identityRef.current = identity;
+  const identity = `${owner}:${authority}`;
   const [items, setItems] = useState<MultiviewRecord[]>([]), [cursor, setCursor] = useState<string | null>(null), [total, setTotal] = useState(0);
   const [projects, setProjects] = useState<Array<{ id: string; title: string }>>([]);
+  const [projectScope, setProjectScope] = useState(''), [projectError, setProjectError] = useState(''), [projectsLoading, setProjectsLoading] = useState(false);
   const [q, setQ] = useState(''), [projectId, setProjectId] = useState(''), [removed, setRemoved] = useState(false);
   const [loading, setLoading] = useState(false), [error, setError] = useState(''), [hydrated, setHydrated] = useState('');
   const [manage, setManage] = useState<{ id: string; action?: RecordAction } | null>(null);
   const management = useRef<HTMLElement>(null), backdrop = useRef<HTMLDivElement>(null);
   useDialogDismiss({ open: Boolean(manage), dialogRef: management, dismissSurfaceRef: backdrop, onDismiss: () => setManage(null) });
   const sequence = useRef(0);
+  const projectSequence = useRef(0), recordRequest = useRef<AbortController | null>(null), projectRequest = useRef<AbortController | null>(null);
+  const [loadedScope, setLoadedScope] = useState(''), [retryAppend, setRetryAppend] = useState(false);
+  const recordScope = JSON.stringify([identity, q, projectId, removed]), directoryScope = JSON.stringify([identity, removed]);
+  const recordScopeRef = useRef(recordScope), directoryScopeRef = useRef(directoryScope);
+  recordScopeRef.current = recordScope; directoryScopeRef.current = directoryScope;
+  const shownItems = loadedScope === recordScope ? items : [];
   const key = `sd2:multiview-records:v1:${owner}`;
   useEffect(() => {
-    sequence.current++; setItems([]); setCursor(null); setError(''); setManage(null);
+    sequence.current++; projectSequence.current++; recordRequest.current?.abort(); projectRequest.current?.abort();
+    recordRequest.current = null; projectRequest.current = null;
+    setItems([]); setCursor(null); setError(''); setManage(null); setLoadedScope(''); setTotal(0);
+    setProjects([]); setProjectScope(''); setProjectError('');
     try { const saved = JSON.parse(localStorage.getItem(key) || '{}'); setQ(typeof saved.q === 'string' ? saved.q.slice(0, 120) : ''); setProjectId(typeof saved.projectId === 'string' ? saved.projectId : ''); setRemoved(saved.removed === true); }
     catch { setQ(''); setProjectId(''); setRemoved(false); }
     setHydrated(identity);
-    return () => { sequence.current++; };
+    return () => { sequence.current++; projectSequence.current++; recordRequest.current?.abort(); projectRequest.current?.abort(); };
   }, [identity, key]);
-  const load = useCallback(async (append = false) => {
+  const loadProjects = useCallback(async () => {
     if (!owner || hydrated !== identity || isClientSessionBlocked()) return;
-    const captured = identity, seq = ++sequence.current;
-    setLoading(true); setError('');
+    const captured = directoryScope, seq = ++projectSequence.current;
+    projectRequest.current?.abort(); const controller = new AbortController(); projectRequest.current = controller;
+    const current = () => seq === projectSequence.current && captured === directoryScopeRef.current && !controller.signal.aborted && !isClientSessionBlocked();
+    setProjectsLoading(true); setProjectError('');
+    try {
+      const complete = await loadMultiviewRecordProjects({ owner, removed, fetch, signal: controller.signal, current });
+      if (!current()) return;
+      setProjects(complete); setProjectScope(captured);
+      setProjectId(previous => !previous || complete.some(project => project.id === previous) ? previous : '');
+    } catch (cause) {
+      if (seq === projectSequence.current && captured === directoryScopeRef.current && !isClientSessionBlocked()) setProjectError(cause instanceof MultiviewRecordReadError ? cause.message : '项目目录暂不可读取，请重试。');
+    } finally {
+      if (seq === projectSequence.current) { projectRequest.current = null; setProjectsLoading(false); }
+    }
+  }, [owner, hydrated, identity, directoryScope, removed]);
+  useEffect(() => { if (hydrated === identity) void loadProjects(); return () => { projectSequence.current++; projectRequest.current?.abort(); }; }, [hydrated, identity, loadProjects]);
+  const load = useCallback(async (append = false) => {
+    if (!owner || hydrated !== identity || isClientSessionBlocked() || projectId && projectScope !== directoryScope) return;
+    if (append && (recordRequest.current || loadedScope !== recordScope || !cursor)) return;
+    const captured = recordScope, seq = ++sequence.current;
+    recordRequest.current?.abort(); const controller = new AbortController(); recordRequest.current = controller;
+    const current = () => seq === sequence.current && captured === recordScopeRef.current && !controller.signal.aborted && !isClientSessionBlocked();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    setLoading(true); setError(''); setRetryAppend(append);
     try {
       const params = new URLSearchParams({ q, projectId, removed: removed ? '1' : '0' });
       if (append && cursor) params.set('cursor', cursor);
-      const response = await fetch(`/api/video/multiview/records?${params}`, { cache: 'no-store', headers: { 'x-app-session-user': owner }, signal: AbortSignal.timeout(30000) });
-      const data = await response.json();
-      if (seq !== sequence.current || captured !== identityRef.current || isClientSessionBlocked()) return;
-      if (!response.ok || !Array.isArray(data.items)) throw new Error(data.error || '记录暂不可读取');
+      const response = await fetch(`/api/video/multiview/records?${params}`, { cache: 'no-store', headers: { 'x-app-session-user': owner }, signal: controller.signal });
+      const data = await readMultiviewRecordPage(response);
+      if (!current()) return;
       setItems(previous => append ? [...previous, ...data.items.filter((item: MultiviewRecord) => !previous.some(old => old.id === item.id))] : data.items);
-      setTotal(data.total); setCursor(data.nextCursor); setProjects(data.projects);
-    } catch (cause) { if (seq === sequence.current && captured === identityRef.current) setError(cause instanceof Error ? cause.message : '记录暂不可读取'); }
-    finally { if (seq === sequence.current) setLoading(false); }
-  }, [owner, hydrated, identity, q, projectId, removed, cursor]);
+      setTotal(data.total); setCursor(data.nextCursor); setLoadedScope(captured);
+    } catch (cause) {
+      if (seq !== sequence.current || captured !== recordScopeRef.current || isClientSessionBlocked()) return;
+      if (cause instanceof MultiviewRecordReadError && [400, 401, 403, 409].includes(cause.status)) {
+        setItems([]); setCursor(null); setLoadedScope(''); setRetryAppend(false); setTotal(0);
+      }
+      setError(cause instanceof MultiviewRecordReadError ? cause.message : '记录暂不可读取，请重试。');
+    } finally { clearTimeout(timeout); if (seq === sequence.current) { recordRequest.current = null; setLoading(false); } }
+  }, [owner, hydrated, identity, q, projectId, removed, cursor, projectScope, directoryScope, loadedScope, recordScope]);
   useEffect(() => {
     if (hydrated !== identity) return;
     try { localStorage.setItem(key, JSON.stringify({ q, projectId, removed })); } catch { /* Browsing remains available without local preferences. */ }
     const timer = setTimeout(() => void load(), 250); return () => clearTimeout(timer);
     // A cursor update must not reload the first page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, identity, key, q, projectId, removed]);
+  }, [hydrated, identity, key, q, projectId, removed, projectScope]);
   if (!owner || hydrated !== identity) return <p>正在读取记录…</p>;
   return <section className={styles.library} aria-label="3D多视图记录">
     <header className={styles.header}><div className={styles.actions}>
       <label><Search size={15} /><input aria-label="搜索记录" placeholder="搜索记录" maxLength={120} value={q} onChange={event => setQ(event.target.value)} /></label>
-      <select aria-label="筛选项目" value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
+      <select aria-label="筛选项目" disabled={projectsLoading || projectScope !== directoryScope} value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">全部项目</option>
+        {projectScope !== directoryScope && projectId && <option value={projectId}>正在读取项目…</option>}
+        {(projectScope === directoryScope ? projects : []).map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
       <label><input type="checkbox" checked={removed} onChange={event => setRemoved(event.target.checked)} />已移出</label>
-      <span>{total} 条</span></div><button type="button" disabled={loading} onClick={() => void load()} aria-label="刷新记录" title="刷新"><RefreshCw size={16} /></button></header>
-    {error && <p role="status">{error}</p>}
-    <div className={styles.grid}>{items.map(item => <RecordCard key={`${identity}:${removed}:${item.id}`} item={item} {...props} onManage={(id, action) => setManage({ id, action })} />)}</div>
+      <span>{loadedScope === recordScope ? total : 0} 条</span></div><button type="button" disabled={loading || projectsLoading} onClick={() => { void load(); void loadProjects(); }} aria-label="刷新记录" title="刷新"><RefreshCw size={16} /></button></header>
+    {projectError && <p role="status">{projectError}<button type="button" disabled={projectsLoading} onClick={() => void loadProjects()}>重试</button></p>}
+    {error && <p role="status">{error}<button type="button" disabled={loading} onClick={() => void load(retryAppend)}>重试</button></p>}
+    <div className={styles.grid}>{shownItems.map(item => <RecordCard key={`${identity}:${removed}:${item.id}`} item={item} {...props} onManage={(id, action) => setManage({ id, action })} />)}</div>
     {loading && <p role="status">正在读取…</p>}
-    {!loading && !items.length && !error && <div className={styles.empty}>暂无记录<button type="button" onClick={props.onDraft}>返回工作台</button></div>}
-    {cursor && <div className={styles.more}><button type="button" disabled={loading} onClick={() => void load(true)}>加载更多</button></div>}
+    {!loading && loadedScope === recordScope && !shownItems.length && !error && <div className={styles.empty}>暂无记录<button type="button" onClick={props.onDraft}>返回工作台</button></div>}
+    {loadedScope === recordScope && cursor && !error && <div className={styles.more}><button type="button" disabled={loading} onClick={() => void load(true)}>加载更多</button></div>}
     {manage && <div ref={backdrop} className={toolStyles.toolsBackdrop}><section ref={management} className={toolStyles.tools} role="dialog" aria-modal="true" aria-label="管理方案">
-      <header className={toolStyles.toolsHeader}><h3>方案</h3><button type="button" aria-label="关闭方案" title="关闭" onClick={() => { setManage(null); void load(); }}><X size={18} /></button></header>
+      <header className={toolStyles.toolsHeader}><h3>方案</h3><button type="button" aria-label="关闭方案" title="关闭" onClick={() => { setManage(null); void load(); void loadProjects(); }}><X size={18} /></button></header>
       <MultiviewWorks key={`${identity}:${manage.id}:${manage.action || ''}`} owner={owner} authority={authority} initialWorkId={manage.id} initialAction={manage.action} detailOnly
-        onClose={() => { setManage(null); void load(); }} onNew={props.onDraft}
+        onClose={() => { setManage(null); void load(); void loadProjects(); }} onNew={props.onDraft}
         onEdit={work => props.onWork(work.id, work.sourceTaskId)} onUseReference={props.onUseReference} />
     </section></div>}
   </section>;

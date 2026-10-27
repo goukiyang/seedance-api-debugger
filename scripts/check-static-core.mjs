@@ -38,7 +38,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const findings = checkStatic(process.cwd());
   console.log(JSON.stringify({ schema: 'static-contracts.v1', rules: ['decoder-single-entry'], findings }));
   if (findings.length) process.exitCode = 1;
-  for (const script of ['scripts/check-audit-billing.cjs', 'scripts/check-audit-net.cjs', 'scripts/check-api-errors.cjs', 'scripts/check-audit-decode-upload.cjs', 'scripts/check-route-policies.cjs', 'scripts/check-task-dto.cjs', 'scripts/check-audit-scale-db-hd.mjs', 'scripts/check-audit-strict-readonly.cjs', 'scripts/check-album-pagination.cjs', 'scripts/check-task-seedance-pagination.cjs', 'scripts/check-seedance-selector-pagination.cjs', 'scripts/check-picker-growth.cjs', 'scripts/check-governance-pagination.cjs']) {
+  for (const script of ['scripts/check-audit-billing.cjs', 'scripts/check-audit-net.cjs', 'scripts/check-api-errors.cjs', 'scripts/check-audit-decode-upload.cjs', 'scripts/check-route-policies.cjs', 'scripts/check-task-dto.cjs', 'scripts/check-audit-scale-db-hd.mjs', 'scripts/check-audit-strict-readonly.cjs', 'scripts/check-album-pagination.cjs', 'scripts/check-task-seedance-pagination.cjs', 'scripts/check-seedance-selector-pagination.cjs', 'scripts/check-picker-growth.cjs', 'scripts/check-governance-pagination.cjs', 'scripts/check-multiview-record-pagination.cjs']) {
     const result = spawnSync(process.execPath, [script], { stdio: 'inherit' });
     if (result.error || result.status !== 0) process.exitCode = 1;
   }
