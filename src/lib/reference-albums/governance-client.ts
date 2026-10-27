@@ -24,7 +24,7 @@ export async function loadAllFolderPages<T extends { id: string }>(options: Albu
   const folders: T[] = [], ids = new Set<string>(), cursors = new Set<string>();
   let cursor: string | null = null, total: number | null = null, canManage = false;
   for (;;) {
-    const page = await fetchGovernancePage<T>('/api/reference-album-folders', 'folders', { ...options, cursor, limit: 100 });
+    const page: { items: T[]; pagination: PageInfo; canManage: boolean } = await fetchGovernancePage<T>('/api/reference-album-folders', 'folders', { ...options, cursor, limit: 100 });
     if (total !== null && total !== page.pagination.total) throw new Error('文件夹列表已变化，请重试');
     total = page.pagination.total; canManage = page.canManage;
     for (const item of page.items) { if (ids.has(item.id)) throw new Error('文件夹列表已变化，请重试'); ids.add(item.id); folders.push(item); }

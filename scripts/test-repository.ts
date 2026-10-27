@@ -4,10 +4,20 @@
  */
 import { prisma } from '../src/lib/prisma';
 import { seedanceAssetRepository } from '../src/lib/assets/seedanceAssetRepository';
+import assert from 'node:assert/strict';
+import path from 'node:path';
 
 async function test() {
+  const run = process.env.MEDIA_FIXTURE_RUN_ID || '';
+  assert.match(run, /^[a-zA-Z0-9_-]{1,80}$/);
+  assert.equal(process.env.DATABASE_URL, `file:${path.join(process.cwd(), '.role-tests/media-fixtures', run, 'audit-media.db')}`);
+  assert.equal(await prisma.user.count(), 0, 'Use a fresh prepared synthetic database only');
+  const owner = await prisma.user.create({ data: {
+    username: 'synthetic-repository-owner', name: 'Synthetic owner', email: 'repository@example.invalid', password_hash: 'unusable',
+  } });
   console.log('=== 1. 测试创建记录 ===');
   const created = await seedanceAssetRepository.create({
+    ownerId: owner.id,
     providerAssetId: 'asset-test-' + Date.now(),
     assetType: 'Image',
     name: 'test-persistence-' + Date.now(),
@@ -55,7 +65,7 @@ async function test() {
   console.log('DB 记录 updated_at:', dbRecord?.updated_at ? '✅ 有值' : '❌ 无值');
 
   console.log('\n=== 8. 清理测试数据 ===');
-  await prisma.seedanceAsset.deleteMany({ where: { name: { startsWith: 'test-persistence-' } } });
+  await prisma.seedanceAsset.deleteMany({ where: { owner_id: owner.id, name: { startsWith: 'test-persistence-' } } });
   const finalCount = await seedanceAssetRepository.count(false);
   console.log('清理后活跃数:', finalCount);
 

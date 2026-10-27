@@ -12,19 +12,20 @@ const text = (value: unknown) => { if (typeof value !== 'string') throw new Erro
 const nullable = (value: unknown) => value === null ? null : text(value);
 export function hdReadDate(value: unknown): Date {
   if (typeof value !== 'number' && typeof value !== 'bigint' && typeof value !== 'string') throw new Error('hd_read_date_invalid');
+  let normalized: string | number = typeof value === 'bigint' ? Number(value) : value;
   // Match Prisma SQLite's UTC timestamps, including legacy SQL datetime text.
-  if (typeof value === 'string') {
-    const iso = /^(\d{4}-\d\d-\d\d)[Tt ](\d\d):(\d\d):(\d\d)/.exec(value);
+  if (typeof normalized === 'string') {
+    const iso = /^(\d{4}-\d\d-\d\d)[Tt ](\d\d):(\d\d):(\d\d)/.exec(normalized);
     if (iso) {
       const calendar = new Date(iso[1] + 'T00:00:00Z');
       if (!Number.isFinite(calendar.getTime()) || calendar.toISOString().slice(0, 10) !== iso[1]
         || Number(iso[2]) > 23 || Number(iso[3]) > 59 || Number(iso[4]) > 59) throw new Error('hd_read_date_invalid');
     }
-    if (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(value)) value = value.replace(' ', 'T') + 'Z';
-    else if (/^\d{4}-\d\d-\d\d[Tt ]\d\d:\d\d:\d\d(?:\.\d+)?(?:[Zz]|[+-]\d\d:\d\d)$/.test(value)) value = value.replace(' ', 'T');
-    else if (!/^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d\d:\d\d:\d\d\s+(?:[+-]\d{4}|UT|GMT|[ECMP][SD]T)$/.test(value)) throw new Error('hd_read_date_invalid');
+    if (/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(normalized)) normalized = normalized.replace(' ', 'T') + 'Z';
+    else if (/^\d{4}-\d\d-\d\d[Tt ]\d\d:\d\d:\d\d(?:\.\d+)?(?:[Zz]|[+-]\d\d:\d\d)$/.test(normalized)) normalized = normalized.replace(' ', 'T');
+    else if (!/^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d\d:\d\d:\d\d\s+(?:[+-]\d{4}|UT|GMT|[ECMP][SD]T)$/.test(normalized)) throw new Error('hd_read_date_invalid');
   }
-  const date = new Date(typeof value === 'bigint' ? Number(value) : value);
+  const date = new Date(normalized);
   if (!Number.isFinite(date.getTime())) throw new Error('hd_read_date_invalid');
   return date;
 }

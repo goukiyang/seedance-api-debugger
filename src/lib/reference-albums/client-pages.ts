@@ -26,7 +26,7 @@ export async function loadAllAlbumPages<T extends { id: string }>(address: strin
   let cursor: string | null = null;
   let total: number | null = null;
   for (let pages = 0; pages < 10000; pages++) {
-    const page = await fetchAlbumPage<T>(address, key, { ...options, cursor, limit: 100 });
+    const page: { items: T[]; pagination: PageInfo } = await fetchAlbumPage<T>(address, key, { ...options, cursor, limit: 100 });
     if (total !== null && total !== page.pagination.total) throw new Error('图集列表已变化，请刷新后重试');
     total = page.pagination.total;
     for (const item of page.items) { if (ids.has(item.id)) throw new Error('图集列表已变化，请刷新后重试'); ids.add(item.id); items.push(item); }
