@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { AuthError } from '@/lib/auth/session';
 import type { SessionUser } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
@@ -16,8 +17,8 @@ export function canGenerateInVideoCardStatus(status: string) {
   return VIDEO_CARD_GENERATABLE_STATUSES.includes(status as typeof VIDEO_CARD_GENERATABLE_STATUSES[number]);
 }
 
-export async function getVideoCardAccess(user: SessionUser, videoCardId: string) {
-  const videoCard = await prisma.videoCard.findUnique({
+export async function getVideoCardAccess(user: SessionUser, videoCardId: string, db: Prisma.TransactionClient = prisma) {
+  const videoCard = await db.videoCard.findUnique({
     where: { id: videoCardId },
     include: {
       project: true,
@@ -35,7 +36,7 @@ export async function getVideoCardAccess(user: SessionUser, videoCardId: string)
     };
   }
 
-  const projectAccess = await getProjectAccess(user, videoCard.project_id);
+  const projectAccess = await getProjectAccess(user, videoCard.project_id, db);
   const canView = projectAccess.canView;
   const canGenerate = projectAccess.canGenerate && canGenerateInVideoCardStatus(videoCard.status);
   const canManage = projectAccess.canManageProject;
@@ -61,8 +62,9 @@ export async function assertCanGenerateInVideoCard(
   user: SessionUser,
   projectId: string,
   videoCardId: string,
+  db: Prisma.TransactionClient = prisma,
 ) {
-  const access = await getVideoCardAccess(user, videoCardId);
+  const access = await getVideoCardAccess(user, videoCardId, db);
   if (!access.videoCard) throw new AuthError('视频卡不存在', 404);
   if (!access.canView) throw new AuthError('无权查看此视频卡', 403);
   if (access.videoCard.project_id !== projectId) {

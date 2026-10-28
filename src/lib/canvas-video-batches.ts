@@ -130,7 +130,7 @@ async function assertInputMedia(user: SessionUser, input: Body) {
     for (const imageId of input.reference_image_ids) await assertCanUseReferenceImage(user, checkedId(imageId, '素材编号'));
   }
 }
-async function quoteChild(user: SessionUser, input: Body) {
+async function quoteChild(user: SessionUser, input: Body, db: CanvasBatchDb = prisma) {
   const provider = input.provider as 'seedance' | 'volcengine_ip' | 'h3';
   const model = String(input.model), resolution = String(input.resolution), duration = Number(input.duration);
   if (!['480p', '720p', '1080p'].includes(resolution) || !Number.isInteger(duration)) throw new CanvasVideoBatchError('视频规格无效，原输入保留', 400);
@@ -138,15 +138,15 @@ async function quoteChild(user: SessionUser, input: Body) {
     const parsed = parseSeedanceVideoModel(model);
     if (!parsed.ok || parsed.model !== model) throw new CanvasVideoBatchError('当前视频型号无法确认，原选择保留', 400);
   } else if (provider === 'volcengine_ip') {
-    const settings = await getVolcengineIpApiSettings();
+    const settings = await getVolcengineIpApiSettings(db);
     if (!isVolcengineIpApiReady(settings) || !isVolcengineIpModelId(model) && model !== settings.default_model
       || !volcengineIpModelResolutions(model).includes(resolution)) throw new CanvasVideoBatchError('原 IP 通道或型号规格暂不可用', 409);
   } else {
-    if (!isH3Operational(await getH3ApiSettings()) || !H3_PRESET_OPTIONS.some(option => option.id === model)) throw new CanvasVideoBatchError('原 H3 通道尚未就绪', 409);
+    if (!isH3Operational(await getH3ApiSettings(db)) || !H3_PRESET_OPTIONS.some(option => option.id === model)) throw new CanvasVideoBatchError('原 H3 通道尚未就绪', 409);
   }
   // IP admission uses the existing IP quote without an ordinary-video context.
-  const context = provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, input);
-  const quote = await quoteVideoPricing({ provider, model, resolution, duration, context });
+  const context = provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, input, 'create', db);
+  const quote = await quoteVideoPricing({ provider, model, resolution, duration, context }, db);
   return { quote, token: context ? issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) : null };
 }
 function signQuote(encoded: string) {
@@ -185,7 +185,7 @@ async function ownedBatch(user: SessionUser, batchId: string, db: CanvasBatchDb 
 async function statesFor(batch: Batch, user: SessionUser, db: CanvasBatchDb = prisma) {
   const taskIds = batch.children.flatMap(child => child.task_id ? [child.task_id] : []);
   const tasks = await db.videoTask.findMany({ where: { id: { in: taskIds } } });
-  for (const task of tasks) await assertCanViewTask(user, task);
+  for (const task of tasks) await assertCanViewTask(user, task, db);
   return batch.children.map(child => canvasVideoChildState(child, tasks.find(task => task.id === child.task_id)));
 }
 export async function projectCanvasVideoBatch(user: SessionUser, batch: Batch) {
@@ -309,7 +309,7 @@ export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
         const childInput = { ...input, idempotency_key: child.idempotency_key,
           source_request_id: `ultimate_canvas:${nodeId}:${child.request_id}` };
         if (canvasBatchBusinessFingerprint(childInput) !== child.fingerprint) throw new CanvasVideoBatchError('子项报价输入不一致');
-        const fresh = await quoteChild(user, childInput);
+        const fresh = await quoteChild(user, childInput, db);
         if (await canvasVideoRouteFingerprint(input.provider, db) !== child.route_fingerprint) throw new CanvasVideoBatchError('视频通道配置已变化，请重新确认报价');
         await assertVideoPricingAcceptance(fresh.quote, child.pricing_revision, db);
         if (creditCents(fresh.quote.pricing.estimatedCost) !== child.amount) throw new CanvasVideoBatchError('子项价格已变化，请重新确认', 409, 'canvas_video_batch_requote_required');
@@ -405,7 +405,7 @@ export async function mutateCanvasVideoBatch(user: SessionUser, batchId: string,
         const revised = quote.children.find(item => item.id === child.id);
         if (!revised || revised.fingerprint !== child.business_fingerprint) throw new CanvasVideoBatchError('原子项输入已变化，未重新生成');
         const frozen = JSON.parse(child.frozen_input_json) as Body;
-        const fresh = await quoteChild(user, frozen);
+        const fresh = await quoteChild(user, frozen, db);
         if (await canvasVideoRouteFingerprint(input.provider, db) !== revised.route_fingerprint) throw new CanvasVideoBatchError('视频通道再次变化，请重新确认报价');
         await assertVideoPricingAcceptance(fresh.quote, revised.pricing_revision, db);
         if (creditCents(fresh.quote.pricing.estimatedCost) !== revised.amount) throw new CanvasVideoBatchError('价格再次变化，请重新确认');

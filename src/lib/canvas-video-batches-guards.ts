@@ -157,7 +157,7 @@ export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: Sessio
     if (slot) {
       const children = await db.canvasVideoBatchChild.findMany({ where: { batch_id: slot.id } });
       const tasks = await db.videoTask.findMany({ where: { id: { in: children.flatMap(child => child.task_id ? [child.task_id] : []) } } });
-      for (const task of tasks) await assertCanViewTask(user, task);
+      for (const task of tasks) await assertCanViewTask(user, task, db);
       const states = children.map(child => canvasVideoChildState(child, tasks.find(task => task.id === child.task_id)));
       if (children.length === slot.count && canvasVideoBatchIsSettled(states)) {
         await db.canvasVideoBatch.update({ where: { id: slot.id }, data: { active_node_key: null,

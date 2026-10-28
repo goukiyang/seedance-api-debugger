@@ -2189,7 +2189,7 @@ export async function POST(request: NextRequest) {
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       if (requireScopeCredential) {
         const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
-          provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
+          provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested }, 'create', tx);
         verifyVideoPricingCredential(body.pricing_quote_token, freshPricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
       }
       if (multiviewGeneration && multiviewRecipe && multiviewSystemReference) {

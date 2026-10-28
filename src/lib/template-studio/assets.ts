@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { sameOriginPublicUrlForSiteUpload, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { studioHiddenAssetUrls } from '@/lib/image-studio/protected-assets';
 import { getReferenceImageByIdForAccess, canUseAlbumImage } from '@/lib/reference-albums/permissions';
@@ -47,12 +48,12 @@ async function assertAssetIsReadable(originalUrl: string) {
   }
 }
 
-async function canReadAsset(user: SessionUser, asset: { id: string; owner_id: string; original_url: string }) {
+async function canReadAsset(user: SessionUser, asset: { id: string; owner_id: string; original_url: string }, db: Prisma.TransactionClient = prisma) {
   if (user.role === 'admin' || asset.owner_id === user.id) return true;
-  const refs = await prisma.referenceImage.findMany({ where: { asset_id: asset.id, status: 'active' }, select: { id: true } });
+  const refs = await db.referenceImage.findMany({ where: { asset_id: asset.id, status: 'active' }, select: { id: true } });
   for (const ref of refs) {
-    const image = await getReferenceImageByIdForAccess(ref.id);
-    if (image && await canUseAlbumImage(user, image)) return true;
+    const image = await getReferenceImageByIdForAccess(ref.id, db);
+    if (image && await canUseAlbumImage(user, image, db)) return true;
   }
   return false;
 }
@@ -80,9 +81,9 @@ export async function getStudioReferenceMetadata(user: SessionUser, assetIds: st
   return items;
 }
 
-export async function authorizeStudioAssets(user: SessionUser, assets: StudioAssetInput[]) {
+export async function authorizeStudioAssets(user: SessionUser, assets: StudioAssetInput[], db: Prisma.TransactionClient = prisma) {
   if (!assets.length) return [];
-  const rows = await prisma.asset.findMany({
+  const rows = await db.asset.findMany({
     where: { id: { in: assets.map((asset) => asset.assetId) }, status: 'active' },
     select: { id: true, owner_id: true, type: true, original_url: true },
   });
@@ -92,8 +93,9 @@ export async function authorizeStudioAssets(user: SessionUser, assets: StudioAss
     if (!row || row.type !== input.type) {
       throw new StudioError('素材不存在、已停用或无权使用', 403, 'FORBIDDEN');
     }
-    if (!(await canReadAsset(user, row))) throw new StudioError('无权使用此素材', 403, 'FORBIDDEN');
-    await assertAssetIsReadable(row.original_url);
+    if (!(await canReadAsset(user, row, db))) throw new StudioError('无权使用此素材', 403, 'FORBIDDEN');
+    // Admission repeats DB authority; physical preparation stays before the write transaction.
+    if (db === prisma) await assertAssetIsReadable(row.original_url);
   }
   return assets;
 }

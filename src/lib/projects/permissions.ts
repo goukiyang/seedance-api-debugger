@@ -197,8 +197,8 @@ export async function getProjectAccess(user: { id: string; role: string } & Acco
   return { project, role, canView, canGenerate, canManageProject, canManageMembers, canManageAssets };
 }
 
-export async function assertCanViewProject(user: SessionUser, projectId: string) {
-  const access = await getProjectAccess(user, projectId);
+export async function assertCanViewProject(user: SessionUser, projectId: string, db: Prisma.TransactionClient = prisma) {
+  const access = await getProjectAccess(user, projectId, db);
   if (!access.project) throw new AuthError('项目不存在', 404);
   if (!access.canView) throw new AuthError('无权查看此项目', 403);
   return access;
@@ -227,8 +227,8 @@ export async function assertCanManageProjectAssets(user: SessionUser, projectId:
   return access;
 }
 
-export async function assertCanGenerateInProject(user: SessionUser, projectId: string) {
-  const access = await getProjectAccess(user, projectId);
+export async function assertCanGenerateInProject(user: SessionUser, projectId: string, db: Prisma.TransactionClient = prisma) {
+  const access = await getProjectAccess(user, projectId, db);
   if (!access.project) throw new AuthError('项目不存在', 404);
   if (!access.canGenerate) throw new AuthError('无权在此项目中生成内容', 403);
   return access;
@@ -403,7 +403,7 @@ export async function assertCanViewTask(user: SessionUser, task: {
   owner_user_id?: string | null;
   user_id?: string | null;
   retention_status?: string | null;
-}) {
+}, db: Prisma.TransactionClient = prisma) {
   if (user.role === 'admin') return;
 
   if (isTaskHiddenFromRegularUsers(task)) {
@@ -411,7 +411,7 @@ export async function assertCanViewTask(user: SessionUser, task: {
   }
 
   if (task.project_id) {
-    await assertCanViewProject(user, task.project_id);
+    await assertCanViewProject(user, task.project_id, db);
     return;
   }
 

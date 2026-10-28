@@ -99,6 +99,28 @@ function canReadTemplate(row: any, user: SessionUser) {
     || (row.status === 'published' && row.visibility === 'shared');
 }
 
+// Generation needs source authority, not HTTP-only private editor capabilities.
+export async function getStudioTemplateUseAccess(user: SessionUser, id: string, source: 'legacy' | 'studio',
+  db: Pick<Prisma.TransactionClient, 'generationTemplate' | 'videoStudioTemplate'> = prisma) {
+  if (source === 'legacy') {
+    const row = await db.generationTemplate.findFirst({ where: { id, status: 'active' }, select: { updated_at: true } });
+    if (!row) throw new StudioError('模板不存在或已撤销', 404, 'NOT_FOUND');
+    return { updatedAt: row.updated_at.toISOString(), canManage: false };
+  }
+  const row = await db.videoStudioTemplate.findUnique({ where: { id }, include: { published_version: true } });
+  if (!row || !canReadTemplate(row, user)) throw new StudioError('模板不存在或无权访问', 404, 'NOT_FOUND');
+  const canManage = user.role === 'admin' || row.owner_user_id === user.id;
+  const visibleRecipe = canManage ? row.recipe_json : row.published_version?.recipe_json;
+  if (visibleRecipe) {
+    const kind = canManage ? 'video-template' : 'video-template-version';
+    const recipeId = canManage ? row.id : row.published_version!.id;
+    const origins = privateFieldBinding(JSON.parse(visibleRecipe).instruction, kind, recipeId,
+      'instruction', videoTemplateOrigins(row.id, row.owner_user_id))?.origins || [];
+    readPrivateVideoRecipe(visibleRecipe, kind, recipeId, origins);
+  }
+  return { updatedAt: row.updated_at.toISOString(), canManage };
+}
+
 const TEMPLATE_PAGE_SIZE = 30;
 
 export async function listStudioTemplates(user: SessionUser, query: { cursor?: string; search?: string; group?: string }) {

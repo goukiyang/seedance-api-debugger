@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
@@ -55,20 +56,20 @@ export function assertVideoPricingFinalReferences(context: VideoPricingContext, 
 
 /** Read-only: no workspace creation, public upload, approval consumption or upstream request. */
 async function resolveContext(user: SessionUser, body: Record<string, unknown>,
-  operation: 'create' | 'draft_upgrade' = 'create'): Promise<VideoPricingContext> {
+  operation: 'create' | 'draft_upgrade', db: Prisma.TransactionClient): Promise<VideoPricingContext> {
   if (Buffer.byteLength(JSON.stringify(body)) > 262144) throw new PricingChargeError('视频报价上下文过大');
   let projectId = typeof body.project_id === 'string' ? body.project_id : '';
   const videoCardId = typeof body.video_card_id === 'string' && body.video_card_id ? body.video_card_id : null;
-  if (videoCardId && !projectId) projectId = (await prisma.videoCard.findUnique({ where: { id: videoCardId }, select: { project_id: true } }))?.project_id || '';
+  if (videoCardId && !projectId) projectId = (await db.videoCard.findUnique({ where: { id: videoCardId }, select: { project_id: true } }))?.project_id || '';
   if (!projectId) throw new PricingChargeError('请先选择报价所属项目');
-  const access = await assertCanGenerateInProject(user, projectId);
-  if (videoCardId) await assertCanGenerateInVideoCard(user, projectId, videoCardId);
+  const access = await assertCanGenerateInProject(user, projectId, db);
+  if (videoCardId) await assertCanGenerateInVideoCard(user, projectId, videoCardId, db);
   const payer = shouldBillProjectBudget(access.project!) ? { kind: 'project' as const, id: projectId } : { kind: 'user' as const, id: user.id };
   const templateRunId = typeof body.template_studio_run_id === 'string' && body.template_studio_run_id ? body.template_studio_run_id : null;
   let templateVideoUrls: string[] | undefined;
   let templateBinding: unknown = null;
   if (templateRunId) {
-    const handoff = await authorizeStudioRunForGeneration(user, templateRunId);
+    const handoff = await authorizeStudioRunForGeneration(user, templateRunId, db);
     if (!Array.isArray(body.template_studio_assets) || body.template_studio_assets.length > 32) throw new PricingChargeError('模板报价缺少最终素材');
     const rawAssets = body.template_studio_assets as Array<Record<string, unknown>>;
     if (rawAssets.some(item => !item || typeof item.assetId !== 'string' || !item.assetId.trim() || !['image', 'video', 'audio'].includes(String(item.type))
@@ -94,9 +95,9 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
       counts.set(item.slotKey, count);
     }
     if (getMissingRequiredStudioAssetSlot(slots, submitted)) throw new PricingChargeError('模板报价缺少必填素材，未按无参考视频计价');
-    await authorizeStudioAssets(user, submitted);
+    await authorizeStudioAssets(user, submitted, db);
     const ids = submitted.filter(item => item.type === 'video' && item.role === 'reference').map(item => item.assetId);
-    const rows = await prisma.asset.findMany({ where: { id: { in: ids }, status: 'active', type: 'video' }, select: { id: true, original_url: true, created_at: true, hash: true, file_size: true } });
+    const rows = await db.asset.findMany({ where: { id: { in: ids }, status: 'active', type: 'video' }, select: { id: true, original_url: true, created_at: true, hash: true, file_size: true } });
     if (rows.length !== ids.length) throw new AuthError('模板参考视频已失效', 403);
     templateVideoUrls = rows.map(row => row.original_url);
     templateBinding = { runId: templateRunId, template: handoff.snapshot.templateVersion, assets: submitted,
@@ -119,8 +120,9 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
     ...(multiviewSettings ? { multiviewSettings } : {}) });
   return { fingerprint, actorId: user.id, projectId, videoCardId, payer, referenceVideo, purpose, referenceVideoCount, referenceVideoFingerprint, templateRunId };
 }
-export async function resolveVideoPricingContext(user: SessionUser, body: Record<string, unknown>, operation: 'create' | 'draft_upgrade' = 'create') {
-  try { return await resolveContext(user, body, operation); }
+export async function resolveVideoPricingContext(user: SessionUser, body: Record<string, unknown>, operation: 'create' | 'draft_upgrade' = 'create',
+  db: Prisma.TransactionClient = prisma) {
+  try { return await resolveContext(user, body, operation, db); }
   catch (error) {
     if (error instanceof AuthError || error instanceof StudioError) throw new VideoPricingContextError(error.message, error.status);
     throw error;

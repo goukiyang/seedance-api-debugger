@@ -358,7 +358,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     if (needsPricingCredential) {
       const freshDraft = await tx.videoTask.findUnique({ where: { id: draft.id } });
       if (!freshDraft || ['admin_hidden', 'user_deleted'].includes(freshDraft.retention_status)) throw new DraftUpgradeError('原样片暂不可用，未提交升级', 409, 'pricing_quote_changed');
-      const freshContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(freshDraft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade');
+      const freshContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(freshDraft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade', tx);
       verifyVideoPricingCredential(input.pricingQuoteToken, freshContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
     }
     const created = await tx.videoTask.create({
