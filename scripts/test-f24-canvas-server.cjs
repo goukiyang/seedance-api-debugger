@@ -7,15 +7,20 @@ const { execFileSync } = require('node:child_process');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const baseline = process.argv.includes('--baseline');
+const sourceRef = baseline ? '24e4c097bcea877135c40c6bf14eba48a5ecc055' : process.env.F24_SOURCE_REF;
 class AuthError extends Error { constructor(message, status = 403) { super(message); this.status = status; } }
-const forbidden = new Proxy({}, { get: (_, key) => { throw Error('unexpected global database access: ' + String(key)); } });
+let activeMutationDb = null;
+const forbidden = new Proxy({}, { get: (_, key) => {
+  if (key === '$transaction' && activeMutationDb) return async work => work(activeMutationDb);
+  throw Error('unexpected global database access: ' + String(key));
+} });
 const cache = new Map();
 const noCall = new Proxy({}, { get: (_, key) => { if (key === '__esModule') return false; return () => { throw Error('unexpected dependency: ' + String(key)); }; } });
 function load(file) {
   file = path.resolve(file);
   if (cache.has(file)) return cache.get(file).exports;
   const name = path.relative(root, file).replaceAll(path.sep, '/');
-  let source = baseline ? execFileSync('git', ['show', '24e4c097bcea877135c40c6bf14eba48a5ecc055:' + name], { cwd: root, encoding: 'utf8' }) : fs.readFileSync(file, 'utf8');
+  let source = sourceRef ? execFileSync('git', ['show', sourceRef + ':' + name], { cwd: root, encoding: 'utf8' }) : fs.readFileSync(file, 'utf8');
   if (name === 'src/lib/canvas-documents.ts') source += '\nexport { duplicateSnapshot as f24DuplicateSnapshot };';
   const module = { exports: {} }; cache.set(file, module);
   const local = id => {
@@ -24,7 +29,6 @@ function load(file) {
     if (id.endsWith('/auth/session') || id === './auth/session') return { AuthError };
     if (id.endsWith('/access/feature-guard')) return { assertInternalOnly: user => { if (user.account_type !== 'internal') throw new AuthError('internal', 403); }, isFeatureAllowed: () => true };
     if (id.endsWith('/image-studio/protected-assets') || id === './image-studio/protected-assets') return { canReadStudioAsset: async (_user, asset, db) => { assert.equal(db, activeDb); return !asset.syntheticProtected; }, studioHiddenAssetUrls: async () => [] };
-    if (id.endsWith('/canvas-video-batches-guards') || id === './canvas-video-batches-guards') return noCall;
     if (id.endsWith('/canvas-roles/guard')) return { isRoleCollaborationReadOnly: () => false };
     if (id === 'uuid') return { v4: () => 'synthetic-workspace' };
     if (id.startsWith('node:') || ['crypto', 'fs', 'path'].includes(id)) return require(id);
@@ -33,6 +37,7 @@ function load(file) {
     next += path.extname(next) === '.ts' ? '' : '.ts';
     if (['canvas-documents.ts', 'canvas-workspace.ts', 'canvas-reference-inputs.ts', 'canvas-references.ts', 'workspace.ts',
       'permissions.ts', 'site-url.ts', 'reference-media-policy.ts', 'seedance-models.ts', 'multiview-task-privacy.ts', 'retention.ts',
+      'canvas-video-batches-guards.ts', 'canvas-video-batch-contract.ts', 'canvas-video-batches-build-mode.ts',
       'workflow-schema.ts', 'types.ts', 'text-models.ts', 'quality-routing.ts', 'shared-capabilities.ts', 'ratios.ts', 'limits.ts'].includes(path.basename(next))) return load(next);
     return noCall;
   };
@@ -65,12 +70,29 @@ if (!baseline) {
   const channels = load(path.join(root, 'src/lib/image-studio/shared-capabilities.ts'));
   const caps = ['canvas.references.v1'];
   function fixture(graph = snapshot()) {
-    const state = { user: { ...user }, document: document(graph), project: { id: 'project-a', owner_user_id: user.id, status: 'active', type: 'personal', members: [] },
-      assets: new Map(), references: new Map(), workspaces: [], bindings: new Map(), writes: 0, balance: 1234, unknown: { request_id: 'unknown-original', state: 'unknown' } };
+    const state = { user: { ...user, expires_at: null }, document: document(graph), project: { id: 'project-a', owner_user_id: user.id, status: 'active', type: 'personal', members: [] },
+      assets: new Map(), references: new Map(), tasks: new Map(), workspaces: [], bindings: new Map(), writes: 0, balance: 1234, unknown: { request_id: 'unknown-original', state: 'unknown' },
+      userReads: [], documentWrites: [], history: [], mutations: new Map(), hasBatch: false, sealScans: 0 };
     const db = new Proxy({
-      user: { findUnique: async () => state.user },
+      user: { findUnique: async query => { state.userReads.push(query); return state.user; } },
       project: { findUnique: async () => state.project },
-      canvasDocument: { findUnique: async ({ where }) => where.id === state.document.id ? state.document : null },
+      canvasDocument: {
+        findUnique: async ({ where }) => where.id === state.document.id ? { ...state.document } : null,
+        updateMany: async ({ where, data }) => {
+          if (where.id !== state.document.id || where.revision !== state.document.revision || where.protocol_version !== state.document.protocol_version) return { count: 0 };
+          state.documentWrites.push(data); const { revision, ...metadata } = data;
+          state.document = { ...state.document, ...metadata, revision: state.document.revision + revision.increment };
+          return { count: 1 };
+        },
+      },
+      canvasDocumentRevision: { create: async ({ data }) => { state.history.push(data); return data; }, findMany: async () => [] },
+      canvasDocumentMutation: {
+        findUnique: async ({ where }) => state.mutations.get(where.actor_user_id_mutation_id.mutation_id) || null,
+        deleteMany: async () => ({ count: 0 }),
+        create: async ({ data }) => { state.mutations.set(data.mutation_id, { ...data, created_at: new Date() }); return data; },
+      },
+      canvasVideoBatch: { findFirst: async () => state.hasBatch ? { id: 'original-batch' } : null,
+        findMany: async () => { state.sealScans++; return []; } },
       asset: { findUnique: async ({ where }) => state.assets.get(where.id) || null },
       referenceImage: { findFirst: async ({ where }) => state.references.get(where.id) || null },
       platformSetting: { findUnique: async ({ where }) => state.bindings.get(where.key) || null },
@@ -78,7 +100,11 @@ if (!baseline) {
         findFirst: async ({ where }) => state.workspaces.find(row => (!where.id || row.id === where.id) && row.owner_id === where.owner_id && row.status === where.status && (!where.name || row.name === where.name)) || null,
         findMany: async ({ where, take }) => state.workspaces.filter(row => row.owner_id === where.owner_id && row.status === where.status && where.name.in.includes(row.name)).slice(0, take),
       },
-      videoTask: { findFirst: async () => null },
+      videoTask: { findFirst: async ({ where }) => {
+        const task = state.tasks.get(where.id);
+        return task && task.local_status === where.local_status && where.retention_status.in.includes(task.retention_status)
+          && where.OR.some(owner => Object.entries(owner).every(([key, value]) => task[key] === value)) ? task : null;
+      } },
     }, { get(target, key) { if (key in target) return target[key]; throw Error('unexpected DB operation ' + String(key)); } });
     activeDb = db;
     const add = (id, type = 'image', owner = user.id) => {
@@ -88,8 +114,101 @@ if (!baseline) {
     };
     const body = items => ({ provider: 'seedance', model: 'seedance_2.0', project_id: 'project-a', canvas_document_id: 'document-a', canvas_node_id: 'target',
       generation_mode: 'all_in_one_reference', canvas_references: { version: 1, items }, required_capabilities: caps });
-    return { db, state, add, body };
+    const mutate = async (body, method = 'PATCH', capabilities = []) => {
+      activeMutationDb = db;
+      try { return await docs.mutateCanvasDocument(user, body, method, capabilities); }
+      finally { activeMutationDb = null; }
+    };
+    return { db, state, add, body, mutate };
   }
+  test('correction: explicit nonexistent assetId cannot fall through to a valid own task', async () => {
+    const f = fixture();
+    f.state.tasks.set('task-video', { id: 'task-video', owner_user_id: user.id, user_id: user.id, project_id: 'project-a',
+      local_status: 'succeeded', retention_status: 'active', public_video_url: 'https://synthetic.invalid/video' });
+    const item = { kind: 'video', role: 'reference', taskId: 'task-video', assetId: 'missing-asset' };
+    const original = JSON.stringify(item);
+    await assert.rejects(() => inputs.resolveCanvasReferenceInputs(user, f.body([item]), f.db), error => error.status === 403);
+    assert.equal(JSON.stringify(item), original); assert.equal(f.state.balance, 1234); assert.equal(f.state.writes, 0);
+  });
+  test('correction: valid single/matching identities remain valid, explicit absent task/reference identities reject', async () => {
+    const f = fixture(), item = f.add('video', 'video');
+    f.state.tasks.set('task-video', { id: 'task-video', owner_user_id: user.id, user_id: user.id, project_id: 'project-a',
+      local_status: 'succeeded', retention_status: 'active', public_video_url: f.state.assets.get('video').original_url });
+    f.state.references.set('ref-video', { id: 'ref-video', asset_id: 'video', asset: f.state.assets.get('video'),
+      album: { owner_user_id: user.id, project_id: null, album_type: 'personal', visibility: 'private', shares: [] } });
+    for (const value of [{ kind: 'video', role: 'reference', taskId: 'task-video' }, item,
+      { ...item, referenceImageId: 'ref-video' }, { ...item, taskId: 'task-video', referenceImageId: 'ref-video' }]) {
+      const resolved = (await inputs.resolveCanvasReferenceInputs(user, f.body([value]), f.db)).references.items[0];
+      for (const [key, identity] of Object.entries(value)) assert.equal(resolved[key], identity);
+    }
+    for (const value of [{ ...item, taskId: 'absent-task' }, { ...item, referenceImageId: 'absent-reference' },
+      { kind: 'video', role: 'reference', assetId: 'absent-asset' }, { ...item, taskId: 'task-video', referenceImageId: 'absent-reference' }]) {
+      await assert.rejects(() => inputs.resolveCanvasReferenceInputs(user, f.body([value]), f.db), error => [403, 404].includes(error.status));
+    }
+    assert.equal(f.state.balance, 1234); assert.equal(f.state.writes, 0);
+  });
+  test('correction: marked-document metadata-only rename/archive/restore keep exact original JSON without new capability', async () => {
+    const graph = snapshot(); graph.canvas.nodes[0].data.canvas_references = { version: 1, items: [] };
+    graph.canvasReferenceVersion = 1; graph.requiredCapabilities = caps;
+    const f = fixture(graph); f.state.document.document_json = ' \n' + JSON.stringify(graph, null, 2) + '\n';
+    const original = f.state.document.document_json;
+    let rename;
+    for (const action of ['rename', 'archive', 'restore']) {
+      const body = { action, document_id: 'document-a', protocol_version: 2, base_revision: f.state.document.revision, mutation_id: 'metadata-' + action,
+        document_json: JSON.stringify(snapshot()),
+        ...(action === 'rename' ? { title: 'Renamed' } : {}) };
+      await f.mutate(body);
+      if (action === 'rename') rename = body;
+      assert.equal(f.state.document.document_json, original);
+      assert.equal(f.state.document.status, action === 'archive' ? 'archived' : 'active');
+      assert.equal(Object.hasOwn(f.state.documentWrites.at(-1), 'document_json'), false);
+    }
+    assert.equal(f.state.sealScans, 1, 'archive still invokes actual batch sealing');
+    const writes = f.state.documentWrites.length;
+    assert.equal((await f.mutate(rename)).replayed, true);
+    assert.equal(f.state.documentWrites.length, writes);
+    assert.equal(f.state.document.document_json, original); assert.equal(f.state.balance, 1234);
+  });
+  test('correction: metadata-only operations still enforce owner/project/CAS/batch; JSON-rewriting actions still require capability', async () => {
+    const graph = snapshot(); graph.canvas.nodes[0].data.canvas_references = { version: 1, items: [] };
+    graph.canvasReferenceVersion = 1; graph.requiredCapabilities = caps;
+    const f = fixture(graph), original = f.state.document.document_json;
+    const body = { action: 'rename', title: 'Renamed', document_id: 'document-a', protocol_version: 2, base_revision: 1, mutation_id: 'denied' };
+    await assert.rejects(() => f.mutate({ ...body, base_revision: 0 }), error => error.code === 'revision_conflict');
+    f.state.document.owner_user_id = 'other'; await assert.rejects(() => f.mutate(body), error => error.status === 403); f.state.document.owner_user_id = user.id;
+    f.state.project.status = 'archived'; await assert.rejects(() => f.mutate(body), error => error.status === 403); f.state.project.status = 'active';
+    f.state.hasBatch = true;
+    await assert.rejects(() => f.mutate(body), error => error.code === 'canvas_video_batch_capability_required');
+    f.state.hasBatch = false;
+    for (const action of ['duplicate', 'restore_revision']) await assert.rejects(() => f.mutate({ ...body, action }), error => error.status === 426 && error.code === 'canvas_references_capability_required');
+    await assert.rejects(() => f.mutate({ ...body, document_json: JSON.stringify(snapshot()) }, 'POST'), error => error.status === 426 && error.code === 'canvas_references_capability_required');
+    await assert.rejects(() => f.mutate({ ...body, document_id: undefined, project_id: 'project-a', base_revision: 0, document_json: JSON.stringify(graph) }, 'POST'), error => error.status === 426 && error.code === 'canvas_references_capability_required');
+    f.state.document.status = 'archived';
+    await assert.rejects(() => f.mutate({ ...body, document_json: original }, 'POST', caps), error => error.code === 'document_archived');
+    assert.equal(f.state.document.document_json, original); assert.equal(f.state.documentWrites.length, 0);
+  });
+  test('correction: scope freshly rejects expired actors for read/upload/generate and accepts null/future expiry', async () => {
+    const f = fixture(), request = { projectId: 'project-a', documentId: 'document-a' };
+    for (const purpose of ['read', 'upload', 'generate']) {
+      f.state.user.expires_at = new Date(Date.now() - 1000);
+      await assert.rejects(() => workspace.resolveCanvasWorkspaceScope(user, { ...request, purpose }, f.db), error => error.status === 403);
+      for (const expires of [null, new Date(Date.now() + 60000)]) {
+        f.state.user.expires_at = expires;
+        assert.equal((await workspace.resolveCanvasWorkspaceScope(user, { ...request, purpose }, f.db)).owner_id, user.id);
+      }
+    }
+    assert.ok(f.state.userReads.every(query => query.select.expires_at === true)); assert.equal(f.state.writes, 0);
+  });
+  test('correction: resolver with prevalidated scope freshly rejects expired actor without global DB or input changes', async () => {
+    const f = fixture(), body = f.body([f.add('video', 'video')]);
+    const scope = await workspace.resolveCanvasWorkspaceScope(user, { projectId: 'project-a', documentId: 'document-a' }, f.db);
+    const original = JSON.stringify(body);
+    f.state.user.expires_at = new Date(0);
+    await assert.rejects(() => inputs.resolveCanvasReferenceInputs(user, body, f.db, { scope }), error => error.status === 403);
+    f.state.user.expires_at = null;
+    assert.equal((await inputs.resolveCanvasReferenceInputs(user, body, f.db, { scope })).references.items.length, 1);
+    assert.equal(JSON.stringify(body), original); assert.equal(f.state.balance, 1234); assert.equal(f.state.writes, 0);
+  });
   test('server key binds full user/project/document tuple, fits old96 and rejects foreign document', async () => {
     const f = fixture(); const scope = await workspace.resolveCanvasWorkspaceScope(user, { projectId: 'project-a', documentId: 'document-a' }, f.db);
     assert.match(scope.workspace_key, /^uc2_[a-f0-9]{64}$/); assert.ok(scope.workspace_key.length <= 96);

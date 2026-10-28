@@ -75,6 +75,35 @@ async function main() {
     await assert.rejects(() => prisma.$transaction(tx => resolveCanvasReferenceInputs(user, canonical, tx)));
     await prisma.project.update({ where: { id: project.id }, data: { status: 'active' } });
     await assert.rejects(() => resolveCanvasWorkspaceScope({ ...user, id: 'other' }, { projectId: project.id, documentId: doc.id }));
+    phase = 'actual_explicit_identity_contract';
+    const source = await prisma.videoTask.create({ data: { id: 'f24-valid-source', provider: 'seedance', model: SEEDANCE_2_0_MODEL_ID,
+      generation_mode: 'all_in_one_reference', prompt: 'synthetic-source', user_id: user.id, owner_user_id: user.id, project_id: project.id,
+      local_status: 'succeeded', public_video_url: assets[1].original_url } });
+    const sourceInput = (items: unknown[]) => ({ ...body, canvas_references: { version: 1, items } });
+    const taskOnly = { kind: 'video', role: 'reference', taskId: source.id };
+    await assert.rejects(() => prisma.$transaction(tx => resolveCanvasReferenceInputs(user,
+      sourceInput([{ ...taskOnly, assetId: 'f24-nonexistent-asset' }]), tx)), error => (error as { status: number }).status === 403);
+    const taskResult = await prisma.$transaction(tx => resolveCanvasReferenceInputs(user, sourceInput([taskOnly]), tx));
+    assert.equal(taskResult!.references.items[0].taskId, source.id);
+    assert.equal(taskResult!.references.items[0].assetId, undefined);
+    const matching = { ...taskOnly, assetId: assets[1].id };
+    assert.equal((await prisma.$transaction(tx => resolveCanvasReferenceInputs(user, sourceInput([matching]), tx)))!.references.items[0].assetId, assets[1].id);
+    await assert.rejects(() => prisma.$transaction(tx => resolveCanvasReferenceInputs(user,
+      sourceInput([{ ...matching, taskId: 'f24-nonexistent-task' }]), tx)), error => (error as { status: number }).status === 403);
+    const album = await prisma.referenceAlbum.create({ data: { name: 'Synthetic', owner_user_id: user.id } });
+    const reference = await prisma.referenceImage.create({ data: { album_id: album.id, owner_user_id: user.id, asset_id: assets[0].id, url: assets[0].original_url } });
+    const imageReference = { kind: 'image', role: 'reference', assetId: assets[0].id, referenceImageId: reference.id };
+    assert.equal((await prisma.$transaction(tx => resolveCanvasReferenceInputs(user, sourceInput([imageReference]), tx)))!.references.items[0].referenceImageId, reference.id);
+    await assert.rejects(() => prisma.$transaction(tx => resolveCanvasReferenceInputs(user,
+      sourceInput([{ ...imageReference, referenceImageId: 'f24-nonexistent-reference' }]), tx)), error => (error as { status: number }).status === 404);
+    phase = 'actual_fresh_actor_expiry';
+    const priorScope = await resolveCanvasWorkspaceScope(user, { projectId: project.id, documentId: doc.id });
+    await prisma.user.update({ where: { id: user.id }, data: { expires_at: new Date(0) } });
+    for (const purpose of ['read', 'upload', 'generate'] as const) await assert.rejects(() => prisma.$transaction(tx => resolveCanvasWorkspaceScope(user,
+      { projectId: project.id, documentId: doc.id, purpose }, tx)), error => (error as { status: number }).status === 403);
+    await assert.rejects(() => prisma.$transaction(tx => resolveCanvasReferenceInputs(user, canonical, tx, { scope: priorScope })), error => (error as { status: number }).status === 403);
+    await prisma.user.update({ where: { id: user.id }, data: { expires_at: null } });
+    assert.deepEqual(await balances(), before);
     phase = 'actual_document_sticky_reader_copy_replay';
     graph.canvas.nodes[0].data.canvas_references = canonical.canvas_references;
     const saveBody = { document_id: doc.id, project_id: project.id, protocol_version: 2, base_revision: oldSaved.revision, mutation_id: 'f24-save', document_json: JSON.stringify(graph) };
@@ -84,8 +113,20 @@ async function main() {
     assert.equal(canvasDetail(saved).reference_capability!.client_supported, false);
     assert.deepEqual(await prisma.canvasDocument.findUniqueOrThrow({ where: { id: doc.id } }), saved);
     assert.equal(canvasDetail(saved, caps).workspace_context!.workspace_key, canvasWorkspaceKey(user.id, project.id, doc.id));
-    for (const action of ['rename', 'archive', 'duplicate']) await assert.rejects(() => mutateCanvasDocument(user,
+    for (const action of ['duplicate', 'restore_revision']) await assert.rejects(() => mutateCanvasDocument(user,
       { action, document_id: doc.id, protocol_version: 2, base_revision: saved.revision, mutation_id: 'old-' + action, title: 'old-reader' }, 'PATCH'), error => (error as { status: number }).status === 426);
+    await assert.rejects(() => mutateCanvasDocument(user, { ...saveBody, mutation_id: 'old-drop-fields', base_revision: saved.revision,
+      document_json: JSON.stringify({ ...graph, canvas: { ...graph.canvas, nodes: [] } }) }, 'POST'), error => (error as { status: number }).status === 426);
+    const originalJson = saved.document_json;
+    for (const action of ['rename', 'archive', 'restore']) {
+      await mutateCanvasDocument(user, { action, document_id: doc.id, protocol_version: 2, base_revision: saved.revision,
+        mutation_id: 'lossless-' + action, ...(action === 'rename' ? { title: 'Synthetic renamed' } : {}) }, 'PATCH');
+      saved = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: doc.id } });
+      assert.equal(saved.document_json, originalJson);
+      assert.equal(saved.status, action === 'archive' ? 'archived' : 'active');
+    }
+    await assert.rejects(() => mutateCanvasDocument(user, { action: 'rename', document_id: doc.id, protocol_version: 2,
+      mutation_id: 'metadata-stale', base_revision: saved.revision - 1, title: 'stale' }, 'PATCH'), error => (error as { code: string }).code === 'revision_conflict');
     const replayed = await mutateCanvasDocument(user, saveBody, 'POST');
     assert.equal('replayed' in replayed && replayed.replayed, true); assert.equal(await prisma.canvasDocument.count(), 1);
     assert.equal((await prisma.canvasDocument.findUniqueOrThrow({ where: { id: doc.id } })).revision, saved.revision);

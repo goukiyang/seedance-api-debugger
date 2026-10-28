@@ -14,8 +14,9 @@ export function canvasWorkspaceKey(ownerId: string, projectId: string, documentI
 }
 export async function resolveCanvasWorkspaceScope(user: SessionUser, input: Input, db: Prisma.TransactionClient = prisma) {
   if (user.status !== 'active' || user.account_type !== 'internal') throw new AuthError('当前账号无权使用画布', 403);
-  const actor = await db.user.findUnique({ where: { id: user.id }, select: { status: true, role: true, account_type: true } });
-  if (!actor || actor.status !== 'active' || actor.account_type !== 'internal') throw new AuthError('当前账号无权使用画布', 403);
+  const actor = await db.user.findUnique({ where: { id: user.id }, select: { status: true, role: true, account_type: true, expires_at: true } });
+  if (!actor || actor.status !== 'active' || actor.expires_at && actor.expires_at.getTime() <= Date.now()
+    || actor.account_type !== 'internal') throw new AuthError('当前账号无权使用画布或已过期', 403);
   if (actor.role !== user.role || actor.account_type !== user.account_type) throw new AuthError('账号权限已变化，请刷新后核对原输入', 409);
   if (![input.projectId, input.documentId].every(value => /^[A-Za-z0-9_-]{1,160}$/.test(value))) throw new AuthError('画布归属无效', 400);
   if (input.purpose === 'read') {

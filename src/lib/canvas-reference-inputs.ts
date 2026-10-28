@@ -25,8 +25,9 @@ export async function resolveCanvasReferenceInputs(user: SessionUser, body: Reco
     const submitted = normalizeCanvasReferences(body.canvas_references);
     const context = body.context && typeof body.context === 'object' ? body.context as Record<string, unknown> : body;
     if (!submitted && !body.canvas_document_id && !context.documentId) return null;
-    const actor = await db.user.findUnique({ where: { id: user.id }, select: { status: true, role: true, account_type: true } });
-    if (!actor || actor.status !== 'active' || actor.account_type !== user.account_type || actor.role !== user.role) fail('账号权限已变化，请刷新后核对原输入', 403);
+    const actor = await db.user.findUnique({ where: { id: user.id }, select: { status: true, role: true, account_type: true, expires_at: true } });
+    if (!actor || actor.status !== 'active' || actor.expires_at && actor.expires_at.getTime() <= Date.now()
+      || actor.account_type !== user.account_type || actor.role !== user.role) fail('账号权限已变化或已过期，请刷新后核对原输入', 403);
     const scope = options.scope || await resolveCanvasWorkspaceScope(user, { projectId: String(body.project_id || context.projectId || ''),
       documentId: String(body.canvas_document_id || context.documentId || ''), cardId: (body.video_card_id || context.cardId || null) as string | null,
       nodeId: String(body.canvas_node_id || context.nodeId || ''), purpose: 'generate' }, db);
@@ -46,6 +47,7 @@ export async function resolveCanvasReferenceInputs(user: SessionUser, body: Reco
     const sourceLocations = new Set<string>();
     for (const item of submitted.items) {
       let asset = item.assetId ? await db.asset.findUnique({ where: { id: item.assetId } }) : null;
+      if (item.assetId && !asset) fail('指定的原素材不存在，未替换为任务成品', 403);
       if (item.referenceImageId) {
         const reference = await assertCanUseReferenceImage(user, item.referenceImageId, db);
         if (!reference.asset || !reference.asset_id || item.assetId && reference.asset_id !== item.assetId) fail('参考编号与原素材不一致', 403);

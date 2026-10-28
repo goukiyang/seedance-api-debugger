@@ -732,7 +732,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true, db);
-      if (existing) requireCanvasReferencesCapability(JSON.parse(existing.document_json), batchCapabilities);
+      if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasReferencesCapability(JSON.parse(existing.document_json), batchCapabilities);
       if (existing) await requireCanvasVideoBatchDocumentCapability(db, existing.id, batchCapabilities);
       if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && existing.schema_version >= 5 && isRoleCollaborationReadOnly()) {
