@@ -16,7 +16,7 @@ const close = (a: number, b: number, message = 'geometry differs') => assert.ok(
 const same = (a: unknown, b: unknown) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 function composed(count = 3, output = outputs[0], layout?: ReferenceLayout) {
   const recipe = createMultiviewReferenceRecipe(info, slots.slice(0, count), { ...output, layout });
-  for (const [index, slot] of recipe.slots.entries()) {
+  for (const [index, slot] of Array.from(recipe.slots.entries())) {
     recipe.placements = scaleReferencePlacements(recipe, slot.id, .48 + index * .08);
     const panel = recipe.panels[index];
     recipe.placements = moveReferencePlacements(recipe, slot.id, panel.width * .02 * index, -panel.height * .015 * index);
@@ -41,7 +41,7 @@ for (const count of [2, 3, 4]) for (const output of outputs) {
     within(moved); same(moved.panels, original.panels); same(moved.divider, original.divider);
     const expectedX = Math.min(...original.placements.map((p, i) => (original.panels[i].x + original.panels[i].width - p.width - p.x) / original.panels[i].width));
     const expectedY = Math.min(...original.placements.map((p, i) => (original.panels[i].y + original.panels[i].height - p.height - p.y) / original.panels[i].height));
-    for (const [index, image] of moved.placements.entries()) {
+    for (const [index, image] of Array.from(moved.placements.entries())) {
       close((image.x - original.placements[index].x) / original.panels[index].width, expectedX, 'group X movement diverged');
       close((image.y - original.placements[index].y) / original.panels[index].height, expectedY, 'group Y movement diverged');
     }
@@ -52,7 +52,7 @@ for (const count of [2, 3, 4]) for (const output of outputs) {
       within(scaled); same(scaled.panels, original.panels); same(scaled.divider, original.divider);
       const factor = scaled.placements[0].width / original.placements[0].width;
       const ax = corner === 'center' ? .5 : corner.includes('w') ? 1 : 0, ay = corner === 'center' ? .5 : corner.includes('n') ? 1 : 0;
-      for (const [index, image] of scaled.placements.entries()) {
+      for (const [index, image] of Array.from(scaled.placements.entries())) {
         const before = original.placements[index];
         close(image.width / before.width, factor, 'group scale diverged');
         close(image.height / before.height, factor, 'group scale stretched');
