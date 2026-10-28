@@ -86,7 +86,7 @@ function safeError(error, depth = 0) {
     className: /^[A-Za-z][A-Za-z0-9]{0,70}$/.test(className) ? className : 'OtherError',
     status: Number.isInteger(status) && status >= 400 && status <= 599 ? status : null,
     code: typeof code === 'string' && /^(P\d{4}|pricing_[a-z_]+|PRIVATE_PROMPT_[A-Z_]+|ERR_ASSERTION)$/.test(code) ? code : null,
-    message: typeof message === 'string' && /^fb2322_[a-z_]+$/.test(message) ? message : '[redacted diagnostic message]',
+    message: typeof message === 'string' && (/^fb2322_[a-z_]+$/.test(message) || /^[A-Za-z_$][A-Za-z0-9_$]{0,80} is not defined$/.test(message)) ? message : '[redacted diagnostic message]',
     messageLength: typeof message === 'string' ? Math.min(message.length, 16384) : 0,
     ...(cause && cause !== error ? { cause: safeError(cause, depth + 1) } : {}),
   };

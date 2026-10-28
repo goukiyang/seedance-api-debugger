@@ -249,6 +249,7 @@ async function main() {
       idempotencyKey: 'synthetic-current-request', requestClaim: null, canvasAdmission: null, estimatedCost: quote.pricing.estimatedCost,
       requestedProvider: 'seedance', H3_VIDEO_PROVIDER: 'h3', selectedModel: model, resolution: '480p', duration: 5, draftRequested: false,
       multiviewGeneration: null, multiviewRecipe: null, multiviewSystemReference: null,
+      resolveCanvasReferenceInputs: require('../src/lib/canvas-reference-inputs.ts').resolveCanvasReferenceInputs,
       ...pricing, assertVideoPricingAcceptance: quotes.assertVideoPricingAcceptance,
       assertProjectActiveInTransaction: permissions.assertProjectActiveInTransaction,
       assertMultiviewRequestFence: require('../src/lib/video/multiview-request-receipt.ts').assertMultiviewRequestFence,
