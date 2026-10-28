@@ -109,9 +109,9 @@ export function ProjectSelector({ children, className, style, value, disabled, t
         const project=option.projectId ? catalog.find(item=>item.id===option.projectId) : undefined;
         return <div key={`${option.value}:${index}`}>{option.group && visible[index-1]?.group!==option.group && <div className={styles.group}>{option.group}</div>}
           <div className={styles.row}><button type="button" data-project-choice className={styles.option} disabled={option.disabled} aria-pressed={selected===option.value} onClick={()=>choose(option)}><span>{option.label}</span>{selected===option.value && <Check size={14}/>}</button>
-            {project?.can_manage_project && !['personal','system'].includes(project.type) && <ProductActionMenu label={`管理项目：${option.label}`} portalTarget={host} actions={[
+            {project?.can_manage_project && <ProductActionMenu label={`管理项目：${option.label}`} portalTarget={host} actions={[
               {id:'edit',label:'编辑项目',icon:<Pencil size={14}/>,onSelect:()=>manage({mode:'edit',projectId:project.id})},
-              {id:'delete',label:'删除项目',icon:<Trash2 size={14}/>,danger:true,onSelect:()=>manage({mode:'delete',projectId:project.id})},
+              ...(['personal','system'].includes(project.type) ? [] : [{id:'delete',label:'删除项目',icon:<Trash2 size={14}/>,danger:true,onSelect:()=>manage({mode:'delete',projectId:project.id})}]),
             ]}/>}</div></div>;
       })}{!visible.length && <p className={styles.notice}>{search?'没有匹配项目':'暂无可选项目'}</p>}</div>
       {notice && <p className={styles.notice} role="status">{notice}</p>}

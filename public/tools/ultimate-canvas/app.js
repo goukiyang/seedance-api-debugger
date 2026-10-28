@@ -1495,11 +1495,11 @@
                                     </span>
                                     <span class="context-menu-check" aria-hidden="true">${selected ? '✓' : ''}</span>
                                 </button>
-                                ${canvasRuntime.projectManagement?.ownerId === canvasRuntime.bootstrap?.user?.id && canvasRuntime.projectManagement.projects?.some(item => item.id === project.id && item.can_manage_project) && !['personal','system'].includes(project.type) ? `
+                                ${canvasRuntime.projectManagement?.ownerId === canvasRuntime.bootstrap?.user?.id && canvasRuntime.projectManagement.projects?.some(item => item.id === project.id && item.can_manage_project) ? `
                                     <details class="context-project-actions"><summary class="context-row-action" aria-label="管理项目：${escapeHtml(projectDisplayNameFor(project))}">更多</summary>
                                         <button type="button" class="context-row-action" data-project-manage="edit" data-project-id="${escapeHtml(project.id)}">编辑项目</button>
                                         ${removalAction === 'archive' ? `<button type="button" class="context-row-action" data-project-manage="archive" data-project-id="${escapeHtml(project.id)}">归档项目</button>` : ''}
-                                        <button type="button" class="context-row-action danger" data-project-manage="delete" data-project-id="${escapeHtml(project.id)}">删除项目</button>
+                                        ${!['personal','system'].includes(project.type) ? `<button type="button" class="context-row-action danger" data-project-manage="delete" data-project-id="${escapeHtml(project.id)}">删除项目</button>` : ''}
                                     </details>
                                 ` : ''}
                             </div>`;
