@@ -19,7 +19,11 @@ async function main() {
   assert.throws(() => routePayload(raw, sign(raw, 'not-a-date'), env));
   const routed = routePayload(raw, sign(raw), env);
   assert.equal(routed.kind, 'credit');
-  const relayHeaders = routed.headers as Record<string, string>;
+  const relayHeaders = new Headers();
+  for (const [key, value] of Object.entries(routed.headers || {})) {
+    assert.equal(typeof value, 'string');
+    if (typeof value === 'string') relayHeaders.set(key, value);
+  }
   assert(verifyCreditRelay(routed.body, new Headers(relayHeaders)).event);
   assert.throws(() => verifyCreditRelay(routed.body + ' ', new Headers(relayHeaders)));
   assert.throws(() => verifyCreditRelay(routed.body, new Headers(relayHeaders), Date.now() + 61000));
