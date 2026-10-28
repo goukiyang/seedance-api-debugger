@@ -139,6 +139,8 @@ export function useWorkspace(): UseWorkspaceResult {
   const [error, setError] = useState<string | null>(null);
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, UploadStatus>>({});
   const [pendingWorkspaceAttach, setPendingWorkspaceAttach] = useState<PendingWorkspaceAttach | null>(null);
+  const pendingWorkspaceAttachRef = useRef(pendingWorkspaceAttach); pendingWorkspaceAttachRef.current = pendingWorkspaceAttach;
+  const activeHistoryUpload = useRef<object | null>(null);
   const tabIdRef = useRef<string>(getOrCreateTabId());
   const workspaceRef = useRef(workspace); workspaceRef.current = workspace;
   const mounted = useRef(true), readSequence = useRef(0), mutationRevision = useRef(0);
@@ -190,7 +192,8 @@ export function useWorkspace(): UseWorkspaceResult {
     mounted.current = true;
     const reset = () => {
       readSequence.current++; mutationRevision.current++; pendingMutations.current = 0; readAbort.current?.abort();
-      workspaceRef.current = null; setWorkspace(null); setError(null); setPendingWorkspaceAttach(null); setUploadStatuses({}); setLoading(true);
+      workspaceRef.current = null; setWorkspace(null); setError(null); setPendingWorkspaceAttach(null); pendingWorkspaceAttachRef.current = null;
+      activeHistoryUpload.current = null; setUploadStatuses({}); setLoading(true);
       void fetchWorkspace();
     };
     const unsubscribe = subscribeUploadSession(reset); void fetchWorkspace();
@@ -258,23 +261,44 @@ export function useWorkspace(): UseWorkspaceResult {
     if (!asset.id) throw new Error('素材上传成功，但没有返回素材 ID'); return asset.id;
   }, []);
   const uploadAsset = useCallback(async (file: File, onProgress?: UploadProgressHandler) => {
+    if (activeHistoryUpload.current || pendingWorkspaceAttachRef.current) {
+      setError(pendingWorkspaceAttachRef.current ? '已有素材加入结果待确认，请先重试加入参考区；不用重新上传文件。' : '当前文件仍在上传，请等待本次上传结束。');
+      return;
+    }
+    const operation = {}; activeHistoryUpload.current = operation;
     const tempId = `uploading_${crypto.randomUUID()}`;
-    await mutate(async scope => {
-      setUploadStatuses(previous => ({ ...previous, [tempId]: 'uploading' })); setPendingWorkspaceAttach(null);
+    try { await mutate(async scope => {
+      setUploadStatuses(previous => ({ ...previous, [tempId]: 'uploading' }));
+      let uploaded = false;
       try {
         const assetId = await uploadAssetToHistory(file, p => { if (isCurrent(scope)) onProgress?.(p); }); assertCurrent(scope);
+        uploaded = true;
         try { await associate(scope, { assetIds: [assetId] }); }
-        catch (cause) { if (isCurrent(scope)) setPendingWorkspaceAttach({ assetIds: [assetId], fileNames: [file.name || 'upload.bin'], statusIds: [tempId] });
+        catch (cause) { if (isCurrent(scope)) {
+          const pending = { assetIds: [assetId], fileNames: [file.name || 'upload.bin'], statusIds: [tempId] };
+          pendingWorkspaceAttachRef.current = pending; setPendingWorkspaceAttach(pending);
+        }
           throw new Error(`素材已上传成功，但加入参考区尚未确认：${cause instanceof Error ? cause.message : '请重试加入，不用重新上传'}`); }
         setUploadStatuses(previous => { const next = { ...previous }; delete next[tempId]; return next; }); setPendingWorkspaceAttach(null);
-      } catch (cause) { if (isCurrent(scope)) setUploadStatuses(previous => ({ ...previous, [tempId]: 'failed' })); throw cause; }
-    }).catch(() => { /* The current operation owns the visible error; stale operations stay silent. */ });
+      } catch (cause) {
+        if (isCurrent(scope)) setUploadStatuses(previous => {
+          const next = { ...previous };
+          // No reference exists for a failed history upload. Keep its error and
+          // original upload marker, not an invisible permanent reference blocker.
+          if (uploaded) next[tempId] = 'failed'; else delete next[tempId];
+          return next;
+        });
+        throw cause;
+      }
+    }).catch(() => { /* The current operation owns the visible error; stale operations stay silent. */ }); }
+    finally { if (activeHistoryUpload.current === operation) activeHistoryUpload.current = null; }
   }, [assertCurrent, associate, isCurrent, mutate, uploadAssetToHistory]);
   const retryPendingAttach = useCallback(async () => {
     if (!pendingWorkspaceAttach) return;
     await mutate(async scope => {
       await associate(scope, { assetIds: pendingWorkspaceAttach.assetIds });
-      setUploadStatuses(previous => { const next = { ...previous }; pendingWorkspaceAttach.statusIds.forEach(id => delete next[id]); return next; }); setPendingWorkspaceAttach(null);
+      setUploadStatuses(previous => { const next = { ...previous }; pendingWorkspaceAttach.statusIds.forEach(id => delete next[id]); return next; });
+      pendingWorkspaceAttachRef.current = null; setPendingWorkspaceAttach(null);
     }).catch(() => {});
   }, [associate, mutate, pendingWorkspaceAttach]);
   const replaceAsset = useCallback(async (assetId: string, file: File, onProgress?: UploadProgressHandler) => {
@@ -333,7 +357,10 @@ export function useWorkspace(): UseWorkspaceResult {
     return albumId;
   }), [associate, mutate, request]);
   const setAssetFrameRole = useCallback(async (assetId: string, role: FrameRole) => { await mutate(scope => request(scope, `/api/workspace/assets/${encodeURIComponent(assetId)}`, 'PATCH', { role })).catch(() => {}); }, [mutate, request]);
-  const removeAsset = useCallback(async (assetId: string) => { await mutate(scope => request(scope, `/api/workspace/assets/${encodeURIComponent(assetId)}`, 'DELETE')).catch(() => {}); }, [mutate, request]);
+  const removeAsset = useCallback(async (assetId: string) => { await mutate(async scope => {
+    await request(scope, `/api/workspace/assets/${encodeURIComponent(assetId)}`, 'DELETE'); assertCurrent(scope);
+    setUploadStatuses(previous => { const next = { ...previous }; delete next[assetId]; return next; });
+  }).catch(() => {}); }, [assertCurrent, mutate, request]);
   const reorderAssets = useCallback(async (order: Array<{ assetId: string; sortOrder: number }>) => { await mutate(scope => request(scope, '/api/workspace/assets/reorder', 'PATCH', { order })).catch(() => {}); }, [mutate, request]);
   const validatePrompt = useCallback(async (prompt: string) => {
     const scope = currentScope(); if (!scope) return { valid: false, missing: [] };

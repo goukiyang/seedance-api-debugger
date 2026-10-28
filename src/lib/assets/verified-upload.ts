@@ -426,28 +426,54 @@ export async function stageVerifiedUpload(body: AsyncIterable<Uint8Array>, decla
     return { ...await inspectUpload(file, declaredMime, hash, bytes), temporary: true };
   } catch (error) { await handle.close().catch(() => {}); await fs.unlink(file).catch(() => {}); throw error; }
 }
-export async function verifyExistingUpload(asset: Asset, ownerId: string) {
+async function assertExistingUploadAccess(asset: Asset, ownerId: string) {
   if (asset.owner_id !== ownerId || asset.status !== 'active' || !asset.hash) throw new VerifiedUploadError('UPLOAD_EXISTING_INACTIVE', '相同图片的原记录已隐藏或移除，原记录保留');
   const user = await uploadIdentity(ownerId);
   if (!await canReadStudioAsset(user, asset)) throw new VerifiedUploadError('UPLOAD_ASSET_UNAVAILABLE', '这张图片当前不可使用', 403);
   if (asset.file_size <= 0 || asset.file_size > limits[uploadKind(asset.mime_type)]) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有原件大小无法安全核实');
+  return asset.hash;
+}
+function existingUploadObject(asset: Asset, ownerId: string) {
+  const key = configuredUploadObjectKey(asset.original_url, ownerId, process.env.R2_PUBLIC_BASE_URL);
+  if (!key || !process.env.R2_ACCOUNT_ID
+    || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET) return null;
+  return { client: new S3Client({ region: 'auto', endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } }),
+    command: { Bucket: process.env.R2_BUCKET, Key: key } };
+}
+// This preflight must never stage bytes or register an asset/receipt. Remote
+// decoding still belongs after writing, because it persists a private file.
+export async function preflightVerifiedOwnUpload(ownerId: string, hash: string, mimeType: string, bytes: number) {
+  const asset = await prisma.asset.findUnique({ where: { owner_id_hash: { owner_id: ownerId, hash } } });
+  if (!asset) return;
+  await assertExistingUploadAccess(asset, ownerId);
+  if (asset.hash !== hash || asset.mime_type !== mimeType || asset.file_size !== bytes)
+    throw new VerifiedUploadError('UPLOAD_IDENTITY_MISMATCH', '已有文件身份不一致，原记录保留');
+  if (siteUploadPathFromUrl(asset.original_url)) {
+    await verifyExistingUpload(asset, ownerId);
+    return;
+  }
+  const remote = existingUploadObject(asset, ownerId);
+  if (!remote) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有远程原件无法安全核实，原记录保留');
+  const head = await remote.client.send(new HeadObjectCommand(remote.command), { abortSignal: AbortSignal.timeout(30000) });
+  if (head.ContentLength !== asset.file_size || !head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
+}
+export async function verifyExistingUpload(asset: Asset, ownerId: string) {
+  const hash = await assertExistingUploadAccess(asset, ownerId);
   const local = siteUploadPathFromUrl(asset.original_url);
   if (!local) {
-    const key = configuredUploadObjectKey(asset.original_url, ownerId, process.env.R2_PUBLIC_BASE_URL);
-    if (!key || !process.env.R2_ACCOUNT_ID
-      || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET) return null;
-    const client = new S3Client({ region: 'auto', endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
-    const command = { Bucket: process.env.R2_BUCKET, Key: key };
+    const remote = existingUploadObject(asset, ownerId);
+    if (!remote) return null;
+    const { client, command } = remote;
     const head = await client.send(new HeadObjectCommand(command), { abortSignal: AbortSignal.timeout(30000) });
     if (head.ContentLength !== asset.file_size || !head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
     const object = await client.send(new GetObjectCommand(command), { abortSignal: AbortSignal.timeout(180000) });
     if (!object.Body || object.ETag !== head.ETag || object.ContentLength !== head.ContentLength) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
-    const proof = await stageVerifiedUpload(object.Body as AsyncIterable<Uint8Array>, asset.mime_type, asset.file_size, asset.hash);
+    const proof = await stageVerifiedUpload(object.Body as AsyncIterable<Uint8Array>, asset.mime_type, asset.file_size, hash);
     try {
       const after = await client.send(new HeadObjectCommand(command), { abortSignal: AbortSignal.timeout(30000) });
       if (after.ETag !== head.ETag || after.ContentLength !== head.ContentLength) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '远程原文件验证期间已变化');
-      return { ...proof, sourceVersion: `r2:${uploadDigest(key)}:${head.ETag}:${head.ContentLength}:${asset.hash}` };
+      return { ...proof, sourceVersion: `r2:${uploadDigest(command.Key)}:${head.ETag}:${head.ContentLength}:${asset.hash}` };
     } catch (error) { await releaseVerifiedUpload(proof); throw error; }
   }
   const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));

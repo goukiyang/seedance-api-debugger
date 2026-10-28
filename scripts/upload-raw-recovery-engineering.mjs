@@ -37,7 +37,7 @@ function boundary(run) {
 const check = async (name, run) => { await run(); checks.push(name); };
 const fixtureBytes = Buffer.from('synthetic-preflight-no-decoding');
 
-function environment({ rejectDirectory = false, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false, foreignCommittedAsset = false } = {}) {
+function environment({ rejectDirectory = false, rejectExisting = false, preflightError, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false, foreignCommittedAsset = false } = {}) {
   const rows = new Map(), receipts = new Map(), phases = [], logs = [], committedAssets = new Map(), hdRequests = [];
   let writes = 0, directoryChecks = 0, hdAssetReads = 0;
   const owner = 'isolated-upload-owner';
@@ -70,6 +70,10 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
   const verified = { ...base, uploadIdentity: async () => ({ id: owner }),
     releaseVerifiedUpload: async () => {}, readVerifiedUploadReceipt: async (_owner, id) => receipts.get(id) || null,
     findVerifiedOwnUpload: async () => null,
+    preflightVerifiedOwnUpload: async () => {
+      if (preflightError) throw preflightError;
+      if (rejectExisting) throw new base.VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有远程原件无法安全核实', 409);
+    },
     privateUploadDirectory: async () => {
       directoryChecks++;
       if (rejectDirectory) throw new base.VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传服务暂不可用', 503);
@@ -97,6 +101,7 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
         return { assetId: 'isolated-asset', originalUrl: '/uploads/isolated.png', mimeType: 'image/png', upload: { requestId, verified: true } };
       } },
     '@/lib/assets/upload-log': { recordAssetUploadLog: async value => logs.push(value) },
+    '@/lib/assets/direct-upload-error': evaluate(read('src/lib/assets/direct-upload-error.ts')),
     '@/lib/media/hd-derivatives': { requestHd: async (source, priority, preserveText, options, context) => boundary(() => {
       assert.equal(source, '/uploads/isolated.png'); assert.equal(priority, 0);
       assert.equal(preserveText, undefined); assert.equal(options, undefined);
@@ -140,6 +145,32 @@ await check('post_writing_recheck_failure_cannot_unlock_and_same_request_repost_
   assert.equal(second.status, 409); assert.equal(data.code, 'UPLOAD_RESULT_UNKNOWN'); assert.equal(env.counters().writes, 1);
   await assert.rejects(env.state.transitionRawUpload(env.identity, prepared.rawUpload.nonce, 'writing', 'notAccepted'));
   assert.equal((await env.state.readRawUploadState(env.identity)).phase, 'writing');
+});
+await check('known_existing_asset_preflight_rejection_is_retryable_only_with_current_receiving_cas', async () => {
+  for (const refuseRejectionCas of [false, true]) {
+    const env = environment({ rejectExisting: true, refuseRejectionCas });
+    const prepared = await env.state.prepareRawUpload(env.identity);
+    const response = await env.post(prepared.rawUpload.nonce), data = await response.json();
+    assert.equal(data.errorStage, 'existing-asset-preflight');
+    assert.equal(data.code, refuseRejectionCas ? 'UPLOAD_RESULT_UNKNOWN' : 'RAW_UPLOAD_NOT_ACCEPTED');
+    assert.equal((await env.state.readRawUploadState(env.identity)).phase, refuseRejectionCas ? 'receiving' : 'notAccepted');
+    assert.equal(env.counters().writes, 0);
+    if (!refuseRejectionCas) assert.equal(data.causeCode, 'UPLOAD_EXISTING_FILE_INVALID');
+  }
+});
+await check('generic_preflight_failure_is_no_write_rejection_but_cas_loss_stays_unknown', async () => {
+  for (const [preflightError, causeCode] of [
+    [new Error('Synthetic generic failure with https://synthetic.invalid/?secret=x'), 'UPLOAD_PREFLIGHT_FAILED'],
+    [Object.assign(new Error('Synthetic HEAD timeout'), { name: 'TimeoutError' }), 'TimeoutError'],
+    [Object.assign(new Error('Synthetic HEAD not found'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } }), 'HTTP_404'],
+  ]) for (const refuseRejectionCas of [false, true]) {
+    const env = environment({ preflightError, refuseRejectionCas });
+    const prepared = await env.state.prepareRawUpload(env.identity), response = await env.post(prepared.rawUpload.nonce), data = await response.json();
+    assert.equal(data.code, refuseRejectionCas ? 'UPLOAD_RESULT_UNKNOWN' : 'RAW_UPLOAD_NOT_ACCEPTED');
+    assert.equal((await env.state.readRawUploadState(env.identity)).phase, refuseRejectionCas ? 'receiving' : 'notAccepted');
+    assert.equal(env.counters().writes, 0); assert.ok(!JSON.stringify(data).includes('secret'));
+    if (!refuseRejectionCas) assert.equal(data.causeCode, causeCode);
+  }
 });
 await check('safe_retry_rotates_original_nonce_and_old_nonce_cannot_write', async () => {
   const env = environment({ rejectDirectory: true }), prepared = await env.state.prepareRawUpload(env.identity);
@@ -199,6 +230,44 @@ await check('unknown_without_retired_writer_proof_stays_unknown_even_with_no_ass
   assert.equal(await env.state.rawUploadRecoveryToken(env.identity), null);
   await assert.rejects(() => env.state.recoverRetiredRawUpload(env.identity, 'a'.repeat(64)));
   assert.equal((await env.state.readRawUploadState(env.identity)).phase, 'writing');
+});
+await check('actual_retired_proof_reader_requires_exact_key_state_and_trusted_complete_drain_evidence', async () => {
+  const key = 'raw_upload_attempt_v2:synthetic-owner:synthetic-request';
+  const value = JSON.stringify({ nonce: 'synthetic-only', phase: 'writing' });
+  const digest = base.uploadDigest(value);
+  let entries = [{ key, stateSha256: digest, sameOwnerAsset: true }];
+  let directoryMode = 0o755, fileMode = 0o644, uid = 0, symlink = false, replaced = false, closed = 0;
+  let evidence = { schema: 'raw-upload-retired-writer-proof.v1', oldWritersDrained: true,
+    unidentifiedStagingFiles: 0, drainReceiptSha256: 'a'.repeat(64) };
+  const proof = evaluate(read('src/lib/assets/raw-upload-recovery-proof.ts'), {
+    'node:crypto': crypto,
+    'node:fs/promises': {
+      async lstat(name) { return { isDirectory: () => !name.endsWith('.json'), uid, mode: name.endsWith('.json') ? fileMode : directoryMode, ino: replaced ? 2 : 1 }; },
+      async realpath(name) { return symlink ? name + '-untrusted' : name; },
+      async open() { return { stat: async () => ({ isFile: () => true, uid, mode: fileMode, size: 100, ino: 1 }),
+        readFile: async () => JSON.stringify({ ...evidence, entries }), close: async () => { closed++; } }; },
+    },
+  }, { process: { platform: 'linux' } });
+  assert.equal(await proof.readRawUploadRecoveryProof(key, value), digest);
+  assert.equal(await proof.readRawUploadRecoveryProof(key + '-other', value), null);
+  assert.equal(await proof.readRawUploadRecoveryProof(key, value + ' '), null);
+  entries = [{ key, stateSha256: digest, noAssetOrReceipt: true, noPublishedFile: false }];
+  assert.equal(await proof.readRawUploadRecoveryProof(key, value), null);
+  entries[0].noPublishedFile = true;
+  assert.equal(await proof.readRawUploadRecoveryProof(key, value), digest);
+  entries = [];
+  assert.equal(await proof.readRawUploadRecoveryProof(key, value), null);
+  entries = [{ key, stateSha256: digest, sameOwnerAsset: true }];
+  for (const patch of [{ oldWritersDrained: false }, { unidentifiedStagingFiles: 1 }, { drainReceiptSha256: '' }, { schema: 'other' }]) {
+    const original = evidence; evidence = { ...evidence, ...patch };
+    assert.equal(await proof.readRawUploadRecoveryProof(key, value), null); evidence = original;
+  }
+  directoryMode = 0o775; assert.equal(await proof.readRawUploadRecoveryProof(key, value), null); directoryMode = 0o755;
+  fileMode = 0o664; assert.equal(await proof.readRawUploadRecoveryProof(key, value), null); fileMode = 0o644;
+  uid = 1; assert.equal(await proof.readRawUploadRecoveryProof(key, value), null); uid = 0;
+  symlink = true; assert.equal(await proof.readRawUploadRecoveryProof(key, value), null); symlink = false;
+  replaced = true; assert.equal(await proof.readRawUploadRecoveryProof(key, value), null);
+  assert.ok(closed > 0);
 });
 await check('existing_safe_log_records_only_request_digest_and_sanitized_fields', async () => {
   let saved;

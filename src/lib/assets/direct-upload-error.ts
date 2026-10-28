@@ -21,3 +21,17 @@ export function directUploadFailure(error: unknown, errorStage: 'proxy' | 'compl
     errorStage, recovery: 'query' as const,
   };
 }
+
+/** Only for a caller that has not staged, published or registered any bytes. */
+export function uploadPreflightFailure(error: unknown) {
+  const diagnostic = directUploadFailure(error, 'complete');
+  const value = error && typeof error === 'object'
+    ? error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } : null;
+  const status = value?.$metadata?.httpStatusCode;
+  const name = value?.name;
+  const causeCode = diagnostic.causeCode
+    || (typeof status === 'number' && [400, 401, 403, 404, 408, 429, 500, 502, 503, 504].includes(status) ? `HTTP_${status}` : undefined)
+    || (typeof name === 'string' && ['TimeoutError', 'AbortError', 'NotFound', 'NoSuchKey', 'AccessDenied'].includes(name) ? name : undefined);
+  return { error: '上传检查暂未完成，尚未保存文件；请重试原上传。', code: 'UPLOAD_PREFLIGHT_FAILED', causeCode,
+    errorName: diagnostic.errorName, recovery: 'retry' as const };
+}

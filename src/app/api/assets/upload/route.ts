@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { randomUUID } from 'node:crypto';
-import { assertUploadOwner, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { assertUploadOwner, preflightVerifiedOwnUpload, privateUploadDirectory, uploadDigest, uploadIdentity, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
 import { claimLegacyRawUpload, rawUploadIdentity, rawUploadProof, rawUploadRecoveryToken, readRawUploadResult, readRawUploadState, transitionRawUpload, type RawUploadIdentity } from '@/lib/assets/raw-upload-state';
 import {
   getSiteUploadKind,
@@ -19,6 +19,7 @@ import {
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { requestHd } from '@/lib/media/hd-derivatives';
+import { uploadPreflightFailure } from '@/lib/assets/direct-upload-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -226,18 +227,24 @@ export async function POST(request: NextRequest) {
     // has started. Storage/staging/publishing re-check the directory afterward;
     // a later failure must remain writing/unknown, never be unlocked here.
     errorStage = 'private-directory';
-    try { await privateUploadDirectory(); }
+    try {
+      await privateUploadDirectory();
+      errorStage = 'existing-asset-preflight';
+      await preflightVerifiedOwnUpload(user.id, identity.hash, mimeType, fileSize);
+    }
     catch (error) {
-      if (!(error instanceof VerifiedUploadError)
-        || !['UPLOAD_PRIVATE_DIRECTORY_INVALID', 'UPLOAD_DATA_MOUNT_REQUIRED', 'UPLOAD_CAPACITY_GUARD'].includes(error.code)) throw error;
+      if (errorStage !== 'existing-asset-preflight' && (!(error instanceof VerifiedUploadError)
+        || !['UPLOAD_PRIVATE_DIRECTORY_INVALID', 'UPLOAD_DATA_MOUNT_REQUIRED', 'UPLOAD_CAPACITY_GUARD'].includes(error.code))) throw error;
+      const failure = error instanceof VerifiedUploadError ? verifiedUploadFailure(error) : uploadPreflightFailure(error);
+      const causeCode = 'causeCode' in failure && failure.causeCode || failure.code;
       let state: Awaited<ReturnType<typeof transitionRawUpload>>;
       try { state = await transitionRawUpload(identity, receiving.nonce, 'receiving', 'notAccepted'); }
       catch { throw new VerifiedUploadError('UPLOAD_RESULT_UNKNOWN', '原上传状态已变化，结果尚未确认；未重新发送文件', 409); }
       await recordAssetUploadLog({ operatorId: user.id, stage: 'raw', status: 'failed', fileName, mimeType, fileSize,
-        durationMs: Date.now() - startedAt, errorCode: error.code, errorMessage: error.message,
+        durationMs: Date.now() - startedAt, errorCode: failure.code, causeCode, errorMessage: failure.error,
         errorStage, requestId: identity.requestId, uploadMode: 'raw', fallbackPath: 'raw', skippedProxy: true });
-      return NextResponse.json({ ...verifiedUploadFailure(error), code: 'RAW_UPLOAD_NOT_ACCEPTED', causeCode: error.code,
-        errorStage, notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error.status });
+      return NextResponse.json({ ...failure, code: 'RAW_UPLOAD_NOT_ACCEPTED', causeCode,
+        errorStage, notAccepted: true, rawUpload: rawUploadProof(state) }, { status: error instanceof VerifiedUploadError ? error.status : 503 });
     }
     errorStage = 'writing';
     await transitionRawUpload(identity, receiving.nonce, 'receiving', 'writing');

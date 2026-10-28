@@ -60,6 +60,8 @@ function clientHarness(initialMode: RawMode) {
   let expectedNonce = '';
   const rotatedNonce = 'b'.repeat(48);
   let ticketBody: Record<string, unknown> | null = null;
+  let recoveryPosts = 0;
+  let recoveryResult: Record<string, unknown> | undefined;
   const source = `${fs.readFileSync(clientPath, 'utf8')}\nexport const engineering = { recoverRawUpload, performRawUpload, finishRawAsset };`;
   const module = evaluate(source, {
     sessionStorage: {
@@ -71,7 +73,14 @@ function clientHarness(initialMode: RawMode) {
       const url = String(input);
       if (url.startsWith('/api/assets/upload?')) {
         calls.get += 1;
-        return Response.json({ rawUpload: { ...expectedIdentity, phase: mode, ...(mode === 'absent' ? {} : { nonce: expectedNonce }) } });
+        return Response.json({ rawUpload: { ...expectedIdentity, phase: mode, ...(mode === 'absent' ? {} : { nonce: expectedNonce }) },
+          ...(recoveryResult ? { recoveryToken: 'c'.repeat(64) } : {}) });
+      }
+      if (url === '/api/assets/upload/recover') {
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.requestId, expectedIdentity.requestId); assert.equal(body.hash, expectedIdentity.hash);
+        assert.equal(body.recoveryToken, 'c'.repeat(64)); recoveryPosts++;
+        return Response.json(recoveryResult);
       }
       assert.equal(url, '/api/assets/upload-ticket');
       assert.equal(init?.method, 'POST');
@@ -108,13 +117,60 @@ function clientHarness(initialMode: RawMode) {
     return { key, identity: expectedIdentity };
   };
   return { module, browserStorage, calls, makeFile, prime, setMode: (next: RawMode) => { mode = next; },
-    setTicketProof: (next: 'prepared' | 'writing') => { ticketProofPhase = next; }, rotatedNonce, ticket: () => ticketBody };
+    setTicketProof: (next: 'prepared' | 'writing') => { ticketProofPhase = next; }, rotatedNonce, ticket: () => ticketBody,
+    setRecovery: (next: Record<string, unknown>) => { recoveryResult = next; }, recoveryPosts: () => recoveryPosts };
 }
 
 async function captureFailure(promise: Promise<unknown>) {
   try { await promise; }
   catch (error) { return error as { message: string; code?: string; causeCode?: string; stage?: string; recovery?: string }; }
   assert.fail('Expected upload failure');
+}
+
+function workspaceHarness() {
+  const initial = { id: 'workspace-synthetic', owner_id: 'owner-a', assets: [] as any[] };
+  const state: any[] = [initial, false, null, {}, null], refs: any[] = [];
+  let stateIndex = 0, refIndex = 0, uploadFails = true, attachFails = false, deleteFails = false, epoch = 7;
+  let uploadCalls = 0, uploadGate: Promise<void> | null = null;
+  const markers = new Map([['synthetic-original-marker', 'original-request-never-reset']]);
+  const requests: Array<{ url: string; method: string }> = [];
+  const api = evaluate(fs.readFileSync(path.join(repository, 'src/lib/hooks/useWorkspace.ts'), 'utf8'), {
+    window: {}, TextEncoder, AbortController,
+    sessionStorage: { getItem: (key: string) => markers.get(key) || null,
+      setItem: (key: string, value: string) => markers.set(key, value), removeItem: (key: string) => markers.delete(key) },
+    fetch: async (url: string, init?: RequestInit) => {
+      requests.push({ url, method: init?.method || 'GET' });
+      if (url === '/api/workspace') return Response.json({ workspace: state[0], tabId: markers.get('workspace_tab_id') });
+      if (init?.method === 'DELETE') {
+        if (deleteFails) return Response.json({ error: 'Synthetic deletion refused' }, { status: 403 });
+        state[0] = { ...state[0], assets: [] }; return Response.json({ success: true });
+      }
+      assert.equal(url, '/api/workspace/assets');
+      if (attachFails) return Response.json({ error: 'Synthetic association unknown' }, { status: 503 });
+      const body = JSON.parse(String(init?.body));
+      state[0] = { ...state[0], assets: [{ id: 'workspace-link', assetId: body.assetIds[0], sortOrder: 0, role: 'reference_image' }] };
+      return Response.json({ association: { requestId: body.requestId, associated: true } });
+    },
+  }, {
+    react: {
+      useState: () => { const index = stateIndex++; return [state[index], (next: any) => { state[index] = typeof next === 'function' ? next(state[index]) : next; }]; },
+      useRef: (initial: unknown) => { const index = refIndex++; return refs[index] ||= { current: initial }; },
+      useCallback: (callback: unknown) => callback, useEffect: () => {},
+    },
+    '@/lib/http/file-upload': { uploadFileToHistory: async () => {
+      uploadCalls++; if (uploadGate) await uploadGate;
+      if (uploadFails) throw Error('Synthetic original upload unknown');
+      return { id: 'synthetic-existing-asset' };
+    } },
+    '@/lib/http/upload-session': { uploadSession: () => ({ ownerId: 'owner-a', epoch }), subscribeUploadSession: () => () => {} },
+    '@/lib/http/json-response': { readJsonResponse: async (response: Response) => response.json() },
+  }, 'workspace-upload.engineering.ts');
+  const render = () => { stateIndex = 0; refIndex = 0; return api.useWorkspace(); };
+  return { render, state, markers, requests, setUploadFails: (value: boolean) => { uploadFails = value; },
+    setAttachFails: (value: boolean) => { attachFails = value; }, setDeleteFails: (value: boolean) => { deleteFails = value; },
+    changeSession: () => { epoch++; }, uploadCalls: () => uploadCalls,
+    holdUpload: () => { let release!: () => void; uploadGate = new Promise<void>(resolve => { release = resolve; });
+      return () => { uploadGate = null; release(); }; } };
 }
 
 type MultipartCompleteMode = 'network' | 'invalidJson' | 'noAsset' | 'success' | 'signFailure';
@@ -186,6 +242,29 @@ function multipartHarness(initialMode: MultipartCompleteMode) {
 }
 
 async function main() {
+for (const legacy of [false, true]) {
+  const recovery = clientHarness('writing'), file = recovery.makeFile('retired.bin');
+  const receipt = recovery.prime(file, 'synthetic-retired-original');
+  if (legacy) recovery.browserStorage.set(receipt.key, receipt.identity.requestId);
+  recovery.setRecovery({ asset: { id: 'synthetic-recovered', hash: receipt.identity.hash, fileSize: file.size, mimeType: file.type,
+    upload: { requestId: receipt.identity.requestId, verified: true, assetDisposition: 'reused', sourceVersion: 'synthetic' } } });
+  const conflict = await captureFailure(recovery.module.uploadFileToHistory(file, { ownerId: 'owner-a', requestId: 'must-not-replace-original' }));
+  assert.match(conflict.message, /不能切换上传编号/); assert.equal(recovery.recoveryPosts(), 0);
+  const asset = await recovery.module.uploadFileToHistory(file, { ownerId: 'owner-a' });
+  assert.equal(asset.id, 'synthetic-recovered'); assert.equal(asset.upload.requestId, receipt.identity.requestId);
+  assert.equal(recovery.recoveryPosts(), 1); assert.equal(recovery.calls.ticketPost, 0); assert.equal(recovery.calls.rawPost, 0);
+  assert.equal(recovery.browserStorage.has(receipt.key), false, 'Only verified original receipt completes marker');
+}
+const invalidRecovered = clientHarness('writing'), invalidRecoveredFile = invalidRecovered.makeFile('wrong-recovery.bin');
+const invalidRecoveredReceipt = invalidRecovered.prime(invalidRecoveredFile, 'synthetic-invalid-recovery');
+const originalRecoveryMarker = invalidRecovered.browserStorage.get(invalidRecoveredReceipt.key);
+invalidRecovered.setRecovery({ asset: { id: 'wrong-asset', hash: 'f'.repeat(64), fileSize: invalidRecoveredFile.size, mimeType: invalidRecoveredFile.type,
+  upload: { requestId: invalidRecoveredReceipt.identity.requestId, verified: true } } });
+const invalidRecoveredError = await captureFailure(invalidRecovered.module.uploadFileToHistory(invalidRecoveredFile, { ownerId: 'owner-a' }));
+assert.equal(invalidRecoveredError.recovery, 'query');
+assert.equal(invalidRecovered.browserStorage.get(invalidRecoveredReceipt.key), originalRecoveryMarker);
+assert.equal(invalidRecovered.calls.rawPost, 0); assert.equal(invalidRecovered.calls.ticketPost, 0);
+
 const unknown = clientHarness('writing');
 const unknownFile = unknown.makeFile('unknown.bin');
 const unknownReceipt = unknown.prime(unknownFile, 'request-unknown-0001');
@@ -326,7 +405,7 @@ const pickerHelpers = evaluate(declarations(pickerSource, ['reconcileUploadFailu
   + '\nexport { defaults, pickerFilterKey };', {}, {}, 'picker-helpers.engineering.ts');
 
 function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: string }>, sessionReady = true) {
-  const state = { selected: [] as Array<{ identity: string }>, failed: [] as any[], error: '', directoryError: 'old directory error', notice: '', directoryNotice: '', busy: false, epoch: 0, label: '',
+  const state = { selected: [] as Array<{ identity: string }>, removed: [] as Array<{ identity: string }>, failed: [] as any[], error: '', directoryError: 'old directory error', notice: '', directoryNotice: '', busy: false, epoch: 0, label: '',
     navigation: null as any, query: 'old-filter', page: 3, loadedFilter: 'old-filter',
     prefs: { ...pickerHelpers.defaults, scope: 'shared', query: 'old-filter', filtersOpen: true, selectionOpen: true } };
   const browseRevision = { current: 0 }, sequence = { current: 0 }, readingMore = { current: false }, restoring = { current: false };
@@ -347,6 +426,7 @@ function pickerHarness(onUploadFile: (file: File) => Promise<string | { id?: str
     setBusy: (value: boolean) => { state.busy = value; }, setError: (value: string) => { state.error = value; },
     setNotice: (value: string) => { state.notice = value; }, setProgress: () => {}, setUploadLabel: (value: string) => { state.label = value; },
     setSelected: (value: any) => { state.selected = apply(state.selected, value); }, setFailedUploads: (value: any) => { state.failed = apply(state.failed, value); },
+    setRemovedUploads: (value: any) => { state.removed = apply(state.removed, value); },
     change: () => {}, setQuery: (value: string) => { state.query = value; }, setNavigation: (value: any) => { state.navigation = value; }, setEpoch: (value: any) => { state.epoch = apply(state.epoch, value); },
     open: true, ready: true, sessionOwner: 'picker-owner', prefsKey: 'picker-owner',
     setLoading: () => {}, setDirectoryError: (value: string) => { state.directoryError = value; }, setItems: () => {}, setLoadedFilter: (value: string) => { state.loadedFilter = value; }, setHasMore: () => {},
@@ -474,7 +554,49 @@ assert.equal(proxyFailure instanceof proxyModule.UploadFileError, true);
 assert.equal(proxyFailure.causeCode, 'ETIMEDOUT'); assert.equal(proxyFailure.stage, 'proxy'); assert.equal(proxyFailure.recovery, 'query');
 assert.match(proxyFailure.message, /核对原上传/); assert.doesNotMatch(proxyFailure.message, /CORS|重新选择/);
 
+const workspace = workspaceHarness(), workspaceFile = new File(['synthetic'], 'workspace.png', { type: 'image/png' });
+await workspace.render().uploadAsset(workspaceFile);
+assert.match(workspace.state[2], /original upload unknown/);
+assert.deepEqual(Object.keys(workspace.state[3]), [], 'Failed history upload has no invisible reference status');
+assert.equal(workspace.markers.get('synthetic-original-marker'), 'original-request-never-reset');
+workspace.setUploadFails(false);
+await workspace.render().uploadAsset(workspaceFile);
+assert.equal(workspace.state[2], null); assert.equal(workspace.state[0].assets.length, 1);
+assert.ok(workspace.render().captureRecovery(), 'Successful same-file retry is no longer blocked by an orphan');
+workspace.state[3] = { 'synthetic-existing-asset': 'failed' };
+workspace.setDeleteFails(true);
+await workspace.render().removeAsset('synthetic-existing-asset');
+assert.equal(workspace.state[3]['synthetic-existing-asset'], 'failed', 'Unconfirmed removal keeps status');
+workspace.setDeleteFails(false);
+await workspace.render().removeAsset('synthetic-existing-asset');
+assert.deepEqual(Object.keys(workspace.state[3]), []); assert.equal(workspace.state[0].assets.length, 0);
+assert.ok(workspace.render().captureRecovery());
+workspace.setAttachFails(true);
+await workspace.render().uploadAsset(workspaceFile);
+assert.equal(Object.values(workspace.state[3])[0], 'failed'); assert.ok(workspace.state[4]);
+assert.equal(workspace.render().captureRecovery(), null, 'Unknown association remains guarded');
+const pending = workspace.state[4], pendingStatuses = JSON.stringify(workspace.state[3]), beforePendingUpload = workspace.uploadCalls();
+await workspace.render().uploadAsset(new File(['different'], 'different.png', { type: 'image/png' }));
+assert.equal(workspace.uploadCalls(), beforePendingUpload, 'A new upload cannot discard an unknown association');
+assert.equal(workspace.state[4], pending); assert.equal(JSON.stringify(workspace.state[3]), pendingStatuses);
+workspace.setAttachFails(false);
+await workspace.render().retryPendingAttach();
+assert.equal(workspace.state[4], null); assert.deepEqual(Object.keys(workspace.state[3]), []);
+assert.ok(workspace.render().captureRecovery());
+assert.equal(workspace.markers.get('synthetic-original-marker'), 'original-request-never-reset');
+const concurrentWorkspace = workspaceHarness(); concurrentWorkspace.setUploadFails(false);
+const releaseUpload = concurrentWorkspace.holdUpload();
+const firstUpload = concurrentWorkspace.render().uploadAsset(workspaceFile);
+await concurrentWorkspace.render().uploadAsset(workspaceFile);
+assert.equal(concurrentWorkspace.uploadCalls(), 1, 'Concurrent clicks cannot create a second temporary status');
+releaseUpload(); await firstUpload;
+assert.deepEqual(Object.keys(concurrentWorkspace.state[3]), []); assert.equal(concurrentWorkspace.state[4], null);
+
 const checks = [
+  'v1 and v2 retired markers recover only the verified original receipt without a ticket or file resend',
+  'identity-invalid recovered asset preserves the original marker and query-only action',
+  'failed history upload and confirmed reference deletion leave no orphaned status; unknown association remains guarded',
+  'new and concurrent upload clicks cannot overwrite pending association or leave a second failed temporary status',
   'empty AggregateError survives proxy mapping with original query recovery and finite cause code',
   'writing unknown exports query and performs one GET with zero POST',
   'notAccepted proof requires a second explicit action and rotates the original nonce',
