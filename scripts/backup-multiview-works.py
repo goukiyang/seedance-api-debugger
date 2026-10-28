@@ -15,6 +15,7 @@ import ctypes
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -33,6 +34,7 @@ PRODUCTION_BASE = Path('/data/video-api-debugger')
 PRODUCTION_WORKS = PRODUCTION_BASE / 'var-lib/storage/multiview-works'
 PRODUCTION_RECIPES = PRODUCTION_BASE / 'var-lib/storage/multiview-recipes'
 PRODUCTION_SOURCES = PRODUCTION_BASE / 'var-lib/storage/multiview-sources'
+PRODUCTION_FOREGROUNDS = PRODUCTION_BASE / 'var-lib/storage/multiview-reference-foregrounds'
 PRODUCTION_UPLOADS = PRODUCTION_BASE / 'var-lib/uploads'
 PRODUCTION_BACKUPS = PRODUCTION_BASE / 'backups'
 MINIMUM_FREE = 5 * 1024 ** 3
@@ -44,6 +46,7 @@ MAXIMUM_GUIDE_BYTES = 30000000
 RECIPE_PREFIX = 'multiview_rotation_preset_v1:version:'
 RECIPE_CURRENT = 'multiview_rotation_preset_v1:current'
 OUTPUT_PREFIX = 'multiview_output_registration_v1:receipt:'
+FOREGROUND_PREFIX = 'multiview_reference_cutout_v1:'
 SITE_ORIGINS = {'https://sd2.youdooart.com', 'https://sd2.youdoodesign.com', 'https://sd2-server.youdoodesign.com'}
 PRIVATE_IDENTIFIER = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,179}\Z')
 RECIPE_VERSION = re.compile(r'1\.0\.(?:0|[1-9][0-9]{0,15})\Z')
@@ -241,6 +244,70 @@ def integer(value, minimum=1):
     return type(value) is int and minimum <= value <= 9007199254740991
 
 
+def reference_recipe(recipe, source_info):
+    """Validate the separate schema3 contract without widening legacy work recipes."""
+    slots, output = recipe.get('slots'), recipe.get('output')
+    require(recipe.get('kind') == 'reference-collage' and isinstance(slots, list) and len(slots) in (2, 3, 4)
+            and recipe.get('reserve') == [] and recipe.get('restoreOrder') == [], 'reference_recipe_slots_invalid')
+    require(isinstance(source_info, str) and len(source_info.encode('utf-8')) <= 100000, 'reference_source_info_missing')
+    info = json.loads(source_info)
+    require(isinstance(info, dict) and info.get('sourceVersion') == recipe.get('sourceVersion')
+            and integer(info.get('width')) and integer(info.get('height')) and isinstance(info.get('timestamps'), list)
+            and all(isinstance(slot, dict) and isinstance(slot.get('id'), str) and SLOT_ID.fullmatch(slot['id'])
+                    and integer(slot.get('frame'), 0) and slot['frame'] < len(info['timestamps'])
+                    and isinstance(slot.get('name'), str) and len(slot['name']) <= 40 and type(slot.get('manual')) is bool
+                    and ('locked' not in slot or type(slot['locked']) is bool) for slot in slots)
+            and len({slot['id'] for slot in slots}) == len(slots), 'reference_source_or_slots_invalid')
+    color = lambda value: isinstance(value, str) and re.fullmatch(r'#[a-fA-F0-9]{6}', value)
+    layout = recipe.get('layout')
+    require(isinstance(layout, dict) and type(layout.get('columns')) is int and layout['columns'] in (1, 2, 3, 4, 8)
+            and all(integer(layout.get(key), 0) and layout[key] <= 128 for key in ('margin', 'gap'))
+            and color(layout.get('background')), 'reference_layout_invalid')
+    require(isinstance(output, dict) and integer(output.get('width'), 64) and integer(output.get('height'), 64)
+            and max(output['width'], output['height']) <= 16384 and output['width'] * output['height'] <= 64000000
+            and color(output.get('background')), 'reference_output_invalid')
+    def rectangle(rect):
+        return (isinstance(rect, dict) and all(type(rect.get(key)) in (int, float) and math.isfinite(rect[key])
+                for key in ('x', 'y', 'width', 'height')) and rect['x'] >= 0 and rect['y'] >= 0
+                and rect['width'] > 0 and rect['height'] > 0 and rect['x'] + rect['width'] <= 1.000001
+                and rect['y'] + rect['height'] <= 1.000001
+                and math.floor((rect['x'] + rect['width']) * output['width'] + .5) > math.floor(rect['x'] * output['width'] + .5)
+                and math.floor((rect['y'] + rect['height']) * output['height'] + .5) > math.floor(rect['y'] * output['height'] + .5))
+    panels, placements = recipe.get('panels'), recipe.get('placements')
+    slot_ids = {slot['id'] for slot in slots}
+    for rects in (panels, placements):
+        require(isinstance(rects, list) and len(rects) == len(slots) and all(rectangle(rect) for rect in rects)
+                and {rect.get('slotId') for rect in rects} == slot_ids, 'reference_geometry_invalid')
+    require(abs(sum(panel['width'] * panel['height'] for panel in panels) - 1) <= .000001, 'reference_panels_do_not_cover_canvas')
+    for index, panel in enumerate(panels):
+        for other in panels[index + 1:]:
+            require(min(panel['x'] + panel['width'], other['x'] + other['width']) - max(panel['x'], other['x']) <= .000001
+                    or min(panel['y'] + panel['height'], other['y'] + other['height']) - max(panel['y'], other['y']) <= .000001,
+                    'reference_panels_overlap')
+    ratio = info['width'] / info['height'] * output['height'] / output['width']
+    for image in placements:
+        panel = next(panel for panel in panels if panel['slotId'] == image['slotId'])
+        width = max(.000001, min(panel['width'], panel['height'] * ratio, image['width']))
+        height = width / ratio
+        clean = {'width': width, 'height': height,
+                 'x': max(panel['x'], min(panel['x'] + panel['width'] - width, image['x'])),
+                 'y': max(panel['y'], min(panel['y'] + panel['height'] - height, image['y']))}
+        require(integer(image.get('z'), 0) and image['z'] <= 3
+                and all(abs(clean[key] - image[key]) <= .00001 for key in clean), 'reference_placement_invalid')
+    divider = recipe.get('divider', {'enabled': True, 'color': '#646b70', 'widthPx': 2})
+    require(isinstance(divider, dict) and type(divider.get('enabled')) is bool and color(divider.get('color'))
+            and type(divider.get('widthPx')) in (int, float) and math.isfinite(divider['widthPx'])
+            and 1 <= divider['widthPx'] <= 20, 'reference_divider_invalid')
+    foregrounds = recipe.get('foregrounds', [])
+    require(isinstance(foregrounds, list) and len(foregrounds) <= len(slots)
+            and all(isinstance(item, dict) and item.get('slotId') in slot_ids
+                    and all(isinstance(item.get(key), str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', item[key])
+                            for key in ('jobId', 'sourceAssetId'))
+                    and isinstance(item.get('sha256'), str) and SHA256.fullmatch(item['sha256']) for item in foregrounds)
+            and len({item['slotId'] for item in foregrounds}) == len(foregrounds), 'reference_foreground_binding_invalid')
+    return [{**item, 'frame': next(slot['frame'] for slot in slots if slot['id'] == item['slotId'])} for item in foregrounds]
+
+
 def load_ready_works(snapshot):
     """All metadata selection is against the closed, immutable snapshot only."""
     connection = readonly_database(snapshot, immutable=True)
@@ -258,14 +325,16 @@ def load_ready_works(snapshot):
                                          'OR ready_manifest_json IS NOT NULL OR ready_recipe_json IS NOT NULL').fetchone()[0]
         require(ready_count <= MAXIMUM_READY_WORKS, 'ready_work_inventory_budget_exceeded')
         # No status/removed filter: pending new drafts still require their previous ready files.
+        work_columns = {row['name'] for row in connection.execute('PRAGMA table_info("MultiviewWork")')}
+        source_columns = ', '.join(name if name in work_columns else 'NULL AS ' + name for name in ('source_task_id', 'source_info_json'))
         rows = connection.execute('SELECT id, owner_id, source_version, draft_revision, ready_revision, ready_recipe_json, '
-                                  'ready_manifest_json, removed_at FROM "MultiviewWork" '
+                                  'ready_manifest_json, removed_at, ' + source_columns + ' FROM "MultiviewWork" '
                                   'WHERE ready_revision IS NOT NULL OR ready_manifest_json IS NOT NULL OR ready_recipe_json IS NOT NULL '
                                   'ORDER BY owner_id, id').fetchall()
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='MultiviewShare'").fetchone():
             rows += connection.execute('SELECT work_id AS id, owner_id, source_version, revision AS draft_revision, '
                                        'revision AS ready_revision, recipe_json AS ready_recipe_json, manifest_json AS ready_manifest_json, '
-                                       'NULL AS removed_at FROM MultiviewShare ORDER BY owner_id, work_id, revision').fetchall()
+                                       'NULL AS removed_at, source_task_id, info_json AS source_info_json FROM MultiviewShare ORDER BY owner_id, work_id, revision').fetchall()
         require(len(rows) <= MAXIMUM_READY_WORKS, 'ready_work_inventory_budget_exceeded')
         seen = {}
         works = []
@@ -282,9 +351,11 @@ def load_ready_works(snapshot):
                     and isinstance(row['ready_manifest_json'], str) and len(row['ready_manifest_json'].encode('utf-8')) <= 100000, 'ready_work_metadata_missing')
             recipe = json.loads(row['ready_recipe_json'])
             manifest = json.loads(row['ready_manifest_json'])
-            require(isinstance(recipe, dict) and isinstance(manifest, dict) and recipe.get('schema') in (1, 2) and manifest.get('schema') == 1, 'ready_work_schema_invalid')
+            require(isinstance(recipe, dict) and isinstance(manifest, dict) and type(recipe.get('schema')) is int
+                    and recipe['schema'] in (1, 2, 3) and manifest.get('schema') == 1, 'ready_work_schema_invalid')
             slots = recipe.get('slots')
-            require(isinstance(slots, list) and len(slots) in (3, 4, 8)
+            references = reference_recipe(recipe, row['source_info_json']) if recipe['schema'] == 3 else None
+            require(isinstance(slots, list) and len(slots) in ((2, 3, 4) if recipe['schema'] == 3 else (3, 4, 8))
                     and all(isinstance(slot, dict) and isinstance(slot.get('id'), str) and SLOT_ID.fullmatch(slot['id']) for slot in slots), 'ready_work_slots_invalid')
             roles = {'thumbnail', 'collage', 'zip'} | {'frame-' + slot['id'] for slot in slots}
             require(len(roles) == len(slots) + 3 and manifest.get('revision') == row['ready_revision']
@@ -310,12 +381,102 @@ def load_ready_works(snapshot):
                 seen_roles.add(role)
                 seen_files.add(entry['file'])
             require(seen_roles == roles and sum(entry['bytes'] for entry in files) <= MAXIMUM_REVISION_BYTES, 'ready_work_files_incomplete')
-            works.append({'ownerId': row['owner_id'], 'workId': row['id'], 'readyRevision': row['ready_revision'],
+            work = {'ownerId': row['owner_id'], 'workId': row['id'], 'readyRevision': row['ready_revision'],
                           'draftRevision': row['draft_revision'], 'removed': row['removed_at'] is not None,
-                          'manifest': manifest})
+                          'manifest': manifest}
+            if references is not None:
+                require(isinstance(row['source_task_id'], str) and IDENTIFIER.fullmatch(row['source_task_id'])
+                        and manifest['width'] == recipe['output']['width'] and manifest['height'] == recipe['output']['height'],
+                        'reference_work_source_or_output_mismatch')
+                work.update({'sourceTaskId': row['source_task_id'], 'referenceForegrounds': references})
+            works.append(work)
         return total_works, works
     finally:
         connection.close()
+
+
+def load_foreground_inventory(snapshot):
+    """Project durable cutout bindings only; never materialize unrelated private text."""
+    connection = readonly_database(snapshot, immutable=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='PlatformSetting'").fetchone():
+            return []
+        required_columns(connection, 'PlatformSetting', {'key', 'value_json'})
+        rows = connection.execute('''WITH records AS (
+          SELECT key, json_valid(value_json) AS valid,
+            CASE WHEN json_valid(value_json) THEN value_json ELSE '{}' END AS safe
+          FROM PlatformSetting WHERE substr(key, 1, ?) = ?)
+          SELECT key, valid, json_extract(safe, '$.stage') AS stage,
+            json_extract(safe, '$.schema') AS schema, json_extract(safe, '$.ownerId') AS owner,
+            json_extract(safe, '$.taskId') AS task, json_extract(safe, '$.sourceVersion') AS version,
+            json_extract(safe, '$.frame') AS frame, json_extract(safe, '$.receiptId') AS receipt,
+            json_extract(safe, '$.asset.asset_id') AS asset, json_extract(safe, '$.asset.width') AS width,
+            json_extract(safe, '$.asset.height') AS height, json_extract(safe, '$.job.job_id') AS job,
+            json_extract(safe, '$.job.kind') AS kind, json_extract(safe, '$.job.status') AS status,
+            json_extract(safe, '$.sha256') AS sha FROM records ORDER BY key LIMIT ?''',
+          (len(FOREGROUND_PREFIX), FOREGROUND_PREFIX, MAXIMUM_PRIVATE_RECORDS + 1)).fetchall()
+        require(len(rows) <= MAXIMUM_PRIVATE_RECORDS, 'foreground_inventory_budget_exceeded')
+        result = []
+        for row in rows:
+            check_time()
+            require(row['valid'] == 1, 'foreground_record_json_invalid')
+            if row['stage'] != 'ready':
+                continue
+            require(row['schema'] == 1 and all(isinstance(row[key], str) and IDENTIFIER.fullmatch(row[key]) for key in ('owner', 'task'))
+                    and isinstance(row['version'], str) and SHA256.fullmatch(row['version']) and integer(row['frame'], 0)
+                    and all(isinstance(row[key], str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', row[key]) for key in ('asset', 'job'))
+                    and row['kind'] == 'cutout' and row['status'] == 'succeeded'
+                    and isinstance(row['sha'], str) and SHA256.fullmatch(row['sha'])
+                    and integer(row['width']) and integer(row['height']) and row['width'] * row['height'] <= 16777216,
+                    'foreground_record_binding_invalid')
+            receipt = hashlib.sha256(json.dumps([row['owner'], row['task'], row['version'], row['frame']],
+                                                ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+            require(row['key'] == FOREGROUND_PREFIX + receipt and row['receipt'] == receipt, 'foreground_receipt_identity_invalid')
+            owner_hash = hashlib.sha256(row['owner'].encode()).hexdigest()
+            result.append({'receiptId': receipt, 'ownerId': row['owner'], 'sourceTaskId': row['task'],
+                           'sourceVersion': row['version'], 'frame': row['frame'], 'jobId': row['job'],
+                           'sourceAssetId': row['asset'], 'sha256': row['sha'], 'width': row['width'], 'height': row['height'],
+                           'mime': 'image/png', 'file': owner_hash + '-' + row['sha'] + '.png'})
+        return result
+    finally:
+        connection.close()
+
+
+def bind_work_foregrounds(works, foregrounds):
+    bindings = {(item['ownerId'], item['sourceTaskId'], item['sourceVersion'], item['frame']): item for item in foregrounds}
+    for work in works:
+        for item in work.get('referenceForegrounds', []):
+            binding = bindings.get((work['ownerId'], work['sourceTaskId'], work['manifest']['sourceVersion'], item['frame']))
+            require(binding is not None and all(binding[key] == item[key] for key in ('jobId', 'sourceAssetId', 'sha256')),
+                    'reference_foreground_receipt_mismatch')
+
+
+def foreground_media_inventory(foregrounds, source_root):
+    if not foregrounds:
+        return []  # Legacy snapshots do not require a new empty directory to exist.
+    root_fd = open_directory(source_root)
+    try:
+        require(stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'foreground_root_not_private_0700')
+        result = []
+        for binding in foregrounds:
+            owner = hashlib.sha256(binding['ownerId'].encode()).hexdigest()
+            owner_fd = relative_directory(root_fd, [owner])
+            try:
+                require(stat.S_IMODE(os.fstat(owner_fd).st_mode) == 0o700, 'foreground_owner_directory_not_private_0700')
+                name = binding['sha256'] + '.png'
+                descriptor, info = regular_file(owner_fd, name)
+                os.close(descriptor)
+                require(stat.S_IMODE(info.st_mode) == 0o600 and 0 < info.st_size <= 128 * 1024 ** 2,
+                        'foreground_file_not_private_or_bounded')
+                require(digest_file(owner_fd, name) == {'bytes': info.st_size, 'sha256': binding['sha256']},
+                        'foreground_file_content_mismatch')
+                result.append({**binding, 'bytes': info.st_size})
+            finally:
+                os.close(owner_fd)
+        return result
+    finally:
+        os.close(root_fd)
 
 
 def load_source_inventory(snapshot):
@@ -631,7 +792,7 @@ def verify_image(directory_fd, entry):
         os.close(descriptor)
 
 
-def private_media_entries(recipes, registrations):
+def private_media_entries(recipes, registrations, foregrounds=()):
     entries = {}
     def add(namespace, entry, source_parts):
         key = namespace + '/' + entry['file']
@@ -647,6 +808,10 @@ def private_media_entries(recipes, registrations):
             entries[key] = {'entry': entry, 'sourceParts': source_parts, 'sourcePaths': [source_parts], 'namespace': namespace}
     for recipe in recipes:
         add('recipes', {key: recipe[key] for key in ('file', 'sha256', 'bytes', 'width', 'height', 'mime')}, [recipe['file']])
+    for foreground in foregrounds:
+        owner = hashlib.sha256(foreground['ownerId'].encode()).hexdigest()
+        add('foregrounds', {key: foreground[key] for key in ('file', 'sha256', 'bytes', 'width', 'height', 'mime')},
+            [owner, foreground['sha256'] + '.png'])
     for registration in registrations:
         for output in registration['outputs']:
             if output['state'] != 'registered':
@@ -674,21 +839,23 @@ def relative_directory(root_fd, components):
 
 def copy_private_media(entries, source_roots, staging_fd, parent_fd):
     file_count, total_bytes = 0, 0
-    for namespace in ('recipes', 'outputs', 'sources'):
+    for namespace in ('recipes', 'outputs', 'sources', 'foregrounds'):
         selected = [value for value in entries.values() if value['namespace'] == namespace]
         if not selected:
             continue
         root_fd = open_directory(source_roots[namespace])
         target_fd = child_directory(staging_fd, namespace)
         try:
-            require(namespace != 'recipes' or stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'recipe_root_not_private_0700')
+            require(namespace not in ('recipes', 'foregrounds') or stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'private_media_root_not_private_0700')
             require(os.fstat(root_fd).st_dev == os.fstat(parent_fd).st_dev, 'private_media_root_device_mismatch')
             for value in selected:
                 source_fd = relative_directory(root_fd, value['sourceParts'][:-1])
                 try:
+                    require(namespace != 'foregrounds' or stat.S_IMODE(os.fstat(source_fd).st_mode) == 0o700,
+                            'foreground_owner_directory_not_private_0700')
                     # Copy under a content name, not an arbitrary source basename.
                     entry = value['entry']
-                    copy_verified(source_fd, target_fd, {**entry, 'sourceFile': value['sourceParts'][-1]}, parent_fd, namespace == 'recipes')
+                    copy_verified(source_fd, target_fd, {**entry, 'sourceFile': value['sourceParts'][-1]}, parent_fd, namespace in ('recipes', 'foregrounds'))
                     if namespace != 'sources':
                         verify_image(target_fd, entry)
                     # Content is stored once, but every active receipt alias must actually exist.
@@ -773,7 +940,7 @@ def verify_backup(directory):
     try:
         require(stat.S_IMODE(os.fstat(root_fd).st_mode) == 0o700, 'backup_directory_not_private')
         record = read_private_json(root_fd, 'mapping.json', 256 * 1024 * 1024)
-        require(isinstance(record, dict) and record.get('format') in ('sd2.multiview-works-backup.v1', 'sd2.multiview-works-backup.v2', 'sd2.multiview-works-backup.v3')
+        require(isinstance(record, dict) and record.get('format') in ('sd2.multiview-works-backup.v1', 'sd2.multiview-works-backup.v2', 'sd2.multiview-works-backup.v3', 'sd2.multiview-works-backup.v4')
                 and isinstance(record.get('database'), dict) and record['database'].get('file') == 'database.sqlite3', 'backup_mapping_format_invalid')
         require(digest_file(root_fd, 'database.sqlite3') == {key: record['database'].get(key) for key in ('bytes', 'sha256')},
                 'backup_database_hash_mismatch')
@@ -785,6 +952,13 @@ def verify_backup(directory):
         total_works, works = load_ready_works(directory / 'database.sqlite3')
         recipes, registrations = load_private_inventory(directory / 'database.sqlite3')
         sources = load_source_inventory(directory / 'database.sqlite3')
+        foreground_bindings = load_foreground_inventory(directory / 'database.sqlite3')
+        foregrounds = record.get('foregrounds', [])
+        require(isinstance(foregrounds, list) and len(foregrounds) == len(foreground_bindings)
+                and all(isinstance(item, dict) and {key: value for key, value in item.items() if key != 'bytes'} == binding
+                        and integer(item.get('bytes')) and item['bytes'] <= 128 * 1024 ** 2
+                        for item, binding in zip(foregrounds, foreground_bindings)), 'backup_foreground_inventory_differs_from_snapshot')
+        bind_work_foregrounds(works, foreground_bindings)
         require(record.get('sources', []) == sources, 'backup_source_inventory_differs_from_snapshot')
         require(record.get('recipes', []) == recipes and record.get('outputRegistrations', []) == registrations,
                 'backup_private_inventory_differs_from_snapshot')
@@ -810,7 +984,7 @@ def verify_backup(directory):
                 require(stored.get('files') == files, 'backup_work_media_mapping_mismatch')
             finally:
                 os.close(target_fd)
-        entries = private_media_entries(recipes, registrations)
+        entries = private_media_entries(recipes, registrations, foregrounds)
         for source in sources:
             entries['sources/' + source['file']] = {'entry': source, 'namespace': 'sources'}
         require(sum(item['entry']['bytes'] for item in entries.values()) + total_bytes <= MAXIMUM_MEDIA_BYTES, 'backup_media_budget_exceeded')
@@ -827,7 +1001,7 @@ def verify_backup(directory):
                 os.close(target_fd)
         require(record.get('mediaFiles') == file_count and record.get('mediaBytes') == total_bytes, 'backup_media_totals_mismatch')
         return {'verified': True, 'directory': str(directory), 'readyWorks': len(works), 'recipeVersions': len(recipes),
-                'outputReceipts': len(registrations), 'mediaFiles': file_count, 'mediaBytes': total_bytes}
+                'outputReceipts': len(registrations), 'foregroundReceipts': len(foregrounds), 'mediaFiles': file_count, 'mediaBytes': total_bytes}
     finally:
         os.close(root_fd)
 
@@ -840,6 +1014,7 @@ def main():
     parser.add_argument('--destination')
     parser.add_argument('--recipe-root', default=str(PRODUCTION_RECIPES))
     parser.add_argument('--private-source-root', default=str(PRODUCTION_SOURCES))
+    parser.add_argument('--foreground-root', default=str(PRODUCTION_FOREGROUNDS))
     parser.add_argument('--uploads-root', default=str(PRODUCTION_UPLOADS))
     parser.add_argument('--verify-backup', help='Read-only verification of an isolated backup copy; requires --non-production.')
     parser.add_argument('--non-production', action='store_true', help='Explicit isolated paths; still requires Linux atomic publication.')
@@ -859,11 +1034,12 @@ def main():
         database, source_root, destination = map(absolute_path, (arguments.database, arguments.source_root, arguments.destination))
         recipe_root, uploads_root = map(absolute_path, (arguments.recipe_root, arguments.uploads_root))
         private_source_root = absolute_path(arguments.private_source_root)
+        foreground_root = absolute_path(arguments.foreground_root)
         require(BACKUP_NAME.fullmatch(destination.name), 'backup_destination_name_invalid')
         require(database != destination and source_root != destination and source_root not in destination.parents
                 and destination not in source_root.parents and destination not in database.parents, 'backup_path_overlap_forbidden')
         require(all(root != destination and root not in destination.parents and destination not in root.parents
-                    and root != database and root not in database.parents for root in (recipe_root, uploads_root, private_source_root)), 'private_media_backup_path_overlap_forbidden')
+                    and root != database and root not in database.parents for root in (recipe_root, uploads_root, private_source_root, foreground_root)), 'private_media_backup_path_overlap_forbidden')
         publish = atomic_publisher()
         data_device = None
         if not arguments.non_production:
@@ -879,6 +1055,7 @@ def main():
                     and destination.name == 'bundle')
             require(source_root == PRODUCTION_WORKS and allowed_destination
                     and recipe_root == PRODUCTION_RECIPES and uploads_root == PRODUCTION_UPLOADS and private_source_root == PRODUCTION_SOURCES
+                    and foreground_root == PRODUCTION_FOREGROUNDS
                     and PRODUCTION_BASE / 'var-lib' in database.parents, 'production_backup_paths_invalid')
         parent_fd = open_directory(destination.parent)
         open_descriptors.append(parent_fd)
@@ -908,7 +1085,13 @@ def main():
         database_info = create_snapshot(database, staging, staging_fd, parent_fd)
         total_works, works = load_ready_works(staging / 'database.sqlite3')
         recipes, registrations = load_private_inventory(staging / 'database.sqlite3')
-        private_entries = private_media_entries(recipes, registrations)
+        foreground_bindings = load_foreground_inventory(staging / 'database.sqlite3')
+        bind_work_foregrounds(works, foreground_bindings)
+        if arguments.non_production:
+            require(not foreground_bindings or foreground_root != PRODUCTION_BASE and PRODUCTION_BASE not in foreground_root.parents,
+                    'fixture_foreground_root_must_be_isolated')
+        foregrounds = foreground_media_inventory(foreground_bindings, foreground_root)
+        private_entries = private_media_entries(recipes, registrations, foregrounds)
         sources = load_source_inventory(staging / 'database.sqlite3')
         for source in sources:
             private_entries['sources/' + source['file']] = {'entry': source, 'namespace': 'sources',
@@ -924,7 +1107,7 @@ def main():
                     'fixture_uploads_root_must_be_isolated')
         expected_media_bytes = sum(entry['bytes'] for work in works for entry in work['manifest']['files']) + sum(value['entry']['bytes'] for value in private_entries.values())
         require(expected_media_bytes <= MAXIMUM_MEDIA_BYTES, 'backup_media_budget_exceeded')
-        available_space(parent_fd, expected_media_bytes + len(works) * 200000 + len(json_bytes([recipes, registrations])) + 1024 * 1024)
+        available_space(parent_fd, expected_media_bytes + len(works) * 200000 + len(json_bytes([recipes, registrations, foregrounds])) + 1024 * 1024)
         files_fd = child_directory(staging_fd, 'works')
         open_descriptors.append(files_fd)
         mapping, file_count, total_bytes = [], 0, 0
@@ -954,13 +1137,15 @@ def main():
             finally:
                 os.close(source_fd)
                 os.close(target_fd)
-        private_count, private_bytes = copy_private_media(private_entries, {'recipes': recipe_root, 'outputs': uploads_root, 'sources': private_source_root}, staging_fd, parent_fd)
+        private_count, private_bytes = copy_private_media(private_entries, {'recipes': recipe_root, 'outputs': uploads_root, 'sources': private_source_root,
+                                                                         'foregrounds': foreground_root}, staging_fd, parent_fd)
         file_count += private_count
         total_bytes += private_bytes
-        record = {'format': 'sd2.multiview-works-backup.v3', 'preparedAt': datetime.now(timezone.utc).isoformat(),
+        record = {'format': 'sd2.multiview-works-backup.v4', 'preparedAt': datetime.now(timezone.utc).isoformat(),
                   'database': {'file': 'database.sqlite3', 'integrity': 'ok', **database_info},
                   'totalWorksInSnapshot': total_works, 'readyWorks': len(works), 'mediaFiles': file_count,
-                  'mediaBytes': total_bytes, 'works': mapping, 'recipes': recipes, 'outputRegistrations': registrations, 'sources': sources}
+                  'mediaBytes': total_bytes, 'works': mapping, 'recipes': recipes, 'outputRegistrations': registrations, 'sources': sources,
+                  'foregrounds': foregrounds}
         write_private(staging_fd, 'mapping.json', json_bytes(record))
         os.fsync(files_fd)
         os.fsync(staging_fd)
