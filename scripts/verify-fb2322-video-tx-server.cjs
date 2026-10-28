@@ -111,7 +111,7 @@ async function main() {
   const versionText = storage.writePrivateVideoRecipe(recipe, 'video-template-version', 'version', origins);
   assert.ok(!recipeText.includes(recipe.instruction), 'fixture uses real encrypted template storage');
   await prisma.videoStudioTemplate.create({ data: { id: 'template', owner_user_id: 'actor', name: 'Synthetic template', status: 'published', visibility: 'shared', recipe_json: recipeText } });
-  await prisma.videoStudioTemplateVersion.create({ data: { id: 'version', template_id: 'template', version_number: 1, name: 'Synthetic template', recipe_json: versionText, created_by: 'actor' } });
+  await prisma.videoStudioTemplateVersion.create({ data: { id: 'version', template_id: 'template', version_number: 1, name: 'Synthetic template', group_name: 'Synthetic', recipe_json: versionText, created_by: 'actor' } });
   await prisma.videoStudioTemplate.update({ where: { id: 'template' }, data: { published_version_id: 'version' } });
   const inputs = [{ assetId: 'video', role: 'reference', type: 'video', slotKey: 'video' }];
   const runSnapshot = { owner: { userId: 'actor', username: 'fb2322-actor', displayName: 'Synthetic actor', accountType: 'internal' },
