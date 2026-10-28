@@ -16,6 +16,7 @@ import { readJsonResponse } from '@/lib/http/json-response';
 import { describeUploadFileError, uniqueUploadFiles, type UploadFileFailure, type UploadProgressHandler, type UploadProgressSnapshot, type UploadedAssetPayload } from '@/lib/http/file-upload';
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
+import type { LibraryRemovalState } from '@/lib/assets/library-removal';
 import { templateFilterId } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
 import styles from './ResourceLibraryPicker.module.css';
@@ -100,6 +101,8 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const { confirm: askConfirm, productDialog } = useProductDialog();
   const [removedInSession, setRemovedInSession] = useState(false);
   const [removedItem, setRemovedItem] = useState<Pick<PickerItem,'assetId'|'identity'|'fileName'|'canRemoveFromLibrary'> | null>(null);
+  const [removedUploads, setRemovedUploads] = useState<PickerItem[]>([]);
+  const [restoredUploadIds, setRestoredUploadIds] = useState<string[]>([]);
   const avatarWindow = useRef<Window|null>(null), avatarTicket = useRef('');
   const returnKey=user&&avatarTarget?`sd2:avatar-return:v1:${user.id}:${avatarTarget.kind}:${avatarTarget.id}:${purpose}`:'';
   const [returnAvailable,setReturnAvailable]=useState(false);
@@ -229,7 +232,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     browseRevision.current++; setNavigation(null); setRemovedInSession(false);
     restoration.current = next.scroll; restoring.current = true; lastVisiblePage.current = null;
     locked.current = false; setBusy(false);
-    setPrefs(next); setQuery(next.query); setSelected([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
+    setPrefs(next); setQuery(next.query); setSelected([]); setRemovedUploads([]); setRestoredUploadIds([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
     initializedKey.current = ownerKey;
     setReady(true);
     return () => { sequence.current++; session.current++; };
@@ -346,14 +349,31 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (!active.current || removalSession !== session.current || locked.current) return;
     locked.current = true; setBusy(true); setError('');
     try {
-      const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: item.identity, assetId: item.assetId, removed: !restore }) });
-      const data = await readJsonResponse<{ error?: string }>(response);
-      if (!active.current || removalSession !== session.current) return;
-      if (!response.ok) throw new Error(data.error || '操作未确认');
+      if (!restore || !restoredUploadIds.includes(item.identity)) {
+        const response = await fetch('/api/assets/library/removal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identity: item.identity, assetId: item.assetId, removed: !restore }) });
+        const data = await readJsonResponse<{ error?: string }>(response);
+        if (!active.current || removalSession !== session.current) return;
+        if (!response.ok) throw new Error(data.error || '操作未确认');
+      }
+      if (restore && removedUploads.some(value => value.identity === item.identity)) {
+        setRestoredUploadIds(old => old.includes(item.identity) ? old : [...old, item.identity]);
+        setRemovedItem(null); setRemovedInSession(false);
+        try { localStorage.removeItem(`sd2:library-undo:${user!.id}`); } catch { /* Optional local undo hint. */ }
+        const fresh = await fetch(`/api/assets/picker?target=${target}&scope=mine&keys=${encodeURIComponent(item.identity)}&types=${typesKey}`, { cache: 'no-store' });
+        const metadata = await readJsonResponse<PickerResponse>(fresh);
+        if (!active.current || removalSession !== session.current) return;
+        const restored = fresh.ok ? metadata.items.find(value => value.identity === item.identity) : undefined;
+        if (!restored || restored.unavailableReason) throw new Error('已撤销移出，素材使用权尚未确认；请重新核对，无需重传');
+        const next = [...selected.filter(value => value.identity !== restored.identity), restored];
+        const issue = canSelect(next);
+        if (issue) throw new Error(`已撤销移出；${issue}`);
+        setSelected(next); setRemovedUploads(old => old.filter(value => value.identity !== item.identity));
+        setRestoredUploadIds(old => old.filter(value => value !== item.identity));
+      }
       if (!restore) { setItems(old => old.filter(i => i.identity !== item.identity)); setSelected(old => old.filter(i => i.identity !== item.identity)); imports.current.delete(item.identity); }
       setRemovedInSession(!restore); setRemovedItem(restore ? null : item);if(user){try{if(restore)localStorage.removeItem(`sd2:library-undo:${user.id}`);else localStorage.setItem(`sd2:library-undo:${user.id}`,JSON.stringify({assetId:item.assetId,identity:item.identity,fileName:item.fileName,canRemoveFromLibrary:true}));}catch{setNotice('删除已确认；本机无法记住撤销入口，请在关闭窗口前撤销。');}} setEpoch(v => v + 1);
     } catch (e) { if (active.current && removalSession === session.current) setError(e instanceof Error ? e.message : '操作失败'); }
-    finally { locked.current = false; setBusy(false); }
+    finally { if (removalSession === session.current) { locked.current = false; setBusy(false); } }
   };
   const loadMore = async () => {
     if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setDirectoryError('');
@@ -432,7 +452,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       if (issue) throw new Error(issue);
     } catch (cause) { if (token === session.current) { setError(cause instanceof Error ? cause.message : '文件核对失败'); setBusy(false); locked.current = false; setEpoch(value => value + 1); } return; }
     const kinds = files.map(file => file.type.split('/')[0] as AssetType);
-    const uploaded: PickerItem[] = [], failed: FailedUploadItem[] = [], verified = new Set<string>(); let uploadWarning = '';
+    const uploaded: PickerItem[] = [], removed: PickerItem[] = [], failed: FailedUploadItem[] = [], verified = new Set<string>(); let uploadWarning = '';
     for (let index = 0; index < files.length; index++) {
       if (token !== session.current || !active.current) break;
       const file = files[index]; setUploadLabel(`${index + 1}/${files.length} ${file.name}`); setProgress(null);
@@ -449,7 +469,16 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         const response = await fetch(`/api/assets/picker?target=${target}&keys=${encodeURIComponent(`asset:${id}`)}&types=${typesKey}`, { cache: 'no-store' });
         const data = await readJsonResponse<PickerResponse>(response, { invalidJsonMessage: '文件已上传，素材信息读取失败；请重新读取，不必重传' });
         const item = response.ok ? data.items.find(i => i.assetId === id) : undefined;
-        if (item) { uploaded[uploaded.length - 1] = item; verified.add(item.identity); } else uploadWarning = '文件已上传，素材信息暂时不可用；添加时会重新核对';
+        if (token !== session.current || !active.current) break;
+        if (item) { uploaded[uploaded.length - 1] = item; verified.add(item.identity); }
+        else {
+          const lookup = await fetch(`/api/assets/library/removal?identities=${encodeURIComponent(fallback.identity)}`, { cache: 'no-store' });
+          const metadata = await readJsonResponse<{ states?: LibraryRemovalState[] }>(lookup);
+          if (token !== session.current || !active.current) break;
+          if (lookup.ok && metadata.states?.some(value => value.identity === fallback.identity && value.status === 'removed')) {
+            uploaded.pop(); removed.push({ ...fallback, canRemoveFromLibrary: true });
+          } else uploadWarning = '文件已上传，素材使用权尚未确认；添加时会重新核对，无需重传';
+        }
       } catch (cause) {
         if (token !== session.current || !active.current) break;
         if (uploadedId) uploadWarning = cause instanceof Error ? cause.message : '文件已上传，素材信息暂时不可用；添加时会重新核对';
@@ -462,6 +491,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     }
     if (token === session.current) {
       setSelected(old => [...old, ...uploaded.filter(i => !existing(i) && !old.some(o => o.identity === i.identity))]);
+      setRemovedUploads(old => Array.from(new Map([...old, ...removed].map(item => [item.identity, item])).values()));
       const targetItem = uploaded.find(item => verified.has(item.identity));
       if (operationRevision === browseRevision.current && targetItem) {
         const next = { ...defaults, filtersOpen: prefs.filtersOpen, selectionOpen: prefs.selectionOpen };
@@ -490,7 +520,20 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         }
       }
       const ordered = selected.map(i => validated.find(v => v.identity === i.identity && (!i.referenceImageId || v.referenceImageId === i.referenceImageId)));
-      if (ordered.some(i => !i)) throw new Error('部分素材已失效或无权使用，请移除后重试');
+      if (ordered.some(i => !i)) {
+        const missing = selected.filter((_, index) => !ordered[index]);
+        const lookup = await fetch(`/api/assets/library/removal?identities=${encodeURIComponent(missing.map(item => item.identity).join(','))}`, { cache: 'no-store' });
+        const metadata = await readJsonResponse<{ states?: LibraryRemovalState[] }>(lookup);
+        if (!active.current || confirmationSession !== session.current) return;
+        if (!lookup.ok) throw new Error('素材状态暂不可核对，请重新读取；原选择保留');
+        const removed = missing.filter(item => metadata.states?.some(value => value.identity === item.identity && value.status === 'removed'));
+        if (removed.length) {
+          setRemovedUploads(old => Array.from(new Map([...old, ...removed.map(item => ({ ...item, canRemoveFromLibrary: true }))].map(item => [item.identity, item])).values()));
+          setSelected(old => old.filter(item => !removed.some(value => value.identity === item.identity)));
+          throw new Error('部分素材已从素材库移出，撤销移出后可添加；文件无需重传');
+        }
+        throw new Error('部分素材已失效或无权使用，请移除后重试');
+      }
       const readyItems = ordered as PickerItem[];
       if (readyItems.some(item => item.unavailableReason)) throw new Error('部分素材暂不能用于此处，请移除后重试');
       if (!active.current || confirmationSession !== session.current) return;
@@ -641,6 +684,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {directoryNotice && <div role="status" className={styles.notice}>{directoryNotice}</div>}
         {notice && <div role="status" className={styles.notice}>{notice}</div>}
         {removedItem && <div role={removedInSession ? 'status' : undefined} className={styles.notice}>{removedInSession ? '已从我的素材库移出，文件和已有引用保留。' : `上次移出：${removedItem.fileName}`}<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>{removedInSession ? '撤销移出' : '撤销上次移出素材库'}</button></div>}
+        {removedUploads.map(item => <div key={item.identity} role="status" className={styles.notice}>{item.fileName}{restoredUploadIds.includes(item.identity) ? '已撤销移出，等待核对。' : '已从素材库移出。'}<button type="button" disabled={busy} onClick={() => void removeItem(item, true)}><RotateCcw size={14} />{restoredUploadIds.includes(item.identity) ? '重新核对并选择' : '撤销移出并选择'}</button></div>)}
         {error && <div role="alert" className={styles.error}>{error}</div>}
         {(directoryError || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{directoryError || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setDirectoryError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!directoryError && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && directoryError && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
         {!!failedUploads.length && <div role="alert" className={styles.uploadFailures}>{failedUploads.map(failure => <div key={failure.id} className={styles.uploadFailure}>

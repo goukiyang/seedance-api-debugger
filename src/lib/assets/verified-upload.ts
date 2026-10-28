@@ -10,6 +10,7 @@ import { Prisma, type Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from './site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
+import { configuredUploadObjectKey } from './upload-object-key';
 
 export class VerifiedUploadError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); }
@@ -432,19 +433,16 @@ export async function verifyExistingUpload(asset: Asset, ownerId: string) {
   if (asset.file_size <= 0 || asset.file_size > limits[uploadKind(asset.mime_type)]) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有原件大小无法安全核实');
   const local = siteUploadPathFromUrl(asset.original_url);
   if (!local) {
-    const base = process.env.R2_PUBLIC_BASE_URL?.replace(/\/+$/, '');
-    const ownerPrefix = `seedance-direct-uploads/${uploadDigest(ownerId).slice(0, 16)}/`;
-    if (!base || !asset.original_url.startsWith(`${base}/${ownerPrefix}`) || !process.env.R2_ACCOUNT_ID
+    const key = configuredUploadObjectKey(asset.original_url, ownerId, process.env.R2_PUBLIC_BASE_URL);
+    if (!key || !process.env.R2_ACCOUNT_ID
       || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET) return null;
-    const key = asset.original_url.slice(base.length + 1);
-    if (key.includes('?') || key.includes('#') || key.includes('..')) return null;
     const client = new S3Client({ region: 'auto', endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
     const command = { Bucket: process.env.R2_BUCKET, Key: key };
     const head = await client.send(new HeadObjectCommand(command), { abortSignal: AbortSignal.timeout(30000) });
     if (head.ContentLength !== asset.file_size || !head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
     const object = await client.send(new GetObjectCommand(command), { abortSignal: AbortSignal.timeout(180000) });
-    if (!object.Body || object.ETag !== head.ETag) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
+    if (!object.Body || object.ETag !== head.ETag || object.ContentLength !== head.ContentLength) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '已有远程原文件已变化');
     const proof = await stageVerifiedUpload(object.Body as AsyncIterable<Uint8Array>, asset.mime_type, asset.file_size, asset.hash);
     try {
       const after = await client.send(new HeadObjectCommand(command), { abortSignal: AbortSignal.timeout(30000) });

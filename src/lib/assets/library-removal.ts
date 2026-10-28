@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 
 const prefix = (owner: string) => `asset-library-removal:v1:${owner}:`;
@@ -6,6 +7,26 @@ const prefix = (owner: string) => `asset-library-removal:v1:${owner}:`;
 const resourcePrefix = (owner: string) => `resource-library-removal:v1:${owner}:`;
 const identityPattern = /^(asset|video_task|reference_image):([a-zA-Z0-9_-]{1,100})$/;
 export type LibraryRemovals = { asset: string[]; video_task: string[]; reference_image: string[] };
+export type LibraryRemovalState = { identity: string; status: 'removed' | 'available' | 'unavailable' };
+
+export async function readOwnLibraryRemovalStates(owner: string, identities: string[], db: Prisma.TransactionClient = prisma): Promise<LibraryRemovalState[]> {
+  if (!Array.isArray(identities) || identities.length > 60 || identities.some(value => typeof value !== 'string' || !identityPattern.test(value))) throw new Error('素材编号无效');
+  const unique = [...new Set(identities)];
+  const ids = (kind: string) => unique.filter(identity => identity.startsWith(`${kind}:`)).map(identity => identity.slice(kind.length + 1));
+  const available = new Set<string>();
+  const assets = ids('asset'), tasks = ids('video_task'), references = ids('reference_image');
+  if (assets.length) for (const row of await db.asset.findMany({ where: { id: { in: assets }, owner_id: owner, status: 'active' }, select: { id: true }, take: assets.length })) available.add(`asset:${row.id}`);
+  if (tasks.length) for (const row of await db.videoTask.findMany({ where: { id: { in: tasks },
+    OR: [{ owner_user_id: owner }, { owner_user_id: null, user_id: owner }], local_status: 'succeeded',
+    retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } }, select: { id: true }, take: tasks.length })) available.add(`video_task:${row.id}`);
+  if (references.length) for (const row of await db.referenceImage.findMany({ where: { id: { in: references }, owner_user_id: owner,
+    asset_id: null, status: 'active', album: { status: 'active' } }, select: { id: true }, take: references.length })) available.add(`reference_image:${row.id}`);
+  const markerKey = (identity: string) => identity.startsWith('asset:') ? `${prefix(owner)}${identity.slice(6)}` : `${resourcePrefix(owner)}${identity}`;
+  const keys = [...available].map(markerKey);
+  const rows = keys.length ? await db.platformSetting.findMany({ where: { key: { in: keys } }, select: { key: true, value_json: true }, take: keys.length }) : [];
+  const removed = new Set(rows.filter(row => JSON.parse(row.value_json)?.removed === true).map(row => row.key));
+  return unique.map<LibraryRemovalState>(identity => ({ identity, status: !available.has(identity) ? 'unavailable' : removed.has(markerKey(identity)) ? 'removed' : 'available' }));
+}
 
 export async function removedLibraryResources(owner: string): Promise<LibraryRemovals> {
   const rows = await prisma.platformSetting.findMany({ where: { OR: [

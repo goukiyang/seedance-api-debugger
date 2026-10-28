@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { setLibraryResourceRemoved } from '@/lib/assets/library-removal';
+import { readOwnLibraryRemovalStates, setLibraryResourceRemoved } from '@/lib/assets/library-removal';
+export async function GET(req: NextRequest) {
+  const user = await getSession(); if (!user || user.status !== 'active') return NextResponse.json({ error: '请先登录有效账号' }, { status: 401 });
+  try {
+    const identities = (req.nextUrl.searchParams.get('identities') || '').split(',').filter(Boolean);
+    const states = await readOwnLibraryRemovalStates(user.id, identities);
+    return NextResponse.json({ states }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    return NextResponse.json({ error: '素材状态暂不可核对，请重试' }, {
+      status: error instanceof Error && error.message === '素材编号无效' ? 400 : 503,
+      headers: { 'Cache-Control': 'private, no-store' },
+    });
+  }
+}
 export async function POST(req: NextRequest) {
   const user = await getSession(); if (!user || user.status !== 'active') return NextResponse.json({ error: '请先登录有效账号' }, { status: 401 });
   try {
