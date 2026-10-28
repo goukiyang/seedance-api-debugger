@@ -262,7 +262,11 @@ async function checkWorkspaceRecoveryCallbacks() {
   const state = { pending: null as Pending | null, statuses: {} as Record<string, string>, error: '', uploads: 0, associations: 0 };
   const scope = { ownerId: 'fixture-workspace-owner', epoch: 3, tabId: 'fixture-tab', workspaceId: 'fixture-workspace' };
   let associationAccepted = false;
+  const activeHistoryUpload = { current: null as object | null };
+  const pendingWorkspaceAttachRef = { current: null as Pending | null };
   const context: vm.Context = vm.createContext({ exports: {}, Error, crypto: { randomUUID }, pendingWorkspaceAttach: null,
+    activeHistoryUpload, pendingWorkspaceAttachRef,
+    setError: (value: string | null) => { state.error = value || ''; },
     uploadAssetToHistory: async () => { state.uploads++; return 'original-uploaded-asset'; },
     isCurrent: (current: unknown) => current === scope,
     assertCurrent: (current: unknown) => assert.equal(current, scope),
@@ -277,7 +281,9 @@ async function checkWorkspaceRecoveryCallbacks() {
       if (!associationAccepted) throw new Error('原加入结果待核对');
     },
     setUploadStatuses: (value: (previous: Record<string, string>) => Record<string, string>) => { state.statuses = value(state.statuses); },
-    setPendingWorkspaceAttach: (value: Pending | null) => { state.pending = value; context.pendingWorkspaceAttach = value; },
+    setPendingWorkspaceAttach: (value: Pending | null) => {
+      state.pending = value; context.pendingWorkspaceAttach = value; pendingWorkspaceAttachRef.current = value;
+    },
     fetch: () => assert.fail('重试业务关联不能在隔离检查中发送网络请求'),
     require: (name: string) => assert.fail(`未批准的工作台回调依赖: ${name}`),
   });
@@ -290,6 +296,8 @@ async function checkWorkspaceRecoveryCallbacks() {
   assert.equal(state.uploads, 1); assert.equal(state.associations, 1);
   assert.match(state.error, /素材已上传成功[^\n]*加入参考区[^\n]*(?:失败|未确认)/);
   assert.ok(state.pending); const originalPending = JSON.stringify(state.pending);
+  assert.equal(activeHistoryUpload.current, null, '历史上传结束后必须释放本次活动标记');
+  assert.equal(pendingWorkspaceAttachRef.current, state.pending, '关联未知必须保留同一个原素材引用');
   assert.deepEqual(Array.from(state.pending.assetIds), ['original-uploaded-asset']);
   assert.deepEqual(Array.from(state.pending.fileNames), ['original.png']);
   assert.equal(Object.values(state.statuses).filter(status => status === 'failed').length, 1);
@@ -299,7 +307,7 @@ async function checkWorkspaceRecoveryCallbacks() {
   associationAccepted = true;
   await callbacks.retryPendingAttach();
   assert.equal(state.uploads, 1); assert.equal(state.associations, 3);
-  assert.equal(state.pending, null); assert.deepEqual(Object.keys(state.statuses), []);
+  assert.equal(state.pending, null); assert.equal(pendingWorkspaceAttachRef.current, null); assert.deepEqual(Object.keys(state.statuses), []);
   await callbacks.retryPendingAttach();
   assert.equal(state.uploads, 1); assert.equal(state.associations, 3, '确认加入后不得再次执行旧关联');
 }
