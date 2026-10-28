@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { createRequire } from 'node:module';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -13,7 +12,8 @@ async function main() {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.platform, 'linux');
   const root = fs.realpathSync(process.cwd());
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sd2-sql01-template-'));
+  // Key fixtures must stay outside the app even when the runner's TMPDIR does not.
+  const directory = fs.mkdtempSync(path.join(fs.realpathSync('/tmp'), 'sd2-sql01-template-'));
   fs.chmodSync(directory, 0o700);
   const require = createRequire(path.join(root, 'scripts/verify-sql01-template-server.ts'));
   const write = (file: string, value: unknown) => fs.writeFileSync(file, Buffer.isBuffer(value) ? value : JSON.stringify(value), { mode: 0o600 });

@@ -6,6 +6,44 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 let phase = 'guard';
+const diagnosticClasses = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'AssertionError', 'AuthError', 'PublicApiError',
+  'VideoPricingContextError', 'PricingChargeError', 'StudioError', 'StudioValidationError', 'PrivatePromptError', 'PrivatePromptAccessError', 'PrivateDraftConflict',
+  'PrismaClientKnownRequestError', 'PrismaClientInitializationError', 'PrismaClientValidationError']);
+const diagnosticCodes = new Set(['INVALID', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'UNAVAILABLE', 'UNAUTHENTICATED',
+  'PRIVATE_PROMPT_UNAVAILABLE', 'PRIVATE_PROMPT_ACCESS_DENIED', 'pricing_context_invalid', 'pricing_context_changed', 'ERR_ASSERTION']);
+const diagnosticMessages = new Set([
+  '账号当前不可用', '外部账号无权访问视频模板工作台。', '模板要求不能为空', '项目不存在', '无权在此项目中生成内容', '视频卡不存在', '视频卡不属于当前项目',
+  '视频卡已封板或归档，不能继续生成', '运行快照无法读取', '运行记录不存在或无权访问', '只有已完成的运行记录可以提交生成',
+  '模板已归档或撤销，不能提交生成', '模板不存在或无权访问', '模板不存在或已撤销', '模板版本不可用，请回工作台重新确认',
+  '模板内容已变化，请回工作台重新确认', '这条记录没有可安全使用的文案，请重新整理', '素材不存在、已停用或无权使用', '无权使用此素材',
+  '素材存储地址不受信任，无法安全读取', '素材文件当前不可读取，请重新选择或上传', '模板报价缺少最终素材', '模板报价素材无效',
+  '模板报价素材重复', '模板原素材角色已变化，请重新准备', '模板报价槽位与已保存来源不符', '模板报价槽位数量超出原限制',
+  '模板报价缺少必填素材，未按无参考视频计价', '模板参考视频已失效', '报价范围或有效期已变化，请保留输入重新报价；尚未生成',
+  '私密设置暂不可用，原输入和请求编号已保留；请稍后重试或联系维护人员', 'sql01_fixture_network_prohibited',
+]);
+function diagnosticProperty(value, key) {
+  try {
+    for (let at = value, depth = 0; at && depth < 3; at = Object.getPrototypeOf(at), depth++) {
+      const descriptor = Object.getOwnPropertyDescriptor(at, key);
+      if (descriptor) return Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
+    }
+  } catch { /* Diagnostic serialization must not invoke getters or expose arbitrary values. */ }
+}
+function safeVideoFixtureError(error, depth = 0, seen = new Set()) {
+  if (!error || typeof error !== 'object') return { className: 'NonError', message: '[redacted non-error cause]' };
+  if (seen.has(error) || depth > 2) return { className: 'TruncatedCause' };
+  seen.add(error);
+  const constructor = diagnosticProperty(error, 'constructor'), type = typeof constructor === 'function' ? diagnosticProperty(constructor, 'name') : undefined;
+  const name = diagnosticProperty(error, 'name'), code = diagnosticProperty(error, 'code'), status = diagnosticProperty(error, 'status');
+  const message = diagnosticProperty(error, 'message'), cause = diagnosticProperty(error, 'cause');
+  return { className: diagnosticClasses.has(type) ? type : 'OtherError', name: diagnosticClasses.has(name) ? name : 'OtherError',
+    code: typeof code === 'string' && (/^P\d{4}$/.test(code) || diagnosticCodes.has(code)) ? code : null,
+    status: Number.isInteger(status) && status >= 400 && status <= 599 ? status : null,
+    message: diagnosticMessages.has(message) ? message : '[redacted non-allowlisted message]',
+    messageLength: typeof message === 'string' ? Math.min(message.length, 16384) : 0,
+    ...(cause !== undefined ? { cause: safeVideoFixtureError(cause, depth + 1, seen) } : {}) };
+}
+exports.safeVideoFixtureError = safeVideoFixtureError;
 async function main() {
   assert.equal(process.platform, 'linux'); assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.SD2_DATABASE_MODE, 'writer'); assert.equal(process.env.AUD_SQL01_VIDEO_SERVER, '1');
@@ -49,7 +87,8 @@ async function main() {
     await prisma.albumShare.create({ data: { id: 'grant', album_id: 'album', grantee_type: 'project', grantee_id: 'project', created_by: 'source-owner',
       permissions_json: JSON.stringify({ view: true, use: true }) } });
     await prisma.referenceImage.create({ data: { id: 'reference', album_id: 'album', asset_id: 'video', owner_user_id: 'source-owner', url: 'https://synthetic.invalid/never-read.mp4', status: 'active', source_type: 'upload' } });
-    const recipe = { instruction: '', fields: [], assetSlots: [{ key: 'video', label: 'Video', role: 'reference', types: ['video'], required: true, maxItems: 1 }], defaultParameters: {} };
+    const { normalizeRecipe } = require('../src/lib/template-studio/validation.ts');
+    const recipe = normalizeRecipe({ instruction: 'Synthetic public video requirement', fields: [], assetSlots: [{ key: 'video', label: 'Video', role: 'reference', types: ['video'], required: true, maxItems: 1 }], defaultParameters: {} });
     await prisma.videoStudioTemplate.create({ data: { id: 'template', owner_user_id: 'actor', name: 'Synthetic', status: 'published', visibility: 'shared', recipe_json: JSON.stringify(recipe) } });
     await prisma.videoStudioTemplateVersion.create({ data: { id: 'version', template_id: 'template', version_number: 1, name: 'Synthetic', group_name: 'Synthetic', recipe_json: JSON.stringify(recipe), created_by: 'actor' } });
     await prisma.videoStudioTemplate.update({ where: { id: 'template' }, data: { published_version_id: 'version' } });
@@ -167,5 +206,6 @@ async function main() {
       createAndDraftPrefixes: 2, canvasAdmissionAndRollback: true, projectCardTemplateAndAssetNegatives: true, protectedRowsUnchanged: true, externalRequests: forbidden }));
   } finally { if (prisma) await prisma.$disconnect(); fs.rmSync(directory, { recursive: true, force: true }); }
 }
-void main().catch(error => { console.error(JSON.stringify({ error: 'sql01_video_native_proof_failed', phase,
-  name: ['Error', 'AssertionError', 'TypeError'].includes(error?.name) ? error.name : 'Error', code: /^P\d{4}$|^ERR_ASSERTION$/.test(error?.code || '') ? error.code : null })); process.exitCode = 1; });
+if (require.main === module) void main().catch(error => {
+  console.error(JSON.stringify({ error: 'sql01_video_native_proof_failed', phase, ...safeVideoFixtureError(error) })); process.exitCode = 1;
+});

@@ -26,7 +26,8 @@ exports.runCreatePrefix = async (file, bindings, tx) => {
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   return new Function(...Object.keys(bindings), 'return ' + js)(...Object.values(bindings))(tx);
 };
-const recipe = { instruction: '', fields: [], assetSlots: [{ key: 'video', label: 'video', role: 'reference', types: ['video'], required: true, maxItems: 1 }], defaultParameters: {} };
+const validation = loader()('src/lib/template-studio/validation.ts');
+const recipe = validation.normalizeRecipe({ instruction: 'Synthetic public video requirement', fields: [], assetSlots: [{ key: 'video', label: 'video', role: 'reference', types: ['video'], required: true, maxItems: 1 }], defaultParameters: {} });
 exports.harness = function (options = {}) {
   const user = { id: 'actor', role: 'user', account_type: 'internal', status: 'active', user_profile: 'other', feature_profile_id: 'internal_email_authorized' };
   const owner = { userId: user.id, username: 'synthetic', displayName: 'Synthetic', avatarUrl: null, accountType: 'internal' };
@@ -97,7 +98,7 @@ exports.harness = function (options = {}) {
         if (!options.privateAllowed) throw new AuthError('private denied');
       },
     },
-    './private-storage.server': { readPrivateVideoRecipe: raw => JSON.parse(raw), transformPrivateVideoRun: value => value,
+    './private-storage.server': { readPrivateVideoRecipe: raw => validation.normalizeRecipe(JSON.parse(raw)), transformPrivateVideoRun: value => value,
       videoTemplateOrigins: (id, ownerId) => options.privateAllowed ? [{ kind: 'video-template', id, ownerId }] : [], writePrivateVideoRecipe: JSON.stringify },
     '@/lib/security/private-prompt-fields.server': { privateFieldBinding: () => null, privateFieldOrigins: () => [], transferPrivateOrigins: noop,
       readPrivateFields: value => value, writePrivateFields: value => value },

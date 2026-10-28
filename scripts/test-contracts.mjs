@@ -69,16 +69,17 @@ if (sql01) {
     scope: 'Unchanged recovery/media/billing evidence retained; SQL01 auth, transactions and observations rerun below, not39 rerun.' };
   suites = ['scripts/test-api-route.cjs', 'scripts/test-recovery-factory-facade.cjs',
     'scripts/test-sql01-admission-closure.cjs', 'scripts/test-sql01-video-tx.cjs', 'scripts/check-sql01-video-tx.cjs',
+    'scripts/test-sql01-video-diagnostics.cjs', 'scripts/test-sql01-video-recipe.cjs',
     'scripts/test-sql01-observations.cjs', 'scripts/verify-sql01-template-server.ts',
     'scripts/verify-sql01-video-tx-server.cjs', 'scripts/verify-sql01-observations-server.ts', 'scripts/test-auth-contract.mjs'];
 }
 const results = suites.map(suite => {
   const env = { ...process.env, NODE_ENV: 'test', ALBUM_PAGE_PHASE: 'handoff', PICKER_PHASE: 'closed', GOVERNANCE_PHASE: 'integrated' };
   if (sql01) Object.assign(env, { AUD_SQL01_SYNTHETIC_SERVER: '1', AUD_SQL01_VIDEO_SERVER: '1',
-    SQL01_FIXTURE_RUN_ID: 'integrated-' + randomUUID(), SQL01_PHASE: 'integrated',
+    SQL01_FIXTURE_RUN_ID: 'integrated-' + randomUUID(), SQL01_PHASE: 'integrated', SQL01_VIDEO_RECIPE_PHASE: 'green',
     NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require ${JSON.stringify(path.join(process.cwd(), 'scripts/server-runtime.cjs'))}`.trim() });
   if (suite === 'scripts/verify-sql01-observations-server.ts') delete env.DATABASE_URL;
-  const result = spawnSync(process.execPath, [...(sql01 ? ['--import', 'tsx'] : []), suite], { stdio: 'inherit', env });
+  const result = spawnSync(process.execPath, [...(sql01 ? ['--import', suite.endsWith('.cjs') ? 'tsx/cjs' : 'tsx'] : []), suite], { stdio: 'inherit', env });
   return { suite, exitCode: result.status, passed: !result.error && result.status === 0 };
 });
 console.log(JSON.stringify({ schema: 'contract-suites.v1', ...(sql01 ? { mode: 'sql01', reusedBaseline } : {}), results }));
