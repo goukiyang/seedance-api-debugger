@@ -50,6 +50,7 @@ import { studioTemplateTaskWhere } from './task-visibility';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, publicSkillVersion, publicSkillSnapshot, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
 import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
 import { studioPresetArchived } from './preset-lifecycle';
@@ -402,7 +403,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
   // This version comes only from persisted server preparation, never from body.
   const sizePolicyVersion = preparation?.sizePolicyVersion ?? CURRENT_STUDIO_SIZE_POLICY_VERSION;
   if (sizePolicyVersion !== 1 && sizePolicyVersion !== 2) throw new StudioError('图片尺寸策略版本无效', 409);
@@ -459,6 +460,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   }
   const requestFingerprint = createHash('sha256').update(JSON.stringify({ ...fingerprintInput,
     requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
+    ...(canvasUse?.referenceInput?.canvas_references === undefined ? {} : { canvas_references: canvasUse.referenceInput.canvas_references }),
     ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}),
     ...(roleContextFingerprint ? { roleMediaContext: roleContextFingerprint } : {}),
     ...(avatar ? { avatar: avatar.candidates, ...(sheet ? { avatarLayout: avatar!.layout } : {}) } : {}) })).digest('hex');
@@ -513,10 +515,18 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     await assertUsageProject(tx, user, usageProjectId);
     const identity: ImageStudioIdentity = user;
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
-    const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds) : new Map<string, string>();
-    if (canvasUse && (canvasReferenceOwners.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasReferenceOwners.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
+    const canvasInput = canvasUse?.referenceInput ? await resolveCanvasReferenceInputs(canvasUse.user, canvasUse.referenceInput, tx, { target: 'image' }) : null;
+    const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds, tx) : new Map<string, string>();
+    for (const item of canvasInput?.references.items || []) {
+      if (!item.assetId) throw new StudioError('参考原件身份无法确认', 409);
+      const asset = await tx.asset.findUniqueOrThrow({ where: { id: item.assetId }, select: { owner_id: true } });
+      canvasReferenceOwners.set(item.assetId, asset.owner_id);
+    }
     const storedWorkspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     const workspace = storedWorkspace ? readPrivateStudioDefinition('image-module', storedWorkspace) : null;
+    const canvasExpectedIds = new Set(canvasReferenceOwners.keys());
+    if (canvasInput && workspace) for (const id of JSON.parse(workspace.reference_ids) as string[]) canvasExpectedIds.add(id);
+    if (canvasUse && (canvasExpectedIds.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasExpectedIds.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
     const sharedUse = await resolveStudioTaskSharedUse(identity, typeof moduleId === 'string' ? moduleId : undefined, input.sharedLive, tx);
     if (sharedUse) {
@@ -1005,6 +1015,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         inputDigest: createHash('sha256').update(JSON.stringify({ context, prompt: input.prompt,
           ...(input.projectId !== undefined || canvasUse?.projectId !== undefined ? { usageProjectId } : {}),
           avatar: avatar?.candidates, references: referenceSnapshot.map(ref => ({ id: ref.id, hash: ref.hash })),
+          ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
           imageChannel: contractImageChannel || null,
           revision: settings.revision, moduleRevision: sharedDefinition ? undefined : workspace?.revision,
           ...(sharedDefinition ? { sharedLive: sharedDefinition.intent } : {}),
@@ -1060,6 +1071,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       referencePolicy: { ...referencePolicy, primaryIds: primaryReferenceIds },
       authorizedReferenceOwners: Object.fromEntries(references.map(ref => [ref.id, ref.owner_id])),
       ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
+      ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
       transientReferenceImages: transientReferenceSnapshot,
       globalContext: snapshotGlobalContext,
       moduleContext: snapshotModuleContext,

@@ -17,6 +17,7 @@ import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { getImageGenerationSettingsForModel, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, isMuskImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { assertCanvasPromptCompatibility } from '@/lib/canvas-prompt-compatibility';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { normalizeStudioRatio } from '@/lib/image-studio/ratios';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    const canvasInput = await resolveCanvasReferenceInputs(user, body, prisma, { target: 'image' });
     if (body.roleMediaContext !== undefined) {
       roleMediaFingerprint(body.roleMediaContext);
       const roleContext = body.roleMediaContext as Record<string, unknown>;
@@ -173,6 +175,7 @@ export async function POST(request: NextRequest) {
       throw new StudioError('风格模板参考图设置无法读取，请重新应用模板', 409);
     }
     const mergedReferenceIds = uniquePreserveOrder([...moduleReferenceIds, ...referenceAssetIds]);
+    for (const item of canvasInput?.references.items || []) if (item.assetId && !mergedReferenceIds.includes(item.assetId)) mergedReferenceIds.push(item.assetId);
     if (mergedReferenceIds.length > MAX_REFERENCE_IMAGES) {
       throw new StudioError(`模板参考图和本次选择合计不能超过 ${MAX_REFERENCE_IMAGES} 张`, 400);
     }
@@ -184,7 +187,7 @@ export async function POST(request: NextRequest) {
       model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
       billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-    const canvasUse = body.roleMediaContext === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds, projectId: context.projectId };
+    const canvasUse = body.roleMediaContext === undefined && body.canvas_references === undefined ? undefined : { user, referenceImageIds: requestedReferenceIds, projectId: context.projectId, referenceInput: body };
     if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding));
 
     let batchId: string;

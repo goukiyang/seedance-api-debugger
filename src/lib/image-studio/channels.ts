@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isGeminiImageModel } from '@/lib/image-generation/resolution';
 import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality, type ImageQualityRoutes } from './quality-routing';
-import { isStandardStudioRatio, normalizeStudioRatio } from './ratios';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
+import { sharedImageStudioChannelIssue } from './shared-capabilities';
 
 export const ORIGINAL_IMAGE_CHANNEL_ID = 'original';
 
@@ -201,56 +201,7 @@ export function imageStudioChannelIssue(channel: ImageStudioChannel | undefined,
   referenceCount?: number;
   legacyRoute?: boolean;
 }) {
-  if (model === IMAGE_25_QUALITY_MODEL && !isImage25Quality(values.quality)) return '原质量待选择，请选择中等或最高；素材和描述已保留。';
-  if (!channel || !channel.configured || !channel.enabled) {
-    return channel?.disabledReason || `${channel?.label || '所选生图通道'}未配置或已停用，请联系管理员。`;
-  }
-  const capability = imageStudioChannelModel(channel, model);
-  if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && values.legacyRoute !== false && !capability?.pricingBySpecification) {
-    return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
-  }
-  const allowsUnconfirmedParameters = (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.allowsUnconfirmedParameters === true;
-  if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID && !capability && values.legacyRoute !== false) {
-    return values.legacyReady === false ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
-  }
-  if (capability) {
-    const missing = [
-      !allowsUnconfirmedParameters && !capability.qualities?.length ? '图片质量' : null,
-      !allowsUnconfirmedParameters && !capability.resolutions?.length ? '分辨率' : null,
-      !allowsUnconfirmedParameters && capability.maxReferences == null ? '参考图上限' : null,
-      !capability.billingMode ? '计费方式' : null,
-      capability.billingMode === 'fixed' && !capability.pricingBySpecification && capability.fixedPoints == null
-        && !['shared', 'banana'].includes(channel.id) ? '固定点数' : null,
-    ].filter(Boolean);
-    if (missing.length) return `${model} 的当前供应商尚未确认${missing.join('、')}。当前选择和素材已保留，请管理员补齐该型号配置。`;
-  }
-  if (!channel.ready) return channel.disabledReason || `${channel.label}暂未就绪，请联系管理员。`;
-  if (!capability || !capability.ready) return capability?.disabledReason || '当前供应商的所选型号尚未就绪；当前选择和素材已保留，请联系管理员检查配置。';
-  if (!capability.billingMode) return '当前生图通道的计费方式尚未确认，暂不能生成；请联系管理员检查配置。';
-  if (capability.billingMode === 'fixed' && !capability.pricingBySpecification && capability.fixedPoints == null
-    && channel.id !== 'shared' && channel.id !== 'banana') {
-    return '当前生图通道的固定点数尚未配置，暂不能生成；请联系管理员检查配置。';
-  }
-  if (capability.qualities && (!capability.qualities.length || values.quality !== undefined && !capability.qualities.includes(values.quality))) {
-    return '当前生图通道不支持所选图片质量，请手动调整后再生成。';
-  }
-  if (capability.resolutions && (!capability.resolutions.length || values.resolution !== undefined && !capability.resolutions.includes(values.resolution))) {
-    return '当前生图通道不支持所选分辨率，请手动调整后再生成。';
-  }
-  if (values.ratio !== undefined && !isStandardStudioRatio(values.ratio) && !capability.ratios?.some(value => {
-    try { return normalizeStudioRatio(value) === normalizeStudioRatio(values.ratio); } catch { return false; }
-  })) {
-    return '当前生图通道不支持所选比例，请手动调整后再生成。';
-  }
-  if (!allowsUnconfirmedParameters && (!capability.qualities || !capability.resolutions || capability.maxReferences == null)) {
-    return '当前生图通道的图片参数支持范围尚未确认，暂不能生成；请联系管理员补全配置。';
-  }
-  if (Number.isSafeInteger(capability.maxReferences) && values.referenceCount !== undefined
-    && values.referenceCount > capability.maxReferences!) {
-    return `当前生图通道最多使用 ${capability.maxReferences} 张参考图，请减少后再生成。`;
-  }
-  return values.legacyReady === false && channel.id === ORIGINAL_IMAGE_CHANNEL_ID
-    ? '当前模型的原接口尚未就绪，请联系管理员检查接口。' : null;
+  return sharedImageStudioChannelIssue(channel, model, values);
 }
 
 export function imageStudioChannelReadyForModel(channel: ImageStudioChannel | undefined, model: string, legacyReady?: boolean) {

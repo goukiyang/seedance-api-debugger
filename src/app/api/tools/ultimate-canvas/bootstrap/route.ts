@@ -47,6 +47,9 @@ import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integr
 import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
 import { IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, defaultImageStudioQuality, imageStudioNewQualityOptions } from '@/lib/image-studio/model-catalog';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
+import { canvasImageChannelProjection } from '@/lib/image-studio/shared-capabilities';
+import { canvasWorkspaceKey } from '@/lib/canvas-workspace';
+import { canvasReferencesRequired } from '@/lib/canvas-references';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -391,6 +394,10 @@ export async function GET(request: NextRequest) {
   ];
   const videoReady = seedanceVideoReady || ipReady || h3VideoConfig.ready;
 
+  const imageChannelMenu = await getPricingImageChannelOptions();
+  const canvasImageChannels = { ...imageChannelMenu, items: imageChannelMenu.items.map(channel => ({ ...channel,
+    models: Object.fromEntries(Object.entries(channel.models).map(([model, capability]) => [model,
+      { ...capability, canvas: canvasImageChannelProjection(channel, model) }])) })) };
   return NextResponse.json({
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
     money_display: { usd_to_cny_rate: USD_TO_CNY_RATE, rate_text: usdToCnyRateText() },
@@ -409,6 +416,10 @@ export async function GET(request: NextRequest) {
       avatar_url: user.avatar_url || null,
     },
     context: {
+      canvas_reference_write_capability: latestCanvasDocument && canvasReferencesRequired(JSON.parse(latestCanvasDocument.document_json)) ? 'canvas.references.v1' : null,
+      workspace_context: latestCanvasDocument && selectedProject ? { version: 2, owner_id: user.id, project_id: selectedProject.id,
+        document_id: latestCanvasDocument.id, video_card_id: savedVideoCardId(latestCanvasDocument.document_json) || null,
+        workspace_key: canvasWorkspaceKey(user.id, selectedProject.id, latestCanvasDocument.id) } : null,
       projects: projectSummaries,
       selected_project_id: selectedProject?.id || null,
       video_cards: videoCardSummaries,
@@ -457,7 +468,7 @@ export async function GET(request: NextRequest) {
       },
       image: {
         enabled: imageReady,
-        imageChannels: await getPricingImageChannelOptions(),
+        imageChannels: canvasImageChannels,
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,

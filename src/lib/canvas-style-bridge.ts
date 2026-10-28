@@ -10,7 +10,7 @@ import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ReferenceImportError } from '@/lib/assets/reference-import';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
-import { getProjectForGeneration } from '@/lib/projects/permissions';
+import { getProjectAccess } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { prisma } from '@/lib/prisma';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
@@ -93,22 +93,24 @@ export function parseCanvasStyleContext(body: Record<string, unknown>): CanvasSt
   };
 }
 
-export async function assertCanvasStyleContext(user: SessionUser, context: CanvasStyleContext) {
-  const card = context.cardId ? await prisma.videoCard.findUnique({
+export async function assertCanvasStyleContext(user: SessionUser, context: CanvasStyleContext, db: import('@prisma/client').Prisma.TransactionClient = prisma) {
+  const card = context.cardId ? await db.videoCard.findUnique({
     where: { id: context.cardId },
     select: { id: true, project_id: true },
   }) : null;
   if (context.cardId && !card) throw new AuthError('视频卡不存在', 404);
   if (card && card.project_id !== context.projectId) throw new AuthError('视频卡不属于当前项目', 400);
-  const project = await getProjectForGeneration(user, context.projectId);
-  if (card) await assertCanGenerateInVideoCard(user, project.id, card.id);
+  const access = await getProjectAccess(user, context.projectId, db);
+  if (!access.project || !access.canGenerate) throw new AuthError('无权在当前项目创作', 403);
+  const project = access.project;
+  if (card) await assertCanGenerateInVideoCard(user, project.id, card.id, db);
 
   if (context.nodeId && !context.documentId) {
     throw new AuthError('节点必须属于已选择的画布', 400);
   }
   if (!context.documentId) return;
 
-  const document = await assertCanEditCanvasDocument(user, context.documentId, project.id);
+  const document = await assertCanEditCanvasDocument(user, context.documentId, project.id, db);
   let snapshot: unknown;
   try {
     snapshot = JSON.parse(document.document_json);

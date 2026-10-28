@@ -16,6 +16,7 @@ import { PRICING_POLICY_KEY } from './admin-contract';
 import { PricingChargeError } from './frozen-charge';
 import type { PricingVideoPurpose, PricingReferenceVideo } from './pricing-authoring-contract';
 import { parseMultiviewSettingsBinding } from '@/lib/video/multiview-generation-contract';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 
 export type VideoPricingContext = {
   fingerprint: string;
@@ -58,6 +59,7 @@ export function assertVideoPricingFinalReferences(context: VideoPricingContext, 
 async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   operation: 'create' | 'draft_upgrade', db: Prisma.TransactionClient): Promise<VideoPricingContext> {
   if (Buffer.byteLength(JSON.stringify(body)) > 262144) throw new PricingChargeError('视频报价上下文过大');
+  const canvasInput = await resolveCanvasReferenceInputs(user, body, db, { target: 'video' });
   let projectId = typeof body.project_id === 'string' ? body.project_id : '';
   const videoCardId = typeof body.video_card_id === 'string' && body.video_card_id ? body.video_card_id : null;
   if (videoCardId && !projectId) projectId = (await db.videoCard.findUnique({ where: { id: videoCardId }, select: { project_id: true } }))?.project_id || '';
@@ -117,6 +119,7 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   const fingerprint = pricingFingerprint({ v: 1, actorId: user.id, projectId, videoCardId, payer,
     provider: body.provider || 'seedance', model: body.model, resolution: body.resolution, duration: body.duration,
     ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding,
+    ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
     ...(multiviewSettings ? { multiviewSettings } : {}) });
   return { fingerprint, actorId: user.id, projectId, videoCardId, payer, referenceVideo, purpose, referenceVideoCount, referenceVideoFingerprint, templateRunId };
 }

@@ -12,11 +12,13 @@ import { assertVideoCreationReady, readCreationContext, type CreationDb } from '
 import { readCreationAvailability, creationNeedsApproval } from './availability';
 import { creationTaskLineage, readCreationSource, creationParent, assertCreationLineageUnlocked } from './lineage';
 import { consumeCreationApproval } from './approval';
+import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
+import { normalizeCanvasReferences } from '@/lib/canvas-references';
 
 const INPUT_FIELDS = ['provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
   'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls',
-  'reference_image_ids', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
+  'reference_image_ids', 'canvas_references', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
   'source_task_id', 'source_draft_task_id', 'tool_version', 'fps', 'multiview_generation', 'multiview_settings',
   'canvas_document_id', 'canvas_node_id', 'workspace_id', 'preset_id', 'lora_id', 'audio_prompt', 'music_prompt',
   'scene', 'video_url', 'template_id', 'agent_run_id', 'selected_agent_plan_key', 'agent_prompt_snapshot', 'final_prompt_snapshot', 'prompt_user_edited', 'roleMediaContext', 'first_frame_asset_id', 'last_frame_asset_id', 'template_studio_parameters', 'omni_reference_task_type', 'promptMentions'] as const;
@@ -37,6 +39,7 @@ export function normalizeVideoCreationSpec(body: Record<string, unknown>): Video
   const sourceIds = body.input_source_task_ids === undefined ? [] : body.input_source_task_ids;
   if (!Array.isArray(sourceIds) || sourceIds.length > 16) throw new CreationError('素材来源无效', 400);
   const input = Object.fromEntries(INPUT_FIELDS.filter(key => body[key] !== undefined).map(key => [key, body[key]]));
+  if (input.canvas_references !== undefined) input.canvas_references = normalizeCanvasReferences(input.canvas_references);
   if (typeof input.model !== 'string' || !input.model || typeof input.duration !== 'number' || !Number.isFinite(input.duration)
     || input.duration <= 0 || input.duration > 3600 || typeof input.resolution !== 'string') throw new CreationError('型号、时长或分辨率无效，未提交生成', 400, 'creation_spec_invalid');
   return { version: 2, action: action as VideoCreationSpec['action'], entry: entry as VideoCreationSpec['entry'],
@@ -86,12 +89,13 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   if (previous && ['accepted', 'closed', 'batch_active', 'batch_settled'].includes(previous.state)) return projectIntent(user, previous, prisma);
   await assertVideoCreationReady();
   await assertNoPreparationRejection(prisma, user.id, requestId, body);
+  body = applyCanvasReferenceInputs(body, await resolveCanvasReferenceInputs(user, body, prisma, { target: 'video' }));
   const spec = normalizeVideoCreationSpec(body), inputHash = creationSpecHash(spec);
   const context = await readCreationContext(user, spec.project_id, spec.video_card_id);
   const parentId = creationParent(spec);
   if (parentId) await assertCreationLineageUnlocked(prisma, user, parentId, spec.project_id);
   for (const id of spec.input_source_task_ids) await readCreationSource(prisma, user, id);
-  const pricingBody = { ...spec.input, project_id: spec.project_id, video_card_id: spec.video_card_id };
+  const pricingBody = { ...spec.input, project_id: spec.project_id, video_card_id: spec.video_card_id, required_capabilities: body.required_capabilities };
   const pricingContext = spec.action === 'enhance' || spec.input.provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, pricingBody, spec.action === 'draft_upgrade' ? 'draft_upgrade' : 'create');
   const provider = spec.action === 'enhance' ? 'volcengine_mediakit' : spec.input.provider || (spec.entry === 'ip' ? 'volcengine_ip' : 'seedance');
   const quote = await quoteVideoPricing({ ...spec.input, provider, model: spec.input.model, duration: spec.input.duration,
@@ -101,6 +105,7 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
     per_child_cost_cents: creditCents(quote.pricing.estimatedCost), count: spec.count });
   const row = await prisma.$transaction(async tx => {
     await assertProjectActiveInTransaction(tx, user, spec.project_id);
+    await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
     const current = await tx.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
     await assertNoPreparationRejection(tx, user.id, requestId, body);
     const data = { action: spec.action, entry: spec.entry, project_id: spec.project_id, legacy_card_id: spec.video_card_id,
@@ -158,6 +163,7 @@ export async function acceptVideoCreationIntent(tx: Prisma.TransactionClient, us
   if (intent.revision !== body.intent_revision || (!isBatch && !['ready', 'awaiting_approval', 'prepared'].includes(intent.state))
     || isBatch && intent.state !== 'batch_active' || intent.state === 'closed') throw new CreationError('原创作请求已结束或变化，未重新生成');
   const spec = creationSubmissionSpec(body, intent);
+  await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
   if (creationSpecHash(spec) !== intent.input_hash || (child ? child.quote_revision : intent.pricing_revision) !== accepted.pricingRevision
     || intent.request_id !== body.idempotency_key && !isBatch) throw new CreationError('本次内容与原创作请求不一致，请核对原请求', 409, 'creation_input_changed');
   const context = await readCreationContext(user, intent.project_id, spec.video_card_id, tx);

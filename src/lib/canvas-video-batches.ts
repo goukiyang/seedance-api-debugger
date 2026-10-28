@@ -22,6 +22,8 @@ import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integr
 import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import { getH3ApiSettings, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/integrations/h3';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
+import { CANVAS_REFERENCES_CAPABILITY, normalizeCanvasReferences } from '@/lib/canvas-references';
 import { CANVAS_VIDEO_BATCH_CAPABILITY, canvasBatchId, canvasBatchObject, canvasVideoCount,
   canvasVideoChildState, canvasVideoBatchState, canvasVideoBatchIsSettled } from './canvas-video-batch-contract';
 import { CanvasVideoBatchError, assertCanvasVideoBatchCreateEnabled, canvasBatchHash, canvasBatchBusinessFingerprint,
@@ -38,7 +40,7 @@ const QUOTE_TTL = 300000;
 const MAX_INPUT_BYTES = 262144;
 const inputFields = new Set(['prompt', 'promptMentions', 'model', 'provider', 'generation_mode', 'ratio', 'duration', 'resolution',
   'seed', 'generate_audio', 'return_last_frame', 'watermark', 'draft', 'project_id', 'video_card_id', 'video_branch_id',
-  'reference_image_ids', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url',
+  'reference_image_ids', 'canvas_references', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url',
   'first_frame_image_id', 'last_frame_image_id', 'final_prompt_snapshot', 'prompt_user_edited', 'client_name', 'source_metadata',
   'canvas_document_id', 'canvas_node_id', 'idempotency_key', 'source_request_id', 'resolution_approval_id',
   'pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost', 'count', 'required_capabilities',
@@ -82,7 +84,8 @@ function normalizeInput(raw: unknown, documentId: string, nodeId: string): Body 
   return { ...input, provider: raw.provider, model: raw.model.trim(), video_card_id: optionalId(raw.video_card_id), video_branch_id: branch,
     client_name: 'ultimate_canvas', canvas_document_id: documentId, canvas_node_id: nodeId,
     source_metadata: { ...metadata, source: 'ultimate_canvas', provider: raw.provider, canvas_document_id: documentId, canvas_node_id: nodeId },
-    required_capabilities: [CANVAS_VIDEO_BATCH_CAPABILITY] };
+    ...(raw.canvas_references === undefined ? {} : { canvas_references: normalizeCanvasReferences(raw.canvas_references) }),
+    required_capabilities: [CANVAS_VIDEO_BATCH_CAPABILITY, ...(Array.isArray(raw.required_capabilities) && raw.required_capabilities.includes(CANVAS_REFERENCES_CAPABILITY) ? [CANVAS_REFERENCES_CAPABILITY] : [])] };
 }
 async function assertScope(db: CanvasBatchDb, user: SessionUser, input: Body, documentId: string, nodeId: string) {
   const doc = await db.canvasDocument.findUnique({ where: { id: documentId } });
@@ -94,6 +97,7 @@ async function assertScope(db: CanvasBatchDb, user: SessionUser, input: Body, do
   }
   const nodes = JSON.parse(doc.document_json).canvas?.nodes;
   if (!Array.isArray(nodes) || !nodes.some((node: { id: string }) => node.id === nodeId)) throw new CanvasVideoBatchError('请先保存当前视频节点', 409);
+  await resolveCanvasReferenceInputs(user, input, db, { target: 'video' });
   const card = input.video_card_id ? await db.videoCard.findUnique({ where: { id: String(input.video_card_id) } }) : null;
   if (input.video_card_id && (!card || card.project_id !== doc.project_id || !canGenerateInVideoCardStatus(card.status))) throw new CanvasVideoBatchError('视频卡已关闭或不属于当前项目', 403);
   if (input.video_branch_id) {
@@ -131,6 +135,7 @@ async function assertInputMedia(user: SessionUser, input: Body) {
   }
 }
 async function quoteChild(user: SessionUser, input: Body, db: CanvasBatchDb = prisma) {
+  await resolveCanvasReferenceInputs(user, input, db, { target: 'video' });
   const provider = input.provider as 'seedance' | 'volcengine_ip' | 'h3';
   const model = String(input.model), resolution = String(input.resolution), duration = Number(input.duration);
   if (!['480p', '720p', '1080p'].includes(resolution) || !Number.isInteger(duration)) throw new CanvasVideoBatchError('视频规格无效，原输入保留', 400);

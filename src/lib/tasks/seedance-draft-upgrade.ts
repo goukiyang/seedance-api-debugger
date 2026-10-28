@@ -2,6 +2,7 @@ import { isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
+import { normalizeCanvasReferences } from '@/lib/canvas-references';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
@@ -268,6 +269,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       first_frame_url: true,
       last_frame_url: true,
       frame_image_urls: true,
+      params_json: true,
       workspace_id: true,
       project_id: true,
       video_card_id: true,
@@ -339,7 +341,13 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     draft_task_id: draft.id,
     draft_contract_version: SEEDANCE_DRAFT_CONTRACT_VERSION,
   };
+  let frozenReferences: ReturnType<typeof normalizeCanvasReferences>;
+  if (draft.params_json?.includes('"canvas_references"')) {
+    try { frozenReferences = normalizeCanvasReferences(JSON.parse(draft.params_json).canvas_references); }
+    catch { throw new DraftUpgradeError('原样片参考快照无法确认，未升级或重新提交', 409, 'draft_reference_snapshot_invalid'); }
+  }
   const taskParams = {
+    ...(frozenReferences === undefined ? {} : { canvas_references: frozenReferences }),
     source_draft_task_id: draft.id,
     model: draft.model,
     resolution: '1080p',

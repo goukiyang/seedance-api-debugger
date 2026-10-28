@@ -39,18 +39,18 @@ export function normalizeWorkspaceTabId(value: unknown): string {
 function workspaceBindingKey(tabId: string, ownerId: string) {
   return 'workspace_tab_binding_v1:' + createHash('sha256').update(JSON.stringify([ownerId, tabId])).digest('hex');
 }
-export async function readWorkspaceForTab(tabId: string, ownerId: string) {
+export async function readWorkspaceForTab(tabId: string, ownerId: string, db: Prisma.TransactionClient = prisma) {
   const normalized = normalizeWorkspaceTabId(tabId), key = workspaceBindingKey(normalized, ownerId);
-  const binding = await prisma.platformSetting.findUnique({ where: { key } });
+  const binding = await db.platformSetting.findUnique({ where: { key } });
   if (binding) {
     const value = JSON.parse(binding.value_json);
     if (value.version !== 1 || value.ownerId !== ownerId || value.tabId !== normalized || typeof value.workspaceId !== 'string')
       throw new Error('工作区绑定无法确认，请保留当前输入');
-    const workspace = await prisma.workspace.findFirst({ where: { id: value.workspaceId, owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) } });
+    const workspace = await db.workspace.findFirst({ where: { id: value.workspaceId, owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) } });
     if (!workspace) throw new Error('原工作区已失效，未切换到其它工作区');
     return { id: workspace.id };
   }
-  return prisma.workspace.findFirst({ where: { owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) },
+  return db.workspace.findFirst({ where: { owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) },
     orderBy: [{ updated_at: 'desc' }, { id: 'asc' }], select: { id: true } });
 }
 
@@ -58,17 +58,17 @@ export async function readWorkspaceForTab(tabId: string, ownerId: string) {
  * 获取或创建当前用户的活跃工作区
  * 每个浏览器 tab 有独立 workspace（通过 tabId 区分）
  */
-export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user'): Promise<{ id: string }> {
+export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-user', db: Prisma.TransactionClient = prisma): Promise<{ id: string }> {
   const normalized = normalizeWorkspaceTabId(tabId), key = workspaceBindingKey(normalized, ownerId);
-  const existing = await readWorkspaceForTab(normalized, ownerId);
-  if (existing && await prisma.platformSetting.findUnique({ where: { key }, select: { id: true } })) return existing;
+  const existing = await readWorkspaceForTab(normalized, ownerId, db);
+  if (existing && await db.platformSetting.findUnique({ where: { key }, select: { id: true } })) return existing;
   try {
     if (existing) {
-      await prisma.platformSetting.create({ data: { key, updated_by: ownerId,
+      await db.platformSetting.create({ data: { key, updated_by: ownerId,
         value_json: JSON.stringify({ version: 1, ownerId, tabId: normalized, workspaceId: existing.id }) } });
       return existing;
     }
-    return await prisma.$transaction(async db => {
+    const bind = async (db: Prisma.TransactionClient) => {
       const prior = await db.workspace.findFirst({ where: { owner_id: ownerId, status: 'active', name: workspaceNameForTab(normalized) },
         orderBy: [{ updated_at: 'desc' }, { id: 'asc' }], select: { id: true } });
       const workspace = prior || await db.workspace.create({ data: { id: uuidv4(), owner_id: ownerId,
@@ -76,10 +76,11 @@ export async function getOrCreateWorkspace(tabId: string, ownerId = 'default-use
       await db.platformSetting.create({ data: { key, updated_by: ownerId,
         value_json: JSON.stringify({ version: 1, ownerId, tabId: normalized, workspaceId: workspace.id }) } });
       return workspace;
-    });
+    };
+    return await (db === prisma ? prisma.$transaction(bind) : bind(db));
   } catch (error) {
     if ((error as { code?: string }).code !== 'P2002') throw error;
-    const winner = await readWorkspaceForTab(normalized, ownerId);
+    const winner = await readWorkspaceForTab(normalized, ownerId, db);
     if (!winner) throw error;
     return winner;
   }

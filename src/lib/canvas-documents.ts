@@ -9,6 +9,10 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getAccessibleProjectIds, getProjectAccess, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { requireCanvasVideoBatchDocumentCapability, sealCanvasVideoPreparedChildren } from '@/lib/canvas-video-batches-guards';
+import { CANVAS_REFERENCES_CAPABILITY, canvasReferencesRequired, normalizeCanvasReferences, requireCanvasReferencesCapability, retainCanvasReferencesCapability } from './canvas-references';
+import { resolveCanvasReferenceInputs } from './canvas-reference-inputs';
+import { canvasWorkspaceKey } from './canvas-workspace';
+import { assertCanGenerateInVideoCard } from './video-cards/permissions';
 
 export const MAX_CANVAS_BYTES = 2 * 1024 * 1024;
 const HISTORY_LIMIT = 20;
@@ -100,6 +104,10 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     if (typeof node.x !== 'number' || !Number.isFinite(node.x)
       || typeof node.y !== 'number' || !Number.isFinite(node.y) || !object(node.data)) invalid('节点坐标或配置无效');
     nodeIds.add(node.id);
+    if (node.data.canvas_references !== undefined) {
+      if (!['image', 'video'].includes(node.type)) invalid('只有图片或视频节点可以保存生成参考清单');
+      node.data.canvas_references = normalizeCanvasReferences(node.data.canvas_references);
+    }
     if (node.type === 'role') {
       const config = node.data.roleConfig;
       if (!object(config) || !id(config.definitionId) || !Number.isSafeInteger(config.version) || Number(config.version) < 1) invalid('角色缺少有效的库版本');
@@ -180,7 +188,7 @@ export function parseCanvasSnapshot(raw: string, projectId: string | null, v2: b
     parsed.schemaVersion = 3;
     parsed.requiredCapabilities = ['role.v1'];
   } else if (parsed.schemaVersion === 3) parsed.requiredCapabilities = ['role.v1'];
-  return parsed as Snapshot;
+  return retainCanvasReferencesCapability(parsed) as Snapshot;
 }
 
 export function requireCanvasRoleCapability(schemaVersion: number, capabilities: unknown) {
@@ -203,18 +211,28 @@ export const canvasMetadataSelect = {
 
 type Metadata = Prisma.CanvasDocumentGetPayload<{ select: typeof canvasMetadataSelect }>;
 export function canvasMetadata(document: Metadata) {
+  const raw = 'document_json' in document && typeof document.document_json === 'string' ? JSON.parse(document.document_json) : null;
   return {
     id: document.id, owner_user_id: document.owner_user_id, project_id: document.project_id,
     title: document.title, active_generation_node_id: document.active_generation_node_id,
     status: document.status, revision: document.revision, schema_version: document.schema_version,
     protocol_version: document.protocol_version, access_scope: document.access_scope,
+    workspace_context: document.project_id ? { version: 2, owner_id: document.owner_user_id, document_id: document.id, project_id: document.project_id,
+      video_card_id: raw?.context?.video_card_id || raw?.context?.videoCardId || null,
+      workspace_key: canvasWorkspaceKey(document.owner_user_id, document.project_id, document.id) } : null,
+    ...(raw?.canvasReferenceVersion === 1 ? { canvasReferenceVersion: 1,
+      canvas_references_by_node: Object.fromEntries((raw.canvas?.nodes || []).filter((node: NodeSnapshot) => node.data?.canvas_references !== undefined)
+        .map((node: NodeSnapshot) => [node.id, node.data.canvas_references])) } : {}),
     created_at: document.created_at.toISOString(), updated_at: document.updated_at.toISOString(),
   };
 }
 
 export function canvasDetail(document: CanvasDocument, capabilities: unknown = []) {
   requireCanvasRoleCapability(document.schema_version, capabilities);
-  return { ...canvasMetadata(document), document_json: document.document_json };
+  const required = canvasReferencesRequired(JSON.parse(document.document_json));
+  return { ...canvasMetadata(document), document_json: document.document_json,
+    ...(required ? { reference_capability: { required_for_write: [CANVAS_REFERENCES_CAPABILITY],
+      client_supported: Array.isArray(capabilities) && capabilities.includes(CANVAS_REFERENCES_CAPABILITY) } } : {}) };
 }
 
 async function assertProject(user: SessionUser, projectId: string | null, write: boolean, db: Db = prisma) {
@@ -236,20 +254,20 @@ export async function readCanvasDocument(user: SessionUser, documentId: string) 
   return assertCanReadCanvasDocument(user, documentId);
 }
 
-export async function assertCanReadCanvasDocument(user: SessionUser, documentId: string, projectId?: string | null) {
-  return assertCanAccessCanvasDocument(user, documentId, { projectId });
+export async function assertCanReadCanvasDocument(user: SessionUser, documentId: string, projectId?: string | null, db: Db = prisma) {
+  return assertCanAccessCanvasDocument(user, documentId, { projectId }, db);
 }
 
-export async function assertCanEditCanvasDocument(user: SessionUser, documentId: string, projectId?: string | null) {
-  return assertCanAccessCanvasDocument(user, documentId, { write: true, projectId });
+export async function assertCanEditCanvasDocument(user: SessionUser, documentId: string, projectId?: string | null, db: Db = prisma) {
+  return assertCanAccessCanvasDocument(user, documentId, { write: true, projectId }, db);
 }
 
 /** Generation callers must pass write: true and their resolved projectId. */
 export async function assertCanAccessCanvasDocument(user: SessionUser, documentId: string,
-  options: { write?: boolean; projectId?: string | null } = {}) {
+  options: { write?: boolean; projectId?: string | null } = {}, db: Db = prisma) {
   assertInternalOnly(user, '外部账号无权使用无限画布。');
-  const document = await prisma.canvasDocument.findUnique({ where: { id: documentId } });
-  await assertDocument(user, document, options.write ?? false);
+  const document = await db.canvasDocument.findUnique({ where: { id: documentId } });
+  await assertDocument(user, document, options.write ?? false, db);
   if (options.projectId !== undefined && options.projectId !== document!.project_id) {
     throw new AuthError('画布不属于当前项目', 400);
   }
@@ -347,7 +365,7 @@ export async function validateAssets(db: Db, user: SessionUser, snapshot: Snapsh
   const previews = new Map<string, { id: string; originalUrl: string; thumbnailUrl: string; title: string }>();
   const referencePreviews = new Map<string, { url: string; thumbnail: string }>();
   for (const referenceId of refs.reference_image_ids) {
-    const image = await assertCanUseReferenceImage(user, referenceId);
+    const image = await assertCanUseReferenceImage(user, referenceId, db);
     if (image.asset && image.asset.status !== 'active') {
       throw new CanvasDocumentError('参考素材已不可用，请重新选择素材', 403, 'resource_unavailable');
     }
@@ -419,7 +437,7 @@ async function validateNewReferences(db: Db, user: SessionUser, snapshot: Snapsh
       where: { id: { in: batch } },
       select: { id: true, project_id: true, owner_user_id: true, user_id: true, retention_status: true },
     });
-    for (const task of tasks) await assertCanViewTask(user, task);
+    for (const task of tasks) await assertCanViewTask(user, task, db);
     const missingIds = batch.filter(taskId => !tasks.some(task => task.id === taskId));
     if (missingIds.length) {
       const imageTaskCount = await db.imageStudioTask.count({ where: {
@@ -457,7 +475,7 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
     'mode', 'imageSettings', 'videoSettings', 'settings', 'model', 'provider', 'promptMentions', 'textModel', 'quality', 'ratio', 'size', 'resolution',
     'count', 'duration', 'cameraPresets', 'templateId', 'template_id', 'templateVersion', 'moduleId', 'module_id',
     'source', 'executionMode', 'inputSource', 'retryCount', 'outputMode', 'canvasStyle',
-    'planSource', 'planReferences', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup', 'roleConfig']);
+    'planSource', 'planReferences', 'canvas_references', 'planParameterSource', 'videoCardId', 'videoBranchId', 'storyWorkflow', 'storySource', 'canvasGroup', 'roleConfig']);
   const remap = new Map(snapshot.canvas.nodes.map(node => [node.id, `node-${randomUUID()}`]));
   const oldFlows = workflowSnapshots(snapshot.canvas.roleWorkflows);
   const newFlows = remapWorkflows(snapshot.canvas.roleWorkflows, remap);
@@ -478,7 +496,7 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
         .filter(([old]) => remap.has(old)).map(([old, content]) => [remap.get(old)!, content]));
     }
   }
-  return {
+  return retainCanvasReferencesCapability({
     schema: 'ultimate_canvas.v1', schemaVersion: Number(snapshot.schemaVersion) >= 3 ? snapshot.schemaVersion : 2,
     context: { project_id: object(snapshot.context) ? snapshot.context.project_id : null },
     canvas: {
@@ -502,6 +520,11 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
           nodeId: remap.get(String(data.storySource.nodeId)) || null };
         if (Array.isArray(data.planReferences)) data.planReferences = data.planReferences.map(item => object(item)
           ? { ...item, nodeId: remap.get(String(item.nodeId)) || item.nodeId } : item);
+        if (data.canvas_references !== undefined) {
+          const references = normalizeCanvasReferences(data.canvas_references)!;
+          data.canvas_references = { version: 1, items: references.items.map(({ sourceNodeId, ...item }) => ({ ...item,
+            ...(sourceNodeId && remap.has(sourceNodeId) ? { sourceNodeId: remap.get(sourceNodeId) } : {}) })) };
+        }
         if (node.type === 'flow-input') {
           data.assetIds = node.data.assetIds || node.data.asset_ids || [];
           data.asset_ids = data.assetIds;
@@ -515,7 +538,7 @@ function duplicateSnapshot(snapshot: Snapshot): Snapshot {
       }),
       connections: snapshot.canvas.connections.map(edge => ({ from: remap.get(edge.from)!, to: remap.get(edge.to)! })),
     },
-  };
+  }, snapshot);
 }
 
 function withoutLiveTasks(snapshot: Snapshot): Snapshot {
@@ -550,11 +573,22 @@ function withoutLiveTasks(snapshot: Snapshot): Snapshot {
         return !runtimeKeys.has(normalized) && !mediaKeys.has(normalized)
           && !/(?:url|urls|uri|uris)$/.test(normalized);
       })
-      .map(([key, item]) => [key, key.replace(/[_-]/g, '').toLowerCase() === 'generationstatus' ? 'idle' : clean(item)]));
+      .map(([key, item]) => [key, key === 'canvas_references' ? normalizeCanvasReferences(item)
+        : key.replace(/[_-]/g, '').toLowerCase() === 'generationstatus' ? 'idle' : clean(item)]));
   }
   const detached = clean(snapshot) as Snapshot;
   // Keep input/configuration and resource IDs, never old task ownership or media URLs.
   for (const node of detached.canvas.nodes) node.data.generationStatus = 'idle';
+  for (const node of detached.canvas.nodes) if (node.data.canvas_references !== undefined) {
+    const references = normalizeCanvasReferences(node.data.canvas_references)!;
+    node.data.canvas_references = { version: 1, items: references.items.map(item => {
+      const source = detached.canvas.nodes.find(candidate => candidate.id === item.sourceNodeId);
+      if (!item.sourceNodeId || source && [item.assetId && [source.data.assetId, source.data.asset_id].includes(item.assetId),
+        item.referenceImageId && [source.data.referenceImageId, source.data.reference_image_id].includes(item.referenceImageId), item.taskId && source.data.taskId === item.taskId].some(Boolean)) return item;
+      const { sourceNodeId: _source, ...identity } = item;
+      return identity;
+    }) };
+  }
   return detached;
 }
 
@@ -698,6 +732,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (repeated) return repeated;
       const existing = documentId ? await db.canvasDocument.findUnique({ where: { id: documentId } }) : null;
       if (documentId) await assertDocument(user, existing, true, db);
+      if (existing) requireCanvasReferencesCapability(JSON.parse(existing.document_json), batchCapabilities);
       if (existing) await requireCanvasVideoBatchDocumentCapability(db, existing.id, batchCapabilities);
       if (existing && ['save', 'duplicate', 'restore_revision'].includes(action)) requireCanvasRoleCapability(existing.schema_version, body.required_capabilities);
       if (existing && existing.schema_version >= 5 && isRoleCollaborationReadOnly()) {
@@ -759,6 +794,8 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       } else if (action === 'rename' && body.title === undefined) invalid('请输入新的画布名称');
 
       if (snapshot) {
+        retainCanvasReferencesCapability(snapshot, existing ? JSON.parse(existing.document_json) : retainedRoleSource);
+        requireCanvasReferencesCapability(snapshot, batchCapabilities);
         // Once upgraded, removing/restoring the last role must not reopen old-client writes.
         if (existing && existing.schema_version >= 3) {
           snapshot.schemaVersion = Math.max(existing.schema_version, Number(snapshot.schemaVersion) || 2);
@@ -770,6 +807,17 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
           throw new CanvasDocumentError('新版角色协作处于保护模式，暂不创建或写入', 503, 'collaboration_guard');
         }
         await validateRoles(db, user, snapshot, retainedRoleSource, action === 'duplicate', existing?.id);
+        retainCanvasReferencesCapability(snapshot, existing ? JSON.parse(existing.document_json) : retainedRoleSource);
+        const cardId = object(snapshot.context) ? string(snapshot.context.video_card_id ?? snapshot.context.videoCardId) || null : null;
+        if (cardId && snapshot.canvas.nodes.some(node => node.data.canvas_references !== undefined)) await assertCanGenerateInVideoCard(user, projectId!, cardId, db);
+        for (const node of snapshot.canvas.nodes) if (node.data.canvas_references !== undefined) {
+          const settings = object(node.data.videoSettings) ? node.data.videoSettings : {};
+          const result = await resolveCanvasReferenceInputs(user, { canvas_references: node.data.canvas_references,
+            canvas_node_id: node.id, required_capabilities: batchCapabilities, provider: settings.provider, model: settings.model }, db,
+          { validateLimits: false, scope: { version: 2, owner_id: user.id, project_id: projectId!, document_id: documentId || 'pending',
+            video_card_id: cardId, workspace_key: canvasWorkspaceKey(user.id, projectId!, documentId || 'pending'), snapshot } });
+          node.data.canvas_references = result!.references;
+        }
       }
 
       const newDocument = !existing || action === 'duplicate';

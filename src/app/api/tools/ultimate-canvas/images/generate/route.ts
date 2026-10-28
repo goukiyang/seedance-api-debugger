@@ -11,6 +11,8 @@ import { submitStudioBatch } from '@/lib/image-studio/tasks';
 import { roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
 import { canvasImageReferencePolicy } from '@/lib/canvas-image-references';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
+import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { validateStudioReferenceCounts } from '@/lib/image-studio/reference-policy';
 import { assertCanvasStyleContext, canvasStyleFailure, canvasStyleJson, parseCanvasStyleContext, readCanvasStyleJson, requireCanvasStyleUser } from '@/lib/canvas-style-bridge';
 
@@ -24,7 +26,7 @@ export async function GET(request: NextRequest) {
     const context = parseCanvasStyleContext(Object.fromEntries(['projectId', 'cardId', 'documentId', 'nodeId'].map(key => [key, params.get(key)])));
     await assertCanvasStyleContext(user, context);
     const ids = params.getAll('referenceImageId');
-    if (ids.length > 9) throw new AuthError('参考图数量无效', 400);
+    if (ids.length > MAX_REFERENCE_IMAGES) throw new AuthError('参考图数量无效', 400);
     await resolveCanvasStudioReferenceUse(user, ids);
     return canvasStyleJson({ durable: true });
   } catch (error) { return canvasStyleFailure(error, '参考图状态未确认，未生成'); }
@@ -36,6 +38,7 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    const canvasInput = await resolveCanvasReferenceInputs(user, body, prisma, { target: 'image' });
     if (body.roleMediaContext !== undefined) {
       roleMediaFingerprint(body.roleMediaContext);
       const roleContext = body.roleMediaContext as Record<string, unknown>;
@@ -62,7 +65,7 @@ export async function POST(request: NextRequest) {
     if (quote.status !== 'estimate' || quote.revision !== body.settingsRevision
       || body.action !== 'quote' && (quote.actualQuoteRequired || quote.pricingQuoteRequired) && !body.billingQuoteId
       || body.action !== 'quote' && !body.billingQuoteId && quote.estimatedCredits !== body.maxEstimatedCost) throw new AuthError('价格或设置已变化，请重新核对；未派发新任务', 409);
-    if (!Array.isArray(body.referenceImageIds) || body.referenceImageIds.length > 9) throw new AuthError('参考图数量无效', 400);
+    if (!Array.isArray(body.referenceImageIds) || body.referenceImageIds.length > MAX_REFERENCE_IMAGES) throw new AuthError('参考图数量无效', 400);
     const referenceImageIds = body.referenceImageIds as string[];
     const mentions = parseCanvasPromptMentions(body.promptMentions);
     const referenceAssets: Record<string, string> = {};
@@ -74,7 +77,7 @@ export async function POST(request: NextRequest) {
         referenceAssets[id] = reference.asset_id;
       }
     }
-    const uniqueReferences = Array.from((await resolveCanvasStudioReferenceUse(user, referenceImageIds)).keys());
+    const uniqueReferences = canvasInput ? canvasInput.references.items.map(item => item.assetId!) : Array.from((await resolveCanvasStudioReferenceUse(user, referenceImageIds)).keys());
     const referencePolicy = canvasImageReferencePolicy(uniqueReferences);
     validateStudioReferenceCounts(referencePolicy, uniqueReferences, 0, 0, true);
     const unframed = body.moduleId === defaultStudioModuleId(user.id);
@@ -89,8 +92,9 @@ export async function POST(request: NextRequest) {
       model: settings.model, ...(requestedChannelId === undefined ? {} : { channelId: requestedChannelId }),
       imageChannel: body.imageChannel, quality: settings.quality, resolution: settings.resolution, aspectRatio: settings.ratio };
     const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
-    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, { user, referenceImageIds, projectId: context.projectId }, promptBinding));
-    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, { user, referenceImageIds, projectId: context.projectId }, promptBinding,
+    const canvasUse = { user, referenceImageIds, projectId: context.projectId, referenceInput: body };
+    if (body.action === 'quote') return canvasStyleJson(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding));
+    const batchId = await submitStudioBatch(user.id, submission, undefined, undefined, canvasUse, promptBinding,
       body.roleMediaContext === undefined ? undefined : { user, context: body.roleMediaContext, generationNodeId: context.nodeId });
     return canvasStyleJson({ batchId, moduleId: body.moduleId, count: Number(settings.count) }, 202);
   } catch (error) { return canvasStyleFailure(error, '提交结果未确认，请查询原图片请求，不要重新生成'); }

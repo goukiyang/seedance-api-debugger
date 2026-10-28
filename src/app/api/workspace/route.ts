@@ -7,8 +7,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getOrCreateWorkspace, getWorkspaceWithAssets } from '@/lib/assets/workspace';
-import { getSession } from '@/lib/auth/session';
+import { getOrCreateWorkspace, getWorkspaceWithAssets, readWorkspaceForTab } from '@/lib/assets/workspace';
+import { getSession, AuthError } from '@/lib/auth/session';
+import { canvasWorkspaceFromHeaders, writeCanvasWorkspace } from '@/lib/canvas-workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest) {
     // 从 header 获取 tabId（前端设置）
     const tabId = request.headers.get('x-tab-id') || 'default';
 
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+    const scope = await canvasWorkspaceFromHeaders(user, request.headers, 'read');
+    const binding = scope ? await readWorkspaceForTab(scope.workspace_key, user.id) : await getOrCreateWorkspace(tabId, user.id);
+    if (!binding) return NextResponse.json({ workspace: null, tabId }, { headers: privateHeaders });
+    const workspaceId = binding.id;
     const workspace = await getWorkspaceWithAssets(workspaceId);
 
     if (!workspace) {
@@ -33,6 +37,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ workspace, tabId }, { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     console.error('[GetWorkspace] Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },
@@ -51,11 +56,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const tabId = body.tabId || request.headers.get('x-tab-id') || 'default';
 
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+    const scope = await canvasWorkspaceFromHeaders(user, request.headers);
+    if (String(tabId).startsWith('uc2_') && !scope) throw new AuthError('缺少原画布工作区上下文', 409);
+    if (scope && body.tabId && body.tabId !== scope.workspace_key) throw new AuthError('工作区与当前画布不一致', 409);
+    const { id: workspaceId } = scope ? await writeCanvasWorkspace(scope) : await getOrCreateWorkspace(tabId, user.id);
     const workspace = await getWorkspaceWithAssets(workspaceId);
 
     return NextResponse.json({ workspace, tabId }, { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     console.error('[InitWorkspace] Error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed' },

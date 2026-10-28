@@ -3,6 +3,7 @@ import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { prisma } from '@/lib/prisma';
 import { CanvasVideoBatchError, requireCanvasVideoBatchDocumentCapability } from '@/lib/canvas-video-batches-guards';
+import { CanvasReferenceError } from '@/lib/canvas-references';
 import {
   CanvasDocumentError, MAX_CANVAS_BYTES, canvasDetail, canvasHistory,
   latestCanvasDocument, listCanvasDocuments, mutateCanvasDocument, readCanvasDocument,
@@ -16,6 +17,7 @@ function json(value: unknown, status = 200) {
 }
 
 function failure(error: unknown) {
+  if (error instanceof CanvasReferenceError) return json({ error: error.message, code: error.code }, error.status);
   if (error instanceof CanvasVideoBatchError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
   if (error instanceof CanvasDocumentError) return json({ error: error.message, code: error.code, ...error.details }, error.status);
   if (error instanceof AuthError) return json({ error: error.message }, error.status);

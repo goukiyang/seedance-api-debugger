@@ -21,6 +21,7 @@ import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { videoPricingBusinessFingerprint } from '@/lib/pricing/video-context';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
+import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
@@ -472,6 +473,12 @@ export async function POST(request: NextRequest) {
   }
   if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
   const body = restoredBatch.body as typeof receivedBody;
+  let canvasInputs: Awaited<ReturnType<typeof resolveCanvasReferenceInputs>> = null;
+  const originalCanvasRequest = body.idempotency_key ? await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } }, select: { id: true } }) : null;
+  if (!originalCanvasRequest) {
+    try { canvasInputs = await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip', model: body.model || volcengineSettings.default_model }, prisma, { target: 'video' }); Object.assign(body, applyCanvasReferenceInputs(body, canvasInputs)); }
+    catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
+  }
   const creationBody = structuredClone(body);
   let creationV2 = false;
   try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
@@ -771,7 +778,7 @@ export async function POST(request: NextRequest) {
   if (body.roleMediaContext !== undefined && !idempotencyKey) return errorJson('角色媒体必须保留原请求编号，未生成', 400);
 
   // --- Workspace + Reference Image Preparation ---
-  const tabId = request.headers.get('x-tab-id') || 'default';
+  const tabId = canvasInputs?.scope.workspace_key || request.headers.get('x-tab-id') || 'default';
   const bodySourceRequestId = typeof body.source_request_id === 'string' && body.source_request_id.trim()
     ? body.source_request_id.trim()
     : typeof body.codex_request_id === 'string' && body.codex_request_id.trim()
@@ -840,7 +847,7 @@ export async function POST(request: NextRequest) {
   const referenceAudioUrls = normalizeReferenceMediaUrlList(body.reference_audio_urls);
   const requestedFrameImageUrls = normalizeReferenceMediaUrlList(body.frame_image_urls);
 
-  if (requestedReferenceImageIds.length > 0 && requestedReferenceImageUrls.length > 0) {
+  if (!canvasInputs && requestedReferenceImageIds.length > 0 && requestedReferenceImageUrls.length > 0) {
     return errorJson('参考图编号与参考图链接请只使用一种列表，避免其中一组素材被忽略。', 400);
   }
 
@@ -848,7 +855,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `单次生成最多选择 ${referenceMediaCapabilities.imageLimit} 张参考图` }, { status: 400 });
   }
 
-  const implicitWorkspaceImages = requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length === 0
+  const implicitWorkspaceImages = !canvasInputs && requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length === 0
     ? await prisma.workspaceAsset.findMany({
         where: { workspace_id: workspaceId, asset: { type: 'image' } },
         orderBy: { sort_order: 'asc' },
@@ -856,6 +863,7 @@ export async function POST(request: NextRequest) {
       })
     : [];
   const fingerprintPayload = {
+    ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }),
     prompt: body.prompt.trim(),
     ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
     provider: VOLCENGINE_IP_VIDEO_PROVIDER,
@@ -956,7 +964,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const workspaceReferenceBackfill = await ensureWorkspaceImageAssetsHaveReferenceImages({
+  const workspaceReferenceBackfill = canvasInputs ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
     user,
     workspaceId,
     projectId: project.id,
@@ -1036,7 +1044,7 @@ export async function POST(request: NextRequest) {
     ? requestedReferenceImageIds
     : requestedReferenceImageUrls.length > 0
       ? []
-      : workspaceReferenceImageIds;
+      : body.canvas_references !== undefined ? [] : workspaceReferenceImageIds;
   if (!(body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt)) && /图\d+/.test(body.prompt) && generationReferenceImageIds.length > 0
     && (generationReferenceImageIds.length !== workspaceReferenceImageIds.length
       || generationReferenceImageIds.some((id, index) => id !== workspaceReferenceImageIds[index]))) {
@@ -1048,7 +1056,7 @@ export async function POST(request: NextRequest) {
   let generationReferenceImages: Awaited<ReturnType<typeof getAuthorizedReferenceImagesForUse>> = [];
   try {
     generationReferenceImages = generationReferenceImageIds.length > 0
-      ? await getAuthorizedReferenceImagesForUse(user, generationReferenceImageIds)
+      ? await getAuthorizedReferenceImagesForUse(user, generationReferenceImageIds, referenceMediaCapabilities.imageLimit)
       : [];
   } catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
@@ -1062,9 +1070,10 @@ export async function POST(request: NextRequest) {
   try {
     ({ preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
       workspaceId,
-      generationReferenceImageIds,
-      requestedReferenceImageUrls,
+      canvasInputs ? [] : generationReferenceImageIds,
+      canvasInputs ? canvasInputs.orderedImageUrls : requestedReferenceImageUrls,
       user.id,
+      Boolean(canvasInputs),
     ));
   } catch (error) {
     console.error('[IpTasksCreate] Reference image preparation failed:', error);
@@ -1289,6 +1298,7 @@ export async function POST(request: NextRequest) {
     contentOverride: content,
   });
   const taskParams = {
+    ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     requestedModel,
     model: selectedModel,
     requestedParameters: sourceMetadata.requested_parameters,
@@ -1341,6 +1351,7 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip' }, tx, { target: 'video' });
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
@@ -2063,6 +2074,7 @@ async function prepareReferenceImages(
   preferredReferenceImageIds: string[] = [],
   preferredReferenceImageUrls: string[] = [],
   ownerId: string,
+  forceEmptyWorkspaceReferences = false,
 ): Promise<{
   preparedImages: PreparedRefImage[];
   prepareErrors: string[];
@@ -2139,7 +2151,7 @@ async function prepareReferenceImages(
         mime_type: asset.mime_type,
       } : null, originalUrl: rawUrl });
     }
-  } else {
+  } else if (!forceEmptyWorkspaceReferences) {
     imageItems = workspaceReferenceAssets
       .filter((item) => item.asset.type === 'image')
       .map((item) => ({ asset: {

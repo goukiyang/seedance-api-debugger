@@ -16,6 +16,7 @@ import { getAiMediaKitApiSettings, isAiMediaKitApiReady } from '@/lib/integratio
 import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { prisma } from '@/lib/prisma';
 import { assertCanViewTask } from '@/lib/projects/permissions';
+import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 
 export async function GET(request: NextRequest) {
   return estimate(request);
@@ -124,13 +125,16 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
       if (task.model !== parsedModel.model || task.duration !== duration || task.resolution !== resolution) throw new AuthError('重试报价与原任务不同', 409);
       body = savedVideoPricingContextInput(task);
     }
-    const context = body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
+    const canvasInput = body ? await resolveCanvasReferenceInputs(user, { ...body, provider, model: parsedModel.model }, prisma, { target: 'video' }) : null;
+    if (body) body = applyCanvasReferenceInputs(body, canvasInput);
+    const context = provider !== 'volcengine_ip' && body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
       ...body, provider, model: parsedModel.model, resolution, duration,
     }) : undefined;
     const quote = await quoteVideoPricing({ provider: provider as VideoPricingInput['provider'], model: parsedModel.model,
       resolution, duration, toolVersion, fps, context });
     if (multiviewSettings && multiviewPresetVersion !== null) await resolveMultiviewGenerationSettings(user, multiviewPresetVersion, multiviewSettings);
     return NextResponse.json({ ...publicVideoPricing(quote), provider, modelId: parsedModel.model,
+    ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
     ...(context ? { pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) } : {}),
     ...(multiviewPresetVersion === null ? {} : { multiviewPresetVersion, multiviewPresetRevision }),
     ...(multiviewSettings ? { multiviewSettings } : {}),

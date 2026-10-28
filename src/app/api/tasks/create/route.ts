@@ -146,6 +146,7 @@ import { authorizeStudioRunForGeneration } from '@/lib/template-studio/handoff';
 import { StudioError } from '@/lib/template-studio/errors';
 import type { StudioAssetInput, StudioGenerationHandoff, StudioJsonValue } from '@/lib/template-studio/types';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
+import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import {
   buildStudioTaskSnapshot,
@@ -782,6 +783,12 @@ export async function POST(request: NextRequest) {
   if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
   // Existing validators deliberately normalize this local input after server restoration.
   const body = restoredBatch.body as typeof receivedBody;
+  let canvasInputs: Awaited<ReturnType<typeof resolveCanvasReferenceInputs>> = null;
+  const originalCanvasRequest = body.idempotency_key ? await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } }, select: { id: true } }) : null;
+  if (!originalCanvasRequest) {
+    try { canvasInputs = await resolveCanvasReferenceInputs(user, body, prisma, { target: 'video' }); Object.assign(body, applyCanvasReferenceInputs(body, canvasInputs)); }
+    catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
+  }
   // Freeze the user's v2 spec BEFORE existing provider normalization/private prompt composition.
   const creationBody = structuredClone(body);
   let creationV2 = false;
@@ -1298,6 +1305,7 @@ export async function POST(request: NextRequest) {
       }))
     : [];
   const fingerprintPayload = {
+    ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }),
     prompt: body.prompt.trim(),
     ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
     provider: requestedProvider,
@@ -1435,9 +1443,9 @@ export async function POST(request: NextRequest) {
   }, { status: 409 });
 
   // --- Workspace + Reference Image Preparation ---
-  const tabId = studioHandoff ? `template-studio-${studioHandoff.runId}`
+  const tabId = canvasInputs?.scope.workspace_key || (studioHandoff ? `template-studio-${studioHandoff.runId}`
     : multiviewGeneration ? multiviewGeneration.workspaceTabId
-      : request.headers.get('x-tab-id') || 'default';
+      : request.headers.get('x-tab-id') || 'default');
   const bodySourceRequestId = typeof body.source_request_id === 'string' && body.source_request_id.trim()
     ? body.source_request_id.trim()
     : typeof body.codex_request_id === 'string' && body.codex_request_id.trim()
@@ -1669,7 +1677,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const workspaceReferenceBackfill = studioHandoff || multiviewGeneration ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
+  const workspaceReferenceBackfill = canvasInputs || studioHandoff || multiviewGeneration ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
     user,
     workspaceId,
     projectId: project.id,
@@ -1749,7 +1757,7 @@ export async function POST(request: NextRequest) {
     ? requestedReferenceImageIds
     : requestedReferenceImageUrls.length > 0
       ? []
-      : studioHandoff || requestSource.source_type === 'codex_api'
+      : body.canvas_references !== undefined || studioHandoff || requestSource.source_type === 'codex_api'
         ? []
         : workspaceReferenceImageIds;
   if (generationReferenceImageIds.length > 9) {
@@ -1772,10 +1780,10 @@ export async function POST(request: NextRequest) {
   try {
     ({ preparedImages, prepareErrors, summary: prepSummary } = await prepareReferenceImages(
       workspaceId,
-      generationReferenceImageIds,
-      requestedReferenceImageUrls,
+      canvasInputs ? [] : generationReferenceImageIds,
+      canvasInputs ? canvasInputs.orderedImageUrls : requestedReferenceImageUrls,
       user.id,
-      Boolean(studioHandoff),
+      Boolean(studioHandoff || canvasInputs),
     ));
   } catch (error) {
     console.error('[TasksCreate] Reference image preparation failed:', error);
@@ -1788,7 +1796,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
+  if (canvasInputs && prepSummary.skipped > 0 || prepSummary.total > 0 && preparedImages.length === 0 && prepSummary.skipped > 0) {
     const referenceImageFailure = buildReferenceImagePreparationFailure(prepareErrors);
     return NextResponse.json(
       { error: referenceImageFailure.error, message: referenceImageFailure.message, details: { errors: prepareErrors } },
@@ -2070,6 +2078,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     ...(multiviewGeneration ? { multiviewGeneration } : {}),
     ...(body.max_estimated_cost !== undefined ? { max_estimated_cost: body.max_estimated_cost } : {}),
     ...(videoEditRequested ? { omni_reference_task_type: 'edit', seedance_edit_reference: editReference } : {}),
@@ -2181,6 +2190,7 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);

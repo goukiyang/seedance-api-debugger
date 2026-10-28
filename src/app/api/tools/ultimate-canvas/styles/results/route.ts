@@ -6,7 +6,9 @@ import { imageBillingPending, imageBillingView } from '@/lib/image-studio/billin
 import { publicImageTaskStatus, cancelQueuedChannelTask, StudioError } from '@/lib/image-studio/tasks';
 import { historicalImageSupplier } from '@/lib/image-studio/channel-history';
 import { studioAssetUrl } from '@/lib/image-studio/media';
-import { getOrCreateWorkspace } from '@/lib/assets/workspace';
+import { readWorkspaceForTab } from '@/lib/assets/workspace';
+import { readLegacyCanvasWorkspace, resolveCanvasWorkspaceScope, writeCanvasWorkspace } from '@/lib/canvas-workspace';
+import { canvasAssetSourceVersion } from '@/lib/canvas-reference-inputs';
 import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
 import {
   assertCanvasStyleContext, canvasStyleBatchId, canvasStyleFailure, canvasStyleJson,
@@ -75,17 +77,16 @@ export async function POST(request: NextRequest) {
     const assetIds = succeeded.map(task => task.asset_id!).filter((id, index, list) => list.indexOf(id) === index);
     const assets = assetIds.length ? await prisma.asset.findMany({
       where: { id: { in: assetIds }, owner_id: user.id, status: 'active', type: 'image' },
-      select: { id: true, width: true, height: true },
     }) : [];
     const assetById = new Map(assets.map(asset => [asset.id, asset]));
     const outputByAsset = new Map<string, {
       assetId: string; referenceImageId: string; workspaceAssetId: string;
       originalUrl: string; thumbnailUrl: string; width: number | null; height: number | null;
+      sourceVersion: string;
     }>();
     const outputErrors: string[] = [];
 
     if (assets.length) {
-      const workspaceId = (await getOrCreateWorkspace(context.cardId ? `ultimate-canvas:${context.projectId}:${context.cardId}` : `ultimate-canvas:v2:${user.id}:${context.projectId}:${context.documentId}`, user.id)).id;
       for (const task of succeeded) {
         const assetId = task.asset_id!;
         const asset = assetById.get(assetId);
@@ -94,24 +95,37 @@ export async function POST(request: NextRequest) {
           continue;
         }
         try {
-          const existingLink = await prisma.workspaceAsset.findUnique({
-            where: { workspace_id_asset_id: { workspace_id: workspaceId, asset_id: assetId } },
+          const attachedResult = await prisma.$transaction(async db => {
+          if (!context.documentId || !context.nodeId) throw new AuthError('原结果缺少画布目标，未重新分配工作区', 409);
+          await assertCanvasStyleContext(user, context, db);
+          const scope = await resolveCanvasWorkspaceScope(user, { projectId: context.projectId, documentId: context.documentId,
+            cardId: context.cardId, nodeId: context.nodeId, purpose: 'reference' }, db);
+          const freshAsset = await db.asset.findFirst({ where: { id: assetId, owner_id: user.id, status: 'active', type: 'image' } });
+          if (!freshAsset || canvasAssetSourceVersion(freshAsset) !== canvasAssetSourceVersion(asset)) throw new AuthError('原结果素材已变化，未重新关联', 409);
+          const legacy = await readLegacyCanvasWorkspace(scope, context.nodeId, undefined, db);
+          const canonical = await readWorkspaceForTab(scope.workspace_key, user.id, db);
+          let referenceImageId = '', workspaceAssetId = '';
+          for (const originalWorkspaceId of [...new Set([canonical?.id, legacy?.id].filter((id): id is string => Boolean(id)))]) {
+          const existingLink = await db.workspaceAsset.findUnique({
+            where: { workspace_id_asset_id: { workspace_id: originalWorkspaceId, asset_id: assetId } },
             select: { id: true, reference_image_id: true },
           });
-          let referenceImageId = '';
-          let workspaceAssetId = '';
           if (existingLink?.reference_image_id) {
-            const existingReference = await prisma.referenceImage.findFirst({
+            const existingReference = await db.referenceImage.findFirst({
               where: { id: existingLink.reference_image_id, asset_id: assetId, status: 'active', album: { status: { not: 'deleted' } } },
-              select: { id: true },
+              select: { id: true, source_content_id: true },
             });
             if (existingReference) {
+              if (referenceImageId || existingReference.source_content_id && existingReference.source_content_id !== context.nodeId) throw new AuthError('原结果关联有歧义，未重新绑定', 409);
               referenceImageId = existingReference.id;
               workspaceAssetId = existingLink.id;
-            }
+            } else throw new AuthError('原结果关联已失效，未重新绑定', 409);
+          }
           }
           if (!referenceImageId) {
+            const workspaceId = (await writeCanvasWorkspace(scope, db)).id;
             const attached = await attachAssetToSiteReferenceImage({
+              db,
               user,
               workspaceId,
               projectId: context.projectId,
@@ -125,16 +139,19 @@ export async function POST(request: NextRequest) {
             referenceImageId = attached.referenceImageId;
             workspaceAssetId = attached.workspaceAssetId;
           }
+          return { referenceImageId, workspaceAssetId };
+          });
           outputByAsset.set(assetId, {
             assetId,
-            referenceImageId,
-            workspaceAssetId,
+            ...attachedResult,
             originalUrl: studioAssetUrl(assetId),
             thumbnailUrl: studioAssetUrl(assetId, true),
             width: asset.width,
             height: asset.height,
+            sourceVersion: canvasAssetSourceVersion(asset),
           });
-        } catch {
+        } catch (error) {
+          if (error instanceof AuthError) throw error;
           outputErrors.push('部分成功图片暂时未能加入当前素材区，查询时会继续尝试。');
         }
       }

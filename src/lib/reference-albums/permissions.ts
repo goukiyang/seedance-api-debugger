@@ -247,8 +247,9 @@ export async function assertCanViewReferenceImage(user: SessionUser, imageId: st
   return image;
 }
 
-export async function getAuthorizedReferenceImagesForUse(user: SessionUser, imageIds: string[]) {
-  const ids = uniquePreserveOrder(imageIds).slice(0, 9);
+export async function getAuthorizedReferenceImagesForUse(user: SessionUser, imageIds: string[], maximum = 9) {
+  if (!Number.isSafeInteger(maximum) || maximum < 0 || maximum > 30 || imageIds.length > maximum) throw new AuthError('参考图超过当前模型上限，未删减原清单', 400);
+  const ids = uniquePreserveOrder(imageIds);
   const images = [];
   for (const id of ids) {
     images.push(await assertCanUseReferenceImage(user, id));

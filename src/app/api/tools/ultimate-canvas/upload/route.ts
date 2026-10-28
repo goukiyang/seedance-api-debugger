@@ -7,7 +7,10 @@ import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { uploadSiteAsset, validateSiteUploadBuffer, validateSiteUploadInput } from '@/lib/assets/site-upload';
-import { getOrCreateWorkspace, addAssetToWorkspace } from '@/lib/assets/workspace';
+import { addAssetToWorkspace } from '@/lib/assets/workspace';
+import { resolveCanvasWorkspaceScope, writeCanvasWorkspace, readLegacyCanvasWorkspace } from '@/lib/canvas-workspace';
+import { canvasAssetSourceVersion } from '@/lib/canvas-reference-inputs';
+import { CanvasReferenceError, requireCanvasReferencesCapability } from '@/lib/canvas-references';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
 import { getProjectForGeneration } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
@@ -113,6 +116,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (!canvasDocumentId) throw new AuthError('请刷新并保存当前画布后上传，原记录未改变', 426);
+    const scopeInput = { projectId: project.id, documentId: canvasDocumentId, cardId: videoCardId || null, nodeId: canvasNodeId, purpose: 'upload' as const };
+    const scope = await resolveCanvasWorkspaceScope(user, scopeInput);
+    if (!jsonAssociation) requireCanvasReferencesCapability(scope.snapshot, (request.headers.get('x-canvas-capabilities') || '').split(','));
+    if (request.headers.get('x-tab-id')?.startsWith('uc2_') && request.headers.get('x-tab-id') !== scope.workspace_key) throw new AuthError('工作区与当前画布不同', 409);
     // JSON associates a confirmed original; it never fetches or copies a client URL.
     const existingAsset = jsonAssociation ? await prisma.asset.findUnique({ where: { id: assetId } }) : null;
     if (jsonAssociation && (!existingAsset || existingAsset.owner_id !== user.id || existingAsset.status !== 'active'
@@ -132,27 +140,35 @@ export async function POST(request: NextRequest) {
       if (mediaValidationError) return NextResponse.json({ error: mediaValidationError }, { status: 400 });
       uploadResult = await uploadSiteAsset(buffer, sourceFile.name, sourceFile.type, sourceFile.size, user.id);
     }
-    const workspaceId = (await getOrCreateWorkspace(v2 ? `ultimate-canvas:v2:${user.id}:${project.id}:${canvasDocumentId}` : `ultimate-canvas:${project.id}:${videoCardId}`, user.id)).id;
     const role = roleForMimeType(uploadResult.mimeType, jsonAssociation ? '' : requestedRole);
 
     const associate = async (db: Prisma.TransactionClient) => {
+    const scope = await resolveCanvasWorkspaceScope(user, scopeInput, db);
     if (jsonAssociation && existingAsset) {
       const fresh = await db.asset.findUnique({ where: { id: assetId } });
       if (!fresh || fresh.owner_id !== user.id || fresh.status !== 'active') throw new AuthError('原素材不存在或无权关联', 403);
-      const prior = await db.operationLog.findFirst({ where: { operator_id: user.id, action: 'ultimate_canvas_asset_upload',
-        detail: { contains: `"request_id":"${requestId}"` } } });
+      const priorRows = await db.operationLog.findMany({ where: { operator_id: user.id, action: 'ultimate_canvas_asset_upload',
+        detail: { contains: `"request_id":"${requestId}"` } }, take: 2 });
+      if (priorRows.length > 1) throw new AuthError('原关联存在多个回执，未重新分配工作区', 409);
+      const prior = priorRows[0];
       if (prior) {
         const detail = JSON.parse(prior.detail || '{}');
         if (prior.target_id !== assetId || detail.request_id !== requestId || detail.project_id !== project.id
           || (detail.video_card_id || null) !== (videoCardId || null) || detail.canvas_document_id !== canvasDocumentId || detail.canvas_node_id !== canvasNodeId) {
           throw new AuthError('关联编号已用于其它目标，未修改原素材', 409);
         }
+        await readLegacyCanvasWorkspace(scope, canvasNodeId, detail.workspace_id, db);
+        const link = await db.workspaceAsset.findFirst({ where: { id: detail.workspace_asset_id, workspace_id: detail.workspace_id,
+          asset_id: fresh.id, ...(detail.reference_image_id ? { reference_image_id: detail.reference_image_id } : {}) } });
+        if (!link) throw new AuthError('原关联已变化，未自动重新添加', 409);
         return { success: true, workspace_id: detail.workspace_id, workspace_asset_id: detail.workspace_asset_id,
           reference_image_id: detail.reference_image_id, asset: { id: fresh.id, originalUrl: fresh.original_url,
             thumbnailUrl: fresh.thumbnail_url, width: fresh.width, height: fresh.height,
-            fileName: fresh.file_name, fileSize: fresh.file_size, mimeType: fresh.mime_type } };
+            fileName: fresh.file_name, fileSize: fresh.file_size, mimeType: fresh.mime_type, sourceVersion: canvasAssetSourceVersion(fresh) } };
       }
     }
+    requireCanvasReferencesCapability(scope.snapshot, (request.headers.get('x-canvas-capabilities') || '').split(','));
+    const workspaceId = (await writeCanvasWorkspace(scope, db)).id;
     let reference: {
       assetId: string;
       referenceImageId: string;
@@ -201,6 +217,7 @@ export async function POST(request: NextRequest) {
         }),
       },
     });
+    const storedAsset = await db.asset.findUniqueOrThrow({ where: { id: uploadResult.assetId } });
 
     return {
       success: true,
@@ -216,6 +233,7 @@ export async function POST(request: NextRequest) {
         fileName: uploadResult.fileName,
         fileSize: uploadResult.fileSize,
         mimeType: uploadResult.mimeType,
+        sourceVersion: canvasAssetSourceVersion(storedAsset),
         isPubliclyReachable: uploadResult.isPubliclyReachable,
         storageProvider: uploadResult.storageProvider || null,
         warning: uploadResult.publicUploadWarning || null,
@@ -223,9 +241,9 @@ export async function POST(request: NextRequest) {
     };
     };
     // Association and its receipt commit together. Concurrent retries cannot create a second association.
-    return NextResponse.json(jsonAssociation ? await prisma.$transaction(associate) : await associate(prisma));
+    return NextResponse.json(await prisma.$transaction(associate));
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof CanvasReferenceError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof ReferenceImportError) {
@@ -259,13 +277,37 @@ export async function GET(request: NextRequest) {
     }
     await getProjectForGeneration(user, projectId);
     if (cardId) await assertCanGenerateInVideoCard(user, projectId, cardId);
-    await assertCanEditCanvasDocument(user, documentId, projectId);
-    const asset = await prisma.asset.findFirst({ where: { owner_id: user.id, hash, file_size: fileSize, mime_type: mimeType, status: 'active' } });
-    return NextResponse.json({ found: Boolean(asset), asset: asset ? { id: asset.id, originalUrl: asset.original_url,
+    const scope = await resolveCanvasWorkspaceScope(user, { projectId, documentId, cardId: cardId || null,
+      nodeId: query.get('canvas_node_id'), purpose: 'read' });
+    const originalRequestId = query.get('request_id');
+    let receipt: Record<string, unknown> | null = null;
+    if (originalRequestId) {
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(originalRequestId)) throw new AuthError('原关联编号无效', 400);
+      const logs = await prisma.operationLog.findMany({ where: { operator_id: user.id, action: 'ultimate_canvas_asset_upload',
+        detail: { contains: `"request_id":"${originalRequestId}"` } }, take: 2 });
+      if (logs.length > 1) throw new AuthError('原关联有多个可能回执，请保留输入核对', 409);
+      if (logs[0]) {
+        const saved = JSON.parse(logs[0].detail || '{}');
+        if (saved.request_id !== originalRequestId || saved.project_id !== projectId || saved.canvas_document_id !== documentId
+          || (saved.video_card_id || null) !== (cardId || null) || query.get('canvas_node_id') && saved.canvas_node_id !== query.get('canvas_node_id')) throw new AuthError('原关联属于其他目标，未重新上传', 409);
+        await readLegacyCanvasWorkspace(scope, saved.canvas_node_id, saved.workspace_id);
+        const linked = await prisma.workspaceAsset.findFirst({ where: { id: saved.workspace_asset_id, workspace_id: saved.workspace_id, asset_id: logs[0].target_id! } });
+        if (!linked) throw new AuthError('原关联已变化，未自动恢复', 409);
+        if (linked.reference_image_id && !await prisma.referenceImage.findFirst({ where: { id: linked.reference_image_id,
+          asset_id: logs[0].target_id!, status: 'active', album: { status: { not: 'deleted' } } }, select: { id: true } })) throw new AuthError('原参考关联已失效，未重新绑定', 409);
+        receipt = { ...saved, asset_id: logs[0].target_id };
+      }
+    }
+    const candidates = await prisma.asset.findMany({ where: { ...(receipt ? { id: String(receipt.asset_id) } : {}),
+      owner_id: user.id, hash, file_size: fileSize, mime_type: mimeType, status: 'active' }, take: 2 });
+    if (candidates.length > 1) throw new AuthError('原文件有多个可能记录，未重新绑定或上传', 409);
+    const asset = candidates[0];
+    if (receipt && asset?.id !== receipt.asset_id) throw new AuthError('原回执与文件身份不一致，未重新上传', 409);
+    return NextResponse.json({ found: Boolean(asset), associated: Boolean(receipt), receipt, asset: asset ? { id: asset.id, originalUrl: asset.original_url,
       thumbnailUrl: asset.thumbnail_url, width: asset.width, height: asset.height, fileName: asset.file_name,
-      fileSize: asset.file_size, mimeType: asset.mime_type, hash: asset.hash } : null });
+      fileSize: asset.file_size, mimeType: asset.mime_type, hash: asset.hash, sourceVersion: canvasAssetSourceVersion(asset) } : null });
   } catch (error) {
-    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status });
+    if (error instanceof AuthError || error instanceof CanvasReferenceError) return NextResponse.json({ error: error.message }, { status: error.status });
     return NextResponse.json({ error: '上传恢复暂不可用，未重新上传' }, { status: 500 });
   }
 }

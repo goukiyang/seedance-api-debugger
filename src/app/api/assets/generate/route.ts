@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
+import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'node:crypto';
@@ -294,6 +295,7 @@ async function writeGenerationAttemptLog(params: {
   assetIds?: string[];
   referenceImageIds?: string[];
   canvasPromptFingerprint?: string;
+  canvasReferences?: unknown;
 }) {
   await prisma.operationLog.create({
     data: {
@@ -320,6 +322,7 @@ async function writeGenerationAttemptLog(params: {
         asset_ids: params.assetIds || [],
         reference_image_ids: params.referenceImageIds || [],
         ...(params.canvasPromptFingerprint ? { canvas_prompt_fingerprint: params.canvasPromptFingerprint } : {}),
+        ...(params.canvasReferences === undefined ? {} : { canvas_references: params.canvasReferences }),
       }),
     },
   });
@@ -392,6 +395,9 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
+    const referenceInput = { ...body, canvas_document_id: canvasDocumentId, canvas_node_id: canvasNodeId,
+      reference_image_ids: input.reference_image_ids || input.referenceImageIds, promptMentions: input.promptMentions };
+    const canvasInput = await resolveCanvasReferenceInputs(user, referenceInput, prisma, { target: 'image' });
     await assertCanvasPromptCompatibility(user, canvasDocumentId, canvasNodeId, buildGenerationPrompt(body, input, action), input.promptMentions);
     if (inputTooLarge(input)) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
@@ -416,9 +422,10 @@ export async function POST(request: NextRequest) {
       : selectImageGenerationSettings(channels, selectedModel);
     let settings = rawSettings;
     const modelLabel = imageGenerationModelLabel(settings.provider, settings.default_model);
-    const referenceLimit = settings.provider === 'seedream'
+    const referenceLimit = settings.provider === 'seedream' || selectedModel === 'gemini-nano-banana-2.1'
       ? SEEDREAM_REFERENCE_IMAGE_LIMIT
       : DEFAULT_REFERENCE_IMAGE_LIMIT;
+    if (canvasInput && canvasInput.references.items.length > referenceLimit) throw new AuthError('参考图超过当前模型上限，未删减原输入', 400);
     const rawReferenceImageIds = input.reference_image_ids || input.referenceImageIds || [];
     const mentions = parseCanvasPromptMentions(input.promptMentions);
     if (mentions && (!canvasDocumentId || !canvasNodeId)) throw new AuthError('图片绑定仅用于合法画布请求', 400);
@@ -432,6 +439,14 @@ export async function POST(request: NextRequest) {
       referenceImages.push(await assertCanUseReferenceImage(user, referenceImageId));
     }
     const referenceInputs = resolveImageGenerationReferenceInputs(referenceImages);
+    if (canvasInput) {
+      const originals = await prisma.asset.findMany({ where: { id: { in: canvasInput.references.items.map(item => item.assetId!) }, status: 'active', type: 'image' } });
+      referenceInputs.splice(0, referenceInputs.length, ...canvasInput.references.items.map(item => {
+        const original = originals.find(asset => asset.id === item.assetId);
+        if (!original) throw new AuthError('参考原件已变化，未生成', 409);
+        return original.original_url.startsWith('/uploads/') ? localUploadDataUrl(original.original_url, original.mime_type) : original.original_url;
+      }));
+    }
     try { assertImageQualityReferenceCount(imageChannel?.qualityRoute, referenceInputs.length); }
     catch (error) { throw new AuthError((error as Error).message, 400); }
 
@@ -504,9 +519,9 @@ export async function POST(request: NextRequest) {
       const studio = await getImageStudioSettings();
       const submission = { requestId, channelId, projectId: project.id, imageChannel: body.imageChannel || imageChannel,
         revision: body.settingsRevision ?? studio.revision, prompt: rawPrompt, count,
-        referenceIds: referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
+        referenceIds: canvasInput ? canvasInput.references.items.map(item => item.assetId!) : referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
         resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
-      const canvasUse = { user, referenceImageIds, projectId: project.id };
+      const canvasUse = { user, referenceImageIds, projectId: project.id, referenceInput };
       const referenceAssets = Object.fromEntries(referenceImages.map(image => [image.id, image.asset_id!]));
       const promptBinding = mentions ? { mentions, referenceAssets } : undefined;
       if (body.quote === true) return NextResponse.json(await prepareImageBillingQuote(user.id, submission, undefined, canvasUse, promptBinding), { headers: { 'Cache-Control': 'private, no-store' } });
@@ -519,7 +534,9 @@ export async function POST(request: NextRequest) {
 
     assertImageStudioAdmissionOpen();
     const explicitWorkspaceId = cleanString(body.workspace_id || body.workspaceId);
-    let workspaceId = explicitWorkspaceId;
+    const canonicalWorkspace = canvasInput ? await getOrCreateWorkspace(canvasInput.scope.workspace_key, user.id) : null;
+    if (canonicalWorkspace && explicitWorkspaceId && explicitWorkspaceId !== canonicalWorkspace.id) throw new AuthError('图片输入与当前画布工作区不一致', 409);
+    let workspaceId = canonicalWorkspace?.id || explicitWorkspaceId;
     if (workspaceId) {
       const workspace = await prisma.workspace.findFirst({
         where: { id: workspaceId, owner_id: user.id, status: 'active' }, select: { id: true },
@@ -533,9 +550,11 @@ export async function POST(request: NextRequest) {
     assertImageStudioAdmissionOpen();
     const scope = createHash('sha256').update(JSON.stringify([settings.provider, settings.base_url, settings.api_key])).digest('hex');
     const fingerprint = createHash('sha256').update(JSON.stringify({ action, projectId: project.id, videoCardId: videoCardId,
+      ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
       canvasDocumentId, canvasNodeId, prompt, referenceImageIds, model: settings.default_model, ratio, size: imageSize,
       quality: cleanString(input.quality || body.quality), count, scope })).digest('hex');
     synchronousAdmission = await prisma.$transaction(async tx => {
+      await resolveCanvasReferenceInputs(user, referenceInput, tx, { target: 'image' });
       await reserveImageStudioQueueCapacity(tx, user.id, count);
       return createSynchronousImageAdmission(tx, { ownerId: user.id, requestId: cleanString(body.requestId || input.requestId) || undefined,
         fingerprint, count, model: settings.default_model, scope });
@@ -620,6 +639,7 @@ export async function POST(request: NextRequest) {
       assetIds: generatedAssets.map((asset) => asset.assetId),
       referenceImageIds: generatedAssets.map((asset) => asset.referenceImageId),
       canvasPromptFingerprint: compiled?.fingerprint,
+      canvasReferences: canvasInput?.references,
     });
 
     return NextResponse.json({

@@ -19,6 +19,8 @@ import { ensureSiteAssetPublicUrl } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { assertUploadOwner, uploadDigest, uploadRequestId, verifiedUploadFailure, VerifiedUploadError } from '@/lib/assets/verified-upload';
+import { canvasWorkspaceFromHeaders, resolveCanvasWorkspaceScope, writeCanvasWorkspace } from '@/lib/canvas-workspace';
+import { canvasAssetSourceVersion } from '@/lib/canvas-reference-inputs';
 
 function referenceRoleForAssetType(type: string | null | undefined, requestedRole?: string | null) {
   if (type === 'video') return 'reference_video';
@@ -94,7 +96,8 @@ export async function POST(request: NextRequest) {
     );
 
     const tabId = request.headers.get('x-tab-id') || 'default';
-    const { id: workspaceId } = await getOrCreateWorkspace(tabId, user.id);
+    const canvasScope = await canvasWorkspaceFromHeaders(user, request.headers);
+    const { id: workspaceId } = canvasScope ? await writeCanvasWorkspace(canvasScope) : await getOrCreateWorkspace(tabId, user.id);
     const receiptKey = requestId ? `upload_association_v1:${uploadDigest(user.id)}:${uploadDigest(JSON.stringify([workspaceId, requestId]))}` : null;
     if (recoveryClear && recoveryClear.workspaceId !== workspaceId) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_CHANGED', '工作区已变化，未恢复素材');
     const fingerprint = uploadDigest(JSON.stringify([workspaceId, assetIds, referenceImageIds, selection, role || null, shouldReplace, ...(recoveryClear ? [recoveryClear] : [])]));
@@ -139,9 +142,15 @@ export async function POST(request: NextRequest) {
     }
 
     const { workspaceAssetIds, referenceImageIdsFromAssets } = await prisma.$transaction(async (tx) => {
+      if (canvasScope) await resolveCanvasWorkspaceScope(user, { projectId: canvasScope.project_id, documentId: canvasScope.document_id,
+        cardId: canvasScope.video_card_id, nodeId: request.headers.get('x-canvas-node-id'), purpose: 'reference' }, tx);
       const currentUser = await tx.user.findUnique({ where: { id: user.id } });
       const currentWorkspace = await tx.workspace.findUnique({ where: { id: workspaceId } });
       if (!currentUser || currentUser.status !== 'active' || !currentWorkspace || currentWorkspace.owner_id !== user.id) throw new VerifiedUploadError('SESSION_CHANGED', '当前账号或工作区已变化，未关联素材');
+      for (const expected of references) {
+        const fresh = await assertCanUseReferenceImage(currentUser, expected.id, tx);
+        if (fresh.asset_id !== expected.asset_id || fresh.asset?.status !== 'active' || fresh.asset.original_url !== expected.asset?.original_url) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_UNAVAILABLE', '参考素材已变化，未关联');
+      }
       for (const expected of assets) {
         const fresh = await tx.asset.findUnique({ where: { id: expected.id } });
         if (!fresh || fresh.status === 'deleted' || fresh.original_url !== expected.original_url || fresh.owner_id !== expected.owner_id || !await canReadStudioAsset(currentUser, fresh, tx)) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_UNAVAILABLE', '所选素材已变化，未关联');
@@ -229,6 +238,10 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({
       success: true,
+      ...(canvasScope ? { workspace_context: { version: 2, workspace_key: canvasScope.workspace_key,
+        project_id: canvasScope.project_id, document_id: canvasScope.document_id, video_card_id: canvasScope.video_card_id },
+        items: (await prisma.workspaceAsset.findMany({ where: { workspace_id: workspaceId, id: { in: workspaceAssetIds } }, include: { asset: true } }))
+          .map(link => ({ assetId: link.asset_id, referenceImageId: link.reference_image_id, kind: link.asset.type, sourceVersion: canvasAssetSourceVersion(link.asset) })) } : {}),
       ...(requestId ? { association: { requestId, associated: true, workspaceId } } : {}),
       workspaceAssetId: workspaceAssetIds[0] || null,
       workspaceAssetIds,
