@@ -186,7 +186,7 @@ const publicUsageFixtures = [
       'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
       'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts', 'src/lib/image-studio/dimension-mismatch.ts',
       'src/lib/image-studio/pricing-state.ts', 'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts',
-      'src/lib/users/profiles.ts', 'src/lib/users/display.ts',
+      'src/lib/users/profiles.ts', 'src/lib/users/display.ts', 'src/lib/media/storage-roots.ts',
     ] },
   { file: 'scripts/image-provider-admin-engineering.ts', schema: 'image-provider-admin-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
@@ -194,6 +194,7 @@ const publicUsageFixtures = [
       'src/app/admin/image-studio/AdminImageStudioClient.tsx',
       'src/app/admin/image-studio/ImageStudioDiagnostics.module.css',
       'src/lib/image-studio/provider-error-diagnostics.ts', 'src/lib/image-studio/provider-error-evidence.ts',
+      'scripts/fixtures/source-function.ts',
     ] },
   { file: 'scripts/multiview-private-batch-engineering.mjs', schema: 'multiview-private-batch-engineering.v1',
     timeoutMs: 540000, databaseFlag: 'applicationDatabaseOpened', sources: MULTIVIEW_PRIVATE_BATCH_SOURCES },
@@ -210,7 +211,7 @@ const publicUsageFixtures = [
       'src/components/projects/ProjectFilters.tsx', 'src/components/usage/UsageWorkspace.tsx',
       'src/components/usage/UsageWorkspace.module.css', 'src/app/tasks/[id]/TaskResult.module.css',
       'src/app/tasks/[id]/page.tsx', 'src/components/AppShell.tsx', 'src/app/globals.css',
-      'src/lib/release.ts', 'src/components/ReleaseNotice.tsx',
+      'src/lib/release.ts', 'src/components/ReleaseNotice.tsx', 'src/lib/dto/user.ts', 'src/lib/pagination/cursor.ts',
     ] },
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
@@ -244,6 +245,7 @@ const publicUsageFixtures = [
     databaseFlag: 'databaseOpened', sources: [
       'scripts/project-operations-engineering.ts', 'src/lib/projects/operations.ts', 'src/lib/projects/permissions.ts',
       'src/app/api/projects/route.ts', 'src/app/api/projects/[id]/route.ts', 'src/app/api/project-invites/[token]/join/route.ts',
+      'scripts/fixtures/source-function.ts',
     ] },
   { file: 'scripts/usage-reader-sql-engineering.ts', schema: 'usage-reader-sql-engineering.v1',
     timeoutMs: 60000, databaseFlag: 'applicationDatabaseOpened', sources: [
