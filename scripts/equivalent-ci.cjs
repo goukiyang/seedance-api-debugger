@@ -131,6 +131,29 @@ function main() {
   const receipt = { schema: 'equivalent-ci.v1', source, root, fingerprint: fingerprint(root), results: [], completed: false };
   const contractsFrom = process.argv.find(arg => arg.startsWith('--contracts-from='))?.slice('--contracts-from='.length);
   const reusedContracts = contractsFrom ? reuseTypeOnlyContracts(root, contractsFrom) : null;
+  const checksFrom = process.argv.find(arg => arg.startsWith('--checks-from='))?.slice('--checks-from='.length);
+  if (checksFrom) {
+    const previous = JSON.parse(fs.readFileSync(checksFrom, 'utf8'));
+    const oldRoot = fs.realpathSync(previous.root);
+    if (!/^\/data\/video-api-debugger\/managed-releases\/[a-f0-9]{40}$/.test(oldRoot)
+      || previous.source !== path.basename(oldRoot) || withinEvidence(oldRoot, checksFrom) !== fs.realpathSync(checksFrom)
+      || previous.results?.length !== 2) throw new Error('equivalent-ci-checks-origin-mismatch');
+    const original = fingerprint(oldRoot);
+    if (Object.keys(original).some(key => previous.fingerprint?.[key] !== original[key]
+      || key !== 'sourceDigest' && receipt.fingerprint[key] !== original[key])) throw new Error('equivalent-ci-checks-environment-changed');
+    const replacements = new Map(['.deployed-commit', 'scripts/equivalent-ci.cjs'].map(file => [file, fs.readFileSync(path.join(oldRoot, file))]));
+    if (sourceDigest(root, replacements) !== original.sourceDigest) throw new Error('equivalent-ci-checks-source-changed');
+    for (const [index, entry] of previous.results.entries()) {
+      const originalLog = withinEvidence(oldRoot, path.resolve(oldRoot, entry.log));
+      if (entry.command !== `npm run ${COMMANDS[index]}` || entry.exitCode !== 0 || entry.signal !== null
+        || hashFile(originalLog) !== entry.logSha256) throw new Error('equivalent-ci-checks-failed');
+      const retainedLog = path.join(directory, COMMANDS[index] + '-original.log');
+      fs.copyFileSync(originalLog, retainedLog);
+      receipt.results.push({ ...entry, log: path.relative(root, retainedLog) });
+    }
+    receipt.checksReusedFrom = { source: previous.source, receipt: checksFrom, sha256: hashFile(checksFrom),
+      reason: 'Only standalone check launcher changed; all TypeScript, lint inputs, dependencies and runtime identical. Original times retained.' };
+  }
   const resumeFile = process.argv.find(arg => arg.startsWith('--resume='))?.slice('--resume='.length);
   if (resumeFile) {
     const previousFile = withinEvidence(root, resumeFile);
@@ -160,7 +183,8 @@ function main() {
         for (const args of [['scripts/test-api-route.cjs'], ['scripts/test-equivalent-ci.cjs'],
           ['--import', 'tsx', 'scripts/hd-admin-engineering.ts']]) {
           const result = spawnSync(process.execPath, args, { cwd: root, stdio: ['ignore', fd, fd],
-            env: { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: require('node:crypto').randomUUID() } });
+            env: { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: require('node:crypto').randomUUID(),
+              NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require ${JSON.stringify(path.join(root, 'scripts/server-runtime.cjs'))}`.trim() } });
           if (result.error || result.status !== 0 || result.signal) throw new Error('contracts-affected-check-failed:' + args.at(-1));
         }
       } finally { fs.closeSync(fd); }
