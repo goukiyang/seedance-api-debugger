@@ -45,6 +45,7 @@ function workerProviderErrorRecorder(task: ImageStudioTask) {
 }
 
 export async function assertStudioPostAuthorization(task: ImageStudioTask) {
+  if (task.execution_backend === 'local') throw new Error('local_task_requires_local_worker');
   const current = await prisma.imageStudioTask.findUnique({ where: { id: task.id } });
   const activeStatus = studioTaskState(task, publicPricingTaskState(task.status) === 'channel_running' ? 'channel_running' : 'running');
   if (!current || current.status !== activeStatus || current.lease_token !== task.lease_token
@@ -582,7 +583,7 @@ export async function recoverStudioTasks() {
     } finally { await deferStudioAsyncRecovery(pending.task, 'recovery_interrupted'); }
   }
   await cleanupStudioDeliveries();
-  const expired = await prisma.imageStudioTask.findMany({ where: { status: { in: studioTaskStates(['running', 'channel_running']) }, lease_until: { lt: new Date() } },
+  const expired = await prisma.imageStudioTask.findMany({ where: { execution_backend: 'cloud', status: { in: studioTaskStates(['running', 'channel_running']) }, lease_until: { lt: new Date() } },
     // A retained slow query must fall behind untouched expired leases, even if
     // it expires again while the next original task is being queried.
     orderBy: [{ lease_until: 'asc' }, { created_at: 'asc' }, { id: 'asc' }], take: 1 });

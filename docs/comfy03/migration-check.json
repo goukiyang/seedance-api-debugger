@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "scope": "baseline schema and legacy row in memory; additive migration; no production access"
+}

@@ -1,0 +1,252 @@
+[
+  {
+    "cancelSupported": false,
+    "capability": "text-to-image",
+    "environmentRevision": "cdf21ae76b8f824475faa395f8a3ee2ee16608baa3b82cc029793f6c367893c1",
+    "executionProfileId": "hidream-fp8-scaled-cu130-v1",
+    "modelId": "hidream-o1-image",
+    "modelVersion": "377ec7124bc46a15736c68cd9e4ad6d7da7a7614",
+    "outputMax": 1,
+    "outputMin": 1,
+    "outputNodes": [
+      "227"
+    ],
+    "parameterMapping": {
+      "height": [
+        {
+          "input": "height",
+          "node": "156"
+        }
+      ],
+      "negativePrompt": [
+        {
+          "input": "text",
+          "node": "188"
+        }
+      ],
+      "prompt": [
+        {
+          "input": "text",
+          "node": "110"
+        }
+      ],
+      "seed": [
+        {
+          "input": "noise_seed",
+          "node": "108"
+        }
+      ],
+      "width": [
+        {
+          "input": "width",
+          "node": "156"
+        }
+      ]
+    },
+    "parameterSchema": {
+      "allowedDimensions": [
+        [
+          1024,
+          1024
+        ],
+        [
+          2048,
+          2048
+        ]
+      ],
+      "fields": {
+        "height": {
+          "default": 1024,
+          "maximum": 2048,
+          "minimum": 1024,
+          "multipleOf": 64,
+          "type": "integer"
+        },
+        "negativePrompt": {
+          "default": "",
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "seed": {
+          "default": 42,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "default": 1024,
+          "maximum": 2048,
+          "minimum": 1024,
+          "multipleOf": 64,
+          "type": "integer"
+        }
+      },
+      "inputMax": 0,
+      "inputMin": 0,
+      "maxPixels": 4194304
+    },
+    "parameterSchemaVersion": "1.0.0",
+    "partialSuccess": false,
+    "priorEvidence": [
+      "benchmark-results/comparison_summary.json",
+      "test-results/hidream_result.json"
+    ],
+    "productionEnabled": false,
+    "resources": [
+      {
+        "bytes": 8067535296,
+        "path": "HiDream-O1-Image-ComfyUI/checkpoints/hidream_o1_image_fp8_scaled.safetensors",
+        "sha256": "05ad98bc4a94557697f31b839f6dbf6dba293a353d9e3c52eef7818b5802d206"
+      }
+    ],
+    "restartRecovery": "observe-saved-uuid-and-files-no-resubmit",
+    "serviceQualification": "pending-real-service-run",
+    "source": {
+      "licenseFile": "HiDream-O1-Image-ComfyUI/LICENSE",
+      "licenseReview": "pending-product-scope-review",
+      "licenseSha256": "05660a759293f0f326fbab96268c61919ded9460bb0d127fbb67b82dfd69c02b",
+      "repository": "Comfy-Org/HiDream-O1-Image",
+      "revision": "377ec7124bc46a15736c68cd9e4ad6d7da7a7614"
+    },
+    "workflowFile": "workflow.json",
+    "workflowId": "hidream-t2i",
+    "workflowSha256": "7a4d941f4f2e46a64770b76384bce50ef8417c84df7d9778b83db12263f9a52c",
+    "workflowVersion": "1.0.0"
+  },
+  {
+    "cancelSupported": false,
+    "capability": "text-to-image",
+    "environmentRevision": "cdf21ae76b8f824475faa395f8a3ee2ee16608baa3b82cc029793f6c367893c1",
+    "executionProfileId": "qwen-int8-cu130-v1",
+    "modelId": "qwen-image-2.1",
+    "modelVersion": "0217efd1d9c9452e84f6448903d6e21bfa171ffd",
+    "outputMax": 1,
+    "outputMin": 1,
+    "outputNodes": [
+      "481"
+    ],
+    "parameterMapping": {
+      "height": [
+        {
+          "input": "height",
+          "node": "456"
+        }
+      ],
+      "negativePrompt": [
+        {
+          "input": "negative_prompt",
+          "node": "452"
+        }
+      ],
+      "prompt": [
+        {
+          "input": "prompt",
+          "node": "452"
+        }
+      ],
+      "seed": [
+        {
+          "input": "seed",
+          "node": "458"
+        }
+      ],
+      "width": [
+        {
+          "input": "width",
+          "node": "456"
+        }
+      ]
+    },
+    "parameterSchema": {
+      "allowedDimensions": [
+        [
+          1024,
+          1024
+        ],
+        [
+          2048,
+          2048
+        ]
+      ],
+      "fields": {
+        "height": {
+          "default": 1024,
+          "maximum": 2048,
+          "minimum": 1024,
+          "multipleOf": 64,
+          "type": "integer"
+        },
+        "negativePrompt": {
+          "default": "",
+          "maxLength": 4000,
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "required": true,
+          "type": "string"
+        },
+        "seed": {
+          "default": 42,
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "width": {
+          "default": 1024,
+          "maximum": 2048,
+          "minimum": 1024,
+          "multipleOf": 64,
+          "type": "integer"
+        }
+      },
+      "inputMax": 0,
+      "inputMin": 0,
+      "maxPixels": 4194304
+    },
+    "parameterSchemaVersion": "1.0.0",
+    "partialSuccess": false,
+    "priorEvidence": [
+      "benchmark-results/comparison_summary.json",
+      "test-results/qwen_result.json"
+    ],
+    "productionEnabled": false,
+    "resources": [
+      {
+        "bytes": 7256783064,
+        "path": "Qwen-Image-2.1-ComfyUI/diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+        "sha256": "cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d"
+      },
+      {
+        "bytes": 9350798360,
+        "path": "Qwen-Image-2.1-ComfyUI/text_encoders/qwen3vl_8b_int8_convrot.safetensors",
+        "sha256": "8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f"
+      },
+      {
+        "bytes": 675509688,
+        "path": "Qwen-Image-2.1-ComfyUI/vae/qwen_image_2.1_vae_bf16.safetensors",
+        "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+      }
+    ],
+    "restartRecovery": "observe-saved-uuid-and-files-no-resubmit",
+    "serviceQualification": "pending-real-service-run",
+    "source": {
+      "licenseFile": "Qwen-Image-2.1-ComfyUI/LICENSE",
+      "licenseReview": "pending-product-scope-review",
+      "licenseSha256": "8dc973f024ff95966bea25866efa443fd16776dcb1001e681e3d467ea572b28d",
+      "repository": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "0217efd1d9c9452e84f6448903d6e21bfa171ffd"
+    },
+    "workflowFile": "workflow.json",
+    "workflowId": "qwen-t2i",
+    "workflowSha256": "4aae815c5b75e125927aba51dcdc488620b5cf8ed565a182734ede2c1649dbfa",
+    "workflowVersion": "1.0.0"
+  }
+]

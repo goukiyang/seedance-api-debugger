@@ -31,6 +31,7 @@ export class StudioAsyncRecoveryError extends Error {
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const key = (taskId: string) => `${taskId.startsWith('rate-') ? PRICING_ASYNC_PREFIX : PREFIX}${taskId}`;
 function channel(task: ImageStudioTask): { channelId: string; configRevision: string } | null {
+  if (task.execution_backend === 'local') return null;
   try {
     const value = JSON.parse(task.snapshot_json || '{}').imageChannel;
     return value && typeof value.channelId === 'string' && value.channelId !== 'original' && typeof value.configRevision === 'string'
@@ -197,7 +198,7 @@ export async function releaseStudioAsyncSlot(task: ImageStudioTask, receipt: Stu
 }
 
 export async function requestStudioAsyncRecheck(ownerId: string, id: string, bindingOrRequestId: string) {
-  const task = await prisma.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
+  const task = await prisma.imageStudioTask.findFirst({ where: { id, owner_id: ownerId, execution_backend: 'cloud' } });
   const user = await prisma.user.findUnique({ where: { id: ownerId } });
   if (!task || !user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioAsyncRecoveryError('原任务不存在或无权核对', 404);
   const original = await evidence(task).catch(() => null);

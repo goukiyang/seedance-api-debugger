@@ -24,7 +24,8 @@ function configureSqlitePragmas(client: PrismaClient) {
   void (async () => {
     await client.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
     await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
-    await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
+    await client.$queryRawUnsafe(process.env.COMFY03_ENVIRONMENT === 'isolated-test'
+      ? 'PRAGMA synchronous = FULL' : 'PRAGMA synchronous = NORMAL');
   })().catch((error) => {
     console.warn('[Prisma] Failed to configure SQLite pragmas:', error instanceof Error ? error.message : String(error));
   });

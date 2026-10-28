@@ -494,6 +494,7 @@ model ImageStudioPreset {
 }
 
 model ImageStudioTask {
+  execution_backend String @default("cloud")
   id             String   @id
   batch_id       String
   owner_id       String
@@ -550,6 +551,84 @@ model ImageStudioTask {
   @@index([tool_flow_run_id, tool_flow_node_id, status])
   @@index([billing_status, billing_next_check_at])
   @@index([billing_scope, gateway_request_id])
+}
+
+// COMFY03: execution metadata attached to the existing ImageStudioTask queue.
+// No independent business task or credit ledger is introduced.
+model LocalImageCredential {
+  id String @id
+  kind String
+  subject_id String
+  token_hash String
+  profile_ids_json String
+  project_id String?
+  expires_at DateTime
+  revoked_at DateTime?
+  created_at DateTime @default(now())
+}
+
+model LocalImageMachine {
+  id String @id
+  session_id String?
+  state String @default("offline")
+  capabilities_json String @default("[]")
+  last_seen DateTime?
+  sequence Int @default(0)
+}
+
+model LocalImageRequest {
+  id String @id
+  owner_id String
+  request_id String
+  fingerprint String
+  task_id String @unique
+  profile_id String
+  project_id String?
+  assignment_json String
+  created_at DateTime @default(now())
+  @@unique([owner_id, request_id])
+}
+
+model LocalImageAttempt {
+  id String @id
+  task_id String @unique
+  worker_id String
+  active_worker_id String? @unique
+  session_id String
+  epoch Int @default(1)
+  phase String
+  start_granted Boolean @default(false)
+  lease_until DateTime
+  heartbeat_sequence Int @default(0)
+  event_sequence Int @default(0)
+  prompt_id String?
+  terminal_receipt_json String?
+  created_at DateTime @default(now())
+}
+
+model LocalImageOperation {
+  id String @id
+  scope String
+  operation_id String
+  fingerprint String
+  receipt_json String
+  created_at DateTime @default(now())
+  @@unique([scope, operation_id])
+}
+
+model LocalImageOutput {
+  id String @id
+  attempt_id String
+  output_id String
+  asset_id String @unique
+  raw_sha256 String
+  delivered_sha256 String
+  file_path String
+  bytes Int
+  width Int
+  height Int
+  created_at DateTime @default(now())
+  @@unique([attempt_id, output_id])
 }
 
 model MultiviewWork {

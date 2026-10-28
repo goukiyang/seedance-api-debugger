@@ -1145,6 +1145,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
 }
 
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; retainedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
+  if (task.execution_backend === 'local') throw new StudioError('本地任务必须通过原 Worker 回执核对', 409);
   const finish = async (tx: Prisma.TransactionClient) => {
     const recovering = publicPricingTaskState(task.status) === 'uncertain';
     const retainedMismatch = Boolean(data.retainedAsset && studioDimensionMismatch({ status, usage_json: JSON.stringify(data.usage) }));
@@ -1222,7 +1223,7 @@ export async function claimStudioTask() {
   let cursor: string | undefined;
   let candidate: ImageStudioTask | undefined;
   for (;;) {
-    const candidates = await prisma.imageStudioTask.findMany({ where: { status: { in: studioTaskStates(['queued', 'channel_queued']) } },
+    const candidates = await prisma.imageStudioTask.findMany({ where: { execution_backend: 'cloud', status: { in: studioTaskStates(['queued', 'channel_queued']) } },
       orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 32, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
     for (const row of candidates) {
       if (isPricingImageTask(row)) {
@@ -1255,7 +1256,7 @@ export async function claimStudioTask() {
   const leaseToken = randomUUID();
   const channel = publicPricingTaskState(candidate.status) === 'channel_queued';
   const runningStatus = studioTaskState(candidate, channel ? 'channel_running' : 'running');
-  const changed = await prisma.imageStudioTask.updateMany({ where: { id: candidate.id, status: candidate.status },
+  const changed = await prisma.imageStudioTask.updateMany({ where: { id: candidate.id, execution_backend: 'cloud', status: candidate.status },
     data: { status: runningStatus, lease_token: leaseToken, lease_until: new Date(Date.now() + 10 * 60 * 1000) } });
   return changed.count ? { ...candidate, status: runningStatus, lease_token: leaseToken } : null;
 }
@@ -1263,7 +1264,7 @@ export async function claimStudioTask() {
 /** Cancel only a provably unattempted explicit-channel task; accepted receipts never mean a refund. */
 export async function cancelQueuedChannelTask(ownerId: string, id: string, client?: Prisma.TransactionClient) {
   const cancel = async (tx: Prisma.TransactionClient) => {
-    const task = await tx.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
+    const task = await tx.imageStudioTask.findFirst({ where: { id, owner_id: ownerId, execution_backend: 'cloud' } });
     if (!task) throw new StudioError('图片任务不存在或无权操作', 404);
     if (task.status === 'cancelled') return false;
     if (publicPricingTaskState(task.status) !== 'channel_queued') throw new StudioError('只能取消尚未向供应商请求的通道排队任务；已有受理或未知结果请核对原记录', 409);

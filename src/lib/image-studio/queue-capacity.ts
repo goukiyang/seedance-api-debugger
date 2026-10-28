@@ -3,7 +3,8 @@ import { countSynchronousImageAdmissions } from './synchronous-admission';
 import { studioTaskStates } from './pricing-state';
 import { isImageStudioDraining } from '@/lib/pricing/isolation';
 
-export const ACTIVE_IMAGE_TASK_STATUSES = studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']);
+export const ACTIVE_IMAGE_TASK_STATUSES = [...studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']),
+  'local_queued', 'local_leased', 'local_running', 'local_uploading', 'local_reconciling'];
 
 export class QueueCapacityError extends Error {
   readonly code = 'image_queue_capacity';
