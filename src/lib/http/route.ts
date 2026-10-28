@@ -48,7 +48,7 @@ async function identityFields(request: NextRequest) {
 
 export function route<Args extends unknown[]>(options: RouteOptions,
   handler: (...args: Args) => Response | Promise<Response>) {
-  return withApiErrors(async (...args: Args extends [] ? [request?: NextRequest] : Args) => {
+  return withApiErrors(async (...args: Args extends [] ? [request: NextRequest] : Args) => {
     const request = args[0] as NextRequest;
     const handlerArgs = args as unknown as Args;
     if (options.access === 'service') {

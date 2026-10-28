@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const COMMANDS = Object.freeze(['typecheck', 'lint', 'test:contracts', 'check:static', 'build']);
 const EXCLUDED = new Set(['.git', '.role-tests', 'node_modules', 'storage', 'docs', 'tasks', 'public/uploads', 'public/videos']);
 function hashFile(file) { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
-function sourceDigest(root) {
+function sourceDigest(root, replacements = new Map()) {
   const hash = createHash('sha256');
   function visit(directory) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -25,7 +25,8 @@ function sourceDigest(root) {
         || entry.name.endsWith('.tsbuildinfo') || entry.name.endsWith('.log'))) continue;
       if (entry.isSymbolicLink()) throw new Error('equivalent-ci-source-symlink');
       if (entry.isDirectory()) visit(file);
-      else if (entry.isFile()) hash.update(path.relative(root, file)).update('\0').update(hashFile(file)).update('\0');
+      else if (entry.isFile()) hash.update(path.relative(root, file)).update('\0').update(replacements.has(relative)
+        ? createHash('sha256').update(replacements.get(relative)).digest('hex') : hashFile(file)).update('\0');
     }
   }
   visit(root);
@@ -55,7 +56,11 @@ function verifyEquivalentCi(root, source, file) {
       const entry = receipt.results[index];
       return entry.command === `npm run ${name}` && entry.exitCode === 0 && entry.signal === null
         && Number.isFinite(Date.parse(entry.startedAt)) && Date.parse(entry.finishedAt) >= Date.parse(entry.startedAt)
-        && hashFile(withinEvidence(root, path.resolve(root, entry.log))) === entry.logSha256;
+        && hashFile(withinEvidence(root, path.resolve(root, entry.log))) === entry.logSha256
+        && (!entry.reusedFrom || name === 'test:contracts'
+          && hashFile(entry.reusedFrom.receipt) === entry.reusedFrom.receiptSha256
+          && reuseTypeOnlyContracts(root, entry.reusedFrom.receipt).entry.logSha256 === entry.logSha256
+          && hashFile(withinEvidence(root, path.resolve(root, entry.affectedChecks.log))) === entry.affectedChecks.logSha256);
     });
   } catch { return false; }
 }
@@ -73,6 +78,43 @@ function reusablePrebuild(root, results) {
   return summary?.results?.some(entry => entry.suite === 'scripts/check-image-recovery.mjs' && entry.exitCode === 0 && entry.passed === true) === true
     && summary.results.every(entry => entry.exitCode === 0 && entry.passed === true);
 }
+function reuseTypeOnlyContracts(root, previousFile) {
+  const previous = JSON.parse(fs.readFileSync(previousFile, 'utf8'));
+  const oldRoot = fs.realpathSync(previous.root);
+  if (!/^\/data\/video-api-debugger\/managed-releases\/[a-f0-9]{40}$/.test(oldRoot)
+    || withinEvidence(oldRoot, previousFile) !== fs.realpathSync(previousFile)
+    || previous.schema !== 'equivalent-ci.v1' || previous.results?.length !== 5
+    || previous.source !== path.basename(oldRoot)
+    || fs.readFileSync(path.join(oldRoot, '.deployed-commit'), 'utf8').trim() !== previous.source) throw new Error('contracts-reuse-invalid-origin');
+  const oldFingerprint = fingerprint(oldRoot), current = fingerprint(root);
+  if (Object.keys(oldFingerprint).some(key => previous.fingerprint?.[key] !== oldFingerprint[key]
+    || key !== 'sourceDigest' && current[key] !== oldFingerprint[key])) throw new Error('contracts-reuse-dependency-or-runtime-changed');
+  for (const [index, entry] of previous.results.slice(0, 4).entries()) {
+    if (entry.command !== `npm run ${COMMANDS[index]}` || entry.exitCode !== 0 || entry.signal !== null
+      || hashFile(withinEvidence(oldRoot, path.resolve(oldRoot, entry.log))) !== entry.logSha256) throw new Error('contracts-reuse-original-check-failed');
+  }
+  if (!reusablePrebuild(oldRoot, previous.results)) throw new Error('contracts-reuse-original-recovery-failed');
+  const old = file => fs.readFileSync(path.join(oldRoot, file), 'utf8');
+  const changed = new Map([
+    ['src/lib/http/route.ts', ['[request?: NextRequest]', '[request: NextRequest]']],
+    ['scripts/hd-admin-engineering.ts', ['route.GET()', "route.GET(request as import('next/server').NextRequest)"]],
+  ]);
+  const replacements = new Map();
+  for (const [file, [before, after]] of changed) {
+    const original = old(file), updated = fs.readFileSync(path.join(root, file), 'utf8');
+    if (!original.includes(before) || updated !== original.replace(before, after)) throw new Error('contracts-reuse-unreviewed-change:' + file);
+    replacements.set(file, original);
+  }
+  const ts = require('typescript');
+  const emit = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  if (emit(old('src/lib/http/route.ts')) !== emit(fs.readFileSync(path.join(root, 'src/lib/http/route.ts'), 'utf8'))) throw new Error('contracts-reuse-runtime-changed');
+  // These are the runner and its focused regression, not application dependencies.
+  for (const file of ['.deployed-commit', 'scripts/equivalent-ci.cjs', 'scripts/test-api-route.cjs']) replacements.set(file, old(file));
+  if (sourceDigest(root, replacements) !== oldFingerprint.sourceDigest) throw new Error('contracts-reuse-other-source-changed');
+  return { entry: previous.results[2], oldRoot, origin: { source: previous.source, receipt: previousFile,
+    receiptSha256: hashFile(previousFile), validatedAt: new Date().toISOString(),
+    basis: 'All other source/dependencies/runtime identical; route emits identical JavaScript; changed fixture and regression rerun.' } };
+}
 function main() {
   const root = fs.realpathSync(process.cwd());
   if (!/^\/data\/video-api-debugger\/managed-releases\/[a-f0-9]{40}$/.test(root) || process.getuid() === 0) {
@@ -87,6 +129,8 @@ function main() {
   const directory = fs.mkdtempSync(path.join(root, '.role-tests', 'equivalent-ci-'));
   const receiptFile = path.join(directory, 'receipt.json');
   const receipt = { schema: 'equivalent-ci.v1', source, root, fingerprint: fingerprint(root), results: [], completed: false };
+  const contractsFrom = process.argv.find(arg => arg.startsWith('--contracts-from='))?.slice('--contracts-from='.length);
+  const reusedContracts = contractsFrom ? reuseTypeOnlyContracts(root, contractsFrom) : null;
   const resumeFile = process.argv.find(arg => arg.startsWith('--resume='))?.slice('--resume='.length);
   if (resumeFile) {
     const previousFile = withinEvidence(root, resumeFile);
@@ -109,6 +153,26 @@ function main() {
   const save = () => fs.writeFileSync(receiptFile, JSON.stringify(receipt, null, 2), { mode: 0o600 });
   save();
   for (const name of COMMANDS.slice(receipt.results.length)) {
+    if (name === 'test:contracts' && reusedContracts) {
+      const log = path.join(directory, 'contracts-affected.log');
+      const fd = fs.openSync(log, 'wx', 0o600);
+      try {
+        for (const args of [['scripts/test-api-route.cjs'], ['scripts/test-equivalent-ci.cjs'],
+          ['--import', 'tsx', 'scripts/hd-admin-engineering.ts']]) {
+          const result = spawnSync(process.execPath, args, { cwd: root, stdio: ['ignore', fd, fd],
+            env: { ...process.env, NODE_ENV: 'test', IMAGE_RECOVERY_GATE_RUN_ID: require('node:crypto').randomUUID() } });
+          if (result.error || result.status !== 0 || result.signal) throw new Error('contracts-affected-check-failed:' + args.at(-1));
+        }
+      } finally { fs.closeSync(fd); }
+      const originalLog = withinEvidence(reusedContracts.oldRoot, path.resolve(reusedContracts.oldRoot, reusedContracts.entry.log));
+      const retainedLog = path.join(directory, 'test-contracts-original.log');
+      fs.copyFileSync(originalLog, retainedLog);
+      receipt.results.push({ ...reusedContracts.entry, log: path.relative(root, retainedLog), reusedFrom: reusedContracts.origin,
+        affectedChecks: { log: path.relative(root, log), logSha256: hashFile(log) } });
+      save();
+      console.log(JSON.stringify(receipt.results.at(-1)));
+      continue;
+    }
     const log = path.join(directory, name.replace(':', '-') + '.log');
     const fd = fs.openSync(log, 'wx', 0o600);
     const startedAt = new Date().toISOString();
@@ -132,7 +196,7 @@ function main() {
   save();
   console.log(`EQUIVALENT_CI_RECEIPT=${receiptFile}`);
 }
-module.exports = { COMMANDS, fingerprint, verifyEquivalentCi, hashFile, reusablePrebuild };
+module.exports = { COMMANDS, fingerprint, verifyEquivalentCi, hashFile, reusablePrebuild, reuseTypeOnlyContracts };
 if (require.main === module) {
   try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

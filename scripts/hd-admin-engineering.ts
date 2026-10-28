@@ -65,7 +65,7 @@ async function main() {
         method: action ? 'POST' : 'GET', headers, ...(action ? { body: JSON.stringify({ action, token }) } : {}),
       });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
-      const response = await requestAsyncStorage.run(store, () => action ? route.POST(request) : route.GET());
+      const response = await requestAsyncStorage.run(store, () => action ? route.POST(request) : route.GET(request as import('next/server').NextRequest));
       assert.match(response.headers.get('cache-control') || '', /private.*no-store/);
       assert.equal(response.headers.get('vary'), 'Cookie');
       return { status: response.status, body: await response.json() };

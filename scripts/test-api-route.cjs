@@ -5,6 +5,15 @@ process.env.SESSION_SECRET = 'synthetic-api-route-master-0123456789012345678';
 require('tsx/cjs');
 const { withApiErrors, PublicApiError } = require('../src/lib/http/api-error.ts');
 const source = fs.readFileSync(require.resolve('../src/lib/http/route.ts'), 'utf8');
+const routeAst = ts.createSourceFile('route.ts', source, ts.ScriptTarget.Latest, true);
+let requestTuple;
+function findRequestTuple(node) {
+  if (ts.isConditionalTypeNode(node) && ts.isTupleTypeNode(node.trueType)) requestTuple = node.trueType;
+  ts.forEachChild(node, findRequestTuple);
+}
+findRequestTuple(routeAst);
+assert.ok(requestTuple && ts.isNamedTupleMember(requestTuple.elements[0]));
+assert.equal(Boolean(requestTuple.elements[0].questionToken), false, 'Next route exports require a request, even when the inner handler ignores it');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 let user = null, sessionError = null, consumed = [], finished = [], decision = { allowed: true, retryAfterMs: 0, delayMs: 0 };
 const limiter = Object.fromEntries(['auth', 'feedback', 'registrationCode', 'beforeLogin'].map(name => [name, async (...values) => {
