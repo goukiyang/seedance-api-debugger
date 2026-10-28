@@ -12,8 +12,10 @@ import type {
 import { checkPrompt } from '@/components/PromptChecker';
 import { useWorkspace, WorkspaceInputRecoveryError, type WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
 import { uploadSession } from '@/lib/http/upload-session';
-import type { TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
-import { readTaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import type { CompletedTaskReuse, TaskReuseInputBackup, TaskReuseUndoScope } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseInputBackup, readCompletedTaskReuse, taskReuseUndoMatches, sameTaskReuseReceipt, taskReuseInputSignature, hasTaskReuseInput } from '@/lib/navigation/task-reuse-client';
+import type { ReuseUndoAction } from '@/components/generate/TaskReuseStatus';
+import recoveryStyles from '@/components/generate/reuse-feedback.module.css';
 import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
@@ -420,6 +422,9 @@ interface Props {
   onWorkspaceBusyChange?: (busy: boolean, reason?: 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null) => void;
   onWorkspaceRefreshReady?: (refresh: (() => Promise<WorkspaceReadResult>) | null) => void;
   inputRecoveryScope?: string | (() => string);
+  completedTaskReuse?: CompletedTaskReuse | null;
+  inputRecoveryContext?: () => Omit<TaskReuseUndoScope, 'workspaceId'>;
+  onReuseUndoReady?: (action: ReuseUndoAction | null) => void;
   onInputRecoveryReady?: (capture: (() => TaskReuseInputBackup | false) | null) => void;
   onCaptureInputRecoveryTarget?: (target?: { projectId: string; videoCardId: string; videoBranchId: string }) => (() => void);
   onReuseStateChange?: (state: ComposerReuseState) => void;
@@ -528,6 +533,9 @@ export function GenerationComposer({
   onWorkspaceBusyChange,
   onWorkspaceRefreshReady,
   inputRecoveryScope = '',
+  completedTaskReuse = null,
+  inputRecoveryContext,
+  onReuseUndoReady,
   onInputRecoveryReady,
   onCaptureInputRecoveryTarget,
   onReuseStateChange,
@@ -635,12 +643,15 @@ export function GenerationComposer({
   const [studioSettingsReady, setStudioSettingsReady] = useState(false);
   const [imageResultDraftReady, setImageResultDraftReady] = useState(false);
   const [imageResultDraftMessage, setImageResultDraftMessage] = useState('');
-  type InputRecovery = { workspace: WorkspaceInputRecovery; restoreFields: () => void };
+  type InputRecovery = { workspace: WorkspaceInputRecovery; backup: TaskReuseInputBackup; restoreFields: () => void };
   const [inputRecovery, setInputRecovery] = useState<InputRecovery | null>(null);
   const [inputRecoveryPair, setInputRecoveryPair] = useState<{ previous: InputRecovery; next: InputRecovery; pendingTarget: InputRecovery | null } | null>(null);
   const [inputRecoveryBusy, setInputRecoveryBusy] = useState(false);
   const [inputRecoveryMessage, setInputRecoveryMessage] = useState('');
+  const [inputRecoveryIssue, setInputRecoveryIssue] = useState(false);
   const recoveryScopeRef = React.useRef(inputRecoveryScope); recoveryScopeRef.current = inputRecoveryScope;
+  const recoveryContextRef = React.useRef(inputRecoveryContext); recoveryContextRef.current = inputRecoveryContext;
+  const [recoveryBinding, setRecoveryBinding] = useState<{ record: CompletedTaskReuse; side: 'undo' | 'redo'; signature: string } | null>(null);
   const [studioCorrectedParameters, setStudioCorrectedParameters] = useState<string[]>([]);
   const appliedStudioBaseRunRef = React.useRef<string | null>(null);
   const appliedStudioProviderRunRef = React.useRef<string | null>(null);
@@ -712,7 +723,10 @@ export function GenerationComposer({
     const snapshot = workspace.captureRecovery();
     if (!snapshot) return null;
     const restoreTarget = onCaptureInputRecoveryTarget?.();
-    return { workspace: snapshot, restoreFields: () => {
+    const backup: TaskReuseInputBackup = { version: 1, hadInput: Boolean(prompt.trim() || snapshot.items.length || settingsTouchedRef.current), workspace: snapshot,
+      fields: { prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
+        model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
+    return { workspace: snapshot, backup, restoreFields: () => {
       settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
       setPrompt(prompt); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
       setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
@@ -727,9 +741,9 @@ export function GenerationComposer({
     currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
   const captureInputRecovery = useCallback(() => {
     const value = makeInputRecovery();
-    if (!value) { setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
-    setInputRecovery(value); setInputRecoveryMessage('替换前输入已保留，可恢复。'); return { version: 1 as const, workspace: value.workspace, fields: { prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
-  }, [makeInputRecovery, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, selectedVideoCardId]);
+    if (!value) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
+    setRecoveryBinding(null); setInputRecovery(hasTaskReuseInput(value.backup) ? value : null); setInputRecoveryIssue(false); setInputRecoveryMessage(''); return value.backup;
+  }, [makeInputRecovery]);
   useEffect(() => { onInputRecoveryReady?.(captureInputRecovery); return () => onInputRecoveryReady?.(null); }, [onInputRecoveryReady, captureInputRecovery]);
   const restoredBackupScope = React.useRef('');
   useEffect(() => {
@@ -738,12 +752,12 @@ export function GenerationComposer({
     restoredBackupScope.current = current.id;
     try {
       const tab = sessionStorage.getItem('workspace_tab_id') || 'default', backup = readTaskReuseInputBackup(current.owner_id, tab);
-      if (!backup || backup.workspace.workspaceId !== current.id) return;
+      if (!backup || backup.workspace.workspaceId !== current.id || !hasTaskReuseInput(backup)) return;
       const value = backup.fields;
       if (!['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(value.generationMode) || typeof value.ratio !== 'string'
         || typeof value.resolution !== 'string' || !Number.isFinite(value.duration) || !Number.isFinite(value.seed)) return;
       const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
-      setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, restoreFields: () => {
+      setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, backup, restoreFields: () => {
         settingsTouchedRef.current = true;
         setPrompt(value.prompt); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
         setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
@@ -753,9 +767,21 @@ export function GenerationComposer({
         if (value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
         restoreTarget?.();
       } });
-      setInputRecoveryMessage('复用前输入仍保留，可主动恢复。');
+      const completed = readCompletedTaskReuse(current.owner_id, tab);
+      if (completed?.applied.inputReplaced) setRecoveryBinding({ record: completed, side: 'undo', signature: '' });
+      setInputRecoveryMessage('');
     } catch { /* Optional recovery never replaces current input during initialization. */ }
   }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget]);
+  useEffect(() => {
+    if (!completedTaskReuse || !inputRecovery || !completedTaskReuse.applied.inputReplaced
+      || inputRecovery.workspace.ownerId !== completedTaskReuse.accountId
+      || inputRecovery.workspace.workspaceId !== completedTaskReuse.operation.workspaceId
+      || taskReuseInputSignature(inputRecovery.backup) !== taskReuseInputSignature(completedTaskReuse.backup)) return;
+    const current = makeInputRecovery();
+    setRecoveryBinding({ record: completedTaskReuse, side: 'undo', signature: current ? taskReuseInputSignature(current.backup) : '' });
+    // Bind once to the actually completed receipt, not again after a later input capture.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedTaskReuse]);
   const ordinaryDraftKey = creationContextKey ? `sd2:video-input-draft:v2:${creationContextKey}` : '';
   const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
   React.useLayoutEffect(() => {
@@ -781,18 +807,33 @@ export function GenerationComposer({
       || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
     const timer = setTimeout(() => {
       try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, model: selectedModel })); }
-      catch { setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
+      catch { setInputRecoveryIssue(true); setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
     }, 200);
     return () => clearTimeout(timer);
   }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
   const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
+  const readUndoScope = (): TaskReuseUndoScope | null => {
+    const target = recoveryContextRef.current?.(), current = workspace.workspace;
+    if (!target || !current) return null;
+    return { ...target, workspaceId: current.id };
+  };
+  const undoScope = readUndoScope();
+  const undoAllowed = Boolean(recoveryBinding && undoScope && taskReuseUndoMatches(recoveryBinding.record, undoScope, recoveryBinding.side));
+  const currentRecovery = recoveryBinding ? makeInputRecovery() : null;
+  const hasLaterEdits = Boolean(recoveryBinding?.side === 'undo' && (!currentRecovery || taskReuseInputSignature(currentRecovery.backup) !== recoveryBinding.signature));
+  const recoveryReceiptCurrent = () => {
+    if (!recoveryBinding) return true;
+    const current = readCompletedTaskReuse(recoveryBinding.record.accountId, recoveryBinding.record.operation.tabId), scope = readUndoScope();
+    return Boolean(current && sameTaskReuseReceipt(current, recoveryBinding.record) && scope && taskReuseUndoMatches(recoveryBinding.record, scope, recoveryBinding.side));
+  };
   const restoreInputRecovery = async (target = inputRecovery) => {
     if (!target || inputRecoveryBusy || interactionLocked || workspace.loading || workspace.pendingWorkspaceAttach) return;
+    if (!recoveryReceiptCurrent()) { setInputRecoveryIssue(true); setInputRecoveryMessage('账号、保存位置或复用记录已变化，未覆盖当前输入。原备份仍保留。'); return; }
     if (inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== target) {
-      setInputRecoveryMessage('原恢复的素材关联结果尚未确认，请先继续原恢复；两份输入仍保留在本页。'); return;
+      setInputRecoveryIssue(true); setInputRecoveryMessage('原恢复的素材关联结果尚未确认，请先继续原恢复；两份输入仍保留在本页。'); return;
     }
     const pair = inputRecoveryPair || { previous: target, next: makeInputRecovery(), pendingTarget: null };
-    if (!pair.next) { setInputRecoveryMessage('当前素材尚未确认，未开始恢复；请先完成素材准备。'); return; }
+    if (!pair.next) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前素材尚未确认，未开始恢复；请先完成素材准备。'); return; }
     const previous = target, next = target === pair.previous ? pair.next : pair.previous;
     // Retain both sides before the first write, including when a later role/read step fails.
     setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: target });
@@ -804,15 +845,23 @@ export function GenerationComposer({
       associationConfirmed = true;
       const session = uploadSession();
       if (session.ownerId !== previous.workspace.ownerId || session.epoch !== previous.workspace.epoch
-        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
-      previous.restoreFields(); setInputRecovery(next); setInputRecoveryPair(null); setInputRecoveryMessage('已恢复所选输入，另一份输入也保留在本页。');
+        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit || !recoveryReceiptCurrent()) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
+      previous.restoreFields(); setInputRecovery(next); setInputRecoveryPair(null); setInputRecoveryIssue(false); setInputRecoveryMessage('已恢复所选输入，另一份输入也保留在本页。');
+      if (recoveryBinding && target === pair.previous) setRecoveryBinding(value => value ? { ...value, side: value.side === 'undo' ? 'redo' : 'undo' } : null);
     } catch (cause) {
+      setInputRecoveryIssue(true);
       if (cause instanceof WorkspaceInputRecoveryError) associationConfirmed = cause.associationConfirmed;
       setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: associationConfirmed ? null : target });
       setInputRecoveryMessage(`${cause instanceof Error ? cause.message : '恢复尚未完成。'} 两份输入仍保留在本页。${associationConfirmed ? '可重试原恢复，或返回刚才输入。' : '请先继续原恢复，核对原素材关联。'}`);
     }
     finally { setInputRecoveryBusy(false); }
   };
+  const restoreRecoveryRef = React.useRef(restoreInputRecovery); restoreRecoveryRef.current = restoreInputRecovery;
+  useEffect(() => {
+    const available = recoveryBinding?.side === 'undo' && undoAllowed && !inputRecoveryBusy && !interactionLocked && !workspace.loading && !inputRecoveryPair;
+    onReuseUndoReady?.(available ? { run: () => { void restoreRecoveryRef.current(); }, hasLaterEdits } : null);
+    return () => onReuseUndoReady?.(null);
+  }, [recoveryBinding?.side, recoveryBinding?.record.operation.requestId, undoAllowed, inputRecoveryBusy, interactionLocked, workspace.loading, inputRecoveryPair, hasLaterEdits, onReuseUndoReady]);
 
   useEffect(() => {
     const element = generationComposerRef.current;
@@ -1948,10 +1997,14 @@ export function GenerationComposer({
 
   return (
     <>
-      {(inputRecovery || inputRecoveryMessage) && <p className="composer-prefill-notice" role="status">{inputRecoveryMessage}
-        {inputRecovery && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : '恢复替换前输入'}</button>}
+      {inputRecoveryMessage && (inputRecoveryIssue || !inputRecovery || inputRecoveryPair) && <p className={recoveryStyles.recovery} role="status">{inputRecoveryMessage}</p>}
+      {inputRecovery && <details className={recoveryStyles.recovery} open={inputRecoveryPair ? true : undefined}><summary>输入恢复</summary>
+        {recoveryBinding && !undoAllowed && <p>保存位置或账号已变化，当前不能恢复这份输入。</p>}
+        {recoveryBinding && undoAllowed && <p>{recoveryBinding.side === 'redo' ? '将返回刚才输入，当前内容也会保留。' : hasLaterEdits ? '将恢复复用前输入；当前修改会保留，可返回刚才输入。' : '将恢复复用前输入。'}</p>}
+        {inputRecoveryMessage && !inputRecoveryIssue && !inputRecoveryPair && <p role="status">{inputRecoveryMessage}</p>}
+        <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(recoveryBinding && !undoAllowed) || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : recoveryBinding ? recoveryBinding.side === 'undo' ? '撤销上次复用' : '返回刚才输入' : '恢复替换前输入'}</button>
         {inputRecoveryPair && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.next)} onClick={() => void restoreInputRecovery(inputRecoveryPair.next)}>返回刚才输入</button>}
-      </p>}
+      </details>}
       <div
         ref={generationComposerRef}
         className="generation-composer"

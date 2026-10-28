@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Expand, Pencil, SlidersHorizontal, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Copy, Expand, Pencil, SlidersHorizontal, Lock, LockOpen } from 'lucide-react';
 import { ProductActionMenu } from '@/components/ProductActionMenu';
 import { createMultiviewFrameScrub, type MultiviewScrubSession } from './multiview-frame-scrub';
 import styles from './multiview.module.css';
@@ -9,6 +9,7 @@ import styles from './multiview.module.css';
 export function MultiviewFrameControls(props: {
   frame: number; name: string; index: number; timestamps: number[]; scope: string; disabled: boolean;
   locked?: boolean; onToggleLock: () => void;
+  copying?: boolean; onCopy?: () => void;
   onBegin: () => MultiviewScrubSession | null;
   onUsage: (url: string, used: boolean) => void;
   onName: (anchor: HTMLElement) => void; onStep: (delta: -1 | 1) => void; onEdit: () => void; onZoom: () => void;
@@ -75,10 +76,11 @@ export function MultiviewFrameControls(props: {
   }, [shown]);
   const displayFrame = shown?.frame ?? props.frame;
   return <>
-    <div className={styles.frameCorner} data-locked={props.locked || undefined} onPointerDown={event => event.stopPropagation()}>
+    <div className={styles.frameCorner} data-locked={props.locked || undefined} data-copying={props.copying || undefined} onPointerDown={event => event.stopPropagation()}>
       <button type="button" aria-label={props.locked ? '解锁此格' : '锁定此格'} title={props.locked ? '解锁此格' : '锁定此格'}
         aria-pressed={props.locked === true} disabled={props.disabled || active} onClick={props.onToggleLock}>{props.locked ? <Lock size={16} /> : <LockOpen size={16} />}</button>
       <button type="button" aria-label="放大原帧" title="放大原帧" disabled={props.disabled || active} onClick={props.onZoom}><Expand size={16} /></button>
+      {props.onCopy && <button type="button" aria-label="复制原图" title={props.copying ? '正在复制原图' : '复制原图'} aria-busy={props.copying || undefined} disabled={props.disabled || active || props.copying} onClick={props.onCopy}><Copy size={16} /></button>}
     </div>
     {shown && <img className={styles.scrubImage} src={shown.url} alt={`第 ${props.index + 1} 张，第 ${displayFrame + 1} 帧`} />}
     <figcaption className={styles.frameFooter} onPointerDown={event => event.stopPropagation()} data-active={active || menuOpen || Boolean(error) || undefined} onKeyDown={event => {

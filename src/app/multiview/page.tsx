@@ -16,6 +16,7 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import { useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
 import { copyPngBlob } from '@/lib/media/copy-image';
+import type { LocalFrameContext } from '@/lib/media/image-read-session';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { candidateFrames, DEFAULT_MULTIVIEW_LAYOUT, multiviewDimensions, parseMultiviewDraft,
   type MultiviewDraft, type MultiviewInfo, type MultiviewSlot } from '@/lib/video/multiview-contract';
@@ -39,7 +40,7 @@ import { createMultiviewLatestTargetGate, multiviewPreviewChunkIndex, multiviewP
   type MultiviewPreviewManifest } from '@/lib/video/multiview-preview-contract';
 import styles from './multiview.module.css';
 
-type FrameState = { url?: string; originalBytes?: number; previewUrl?: string; previewError?: string; error?: string; loading?: boolean };
+type FrameState = { url?: string; blob?: Blob; localFrame?: LocalFrameContext; originalBytes?: number; previewUrl?: string; previewError?: string; error?: string; loading?: boolean };
 const ORIGINAL_MEMORY_LIMIT = 256 * 1024 * 1024;
 type PreviewState = { manifest: MultiviewPreviewManifest | null; urls: Record<number, string>; loading: boolean; error: string };
 type Artifact = { blob: Blob; url: string; name: string; key: string; format: 'png' | 'zip'; slots: MultiviewSlot[] };
@@ -128,7 +129,11 @@ function MultiviewPageContent() {
   const [exporting, setExporting] = useState(false);
   const [exportFile, setExportFile] = useState<Artifact | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
+  const [copyingFrame, setCopyingFrame] = useState('');
+  const frameCopy = useRef<{ token: symbol; slotId: string; frame: number; generation: number } | null>(null);
+  const previewSlot = useRef<{ slotId: string; frame: number } | null>(null);
   const [editorFrame, setEditorFrame] = useState(0);
+  const editorFrameRef = useRef(editorFrame); editorFrameRef.current = editorFrame;
   const [frameInput, setFrameInput] = useState('1');
   const [frameInputError, setFrameInputError] = useState('');
   const [editorMode, setEditorMode] = useState<'frame' | 'video'>('frame');
@@ -172,6 +177,7 @@ function MultiviewPageContent() {
   const originalTargets = useRef(new Set<number>());
   const preferredOriginalSlot = useRef('');
   const usedUrls = useRef(new Map<string, number>());
+  const retiredOriginals = useRef(new Map<string, number>());
   const interactionUntil = useRef(0);
   const previewRequests = useRef(new Map<number, Promise<boolean>>());
   const previewFrameRequests = useRef(new Map<number, Promise<boolean>>());
@@ -186,6 +192,7 @@ function MultiviewPageContent() {
   const frameRef = useRef(frames); frameRef.current = frames;
   const ownerRef = useRef(owner); ownerRef.current = owner;
   const authorityRef = useRef(authority); authorityRef.current = authority;
+  const mediaBaseRef = useRef('');
   const accountHydrated = useRef('');
   const locationRef = useRef(location); locationRef.current = location;
   const viewRef = useRef(view); viewRef.current = view;
@@ -205,6 +212,7 @@ function MultiviewPageContent() {
   const unreadLocalKey = useRef('');
   const editingWorkId = !shareId && editorWork.owner === owner ? editorWork.id : '';
   const mediaBase = shareId ? `/api/video/multiview/shares/${encodeURIComponent(shareId)}/source` : editingWorkId ? `/api/video/multiview/works/${encodeURIComponent(editingWorkId)}/source` : `/api/video/multiview/${encodeURIComponent(taskId)}`;
+  mediaBaseRef.current = mediaBase;
   const source = editingWorkId || shareId ? `${mediaBase}/video` : `/api/video/play/${encodeURIComponent(taskId)}`;
   const loop = useVideoLoopState(taskId ? source : undefined, taskId ? `video_task:${editingWorkId || taskId}` : undefined, undefined, true);
   const storageKey = info && owner ? shareId ? `sd2:multiview-share-draft:v1:${owner}:${shareId}:${shared?.revision}:${info.sourceVersion}` : editingWorkId ? `sd2:multiview-work:v1:${owner}:${editingWorkId}:${info.sourceVersion}` : `sd2:multiview:v1:${owner}:${taskId}:${info.sourceVersion}` : '';
@@ -336,18 +344,33 @@ function MultiviewPageContent() {
     for (const item of Array.from(artifacts.current.values())) { URL.revokeObjectURL(item.url); objectUrls.current.delete(item.url); }
     artifacts.current.clear(); artifactInflight.current.clear(); setExportFile(null); setExporting(false);
   }, []);
+  const retireFrameUrl = useCallback((url: string, bytes = 0) => {
+    if (usedUrls.current.has(url)) { retiredOriginals.current.set(url, bytes); return; }
+    URL.revokeObjectURL(url); objectUrls.current.delete(url); retiredOriginals.current.delete(url);
+  }, []);
+  const trackFrameUrl = useCallback((url: string, used: boolean) => {
+    const count = (usedUrls.current.get(url) || 0) + (used ? 1 : -1);
+    if (count > 0) usedUrls.current.set(url, count);
+    else {
+      usedUrls.current.delete(url);
+      if (retiredOriginals.current.has(url)) { URL.revokeObjectURL(url); objectUrls.current.delete(url); retiredOriginals.current.delete(url); }
+      setReleasedPixels(value => value + 1);
+    }
+  }, []);
   const clearUrls = useCallback(() => {
     clearArtifacts();
     quickFrameGate.current.cancel();
-    originalQueue.current.clear(); originalTargets.current.clear(); preferredOriginalSlot.current = ''; usedUrls.current.clear();
+    originalQueue.current.clear(); originalTargets.current.clear(); preferredOriginalSlot.current = '';
+    frameCopy.current = null; previewSlot.current = null; setCopyingFrame('');
     quickFrameLock.current = null; scrubFrames.current.clear(); setQuickFrame(null); slotDrag.current = null; suppressSlotClick.current = '';
-    for (const url of Array.from(objectUrls.current)) URL.revokeObjectURL(url);
-    objectUrls.current.clear(); requests.current.clear(); previewRequests.current.clear(); previewFrameRequests.current.clear();
+    const sizes = new Map(Object.values(frameRef.current).filter(item => item.url).map(item => [item.url!, item.originalBytes || 0]));
+    for (const url of Array.from(objectUrls.current)) retireFrameUrl(url, sizes.get(url) || retiredOriginals.current.get(url) || 0);
+    requests.current.clear(); previewRequests.current.clear(); previewFrameRequests.current.clear();
     for (const bitmap of Array.from(previewAtlases.current.values())) bitmap.close();
     previewAtlases.current.clear();
     frameRef.current = {}; setFrames({}); setPreviewState({ manifest: null, urls: {}, loading: false, error: '' });
     setQuickPreview({}); setApplyingFrame(false); setPreview(null); setOriginalWaiting(false); setOnscreenSlots([]);
-  }, [clearArtifacts]);
+  }, [clearArtifacts, retireFrameUrl]);
   const rejectSource = useCallback((message: string) => {
     context.current += 1; abort.current?.abort(); clearUrls();
     video.current?.pause(); video.current?.removeAttribute('src'); video.current?.load(); setActivity(value => value + 1); setAuthorized(false); setError(message); setNotice('原选帧和生成草稿已保留，重新读取前不再使用旧图片或文件。');
@@ -507,9 +530,33 @@ function MultiviewPageContent() {
 
   const loadFrame = useCallback(async (frame: number, retry = false, foreground = true): Promise<boolean> => {
     if (!info || !visible) return false;
-    if (frameRef.current[frame]?.url) return true;
-    if (frameRef.current[frame]?.error && !retry) return false;
     const epoch = context.current;
+    const bindLocal = (url: string, blob: Blob): LocalFrameContext => ({
+      kind: 'local-frame', account: `${owner}:${user?.role || ''}:${user?.account_type || ''}`, authority,
+      sourceKind: shareId ? 'share' : editingWorkId ? 'work' : 'task', sourceId: shareId || editingWorkId || taskId,
+      taskId, sourceVersion: info.sourceVersion, frame, width: info.width, height: info.height, generation: epoch,
+      blob, url, signal: abort.current!.signal,
+      isCurrent: () => epoch === context.current && ownerRef.current === owner && authorityRef.current === authority
+        && mediaBaseRef.current === mediaBase && frameRef.current[frame]?.url === url && frameRef.current[frame]?.blob === blob && !isClientSessionBlocked(),
+      retain: () => { trackFrameUrl(url, true); let released = false; return () => { if (!released) { released = true; trackFrameUrl(url, false); } }; },
+      authorize: async () => {
+        const response = await fetch(mediaBase, { cache: 'no-store', headers: { 'x-app-session-user': owner },
+          signal: AbortSignal.any([abort.current!.signal, AbortSignal.timeout(30000)]) });
+        const result = await response.json();
+        if (epoch !== context.current || ownerRef.current !== owner || authorityRef.current !== authority || mediaBaseRef.current !== mediaBase || isClientSessionBlocked()) throw new DOMException('原帧已变化', 'AbortError');
+        if (!response.ok || result.info?.taskId !== taskId || result.info?.sourceVersion !== info.sourceVersion
+          || result.info.width !== info.width || result.info.height !== info.height) {
+          if ([401, 403, 404, 409].includes(response.status) || response.ok) rejectSource('原视频权限或版本已变化，请重新读取');
+          throw new Error('暂时无法核对原视频，请重试这一帧');
+        }
+      },
+    });
+    const cached = frameRef.current[frame];
+    if (cached?.url && cached.blob && abort.current) {
+      if (cached.localFrame?.generation !== epoch) { frameRef.current = { ...frameRef.current, [frame]: { ...cached, localFrame: bindLocal(cached.url, cached.blob) } }; setFrames(frameRef.current); }
+      return true;
+    }
+    if (cached?.error && !retry) return false;
     const pending = originalQueue.current.request(frame, async () => {
       if (epoch !== context.current) return false;
       if (epoch === context.current) setFrames(value => ({ ...value, [frame]: { ...value[frame], loading: true } }));
@@ -530,7 +577,7 @@ function MultiviewPageContent() {
         } catch { URL.revokeObjectURL(url); throw new Error('原尺寸画面未完整显示，可重试这一格'); }
         if (epoch !== context.current || ownerRef.current !== owner || authorityRef.current !== authority || isClientSessionBlocked()) { URL.revokeObjectURL(url); return false; }
         objectUrls.current.add(url);
-        frameRef.current = { ...frameRef.current, [frame]: { ...frameRef.current[frame], url, originalBytes: blob.size + info.width * info.height * 4, loading: false, error: undefined } }; setFrames(frameRef.current);
+        frameRef.current = { ...frameRef.current, [frame]: { ...frameRef.current[frame], url, blob, localFrame: bindLocal(url, blob), originalBytes: blob.size + info.width * info.height * 4, loading: false, error: undefined } }; setFrames(frameRef.current);
         return true;
       } catch (cause) {
         if (epoch === context.current && !abort.current?.signal.aborted) { frameRef.current = { ...frameRef.current, [frame]: { ...frameRef.current[frame], loading: false, error: cause instanceof Error ? cause.message : '提取失败，可单独重试' } }; setFrames(frameRef.current); }
@@ -540,7 +587,46 @@ function MultiviewPageContent() {
     requests.current.set(frame, pending);
     void pending.finally(() => { if (requests.current.get(frame) === pending) requests.current.delete(frame); });
     return pending;
-  }, [authority, info, owner, rejectSource, mediaBase, visible]);
+  }, [authority, info, owner, rejectSource, mediaBase, visible, user?.role, user?.account_type, shareId, editingWorkId, taskId, trackFrameUrl]);
+  const currentSlotFrame = (id: string, frame: number) => draftRef.current?.slots.some(item => item.id === id && item.frame === frame) === true;
+  async function openFramePreview(frame: number, slotId = '') {
+    const epoch = context.current;
+    const current = () => epoch === context.current && (slotId ? currentSlotFrame(slotId, frame) : editorFrameRef.current === frame) && !isClientSessionBlocked();
+    try {
+      if (!await loadFrame(frame, true) || !current()) return;
+      const local = frameRef.current[frame]?.localFrame;
+      if (!local?.isCurrent()) return;
+      const release = local.retain();
+      try { await local.authorize(); if (current() && local.isCurrent()) { previewSlot.current = slotId ? { slotId, frame } : null; setPreview(frame); } }
+      finally { release(); }
+    } catch (cause) { if (current()) setNotice(cause instanceof Error ? cause.message : '原帧暂不可读取，请重试'); }
+  }
+  function copySlotFrame(item: MultiviewSlot) {
+    const captured = { token: Symbol('frame-copy'), slotId: item.id, frame: item.frame, generation: context.current };
+    frameCopy.current = captured; setCopyingFrame(item.id);
+    const current = () => frameCopy.current === captured && captured.generation === context.current
+      && currentSlotFrame(captured.slotId, captured.frame) && ownerRef.current === owner && authorityRef.current === authority && !isClientSessionBlocked();
+    let release = () => {};
+    const png = (async () => {
+      if (!await loadFrame(captured.frame, true) || !current()) throw new DOMException('原帧已变化，复制已取消', 'AbortError');
+      const local = frameRef.current[captured.frame]?.localFrame;
+      if (!local?.isCurrent()) throw new DOMException('原帧已变化，复制已取消', 'AbortError');
+      release = local.retain(); await local.authorize();
+      if (!current() || !local.isCurrent()) throw new DOMException('原帧已变化，复制已取消', 'AbortError');
+      return local.blob;
+    })();
+    // This write starts in the click, not after the original PNG has loaded.
+    void copyPngBlob(png).then(() => { if (current()) setNotice('原尺寸PNG已复制'); })
+      .catch(cause => { if (current()) setNotice(cause instanceof Error ? cause.message : '复制未完成，请重试'); })
+      .finally(() => { void png.then(() => release(), () => release()); if (frameCopy.current === captured) { frameCopy.current = null; setCopyingFrame(''); } });
+  }
+  useEffect(() => {
+    const copy = frameCopy.current;
+    if (copy && (copy.generation !== context.current || !draft?.slots.some(item => item.id === copy.slotId && item.frame === copy.frame))) { frameCopy.current = null; setCopyingFrame(''); }
+    const target = previewSlot.current;
+    if (pageView !== 'editor' || target && !draft?.slots.some(item => item.id === target.slotId && item.frame === target.frame)
+      || !target && preview !== null && draft?.editing && preview !== editorFrame) { previewSlot.current = null; setPreview(null); }
+  }, [draft, pageView, authority, preview, editorFrame]);
   const loadPreviewManifest = useCallback(async () => {
     if (!info || !visible || previewRef.current.manifest?.sourceVersion === info.sourceVersion) return;
     const epoch = context.current;
@@ -708,16 +794,16 @@ function MultiviewPageContent() {
   useEffect(() => {
     if (!draft) return;
     const keep = new Set([...draft.slots.map(item => item.frame), ...Array.from(scrubFrames.current), ...Object.values(quickPreview), ...(draft.editing ? [-2, -1, 0, 1, 2].map(delta => editorFrame + delta) : []), ...(preview !== null ? [preview] : [])]);
-    let bytes = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0);
+    let bytes = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0) + Array.from(retiredOriginals.current.values()).reduce((a, b) => a + b, 0);
     const removable: number[] = [];
     for (const frame of Object.keys(frames).map(Number)) {
       if (frame === preview || scrubFrames.current.has(frame) || requests.current.has(frame) || previewFrameRequests.current.has(frame) || [frames[frame]?.url, frames[frame]?.previewUrl].some(url => url && usedUrls.current.has(url))) continue;
       if (!keep.has(frame) && (Object.keys(frames).length > 24 || bytes > ORIGINAL_MEMORY_LIMIT) || frames[frame]?.url && !originalTargets.current.has(frame) && bytes > ORIGINAL_MEMORY_LIMIT) { removable.push(frame); bytes -= frames[frame].originalBytes || 0; }
     }
     if (!removable.length) return;
-    for (const frame of removable) for (const url of [frames[frame]?.url, frames[frame]?.previewUrl]) if (url) { URL.revokeObjectURL(url); objectUrls.current.delete(url); }
+    for (const frame of removable) for (const url of [frames[frame]?.url, frames[frame]?.previewUrl]) if (url) retireFrameUrl(url, url === frames[frame]?.url ? frames[frame].originalBytes : 0);
     frameRef.current = Object.fromEntries(Object.entries(frameRef.current).filter(([key]) => !removable.includes(Number(key)))); setFrames(frameRef.current);
-  }, [draft, editorFrame, frames, preview, quickPreview, releasedPixels]);
+  }, [draft, editorFrame, frames, preview, quickPreview, releasedPixels, retireFrameUrl]);
   const validSlots = draft?.slots.filter(item => frames[item.frame]?.previewUrl || frames[item.frame]?.url) || [];
   const dimensions = useMemo(() => info && draft ? multiviewDimensions(info, draft.slots.length, draft.layout) : null, [draft, info]);
   useEffect(() => {
@@ -1050,22 +1136,17 @@ function MultiviewPageContent() {
     ? <img src={frames[frame].previewUrl || frames[frame].url} alt={alt} draggable={false} />
     : previewManifest && atlasUrl(frame) ? <AtlasFrame manifest={previewManifest} url={atlasUrl(frame)!} frame={frame} alt={alt} className={className} /> : null;
   const displayScope = JSON.stringify([authority, taskId, info?.sourceVersion, context.current]);
-  const originalMemory = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0);
-  function trackFrameUrl(url: string, used: boolean) {
-    const count = (usedUrls.current.get(url) || 0) + (used ? 1 : -1);
-    if (count > 0) usedUrls.current.set(url, count);
-    else { usedUrls.current.delete(url); setReleasedPixels(value => value + 1); }
-  }
+  const originalMemory = Object.values(frames).reduce((total, item) => total + (item.originalBytes || 0), 0) + Array.from(retiredOriginals.current.values()).reduce((a, b) => a + b, 0);
   const stableFrameVisual = (frame: number, alt: string, fallback: ReactNode) => <MultiviewFrameImage key={displayScope}
     src={(originalMemory <= ORIGINAL_MEMORY_LIMIT || originalTargets.current.has(frame) || preview === frame ? frames[frame]?.url : undefined) || frames[frame]?.previewUrl} alt={alt}
     onUsage={trackFrameUrl}
-    onFailure={url => { if (frameRef.current[frame]?.url === url) { if (!usedUrls.current.has(url)) { URL.revokeObjectURL(url); objectUrls.current.delete(url); } frameRef.current = { ...frameRef.current, [frame]: { ...frameRef.current[frame], url: undefined, originalBytes: undefined, error: '原尺寸画面未完整显示，可重试这一格' } }; setFrames(frameRef.current); } }}
+    onFailure={url => { if (frameRef.current[frame]?.url === url) { retireFrameUrl(url, frameRef.current[frame].originalBytes); frameRef.current = { ...frameRef.current, [frame]: { ...frameRef.current[frame], url: undefined, blob: undefined, localFrame: undefined, originalBytes: undefined, error: '原尺寸画面未完整显示，可重试这一格' } }; setFrames(frameRef.current); } }}
     >{fallback}</MultiviewFrameImage>;
   const playerEpoch = context.current;
   const mediaCurrent = () => playerEpoch === context.current && authorityRef.current === authority && !isClientSessionBlocked();
   const player = info && <div className={styles.videoArea} style={{ '--mv-video-ratio': info.width / info.height } as CSSProperties}>
     <div className={editing && editorMode === 'frame' ? styles.editorStage : styles.originalStage}>
-    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url && !currentFrame?.previewUrl && !atlasUrl(editorFrame)} onClick={() => { const frame = editorFrame; const epoch = context.current; void loadFrame(frame, true).then(ready => { if (ready && epoch === context.current) setPreview(frame); }); }} aria-label="放大待选帧">{stableFrameVisual(editorFrame, '待选帧，尚未应用', <span>{previewState.loading ? '正在准备快速预览…' : currentFrame?.previewError || currentFrame?.error || previewState.error || '正在读取预览…'}</span>)}</button>}
+    {editing && editorMode === 'frame' && <button type="button" className={styles.candidate} disabled={!currentFrame?.url && !currentFrame?.previewUrl && !atlasUrl(editorFrame)} onClick={() => void openFramePreview(editorFrame)} aria-label="放大待选帧">{stableFrameVisual(editorFrame, '待选帧，尚未应用', <span>{previewState.loading ? '正在准备快速预览…' : currentFrame?.previewError || currentFrame?.error || previewState.error || '正在读取预览…'}</span>)}</button>}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <video ref={video} src={source} hidden={Boolean(editing && editorMode !== 'video')} controls playsInline preload="metadata" loop={loop.enabled}
       onLoadedMetadata={event => { if (!mediaCurrent()) return; event.currentTarget.pause(); event.currentTarget.currentTime = Math.min(info.duration, editing ? info.timestamps[editorFrame] : viewRef.current.time); }}
@@ -1117,7 +1198,8 @@ function MultiviewPageContent() {
           disabled={exporting || applyingFrame || Boolean(draft?.editing) || reduceCount !== null || Boolean(quickFrame && quickFrame !== item.id)}
           onBegin={() => beginScrub(item.id)} onName={anchor => void renameSlot(item, anchor)}
           onStep={delta => stepSlot(item.id, delta)} onEdit={() => openEditor(item)}
-          onZoom={() => { const frame = item.frame; const epoch = context.current; void loadFrame(frame, true).then(ready => { if (ready && epoch === context.current) setPreview(frame); }); }} /></>; }}
+          copying={copyingFrame === item.id} onCopy={() => copySlotFrame(item)}
+          onZoom={() => void openFramePreview(item.frame, item.id)} /></>; }}
       </SortableFrame>)}
     </div></SortableContext></DndContext>;
   }
@@ -1125,8 +1207,8 @@ function MultiviewPageContent() {
   return <div className={styles.page}>
     <PageBanner title="3D多视图" description="一张主图生成旋转视频，再选帧排版。已有视频也可直接制作，不会重新生成。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
     <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}><WandSparkles size={16} />工作台</button><button type="button" aria-pressed={pageView !== 'editor'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { video.current?.pause(); writeLocation('generations'); }}><History size={16} />记录{['submitting', 'submitted', 'unknown'].includes(generation.phase) && <span className={styles.tabBadge}>进行中</span>}</button></div>
-    {pageView === 'generations' && <MultiviewRecords owner={owner} authority={authority}
-      onTask={id => void selectTask(id)} onWork={(id, sourceTask) => void openSavedWork(id, sourceTask)} onManage={id => writeLocation('works', id)} onDraft={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} />}
+    <div hidden={pageView !== 'generations'}><MultiviewRecords key={`${owner}:${authority}`} owner={owner} authority={authority} active={pageView === 'generations' && sessionReady}
+      onTask={id => void selectTask(id)} onWork={(id, sourceTask) => void openSavedWork(id, sourceTask)} onManage={id => writeLocation('works', id)} onDraft={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} /></div>
     {pageView === 'works' && <MultiviewWorks owner={owner} authority={authority} initialWorkId={query.get('workId') || undefined}
       onEdit={(work: MultiviewWorkDto) => { void (async () => {
         if (!owner || isClientSessionBlocked()) return;
@@ -1246,7 +1328,7 @@ function MultiviewPageContent() {
           ]} />
         </div>
       </footer>
-      {preview !== null && frames[preview]?.url && <ZoomableImagePreview src={frames[preview].url!} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => setPreview(null)} safeDetails={{ width: info.width, height: info.height }} />}
+      {preview !== null && frames[preview]?.localFrame?.isCurrent() && <ZoomableImagePreview src={frames[preview].url!} localFrame={frames[preview].localFrame} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => { previewSlot.current = null; setPreview(null); }} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}
     <MultiviewSourcePicker open={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={id => void selectTask(id)} currentTaskId={taskId} />
     </div>

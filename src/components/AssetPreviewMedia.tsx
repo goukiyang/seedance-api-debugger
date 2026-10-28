@@ -1,6 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Copy, Maximize2 } from 'lucide-react';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
 import { VideoLoopButton } from '@/components/VideoLoopButton';
 import { MultiviewEntry } from '@/components/MultiviewEntry';
@@ -14,11 +17,39 @@ type AssetPreviewMediaProps = {
   src: string;
   poster?: string;
   title: string;
+  scope?: 'drawer';
+  taskId?: string | null;
+  onExpand?: () => void;
   onClaim: (key: string, src: string, media: HTMLMediaElement) => AssetPlaybackLease;
   onRelease: (lease: AssetPlaybackLease, key: string, src: string, media: HTMLMediaElement) => void;
 };
 
-export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClaim, onRelease }: AssetPreviewMediaProps) {
+export function AssetPreviewMedia({ kind, contentKey, src, poster, title, scope, taskId, onExpand, onClaim, onRelease }: AssetPreviewMediaProps) {
+  const { user, hasLoadedUser, sessionChanged, userLoadError } = useAppSession();
+  const actualTaskId = scope === 'drawer' && kind === 'video' && taskId && String(contentKey) === `video_task:${taskId}` ? taskId : null;
+  const [copyStatus, setCopyStatus] = useState('');
+  const alive = useRef(true), copySequence = useRef(0);
+  const copyScope = useRef({ owner: user?.id, taskId: actualTaskId, src, sessionChanged, userLoadError, hasLoadedUser });
+  copyScope.current = { owner: user?.id, taskId: actualTaskId, src, sessionChanged, userLoadError, hasLoadedUser };
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { copySequence.current++; setCopyStatus(''); }, [actualTaskId, src, user?.id]);
+  useEffect(() => {
+    if (copyStatus !== '已复制') return;
+    const timer = setTimeout(() => setCopyStatus(''), 4000); return () => clearTimeout(timer);
+  }, [copyStatus]);
+  function copyTaskId() {
+    const captured = copyScope.current, sequence = ++copySequence.current;
+    const current = () => alive.current && sequence === copySequence.current && copyScope.current.owner === captured.owner
+      && copyScope.current.taskId === captured.taskId && copyScope.current.src === captured.src
+      && copyScope.current.hasLoadedUser && !copyScope.current.sessionChanged && !copyScope.current.userLoadError
+      && captured.owner && captured.hasLoadedUser && !captured.sessionChanged && !captured.userLoadError && !isClientSessionBlocked();
+    if (!actualTaskId || !current()) return;
+    if (!navigator.clipboard?.writeText) { setCopyStatus('无法自动复制，可选中任务编号复制'); return; }
+    try {
+      void navigator.clipboard.writeText(actualTaskId).then(() => { if (current()) setCopyStatus('已复制'); })
+        .catch(() => { if (current()) setCopyStatus('复制未完成，可选中任务编号复制'); });
+    } catch { if (current()) setCopyStatus('复制未完成，可选中任务编号复制'); }
+  }
   const state = useMediaPreviewState(contentKey, contentKey, src);
   const loop = useVideoLoopState(kind === 'video' ? src : undefined, contentKey);
   const stateRef = useRef(state);
@@ -103,8 +134,15 @@ export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClai
   };
 
   if (kind === 'video') {
+    const actions = <div className={styles.actions}><VideoLoopButton enabled={loop.enabled} onToggle={loop.toggle} disabled={!src || !loop.ready} storageUnavailable={loop.storageUnavailable} />
+      <MultiviewEntry contentKey={contentKey} className={scope === 'drawer' ? styles.primaryAction : undefined} />
+      {scope === 'drawer' && onExpand && <button type="button" onClick={onExpand} title="放大预览视频" aria-label="放大预览视频"><Maximize2 size={16} /></button>}</div>;
     return (
-      <div className={styles.videoShell}>
+      <div className={`${styles.videoShell} ${scope === 'drawer' ? styles.drawer : ''}`}>
+      {scope === 'drawer' && <div className={styles.drawerTools}>
+        {actualTaskId && <div className={styles.taskId}><span>任务编号</span><code>{actualTaskId}</code><button type="button" title="复制任务编号" aria-label="复制任务编号" disabled={!user?.id || !hasLoadedUser || sessionChanged || Boolean(userLoadError)} onClick={copyTaskId}>{copyStatus === '已复制' ? <Check size={16} /> : <Copy size={16} />}</button></div>}
+        {actions}{copyStatus && <span className={styles.copyStatus} role="status">{copyStatus}</span>}
+      </div>}
       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
       <video
         ref={setMediaRef}
@@ -123,8 +161,7 @@ export function AssetPreviewMedia({ kind, contentKey, src, poster, title, onClai
         onEnded={event => { if (event.currentTarget.ended) releaseLease(event.currentTarget, true, true); }}
         onError={event => releaseLease(event.currentTarget, true)}
       />
-      <div className={styles.actions}><VideoLoopButton enabled={loop.enabled} onToggle={loop.toggle} disabled={!src || !loop.ready} storageUnavailable={loop.storageUnavailable} />
-      <MultiviewEntry contentKey={contentKey} /></div>
+      {scope !== 'drawer' && actions}
       </div>
     );
   }

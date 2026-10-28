@@ -2661,7 +2661,7 @@ function AssetsPageContent() {
       )}
 
       {activeItem && !previewAccountChanged && !mediaPreviewOpen && (
-        <aside ref={detailDrawerRef} className={`asset-detail-drawer ${assetStyles.detailDrawer}`} aria-label="资产详情">
+        <aside ref={detailDrawerRef} className={`asset-detail-drawer ${assetStyles.detailDrawer} ${activeItem.kind === 'video' ? assetStyles.videoDrawer : ''}`} aria-label="资产详情">
           <div className="asset-detail-header">
             <div>
               <span>{activeItem.isEnhanceTask ? '超分视频资产' : activeItem.kind === 'video' ? '视频资产' : activeItem.kind === 'audio' ? '音频资产' : '图片资产'}</span>
@@ -2673,8 +2673,8 @@ function AssetsPageContent() {
           </div>
           <div className={assetStyles.detailBody}>
           <div
-            className={`asset-detail-preview ${assetStyles.detailPreview}`}
-            style={{ aspectRatio: activePreviewAspectRatio }}
+            className={`asset-detail-preview ${assetStyles.detailPreview} ${activeItem.kind === 'video' ? assetStyles.videoDetailPreview : ''}`}
+            style={activeItem.kind === 'video' ? undefined : { aspectRatio: activePreviewAspectRatio }}
           >
             {activeItem.isEnhanceTask && (
               <span className="asset-detail-preview-badge">
@@ -2687,6 +2687,9 @@ function AssetsPageContent() {
                 <AssetPreviewMedia
                   key={`${user?.id || 'anonymous'}:${activeItem.id}:${activePreviewSrc}`}
                   kind="video"
+                  scope="drawer"
+                  taskId={activeItem.source === 'video_task' ? activeItem.taskId : null}
+                  onExpand={openMediaPreview}
                   contentKey={activeContentKey}
                   src={activePreviewSrc}
                   poster={activeItem.thumbnailUrl || undefined}
@@ -2694,15 +2697,6 @@ function AssetsPageContent() {
                   onClaim={claimDetailPlayback}
                   onRelease={releaseDetailPlayback}
                 />
-                <button
-                  type="button"
-                  className={assetStyles.detailPreviewExpand}
-                  onClick={openMediaPreview}
-                  aria-label="放大预览视频"
-                  title="放大预览"
-                >
-                  <Maximize2 size={16} aria-hidden="true" />
-                </button>
               </>
             ) : activeItem.kind === 'audio' && activePreviewSrc && activeContentKey ? (
               <div className="asset-detail-audio-player">

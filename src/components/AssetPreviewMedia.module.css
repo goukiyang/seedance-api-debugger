@@ -2,3 +2,19 @@
 .videoShell > video { display: block; min-width: 0; min-height: 0; object-fit: contain; }
 .videoShell > span { padding: 4px; }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; padding: 4px; }
+.videoShell.drawer { position: static; display: flex; flex-direction: column; align-items: stretch; width: 100%; }
+.videoShell.drawer > video { position: static; width: 100%; height: auto; max-height: calc(100dvh - 240px); object-fit: contain; }
+.drawerTools { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; background: var(--bg-panel); }
+.drawer .actions { justify-content: flex-start; padding: 0; }
+.taskId { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 12px; }
+.taskId > span { flex-shrink: 0; padding-block: 4px; color: var(--text-secondary); }
+.taskId code { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; user-select: text; padding-block: 4px; }
+.taskId button, .drawer .actions > button { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; }
+.drawer .primaryAction { background: var(--accent-color, #4f6cef); border-color: transparent; color: var(--button-primary-text, #f7f9ff); }
+.copyStatus { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .taskId { flex-wrap: wrap; }
+  .taskId code { flex-basis: calc(100% - 44px); order: 2; }
+  .taskId button { margin-left: auto; }
+  .videoShell.drawer > video { max-height: calc(100dvh - 260px); }
+}

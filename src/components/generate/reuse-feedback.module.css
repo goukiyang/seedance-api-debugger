@@ -1,0 +1,6 @@
+.success { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-block: 6px; color: var(--text-secondary); font-size: 13px; }
+.success button { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 3px 7px; }
+.recovery { margin-block: 6px; color: var(--text-secondary); font-size: 12px; }
+.recovery summary { width: fit-content; cursor: pointer; padding-block: 4px; }
+.recovery p { margin-block: 6px; overflow-wrap: anywhere; }
+.recovery button { margin-right: 8px; margin-bottom: 4px; min-height: 34px; }

@@ -62,7 +62,8 @@ import {
   type TaskReuseContext,
   type TaskReuseIntent,
 } from '@/lib/navigation/task-reuse-intent';
-import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, type TaskReuseClientRecord, type TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, taskReuseReplacedInput, type CompletedTaskReuse, type TaskReuseClientRecord, type TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import { TaskReuseStatus, type ReuseUndoAction } from './TaskReuseStatus';
 import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 
 // ============================================================================
@@ -768,6 +769,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [videoCardPanelOpen, setVideoCardPanelOpen] = useState(false);
   const [reuseDraft, setReuseDraft] = useState<ReuseDraft | null>(null);
   const [reuseMessage, setReuseMessage] = useState('');
+  const [reuseSuccess, setReuseSuccess] = useState('');
+  const [completedReuse, setCompletedReuse] = useState<CompletedTaskReuse | null>(null);
+  const [reuseUndoAction, setReuseUndoAction] = useState<ReuseUndoAction | null>(null);
   const [reuseLoading, setReuseLoading] = useState(false);
   const [reusingTaskId, setReusingTaskId] = useState<string | null>(null);
   const [reusePreflightPending, setReusePreflightPending] = useState(false);
@@ -787,7 +791,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [reuseApplicationTick, setReuseApplicationTick] = useState(0);
   const pendingReuseApplicationRef = useRef<{
     taskId: string; reuseKey: number; accountId: string; bridgeKey: string; tabId: string;
-    editEpoch: number; formApplied: boolean; message: string;
+    editEpoch: number; formApplied: boolean; message: string; ordinary: boolean; inputReplaced: boolean;
     projectId: string; videoCardId: string; videoBranchId: string;
   } | null>(null);
   const [composerReuseState, setComposerReuseState] = useState<ComposerReuseState & { key: string }>({
@@ -943,6 +947,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
     inputRecoveryRef.current = capture ? { key: workspaceBridgeKey, capture } : null;
   }, [workspaceBridgeKey]);
+  const reportReuseUndoReady = useCallback((action: ReuseUndoAction | null) => {
+    if (workspaceBridgeKeyRef.current === workspaceBridgeKey) setReuseUndoAction(action ? { ...action, run: () => { setReuseSuccess(''); action.run(); } } : null);
+  }, [workspaceBridgeKey]);
 
   const captureInputRecoveryTarget = useCallback((target?: { projectId: string; videoCardId: string; videoBranchId: string }) => {
     const context = { ...readReuseContext(), ...target };
@@ -1058,6 +1065,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setStudioHandoff(null);
     setStudioWorkspaceTabId(null);
     setReuseDraft(null);
+    setCompletedReuse(null); setReuseUndoAction(null); setReuseSuccess('');
     setInputRecoveryTarget(null);
     setReuseLoading(false);
     setReusingTaskId(null);
@@ -1817,6 +1825,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     options: { clearUrl?: boolean; scrollToComposer?: boolean; resume?: boolean; confirmed?: { record: TaskReuseClientRecord; body: Record<string, unknown>; status: number } } = {},
   ) => {
     if (reuseInFlightRef.current || !options.confirmed && (reuseIntentRef.current?.phase === 'unknown' || reuseIntentRef.current?.phase === 'applying')) return;
+    setReuseSuccess(''); setCompletedReuse(null); setReuseUndoAction(null);
     const accountId = currentUser?.id || null;
     if (loadingUser || !accountId) {
       setReuseMessage('登录状态尚未确认，未发送复用请求。');
@@ -2129,9 +2138,20 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const skipped = data.skipped_references || 0;
       const restored = data.restored_references || 0;
       const message = `${parameterOnly ? '仅恢复旧任务文字与参数，当前素材保留；原参考素材未恢复。' : `已复用输入，恢复 ${restored} 项素材${skipped ? `，${skipped} 项未能恢复` : ''}。`}${data.inputWarnings?.join(' ') || ''}${projectAvailable ? '' : '原项目当前不可用，已保留当前保存位置，请生成前重新选择。'}`;
+      const backup = activeReuseRecord.current?.backup;
+      const after: TaskReuseInputBackup | null = backup ? { ...backup,
+        workspace: { ...backup.workspace, items: Array.isArray(data.workspace_assets) ? data.workspace_assets as TaskReuseInputBackup['workspace']['items'] : backup.workspace.items },
+        fields: { ...backup.fields, prompt: data.draft.prompt, model: data.draft.model || backup.fields.model,
+          provider: data.draft.provider || backup.fields.provider, generationMode: data.draft.generation_mode || backup.fields.generationMode,
+          ratio: data.draft.ratio || backup.fields.ratio, duration: data.draft.duration ?? backup.fields.duration, resolution: data.draft.resolution || backup.fields.resolution,
+          seed: data.draft.seed ?? backup.fields.seed, generateAudio: data.draft.generate_audio ?? backup.fields.generateAudio,
+          returnLastFrame: data.draft.return_last_frame ?? backup.fields.returnLastFrame, watermark: data.draft.watermark ?? backup.fields.watermark,
+          resolutionApprovalConfirmed: data.draft.resolution_approval_confirmed ?? false } } : null;
       pendingReuseApplicationRef.current = {
         taskId, reuseKey, accountId, bridgeKey: capturedContext.workspaceBridgeKey, tabId: capturedTabId,
         editEpoch: capturedContext.editEpoch, formApplied: false, message,
+        ordinary: !parameterOnly && skipped === 0 && !data.inputWarnings?.length && projectAvailable,
+        inputReplaced: Boolean(backup && after && taskReuseReplacedInput(backup, after)),
         projectId: targetProjectId, videoCardId: targetCardId, videoBranchId: targetBranchId,
       };
       updateReuseIntent({ ...intent, phase: 'applying' });
@@ -2260,20 +2280,29 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       || (selectedProjectId && videoCardsLoadedProjectId !== selectedProjectId)
       || (selectedVideoCardId && videoBranchesLoadedCardId !== selectedVideoCardId)) return;
     if (selectedProjectId !== pending.projectId) { pendingReuseApplicationRef.current = null; updateReuseIntent({ ...activeIntent, phase: 'failed' }); setReuseOutcomeUnknown(false); setReuseServerApplied(false); if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied'); setReuseMessage('服务器已完成，保存位置已变化，当前草稿未继续替换。'); return; }
-    let message = pending.message;
+    let message = pending.message, ordinary = pending.ordinary;
     if (pending.videoCardId && !videoCards.some((card) => card.id === pending.videoCardId && card.project_id === pending.projectId
       && card.status !== 'sealed' && card.status !== 'archived')) {
       message += '原视频卡当前不可用，已保留原来路，请生成前处理该归属。';
+      ordinary = false;
     } else if (pending.videoBranchId && !videoBranches.some((branch) => branch.id === pending.videoBranchId)) {
       message += '原方向当前不可用，已保留原来路，请生成前重新确认。';
+      ordinary = false;
     }
     const intent = reuseIntentRef.current;
-    try { if (activeReuseRecord.current) finishTaskReuseClientRecord(activeReuseRecord.current, 'applied'); else sessionStorage.removeItem(taskReuseReceiptKey(pending.accountId, pending.tabId, pending.taskId)); }
-    catch { /* The applied form still completes, but a retained fence fails safe later. */ }
+    try {
+      if (activeReuseRecord.current) {
+        const applied = ordinary ? { reuseKey: pending.reuseKey, workspaceBridgeKey: pending.bridgeKey, inputReplaced: pending.inputReplaced,
+          target: { projectId: pending.projectId, videoCardId: pending.videoCardId, videoBranchId: pending.videoBranchId } } : undefined;
+        const completed = finishTaskReuseClientRecord(activeReuseRecord.current, 'applied', applied);
+        if (applied) setCompletedReuse(completed as CompletedTaskReuse);
+      } else sessionStorage.removeItem(taskReuseReceiptKey(pending.accountId, pending.tabId, pending.taskId));
+    } catch { ordinary = false; message += '恢复记录暂未保存到浏览器，请保留页面。'; }
     if (shouldConsumeTaskReuseQuery('applied')) transitionReuseSourceUrl(pending.taskId, 'consumed');
     pendingReuseApplicationRef.current = null;
     if (intent) updateReuseIntent({ ...intent, phase: 'done' });
-    setReuseOutcomeUnknown(false); setReuseServerApplied(false); setReuseMessage(message);
+    setReuseOutcomeUnknown(false); setReuseServerApplied(false); setReuseMessage(ordinary ? '' : message);
+    setReuseSuccess(ordinary ? `${pending.accountId}:${pending.taskId}:${pending.reuseKey}` : '');
   }, [reuseApplicationTick, reuseDraft, loadingProjects, loadingVideoCards, loadingVideoBranches,
     selectedProjectId, selectedVideoCardId, videoCardsLoadedProjectId, videoBranchesLoadedCardId,
     videoCards, videoBranches, readReuseContext, updateReuseIntent, transitionReuseSourceUrl]);
@@ -3208,9 +3237,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       {/* ===== 页面主体 ===== */}
       <main ref={composerMainRef} className="composer-main" aria-busy={reuseUiLocked}>
         {projectReturnTo && (
-          <div className="composer-prefill-notice">
+          <div>
             <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>
-            <span>返回来源页面不会清除本次已选内容。</span>
           </div>
         )}
 
@@ -3630,6 +3658,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
 
+        {reuseSuccess && !reuseOutcomeUnknown && !reuseServerApplied && <TaskReuseStatus key={reuseSuccess} identity={reuseSuccess} undo={reuseUndoAction} />}
         {reuseMessage && (
           <div className={`composer-prefill-notice ${reuseLoading || reuseIntent?.phase === 'waiting' || reuseIntent?.phase === 'applying' ? 'is-loading' : ''}`} role="status" aria-live="polite">
             <span>{reuseMessage}</span>
@@ -3722,6 +3751,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onWorkspaceBusyChange={reportWorkspaceBusy}
           onWorkspaceRefreshReady={reportWorkspaceRefreshReady}
           onInputRecoveryReady={reportInputRecoveryReady}
+          completedTaskReuse={completedReuse}
+          onReuseUndoReady={reportReuseUndoReady}
+          inputRecoveryContext={() => ({ ...readReuseContext(), surface: isIpSurface ? 'ip' as const : 'normal' as const })}
           onCaptureInputRecoveryTarget={captureInputRecoveryTarget}
           inputRecoveryScope={() => { const context = readReuseContext(); return JSON.stringify([context.projectId, context.videoCardId, context.videoBranchId, context.editEpoch]); }}
           onReuseStateChange={reportComposerReuseState}

@@ -10,7 +10,7 @@ import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { isSafeIdentifier, useMediaPreviewState, type MediaPreviewZoomMode } from '@/lib/hooks/use-media-preview-state';
-import { beginImageForegroundPreparation, captureImageReadSessionScope, invalidateImageReadSource, resetImageReadForRetry, type ImageReadProgress } from '@/lib/media/image-read-session';
+import { beginImageForegroundPreparation, captureImageReadSessionScope, invalidateImageReadSource, resetImageReadForRetry, type ImageReadProgress, type LocalFrameContext } from '@/lib/media/image-read-session';
 import type { HdDescription } from '@/lib/media/hd-source-session';
 import { prepareImagePreview, type ImagePreviewPreparation, type PreparedImagePreviewState } from '@/lib/media/image-preview-session';
 import { handHdImageDownloadToBrowser } from '@/lib/media/native-download';
@@ -65,6 +65,7 @@ export type ZoomableImagePreviewProps = {
   comparisonCandidates?: ImageComparisonSource[];
   sourceRole?: ImageComparisonSource['role'];
   sourceVersion?: string;
+  localFrame?: LocalFrameContext;
   imageNeighbors?: ImageReadCandidate[];
   /** Same-session first-click lease, adopted before the initiating lease ends. */
   preparation?: ImagePreviewPreparation;
@@ -127,7 +128,7 @@ function formatImageBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', preparation, className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; preparation?: ImagePreviewPreparation; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
+function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, version = '', preparation, localFrame, className, style, onReady, onThumbnailReady, onUnavailable }: { src: string; thumbnailSrc?: string; alt: string; original: boolean; previewOnly?: boolean; version?: string; preparation?: ImagePreviewPreparation; localFrame?: LocalFrameContext; className: string; style: CSSProperties; onReady?: (size: IntrinsicSize, decoded: DecodedImage) => void; onThumbnailReady?: (size: IntrinsicSize) => void; onUnavailable?: () => void }) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const image = useRef<HTMLImageElement>(null);
@@ -152,14 +153,14 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     if (!account) return;
     const reusable = !attempt && preparation?.account === account && preparation.source === src && preparation.sourceVersion === version
       && preparation.previewOnly === previewOnly && preparation.original === original && preparation.isCurrent();
-    const handle = reusable && preparation ? preparation : prepareImagePreview({ account, source: src, sourceVersion: version, previewOnly, original });
+    const handle = reusable && preparation ? preparation : prepareImagePreview({ account, source: src, sourceVersion: version, previewOnly, original, localFrame });
     handle.confirmOpen();
     // Subscribe first: closing the click's lease must never abort and relaunch
     // the already accepted foreground read between the card and this dialog.
     const unsubscribe = handle.subscribe(state => setPrepared({ identity, handle, state }));
     handle.release();
     return unsubscribe;
-  }, [account, identity, src, version, previewOnly, original, attempt, preparation]);
+  }, [account, identity, src, version, previewOnly, original, attempt, preparation, localFrame]);
   const current = prepared?.identity === identity && visible ? prepared : null;
   const state = current?.state;
   const readResult = state?.result;
@@ -265,11 +266,11 @@ type ComparisonNotice = { kind: 'retry' | 'reselect'; message: string; saved?: C
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, localFrame, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const owner = user?.id || '';
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
-  const readScopeRef = useRef({ account, preparation, previewOnly }); readScopeRef.current = { account, preparation, previewOnly };
+  const readScopeRef = useRef({ account, preparation, previewOnly, localFrame }); readScopeRef.current = { account, preparation, previewOnly, localFrame };
   const internalPreparations = useRef<Partial<Record<Side, ImagePreviewPreparation>>>({});
   const backdropRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -442,7 +443,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         }
         const provided = readScopeRef.current.preparation;
         const handle = side === 'current' && provided?.isCurrent() && provided.account === scope.account && provided.source === next.src && provided.sourceVersion === (next.version || '') && provided.previewOnly === Boolean(scope.previewOnly || next.previewOnly) && !provided.original
-          ? provided : prepareImagePreview({ account: scope.account, source: next.src, sourceVersion: next.version, previewOnly: scope.previewOnly || next.previewOnly });
+          ? provided : prepareImagePreview({ account: scope.account, source: next.src, sourceVersion: next.version, previewOnly: scope.previewOnly || next.previewOnly,
+            localFrame: scope.localFrame?.url === next.src ? scope.localFrame : undefined });
         const oldHandle = internalPreparations.current[side]; internalPreparations.current[side] = handle;
         oldHandle?.release(); releasePriority();
         setMessage('');
@@ -968,6 +970,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
         return <PreviewImage key={`${id}:${image.src}:${image.version || ''}:${originals[viewIdentity(side, image)] === undefined ? 'auto' : originals[viewIdentity(side, image)] ? 'original' : 'hd'}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly || image.previewOnly} original={!previewOnly && !image.previewOnly && (originals[viewIdentity(side, image)] ?? readImageView(owner, viewIdentity(side, image), pair, axis)?.original ?? false)}
           preparation={side === 'current' && preparation?.source === image.src && preparation.sourceVersion === (image.version || '') ? preparation : internalPreparations.current[side]}
+          localFrame={localFrame?.url === image.src ? localFrame : undefined}
           className={styles.compareImage}
           style={{ width: dimensionsKnown ? base.width : undefined, height: dimensionsKnown ? base.height : undefined,
             transform: 'translate(calc(-50% + ' + (view.x * base.width) + 'px), calc(-50% + ' + (view.y * base.height) + 'px)) scale(' + view.scale + ')' }}
@@ -1041,7 +1044,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             const authorizationSource = decoded?.displayKind === 'hd' ? versionedHdSource(selectedImage.src, 'hd', decoded.hd?.sourceVersion, decoded.hd?.representationVersion)
               : displaySource(selectedImage.src, 'original');
             setCopyState({ src: copySource, busy: true }); void copyImage(copySource, { isCurrent: current, authorizationSource,
-              expectedVersion: decoded?.authorizationVersion, representationVersion: decoded?.representationVersion }).then(() => { if (current()) setCopyState({ src: copySource, success: true, message: copying }); }).catch(error => { if (current()) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
+              expectedVersion: decoded?.authorizationVersion, representationVersion: decoded?.representationVersion,
+              localFrame: localFrame?.url === selectedImage.src ? localFrame : undefined }).then(() => { if (current()) setCopyState({ src: copySource, success: true, message: copying }); }).catch(error => { if (current()) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
           }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
           {!selectedPreviewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => {
             userAction.current++; stopGestures();

@@ -1,12 +1,12 @@
 'use client';
 
-import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult } from './image-read-session';
+import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult, type LocalFrameContext } from './image-read-session';
 import { acquireHdImageSource, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
 import { hdDescriptionUsesOriginal, type HdDisplayKind } from './hd-display-policy';
 import { imageDisplaySource } from './image-comparison';
 import { versionedHdSource } from '@/lib/hooks/use-hd-image-source';
 
-export type ImagePreviewPreparationOptions = { account: string; source: string; sourceVersion?: string; previewOnly?: boolean; original?: boolean; intent?: 'prepare' | 'open' };
+export type ImagePreviewPreparationOptions = { account: string; source: string; sourceVersion?: string; previewOnly?: boolean; original?: boolean; intent?: 'prepare' | 'open'; localFrame?: LocalFrameContext };
 export type PreparedImagePreviewState = {
   readSource: string; version: string; displayKind: HdDisplayKind; fullSize: boolean;
   description?: HdDescription; descriptorPending: boolean; denied?: boolean; error?: boolean; fallback: boolean; result: ImageReadResult;
@@ -63,6 +63,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const active = () => {
     if (disposed) return false;
     if (!sameScope()) { deny('账号状态已变化，图片读取已取消'); return false; }
+    if (options.localFrame && !options.localFrame.isCurrent()) { deny('原帧来源已变化，请重新打开'); return false; }
     return true;
   };
   const unconfirmed = () => {
@@ -79,7 +80,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
         : imageDisplaySource(source, 'original');
     // Preview validators belong to their own representation. They must never
     // be compared with the original/HD descriptor version.
-    const version = kind === 'hd' ? description?.sourceVersion || '' : kind === 'preview' ? '' : sourceVersion;
+    const version = options.localFrame ? sourceVersion : kind === 'hd' ? description?.sourceVersion || '' : kind === 'preview' ? '' : sourceVersion;
     const key = JSON.stringify([kind, readSource, version]);
     const previous = state, previousKey = readKey, previousSequence = readSequence;
     state = { ...state, readSource, version, displayKind: kind, fullSize: kind !== 'preview', description,
@@ -151,7 +152,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
         } else endPriority();
       }
       if (kind === 'preview' && (result.unconfirmed || result.progress.phase === 'unsupported' || result.progress.phase === 'unavailable')) endPriority();
-    });
+    }, options.localFrame);
     // Cached callbacks can synchronously select another representation. Do not
     // replace that newer consumer's release with this older subscription.
     if (disposed || sequence !== readSequence) release();
@@ -177,7 +178,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   const handle: ImagePreviewPreparation = {
     account, source, sourceVersion, previewOnly, original,
     getSnapshot: () => state,
-    isCurrent: () => !disposed && sameScope(),
+    isCurrent: () => !disposed && sameScope() && (!options.localFrame || options.localFrame.isCurrent()),
     subscribe: listener => {
       if (!active()) { listener(state); return () => {}; }
       const consumer = (next: PreparedImagePreviewState) => listener(next);

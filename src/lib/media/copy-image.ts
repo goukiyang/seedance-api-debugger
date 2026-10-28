@@ -1,8 +1,8 @@
 'use client';
 
-import { invalidateImageReadSource } from './image-read-session';
+import { invalidateImageReadSource, localFrameMatches, type LocalFrameContext } from './image-read-session';
 
-type ImageCopyOptions = { isCurrent?: () => boolean; authorizationSource?: string; expectedVersion?: string; representationVersion?: string };
+type ImageCopyOptions = { isCurrent?: () => boolean; authorizationSource?: string; expectedVersion?: string; representationVersion?: string; localFrame?: LocalFrameContext };
 async function imagePng(src: string, options: ImageCopyOptions): Promise<Blob> {
   const current = () => { if (options.isCurrent && !options.isCurrent()) throw new DOMException('图片已变化，复制已取消', 'AbortError'); };
   current();
@@ -52,6 +52,19 @@ async function imagePng(src: string, options: ImageCopyOptions): Promise<Blob> {
 }
 
 export function copyImage(src: string, options: ImageCopyOptions = {}): Promise<void> {
+  if (options.localFrame) {
+    const frame = options.localFrame;
+    let release = () => {};
+    const png = (async () => {
+      const current = () => localFrameMatches(frame, frame.account, src, options.expectedVersion || frame.sourceVersion) && (!options.isCurrent || options.isCurrent());
+      if (!current()) throw new DOMException('原帧已变化，复制已取消', 'AbortError');
+      release = frame.retain();
+      await frame.authorize();
+      if (!current()) throw new DOMException('原帧已变化，复制已取消', 'AbortError');
+      return frame.blob;
+    })();
+    return copyPngBlob(png).finally(() => { void png.then(() => release(), () => release()); });
+  }
   if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
     return Promise.reject(new Error('浏览器不支持按钮复制，请在图片上右键复制'));
   }

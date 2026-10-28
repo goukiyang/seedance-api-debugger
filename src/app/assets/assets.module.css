@@ -113,6 +113,22 @@
   overflow: hidden;
 }
 
+:global(.asset-detail-drawer).videoDrawer {
+  box-sizing: border-box;
+  width: min(960px, calc(100vw - 24px));
+  max-height: calc(100dvh - var(--composer-topbar-height, 48px) - 20px);
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+.videoDrawer :global(.asset-detail-header) > div { min-width: 0; }
+.videoDrawer :global(.asset-detail-header) h2 { overflow-wrap: anywhere; }
+.videoDrawer :global(.asset-detail-header) > button { flex-shrink: 0; }
+:global(.asset-detail-preview).videoDetailPreview { display: block; aspect-ratio: auto; min-block-size: 0; max-block-size: none; }
+.videoDetailPreview :global(.asset-detail-preview-badge) { position: static; margin: 8px; }
+.videoDetailPreview video { height: auto; max-height: calc(100dvh - 240px); }
+@media (max-width: 640px) {
+  :global(.asset-detail-drawer).videoDrawer { right: max(6px, env(safe-area-inset-right)); width: calc(100vw - max(12px, env(safe-area-inset-left) + env(safe-area-inset-right))); padding: 12px; bottom: max(6px, env(safe-area-inset-bottom)); }
+}
+
 .detailBody {
   min-block-size: 0;
   overflow-y: auto;

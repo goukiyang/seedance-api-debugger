@@ -48,8 +48,8 @@
 .collage { margin: 0 auto; flex-shrink: 0; container-type: inline-size; }
 .frameGrid { display: grid; box-sizing: border-box; align-items: start; }
 .frameCell { position: relative; margin: 0; min-width: 0; }
-.frameCorner { position: absolute; top: 6px; right: 6px; z-index: 3; display: flex; gap: 4px; opacity: 0; pointer-events: none; }
-.frameCell:hover .frameCorner, .frameCell:focus-within .frameCorner, .frameCorner[data-locked] { opacity: 1; pointer-events: auto; }
+.frameCorner { position: absolute; top: 6px; right: 6px; z-index: 3; display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 12px); gap: 4px; opacity: 0; pointer-events: none; }
+.frameCell:hover .frameCorner, .frameCell:focus-within .frameCorner, .frameCorner[data-locked], .frameCorner[data-copying] { opacity: 1; pointer-events: auto; }
 .page .frameCorner button { width: 32px; height: 32px; min-height: 32px; padding: 4px; }
 .frameCorner button[aria-pressed=true] { color: var(--primary); }
 @media (pointer: coarse) { .frameCell:has(.frameImage[aria-pressed=true]) .frameCorner { opacity: 1; pointer-events: auto; } }

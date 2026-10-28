@@ -7,6 +7,13 @@ export type ImageReadProgress = { phase: 'reading' | 'confirming' | 'decoding' |
 export type ImageReadResult = { imageSrc: string | null; progress: ImageReadProgress; denied?: boolean; unconfirmed?: boolean; refreshSource?: boolean; decoded?: boolean; mime?: string; bytes?: number; width?: number; height?: number; authorizationVersion?: string; representationVersion?: string };
 export type ImageReadBorrowProof = { sourceVersion: string; representationVersion?: string; bytes: number; mime: string; variant: 'hd'; policy: 'hd-f-v1' };
 export type ImageReadBorrow = { blob: Blob; bytes: number; mime: string; sourceVersion: string; isValid: () => boolean; release: () => void };
+/** Only the authorized, decoded original-frame producer supplies this object. No URL-only trust flag. */
+export type LocalFrameContext = Readonly<{
+  kind: 'local-frame'; account: string; authority: string; sourceKind: 'task' | 'work' | 'share'; sourceId: string;
+  taskId: string; sourceVersion: string; frame: number; width: number; height: number; generation: number;
+  blob: Blob; url: string; signal: AbortSignal; isCurrent: () => boolean;
+  retain: () => (() => void); authorize: () => Promise<void>;
+}>;
 type Listener = (value: ImageReadResult) => void;
 type Consumer = { listener: Listener; approval: number; expectedVersion: string };
 type BodyBorrow = { blob: Blob; references: number; detached: boolean };
@@ -42,11 +49,13 @@ export function isImagePreviewReady(result: ImageReadResult, domDecoded = false)
 
 export function canonicalImageReadSource(source: string) {
   const url = new URL(source, location.href);
+  if (url.protocol === 'blob:') return url.href;
   url.hash = ''; url.searchParams.sort();
   return url.origin === location.origin ? `${url.pathname}${url.search}` : url.href;
 }
 function sourceFamily(source: string) {
   const url = new URL(source, location.href);
+  if (url.protocol === 'blob:') return url.href;
   url.hash = '';
   for (const name of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation', 'variant']) url.searchParams.delete(name);
   url.searchParams.sort();
@@ -465,7 +474,31 @@ export function borrowImageRead(account: string, source: string, version: string
     if (owner === account && epoch === expected && entries.get(entry.key) === entry) releaseUnused(entry);
   } };
 }
-export function acquireImageRead(account: string, source: string, version: string, _attempt: number, listener: Listener) {
+export function localFrameMatches(frame: LocalFrameContext, account: string, source: string, version: string) {
+  return Boolean(frame && frame.kind === 'local-frame' && account && frame.account === account && frame.authority
+    && ['task', 'work', 'share'].includes(frame.sourceKind) && frame.sourceId && frame.taskId
+    && /^blob:/.test(source) && frame.url === source && frame.sourceVersion === version && /^[a-f0-9]{64}$/.test(version)
+    && Number.isSafeInteger(frame.frame) && frame.frame >= 0 && Number.isSafeInteger(frame.generation) && frame.generation >= 0
+    && Number.isSafeInteger(frame.width) && frame.width > 0 && Number.isSafeInteger(frame.height) && frame.height > 0
+    && frame.blob instanceof Blob && frame.blob.type === 'image/png' && frame.blob.size > 0
+    && frame.signal instanceof AbortSignal && !frame.signal.aborted && typeof frame.isCurrent === 'function'
+    && typeof frame.retain === 'function' && typeof frame.authorize === 'function' && frame.isCurrent());
+}
+export function acquireLocalFrameRead(account: string, source: string, version: string, frame: LocalFrameContext, listener: Listener) {
+  setImageReadSessionOwner(account);
+  const currentScope = captureImageReadSessionScope(account);
+  const denied = () => listener({ imageSrc: null, denied: true, progress: { phase: 'unavailable', loadedBytes: 0, message: '原帧来源已变化，请重新打开' } });
+  if (!localFrameMatches(frame, account, source, version)) { denied(); return () => {}; }
+  const release = frame.retain();
+  if (!currentScope() || !localFrameMatches(frame, account, source, version)) { release(); denied(); return () => {}; }
+  frame.signal.addEventListener('abort', denied, { once: true });
+  listener({ imageSrc: source, decoded: true, mime: 'image/png', bytes: frame.blob.size, width: frame.width, height: frame.height,
+    authorizationVersion: version, progress: { phase: 'decoding', loadedBytes: frame.blob.size, bodyComplete: true } });
+  let released = false;
+  return () => { if (released) return; released = true; frame.signal.removeEventListener('abort', denied); release(); };
+}
+export function acquireImageRead(account: string, source: string, version: string, _attempt: number, listener: Listener, localFrame?: LocalFrameContext) {
+  if (localFrame) return acquireLocalFrameRead(account, source, version, localFrame, listener);
   setImageReadSessionOwner(account);
   if (!account) { listener({ imageSrc: null, denied: true, progress: { phase: 'unavailable', loadedBytes: 0, message: '请先确认登录状态后重试' } }); return () => {}; }
   cancelImagePrefetches(source);
