@@ -44,6 +44,7 @@ async function main() {
       await exec('python3', [path.join(process.cwd(), 'scripts/backup-multiview-works.py'),
         '--database', database, '--source-root', path.join(media, 'storage/multiview-works'),
         '--recipe-root', path.join(media, 'storage/multiview-recipes'), '--private-source-root', path.join(media, 'storage/multiview-sources'),
+        '--foreground-root', path.join(media, 'storage/multiview-reference-foregrounds'),
         '--uploads-root', path.join(media, 'uploads'), '--destination', path.join(staging, 'bundle'),
         fixture ? '--non-production' : '--sealed-staging'], { timeout: 90 * 60 * 1000, maxBuffer: 16384 });
       await exec('tar', ['-C', path.join(staging, 'bundle'), '-czf', compressed, '.'], { timeout: 15 * 60 * 1000, maxBuffer: 16384 });
