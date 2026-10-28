@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { sourceFunction } from './fixtures/source-function';
 
 const root = realpathSync(process.cwd());
 const destination = path.resolve(process.argv[2] || '');
@@ -15,6 +16,7 @@ const sources = [
   'src/app/admin/image-studio/ImageStudioDiagnostics.module.css',
   'src/lib/image-studio/provider-error-diagnostics.ts',
   'src/lib/image-studio/provider-error-evidence.ts',
+  'scripts/fixtures/source-function.ts',
 ];
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
 const api = read(sources[1]);
@@ -38,12 +40,14 @@ assert.match(diagnosticsBranchSource, /catch \{\s*return adminJson\(\{ error: 'å
 assert.doesNotMatch(diagnosticsBranchSource, /console\.(?:error|warn|log)/);
 checks.push('diagnostics_responses_are_private_fixed_and_do_not_log_raw_errors');
 
-const apiProjectionStart = api.indexOf('function projectProviderErrorDiagnostics');
-const apiProjectionEnd = api.indexOf('export async function GET');
-assert.ok(apiProjectionStart >= 0 && apiProjectionEnd > apiProjectionStart);
-const apiProjection = api.slice(apiProjectionStart, apiProjectionEnd);
-for (const required of ['binding:', 'frozen:', 'request:', 'events:', 'unknownFields:', 'summarySource:', 'summary:']) assert.ok(apiProjection.includes(required));
-for (const forbidden of ['...', 'prompt', 'snapshot_json', 'original_url', 'headers:', 'stack:', 'cause:']) assert.ok(!apiProjection.includes(forbidden), `API projection must omit ${forbidden}`);
+function assertApiProjection(projection: string) {
+  for (const required of ['binding:', 'frozen:', 'request:', 'events:', 'unknownFields:', 'summarySource:', 'summary:']) assert.ok(projection.includes(required));
+  for (const forbidden of ['...', 'prompt', 'snapshot_json', 'original_url', 'headers:', 'stack:', 'cause:']) assert.ok(!projection.includes(forbidden), `API projection must omit ${forbidden}`);
+}
+const apiProjection = sourceFunction(api, 'projectProviderErrorDiagnostics', sources[1]);
+assertApiProjection(apiProjection);
+assert.throws(() => assertApiProjection(apiProjection.replace('binding:', '...diagnostics, binding:')));
+assert.throws(() => assertApiProjection(apiProjection.replace('summary:', 'prompt:')));
 const copyStart = client.indexOf('function safeDiagnosticsCopy');
 const copyEnd = client.indexOf('function DiagnosticFields');
 assert.ok(copyStart >= 0 && copyEnd > copyStart);

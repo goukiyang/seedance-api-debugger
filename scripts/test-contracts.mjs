@@ -10,6 +10,7 @@ const suites = [
   'scripts/test-static-contracts.mjs',
   'scripts/test-tos-http-compat.cjs',
   'scripts/test-next-request-context.cjs',
+  'scripts/test-recovery-factory-facade.cjs',
   'scripts/test-purpose-signatures.cjs',
   'scripts/test-signed-media-mime.cjs',
   'scripts/test-api-errors.cjs',

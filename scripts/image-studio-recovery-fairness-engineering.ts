@@ -1,4 +1,4 @@
-import { setFixtureDatabase } from './fixtures/database-client';
+import { assertFreshFixtureFactory, openRealFixtureDatabase } from './fixtures/real-database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -39,6 +39,7 @@ async function main() {
   const databasePath = path.join(directory, 'synthetic.db');
   assert.ok(realpathSync(directory).startsWith(realpathSync(scratch) + path.sep));
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined, 'Start in a fresh process before importing application modules');
+  assertFreshFixtureFactory();
   process.env.DATABASE_URL = `file:${databasePath}`;
   Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
@@ -51,13 +52,13 @@ async function main() {
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
   markPhase('isolated_schema_complete');
 
-  const { PrismaClient } = await import('@prisma/client');
-  const database = new PrismaClient();
+  const fixture = await openRealFixtureDatabase(databasePath);
+  const database = fixture.raw;
   const selected: string[] = [];
   let competeFor: string | null = null;
   // Observe the real SQLite query and, in one case, acquire a competing lease
   // after selection but before the production updateMany CAS. No worker hook.
-  const observedDatabase = database.$extends({ query: { imageStudioTask: {
+  const observedDatabase = fixture.observe(base => base.$extends({ query: { imageStudioTask: {
     async findMany({ args, query }) {
       const rows = await query(args);
       if (args.take === 1 && args.where?.lease_until) {
@@ -74,8 +75,7 @@ async function main() {
       }
       return rows;
     },
-  } } });
-  setFixtureDatabase(observedDatabase);
+  } } }));
   const originalCwd = process.cwd();
   process.chdir(directory);
   const checks: string[] = [];
@@ -142,7 +142,7 @@ async function main() {
 
   try {
     const { prisma } = await import('../src/lib/prisma');
-    assert.equal(prisma, observedDatabase, 'Production recovery must use only the fresh isolated SQLite client');
+    await fixture.verify(prisma, observedDatabase);
     const { recoverStudioTasks } = await import('../src/lib/image-studio/worker');
     const { finishStudioTask } = await import('../src/lib/image-studio/tasks');
     const delivery = await import('../src/lib/image-studio/delivery');
@@ -333,13 +333,14 @@ async function main() {
     assert.equal(sourceSha256(fixturePath), fixtureSha256, 'Fixture source must remain unchanged throughout this run');
     assert.equal(sourceSha256(workerPath), workerSha256, 'Worker source must remain unchanged throughout this run');
     assert.equal(sourceSha256(providerPath), providerSha256, 'Provider source must remain unchanged throughout this run');
+    await fixture.verify();
     completed = true;
   } finally {
     markPhase('cleanup_start');
     for (const timer of Array.from(pendingIoTimers)) clearTimeout(timer);
     pendingIoTimers.clear();
     mock.restoreAll();
-    await database.$disconnect();
+    await fixture.close();
     process.chdir(originalCwd);
     markPhase('cleanup_complete');
     const receipt = path.join(directory, 'receipt.json');

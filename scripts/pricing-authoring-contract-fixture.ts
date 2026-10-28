@@ -45,7 +45,9 @@ export async function runPricingAuthoringContractFixture(): Promise<{
   let completed = false;
   try {
     const { prisma } = await import('@/lib/prisma');
-    equal(prisma, db, 'No implementation helper may resolve a production/default database');
+    equal(Reflect.get(globalThis, Symbol.for('video-api.database-client.v1')).raw, db, 'No implementation helper may resolve a production/default database');
+    const attached = await prisma.$queryRawUnsafe<Array<{ name: string; file: string }>>('PRAGMA database_list');
+    equal(fs.realpathSync(attached.find(row => row.name === 'main')!.file), filename, 'Business queries must use the supplied isolated file');
     const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing, getAdminPricingOperation,
       getAdminPricingHistory } = await import('@/lib/pricing/policy');
     const { PRICING_POLICY_KEY, PRICING_REVISION_PREFIX } = await import('@/lib/pricing/admin-contract');

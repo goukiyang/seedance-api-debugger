@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { sourceFunction } from './fixtures/source-function';
 import type { Prisma } from '@prisma/client';
 import type { SessionUser } from '../src/lib/auth/session';
 
@@ -215,24 +216,24 @@ async function main() {
   assert.equal(archivedProjection.status_version.status, 'archived');
   assert.equal(archivedProjection.can_archive, false); assert.equal(archivedProjection.can_restore, true);
   const listRouteSource = readFileSync(path.join(root, 'src/app/api/projects/route.ts'), 'utf8');
-  const viewListStart = listRouteSource.indexOf('if (viewList) {');
-  const legacyListStart = listRouteSource.indexOf('    const projects = await prisma.project.findMany({', viewListStart);
-  const postStart = listRouteSource.indexOf('export async function POST');
-  assert.ok(viewListStart >= 0 && legacyListStart > viewListStart && postStart > legacyListStart);
-  for (const source of [listRouteSource.slice(viewListStart, legacyListStart), listRouteSource.slice(legacyListStart, postStart)]) {
+  const getSource = sourceFunction(listRouteSource, 'GET');
+  const viewListStart = getSource.indexOf('if (viewList) {');
+  const legacyListStart = getSource.indexOf('    const projects = await prisma.project.findMany({', viewListStart);
+  assert.ok(viewListStart >= 0 && legacyListStart > viewListStart);
+  for (const source of [getSource.slice(viewListStart, legacyListStart), getSource.slice(legacyListStart)]) {
     assert.match(source, /const operationFields = await readProjectOperationProjection\(prisma, project, canManageProject\)/);
     assert.match(source, /\.\.\.operationFields/);
   }
-  const getSource = listRouteSource.slice(listRouteSource.indexOf('export async function GET'), postStart);
   assert.doesNotMatch(getSource, /\$transaction|getProjectDeletionBlockers\(/);
   assert.doesNotMatch(getSource, /Internal server error/);
   assert.match(getSource, /PROJECT_LIST_BUSY/);
   assert.match(getSource, /status: busy \? 503 : 500/);
   const detailSource = readFileSync(path.join(root, 'src/app/api/projects/[id]/route.ts'), 'utf8');
-  const detailCapabilities = detailSource.slice(detailSource.indexOf('async function projectCapabilities'), detailSource.indexOf('function boundedPage'));
+  const detailCapabilities = sourceFunction(detailSource, 'projectCapabilities');
   assert.match(detailCapabilities, /readProjectOperationProjection\(prisma, project, access\.canManageProject\)/);
   assert.doesNotMatch(detailCapabilities, /\$transaction/);
-  const deleteSource = detailSource.slice(detailSource.indexOf('export async function DELETE'));
+  const deleteSource = sourceFunction(detailSource, 'DELETE');
+  assert.throws(() => sourceFunction(listRouteSource.replace('export const GET =', 'export const REMOVED ='), 'GET'));
   assert.match(deleteSource, /prisma\.\$transaction\(async \(tx\) =>/);
   assert.match(deleteSource, /getProjectDeletionBlockers\(tx, project\.id\)/);
   assert.doesNotMatch(deleteSource, /stopAfterFirst/);
@@ -256,7 +257,7 @@ async function main() {
   checks.push('cas_zero_or_stale_fails_closed_active_gate_rejects_archive_delete_or_lost_permission');
   assert.equal(forbiddenCalls, 0);
   const sources = ['scripts/project-operations-engineering.ts', 'src/lib/projects/operations.ts', 'src/lib/projects/permissions.ts',
-    'src/app/api/projects/route.ts', 'src/app/api/projects/[id]/route.ts', 'src/app/api/project-invites/[token]/join/route.ts'];
+    'src/app/api/projects/route.ts', 'src/app/api/projects/[id]/route.ts', 'src/app/api/project-invites/[token]/join/route.ts', 'scripts/fixtures/source-function.ts'];
   writeFileSync(destination, JSON.stringify({ schema: 'project-operations-engineering.v1', completed: true, synthetic: true,
     candidateRoot: root, startedAt, finishedAt: Date.now(), checks,
     sourceSha256: Object.fromEntries(sources.map(file => [file, createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex')])),

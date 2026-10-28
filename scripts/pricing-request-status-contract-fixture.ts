@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { CodexVideoApiSettings } from '../src/lib/integrations/codex';
+import { instrumentDatabaseQueries } from './fixtures/audit-query-instrumentation';
 
 type FixtureResult = {
   fixture: 'pricing-request-status-contract';
@@ -217,6 +218,29 @@ export async function runPricingRequestStatusContractFixture(): Promise<FixtureR
     equal(await query('Restored fixture mapping remains readable', sharedKey), { status: 200, body: found(tasks[0]) },
       'The same original task remains readable after fixture-only authentication state changes');
     evidence.push('G30/5: wrong Bearer, disabled or expired mapped user, and disabled integration keep their exact real-auth denial and safeToResubmit:false; no Cookie request-store or browser-login fixture is introduced.');
+
+    let failModel = '', injected = 0;
+    const privateFailure = 'synthetic-request-status-private-database-detail';
+    await instrumentDatabaseQueries(db, async (params, next) => {
+      if (failModel && params.model === failModel && params.action === 'findUnique') {
+        injected++; throw new Error(privateFailure);
+      }
+      return next(params);
+    });
+    for (const model of ['PlatformSetting', 'VideoTask']) {
+      const beforeInjection = injected;
+      failModel = model;
+      try {
+        const response = await query(`Unknown ${model} failure stays query-only`, sharedKey);
+        equal(response.status, 503, 'An unavailable lookup must not claim accepted, rejected or absent');
+        const body = response.body as Record<string, unknown>;
+        equal(body.safeToResubmit, false, 'Unknown authentication and task queries preserve the original no-resubmit contract');
+        ok(typeof body.errorId === 'string' && /^[a-f0-9-]{36}$/.test(body.errorId), 'Unexpected errors retain a traceable identifier');
+        ok(!JSON.stringify(body).includes(privateFailure), 'Private database diagnostics never enter the public response');
+        ok(injected > beforeInjection, 'The actual underlying database interceptor must fire');
+      } finally { failModel = ''; }
+    }
+    evidence.push('G30/7: actual same-client middleware injects authentication and original-task DB failures; each remains503/query-only/private with encrypted diagnostic ID and unchanged business rows.');
 
     const final = await databaseProjection(db);
     for (const name of ['VideoTask', 'CreditAccount', 'CreditBucket', 'CreditLedger', 'ProjectBudgetAccount', 'ProjectBudgetLedger']) {

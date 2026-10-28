@@ -1,4 +1,4 @@
-import { setFixtureDatabase } from './fixtures/database-client';
+import { assertFreshFixtureFactory, openRealFixtureDatabase } from './fixtures/real-database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -47,6 +47,7 @@ async function main() {
   const directory = mkdtempSync(path.join(scratch, 'image-async-recovery-')), databasePath = path.join(directory, 'synthetic.db');
   assert.ok(realpathSync(directory).startsWith(realpathSync(scratch) + path.sep));
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined);
+  assertFreshFixtureFactory();
   process.env.DATABASE_URL = `file:${databasePath}`; Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   const require = createRequire(import.meta.url), prismaPackage = require.resolve('prisma/package.json');
@@ -58,17 +59,16 @@ async function main() {
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
   markPhase('isolated_schema_complete');
   assert.equal(statSync(databasePath).mode & 0o777, 0o600);
-  const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient();
+  const fixture = await openRealFixtureDatabase(databasePath); const db = fixture.raw;
   let competeKey: string | null = null;
-  const observed = db.$extends({ query: { platformSetting: { async findMany({ args, query }) {
+  const observed = fixture.observe(base => base.$extends({ query: { platformSetting: { async findMany({ args, query }) {
     const rows = await query(args);
     if (competeKey) for (const row of rows) if (typeof row.key === 'string' && row.key === competeKey && typeof row.value_json === 'string') {
       competeKey = null;
       await db.platformSetting.update({ where: { key: row.key }, data: { value_json: JSON.stringify({ ...JSON.parse(row.value_json), lastRequestedAt: Date.now() + 1 }) } });
     }
     return rows;
-  } } } });
-  setFixtureDatabase(observed);
+  } } } }));
   process.chdir(directory);
   const checks: string[] = [], queries: Array<{ id: string; path: string }> = [];
   const recordCheck = (name: string) => { checks.push(name); markPhase('check_complete', name); };
@@ -132,7 +132,7 @@ async function main() {
   });
   const summary: Record<string, unknown> = {};
   try {
-    const { prisma } = await import('../src/lib/prisma'); assert.equal(prisma, observed);
+    const { prisma } = await import('../src/lib/prisma'); await fixture.verify(prisma, observed);
     const { recoverStudioTasks } = await import('../src/lib/image-studio/worker');
     const { finishStudioTask } = await import('../src/lib/image-studio/tasks');
     const delivery = await import('../src/lib/image-studio/delivery');
@@ -413,9 +413,10 @@ async function main() {
     assert.equal(forbiddenCalls, 0); assert.equal(timers.size, 0); assert.deepEqual(pendingIoFailures, []);
     assert.ok(queries.length > 0, 'No empty run can complete this fixture');
     summary.simulatedOriginalGetCalls = queries.length;
+    await fixture.verify();
     completed = true;
   } finally {
-    mock.restoreAll(); for (const timer of Array.from(timers)) clearTimeout(timer); await db.$disconnect(); process.chdir(root);
+    mock.restoreAll(); for (const timer of Array.from(timers)) clearTimeout(timer); await fixture.close(); process.chdir(root);
     for (const [file, digest] of Object.entries(sourceSha256)) assert.equal(sha(readFileSync(path.join(root, file))), digest, `${file} changed during this run`);
     assert.equal(sha(readFileSync(path.join(root, 'scripts/image-async-recovery-engineering.ts'))), fixtureSha256, 'Fixture changed during this run');
     const receipt = path.join(directory, 'receipt.json');

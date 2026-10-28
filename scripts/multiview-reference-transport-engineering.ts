@@ -108,7 +108,10 @@ async function main() {
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true });
   const folder = mkdtempSync(path.join(scratch, 'multiview-original-'));
-  mkdirSync(path.join(folder, '.media/uploads/assets'), { recursive: true });
+  const previousMediaRoot = process.env.MEDIA_DATA_ROOT;
+  const mediaRoot = path.join(folder, '.media');
+  process.env.MEDIA_DATA_ROOT = mediaRoot;
+  mkdirSync(path.join(mediaRoot, 'uploads/assets'), { recursive: true });
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
   const guideBytes = await sharp({ create: { width: 2, height: 2, channels: 4,
     background: { r: 64, g: 32, b: 16, alpha: 1 } } }).png().toBuffer();
@@ -118,7 +121,7 @@ async function main() {
     mimeType: 'image/png' as const, bytes: guideBytes, sha256: hash(guideBytes) };
   assert.notEqual(guide.sha256, hash(bytes));
   const local = '/uploads/assets/original.png', url = `https://sd2.youdooart.com${local}`;
-  const file = path.join(folder, 'public', local);
+  const file = path.join(mediaRoot, local);
   writeFileSync(file, bytes, { flag: 'wx' });
   const asset = { original_url: url, type: 'image', status: 'active', mime_type: 'image/png', file_size: bytes.length };
   const input: CreateVideoInput = { generation_mode: 'all_in_one_reference', prompt: 'synthetic rotation', reference_image_urls: [url], model: 'dreamina-seedance-2-5-260628' };
@@ -163,7 +166,7 @@ async function main() {
     checks.push('actual_multiview_branch_both_models_exact_original_bytes_no_url_fetch_or_snapshot_mutation');
     const authorizedBefore = structuredClone(context.generationReferenceImages), guideBefore = Buffer.from(guideBytes);
     context.multiviewSystemReference = guide;
-    assert.equal(existsSync(path.join(folder, '.media/uploads/assets/private-guide-not-a-public-file.png')), false);
+    assert.equal(existsSync(path.join(mediaRoot, 'uploads/assets/private-guide-not-a-public-file.png')), false);
     for (const model of ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628']) {
       context.providerInput = { ...input, model };
       const providerBefore = structuredClone(context.providerInput);
@@ -214,14 +217,18 @@ async function main() {
     context.generationReferenceImages = [{ url, asset: { ...asset, file_size: 30_000_000 } }];
     assert.equal((await context.prepare()).status, 400);
     const outside = path.join(folder, 'outside.png'); writeFileSync(outside, bytes, { flag: 'wx' });
-    symlinkSync(outside, path.join(folder, '.media/uploads/assets/escape.png'));
+    symlinkSync(outside, path.join(mediaRoot, 'uploads/assets/escape.png'));
     const escape = 'https://sd2.youdooart.com/uploads/assets/escape.png';
     context.providerInput = { ...input, reference_image_urls: [escape] };
     context.generationReferenceImages = [{ url: escape, asset: { ...asset, original_url: escape } }];
     assert.equal((await context.prepare()).status, 400);
     checks.push('authorized_record_required_deleted_changed_oversize_and_path_escape_guarded');
     assert.equal(networkCalls, 0);
-  } finally { process.chdir(root); }
+    assert.equal(existsSync(path.join(folder, 'public')), false, 'Synthetic transport must not create a static-tree fallback');
+  } finally {
+    process.chdir(root);
+    if (previousMediaRoot === undefined) delete process.env.MEDIA_DATA_ROOT; else process.env.MEDIA_DATA_ROOT = previousMediaRoot;
+  }
   console.log(JSON.stringify({ completed: true, checks, productionWrites: 0, generationCalls: 0, billingChanges: 0 }));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

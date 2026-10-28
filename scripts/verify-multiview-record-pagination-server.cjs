@@ -39,7 +39,8 @@ async function main() {
     const rows = synthetic();
     phase = 'synthetic_seed';
     await prisma.user.create({ data: { id: 'owner', name: 'Synthetic', username: 'synthetic-owner', email: 'synthetic-owner@example.invalid',
-      password_hash: 'synthetic-unusable-password-hash', role: 'user', account_type: 'internal', user_profile: 'other', status: 'active' } });
+      password_hash: 'synthetic-unusable-password-hash', role: 'user', account_type: 'internal', user_profile: 'other', status: 'active',
+      feishu_user_id: 'synthetic-mv-owner', feishu_tenant_key: 'synthetic-tenant' } });
     for (const project of rows.projects) await prisma.project.create({ data: { ...project, owner_user_id: 'owner', created_by: 'owner', type: 'personal' } });
     for (const task of rows.tasks) await prisma.videoTask.create({ data: { ...task, provider: 'synthetic', model: 'synthetic', generation_mode: 'text', prompt: 'synthetic-unread-private-sentinel' } });
     for (const source of rows.sources) await prisma.multiviewSource.create({ data: { ...source, source_version: 'synthetic-version', info_json: 'DO_NOT_PARSE_SOURCE_INFO',

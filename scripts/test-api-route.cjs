@@ -44,6 +44,13 @@ async function main() {
   user = { id: 'cookie-admin', role: 'admin' };
   assert.equal((await route({ access: 'user', rateLimit: false, identity: async () => null }, handler)(request())).status, 401);
   assert.equal((await route({ access: 'admin', rateLimit: false, identity: async () => ({ id: 'service-user', role: 'user' }) }, handler)(request())).status, 403);
+  const beforeDeniedIdentity = called;
+  const deniedIdentity = await route({ access: 'user', rateLimit: false, identity: async () => Response.json(
+    { error: 'denied', safeToResubmit: false }, { status: 401, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization' } }) }, handler)(request());
+  assert.equal(deniedIdentity.status, 401);
+  assert.equal(deniedIdentity.headers.get('vary'), 'Cookie, Authorization');
+  assert.deepEqual(await deniedIdentity.json(), { error: 'denied', safeToResubmit: false });
+  assert.equal(called, beforeDeniedIdentity, 'A custom authentication denial must not enter the handler or fall back to Cookie');
   decision = { allowed: false, retryAfterMs: 1500, delayMs: 0 };
   user = null;
   const limited = await route({ access: 'public', rateLimit: 'feedback' }, handler)(request());

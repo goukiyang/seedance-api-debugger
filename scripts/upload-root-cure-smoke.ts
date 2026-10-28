@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { File } from 'node:buffer';
 import ts from 'typescript';
+import { sourceFunction } from './fixtures/source-function';
 
 const root = process.cwd();
 
@@ -155,12 +156,30 @@ const referenceImageSafety = read('src/lib/provider/reference-image-safety.ts');
 assertNotIncludes(referenceImageSafety, "import { uploadPublicAsset }", '自动压缩参考图不能直接依赖 R2/TOS 上传。');
 assertIncludes(referenceImageSafety, 'uploadSiteAsset', '自动压缩参考图必须先走本站上传链路生成 local-public URL。');
 const referenceImageContentRoute = read('src/app/api/reference-images/[id]/content/route.ts');
-assertIncludes(referenceImageContentRoute, 'authorizedImageResponse', '参考图图片读取必须走现有受权图片响应。');
-assertIncludes(referenceImageContentRoute, 'mediaPreviewResponse', '参考图其它媒体读取必须走现有媒体响应。');
-assertIncludes(referenceImageContentRoute, 'canDownloadOriginal', '共享读取不得绕过原件下载权限。');
+const mediaOutlet = read('src/lib/media/outlet.ts');
+const mediaPolicy = read('src/lib/access/media-policy.ts');
+function assertReferenceMediaPipeline(route: string, outlet: string, policy: string) {
+  const content = sourceFunction(route, 'mediaContent');
+  assertMatches(content, /redirectMedia\(request, await getSession\(\), \{ type: 'reference', id:/, '参考图必须将当前身份和真实reference编号交给统一出口。');
+  for (const method of ['GET', 'HEAD']) assertMatches(route, new RegExp(`export const ${method} = apiRoute\\(\\{ access: 'user', rateLimit: false \\}, mediaContent\\)`), '参考图GET/HEAD必须保留同一受权读取链。');
+  const action = vm.runInNewContext(ts.transpileModule(`(${sourceFunction(outlet, 'mediaVariantAction')})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText);
+  for (const variant of ['original', 'download', 'hd', 'hd-download', 'hd-description']) assert.equal(action(variant), 'download-original', '共享读取不得绕过原件下载权限。');
+  assert.equal(action('thumbnail'), 'view-thumbnail'); assert.equal(action('preview'), 'view-preview'); assert.equal(action('detail'), 'view-preview');
+  const address = sourceFunction(outlet, 'mediaAddress');
+  assertIncludes(address, 'await assertMedia(user, ref, mediaVariantAction(variant))', '签发地址必须重核本次媒体动作权限。');
+  assertIncludes(address, 'return signUserMedia(user.id, ref, variant', '签发地址必须绑定当前账号、对象和变体。');
+  assertIncludes(sourceFunction(outlet, 'redirectMedia'), 'await mediaAddress(user, ref, variant', '实际参考图读取必须使用同一受权出口。');
+  assertIncludes(sourceFunction(policy, 'decideMedia'), 'rights = await referenceContentRights(user, image, db)', '参考图权限必须保留内容来源上限。');
+  assertIncludes(sourceFunction(policy, 'referenceContentRights'), 'intersect(rights, ceiling)', '复制入本人图集不能抬高内容权限。');
+  assertNotIncludes(content, 'mediaPreviewResponse(', '薄路由不得直接以原URL绕过统一出口。');
+}
+assertReferenceMediaPipeline(referenceImageContentRoute, mediaOutlet, mediaPolicy);
+assert.throws(() => assertReferenceMediaPipeline(referenceImageContentRoute.replace("type: 'reference'", "type: 'asset'"), mediaOutlet, mediaPolicy));
+assert.throws(() => assertReferenceMediaPipeline(referenceImageContentRoute, mediaOutlet.replace("'download-original'", "'use'"), mediaPolicy));
+assert.throws(() => assertReferenceMediaPipeline(referenceImageContentRoute, mediaOutlet, mediaPolicy.replace('rights = await referenceContentRights(user, image, db)', 'rights = all()')));
 const mediaPreviewResponse = read('src/lib/media/preview-response.ts');
 assertIncludes(mediaPreviewResponse, 'siteUploadPathFromUrl', '实际媒体读取helper须识别历史站内上传域名。');
-assertIncludes(mediaPreviewResponse, 'resolveInside(path.join(publicRoot', '实际媒体读取helper必须经过统一的本地路径边界校验。');
+assertIncludes(mediaPreviewResponse, 'resolveInside(mediaRoot(', '实际媒体读取helper必须经过私有存储根与统一路径边界校验。');
 const localPathBoundary = read('src/lib/fs/resolve-inside.ts');
 assertIncludes(localPathBoundary, 'realpath', '统一路径校验必须核准真实路径。');
 assertIncludes(localPathBoundary, 'path.relative', '统一路径校验必须核准路径属于允许根。');
@@ -198,11 +217,10 @@ for (const routePath of legacyMultipartRoutes) {
   const route = read(routePath);
   assertIncludes(route, 'MULTIPART_COMPAT_MAX_SIZE_BYTES', `${routePath} 必须限制旧 multipart 兼容入口大小，避免大文件被 formData 解析拖死。`);
   assertIncludes(route, 'multipartContentLength == null', `${routePath} 缺少 Content-Length 时必须直接返回 JSON 411，不能继续 formData 解析。`);
-  assertMatches(
-    route,
-    /content-length[\s\S]+MULTIPART_COMPAT_MAX_SIZE_BYTES[\s\S]+request\.formData\(\)/,
-    `${routePath} 必须在 request.formData() 前按 Content-Length 提前拒绝大 multipart。`,
-  );
+  const parser = routePath === 'src/app/api/assets/upload/route.ts' ? 'readMultipartUpload(' : 'request.formData()';
+  const guard = route.indexOf('multipartContentLength > MULTIPART_COMPAT_MAX_SIZE_BYTES');
+  assert.ok(guard >= 0 && route.indexOf(parser) > guard, `${routePath} 必须在实际解析器前按 Content-Length 提前拒绝大 multipart。`);
+  if (parser === 'readMultipartUpload(') assertNotIncludes(route, 'request.formData()', 'raw流式上传不得退回整包formData读取。');
 }
 
 const uploadRoutes = [

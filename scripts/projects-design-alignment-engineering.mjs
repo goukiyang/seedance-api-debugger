@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -18,7 +18,7 @@ const sources = ['scripts/projects-design-alignment-engineering.mjs', 'src/lib/p
   'src/components/projects/ProjectFilters.tsx', 'src/components/usage/UsageWorkspace.tsx',
   'src/components/usage/UsageWorkspace.module.css', 'src/app/tasks/[id]/TaskResult.module.css',
   'src/app/tasks/[id]/page.tsx', 'src/components/AppShell.tsx', 'src/app/globals.css',
-  'src/lib/release.ts', 'src/components/ReleaseNotice.tsx'];
+  'src/lib/release.ts', 'src/components/ReleaseNotice.tsx', 'src/lib/dto/user.ts', 'src/lib/pagination/cursor.ts'];
 let allowed = true;
 let reads = 0;
 const visible = { asset: { status: 'visible-fixture' } };
@@ -26,19 +26,21 @@ const album = { id: 'album1', project_id: 'team', album_type: 'project', visibil
   owner_user_id: 'other', name: 'Fixture', description: null, updated_at: new Date(0), cover_image_id: 'cover1',
   shares: [], project: { status: 'active' }, images: ['image1', 'image2', 'image3', 'image4'].map(id => ({ id })), _count: { images: 9 } };
 let covers = [{ id: 'cover1', album_id: 'album1' }];
+const albums = [...Array.from({ length: 20 }, (_, index) => ({ ...album, id: `prior-${String(index).padStart(2, '0')}`, cover_image_id: null })), album];
 const database = {
   referenceAlbum: { findMany: async args => {
     reads++;
-    assert.equal(args.take, 20); assert.equal(args.skip, 20);
-    assert.deepEqual(plain(args.where), { project_id: 'team', status: { not: 'deleted' } });
+    assert.equal(args.take, 100); assert.equal(args.skip, undefined, 'Permission filtering must precede the20-row page');
+    assert.deepEqual(plain(args.where), { project_id: 'team', status: { not: 'deleted' }, AND: [{}] });
+    assert.deepEqual(plain(args.orderBy), [{ updated_at: 'desc' }, { id: 'desc' }]);
     assert.equal(args.include.images.take, 4);
     assert.deepEqual(plain(args.include.images.where), { status: 'active', AND: [visible] });
     assert.deepEqual(args.include._count.select.images.where, args.include.images.where);
-    return [album];
+    return albums;
   } },
   referenceImage: { findMany: async args => {
     reads++; assert.equal(args.take, 20);
-    assert.deepEqual(plain(args.where), { id: { in: ['cover1'] }, status: 'active', AND: [visible] });
+    assert.deepEqual(plain(args.where), { id: { in: allowed ? ['cover1'] : [] }, status: 'active', AND: [visible] });
     return covers;
   } },
 };
@@ -53,13 +55,18 @@ function load(file, bindings) {
   return module.exports;
 }
 const auth = { AuthError: class extends Error {} };
+const userDto = load('src/lib/dto/user.ts', {});
+const cursor = load('src/lib/pagination/cursor.ts', { 'node:crypto': { createHmac, timingSafeEqual } });
+const unusedMediaPolicy = new Proxy({}, { get: () => () => { throw new Error('Unexpected media-policy execution in album permission fixture'); } });
 const permissions = load('src/lib/reference-albums/permissions.ts', {
   '@/lib/prisma': { prisma: database }, '@/lib/auth/session': auth,
+  '@/lib/dto/user': userDto, '@/lib/access/media-policy': unusedMediaPolicy,
   '@/lib/projects/permissions': { getProjectAccess: async () => ({ canView: allowed, canGenerate: false, canManageAssets: false, role: 'viewer' }) },
   '@/lib/image-studio/protected-assets': {},
 });
-const { readProjectAlbumPage } = load('src/lib/projects/album-projection.ts', {
+const { readProjectAlbumPage, readProjectAlbumDirectory } = load('src/lib/projects/album-projection.ts', {
   '@/lib/prisma': { prisma: database }, '@/lib/reference-albums/permissions': permissions,
+  '@/lib/pagination/cursor': cursor,
   '@/lib/image-studio/protected-assets': { studioVisibleReferenceWhere: async () => visible },
 });
 const user = { id: 'self', role: 'user', status: 'active', account_type: 'internal' };
@@ -69,6 +76,9 @@ assert.equal(first[0].image_count, 9);
 assert.equal(first[0]._count.images, first[0].image_count);
 assert.equal(reads, 2);
 assert.equal(first[0].owner_user_id, undefined); assert.equal(first[0].shares, undefined);
+const directory = await readProjectAlbumDirectory(user, 'team', 2);
+assert.equal(directory.total, 21); assert.equal(directory.page, 2); assert.equal(directory.totalPages, 2);
+assert.equal(directory.albums.length, 1); assert.equal(directory.albums[0].id, album.id);
 covers = [{ id: 'cover1', album_id: 'different-album' }];
 const foreign = await readProjectAlbumPage(user, 'team', 20);
 assert.ok(foreign[0].thumbnail_urls.every(url => !url.includes('cover1')));

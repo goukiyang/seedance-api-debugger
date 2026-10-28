@@ -1,4 +1,4 @@
-import { setFixtureDatabase } from './fixtures/database-client';
+import { assertFreshFixtureFactory, openRealFixtureDatabase } from './fixtures/real-database-client';
 import assert from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -37,6 +37,7 @@ async function main() {
   assert.ok(realpathSync(directory).startsWith(realpathSync(scratch) + path.sep));
   const databasePath = path.join(directory, 'synthetic.db');
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined, 'Use a fresh process before importing application code');
+  assertFreshFixtureFactory();
   process.env.DATABASE_URL = `file:${databasePath}`;
   Object.assign(process.env, { NODE_ENV: 'test' });
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
@@ -46,8 +47,8 @@ async function main() {
   const schemaLog = execFileSync(process.execPath, [path.join(path.dirname(prismaPackage), 'build/index.js'), 'db', 'push',
     '--skip-generate', '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   writeFileSync(path.join(directory, 'schema.log'), schemaLog, { mode: 0o600 });
-  const { PrismaClient } = await import('@prisma/client');
-  const database = new PrismaClient();
+  const fixture = await openRealFixtureDatabase(databasePath);
+  const database = fixture.raw;
   let activeCall: Call | null = null;
   let onBatchPage: ((rows: ObservedBatch[]) => Promise<void>) | null = null;
   let onFlowPage: ((rows: ObservedRun[]) => Promise<void>) | null = null;
@@ -69,7 +70,7 @@ async function main() {
     assert.ok(typeof id === 'string', 'A dispatched candidate must have an ID');
     if (!activeCall.checked.includes(id)) activeCall.checked.push(id);
   };
-  const observed = database.$extends({ query: {
+  const observed = fixture.observe(base => base.$extends({ query: {
     platformSetting: {
       async findMany({ args, query }) {
         const record = activeCall?.kind === 'batch' && batchCandidate(args.where) ? activeCall : null;
@@ -116,8 +117,7 @@ async function main() {
       },
       async findUnique({ args, query }) { check('toolflow', args.where.id); return query(args); },
     },
-  } });
-  setFixtureDatabase(observed);
+  } }));
   const originalCwd = process.cwd();
   process.chdir(directory);
   let forbiddenCalls = 0, completed = false;
@@ -143,7 +143,7 @@ async function main() {
   const summary: Record<string, unknown> = {};
   try {
     const { prisma } = await import('../src/lib/prisma');
-    assert.equal(prisma, observed, 'Actual dispatchers must use only the isolated SQLite client');
+    await fixture.verify(prisma, observed);
     const batches = await import('../src/lib/image-studio/batches');
     const flows = await import('../src/lib/tools/toolflow-runtime');
     assert.equal(await database.user.count(), 0);
@@ -438,10 +438,11 @@ async function main() {
         maxCandidateChecksPerCall: Math.max(...ownCalls.map(call => call.checked.length)),
         maxLoadedPerQuery: Math.max(...ownCalls.flatMap(call => call.loaded)), ...outcome[kind] };
     }
+    await fixture.verify();
     completed = true;
   } finally {
     mock.restoreAll();
-    await database.$disconnect();
+    await fixture.close();
     process.chdir(originalCwd);
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'image-dispatch-fairness-engineering.v1', runId, mode, startedAt, finishedAt: new Date().toISOString(),

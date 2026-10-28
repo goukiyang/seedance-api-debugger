@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { MULTIVIEW_FLOW_SOURCES } from './multiview-flow-fixture-inputs.mjs';
+import { assertFreshFixtureFactory, openRealFixtureDatabase } from './fixtures/real-database-client';
 
 async function main() {
   const root = realpathSync(process.cwd()), startedAt = Date.now();
@@ -41,6 +42,7 @@ assert json.loads(subprocess.check_output(['python3',str(root/'scripts/check-mul
   process.env.SESSION_SECRET = randomBytes(32).toString('hex');
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined);
+  assertFreshFixtureFactory();
   globalThis.fetch = async () => { throw new Error('Network forbidden in isolated flow checks'); };
   execFileSync(process.execPath, [path.join(root, 'node_modules/prisma/build/index.js'), 'db', 'push', '--skip-generate', '--schema', path.join(root, 'prisma/schema.prisma')],
     { cwd: scratch, env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: 'test', DATABASE_URL: process.env.DATABASE_URL }, stdio: 'pipe', timeout: 120000 });
@@ -49,6 +51,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
 `, database, path.join(root, 'prisma/migrations/20261026203000_multiview_flow/migration.sql')]);
   const schema = JSON.parse(execFileSync('python3', [path.join(root, 'scripts/check-multiview-works-schema.py'), '--database', database], { encoding: 'utf8' }));
   assert.equal(schema.state, 'compatible'); assert.equal(schema.writes, 0);
+  const fixture = await openRealFixtureDatabase(database);
   const { prisma } = await import('../src/lib/prisma');
   const require = createRequire(import.meta.url);
   const { requestAsyncStorage } = require('./fixtures/next-request-context') as typeof import('./fixtures/next-request-context');
@@ -163,16 +166,23 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
     assert.equal((await media.multiviewSourceFile(recipient, info.taskId, version, { kind: 'work', id: independent.id })).info.sourceVersion, version);
     assert.equal((await prisma.multiviewSource.findUniqueOrThrow({ where: { id: independent.sourceId! } })).can_reshare, false);
     checks.push('immutable_old_share_revision_and_independent_copy_survives_revocation_without_task_permission');
-    const transaction = prisma.$transaction.bind(prisma); let calls = 0;
-    Reflect.set(prisma, '$transaction', async (...args: unknown[]) => {
-      if (++calls === 2) await prisma.multiviewShare.update({ where: { id: sent.shareId }, data: { revoked_at: new Date() } });
-      return Reflect.apply(transaction, prisma, args);
+    let calls = 0, revocations = 0;
+    const restoreTransaction = fixture.interceptTransactions(async () => {
+      if (++calls === 2) {
+        const revoked = await prisma.multiviewShare.update({ where: { id: sent.shareId }, data: { revoked_at: new Date() } });
+        assert.ok(revoked.revoked_at, 'Race hook must persist the actual revocation'); revocations++;
+      }
     });
     let raced;
     try { raced = await share.mutateMultiviewShare(recipient, { ...branchInput, mutationId: randomUUID(), shareId: sent.shareId }); }
-    finally { Reflect.set(prisma, '$transaction', transaction); }
+    finally { restoreTransaction(); }
+    assert.ok(calls >= 2, 'Race hook must intercept the claim and fresh commit');
+    assert.equal(revocations, 1, 'Race hook must revoke exactly once');
+    assert.ok((await prisma.multiviewShare.findUniqueOrThrow({ where: { id: sent.shareId } })).revoked_at, 'Race hook must remain visible in actual SQLite');
     assert.equal(raced.state, 'rejected'); assert.equal(raced.notCommitted, true);
     assert.equal(await prisma.multiviewWork.count({ where: { owner_id: recipient.id } }), 1);
+    assert.equal(calls, 3, 'Race hook must observe claim, denied commit and durable rejection');
+    await fixture.verify();
     checks.push('revocation_during_copy_rejected_at_fresh_commit_without_orphan_work');
     const exhaustedInput = { ...branchInput, mutationId: randomUUID() };
     await prisma.multiviewShareMutation.create({ data: { id: randomUUID(), actor_id: recipient.id, mutation_id: exhaustedInput.mutationId,
@@ -228,6 +238,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
     assert.equal(works.multiviewWorkRecipeHash(explicitBase.work.recipe!), (await prisma.multiviewWork.findUniqueOrThrow({ where: { id: intent.id } })).recipe_hash);
     checks.push('first_explicit_save_advances_intent_output_revision_and_uses_canonical_recipe');
     assert.deepEqual(hashes(), sourceSha256);
+    await fixture.verify();
     const receipt = process.argv[2] || path.join(root, '.role-tests', `multiview-flow-${randomUUID()}.json`);
     assert.ok(path.resolve(receipt).startsWith(path.join(root, '.role-tests') + path.sep));
     writeFileSync(receipt, JSON.stringify({ schema: 'multiview-flow-engineering.v1', completed: true, synthetic: true,
@@ -235,6 +246,6 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
       applicationDatabaseOpened: false, productionWrites: 0, paidRequests: 0, browserRuns: 0, forbiddenCalls: 0,
       sourceSha256, checks }, null, 2), { flag: 'wx', mode: 0o600 });
     console.log('Multiview flow engineering receipt: ' + receipt);
-  } finally { await prisma.$disconnect(); process.chdir(root); }
+  } finally { await fixture.close(); process.chdir(root); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -287,15 +287,27 @@ async function main() {
     });
     await test('copied source ceiling cannot be upgraded by re-sharing with explicit download', async () => {
       const copied = await prisma.referenceImage.findFirstOrThrow({ where: { album_id: 'media-copy-album', source_image_id: 'media-source-reference' } });
-      await prisma.albumShare.upsert({ where: { album_id_grantee_type_grantee_id: { album_id: 'media-copy-album', grantee_type: 'user', grantee_id: external.id } }, update: {},
+      const grant = await prisma.albumShare.upsert({ where: { album_id_grantee_type_grantee_id: { album_id: 'media-copy-album', grantee_type: 'user', grantee_id: external.id } }, update: { status: 'active' },
         create: { album_id: 'media-copy-album', grantee_type: 'user', grantee_id: external.id, created_by: shared.id, permissions_json: JSON.stringify({ view: true, use: true, copy: true, download: true }) } });
-      assert.equal((await policy.decideMedia(actors[3], { type: 'reference', id: copied.id }, 'use')).allowed, true);
-      assert.equal((await policy.decideMedia(actors[3], { type: 'reference', id: copied.id }, 'download-original')).allowed, false);
+      try {
+        assert.equal((await policy.decideMedia(actors[3], { type: 'reference', id: copied.id }, 'use')).allowed, true);
+        assert.equal((await policy.decideMedia(actors[3], { type: 'reference', id: copied.id }, 'download-original')).allowed, false);
+      } finally {
+        await prisma.albumShare.update({ where: { id: grant.id }, data: { status: 'revoked' } });
+      }
+      assert.equal((await policy.decideMedia(actors[3], { type: 'asset', id: asset.id }, 'copy')).allowed, false, 'The temporary re-share must not leak into the next matrix run');
     });
     await test('a private system-image thumbnail alias cannot be smuggled through an owned Asset', async () => {
-      const alias = await prisma.asset.upsert({ where: { id: 'media-private-thumb-alias' }, update: {}, create: { id: 'media-private-thumb-alias', owner_id: shared.id, type: 'image', original_url: asset.original_url,
+      const alias = await prisma.asset.upsert({ where: { id: 'media-private-thumb-alias' }, update: { status: 'active' }, create: { id: 'media-private-thumb-alias', owner_id: shared.id, type: 'image', original_url: asset.original_url,
         thumbnail_url: mvReference.original_url, file_name: 'alias.png', mime_type: 'image/png', file_size: png.length } });
-      assert.equal((await policy.decideMedia(actors[2], { type: 'asset', id: alias.id }, 'view-thumbnail')).allowed, false);
+      try {
+        assert.equal((await policy.decideMedia(actors[2], { type: 'asset', id: alias.id }, 'view-thumbnail')).allowed, false);
+        const ref = { type: 'video-input' as const, id: `${video.id}--image--0` };
+        assert.equal((await policy.decideMedia(actors[0], ref, 'view-preview')).allowed, false, 'An active duplicate source stays ambiguous even for its owner');
+      } finally {
+        await prisma.asset.update({ where: { id: alias.id }, data: { status: 'inactive' } });
+      }
+      assert.equal((await policy.decideMedia(actors[1], { type: 'video-input', id: `${video.id}--image--0` }, 'view-preview')).allowed, true, 'Removing only the synthetic duplicate restores the original authorized source');
     });
     await test('real outlet resolves revocation and cross-user identity before trusting a signed ticket', async () => {
       const route = await import('../src/app/m/[type]/[id]/[variant]/route');

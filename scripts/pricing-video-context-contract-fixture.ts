@@ -105,6 +105,7 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
   fs.chmodSync(runtime, 0o700);
   assert.ok(contained(roleRoot, fs.realpathSync(runtime)));
   const secretBefore = process.env.SESSION_SECRET;
+  const mediaRootBefore = process.env.MEDIA_DATA_ROOT;
   const fixtureSecret = `pricing-video-context-fixture-only-${randomUUID()}`;
   let client: PrismaClient | undefined, seeded = false, assertions = 0;
   const evidence: string[] = [];
@@ -176,9 +177,10 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
   try {
     process.chdir(runtime);
     process.env.SESSION_SECRET = fixtureSecret;
-    fs.mkdirSync(path.join(runtime, 'public/uploads/pricing-video-context-fixture'), { recursive: true, mode: 0o700 });
+    process.env.MEDIA_DATA_ROOT = path.join(runtime, '.media');
+    fs.mkdirSync(path.join(runtime, '.media/uploads/pricing-video-context-fixture'), { recursive: true, mode: 0o700 });
     for (const [index, url] of Array.from(videoUrls.entries())) {
-      fs.writeFileSync(path.join(runtime, 'public', url.slice(1)), Buffer.from(`Readable fixture bytes ${index}; not a decoded video.`), { flag: 'wx', mode: 0o600 });
+      fs.writeFileSync(path.join(runtime, '.media', url.slice(1)), Buffer.from(`Readable fixture bytes ${index}; not a decoded video.`), { flag: 'wx', mode: 0o600 });
     }
     // Load after the cwd guard, using one graph for runtime functions and Error classes.
     const loadRuntime = createRequire(path.join(candidateRoot, 'package.json'));
@@ -220,7 +222,7 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       await tx.platformSetting.create({ data: { key: ids.settings, value_json: JSON.stringify({ fixture: 'video-context', untouched: true }) } });
       await tx.workspace.create({ data: { id: ids.workspace, owner_id: actorA.id, name: 'Existing fixture workspace' } });
       for (const [index, assetId] of Array.from(ids.assets.entries())) {
-        const bytes = fs.readFileSync(path.join(runtime, 'public', videoUrls[index].slice(1)));
+        const bytes = fs.readFileSync(path.join(runtime, '.media', videoUrls[index].slice(1)));
         await tx.asset.create({ data: { id: assetId, owner_id: actorA.id, type: 'video', original_url: videoUrls[index],
           file_name: `${assetId}.mp4`, mime_type: 'video/mp4', file_size: bytes.length, hash: createHash('sha256').update(bytes).digest('hex'), status: 'active' } });
       }
@@ -424,6 +426,8 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       finally {
         if (secretBefore === undefined) delete process.env.SESSION_SECRET;
         else process.env.SESSION_SECRET = secretBefore;
+        if (mediaRootBefore === undefined) delete process.env.MEDIA_DATA_ROOT;
+        else process.env.MEDIA_DATA_ROOT = mediaRootBefore;
         process.chdir(originalCwd);
         assert.ok(contained(roleRoot, fs.realpathSync(runtime)), 'Cleanup is limited to the created private fixture runtime');
         fs.rmSync(runtime, { recursive: true, force: true });

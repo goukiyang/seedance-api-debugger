@@ -30,6 +30,8 @@ function evaluate(source, imports = {}, globals = {}) {
 const base = evaluate(declarations(read('src/lib/assets/verified-upload.ts'), [
   'VerifiedUploadError', 'uploadDigest', 'assertUploadOwner', 'uploadRequestId', 'verifiedUploadFailure',
 ]), {}, { createHash: crypto.createHash });
+const streamErrors = evaluate(declarations(read('src/lib/assets/streamed-upload.ts'), ['UploadStreamError']));
+const browserAsset = evaluate(read('src/lib/media/browser-asset.ts'));
 const checks = [], boundaryFailures = [];
 function boundary(run) {
   try { return run(); } catch (error) { boundaryFailures.push(error); throw error; }
@@ -83,13 +85,37 @@ function environment({ rejectDirectory = false, failAfterWriting = false, refuse
     './upload-similarity': { uploadSimilarityStatus: async () => ({ state: 'disabled' }) },
     './raw-upload-recovery-proof': { readRawUploadRecoveryProof: async (_key, value) => retiredProof ? base.uploadDigest(value) : null },
   });
+  const browserProjection = evaluate(read('src/lib/media/browser-projection.server.ts'), {
+    '@/lib/prisma': { prisma }, './browser-asset': browserAsset,
+    './outlet': { mediaProjection: async (viewer, ref) => boundary(() => {
+      assert.equal(viewer.id, owner); assert.equal(ref.type, 'asset');
+      return null; // Display readiness cannot undo the committed original receipt.
+    }) },
+  });
   const route = evaluate(read('src/app/api/assets/upload/route.ts'), {
+    '@/lib/http/route': { route: (options, handler) => boundary(() => {
+      assert.equal(options.access, 'user'); assert.equal(options.rateLimit, false); return handler;
+    }) },
+    '@/lib/http/api-error': { apiErrorResponse: error => boundary(() => { throw error; }) },
+    '@/lib/assets/streamed-upload': { ...streamErrors,
+      readMultipartUpload: async () => boundary(() => { throw new Error('This raw fixture must not enter multipart parsing'); }),
+      streamToTemporaryUpload: async (body, options) => {
+        const bytes = Buffer.from(await new Response(body).arrayBuffer());
+        return boundary(() => {
+          assert.equal(options.expectedBytes, fixtureBytes.length); assert.equal(options.maxBytes, fixtureBytes.length);
+          assert.deepEqual(bytes, fixtureBytes);
+          return { file: '/isolated/staged-upload', bytes: bytes.length, hash: base.uploadDigest(bytes), cleanup: async () => {} };
+        });
+      } },
+    '@/lib/media/browser-projection.server': browserProjection,
     'next/server': { NextResponse: { json: (data, init) => Response.json(data, init) } },
     '@/lib/auth/session': { getSession: async () => ({ id: owner }) }, 'node:crypto': crypto,
     '@/lib/prisma': { prisma },
     '@/lib/assets/verified-upload': verified, '@/lib/assets/raw-upload-state': state,
     '@/lib/assets/site-upload': { ...metadata, validateSiteUploadInput: () => null, getSiteUploadKind: () => 'image',
-      uploadSiteAsset: async (_bytes, _name, _mime, _size, _owner, _batch, requestId) => {
+      uploadSiteAssetFile: async (file, _name, mime, size, hash, uploader, requestId) => {
+        boundary(() => { assert.equal(file, '/isolated/staged-upload'); assert.equal(uploader, owner);
+          assert.equal(mime, 'image/png'); assert.equal(size, fixtureBytes.length); assert.equal(hash, base.uploadDigest(fixtureBytes)); });
         writes++;
         if (failAfterWriting) throw new base.VerifiedUploadError('UPLOAD_PRIVATE_DIRECTORY_INVALID', '上传服务暂不可用', 503);
         committedAssets.set('isolated-asset', { id: 'isolated-asset', owner_id: foreignCommittedAsset ? 'other-owner' : owner,

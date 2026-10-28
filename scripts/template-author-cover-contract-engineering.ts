@@ -26,7 +26,7 @@ const sourceFiles = [fixtureFile, 'src/lib/image-studio/template-author.ts', 'sr
   'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts',
   'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
   'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/pricing-state.ts',
-  'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts', 'src/lib/users/profiles.ts', 'src/lib/users/display.ts'];
+  'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts', 'src/lib/users/profiles.ts', 'src/lib/users/display.ts', 'src/lib/media/storage-roots.ts'];
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -45,7 +45,7 @@ async function main() {
   let forbiddenCalls = 0, syntheticWrites = 0, allowWrites = false, rejectCasKey: string | null = null;
   const forbidden = (label: string): never => { forbiddenCalls++; throw new Error(`Unapproved offline boundary: ${label}`); };
   const fakeRoot = '/synthetic/template-author-cover';
-  const syntheticEnv: Record<string, string> = { NODE_ENV: 'test', FEISHU_ALLOWED_TENANT_KEY: 'fixture-company' };
+  const syntheticEnv: Record<string, string> = { NODE_ENV: 'test', FEISHU_ALLOWED_TENANT_KEY: 'fixture-company', MEDIA_DATA_ROOT: path.join(fakeRoot, '.media') };
   const source = (file: string) => readFileSync(path.join(root, file), 'utf8');
   function evaluate(file: string, imports: Exports, globals: Exports = {}, text = source(file)) {
     evaluatedSources.add(file);
@@ -277,7 +277,7 @@ async function main() {
   // synthetic filesystem. Render transport intentionally fails before sharp.
   const files = new Map<string, { bytes: Buffer; ino: number; mtimeMs: number }>();
   const putFile = (file: string, text: string) => files.set(file, { bytes: Buffer.from(text), ino: files.size + 1, mtimeMs: 1000 });
-  const permittedDirectories = new Set([path.join(fakeRoot, 'public/uploads'), path.join(fakeRoot, 'storage'), path.join(fakeRoot, 'storage/module-covers')]);
+  const permittedDirectories = new Set([path.join(fakeRoot, '.media/uploads'), path.join(fakeRoot, 'storage'), path.join(fakeRoot, 'storage/module-covers')]);
   const syntheticFs = new Proxy({
     realpath: async (file: string) => { if (!permittedDirectories.has(file) && !files.has(file)) return forbidden('filesystem-realpath'); return file; },
     stat: async (file: string) => {
@@ -290,9 +290,15 @@ async function main() {
   const mismatch = evaluate('src/lib/image-studio/dimension-mismatch.ts', { './pricing-state': pricing });
   const coverTypes = evaluate('src/lib/image-studio/module-cover-types.ts', {});
   const siteURL = evaluate('src/lib/assets/site-url.ts', {});
+  const storageRoots = evaluate('src/lib/media/storage-roots.ts', { 'node:path': path,
+    'node:fs/promises': { __esModule: true, default: syntheticFs }, '@/lib/assets/site-url': siteURL,
+    './hd-storage-root': { hdDirectory: () => forbidden('unused-hd-storage-root') } });
   const renderAttempts: string[] = [], protectedURLs = new Set<string>();
   const cover = evaluate('src/lib/image-studio/module-cover.ts', { 'node:fs/promises': { __esModule: true, default: syntheticFs }, 'node:path': path,
     'node:crypto': crypto, '../media/sharp': () => forbidden('image-encoder'), '@/lib/prisma': { prisma }, '@/lib/assets/site-url': siteURL,
+    '@/lib/media/storage-roots': storageRoots,
+    '@/lib/media/decode-image': { openUntrustedImage: () => forbidden('image-decoder'), openTrustedRawImage: () => forbidden('raw-image-decoder'),
+      createTrustedImageCanvas: () => forbidden('image-canvas'), compositeCheckedImageTiles: () => forbidden('image-composite') },
     './access': access, './shared-contract': shared, './shared-command-storage': storage, './preset-lifecycle': lifecycle,
     './workspace-deletion': deletion, './protected-assets': { studioHiddenAssetUrls: async (viewer: Row) => {
       assert.equal(viewer.id, 'module-cover-audience'); return Array.from(protectedURLs);
@@ -303,7 +309,7 @@ async function main() {
   }, {}, source('src/lib/image-studio/module-cover.ts') + '\nexport const engineering = { hash, prepareKey, preparationFingerprint, parseRecipe };');
   const native = (id: string): Row => ({ id, owner_id: owner.id, type: 'image', status: 'active', original_url: `/uploads/${id}.png`,
     hash: sha(id), file_size: 16, width: 16, height: 16, mime_type: 'image/png' });
-  for (const id of ['original-a', 'later-b']) { const row = native(id); assets.set(id, row); putFile(path.join(fakeRoot, 'public', row.original_url), `synthetic-original-${id}`); }
+  for (const id of ['original-a', 'later-b']) { const row = native(id); assets.set(id, row); putFile(storageRoots.localMediaPath(row.original_url), `synthetic-original-${id}`); }
   const workspace = (id: string, revision = 1): Row => ({ id, owner_id: owner.id, revision, source_preset_id: null, banner_asset_id: null });
   const resultTask = (id: string, moduleId: string, assetId: string, when = 1): Row => ({ id, module_id: moduleId, owner_id: owner.id,
     asset_id: assetId, status: 'succeeded', usage_json: null, deleted_at: null, finished_at: new Date(when) });
@@ -409,7 +415,7 @@ async function main() {
   await assert.rejects(cover.commitPreparedModuleCoverSnapshot(owner, prepared, prisma, { ...transition, targetPresetId: preset.id }));
   await assert.rejects(cover.commitPreparedModuleCoverSnapshot(admin, prepared, prisma, transition));
   await assert.rejects(cover.commitPreparedModuleCoverSnapshot(owner, prepared, prisma, { ...transition, operationFingerprint: sha('foreign-operation') }));
-  const originalFile = files.get(path.join(fakeRoot, 'public/uploads/original-a.png'))!;
+  const originalFile = files.get(storageRoots.localMediaPath('/uploads/original-a.png'))!;
   originalFile.mtimeMs++;
   await assert.rejects(cover.commitPreparedModuleCoverSnapshot(owner, prepared, prisma, transition));
   originalFile.mtimeMs--;

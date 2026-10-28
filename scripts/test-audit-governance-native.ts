@@ -101,6 +101,8 @@ async function main() {
     assert.equal((await get('shares', '', outsider.id)).status, 403);
     assert.equal((await get('submissions', '', viewer.id)).status, 403);
     await prisma.user.update({ where: { id: admin.id }, data: { role: 'user' } });
+    assert.equal((await get('submissions')).status, 401, 'Role change must invalidate the old durable session');
+    tokens.set(admin.id, await session.createSession(admin.id));
     assert.equal((await get('submissions')).status, 403); results.push('fresh role and share management authorization');
     const who: SessionUser = { ...viewer, role: 'user', account_type: 'internal', status: 'active' };
     const first = await readProjectAlbumDirectory(who, project.id); assert.equal(first.total, 130); assert.equal(first.albums.length, 20); assert.equal(first.totalPages, 7);

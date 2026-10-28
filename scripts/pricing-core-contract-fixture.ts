@@ -64,7 +64,9 @@ async function main() {
   const { PricingItemUnavailableError } = fixtureRequire('@/lib/pricing/item-unavailable') as typeof import('@/lib/pricing/item-unavailable');
   const frozenCharge = fixtureRequire('@/lib/pricing/frozen-charge') as typeof import('@/lib/pricing/frozen-charge');
   const { prisma } = fixtureRequire('@/lib/prisma') as typeof import('@/lib/prisma');
-  assert.equal(prisma, db, 'Business modules must retain the injected isolated client');
+  assert.equal(Reflect.get(globalThis, Symbol.for('video-api.database-client.v1')).raw, db, 'Business facade must retain the injected isolated client');
+  const attached = await prisma.$queryRawUnsafe<Array<{ name: string; file: string }>>('PRAGMA database_list');
+  assert.equal(fs.realpathSync(attached.find(row => row.name === 'main')!.file), fs.realpathSync(databasePath), 'Business queries must reach only the guarded isolated database');
   assert.equal(pricingImageCandidateFixtureErrorClasses.PricingRuntimeError, runtime.PricingRuntimeError, 'Runtime error constructors must share one module instance');
   assert.equal(pricingImageCandidateFixtureErrorClasses.PricingItemUnavailableError, PricingItemUnavailableError, 'Item error constructors must share one module instance');
   assert.equal(PricingChargeError, frozenCharge.PricingChargeError, 'Charge re-exports must retain the original error constructor');

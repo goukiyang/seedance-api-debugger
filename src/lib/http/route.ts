@@ -7,7 +7,7 @@ import { PublicApiError, withApiErrors } from './api-error';
 
 type RatePolicy = false | 'auth' | 'login' | 'registration-code' | 'feedback';
 type Access = { access: 'public' }
-  | { access: 'user' | 'internal' | 'admin'; identity?: (request: NextRequest) => Promise<SessionUser | null>; unauthenticatedStatus?: 401 | 403 | 404 }
+  | { access: 'user' | 'internal' | 'admin'; identity?: (request: NextRequest) => Promise<SessionUser | null | Response>; unauthenticatedStatus?: 401 | 403 | 404 }
   | { access: 'service'; authenticate: (request: NextRequest) => Promise<boolean | Response> };
 export type RouteOptions = Access & { rateLimit: RatePolicy };
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -57,6 +57,7 @@ export function route<Args extends unknown[]>(options: RouteOptions,
       if (authenticated !== true) return Response.json({ error: '未授权' }, { status: 401, headers: privateHeaders });
     } else if (options.access !== 'public') {
       const user = await (options.identity ? options.identity(request) : getSession());
+      if (user instanceof Response) return user;
       if (!user) {
         const status = options.unauthenticatedStatus ?? 401;
         return Response.json({ error: status === 404 ? '不存在' : '未登录' }, { status, headers: privateHeaders });
