@@ -27,7 +27,8 @@ async function main() {
     assert.equal(databases.find(row => row.name === 'main')?.file, match![1]);
     assert.equal(await prisma.user.count(), 0); assert.equal(await prisma.videoTask.count(), 0);
     const row = await prisma.user.create({ data: { id: 'f24-user', name: 'Synthetic', username: 'f24-synthetic', email: 'synthetic@invalid.example',
-      password_hash: 'synthetic-no-login', account_type: 'internal', status: 'active', role: 'user', user_profile: 'core_video' } });
+      password_hash: 'synthetic-no-login', account_type: 'internal', feature_profile_id: 'internal_email_authorized',
+      status: 'active', role: 'user', user_profile: 'core_video' } });
     const user = row as SessionUser;
     await prisma.creditAccount.create({ data: { user_id: user.id, balance: 1234 } });
     const project = await prisma.project.create({ data: { id: 'f24-project', name: 'Synthetic', owner_user_id: user.id, created_by: user.id, type: 'personal' } });
