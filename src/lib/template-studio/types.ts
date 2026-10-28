@@ -175,6 +175,8 @@ export type UpdateStudioDraftRequest = {
 };
 
 export type StudioRunSnapshot = {
+  purpose?: 'studio' | 'multiview-action';
+  multiviewAction?: { attemptId?: string; stage: 'format' | 'final'; workId: string; revision: number; recipeHash: string; outputHash: string; sourceTaskId: string; sourceVersion: string; geometry: Record<string, StudioJsonValue>; assetId: string; inputHash?: string; formatRevision: number; syncRevision: number };
   privateProvider?: { kind: 'musk'; settings: { enabled: boolean; base_url: string; default_model: string; api_key: string | null } };
   llmModel?: string;
   privateContext?: { global: string; module: string; globalRevision: number; moduleRevision: number };

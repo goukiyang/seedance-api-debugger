@@ -90,6 +90,7 @@ db=sqlite3.connect(sys.argv[1]); sql=pathlib.Path(sys.argv[2]).read_text(); db.e
     const initialRecipe = { ...contract.defaultMultiviewWorkRecipe(info), schema: 2 as const };
     initialRecipe.slots[0].locked = true;
     const recipe = contract.parseMultiviewWorkRecipe(initialRecipe, info)!;
+    assert.ok(recipe.schema !== 3);
     assert.equal(contract.parseMultiviewWorkRecipe(recipe, info)?.slots[0].locked, true);
     assert.notEqual(contract.multiviewWorkContentSignature(recipe), contract.multiviewWorkContentSignature({ ...recipe, slots: recipe.slots.map(slot => ({ ...slot, locked: false })) }));
     const applied = applyMultiviewFrameSettings({ ...recipe, editing: null }, info, { schema: 1, slots: [1, 2, 3].map(frame => ({ frame, name: '' })) });

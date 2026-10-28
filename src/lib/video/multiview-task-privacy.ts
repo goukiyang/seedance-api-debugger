@@ -1,17 +1,29 @@
 import type { Prisma } from '@prisma/client';
 import { taskThumbnailProjection, type TaskThumbnailProjectionSource } from './task-thumbnail-projection';
+import { parseMultiviewActionBinding, type MultiviewActionBinding } from './multiview-action-contract';
 
 /** This object is written only after the server has accepted a private recipe. */
-export type MultiviewPrivateTaskMarker = { kind: 'multiview'; schema: 1; recipeVersion: string };
+export type MultiviewPrivateTaskMarker = { kind: 'multiview' | 'multiview-action'; schema: 1; recipeVersion: string;
+  actionBinding?: MultiviewActionBinding };
 export type TaskProtectionSource = { source_metadata_json: string | null };
 export const MULTIVIEW_PRIVATE_MODULE = 'multiview' as const;
 export const MULTIVIEW_PRIVATE_SCHEMA = 1 as const;
 export const MULTIVIEW_PUBLIC_TASK_TITLE = '3D多视图';
+export const MULTIVIEW_ACTION_PUBLIC_TASK_TITLE = '同步动作视频';
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 export function multiviewPrivateTaskMarker(recipeVersion: string): MultiviewPrivateTaskMarker {
   if (!/^1\.0\.(?:0|[1-9]\d{0,15})$/.test(recipeVersion)) throw new Error('私有配方版本无效');
   return { kind: MULTIVIEW_PRIVATE_MODULE, schema: MULTIVIEW_PRIVATE_SCHEMA, recipeVersion };
+}
+export function multiviewActionPrivateTaskMarker(binding: MultiviewActionBinding): MultiviewPrivateTaskMarker {
+  const parsed = parseMultiviewActionBinding(binding);
+  if (!parsed) throw new Error('动作视频绑定无效');
+  return { kind: 'multiview-action', schema: 1, recipeVersion: 'action-v1', actionBinding: parsed };
+}
+export function isPrivateMultiviewActionTask(task: TaskProtectionSource): boolean {
+  const marker = metadata(task)?.protected_module;
+  return record(marker) && marker.kind === 'multiview-action';
 }
 
 function metadata(task: TaskProtectionSource): Record<string, unknown> | null {
@@ -41,6 +53,10 @@ export function readMultiviewPrivateTaskMarker(task: TaskProtectionSource): Mult
   const value = metadata(task);
   if (!value || !Object.prototype.hasOwnProperty.call(value, 'protected_module')) return null;
   const marker = value.protected_module;
+  if (record(marker) && marker.kind === 'multiview-action' && marker.schema === 1 && marker.recipeVersion === 'action-v1') {
+    const binding = parseMultiviewActionBinding(marker.actionBinding);
+    if (binding) return multiviewActionPrivateTaskMarker(binding);
+  }
   if (!record(marker) || marker.kind !== MULTIVIEW_PRIVATE_MODULE || marker.schema !== MULTIVIEW_PRIVATE_SCHEMA
     || typeof marker.recipeVersion !== 'string' || !/^1\.0\.(?:0|[1-9]\d{0,15})$/.test(marker.recipeVersion)) {
     throw new Error('该任务的私有配方记录暂时无法确认，请保留原任务并联系管理员');
@@ -60,7 +76,7 @@ export function safeVideoTaskKeywordWhere(keyword: string): Prisma.VideoTaskWher
   return { OR: [
     { id: { contains: keyword } },
     { AND: [ordinaryVideoTaskWhere(), { prompt: { contains: keyword } }] },
-    ...(MULTIVIEW_PUBLIC_TASK_TITLE.includes(keyword) ? [privateMultiviewTaskWhere()] : []),
+    ...(MULTIVIEW_PUBLIC_TASK_TITLE.includes(keyword) || MULTIVIEW_ACTION_PUBLIC_TASK_TITLE.includes(keyword) ? [privateMultiviewTaskWhere()] : []),
   ] };
 }
 
@@ -123,7 +139,8 @@ export function projectPrivateMultiviewTask<T extends object & TaskProtectionSou
   const upstreamId = source.provider_task_id;
   result.provider_accepted = typeof upstreamId === 'string' && upstreamId.length > 0 && upstreamId !== source.id
     && upstreamId !== source.provider_client_request_id && upstreamId !== source.idempotency_key;
-  Object.assign(result, { prompt: MULTIVIEW_PUBLIC_TASK_TITLE, source_label: MULTIVIEW_PUBLIC_TASK_TITLE,
+  const title = isPrivateMultiviewActionTask(task) ? MULTIVIEW_ACTION_PUBLIC_TASK_TITLE : MULTIVIEW_PUBLIC_TASK_TITLE;
+  Object.assign(result, { prompt: title, source_label: title,
     protected_module: true, module_path: '/multiview', reference_image_ids: null, reference_image_urls: null });
   const error = privateMultiviewFailure(source.error_message, source.local_status);
   result.error_message = error?.message ?? null;

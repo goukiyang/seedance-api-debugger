@@ -17,7 +17,7 @@ import styles from './multiview-works.module.css';
 type Pending = { mutationId: string; workId: string; action: 'save' | 'branch' | 'remove' | 'restore' };
 type LibraryPreferences = { projectId: string; q: string; removed: boolean; selected: string; y: number };
 type Props = { owner: string; authority: string; initialWorkId?: string; onEdit: (work: MultiviewWorkDto) => void; onNew: () => void;
-  detailOnly?: boolean; initialAction?: 'rename' | 'branch' | 'remove' | 'restore' | 'retry' | 'share'; onClose?: () => void;
+  kind?: 'reference'; detailOnly?: boolean; initialAction?: 'rename' | 'branch' | 'remove' | 'restore' | 'retry' | 'share'; onClose?: () => void;
   onUseReference?: (work: MultiviewWorkDto, role: string) => void };
 type ListResult = MultiviewWorkList & { projects: Array<{ id: string; title: string }> };
 const base = '/api/video/multiview/works';
@@ -58,7 +58,7 @@ const messageFor = (status: number) => status === 409 ? '作品已在别处更�
   : status === 401 || status === 403 ? '当前账号暂不能读取此作品，请核对登录和原视频权限。'
     : status === 404 ? '作品或原视频暂不可读取，请返回作品库重新核对。' : '作品读取未完成，请重试；原作品和本机修改保持不变。';
 
-export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew, onUseReference, detailOnly = false, initialAction, onClose }: Props) {
+export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, onNew, onUseReference, kind, detailOnly = false, initialAction, onClose }: Props) {
   const router = useRouter(), query = useSearchParams();
   const identity = `${owner}:${authority}`;
   const identityRef = useRef(identity); identityRef.current = identity;
@@ -84,7 +84,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
   const pendingRef = useRef(pending); pendingRef.current = pending;
   const workRef = useRef(work); workRef.current = work;
   const preferenceRef = useRef(preferences); preferenceRef.current = preferences;
-  const preferenceKey = `sd2:multiview:works-library:v1:${owner}`;
+  const preferenceKey = `sd2:multiview:works-library:v1:${owner}${kind ? ':reference' : ''}`;
   const mutationKey = `sd2:multiview:works-management:v1:${owner}`;
   const alive = useCallback((captured: string) => identityRef.current === captured && activeIdentity.current === captured && !isClientSessionBlocked(), []);
   const savePreferences = useCallback((next: LibraryPreferences) => {
@@ -123,6 +123,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
     if (append && cursor) params.set('cursor', cursor);
     setLoading(true);
     try {
+      if (kind) params.set('kind', kind);
       const response = await request(`${base}?${params}`);
       if (!alive(captured) || epoch !== listEpoch.current) return;
       if (!response.ok) { if ([401, 403].includes(response.status)) { setItems([]); setWork(null); clearMultiviewWorkFiles(); } throw new Error(messageFor(response.status)); }
@@ -133,7 +134,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       return data.works;
     } catch (error) { if (alive(captured) && epoch === listEpoch.current) setNotice(error instanceof Error ? error.message : messageFor(503)); }
     finally { if (alive(captured) && epoch === listEpoch.current) setLoading(false); }
-  }, [detailOnly, owner, loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed, cursor, request, alive]);
+  }, [kind, detailOnly, owner, loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed, cursor, request, alive]);
   const fetchDetail = useCallback(async (id: string, report = false) => {
     const captured = identity, epoch = ++detailEpoch.current, previous = workRef.current?.id === id ? workRef.current.revision : null;
     if (!validId(id)) return;

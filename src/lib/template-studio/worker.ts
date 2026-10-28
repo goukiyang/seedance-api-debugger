@@ -13,6 +13,7 @@ import { TEMPLATE_STUDIO_TEXT_ENABLED_KEY } from './capabilities';
 import { TEMPLATE_STUDIO_LIMITS } from './validation';
 import { containsPrivateContext } from './projection';
 import { isStudioTextModel } from './text-models';
+import { ensureMultiviewActionSnapshot } from '@/lib/video/multiview-action.server';
 
 const LEASE_MS = 90_000;
 const MUSK_TIMEOUT_MS = 45_000;
@@ -96,7 +97,7 @@ export async function recoverExpiredStudioRuns() {
 
 async function claimStudioRun() {
   const candidates = await prisma.videoStudioRun.findMany({
-    where: { mode: 'llm', status: 'queued', delivery_state: 'not_sent', OR: [{ lease_expires_at: null }, { lease_expires_at: { lte: new Date() } }] },
+    where: { purpose: { in: ['studio', 'multiview-action'] }, mode: 'llm', status: 'queued', delivery_state: 'not_sent', OR: [{ lease_expires_at: null }, { lease_expires_at: { lte: new Date() } }] },
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
     take: 5,
   });
@@ -144,7 +145,13 @@ export async function processStudioPromptOnce() {
     }
     requireStudioUser(user);
     const snapshot = parseWorkerSnapshot(run.snapshot_json, run.id, run.draft_id);
-    await ensureStudioSnapshotSourceStillUsable(user, snapshot);
+    if (run.purpose === 'multiview-action') {
+      if (snapshot.purpose !== 'multiview-action') throw new StudioError('动作快照用途不一致，未提交上游', 409, 'CONFLICT');
+      await ensureMultiviewActionSnapshot(user, snapshot);
+    } else {
+      if (snapshot.purpose && snapshot.purpose !== 'studio') throw new StudioError('文案快照用途不一致，未提交上游', 409, 'CONFLICT');
+      await ensureStudioSnapshotSourceStillUsable(user, snapshot);
+    }
     await authorizeStudioAssets(user, snapshot.assets);
 
     const setting = await prisma.platformSetting.findUnique({ where: { key: TEMPLATE_STUDIO_TEXT_ENABLED_KEY }, select: { value_json: true } });
@@ -178,7 +185,7 @@ export async function processStudioPromptOnce() {
         { role: 'user', content: JSON.stringify({
           fields: snapshot.input.values,
           userPrompt: snapshot.input.draftPrompt,
-          parameters: snapshot.parameters,
+          parameters: snapshot.purpose === 'multiview-action' ? { duration: snapshot.parameters.duration, panels: snapshot.multiviewAction?.geometry.panels } : snapshot.parameters,
           assets: snapshot.assets.map(({ role, type, slotKey }) => ({ role, type, ...(slotKey ? { slotKey } : {}) })),
         }) },
       ],

@@ -124,7 +124,7 @@ function responseStatus(run: { mode: string; status: string }) {
 }
 
 function assertIdempotentSemantics(run: { id: string; draft_id: string; draft_revision: number; mode: string; snapshot_json: string; model: string | null }, input: CreateStudioRunRequest) {
-  if (run.draft_id !== input.draftId || run.draft_revision !== input.revision || run.mode !== input.mode) {
+  if (('purpose' in run && run.purpose !== 'studio') || run.draft_id !== input.draftId || run.draft_revision !== input.revision || run.mode !== input.mode) {
     throw new StudioError('requestId 已用于不同的草稿修订或运行模式', 409, 'CONFLICT');
   }
   if (input.llmModel !== undefined && input.llmModel !== (decodeSnapshot(run.snapshot_json, run.id, run.draft_id).llmModel || run.model)) {
@@ -194,7 +194,7 @@ async function resolveRunTemplateFilter(user: SessionUser, templateId?: string, 
   if (source && source !== 'legacy' && source !== 'studio') throw new StudioError('模板来源无效', 400, 'INVALID');
   if (!source) {
     const drafts = await prisma.videoStudioDraft.findMany({
-      where: { owner_user_id: user.id, source_template_id: id, template_source: { in: ['legacy', 'studio'] } },
+      where: { owner_user_id: user.id, purpose: 'studio', source_template_id: id, template_source: { in: ['legacy', 'studio'] } },
       select: { template_source: true },
       distinct: ['template_source'],
     });
@@ -218,7 +218,7 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
     assertIdempotentSemantics(existingBeforeValidation, { ...input, requestId });
     return { run: dto(existingBeforeValidation), status: responseStatus(existingBeforeValidation) };
   }
-  const draft = await prisma.videoStudioDraft.findFirst({ where: { id: input.draftId, owner_user_id: user.id } });
+  const draft = await prisma.videoStudioDraft.findFirst({ where: { id: input.draftId, owner_user_id: user.id, purpose: 'studio' } });
   if (!draft) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   if (draft.revision !== input.revision) throw new StudioError('草稿内容已变化，请刷新后重新提交', 409, 'CONFLICT', { currentRevision: draft.revision });
   const snapshot = draftSnapshot(draft, user, input.mode);
@@ -312,7 +312,7 @@ export async function listStudioRuns(user: SessionUser, query: StudioRunListQuer
   if (after && before && after >= before) throw new StudioError('结束日期必须晚于开始日期', 400, 'INVALID');
   const cursor = parseCursor(query.cursor);
   const where = {
-    owner_user_id: user.id,
+    owner_user_id: user.id, purpose: 'studio',
     ...(query.requestId ? { request_id: query.requestId.slice(0, 120) } : {}),
     ...(query.draftId ? { draft_id: query.draftId.slice(0, 120) } : {}),
     ...(query.status ? { status: query.status } : {}),
@@ -334,7 +334,7 @@ export async function listStudioRuns(user: SessionUser, query: StudioRunListQuer
 }
 
 export async function getStudioRun(user: SessionUser, id: string): Promise<StudioRunDetailResponse> {
-  const row = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id } });
+  const row = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio' } });
   if (!row) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
   const snapshot = JSON.parse(row.snapshot_json) as StudioRunSnapshot;
   const tasks = await prisma.videoTask.findMany({
@@ -361,11 +361,11 @@ export async function getStudioRun(user: SessionUser, id: string): Promise<Studi
 
 export async function cancelStudioRun(user: SessionUser, id: string) {
   const update = await prisma.videoStudioRun.updateMany({
-    where: { id, owner_user_id: user.id, status: 'queued', delivery_state: 'not_sent', lease_token: null },
+    where: { id, owner_user_id: user.id, purpose: 'studio', status: 'queued', delivery_state: 'not_sent', lease_token: null },
     data: { status: 'cancelled', error_message: '已取消', completed_at: new Date(), updated_at: new Date() },
   });
   if (update.count !== 1) {
-    const exists = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id }, select: { id: true } });
+    const exists = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio' }, select: { id: true } });
     if (!exists) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
     throw new StudioError('当前状态不能取消；已投递任务会保留查询，不会重复提交', 409, 'CONFLICT');
   }

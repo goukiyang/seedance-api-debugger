@@ -16,7 +16,8 @@ type Pending = { schema: 1; owner: string; taskId: string; sourceVersion: string
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const signature = multiviewWorkContentSignature;
 export function appliedWorkRecipe(draft: MultiviewDraft | null, info: MultiviewInfo | null) {
-  return draft && info ? parseMultiviewWorkRecipe({ ...draft, schema: 2, restoreOrder: draft.restoreOrder || [] }, info) : null;
+  const recipe = draft && info ? parseMultiviewWorkRecipe({ ...draft, schema: 2, restoreOrder: draft.restoreOrder || [] }, info) : null;
+  return recipe?.schema === 3 ? null : recipe;
 }
 function workFrom(value: unknown): MultiviewWorkDto | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -30,6 +31,7 @@ function workFrom(value: unknown): MultiviewWorkDto | null {
     || work.info.taskId !== work.sourceTaskId || work.info.sourceVersion !== work.sourceVersion
     || !Number.isSafeInteger(work.info.width) || work.info.width < 1 || !Number.isSafeInteger(work.info.height) || work.info.height < 1
     || !Number.isFinite(work.info.duration) || work.info.timestamps.some(time => !Number.isFinite(time) || time < 0))) return null;
+  if (work.recipe?.schema === 3) return null;
   if (work.recipe && (!work.info || !parseMultiviewWorkRecipe(work.recipe, work.info))) return null;
   return work;
 }

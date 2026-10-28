@@ -3,12 +3,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import type { SessionUser } from '@/lib/auth/session';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
-import { assertMultiviewWorkReference, multiviewWorkActor, readMultiviewWorkFile } from './multiview-works';
-import { parseMultiviewWorkManifest } from './multiview-work-contract';
+import { assertMultiviewWorkReference, currentMultiviewActor, multiviewWorkActor, readMultiviewWorkFile, MultiviewWorkError } from './multiview-works';
+import { parseMultiviewWorkManifest, parseMultiviewWorkRecipe } from './multiview-work-contract';
 
 const PREFIX = 'multiview_output_registration_v1:';
 const ACTIVATION = PREFIX + 'activation';
@@ -115,8 +116,10 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
   await assertMultiviewWorkReference(user, work);
   const manifest = parseMultiviewWorkManifest(work.ready_manifest_json, JSON.parse(work.ready_recipe_json), work.ready_revision, sha(work.ready_recipe_json));
   if (!manifest) throw unavailable();
+  const reference = JSON.parse(work.ready_recipe_json).schema === 3;
+  const expectedOutputs = reference ? 1 : manifest.frameCount + 1;
   const root = await uploadsRoot(), prepared: Prepared[] = [];
-  for (const entry of manifest.files.filter(file => file.role === 'collage' || file.role.startsWith('frame-'))) {
+  for (const entry of manifest.files.filter(file => file.role === 'collage' || !reference && file.role.startsWith('frame-'))) {
     if (entry.mime !== 'image/png' || !entry.width || !entry.height) throw unavailable();
     const file = await readMultiviewWorkFile(user, work.id, entry.role, work.ready_revision);
     let bytes: Buffer;
@@ -129,7 +132,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     prepared.push({ role: entry.role, sha256: entry.sha256, bytes: entry.bytes, width: entry.width, height: entry.height,
       mime: 'image/png', originalUrl, thumbnailUrl, thumbnailSha256: sha(thumbnail), thumbnailBytes: thumbnail.length });
   }
-  if (prepared.length !== manifest.frameCount + 1) throw unavailable();
+  if (prepared.length !== expectedOutputs) throw unavailable();
   const existing = await prisma.asset.findMany({ where: { owner_id: user.id, hash: { in: prepared.map(item => item.sha256) } } });
   const byHash = new Map(existing.flatMap(asset => asset.hash ? [[asset.hash, asset] as const] : []));
   const checked = new Map<string, Prepared>();
@@ -187,7 +190,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
       mutationId: mutation.mutation_id, mutationRowId: mutation.id, mutationRequestHash: mutation.request_hash, outputs }) } });
     // Switch the group only with an entirely registered revision. A partial
     // revision never replaces the preceding complete group or resurrects assets.
-    if (outputs.length === manifest.frameCount + 1 && outputs.every(output => output.state === 'registered')) {
+    if (!reference && outputs.length === expectedOutputs && outputs.every(output => output.state === 'registered')) {
       const groupKey = `multiview_output_group_v1:${work.id}`;
       const group = { schema: 1, workId: work.id, ownerId: user.id, revision: work.ready_revision, receiptKey: key };
       await db.platformSetting.upsert({ where: { key: groupKey }, create: { key: groupKey, updated_by: user.id, value_json: JSON.stringify(group) },
@@ -225,4 +228,37 @@ export async function registerNextSavedMultiviewOutputs(admit: () => Promise<unk
     // this local output-registration step, never a generation or a second save.
   }
   return row.id;
+}
+
+export type MultiviewReferenceAssetBinding = { assetId: string; recipeHash: string; outputHash: string; sourceTaskId: string; sourceVersion: string;
+  geometry: { output: import('./multiview-reference-layout').ReferenceOutput; panels: import('./multiview-reference-layout').ReferencePanel[];
+    placements: import('./multiview-reference-layout').ReferencePlacement[]; divider: import('./multiview-reference-layout').ReferenceDivider } };
+/** Read the exact registered revision; this never registers assets or revives hidden output. */
+export async function readMultiviewReferenceBinding(user: SessionUser, workId: string, revision: number, db: Prisma.TransactionClient = prisma): Promise<MultiviewReferenceAssetBinding> {
+  await currentMultiviewActor(user, db);
+  const work = await db.multiviewWork.findFirst({ where: { id: workId, owner_id: user.id } });
+  if (!work || work.removed_at || work.schema_version !== 3 || work.status !== 'ready' || work.ready_revision !== revision || work.draft_revision !== revision
+    || !work.source_info_json || !work.ready_recipe_json || !work.ready_manifest_json || work.recipe_json !== work.ready_recipe_json) throw new MultiviewWorkError('本次参考拼图尚未准备好，原草稿保留。', 409, 'REFERENCE_NOT_READY');
+  await assertMultiviewWorkReference(user, work, db);
+  const info = JSON.parse(work.source_info_json), recipe = parseMultiviewWorkRecipe(work.ready_recipe_json, info);
+  if (recipe?.schema !== 3 || recipe.foregrounds.length !== recipe.slots.length) throw new MultiviewWorkError('请先完成每张图片的背景处理，原图仍可查看和导出。', 409, 'REFERENCE_BACKGROUND_PENDING');
+  const recipeHash = sha(work.ready_recipe_json), manifest = parseMultiviewWorkManifest(work.ready_manifest_json, recipe, revision, recipeHash);
+  const output = manifest?.files.find(file => file.role === 'collage');
+  if (!manifest || !output) throw unavailable();
+  const registered = await db.platformSetting.findUnique({ where: { key: receiptKey(workId, revision) } });
+  const receipt = registered ? JSON.parse(registered.value_json) : null;
+  const entry = Array.isArray(receipt?.outputs) ? receipt.outputs.find((value: Record<string, unknown>) => value && value.role === 'collage' && value.state === 'registered' && value.sha256 === output.sha256) : null;
+  if (!entry || receipt.ownerId !== user.id || receipt.readyRevision !== revision) throw new MultiviewWorkError('参考拼图素材仍在准备，请稍后查询原保存结果。', 409, 'REFERENCE_ASSET_PENDING');
+  const asset = await db.asset.findFirst({ where: { id: entry.assetId, owner_id: user.id, hash: output.sha256, status: 'active', type: 'image' } });
+  if (!asset || asset.original_url !== entry.originalUrl || asset.width !== recipe.output.width || asset.height !== recipe.output.height) throw new MultiviewWorkError('参考拼图素材已不可用，原作品仍保留。', 409, 'REFERENCE_ASSET_UNAVAILABLE');
+  return { assetId: asset.id, recipeHash, outputHash: output.sha256, sourceTaskId: work.source_task_id, sourceVersion: recipe.sourceVersion,
+    geometry: { output: recipe.output, panels: recipe.panels, placements: recipe.placements, divider: recipe.divider } };
+}
+/** Explicitly prepare an accepted reference save for the existing video asset consumer. */
+export async function ensureMultiviewReferenceAsset(user: SessionUser, workId: string, revision: number): Promise<MultiviewReferenceAssetBinding> {
+  const work = await prisma.multiviewWork.findFirst({ where: { id: workId, owner_id: user.id, removed_at: null, schema_version: 3 } });
+  if (!work || work.ready_revision !== revision || work.draft_revision !== revision || work.status !== 'ready') throw new MultiviewWorkError('参考拼图正在准备，原草稿保留。', 409, 'REFERENCE_NOT_READY');
+  await assertMultiviewWorkReference(user, work);
+  await registerSavedMultiviewOutputs(workId);
+  return readMultiviewReferenceBinding(user, workId, revision);
 }

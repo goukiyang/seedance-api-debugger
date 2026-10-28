@@ -155,7 +155,7 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
         if ((event.target as HTMLElement).closest('button') && menu.current) { menu.current.open = false; setMenuOpen(false); }
       }}>
         <button type="button" disabled={busy || !work.recipe} onClick={props.onBranch}>另存一版</button>
-        {props.onShare && <button type="button" onClick={props.onShare}>分享</button>}
+        {props.onShare && work.recipe?.schema !== 3 && <button type="button" onClick={props.onShare}>分享</button>}
         <button type="button" disabled={busy} onClick={props.onRemove}>{work.removed ? '恢复到作品库' : '移出作品库'}</button>
       </div></details>
     </header>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { isPrivateMultiviewTask, isPrivateMultiviewActionTask } from '@/lib/video/multiview-task-privacy';
 import { readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -290,6 +290,8 @@ export async function POST(
     await assertCanViewTask(user, task);
 
     if (isPrivateMultiviewTask(task)) {
+      if (isPrivateMultiviewActionTask(task)) return NextResponse.json({ error: '请在同步动作视频中继续编辑本次动作',
+        code: 'MULTIVIEW_ACTION_ONLY', target_path: '/multiview', draft: { target_path: '/multiview' } }, { status: 409 });
       if (task.generation_mode === 'enhance_video') {
         return NextResponse.json({ error: '此结果可查看和下载；重新生成请到3D多视图选择本人主图。',
           code: 'MULTIVIEW_OUTPUT_ONLY', target_path: '/multiview', draft: { target_path: '/multiview' } },

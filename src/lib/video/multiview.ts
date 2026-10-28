@@ -12,9 +12,10 @@ import { mediaPreviewResponse } from '@/lib/media/preview-response';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { isSafeTaskId } from './thumbnail';
 import { multiviewDimensions, validMultiviewLayout, type MultiviewInfo, type MultiviewLayout } from './multiview-contract';
-import { parseMultiviewWorkRecipe, type MultiviewWorkRecipe, type MultiviewSourceAccess } from './multiview-work-contract';
+import { parseMultiviewWorkRecipe, multiviewWorkDimensions, type MultiviewWorkRecipe, type MultiviewReferenceRecipe, type MultiviewSourceAccess } from './multiview-work-contract';
 import { buildAllMultiviewPreviews, buildMultiviewPreviewChunk, previewDirectoryMetrics,
   readMultiviewPreviewChunk, readMultiviewPreviewManifest } from './multiview-preview';
+import { referencePixelGeometry } from './multiview-reference-layout';
 import { MULTIVIEW_PREVIEW_CHUNK_SIZE } from './multiview-preview-contract';
 
 const exec = promisify(execFile);
@@ -284,6 +285,23 @@ function composeMultiviewPng(info: MultiviewInfo, files: Buffer[], layout: Multi
     left: layout.margin + (index % columns) * (info.width + layout.gap),
     top: layout.margin + Math.floor(index / columns) * (info.height + layout.gap) }))).timeout({ seconds: 60 }).png().toBuffer();
 }
+export async function composeMultiviewReferencePng(user: SessionUser, sourceTaskId: string, info: MultiviewInfo, originals: Buffer[], recipe: MultiviewReferenceRecipe) {
+  const geometry = referencePixelGeometry(recipe, info);
+  const layers: sharp.OverlayOptions[] = [];
+  for (const placement of geometry.placements) {
+    const index = recipe.slots.findIndex(slot => slot.id === placement.slotId), foreground = recipe.foregrounds.find(item => item.slotId === placement.slotId);
+    const input = foreground ? await (await import('./multiview-reference-cutout.server')).readMultiviewReferenceForeground(user, sourceTaskId, info, recipe.slots[index], foreground) : originals[index];
+    const data = await sharp(input, { limitInputPixels: 16777216 }).resize(placement.width, placement.height, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+    layers.push({ input: data, left: placement.x, top: placement.y });
+  }
+  if (recipe.divider.enabled) {
+    // A single SVG path avoids duplicate strokes at collinear T intersections.
+    const d = geometry.dividers.map(edge => `M${edge.x1},${edge.y1}L${edge.x2},${edge.y2}`).join(' ');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${geometry.width}" height="${geometry.height}"><path d="${d}" fill="none" stroke="${recipe.divider.color}" stroke-width="${recipe.divider.widthPx}"/></svg>`;
+    layers.push({ input: Buffer.from(svg), left: 0, top: 0 });
+  }
+  return sharp({ create: { width: geometry.width, height: geometry.height, channels: 4, background: recipe.output.background } }).composite(layers).timeout({ seconds: 60 }).png().toBuffer();
+}
 function packMultiviewFrames(info: MultiviewInfo, files: Buffer[], frames: number[], names: string[]) {
   const zip = new ZipFile();
   files.forEach((file, index) => zip.addBuffer(file, `view-${String(index + 1).padStart(2, '0')}.png`, { compress: false }));
@@ -305,7 +323,7 @@ export async function renderMultiviewWork(user: SessionUser, id: string, recipe:
   const prepared = await preparation(user, id, context, recipe.sourceVersion);
   const parsed = parseMultiviewWorkRecipe(recipe, prepared.info);
   if (!parsed) throw new MultiviewError('作品选帧设置无效，原配方保持不变');
-  const dimensions = multiviewDimensions(prepared.info, parsed.slots.length, parsed.layout);
+  const dimensions = multiviewWorkDimensions(prepared.info, parsed);
   if (dimensions.width * dimensions.height > 64000000) throw new MultiviewError('拼图超过 6400 万像素，请减少图片数量或留白；原配方保持不变');
   const files: Buffer[] = [];
   for (const slot of parsed.slots) {
@@ -313,7 +331,7 @@ export async function renderMultiviewWork(user: SessionUser, id: string, recipe:
     files.push(await readFile(await frameFile(prepared, slot.frame, context)));
   }
   signal.throwIfAborted();
-  const collage = await composeMultiviewPng(prepared.info, files, parsed.layout);
+  const collage = parsed.schema === 3 ? await composeMultiviewReferencePng(user, id, prepared.info, files, parsed) : await composeMultiviewPng(prepared.info, files, parsed.layout);
   signal.throwIfAborted();
   const zip = await packMultiviewFrames(prepared.info, files, parsed.slots.map(slot => slot.frame), parsed.slots.map(slot => slot.name));
   signal.throwIfAborted();

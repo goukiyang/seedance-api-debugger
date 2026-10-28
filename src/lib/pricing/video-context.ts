@@ -17,6 +17,8 @@ import { PricingChargeError } from './frozen-charge';
 import type { PricingVideoPurpose, PricingReferenceVideo } from './pricing-authoring-contract';
 import { parseMultiviewSettingsBinding } from '@/lib/video/multiview-generation-contract';
 import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
+import { resolveMultiviewActionForGeneration } from '@/lib/video/multiview-action.server';
+import { parseMultiviewActionBinding } from '@/lib/video/multiview-action-contract';
 
 export type VideoPricingContext = {
   fingerprint: string;
@@ -67,10 +69,22 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   const access = await assertCanGenerateInProject(user, projectId, db);
   if (videoCardId) await assertCanGenerateInVideoCard(user, projectId, videoCardId, db);
   const payer = shouldBillProjectBudget(access.project!) ? { kind: 'project' as const, id: projectId } : { kind: 'user' as const, id: user.id };
-  const templateRunId = typeof body.template_studio_run_id === 'string' && body.template_studio_run_id ? body.template_studio_run_id : null;
+  const action = body.multiview_action === undefined ? null : await resolveMultiviewActionForGeneration(user, body.multiview_action, db);
+  const templateRunId = action?.runId || (typeof body.template_studio_run_id === 'string' && body.template_studio_run_id ? body.template_studio_run_id : null);
   let templateVideoUrls: string[] | undefined;
   let templateBinding: unknown = null;
-  if (templateRunId) {
+  if (action) {
+    if (body.provider !== 'seedance' || body.generation_mode !== 'first_last_frame'
+      || body.template_studio_run_id !== undefined && body.template_studio_run_id !== action.runId
+      || body.first_frame_asset_id !== undefined && body.first_frame_asset_id !== action.assetId
+      || action.parameters.project_id !== projectId || action.parameters.video_card_id !== videoCardId
+      || ['model', 'ratio', 'duration', 'resolution'].some(key => body[key] !== action.parameters[key as keyof typeof action.parameters])) {
+      throw new PricingChargeError('动作视频与本次拼图或参数不一致，请重新准备费用');
+    }
+    templateBinding = { purpose: 'multiview-action', binding: parseMultiviewActionBinding(body.multiview_action),
+      firstFrameAssetId: action.assetId, outputHash: action.outputHash };
+    templateVideoUrls = [];
+  } else if (templateRunId) {
     const handoff = await authorizeStudioRunForGeneration(user, templateRunId, db);
     if (!Array.isArray(body.template_studio_assets) || body.template_studio_assets.length > 32) throw new PricingChargeError('模板报价缺少最终素材');
     const rawAssets = body.template_studio_assets as Array<Record<string, unknown>>;

@@ -176,7 +176,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       return { summary: item };
     }
     if (type === 'video_draft') {
-      const row = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id } });
+      const row = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio' } });
       if (!row) return null;
       if (row.source_template_id && (row.template_source === 'studio' || row.template_source === 'legacy')) {
         const source = await getStudioTemplate(user, row.source_template_id, row.template_source);
@@ -196,7 +196,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       return { summary: item };
     }
     if (type === 'prompt') {
-      const row = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id, status: 'succeeded' } });
+      const row = await prisma.videoStudioRun.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio', status: 'succeeded' } });
       if (!row) return null;
       const snapshot = JSON.parse(row.snapshot_json) as StudioRunSnapshot;
       if (snapshot.templateVersion) {

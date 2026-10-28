@@ -51,7 +51,7 @@ export async function ensureStudioSnapshotSourceStillUsable(user: SessionUser, s
 
 export async function authorizeStudioRunForGeneration(user: SessionUser, runId: string, db: Prisma.TransactionClient = prisma): Promise<StudioGenerationHandoff> {
   requireStudioUser(user);
-  const run = await db.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
+  const run = await db.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id, purpose: 'studio' } });
   if (!run) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
   if (run.status !== 'succeeded') throw new StudioError('只有已完成的运行记录可以提交生成', 409, 'CONFLICT');
   const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
@@ -79,7 +79,7 @@ export async function saveStudioFinalText(user: SessionUser, runId: string, inpu
   if (typeof value?.prompt !== 'string' || value.prompt.length > 12000) throw new StudioError('最终文案必须是12000字以内的文本', 400, 'INVALID');
   const prompt = normalizePrompt(value?.prompt).trim();
   if (!prompt) throw new StudioError('请先填写最终文案', 400, 'INVALID');
-  const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
+  const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id, purpose: 'studio' } });
   if (!run) throw new StudioError('记录不存在或无权访问', 404, 'NOT_FOUND');
   if (run.status !== 'succeeded') throw new StudioError('请等待文案完成后再继续', 409, 'CONFLICT');
   const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);

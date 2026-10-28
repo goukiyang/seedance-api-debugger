@@ -5,6 +5,7 @@ import { privateOrigin, privatePromptPolicy, inspectPrivatePrompt, isStoredPriva
 import { preparePrivateMigrationRow, type PrivateMigrationCell, type PrivateMigrationRow } from '@/lib/security/private-prompt-migration.server';
 import { MULTIVIEW_ROTATION_PRESET } from './multiview-generation-contract';
 import { readMultiviewPrivateTaskMarker } from './multiview-task-privacy';
+import { privateMultiviewActionOrigins } from './private-storage.server';
 
 const currentKey = 'multiview_rotation_preset_v1:current';
 const versionPrefix = 'multiview_rotation_preset_v1:version:';
@@ -16,20 +17,25 @@ export async function preparePrivateVideoTaskMigration(db: PrismaClient, ids: st
   const tasks = await db.videoTask.findMany({ where: { id: { in: ids } } });
   if (tasks.length !== ids.length) return fail();
   const origin = privateOrigin('multiview-preset', MULTIVIEW_ROTATION_PRESET.id);
-  if (ids.length && !origin) return fail();
   const rows: PrivateMigrationRow[] = [];
   let unchangedRows = 0;
   for (const task of tasks) {
-    if (!readMultiviewPrivateTaskMarker(task)) return fail();
-    const cells = ['prompt', 'final_prompt_snapshot'].filter(field => typeof task[field as 'prompt' | 'final_prompt_snapshot'] === 'string')
-      .map(field => ({ column: field, path: [], binding: { kind: 'video-task', id: task.id, field, origins: [origin!] } }));
+    const marker = readMultiviewPrivateTaskMarker(task);
+    if (!marker) return fail();
+    const action = marker.kind === 'multiview-action';
+    if (!action && !origin) return fail();
+    const origins = action ? privateMultiviewActionOrigins() : [origin!];
+    if (!origins.length) return fail();
+    const fields = ['prompt', 'final_prompt_snapshot', ...(action ? ['template_studio_snapshot_json'] : [])];
+    const cells = fields.filter(field => typeof task[field as keyof typeof task] === 'string')
+      .map(field => ({ column: field, path: [], binding: { kind: 'video-task', id: task.id, field, origins } }));
     const prepared = preparePrivateMigrationRow('VideoTask', task, cells, options);
     if (prepared) rows.push(prepared); else unchangedRows++;
     if (task.snapshot_id) {
       const snapshot = await db.generationTaskSnapshot.findUnique({ where: { id: task.snapshot_id } });
       if (!snapshot || snapshot.task_id && snapshot.task_id !== task.id) return fail();
       const next = preparePrivateMigrationRow('GenerationTaskSnapshot', snapshot, ['prompt_raw', 'prompt_rendered'].map(field => ({
-        column: field, path: [], binding: { kind: 'video-generation-snapshot', id: snapshot.id, field, origins: [origin!] },
+        column: field, path: [], binding: { kind: 'video-generation-snapshot', id: snapshot.id, field, origins },
       })), options);
       if (next) rows.push(next); else unchangedRows++;
     }

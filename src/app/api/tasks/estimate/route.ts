@@ -17,6 +17,9 @@ import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPric
 import { prisma } from '@/lib/prisma';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
+import { resolveMultiviewActionVideoInput } from '@/lib/video/multiview-action-video.server';
+import { StudioError } from '@/lib/template-studio/errors';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 
 export async function GET(request: NextRequest) {
   return estimate(request);
@@ -117,6 +120,10 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   }
 
   try {
+    const actionInput = body?.multiview_action === undefined ? null : await resolveMultiviewActionVideoInput(user, {
+      ...body, provider, model: parsedModel.model, duration, resolution,
+    });
+    if (actionInput) body = actionInput.body;
     if (body?.retry_task_id) {
       if (typeof body.retry_task_id !== 'string') throw new AuthError('原任务编号无效', 400);
       const task = await prisma.videoTask.findUnique({ where: { id: body.retry_task_id } });
@@ -138,8 +145,11 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
     ...(context ? { pricing_quote_token: issueVideoPricingCredential(context, quote.revision, quote.pricing.estimatedCost) } : {}),
     ...(multiviewPresetVersion === null ? {} : { multiviewPresetVersion, multiviewPresetRevision }),
     ...(multiviewSettings ? { multiviewSettings } : {}),
+    ...(actionInput ? { multiviewAction: actionInput.body.multiview_action } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
+      { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof MultiviewSettingsError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code },
       { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof AuthError) return errorJson(error.message, error.status);

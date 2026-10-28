@@ -11,7 +11,10 @@ import type { AssetMapping } from './collection';
 import { renderPromptWithAssets } from './collection';
 import { buildContentArray } from '@/lib/provider/jimeng';
 import type { CreateVideoInput } from '@/types';
-import { multiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import { multiviewPrivateTaskMarker, multiviewActionPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import type { MultiviewActionBinding } from '@/lib/video/multiview-action-contract';
+import type { PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { writePrivateFields } from '@/lib/security/private-prompt-fields.server';
 import { transformPrivateVideoText } from '@/lib/video/private-storage.server';
 
 // ============================================================================
@@ -29,6 +32,7 @@ export interface CreateSnapshotInput {
   promptRenderedOverride?: string;
   assetMappingOverride?: AssetMapping;
   protectedRecipeVersion?: string;
+  protectedAction?: { binding: MultiviewActionBinding; origins: PrivateOrigin[] };
 }
 
 /**
@@ -42,7 +46,9 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
 
   // 构建 content 数组（用于调试）
   let contentJson: string | null = null;
-  if (input.protectedRecipeVersion) {
+  if (input.protectedAction) {
+    contentJson = JSON.stringify({ protected_module: multiviewActionPrivateTaskMarker(input.protectedAction.binding) });
+  } else if (input.protectedRecipeVersion) {
     contentJson = JSON.stringify({ protected_module: multiviewPrivateTaskMarker(input.protectedRecipeVersion) });
   } else if (input.workspaceId) {
     const content = input.contentOverride !== undefined
@@ -54,8 +60,7 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
     contentJson = JSON.stringify(content, null, 2);
   }
 
-  const snapshot = await prisma.generationTaskSnapshot.create({
-    data: transformPrivateVideoText('video-generation-snapshot', {
+  const data = {
       id: uuidv4(),
       task_id: input.taskId,
       workspace_id: input.workspaceId,
@@ -64,8 +69,12 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
       prompt_rendered: promptRendered,
       asset_mapping_json: JSON.stringify(assetMapping),
       content_json: contentJson,
-      provider_payload_json: input.providerPayloadJson ?? null,
-    }, ['prompt_raw', 'prompt_rendered'], true, Boolean(input.protectedRecipeVersion)),
+      provider_payload_json: input.protectedAction ? contentJson : input.providerPayloadJson ?? null,
+    };
+  const snapshot = await prisma.generationTaskSnapshot.create({
+    data: input.protectedAction ? writePrivateFields(data, 'video-generation-snapshot', data.id,
+      ['prompt_raw', 'prompt_rendered'].map(field => ({ field, origins: input.protectedAction!.origins })))
+      : transformPrivateVideoText('video-generation-snapshot', data, ['prompt_raw', 'prompt_rendered'], true, Boolean(input.protectedRecipeVersion)),
   });
 
   return snapshot;

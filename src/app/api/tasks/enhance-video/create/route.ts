@@ -46,7 +46,7 @@ import {
   validateEnhanceVideoUrl,
 } from '@/lib/tasks/enhance-video-create';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
-import { isPrivateMultiviewTask, readMultiviewPrivateTaskMarker, MULTIVIEW_PUBLIC_TASK_TITLE } from '@/lib/video/multiview-task-privacy';
+import { isPrivateMultiviewTask, isPrivateMultiviewActionTask, readMultiviewPrivateTaskMarker, MULTIVIEW_PUBLIC_TASK_TITLE } from '@/lib/video/multiview-task-privacy';
 
 const LOCAL_UPLOAD_SAFE_MAX_BYTES = 512 * 1024 * 1024;
 
@@ -344,6 +344,7 @@ export async function POST(request: NextRequest) {
   const idempotencyKey = body.idempotencyKey || undefined;
   let privateSourceMarker: ReturnType<typeof readMultiviewPrivateTaskMarker> = null;
   try {
+    if (sourceTask && isPrivateMultiviewActionTask(sourceTask)) return jsonError('此同步动作视频请回3D多视图查看原结果；当前入口不能安全接续，未创建或扣点。', 409, 'MULTIVIEW_ACTION_SOURCE_UNSUPPORTED');
     if (sourceTask && isPrivateMultiviewTask(sourceTask)) privateSourceMarker = readMultiviewPrivateTaskMarker(sourceTask);
   } catch {
     return jsonError('源任务的私有配方记录暂时无法确认，请保留原任务并联系管理员。', 409, 'SOURCE_RECIPE_UNAVAILABLE');

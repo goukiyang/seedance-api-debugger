@@ -11,7 +11,7 @@
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
 import { assertPrivateSend, privatePromptFetch } from '@/lib/security/private-prompt-send.server';
-import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
 import {
@@ -447,8 +447,7 @@ export function redactInlineImageTransport(value: unknown): unknown {
     key.toLowerCase().includes('base64') ? '[inline image omitted]' : redactInlineImageTransport(item)]));
 }
 
-export function assertPrivateSeedanceDestination(model: string) {
-  const origins = privateMultiviewOrigins();
+export function assertPrivateSeedanceDestination(model: string, origins = privateMultiviewOrigins()) {
   if (origins.length) assertPrivateSend({ endpoint: `${SEEDANCE_BASE_URL}/call`, provider: 'seedance',
     credential: SEEDANCE_API_KEY, model }, origins);
 }
@@ -456,8 +455,9 @@ export function assertPrivateSeedanceDestination(model: string) {
 export async function createVideoTask(
   input: SeedanceProviderInput & { generation_mode: GenerationMode },
   onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void,
-  options: { sensitiveRecipe?: boolean } = {},
+  options: { sensitiveRecipe?: boolean; privateOrigins?: PrivateOrigin[] } = {},
 ): Promise<ProviderCreateResponse> {
+  const sensitiveRecipe = Boolean(options.sensitiveRecipe || options.privateOrigins?.length);
   if (!isApiKeyConfigured()) throw new Error('API key not configured');
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
   const payload = buildSeedanceVideoPayload(input);
@@ -477,7 +477,7 @@ export async function createVideoTask(
   console.log(`Endpoint:  ${endpoint}`);
   console.log(`Model:     ${model}`);
   console.log(`Mode:      ${input.generation_mode}`);
-  console.log(`Prompt:    ${options.sensitiveRecipe ? '[protected multiview recipe]' : `${input.prompt?.slice(0, 100)}...`}`);
+  console.log(`Prompt:    ${sensitiveRecipe ? '[protected multiview recipe]' : `${input.prompt?.slice(0, 100)}...`}`);
   console.log(`Duration:  ${input.duration || 'default'}s`);
   console.log(`Ratio:     ${payload.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
@@ -503,7 +503,7 @@ export async function createVideoTask(
       },
       body: requestBody,
     };
-    const origins = options.sensitiveRecipe ? privateMultiviewOrigins() : [];
+    const origins = options.privateOrigins || (sensitiveRecipe ? privateMultiviewOrigins() : []);
     const response = origins.length ? await privatePromptFetch({ endpoint, provider: 'seedance',
       credential: SEEDANCE_API_KEY, model }, origins, init) : await fetch(endpoint, init);
 
@@ -524,7 +524,7 @@ export async function createVideoTask(
     if (hasInlineImages) data = redactInlineImageTransport(data) as Record<string, unknown>;
 
     console.log(`[Create] HTTP Status: ${response.status}`);
-    console.log(`[Create] Response:`, JSON.stringify(options.sensitiveRecipe
+    console.log(`[Create] Response:`, JSON.stringify(sensitiveRecipe
       ? { http_status: response.status, accepted: Boolean(response.ok && data.id),
           provider_status: sensitiveProviderStatus(data), response_key_count: Object.keys(data).length }
       : data, null, 2));
@@ -542,7 +542,7 @@ export async function createVideoTask(
       throw new Error(providerErrorMessage || 'Seedance 创建任务响应缺少任务 ID');
     }
 
-    console.log(options.sensitiveRecipe
+    console.log(sensitiveRecipe
       ? '\n✅ Step1 Complete: protected provider task accepted\n'
       : `\n✅ Step1 Complete: provider_task_id = ${providerTaskId}\n`);
 
@@ -550,14 +550,14 @@ export async function createVideoTask(
     capture();
     return {
       provider_task_id: providerTaskId,
-      raw: options.sensitiveRecipe
+      raw: sensitiveRecipe
         ? { id: providerTaskId, status: sensitiveProviderStatus(data) }
         : data,
     };
   } catch (error) {
     if (error instanceof PrivatePromptError) throw error;
     const diagnostic = capture(error);
-    const safeError = options.sensitiveRecipe ? (() => {
+    const safeError = sensitiveRecipe ? (() => {
       const failure = privateMultiviewFailure(
         error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
         sensitiveCreateFailureState(diagnostic),

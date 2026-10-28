@@ -24,7 +24,11 @@ import { readMultiviewRotationPresetVersion, MultiviewPresetError } from '@/lib/
 import { assertMultiviewGenerationSettings, MultiviewSettingsError } from '@/lib/video/multiview-settings.server';
 import { readMultiviewSystemReference } from '@/lib/video/multiview-recipe-storage.server';
 import { consumeTrustedMultiviewRetry, readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
-import { isPrivateMultiviewTask, multiviewPrivateTaskMarker, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { isPrivateMultiviewTask, isPrivateMultiviewActionTask, multiviewPrivateTaskMarker, multiviewActionPrivateTaskMarker,
+  MULTIVIEW_ACTION_PUBLIC_TASK_TITLE, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { resolveMultiviewActionVideoInput, multiviewActionVideoFingerprint, protectMultiviewActionVideoTask,
+  multiviewActionRequestId } from '@/lib/video/multiview-action-video.server';
+import { parseMultiviewActionBinding, type MultiviewActionBinding } from '@/lib/video/multiview-action-contract';
 import { registerMultiviewWorkIntent } from '@/lib/video/multiview-works';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
@@ -717,6 +721,7 @@ export async function POST(request: NextRequest) {
     generate_audio: boolean; return_last_frame: boolean; watermark: boolean; reference_image_ids: string | null;
   } | null = null;
   let receivedBody = await request.json();
+  if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: {
       user_id: user.id, idempotency_key: receivedBody.idempotency_key,
@@ -725,7 +730,8 @@ export async function POST(request: NextRequest) {
     if (original?.request_fingerprint?.startsWith('pricing-v2:')
       && receivedBody.canvas_video_batch === undefined && !receivedBody.idempotency_key.startsWith('cvb:')) {
       await assertCanViewTask(user, original);
-      if (original.request_fingerprint !== videoPricingBusinessFingerprint(receivedBody)) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      if (original.request_fingerprint !== (isPrivateMultiviewActionTask(original) ? multiviewActionVideoFingerprint(receivedBody)
+        : videoPricingBusinessFingerprint(receivedBody))) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
       return isPrivateMultiviewTask(original)
         ? NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
         : NextResponse.json(canvasVideoBatchTaskResponse(original));
@@ -777,6 +783,46 @@ export async function POST(request: NextRequest) {
       multiview_generation: frozen.snapshot,
     };
   }
+  let actionRequestClaim: MultiviewRequestClaim | null = null;
+  if (receivedBody.multiview_action !== undefined) {
+    const actionBinding = parseMultiviewActionBinding(receivedBody.multiview_action);
+    if (actionBinding && receivedBody.idempotency_key === multiviewActionRequestId(actionBinding.runId)) {
+      try {
+        const admission = await claimMultiviewRequest(user.id, receivedBody.idempotency_key, receivedBody);
+        if (admission.kind === 'blocked') return NextResponse.json({ error: admission.receipt?.code || 'MULTIVIEW_REQUEST_PENDING',
+          message: admission.receipt?.message || '提交结果待确认，请查询原请求号', safeToResubmit: false,
+          ...(admission.receipt ? { request_receipt: admission.receipt, new_request_allowed: true } : {}) },
+        { status: admission.status, headers: privateNoStore() });
+        if (admission.kind === 'claimed') actionRequestClaim = admission.claim;
+        if (admission.kind === 'task_exists') {
+          const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
+          if (!original) throw new Error('Original task unavailable');
+          await assertCanViewTask(user, original);
+          if (!isPrivateMultiviewActionTask(original) || original.request_fingerprint !== multiviewActionVideoFingerprint(receivedBody)) return errorJson('原请求内容不同，请查询原任务；未重新生成', 409);
+          return NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true }), { headers: privateNoStore() });
+        }
+      } catch { return NextResponse.json({ error: 'MULTIVIEW_REQUEST_UNKNOWN', message: '原提交结果暂时无法确认，请查询原请求号，不要重新提交。', safeToResubmit: false }, { status: 503, headers: privateNoStore() }); }
+    }
+  }
+  async function sealActionRejection(response: NextResponse) {
+    if (!actionRequestClaim || response.status < 400 || response.status >= 500) return response;
+    const payload = await response.clone().json().catch(() => null);
+    if (payload?.id || payload?.task_id || payload?.existing_task_id) return response;
+    const receipt = await rejectMultiviewRequest(actionRequestClaim, response.status, payload);
+    return receipt ? NextResponse.json({ ...payload, request_receipt: receipt, new_request_allowed: true, safeToResubmit: false },
+      { status: response.status, headers: privateNoStore() }) : response;
+  }
+  let multiviewAction: Awaited<ReturnType<typeof resolveMultiviewActionVideoInput>> = null;
+  try {
+    if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key.startsWith('multiview-action:')
+      && receivedBody.multiview_action === undefined) throw new AuthError('动作视频原请求必须保留冻结绑定，请查询原任务', 409);
+    multiviewAction = await resolveMultiviewActionVideoInput(user, receivedBody, prisma, receivedBody.multiview_action !== undefined);
+    if (multiviewAction) receivedBody = multiviewAction.body;
+  } catch (error) {
+    if (error instanceof AuthError || error instanceof StudioError || error instanceof PrivatePromptError) return sealActionRejection(NextResponse.json({ error: error.message,
+      ...('code' in error ? { code: error.code } : {}) }, { status: error.status, headers: privateNoStore() }));
+    throw error;
+  }
   let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
   try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ordinary'); }
   catch (error) {
@@ -794,16 +840,27 @@ export async function POST(request: NextRequest) {
   }
   // Freeze the user's v2 spec BEFORE existing provider normalization/private prompt composition.
   const creationBody = structuredClone(body);
+  if (multiviewAction) {
+    const asset = await prisma.asset.findFirst({ where: { id: multiviewAction.action.assetId, owner_id: user.id, status: 'active', type: 'image' } });
+    if (!asset) return sealActionRejection(errorJson('参考拼图素材已不可用，原动作与布局保留', 409));
+    const prepared = await ensureSiteAssetPublicUrl(asset.id);
+    if (!prepared.isPubliclyReachable) return sealActionRejection(errorJson('参考拼图暂时无法提供给视频服务，尚未生成', 409));
+    body.first_frame_url = prepared.asset.original_url;
+    body.prompt = multiviewAction.action.prompt;
+    body.final_prompt_snapshot = multiviewAction.action.prompt;
+  }
   let creationV2 = false;
   try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
   catch (error) {
-    if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, stage: 'validation', attemptedSend: false }, { status: error.status });
+    if (error instanceof CreationError) return sealActionRejection(NextResponse.json({ error: error.message, code: error.code, stage: 'validation', attemptedSend: false }, { status: error.status }));
     throw error;
   }
   const canvasAdmission: CanvasVideoAdmission | null = restoredBatch.admission;
   let response: NextResponse;
   try { response = await runCanvasAdmission(); }
   catch (error) {
+    if (error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
+      { status: error.status, headers: privateNoStore() });
     if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
     response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
@@ -811,11 +868,12 @@ export async function POST(request: NextRequest) {
   if (canvasAdmission && response.status >= 400) {
     await recordCanvasVideoBatchRejection(user, canvasAdmission, response.status, await response.clone().json().catch(() => null));
   }
-  if (body.multiview_generation !== undefined) response.headers.set('Cache-Control', 'private, no-store');
+  if (body.multiview_generation !== undefined || multiviewAction) response.headers.set('Cache-Control', 'private, no-store');
   return response;
 
   async function runCanvasAdmission() {
-  const stablePricingFingerprint = body.pricing_fingerprint_version === 2 ? videoPricingBusinessFingerprint(body) : null;
+  const stablePricingFingerprint = multiviewAction ? multiviewActionVideoFingerprint(creationBody)
+    : body.pricing_fingerprint_version === 2 ? videoPricingBusinessFingerprint(body) : null;
   if (stablePricingFingerprint && typeof body.idempotency_key === 'string') {
     const existing = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } } });
     if (existing?.request_fingerprint?.startsWith('pricing-v2:')) {
@@ -837,20 +895,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'MULTIVIEW_GENERATION_GUARD', message: '3D多视图新生成暂不可用，原任务、作品和当前输入保留；请查询原结果。' },
       { status: 503, headers: privateNoStore() });
   }
-  let requestClaim: MultiviewRequestClaim | null = null;
+  let requestClaim: MultiviewRequestClaim | null = actionRequestClaim;
   let committedTaskId: string | null = null;
-  const receiptIntentKey = trustedMultiviewRetry?.idempotencyKey || multiviewRequestIntent(body, request.headers.get('x-tab-id'));
+  const receiptIntentKey = actionRequestClaim?.key || trustedMultiviewRetry?.idempotencyKey || multiviewRequestIntent(body, request.headers.get('x-tab-id'));
   if (!receiptIntentKey) return runCreate();
   try {
-    const admission = await claimMultiviewRequest(user.id, receiptIntentKey, body);
-    if (admission.kind === 'blocked') {
+    const admission = actionRequestClaim ? null : await claimMultiviewRequest(user.id, receiptIntentKey, body);
+    if (admission?.kind === 'blocked') {
       const receipt = admission.receipt;
       return NextResponse.json({ error: receipt?.code || 'MULTIVIEW_REQUEST_PENDING',
         message: receipt?.message || '原提交结果待确认，请查询同一请求号，不会再次提交。', safeToResubmit: false,
         ...(receipt ? { request_receipt: receipt, new_request_allowed: true } : {}) },
       { status: admission.status, headers: privateNoStore() });
     }
-    if (admission.kind === 'claimed') requestClaim = admission.claim;
+    if (admission?.kind === 'claimed') requestClaim = admission.claim;
     const response = await runCreate();
     if (!requestClaim || response.status < 400 || response.status >= 500) return response;
     const payload = await response.clone().json().catch(() => null);
@@ -902,7 +960,7 @@ export async function POST(request: NextRequest) {
     ? body.template_studio_run_id.trim()
     : null;
   let studioHandoff: StudioGenerationHandoff | null = null;
-  if (requestedStudioRunId) {
+  if (requestedStudioRunId && !multiviewAction) {
     if (requestedTemplateId || requestedAgentRunId) {
       return errorJson('模板工作台运行记录不能混用旧模板或 Agent 执行链路', 400);
     }
@@ -1430,7 +1488,7 @@ export async function POST(request: NextRequest) {
       provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
     priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, context: pricingContext });
     requireVideoPricingRevision(priceQuote, body.pricing_revision);
-    requireScopeCredential = Boolean(multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
+    requireScopeCredential = Boolean(multiviewAction || multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
     if (requireScopeCredential) verifyVideoPricingCredential(body.pricing_quote_token, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   } catch (error) {
     const failure = videoPricingError(error);
@@ -1447,7 +1505,7 @@ export async function POST(request: NextRequest) {
   }, { status: 409 });
 
   // --- Workspace + Reference Image Preparation ---
-  const tabId = canvasInputs?.scope.workspace_key || (studioHandoff ? `template-studio-${studioHandoff.runId}`
+  const tabId = canvasInputs?.scope.workspace_key || (multiviewAction ? `multiview-action-${multiviewAction.action.runId}` : studioHandoff ? `template-studio-${studioHandoff.runId}`
     : multiviewGeneration ? multiviewGeneration.workspaceTabId
       : request.headers.get('x-tab-id') || 'default');
   const bodySourceRequestId = typeof body.source_request_id === 'string' && body.source_request_id.trim()
@@ -1460,7 +1518,7 @@ export async function POST(request: NextRequest) {
   const clientName = cleanClientName(body.client_name);
   const isUltimateCanvasRequest = clientName === 'ultimate_canvas'
     || cleanedSourceMetadata.source === 'ultimate_canvas';
-  const effectiveSourceLabel = multiviewGeneration ? '3D多视图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
+  const effectiveSourceLabel = multiviewAction ? MULTIVIEW_ACTION_PUBLIC_TASK_TITLE : multiviewGeneration ? '3D多视图' : isUltimateCanvasRequest ? '无限画布' : requestSource.source_label;
   const ordinarySourceMetadata: Record<string, unknown> = {
     ...requestSource.source_metadata,
     ...cleanedSourceMetadata,
@@ -1478,7 +1536,8 @@ export async function POST(request: NextRequest) {
     } : {}),
     paid_generation_guard: paidGenerationGuard.metadata,
   };
-  const sourceMetadata: Record<string, unknown> = multiviewGeneration
+  const sourceMetadata: Record<string, unknown> = multiviewAction
+    ? { protected_module: multiviewActionPrivateTaskMarker(creationBody.multiview_action as MultiviewActionBinding) } : multiviewGeneration
     ? { protected_module: multiviewPrivateTaskMarker(multiviewGeneration.presetVersion) }
     : ordinarySourceMetadata;
   const workspace = multiviewGeneration ? await prisma.workspace.findFirst({
@@ -1681,7 +1740,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const workspaceReferenceBackfill = canvasInputs || studioHandoff || multiviewGeneration ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
+  const workspaceReferenceBackfill = canvasInputs || studioHandoff || multiviewGeneration || multiviewAction ? [] : await ensureWorkspaceImageAssetsHaveReferenceImages({
     user,
     workspaceId,
     projectId: project.id,
@@ -1696,7 +1755,7 @@ export async function POST(request: NextRequest) {
     }));
   }
 
-  let workspaceReferenceImageIds = uniquePreserveOrder(
+  let workspaceReferenceImageIds = multiviewAction ? [] : uniquePreserveOrder(
     (await prisma.workspaceAsset.findMany({
       where: {
         workspace_id: workspaceId,
@@ -1761,7 +1820,7 @@ export async function POST(request: NextRequest) {
     ? requestedReferenceImageIds
     : requestedReferenceImageUrls.length > 0
       ? []
-      : body.canvas_references !== undefined || studioHandoff || requestSource.source_type === 'codex_api'
+      : body.canvas_references !== undefined || studioHandoff || multiviewAction || requestSource.source_type === 'codex_api'
         ? []
         : workspaceReferenceImageIds;
   if (generationReferenceImageIds.length > 9) {
@@ -1787,7 +1846,7 @@ export async function POST(request: NextRequest) {
       canvasInputs ? [] : generationReferenceImageIds,
       canvasInputs ? canvasInputs.orderedImageUrls : requestedReferenceImageUrls,
       user.id,
-      Boolean(studioHandoff || canvasInputs),
+      Boolean(studioHandoff || canvasInputs || multiviewAction),
     ));
   } catch (error) {
     console.error('[TasksCreate] Reference image preparation failed:', error);
@@ -1905,7 +1964,7 @@ export async function POST(request: NextRequest) {
 
   // --- Prompt validation + rendering ---
   const hasCanvasBindings = body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt);
-  const promptValidation = multiviewGeneration || hasCanvasBindings
+  const promptValidation = multiviewGeneration || multiviewAction || hasCanvasBindings
     ? { valid: true, missing: [] }
     : await validatePromptReferences(body.prompt, workspaceId);
   if (!promptValidation.valid) {
@@ -1916,7 +1975,7 @@ export async function POST(request: NextRequest) {
   }
   let promptRendered: string, assetMapping: Record<string, string>;
   try {
-    const rendered = multiviewGeneration && multiviewSystemReference
+    const rendered = multiviewAction ? { promptRendered: multiviewAction.action.prompt, assetMapping: {} } : multiviewGeneration && multiviewSystemReference
       ? { promptRendered: MULTIVIEW_REFERENCE_PROMPT_PREFIX + body.prompt,
           assetMapping: { '图1': multiviewGeneration.mainAssetId, '图2': multiviewSystemReference.assetId } }
       : hasCanvasBindings
@@ -2061,6 +2120,8 @@ export async function POST(request: NextRequest) {
       assetMappingOverride: assetMapping,
       protectedRecipeVersion: multiviewGeneration.presetVersion,
     } : {}),
+    ...(multiviewAction ? { promptRenderedOverride: promptRendered, assetMappingOverride: {}, protectedAction: {
+      binding: creationBody.multiview_action as MultiviewActionBinding, origins: multiviewAction.action.origins } } : {}),
     providerPayloadJson: JSON.stringify(requestedProvider === H3_VIDEO_PROVIDER
       ? {
           provider: H3_VIDEO_PROVIDER,
@@ -2082,6 +2143,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(multiviewAction ? { multiviewAction: creationBody.multiview_action } : {}),
     ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     ...(multiviewGeneration ? { multiviewGeneration } : {}),
@@ -2144,7 +2206,9 @@ export async function POST(request: NextRequest) {
     draft: draftRequested,
     h3LoraId: selectedH3Lora?.id || null,
   };
-  const templateStudioSnapshotJson = studioHandoff && studioSubmission
+  const templateStudioSnapshotJson = multiviewAction ? JSON.stringify({ purpose: 'multiview-action', binding: creationBody.multiview_action,
+    actionText: multiviewAction.action.actionText, parameters: multiviewAction.action.parameters, geometry: multiviewAction.action.geometry,
+    formatRevision: multiviewAction.action.formatRevision, syncRevision: multiviewAction.action.syncRevision }) : studioHandoff && studioSubmission
     ? JSON.stringify(buildStudioTaskSnapshot(studioHandoff, {
         prompt: body.prompt,
         parameters: actualStudioParameters,
@@ -2202,6 +2266,12 @@ export async function POST(request: NextRequest) {
       await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
         videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
+      if (multiviewAction) {
+        const fresh = await resolveMultiviewActionVideoInput(user, creationBody, tx, true);
+        if (!fresh || fresh.action.prompt !== multiviewAction.action.prompt || fresh.action.assetId !== multiviewAction.action.assetId) {
+          throw new AuthError('动作视频输入已变化，请重新准备本次费用；尚未生成', 409);
+        }
+      }
       if (requireScopeCredential) {
         const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
           provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested }, 'create', tx);
@@ -2247,7 +2317,7 @@ export async function POST(request: NextRequest) {
         }
       }
       const task = await tx.videoTask.create({
-        data: transformPrivateVideoText('video-task', {
+        data: protectMultiviewActionVideoTask(transformPrivateVideoText('video-task', {
           id: randomUUID(),
           provider: requestedProvider,
           model: selectedModel,
@@ -2283,14 +2353,14 @@ export async function POST(request: NextRequest) {
           video_branch_id: videoBranch?.id || null,
           template_id: generationTemplate?.id || null,
           agent_run_id: agentRun?.id || null,
-          template_studio_run_id: studioHandoff?.runId || null,
+          template_studio_run_id: multiviewAction?.action.runId || studioHandoff?.runId || null,
           template_studio_snapshot_json: templateStudioSnapshotJson,
           request_fingerprint: requestFingerprint,
           selected_agent_plan_key: selectedAgentPlanKey,
           agent_prompt_snapshot: agentPromptSnapshot,
           final_prompt_snapshot: storedFinalPromptSnapshot,
           prompt_user_edited: promptUserEdited,
-          visibility: multiviewGeneration ? 'private' : project.type === 'personal' ? 'private' : 'project',
+          visibility: multiviewGeneration || multiviewAction ? 'private' : project.type === 'personal' ? 'private' : 'project',
           estimated_cost: estimatedCost,
           frozen_cost: estimatedCost,
           pricing_snapshot: JSON.stringify(pricing),
@@ -2301,7 +2371,7 @@ export async function POST(request: NextRequest) {
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify(taskParams),
-        }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)),
+        }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)), multiviewAction?.action || null),
       });
 
       await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
@@ -2313,7 +2383,8 @@ export async function POST(request: NextRequest) {
         actorUserId: user.id, ownerUserId: task.owner_user_id || task.user_id,
         billingSubjectType: task.billing_scope, billingSubjectId: task.billing_account_id,
         projectId: task.project_id, occurredAt: task.created_at, contextOrigin: 'video-create',
-        parentSourceKind: studioHandoff ? 'video_studio_run' as const : null, parentSourceId: studioHandoff?.runId || null };
+        parentSourceKind: studioHandoff || multiviewAction ? 'video_studio_run' as const : null,
+        parentSourceId: multiviewAction?.action.runId || studioHandoff?.runId || null };
       if (body.roleMediaContext && typeof body.roleMediaContext === 'object' && 'runId' in body.roleMediaContext) {
         await inheritUsageAttribution(tx, { ...usageAttribution, parentSourceKind: 'role_run', parentSourceId: String(body.roleMediaContext.runId) });
       } else await recordUsageAttribution(tx, usageAttribution);
@@ -2633,7 +2704,9 @@ export async function POST(request: NextRequest) {
               paidGenerationGuard: paidGenerationGuard.metadata,
             },
           }
-        : multiviewGeneration ? {
+        : multiviewAction ? { protected_module: multiviewActionPrivateTaskMarker(creationBody.multiview_action as MultiviewActionBinding),
+            provider: 'seedance', model: selectedModel, generation_mode: generationMode, ratio, duration, resolution,
+            reference_count: 1 } : multiviewGeneration ? {
             protected_module: multiviewPrivateTaskMarker(multiviewGeneration.presetVersion),
             provider: 'seedance', model: selectedModel, generation_mode: generationMode,
             ratio, duration, resolution, reference_count: 2,
@@ -2661,7 +2734,8 @@ export async function POST(request: NextRequest) {
       : await createVideoTask(
           { ...providerInput, ...seedanceReferenceTransport },
           diagnostic => { seedanceDiagnostic.value = diagnostic; },
-          { sensitiveRecipe: Boolean(multiviewGeneration) },
+          { sensitiveRecipe: Boolean(multiviewGeneration || multiviewAction),
+            ...(multiviewAction ? { privateOrigins: multiviewAction.action.origins } : {}) },
         );
 
     await prisma.videoTask.update({
@@ -2731,7 +2805,7 @@ export async function POST(request: NextRequest) {
         : {});
     const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
-    if (multiviewGeneration) {
+    if (multiviewGeneration || multiviewAction) {
       return NextResponse.json(protectedMultiviewTaskPayload({ ...createdTask,
         provider_task_id: providerResult.provider_task_id, local_status: 'submitted' }, {
         status: 'submitted', pricing: publicVideoPricing(priceQuote),

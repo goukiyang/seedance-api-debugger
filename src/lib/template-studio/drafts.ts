@@ -93,7 +93,7 @@ function readRunSnapshot(json: string, runId: string, draftId: string): StudioRu
 }
 
 async function createStudioDraftFromRun(user: SessionUser, runId: string) {
-  const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
+  const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id, purpose: 'studio' } });
   if (!run) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
   const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
   const ref = snapshot.templateVersion;
@@ -147,7 +147,7 @@ function normalizeDraftRecovery(value: unknown, recipe: StudioTemplateRecipe | n
 }
 
 async function createStudioDraftFromDraft(user: SessionUser, draftId: string, recoveryInput: unknown) {
-  const source = await prisma.videoStudioDraft.findFirst({ where: { id: draftId, owner_user_id: user.id } });
+  const source = await prisma.videoStudioDraft.findFirst({ where: { id: draftId, owner_user_id: user.id, purpose: 'studio' } });
   if (!source) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   const snapshot = readTemplateSnapshot(source.template_snapshot_json, source.id);
   const isBlank = source.template_source === 'blank';
@@ -161,7 +161,7 @@ async function createStudioDraftFromDraft(user: SessionUser, draftId: string, re
   await authorizeStudioAssets(user, recovery.assets);
   const row = await prisma.$transaction(async (tx) => {
     const currentSource = await tx.videoStudioDraft.findFirst({
-      where: { id: draftId, owner_user_id: user.id },
+      where: { id: draftId, owner_user_id: user.id, purpose: 'studio' },
       select: {
         id: true, name: true, group_name: true, template_source: true,
         source_template_id: true, source_version_id: true, template_snapshot_json: true,
@@ -230,7 +230,7 @@ export async function listStudioDrafts(user: SessionUser, cursor?: string) {
   const parsed = parseCursor(cursor);
   const rows = await prisma.videoStudioDraft.findMany({
     where: {
-      owner_user_id: user.id,
+      owner_user_id: user.id, purpose: 'studio',
       ...(parsed ? { OR: [{ updated_at: { lt: parsed.date } }, { updated_at: parsed.date, id: { lt: parsed.id } }] } : {}),
     },
     orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
@@ -296,14 +296,14 @@ export async function createStudioDraft(user: SessionUser, input: CreateStudioDr
 }
 
 export async function getStudioDraft(user: SessionUser, id: string) {
-  const row = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id } });
+  const row = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio' } });
   if (!row) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   return serializeDraft(row);
 }
 
 export async function updateStudioDraft(user: SessionUser, id: string, input: UpdateStudioDraftRequest) {
   if (!Number.isInteger(input?.revision) || input.revision < 1) throw new StudioError('请提供有效的草稿 revision', 400, 'INVALID');
-  const current = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id } });
+  const current = await prisma.videoStudioDraft.findFirst({ where: { id, owner_user_id: user.id, purpose: 'studio' } });
   if (!current) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
   if (current.revision !== input.revision) throw new StudioError('草稿已在其他位置更新，请刷新后重试', 409, 'CONFLICT', { currentRevision: current.revision });
   const snapshot = readTemplateSnapshot(current.template_snapshot_json, current.id);
@@ -318,7 +318,7 @@ export async function updateStudioDraft(user: SessionUser, id: string, input: Up
   const previousAssetKeys = new Set(previousAssets.map((asset) => `${asset.assetId}:${asset.type}`));
   await authorizeStudioAssets(user, assets.filter((asset) => !previousAssetKeys.has(`${asset.assetId}:${asset.type}`)));
   const update = await prisma.videoStudioDraft.updateMany({
-    where: { id, owner_user_id: user.id, revision: input.revision },
+    where: { id, owner_user_id: user.id, purpose: 'studio', revision: input.revision },
     data: {
       name, group_name: groupName, prompt,
       values_json: JSON.stringify(values),

@@ -58,7 +58,7 @@ export async function readVideoModuleContext(id: string, inherited = '') {
 
 async function contextAccess(user: SessionUser, draftId?: string, client: ContextClient = prisma) {
   if (!draftId) return { key: GLOBAL_KEY, canEdit: user.role === 'admin', inherited: '', origins: fieldSpec(GLOBAL_KEY).fields[0].origins };
-  const draft = await client.videoStudioDraft.findFirst({ where: { id: draftId, ...(user.role === 'admin' ? {} : { owner_user_id: user.id }) } });
+  const draft = await client.videoStudioDraft.findFirst({ where: { id: draftId, purpose: 'studio', ...(user.role === 'admin' ? {} : { owner_user_id: user.id }) } });
   if (!draft) throw new StudioError('模块不存在或无权访问', 404, 'NOT_FOUND');
   let inherited = '';
   let canEdit = true;

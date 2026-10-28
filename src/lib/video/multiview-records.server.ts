@@ -22,7 +22,7 @@ async function recordCovers(user: SessionUser, item: MultiviewRecord) {
   let retryable = false, after: string | undefined;
   // Search older saved results in bounded chunks; an unfinished latest scheme must not mask a ready one.
   if (item.workId) do {
-    const rows = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, save_state: { not: 'intent' },
+    const rows = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, schema_version: { lte: 2 }, save_state: { not: 'intent' },
       removed_at: item.removed ? { not: null } : null, ...(item.sourceId ? { source_id: item.sourceId } : { source_id: null, source_task_id: item.taskId }) },
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 128, ...(after ? { cursor: { id: after }, skip: 1 } : {}),
       select: { id: true, owner_id: true, source_task_id: true, source_id: true, source_version: true, source_info_json: true,
@@ -85,6 +85,7 @@ export async function listMultiviewRecords(user: SessionUser, input: { q: string
     let after: string | undefined;
     do {
       const tasks = await prisma.videoTask.findMany({ where: { AND: [privateMultiviewTaskWhere(),
+        { NOT: { source_metadata_json: { contains: '"kind":"multiview-action"' } } },
         { OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }] },
         { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } }] }, orderBy: { id: 'asc' }, take: 128,
         ...(after ? { cursor: { id: after }, skip: 1 } : {}),
@@ -103,7 +104,7 @@ export async function listMultiviewRecords(user: SessionUser, input: { q: string
   }
   let after: string | undefined;
   do {
-    const rows = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, save_state: { not: 'intent' }, removed_at: input.removed ? { not: null } : null },
+    const rows = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, schema_version: { lte: 2 }, save_state: { not: 'intent' }, removed_at: input.removed ? { not: null } : null },
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 128, ...(after ? { cursor: { id: after }, skip: 1 } : {}),
       select: { id: true, owner_id: true, source_task_id: true, source_id: true, source_version: true, title: true, created_at: true, project_id: true, status: true } });
     for (const row of rows) {

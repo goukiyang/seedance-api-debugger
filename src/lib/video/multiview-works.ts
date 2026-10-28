@@ -8,6 +8,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getTaskWhereForUser } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
+import { MULTIVIEW_ACTION_ENABLED } from './multiview-action-capability';
 import { multiviewInfoForWork, multiviewSourceVersion, MultiviewError } from './multiview';
 import type { MultiviewInfo } from './multiview-contract';
 import { MULTIVIEW_SAVE_PROTOCOL, defaultMultiviewWorkRecipe, isMultiviewWorkId, isMultiviewWorkFileRole, parseMultiviewWorkRecipe,
@@ -34,7 +35,8 @@ function requireExplicitSave(input: Json) {
   if (process.env.MULTIVIEW_FLOW_READ_ONLY === '1') throw new MultiviewWorkError('方案当前仅可读取，原保存回执与本机修改保留。', 503, 'WORK_READ_ONLY');
   if (input.protocol !== MULTIVIEW_SAVE_PROTOCOL) throw new MultiviewWorkError('页面已更新，请保留本机修改并刷新后主动保存。原保存仍可查询。',
     409, 'WORK_PROTOCOL_REQUIRED', { notCommitted: true });
-  if (input.recipe && (!record(input.recipe) || input.recipe.schema !== 2)) throw invalid('选帧设置需要新版保存协议，当前修改保留。');
+  if (record(input.recipe) && input.recipe.schema === 3 && (!MULTIVIEW_ACTION_ENABLED || process.env.MULTIVIEW_REFERENCE_READ_ONLY === '1')) throw new MultiviewWorkError('参考拼图当前仅可读取，原保存和在途处理保留。', 503, 'WORK_READ_ONLY');
+  if (input.recipe && (!record(input.recipe) || ![2, 3].includes(Number(input.recipe.schema)))) throw invalid('选帧设置需要新版保存协议，当前修改保留。');
 }
 const conflict = () => new MultiviewWorkError('作品已在其他页面更新，未覆盖服务器内容；请打开服务器版本或将本机修改另存。', 409, 'WORK_REVISION_CONFLICT', { notCommitted: true });
 function title(value: unknown, fallback = '3D多视图作品') {
@@ -137,7 +139,7 @@ async function dto(user: SessionUser, row: MultiviewWork): Promise<MultiviewWork
 }
 export async function getMultiviewWork(user: SessionUser, workId: string) { return dto(user, await ownedWork(user, workId)); }
 
-export async function listMultiviewWorks(user: SessionUser, input: { projectId?: string; taskId?: string; sourceId?: string; q?: string; removed?: boolean; cursor?: string }): Promise<MultiviewWorkList> {
+export async function listMultiviewWorks(user: SessionUser, input: { projectId?: string; taskId?: string; sourceId?: string; q?: string; removed?: boolean; cursor?: string; kind?: 'reference' }): Promise<MultiviewWorkList> {
   await currentActor(user);
   if (input.projectId && !isMultiviewWorkId(input.projectId) || input.taskId && !isMultiviewWorkId(input.taskId)
     || input.sourceId && !isMultiviewWorkId(input.sourceId) || input.q && input.q.length > 120 || input.cursor && input.cursor.length > 512) throw invalid('作品筛选条件无效。');
@@ -148,7 +150,7 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
     if (!cursor || cursor.scope !== scope || !isMultiviewWorkId(cursor.id) || !Number.isFinite(Date.parse(cursor.at))) throw invalid('作品翻页位置失效，请重新读取。');
   }
   const taskWhere = await getTaskWhereForUser(user);
-  const where: Prisma.MultiviewWorkWhereInput = { owner_id: user.id, save_state: { not: 'intent' }, removed_at: input.removed ? { not: null } : null,
+  const where: Prisma.MultiviewWorkWhereInput = { owner_id: user.id, schema_version: input.kind === 'reference' ? 3 : { lte: 2 }, save_state: { not: 'intent' }, removed_at: input.removed ? { not: null } : null,
     ...(input.sourceId ? { source_id: input.sourceId } : input.taskId ? { source_task_id: input.taskId, source_id: null } : { source_version: { not: null } }),
     ...(input.q ? { title: { contains: input.q } } : {}) };
   let scan: string | undefined, total = 0;
@@ -182,7 +184,7 @@ export async function listMultiviewWorks(user: SessionUser, input: { projectId?:
   let preferredWorkId: string | null | undefined;
   if (input.taskId) {
     await assertMultiviewWorkSource(user, input.taskId);
-    const target = { owner_id: user.id, source_task_id: input.taskId, source_id: null, removed_at: null, save_state: { not: 'intent' } };
+    const target = { owner_id: user.id, schema_version: input.kind === 'reference' ? 3 : { lte: 2 }, source_task_id: input.taskId, source_id: null, removed_at: null, save_state: { not: 'intent' } };
     // Render completion updates updated_at too. Prefer the last real accepted
     // user save/branch receipt, independent of list pagination or background IO.
     const lastEdit = await prisma.multiviewWorkMutation.findFirst({ where: { actor_id: user.id,
@@ -254,37 +256,43 @@ async function mutation(user: SessionUser, input: Json, action: MultiviewWorkRec
 export async function createMultiviewWork(user: SessionUser, input: Json) {
   const prior = await priorMutation(user, input, 'create', null); if (prior) return prior;
   requireExplicitSave(input);
-  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title', 'protocol', 'branchKey'].includes(key))
+  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title', 'protocol', 'branchKey', 'referenceKey', 'sourceWorkId'].includes(key))
     || !isMultiviewWorkId(input.taskId) || typeof input.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(input.sourceVersion)) throw invalid();
   const taskId = input.taskId, version = input.sourceVersion;
-  await assertMultiviewWorkSource(user, taskId);
+  const isReference = record(input.recipe) && input.recipe.schema === 3;
+  if (isReference && (!mutationValid(input.referenceKey) || input.referenceKey.length > 100) || !isReference && (input.referenceKey !== undefined || input.sourceWorkId !== undefined)) throw invalid('参考拼图编号无效。');
+  const parent = input.sourceWorkId === undefined ? null : await ownedWork(user, String(input.sourceWorkId));
+  if (parent && (parent.source_task_id !== taskId || parent.source_version !== version || parent.removed_at)) throw invalid('参考拼图来源不一致。');
+  const access = parent?.source_id ? { kind: 'work' as const, id: parent.id } : undefined;
+  if (parent) await assertMultiviewWorkReference(user, parent); else await assertMultiviewWorkSource(user, taskId);
+  const workBaseKey = isReference ? `reference:${input.referenceKey}` : 'base';
   const independent = input.branchKey !== undefined;
   if (independent && (!mutationValid(input.branchKey) || input.branchKey.length > 100)) throw invalid('另存编号无效。');
-  const existing = independent ? null : await prisma.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
+  const existing = independent ? null : await prisma.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: workBaseKey } } });
   if (existing?.source_version && existing.source_version !== version) throw new MultiviewWorkError('原视频已变化，已有作品保留，请打开原作品核对。', 409, 'WORK_SOURCE_CHANGED', { workId: existing.id, notCommitted: true });
-  const info = await multiviewInfoForWork(user, taskId, version);
-  const frozenSourceBinding = sourceBinding(await assertMultiviewWorkSource(user, taskId));
-  if (await multiviewSourceVersion(user, taskId) !== version) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
+  const info = await multiviewInfoForWork(user, taskId, version, undefined, access);
+  const frozenSourceBinding = parent?.source_id ? null : sourceBinding(await assertMultiviewWorkSource(user, taskId));
+  if (await multiviewSourceVersion(user, taskId, access) !== version) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
   const recipe = parseMultiviewWorkRecipe(input.recipe === undefined ? { ...defaultMultiviewWorkRecipe(info), schema: 2 } : input.recipe, info);
   if (!recipe) throw invalid();
   const recipeHash = multiviewWorkRecipeHash(recipe);
   return mutation(user, input, 'create', null, async db => {
-    const source = await assertMultiviewWorkSource(user, taskId, db);
-    if (sourceBinding(source) !== frozenSourceBinding) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
-    const previous = independent ? null : await db.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: 'base' } } });
+    const source = parent?.source_id ? (await assertMultiviewWorkReference(user, parent, db), parent) : await assertMultiviewWorkSource(user, taskId, db);
+    if (frozenSourceBinding !== null && sourceBinding(source as Parameters<typeof sourceBinding>[0]) !== frozenSourceBinding) throw new MultiviewWorkError('原视频已变化，本次未保存，已有作品保留。', 409, 'WORK_SOURCE_CHANGED', { notCommitted: true });
+    const previous = independent ? null : await db.multiviewWork.findUnique({ where: { owner_id_source_task_id_base_key: { owner_id: user.id, source_task_id: taskId, base_key: workBaseKey } } });
     if (previous?.recipe_json && previous.save_state !== 'intent') {
       if (previous.source_version !== version || !multiviewWorkRecipesEqual(readRecipe(previous)!, recipe) || input.title !== undefined && title(input.title) !== previous.title)
         throw new MultiviewWorkError('已有同一来源作品，未覆盖服务器内容；本机修改可以另存一版。', 409, 'WORK_EXISTS', { workId: previous.id, notCommitted: true });
-      return db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: 2 } });
+      return db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: recipe.schema } });
     }
-    const data = { owner_id: user.id, source_task_id: taskId, project_id: source.project_id, video_card_id: source.video_card_id,
-      save_state: 'saved', schema_version: 2,
+    const data = { owner_id: user.id, source_task_id: taskId, source_id: parent?.source_id || null, project_id: source.project_id, video_card_id: source.video_card_id,
+      save_state: 'saved', schema_version: recipe.schema,
       source_version: version, source_info_json: JSON.stringify(info), title: title(input.title, previous?.title),
       draft_revision: previous ? previous.draft_revision + 1 : 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: 'queued', next_attempt_at: new Date(),
       lease_token: null, lease_until: null, attempts: 0, last_error: null };
     if (previous) return db.multiviewWork.update({ where: { id: previous.id }, data: { ...data, revision: { increment: 1 }, write_epoch: { increment: 1 } } });
-    return db.multiviewWork.create({ data: { id: independent ? `mvw_${digest(JSON.stringify([user.id, input.branchKey])).slice(0, 48)}` : baseId(user.id, taskId),
-      base_key: independent ? null : 'base', branch_key: independent ? input.branchKey as string : null, ...data } });
+    return db.multiviewWork.create({ data: { id: independent ? `mvw_${digest(JSON.stringify([user.id, input.branchKey])).slice(0, 48)}` : isReference ? `mvw_${digest(JSON.stringify([user.id, taskId, workBaseKey])).slice(0, 48)}` : baseId(user.id, taskId),
+      base_key: independent ? null : workBaseKey, branch_key: independent ? input.branchKey as string : null, ...data } });
   });
 }
 export async function mutateMultiviewWork(user: SessionUser, workId: string, input: Json) {
@@ -294,6 +302,7 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
     || Number(input.baseRevision) < 1 || Object.keys(input).some(key => !['mutationId', 'baseRevision', 'action', 'recipe', 'title', 'branchKey', 'protocol'].includes(key))) throw invalid();
   const action = input.action as 'save' | 'branch' | 'remove' | 'restore';
   const before = await ownedWork(user, workId);
+  if (before.schema_version === 3 && ['save', 'branch'].includes(action) && !MULTIVIEW_ACTION_ENABLED) throw new MultiviewWorkError('参考拼图当前仅可读取，原保存和在途处理保留。', 503, 'WORK_READ_ONLY');
   let info = readInfo(before);
   let frozenSourceBinding: string | null = null;
   if (action === 'save' || action === 'branch') {
@@ -307,6 +316,7 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
   }
   const recipe = input.recipe === undefined ? readRecipe(before) : info && parseMultiviewWorkRecipe(input.recipe, info);
   if ((action === 'save' || action === 'branch') && !recipe) throw invalid();
+  if (recipe && (before.schema_version === 3) !== (recipe.schema === 3)) throw invalid('此作品须从对应编辑器保存，原内容未改变。');
   if (action === 'branch' && (!mutationValid(input.branchKey) || input.branchKey.length > 100)) throw invalid('另存编号无效。');
   return mutation(user, input, action, workId, async db => {
     const row = await ownedWork(user, workId, db);
@@ -322,12 +332,12 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
         return previous;
       }
       return db.multiviewWork.create({ data: { id: `mvw_${digest(JSON.stringify([user.id, branchKey])).slice(0, 48)}`, owner_id: user.id,
-        source_id: row.source_id, save_state: 'saved', schema_version: 2,
+        source_id: row.source_id, save_state: 'saved', schema_version: recipe!.schema,
         source_task_id: row.source_task_id, project_id: row.project_id, video_card_id: row.video_card_id, parent_work_id: row.id,
         branch_key: branchKey, title: title(input.title, `${row.title.slice(0, 114)}（另存）`), source_version: row.source_version,
         source_info_json: row.source_info_json, draft_revision: 1, recipe_json: JSON.stringify(recipe), recipe_hash: hash, status: 'queued' } });
     }
-    const patch: Prisma.MultiviewWorkUpdateManyMutationInput = { revision: { increment: 1 }, schema_version: 2, write_epoch: { increment: 1 } };
+    const patch: Prisma.MultiviewWorkUpdateManyMutationInput = { revision: { increment: 1 }, schema_version: recipe?.schema ?? before.schema_version, write_epoch: { increment: 1 } };
     if (action === 'remove' || action === 'restore') patch.removed_at = action === 'remove' ? new Date() : null;
     else {
       patch.save_state = 'saved';

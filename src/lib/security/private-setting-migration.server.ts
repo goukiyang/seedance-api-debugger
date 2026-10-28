@@ -37,6 +37,9 @@ export async function preparePrivateSettingMigration(db: PrismaClient, settingId
     if (row.key === 'gpt_image_studio_v1' || row.key === 'video_studio_context_v1') {
       const kind = row.key === 'gpt_image_studio_v1' ? 'image-global' : 'video-global';
       add(value.context, ['context'], kind, row.key, 'context', one(privateOrigin(kind, row.key)));
+    } else if (row.key === 'multiview_action_format_v1' || row.key === 'multiview_action_sync_v1') {
+      const kind = row.key === 'multiview_action_format_v1' ? 'multiview-action-format' : 'multiview-action-sync';
+      add(value.context, ['context'], kind, row.key, 'context', one(privateOrigin(kind, row.key)));
     } else if (row.key.startsWith('video_studio_module_context:')) {
       const id = row.key.slice('video_studio_module_context:'.length);
       add(value.context, ['context'], 'video-module-context', id, 'context', one(privateOrigin('video-module-context', id)));

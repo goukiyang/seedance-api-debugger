@@ -5,7 +5,7 @@ import { canonicalPrivateBinding, inspectPrivatePrompt, isStoredPrivatePrompt, P
 export type PrivateField = { field: string; origins: PrivateOrigin[] };
 const provenance = new WeakMap<object, Map<string, PrivateOrigin[]>>();
 const stored = new WeakMap<object, object>();
-const definitionKinds = new Set(['image-module', 'image-preset', 'skill', 'video-template', 'video-template-version', 'video-module-context']);
+const definitionKinds = new Set(['image-module', 'image-preset', 'skill', 'video-template', 'video-template-version', 'video-module-context', 'multiview-action-format', 'multiview-action-sync']);
 
 export function privateFieldBinding(raw: unknown, kind: string, id: string, field: string, origins: PrivateOrigin[]): PrivateBinding | null {
   if (isStoredPrivatePrompt(raw)) {

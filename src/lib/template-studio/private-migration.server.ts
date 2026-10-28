@@ -2,6 +2,7 @@ import 'server-only';
 import type { PrismaClient } from '@prisma/client';
 import { privateOrigin, inspectPrivatePrompt, isStoredPrivatePrompt, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { preparePrivateMigrationRow, type PrivateMigrationCell, type PrivateMigrationRow } from '@/lib/security/private-prompt-migration.server';
+import { multiviewActionContextOrigins } from '@/lib/video/multiview-action-context.server';
 import { videoTemplateOrigins } from './private-storage.server';
 
 type Selection = { templates: string[]; versions: string[]; drafts: string[]; runs: string[] };
@@ -47,7 +48,9 @@ export async function prepareVideoStudioPrivateMigration(db: PrismaClient, selec
   for (const row of runs) {
     const value = JSON.parse(row.snapshot_json);
     const recipe = value.templateVersion?.templateSource === 'studio' ? videoTemplateOrigins(value.templateVersion.templateId) : [];
-    const moduleOrigin = one(privateOrigin('video-module-context', row.draft_id));
+    if ((row.purpose === 'multiview-action') !== (value.purpose === 'multiview-action')) throw new PrivatePromptError();
+    const action = row.purpose === 'multiview-action';
+    const moduleOrigin = action ? multiviewActionContextOrigins('sync') : one(privateOrigin('video-module-context', row.draft_id));
     const moduleOrigins = moduleOrigin.length ? moduleOrigin : recipe;
     if (value.templateVersion?.templateSource === 'studio' && !recipe.length && !isStoredPrivatePrompt(value.recipe?.instruction)
       || value.privateContext?.module && !moduleOrigins.length && !isStoredPrivatePrompt(value.privateContext.module)) {
@@ -55,7 +58,7 @@ export async function prepareVideoStudioPrivateMigration(db: PrismaClient, selec
     }
     const cells: PrivateMigrationCell[] = [];
     if (value.privateContext) {
-      cells.push(...cell(value.privateContext.global, 'snapshot_json', ['privateContext', 'global'], 'video-run', row.id, 'global', one(privateOrigin('video-global', 'video_studio_context_v1'))));
+      cells.push(...cell(value.privateContext.global, 'snapshot_json', ['privateContext', 'global'], 'video-run', row.id, 'global', action ? multiviewActionContextOrigins('format') : one(privateOrigin('video-global', 'video_studio_context_v1'))));
       cells.push(...cell(value.privateContext.module, 'snapshot_json', ['privateContext', 'module'], 'video-run', row.id, 'module', moduleOrigins));
     }
     if (value.recipe) cells.push(...cell(value.recipe.instruction, 'snapshot_json', ['recipe', 'instruction'], 'video-run', row.id, 'instruction', recipe));

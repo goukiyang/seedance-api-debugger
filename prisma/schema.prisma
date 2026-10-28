@@ -900,6 +900,7 @@ model VideoStudioTemplateVersion {
 
 model VideoStudioDraft {
   id                    String   @id @default(cuid())
+  purpose               String   @default("studio") // studio | multiview-action
   owner_user_id         String
   name                  String
   group_name            String   @default("未分组")
@@ -920,10 +921,12 @@ model VideoStudioDraft {
 
   @@index([owner_user_id, updated_at])
   @@index([template_source, source_template_id])
+  @@index([owner_user_id, purpose, updated_at])
 }
 
 model VideoStudioRun {
   id                 String    @id @default(cuid())
+  purpose               String   @default("studio") // studio | multiview-action
   owner_user_id      String
   draft_id           String
   draft_revision     Int       @default(1)
@@ -954,6 +957,7 @@ model VideoStudioRun {
   @@index([draft_id, created_at])
   @@index([status, delivery_state, created_at])
   @@index([status, lease_expires_at])
+  @@index([owner_user_id, purpose, created_at])
 }
 
 model TemplateMemory {

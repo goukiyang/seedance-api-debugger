@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { AuthError } from '@/lib/auth/session';
 import { multiviewDimensions } from './multiview-contract';
 import { MultiviewError, multiviewInfoForWork, multiviewSourceVersion, renderMultiviewWork } from './multiview';
-import { isMultiviewWorkId, parseMultiviewWorkManifest, type MultiviewWorkManifest, type MultiviewWorkFileRole } from './multiview-work-contract';
+import { isMultiviewWorkId, parseMultiviewWorkManifest, multiviewWorkDimensions, type MultiviewWorkManifest, type MultiviewWorkFileRole } from './multiview-work-contract';
 import { assertMultiviewWorkSource, assertMultiviewWorkReference, claimNextMultiviewWork, completeMultiviewWork, failMultiviewWork,
   initializeMultiviewWork, multiviewWorkActor, multiviewWorkDirectory, type MultiviewWorkLease } from './multiview-works';
 import { registerNextSavedMultiviewOutputs } from './multiview-output-assets.server';
@@ -215,7 +215,7 @@ async function validateDirectory(directory: string, lease: MultiviewWorkLease, s
   const raw = await readPrivate(path.join(directory, 'manifest.json'), 30000);
   const manifest = parseMultiviewWorkManifest(JSON.parse(raw.toString('utf8')), lease.recipe!, lease.draftRevision, lease.recipeHash!);
   if (!manifest) throw unavailable('作品成品清单不完整，未标记为已保存。');
-  const expectedDimensions = multiviewDimensions(lease.info!, lease.recipe!.slots.length, lease.recipe!.layout);
+  const expectedDimensions = multiviewWorkDimensions(lease.info!, lease.recipe!);
   if (manifest.width !== expectedDimensions.width || manifest.height !== expectedDimensions.height) throw unavailable('作品拼图尺寸与配方不一致。');
   const names = (await readdir(directory)).sort();
   if (JSON.stringify(names) !== JSON.stringify(['manifest.json', ...manifest.files.map(file => file.file)].sort())
@@ -250,7 +250,7 @@ async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
   if (!destination.startsWith(`${root}${path.sep}`) || !isMultiviewWorkId(lease.ownerId) || !isMultiviewWorkId(lease.workId)) throw unavailable('作品文件位置校验未完成。');
   const existing = await lstat(destination).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
   if (existing) return validateDirectory(destination, lease, signal); // An interrupted CAS may have already published this immutable revision.
-  const dimensions = multiviewDimensions(lease.info!, lease.recipe!.slots.length, lease.recipe!.layout);
+  const dimensions = multiviewWorkDimensions(lease.info!, lease.recipe!);
   const estimate = Math.ceil((dimensions.width * dimensions.height + lease.info!.width * lease.info!.height * lease.recipe!.slots.length * 2) * 4 + 1024 * 1024);
   await assertCapacity(root, estimate);
   let rendered: Awaited<ReturnType<typeof renderMultiviewWork>> | null = await renderMultiviewWork(user, lease.sourceTaskId, lease.recipe!, signal, access);

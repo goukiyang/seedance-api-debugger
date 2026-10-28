@@ -14,7 +14,7 @@ const columns = {
   VideoStudioRun: ['snapshot_json', 'prompt'],
   PlatformSetting: ['value_json'],
   OperationLog: ['detail'],
-  VideoTask: ['prompt', 'final_prompt_snapshot'],
+  VideoTask: ['prompt', 'final_prompt_snapshot', 'template_studio_snapshot_json'],
   GenerationTaskSnapshot: ['prompt_raw', 'prompt_rendered'],
 } as const;
 const guardColumns = {

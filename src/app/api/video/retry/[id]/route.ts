@@ -13,7 +13,7 @@ import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { quoteVideoPricing, requireVideoPricingRevision, videoPricingError } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
-import { isPrivateMultiviewTask, projectSelectedMultiviewTask, readMultiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import { isPrivateMultiviewTask, isPrivateMultiviewActionTask, projectSelectedMultiviewTask, readMultiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
 import { createPrivateMultiviewRetry } from '@/lib/video/multiview-private-create.server';
 import {
   PAID_GENERATION_INTENT_HEADER,
@@ -135,6 +135,8 @@ export async function POST(
       { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (isPrivateMultiviewTask(originalTask)) {
+      if (isPrivateMultiviewActionTask(originalTask)) return NextResponse.json({ error: 'MULTIVIEW_ACTION_REQUOTE_REQUIRED',
+        message: '请回同步动作视频修改动作并确认新费用；原任务未重发。', target_path: '/multiview' }, { status: 409 });
       if (originalTask.local_status !== 'failed' || originalTask.error_code?.includes('UNCONFIRMED') || originalTask.frozen_cost !== 0) {
         return NextResponse.json({ error: '原请求尚未确认失败，请查询原任务；未重新生成' }, { status: 409 });
       }

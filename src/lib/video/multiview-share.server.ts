@@ -45,6 +45,7 @@ async function shareableWork(user: SessionUser, workId: string, revision: number
   const info = JSON.parse(work.source_info_json || 'null') as MultiviewInfo | null;
   const recipe = info && parseMultiviewWorkRecipe(work.ready_recipe_json, info);
   const manifest = recipe && parseMultiviewWorkManifest(work.ready_manifest_json, recipe, revision, multiviewWorkRecipeHash(recipe));
+  if (recipe?.schema === 3) throw new MultiviewWorkError('参考拼图仅本人可用，原选帧方案分享不受影响。', 409, 'REFERENCE_SHARE_UNSUPPORTED', { notCommitted: true });
   if (!info || !recipe || !manifest) throw invalid('成品记录尚未完整，未建立分享。');
   return { work, info, recipe, manifest };
 }

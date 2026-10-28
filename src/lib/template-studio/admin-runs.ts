@@ -232,6 +232,7 @@ export async function listAdminStudioRuns(user: SessionUser, query: StudioAdminR
   if (query.cursor && !cursor) throw new StudioError('分页游标无效，请刷新后重试', 400, 'INVALID');
 
   const where: Prisma.VideoStudioRunWhereInput = {
+    purpose: 'studio',
     ...(status ? { status } : {}),
     ...(query.ownerUserId ? { owner_user_id: query.ownerUserId.slice(0, 120) } : {}),
     ...(query.requestId ? { request_id: query.requestId.slice(0, 120) } : {}),
@@ -303,8 +304,8 @@ async function projectPage(rows: AdminRunRow[], pageSize: number, detail = false
 
 export async function getAdminStudioRun(user: SessionUser, id: string): Promise<StudioAdminRunDetailResponse> {
   requireAdminStudioReviewer(user);
-  const row = await prisma.videoStudioRun.findUnique({
-    where: { id },
+  const row = await prisma.videoStudioRun.findFirst({
+    where: { id, purpose: 'studio' },
     select: {
       id: true, owner_user_id: true, source: true, mode: true, status: true, delivery_state: true,
       attempt: true, created_at: true, updated_at: true, completed_at: true, model: true,

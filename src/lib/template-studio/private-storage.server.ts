@@ -3,6 +3,7 @@ import { privateOrigin, type PrivateOrigin } from '@/lib/security/private-prompt
 import { readPrivateFields, writePrivateFields, privateFieldOrigins, transferPrivateOrigins } from '@/lib/security/private-prompt-fields.server';
 import { normalizeRecipe } from './validation';
 import type { StudioTemplateRecipe, StudioRunSnapshot } from './types';
+import { multiviewActionContextOrigins } from '@/lib/video/multiview-action-context.server';
 import { readPrivateCredential, writePrivateCredential } from '@/lib/security/private-credentials.server';
 
 export function videoTemplateOrigins(id: string, ownerId?: string): PrivateOrigin[] {
@@ -25,8 +26,12 @@ const runFields = ['global', 'module', 'instruction', 'prompt'] as const;
 export function privateVideoRunOrigins(snapshot: StudioRunSnapshot, draftId?: string) {
   const origins = runFields.flatMap(field => privateFieldOrigins(snapshot, field));
   if (draftId) {
-    const global = snapshot.privateContext ? privateOrigin('video-global', 'video_studio_context_v1') : null;
-    const moduleOrigin = snapshot.privateContext ? privateOrigin('video-module-context', draftId) : null;
+    const global = snapshot.privateContext && snapshot.purpose !== 'multiview-action' ? privateOrigin('video-global', 'video_studio_context_v1') : null;
+    const moduleOrigin = snapshot.privateContext && snapshot.purpose !== 'multiview-action' ? privateOrigin('video-module-context', draftId) : null;
+    if (snapshot.privateContext && snapshot.purpose === 'multiview-action') {
+      if (snapshot.privateContext.global) origins.push(...multiviewActionContextOrigins('format'));
+      if (snapshot.privateContext.module) origins.push(...multiviewActionContextOrigins('sync'));
+    }
     if (global) origins.push(global);
     if (moduleOrigin) origins.push(moduleOrigin);
     if (snapshot.templateVersion?.templateSource === 'studio') origins.push(...videoTemplateOrigins(snapshot.templateVersion.templateId));
@@ -38,7 +43,8 @@ export function transformPrivateVideoRun(snapshot: StudioRunSnapshot, id: string
   const moduleOrigin = privateOrigin('video-module-context', draftId);
   const recipe = snapshot.templateVersion?.templateSource === 'studio' ? videoTemplateOrigins(snapshot.templateVersion.templateId) : [];
   const origins = {
-    global: global ? [global] : [], module: moduleOrigin ? [moduleOrigin] : recipe,
+    global: snapshot.purpose === 'multiview-action' ? multiviewActionContextOrigins('format') : global ? [global] : [],
+    module: snapshot.purpose === 'multiview-action' ? multiviewActionContextOrigins('sync') : moduleOrigin ? [moduleOrigin] : recipe,
     instruction: recipe, prompt: snapshot.privateContext ? [] : recipe,
   };
   const values: Record<string, string> = {};

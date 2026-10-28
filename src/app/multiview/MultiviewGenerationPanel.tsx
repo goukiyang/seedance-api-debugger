@@ -39,6 +39,7 @@ export type MultiviewGenerationReady = { taskId: string; requestKey: string; own
 export type MultiviewGenerationPanelProps = {
   currentSourceKey: string | null; hasResult: boolean; expanded: boolean; onExpandedChange: (expanded: boolean) => void;
   onUseExisting: () => void; onReady: (result: MultiviewGenerationReady) => void;
+  onActionSettings?: (value: { model: string; duration: number; resolution: string; projectId: string; videoCardId: string | null }) => void;
   onStateChange?: (state: MultiviewGenerationPanelState) => void; initialProjectId?: string; initialVideoCardId?: string;
   currentTaskId?: string;
   /** A saved work output chosen with “用作参考图”; replaces the main image once, never starts a generation. */
@@ -346,6 +347,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [creationBaselineId, setCreationBaselineId] = useState<string | null>(null);
   const creationDraftBody = useRef<Record<string, unknown> | null>(null);
   const active = pendingActive(receipt);
+  useEffect(() => { if (ready && draft) propsRef.current.onActionSettings?.({ model: draft.model, duration: draft.duration, resolution: draft.resolution, projectId: draft.projectId || '', videoCardId: draft.videoCardId || null }); }, [ready, draft?.model, draft?.duration, draft?.resolution, draft?.projectId, draft?.videoCardId]);
   const currentProject = projects.find(item => item.id === draft?.projectId);
   const currentCard = cards.find(item => item.id === draft?.videoCardId && item.project_id === draft?.projectId);
   const cardSelectionInvalid = Boolean(draft?.videoCardId && (!currentCard || !canGenerateInCard(currentCard)));

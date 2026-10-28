@@ -22,7 +22,7 @@ async function destination(user: SessionUser, target: AvatarReturnTarget, tx: Pr
     const assets = await tx.workspaceAsset.findMany({ where: { workspace_id: target.id }, orderBy: { sort_order: 'asc' }, include: { asset: { select: { type: true } } } });
     return { fingerprint: hash([workspace.updated_at, assets.map(a => [a.id,a.asset_id,a.reference_image_id,a.role,a.sort_order])]), assetIds: assets.map(a=>a.asset_id), imageCount: assets.filter(a=>a.asset.type==='image').length, draft: null };
   }
-  const draft = await tx.videoStudioDraft.findFirst({ where: { id: target.id, owner_user_id: user.id } });
+  const draft = await tx.videoStudioDraft.findFirst({ where: { id: target.id, owner_user_id: user.id, purpose: 'studio' } });
   if (!draft || draft.revision !== target.revision) throw new StudioError('原模块版本已变化，请返回后重新选择', 409);
   const assets = JSON.parse(draft.assets_json) as Array<{assetId:string}>;
   return { fingerprint: hash([draft.revision,draft.assets_json,draft.template_snapshot_json]), assetIds: assets.map(a=>a.assetId), imageCount: 0, draft };
@@ -86,7 +86,7 @@ export async function avatarTicketAction(user:SessionUser,id:string,action:strin
         const slot=ticket.target.slotKey?recipe?.assetSlots.find(s=>s.key===ticket.target.slotKey):null;
         if (ticket.target.slotKey&&!slot || slot&&!slot.types.includes('image')) throw new StudioError('模板槽位已不可用或不接收图片',409);
         const assets=normalizeAssets([...JSON.parse(row.assets_json),{assetId:asset.id,type:'image',role:slot?.role||'reference',...(slot?{slotKey:slot.key}:{})}],recipe);
-        const changed=await tx.videoStudioDraft.updateMany({where:{id:row.id,owner_user_id:user.id,revision:row.revision},data:{assets_json:JSON.stringify(assets),revision:{increment:1},updated_at:new Date()}});
+        const changed=await tx.videoStudioDraft.updateMany({where:{id:row.id,owner_user_id:user.id,purpose:'studio',revision:row.revision},data:{assets_json:JSON.stringify(assets),revision:{increment:1},updated_at:new Date()}});
         if (!changed.count) throw new StudioError('模块已变化，未覆盖新编辑',409);
       }
       ticket.applied=true;
