@@ -59,6 +59,7 @@ test('existing b9 upload verification accepts only same-owner verified legacy/cu
   const names = ['R2_PUBLIC_BASE_URL', 'R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET'];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   await fsp.mkdir(path.join(directory, 'storage'), { mode: 0o700 });
+  await fsp.mkdir(path.join(directory, 'storage/verified-uploads'), { mode: 0o700 });
   process.chdir(directory);
   Object.assign(process.env, { R2_PUBLIC_BASE_URL: base, R2_ACCOUNT_ID: 'synthetic-only',
     R2_ACCESS_KEY_ID: 'synthetic-only', R2_SECRET_ACCESS_KEY: 'synthetic-only', R2_BUCKET: 'synthetic-only' });
