@@ -1351,7 +1351,7 @@ export async function POST(request: NextRequest) {
   };
   try {
     const result = await prisma.$transaction(async (tx) => {
-      await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip' }, tx, { target: 'video' });
+      await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip', model: selectedModel }, tx, { target: 'video' });
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
