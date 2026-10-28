@@ -16,7 +16,7 @@ type State = { minutes: Map<string, Minute>; seen: WeakSet<object>; timer?: Retu
   context: AsyncLocalStorage<Scope>; reporter: DatabaseReporter };
 const key = Symbol.for('video-api.database-observations.v1');
 const globals = globalThis as typeof globalThis & { [key]?: State };
-const state = globals[key] ||= { minutes: new Map(), seen: new WeakSet(), writer: false, active: 0, flushing: false,
+const state: State = globals[key] ||= { minutes: new Map(), seen: new WeakSet(), writer: false, active: 0, flushing: false,
   context: new AsyncLocalStorage<Scope>(), reporter: { id: randomUUID(), pid: process.pid,
     consumer: process.env.SD2_DATABASE_MODE === 'readonly' ? 'readonly' : 'application-writer' } };
 const normalizeScope = (scope: string): Scope => scopes.includes(scope as Scope) ? scope as Scope : 'other';
