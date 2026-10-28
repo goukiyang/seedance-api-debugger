@@ -10,8 +10,8 @@ export function assertFreshFixtureFactory() {
   assert.equal(Reflect.get(globalThis, 'prisma'), undefined, 'Fixture factory cannot use the retired global injection');
 }
 export function wrapFixtureTransactions<T extends object>(target: T, before: () => Promise<void>): T {
-  const original = Reflect.get(target, '$transaction', target);
-  assert.equal(typeof original, 'function');
+  const original: unknown = Reflect.get(target, '$transaction', target);
+  assert.ok(typeof original === 'function');
   return new Proxy(target, { get(current, property) {
     if (property === '$transaction') return async (...args: unknown[]) => {
       await before(); return Reflect.apply(original, current, args);
