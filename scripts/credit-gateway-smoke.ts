@@ -19,11 +19,12 @@ async function main() {
   assert.throws(() => routePayload(raw, sign(raw, 'not-a-date'), env));
   const routed = routePayload(raw, sign(raw), env);
   assert.equal(routed.kind, 'credit');
-  assert(verifyCreditRelay(routed.body, new Headers(routed.headers)).event);
-  assert.throws(() => verifyCreditRelay(routed.body + ' ', new Headers(routed.headers)));
-  assert.throws(() => verifyCreditRelay(routed.body, new Headers(routed.headers), Date.now() + 61000));
+  const relayHeaders = routed.headers as Record<string, string>;
+  assert(verifyCreditRelay(routed.body, new Headers(relayHeaders)).event);
+  assert.throws(() => verifyCreditRelay(routed.body + ' ', new Headers(relayHeaders)));
+  assert.throws(() => verifyCreditRelay(routed.body, new Headers(relayHeaders), Date.now() + 61000));
   process.env.FEISHU_ALLOWED_TENANT_KEY = 'other';
-  assert.throws(() => verifyCreditRelay(routed.body, new Headers(routed.headers)));
+  assert.throws(() => verifyCreditRelay(routed.body, new Headers(relayHeaders)));
   process.env.FEISHU_ALLOWED_TENANT_KEY = 'test-tenant';
   assert.throws(() => routePayload(raw, { ...sign(raw), 'x-lark-signature': 'bad' }, env));
   assert.throws(() => routePayload(raw, sign(raw), { ...env, FEISHU_APP_ID: 'other' }));

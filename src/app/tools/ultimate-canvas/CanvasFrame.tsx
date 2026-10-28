@@ -178,7 +178,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     if (!request || !items.length || items.length > request.capacity || items.some(item => !request.acceptedTypes.includes(item.type))) throw new Error('所选参考素材数量或类型无效');
     for (const kind of request.acceptedTypes) if (items.filter(item => item.type === kind).length > (request.typeLimits[kind] ?? 0)) throw new Error('所选素材超过当前类型上限，未删减');
     const references: Array<{ kind: 'image' | 'video' | 'audio'; referenceImageId?: string; assetId: string; sourceVersion: string; title: string; width: number | null; height: number | null }> = [];
-    for (const [index, item] of items.entries()) {
+    for (const [index, item] of Array.from(items.entries())) {
       check();
       {
         if (!validId(item.assetId) && !validId(item.referenceImageId)) throw new Error('原素材编号不可用，请通过原件添加后重试');

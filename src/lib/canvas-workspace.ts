@@ -41,11 +41,11 @@ export async function writeCanvasWorkspace(scope: CanvasWorkspaceScope, db: Pris
   return getOrCreateWorkspace(scope.workspace_key, scope.owner_id, db);
 }
 export function legacyCanvasWorkspaceKeys(scope: CanvasWorkspaceScope, nodeId?: string | null) {
-  return [...new Set([
+  return Array.from(new Set([
     ...(scope.video_card_id ? [`ultimate-canvas:${scope.project_id}:${scope.video_card_id}`] : []),
     `ultimate-canvas:v2:${scope.owner_id}:${scope.project_id}:${scope.document_id}`,
     ...(scope.video_card_id || nodeId ? [`ultimate-canvas:${scope.project_id}:${scope.video_card_id || nodeId}`] : []),
-  ])];
+  ]));
 }
 export async function readLegacyCanvasWorkspace(scope: CanvasWorkspaceScope, nodeId?: string | null,
   receiptWorkspaceId?: string, db: Prisma.TransactionClient = prisma) {
@@ -70,7 +70,7 @@ export async function readLegacyCanvasWorkspace(scope: CanvasWorkspaceScope, nod
     name: { in: keys.map(key => `默认工作台:${key.trim().slice(0, 96)}`) } }, select: { id: true }, take: 4 });
   rows.forEach(row => ids.add(row.id));
   if (ids.size > 1) throw new AuthError('原工作区存在多个可能记录，请保留原素材并核对原关联', 409);
-  return ids.size ? { id: [...ids][0] } : null;
+  return ids.size ? { id: Array.from(ids)[0] } : null;
 }
 export async function canvasWorkspaceFromHeaders(user: SessionUser, headers: Headers, purpose: Input['purpose'] = 'reference', db: Prisma.TransactionClient = prisma) {
   const key = headers.get('x-tab-id');

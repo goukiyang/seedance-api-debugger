@@ -51,7 +51,7 @@ export function retainCanvasReferencesCapability<T extends Record<string, unknow
   if (canvasReferencesRequired(snapshot) || canvasReferencesRequired(previous)) {
     const mutable: Record<string, unknown> = snapshot;
     mutable.canvasReferenceVersion = 1;
-    mutable.requiredCapabilities = [...new Set([...(Array.isArray(snapshot.requiredCapabilities) ? snapshot.requiredCapabilities : []), CANVAS_REFERENCES_CAPABILITY])];
+    mutable.requiredCapabilities = Array.from(new Set([...(Array.isArray(snapshot.requiredCapabilities) ? snapshot.requiredCapabilities : []), CANVAS_REFERENCES_CAPABILITY]));
   }
   return snapshot;
 }

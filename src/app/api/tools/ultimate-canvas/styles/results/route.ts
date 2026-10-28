@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
           const legacy = await readLegacyCanvasWorkspace(scope, context.nodeId, undefined, db);
           const canonical = await readWorkspaceForTab(scope.workspace_key, user.id, db);
           let referenceImageId = '', workspaceAssetId = '';
-          for (const originalWorkspaceId of [...new Set([canonical?.id, legacy?.id].filter((id): id is string => Boolean(id)))]) {
+          for (const originalWorkspaceId of Array.from(new Set([canonical?.id, legacy?.id].filter((id): id is string => Boolean(id))))) {
           const existingLink = await db.workspaceAsset.findUnique({
             where: { workspace_id_asset_id: { workspace_id: originalWorkspaceId, asset_id: assetId } },
             select: { id: true, reference_image_id: true },

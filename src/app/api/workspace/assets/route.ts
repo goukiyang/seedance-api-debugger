@@ -148,7 +148,9 @@ export async function POST(request: NextRequest) {
       const currentWorkspace = await tx.workspace.findUnique({ where: { id: workspaceId } });
       if (!currentUser || currentUser.status !== 'active' || !currentWorkspace || currentWorkspace.owner_id !== user.id) throw new VerifiedUploadError('SESSION_CHANGED', '当前账号或工作区已变化，未关联素材');
       for (const expected of references) {
-        const fresh = await assertCanUseReferenceImage(currentUser, expected.id, tx);
+        const fresh = await assertCanUseReferenceImage({ ...currentUser,
+          role: currentUser.role as typeof user.role, account_type: currentUser.account_type as typeof user.account_type,
+          status: currentUser.status as typeof user.status }, expected.id, tx);
         if (fresh.asset_id !== expected.asset_id || fresh.asset?.status !== 'active' || fresh.asset.original_url !== expected.asset?.original_url) throw new VerifiedUploadError('UPLOAD_ASSOCIATION_UNAVAILABLE', '参考素材已变化，未关联');
       }
       for (const expected of assets) {
