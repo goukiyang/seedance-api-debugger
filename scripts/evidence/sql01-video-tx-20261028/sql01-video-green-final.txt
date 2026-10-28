@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: actual video context project and card reads remain on the supplied transaction
+ok 1 - actual video context project and card reads remain on the supplied transaction
+  ---
+  duration_ms: 2000.321
+  type: 'test'
+  ...
+# Subtest: actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+ok 2 - actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+  ---
+  duration_ms: 106.196833
+  type: 'test'
+  ...
+# Subtest: actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+ok 3 - actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+  ---
+  duration_ms: 717.174125
+  type: 'test'
+  ...
+# Subtest: fresh project membership, active state and video-card ownership/status still deny inside the transaction
+ok 4 - fresh project membership, active state and video-card ownership/status still deny inside the transaction
+  ---
+  duration_ms: 342.33725
+  type: 'test'
+  ...
+# Subtest: template archive/access/version and inactive or revoked shared assets still fail closed
+ok 5 - template archive/access/version and inactive or revoked shared assets still fail closed
+  ---
+  duration_ms: 442.682666
+  type: 'test'
+  ...
+# Subtest: outside callers retain physical preflight, fingerprint, payer and real signed credential behavior
+ok 6 - outside callers retain physical preflight, fingerprint, payer and real signed credential behavior
+  ---
+  duration_ms: 66.023083
+  type: 'test'
+  ...
+# Subtest: actual standard-create prefix rejects a post-quote permission change before any write
+ok 7 - actual standard-create prefix rejects a post-quote permission change before any write
+  ---
+  duration_ms: 72.23575
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5523.997875

@@ -31,6 +31,7 @@ import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '@/lib/prisma';
+import { withDatabaseObservationScope } from '@/lib/database/observations';
 import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
@@ -2154,7 +2155,7 @@ export async function createStandardVideoTask(request: NextRequest) {
     source_metadata_json: string | null;
   };
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await withDatabaseObservationScope('video-task.create', () => prisma.$transaction(async (tx) => {
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey, requestClaim);
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);
@@ -2163,7 +2164,7 @@ export async function createStandardVideoTask(request: NextRequest) {
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
       if (requireScopeCredential) {
         const freshPricingContext = await resolveVideoPricingContext(user, { ...body, project_id: project.id, video_card_id: videoCardId,
-          provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
+          provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested }, 'create', tx);
         verifyVideoPricingCredential(body.pricing_quote_token, freshPricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
       }
       if (multiviewGeneration && multiviewRecipe && multiviewSystemReference) {
@@ -2451,7 +2452,7 @@ export async function createStandardVideoTask(request: NextRequest) {
       if (multiviewGeneration) await registerMultiviewWorkIntent(tx, { ownerId: user.id, taskId: task.id,
         projectId: project.id, videoCardId });
       return task;
-    });
+    }));
 
     taskId = result.id;
     committedTaskId = taskId;

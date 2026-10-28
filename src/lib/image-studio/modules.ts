@@ -649,8 +649,8 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       if (!source || !canViewStudioPreset(sourceUser, source)) throw new StudioModuleError('模板已停止共享，不能保存新的配置', 403);
     }
     const newOrigins = studioDefinitionOrigins('image-module', { id, owner_id: ownerId, source_preset_id: forcedSourcePresetId });
-    if (!current && newOrigins.length && (data.prompt || data.context)) await requirePrivatePromptRequest(ownerId, newOrigins);
-    const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, body.privatePromptEdit === true)
+    if (!current && newOrigins.length && (data.prompt || data.context)) await requirePrivatePromptRequest(ownerId, newOrigins, tx);
+    const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, body.privatePromptEdit === true, tx)
       : writePrivateStudioDefinition('image-module', { id, owner_id: ownerId, context: '', ...data });
     const saved = !current
       ? await tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...protectedData } })

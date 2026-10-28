@@ -9,13 +9,13 @@ import { openPrivatePrompt, sealPrivatePrompt, privatePromptIndex, PrivatePrompt
 import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt, markPrivatePromptDraftApplied,
   PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
-type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
+type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset' | 'userSession'>;
 type Result = { state: 'saved' | 'not-applied'; requestId: string; revision: number };
 async function target(user: ImageStudioIdentity, id: string, client: Client = prisma) {
   const skill = await getSkill(user, id, client);
   const origins = privateFieldOrigins(skill, 'prompt');
   if (!origins.length) throw new PrivatePromptError();
-  await requirePrivatePromptRequest(user.id, origins);
+  await requirePrivatePromptRequest(user.id, origins, client);
   return { skill, draftTarget: { kind: 'skill', id, origins, fields: ['prompt', 'context'] } };
 }
 function receiptScope(userId: string, id: string, requestId: string, origins: Awaited<ReturnType<typeof target>>['draftTarget']['origins']) {

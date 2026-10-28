@@ -1,0 +1,77 @@
+TAP version 13
+# Subtest: actual video context project and card reads remain on the supplied transaction
+ok 1 - actual video context project and card reads remain on the supplied transaction
+  ---
+  duration_ms: 4165.687791
+  type: 'test'
+  ...
+# Subtest: actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+ok 2 - actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+  ---
+  duration_ms: 94.187958
+  type: 'test'
+  ...
+# Subtest: actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+not ok 3 - actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+  ---
+  duration_ms: 602.212708
+  type: 'test'
+  location: '/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:21:1'
+  failureType: 'testCodeFailure'
+  error: 'videoBranch is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    eval (eval at exports.runCreatePrefix (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:27:10), <anonymous>:8:32)
+    async Object.run (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:113:66)
+    async TestContext.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:27:18)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: fresh project membership, active state and video-card ownership/status still deny inside the transaction
+ok 4 - fresh project membership, active state and video-card ownership/status still deny inside the transaction
+  ---
+  duration_ms: 287.142542
+  type: 'test'
+  ...
+# Subtest: template archive/access/version and inactive or revoked shared assets still fail closed
+ok 5 - template archive/access/version and inactive or revoked shared assets still fail closed
+  ---
+  duration_ms: 402.540083
+  type: 'test'
+  ...
+# Subtest: outside callers retain physical preflight, fingerprint, payer and real signed credential behavior
+ok 6 - outside callers retain physical preflight, fingerprint, payer and real signed credential behavior
+  ---
+  duration_ms: 66.489625
+  type: 'test'
+  ...
+# Subtest: actual standard-create prefix rejects a post-quote permission change before any write
+not ok 7 - actual standard-create prefix rejects a post-quote permission change before any write
+  ---
+  duration_ms: 82.329334
+  type: 'test'
+  location: '/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:77:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The validation function is expected to return "true". Received false
+    
+    Caught error:
+    
+    ReferenceError: videoBranch is not defined
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:81:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 5
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8600.827792

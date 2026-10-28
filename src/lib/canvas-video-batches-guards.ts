@@ -161,7 +161,7 @@ export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: Sessio
     if (slot) {
       const children = await db.canvasVideoBatchChild.findMany({ where: { batch_id: slot.id } });
       const tasks = await db.videoTask.findMany({ where: { id: { in: children.flatMap(child => child.task_id ? [child.task_id] : []) } } });
-      for (const task of tasks) await assertCanViewTask(user, task);
+      for (const task of tasks) await assertCanViewTask(user, task, db);
       const states = children.map(child => canvasVideoChildState(child, tasks.find(task => task.id === child.task_id)));
       if (children.length === slot.count && canvasVideoBatchIsSettled(states)) {
         await db.canvasVideoBatch.update({ where: { id: slot.id }, data: { active_node_key: null,
@@ -184,8 +184,7 @@ export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: Sessio
     || child.business_fingerprint !== admission.fingerprint) throw new CanvasVideoBatchError('原批次归属或输入不一致，尚未生成');
   if (child.task_id) throw new CanvasVideoBatchError('原子任务已受理，请查询该任务', 409, 'canvas_video_batch_child_accepted', { existing_task_id: child.task_id });
   if (child.state !== 'prepared' || child.revision !== admission.childRevision) throw new CanvasVideoBatchError('本子项已停止或报价已更新，请查询原批次', 409, 'canvas_video_batch_child_changed');
-  if (await canvasVideoRouteFingerprint(body.provider, prisma, child.route_fingerprint) !== child.route_fingerprint
-    || await canvasVideoRouteFingerprint(body.provider, db, child.route_fingerprint) !== child.route_fingerprint) throw new CanvasVideoBatchError('原通道配置已变化，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
+  if (await canvasVideoRouteFingerprint(body.provider, db, child.route_fingerprint) !== child.route_fingerprint) throw new CanvasVideoBatchError('原通道配置已变化，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
   if (child.quote_expires_at.getTime() <= Date.now()) throw new CanvasVideoBatchError('报价已过期，请重新确认未开始子项', 409, 'canvas_video_batch_requote_required');
   const amount = creditCents(input.amount);
   if (amount < 0 || amount > child.authorized_maximum || child.batch.admitted_total + amount > child.batch.authorized_total) {

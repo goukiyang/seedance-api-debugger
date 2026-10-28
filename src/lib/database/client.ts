@@ -61,7 +61,7 @@ async function initialize(state: Shared, write: boolean) {
   try { await run; }
   catch (error) {
     state.mode = 'cold'; state.initialization = undefined; state.writing = undefined;
-    observeDatabaseError(error); throw error;
+    observeDatabaseError(error, 'initialization'); throw error;
   }
 }
 async function disconnect() {
@@ -79,13 +79,16 @@ export const applicationDatabase = new Proxy({} as PrismaClient, {
     if (property === '$transaction') return async (...args: Parameters<PrismaClient['$transaction']>) => {
       // Initialization must complete before BEGIN, including array transactions.
       await initialize(state, true);
-      databaseTransactionStarted(); const started = performance.now();
+      const observationScope = databaseTransactionStarted(); const started = performance.now();
+      const category = typeof args[0] === 'function' ? 'interactive' : 'batch';
+      let outcome: 'succeeded' | 'failed' = 'failed';
       try {
         const transaction = state.extended.$transaction as unknown as (...values: unknown[]) => Promise<unknown>;
-        return await transaction.apply(state.extended, args);
+        const result = await transaction.apply(state.extended, args);
+        outcome = 'succeeded'; return result;
       }
-      catch (error) { observeDatabaseError(error); throw error; }
-      finally { databaseTransactionFinished(performance.now() - started); }
+      catch (error) { observeDatabaseError(error, category); throw error; }
+      finally { databaseTransactionFinished(performance.now() - started, outcome, category, observationScope); }
     };
     const value = Reflect.get(state.extended, property);
     return typeof value === 'function' ? value.bind(state.extended) : value;

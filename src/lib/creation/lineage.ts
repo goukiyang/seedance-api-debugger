@@ -15,7 +15,7 @@ export async function readCreationSource(db: CreationDb, user: SessionUser, task
   } else if ((task.owner_user_id || task.user_id) !== user.id && user.role !== 'admin') {
     throw new CreationError('来源任务不可用，当前输入已保留', 404, 'creation_source_unavailable');
   }
-  await assertCanViewTask(user, task);
+  await assertCanViewTask(user, task, db);
   return task;
 }
 export async function assertCreationLineageUnlocked(db: CreationDb, user: SessionUser, parentTaskId: string, projectId: string) {

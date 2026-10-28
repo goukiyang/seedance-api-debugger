@@ -8,6 +8,7 @@ export const SESSION_IDLE_MS = 7 * 86400000;
 export const SESSION_ABSOLUTE_MS = 30 * 86400000;
 export type SessionAccount = Pick<User, 'id' | 'password_hash' | 'role' | 'account_type' | 'feature_profile_id' | 'user_profile' | 'status' | 'expires_at'>;
 type StoreClient = Prisma.TransactionClient;
+export type SessionClient = Pick<Prisma.TransactionClient, 'userSession'>;
 export type SessionDevice = { userAgent?: string | null; ip?: string | null };
 export function requestSessionDevice(request: { headers: Headers }): SessionDevice {
   return { userAgent: request.headers.get('user-agent')?.slice(0, 512), ip: request.headers.get('x-real-ip')?.slice(0, 64) };
@@ -59,16 +60,16 @@ export async function createSession(userId: string, expected?: SessionAccount, t
   return tx ? create(tx) : prisma.$transaction(create);
 }
 
-export async function resolveSession(token?: string | null): Promise<User | null> {
+export async function resolveSession(token?: string | null, client: SessionClient = prisma): Promise<User | null> {
   if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
   try {
     const digest = sessionTokenDigest(token);
-    const row = await prisma.userSession.findUnique({ where: { token_digest: digest }, include: { user: true } });
+    const row = await client.userSession.findUnique({ where: { token_digest: digest }, include: { user: true } });
     const now = new Date(), idleCutoff = new Date(now.getTime() - SESSION_IDLE_MS);
     if (!row || row.revoked_at || row.expires_at <= now || row.last_activity_at <= idleCutoff
       || row.created_at.getTime() + SESSION_ABSOLUTE_MS <= now.getTime()
       || !isUsableAccount(row.user, now) || row.account_digest !== accountSessionDigest(row.user)) return null;
-    const touched = await prisma.userSession.updateMany({
+    const touched = await client.userSession.updateMany({
       where: { token_digest: digest, revoked_at: null, expires_at: { gt: now }, last_activity_at: { gt: idleCutoff },
         user: { is: { id: row.user.id, password_hash: row.user.password_hash, role: row.user.role,
           account_type: row.user.account_type, feature_profile_id: row.user.feature_profile_id,

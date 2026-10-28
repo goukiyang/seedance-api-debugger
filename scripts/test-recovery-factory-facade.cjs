@@ -16,14 +16,50 @@ function collect(source, select) {
 let proxy;
 const factory = collect(read('src/lib/database/client.ts'), (node, tree) => ts.isVariableDeclaration(node) && node.name.getText(tree) === 'applicationDatabase');
 assert.equal(factory.nodes.length, 1); proxy = factory.nodes[0].initializer.getText(factory.tree);
-assert.equal(hash(proxy), '08d92e115ccb79d4586c22196e463714a1c2ee9148a9b13588fa931130082acf', '1e90abaf factory proxy body');
+function assertTransactionForwarding(source) {
+  const calls = collect(source, node => ts.isCallExpression(node));
+  const forward = calls.nodes.filter(node => node.expression.getText(calls.tree) === 'transaction.apply');
+  assert.equal(forward.length, 1);
+  assert.deepEqual(forward[0].arguments.map(node => node.getText(calls.tree)), ['state.extended', 'args']);
+  const initialize = calls.nodes.find(node => node.expression.getText(calls.tree) === 'initialize'
+    && node.arguments.map(value => value.getText(calls.tree)).join(',') === 'state,true' && node.pos < forward[0].pos);
+  assert.ok(initialize && ts.isAwaitExpression(initialize.parent), 'Initialize the same client before transaction dispatch');
+  const delegate = collect(source, (node, tree) => ts.isVariableDeclaration(node) && node.name.getText(tree) === 'transaction');
+  assert.equal(delegate.nodes.length, 1);
+  let value = delegate.nodes[0].initializer;
+  while (ts.isAsExpression(value)) value = value.expression;
+  assert.equal(value.getText(delegate.tree), 'state.extended.$transaction');
+}
+// Metrics may change. Receiver, full argument forwarding and initialization may not.
+assertTransactionForwarding(proxy);
+test('factory forwarding protection rejects receiver, argument and initialization mutations', () => {
+  for (const mutation of [proxy.replace('transaction.apply(state.extended, args)', 'transaction.apply(state.raw, args)'),
+    proxy.replace('transaction.apply(state.extended, args)', 'transaction.apply(state.extended, [])'),
+    proxy.replace('await initialize(state, true)', 'void initialize(state, true)')]) {
+    assert.notEqual(mutation, proxy); assert.throws(() => assertTransactionForwarding(mutation));
+  }
+});
 // Plain function receivers exercise the actual JS get trap only. No Prisma
 // constructor, query result, native connection or business operation is mocked.
-function structuralFacade(state) {
+function structuralFacade(state, initialize = async () => {}) {
   const js = ts.transpileModule('const result = ' + proxy, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   return new Function('shared', 'initialize', 'disconnect', 'databaseTransactionStarted', 'databaseTransactionFinished', 'observeDatabaseError',
-    js + '\nreturn result;')(() => state, async () => {}, async () => {}, () => {}, () => {}, () => {});
+    js + '\nreturn result;')(() => state, initialize, async () => {}, () => {}, () => {}, () => {});
 }
+test('actual facade preserves callback, batch, options, receiver, result and thrown error', async () => {
+  const callback = async () => {}, batch = [], options = { timeout: 5000 }, returned = {}, events = [];
+  const expected = new Error('synthetic-original-error'); let reject = false;
+  const receiver = { async $transaction(input, actualOptions) {
+    assert.equal(this, receiver); assert.equal(actualOptions, options);
+    assert.ok(input === callback || input === batch); events.push('dispatch');
+    if (reject) throw expected; return returned;
+  } };
+  const facade = structuralFacade({ extended: receiver }, async () => events.push('initialize'));
+  assert.equal(await facade.$transaction(callback, options), returned);
+  assert.equal(await facade.$transaction(batch, options), returned);
+  reject = true; await assert.rejects(facade.$transaction(callback, options), error => error === expected);
+  assert.deepEqual(events, ['initialize', 'dispatch', 'initialize', 'dispatch', 'initialize', 'dispatch']);
+});
 for (const file of files.slice(0, 3)) test('actual reference contract adapts to facade: ' + file, () => {
   const source = read('scripts/' + file);
   const old = collect(source, (node, tree) => ts.isCallExpression(node) && node.expression.getText(tree) === 'assert.equal'

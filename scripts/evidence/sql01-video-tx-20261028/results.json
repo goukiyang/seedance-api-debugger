@@ -1,0 +1,91 @@
+{
+  "requestId": "SQL01-VIDEO-TX-20261028",
+  "base": "8c0c50e8bfe03b66d7388b2704bfc267cd231eb7",
+  "candidateOnly": true,
+  "productionTouched": false,
+  "nativePrismaExecutedLocally": false,
+  "applicationFiles": [
+    "src/server/video-tasks/standard-create.ts",
+    "src/lib/tasks/seedance-draft-upgrade.ts",
+    "src/lib/pricing/video-context.ts",
+    "src/lib/projects/permissions.ts",
+    "src/lib/video-cards/permissions.ts",
+    "src/lib/template-studio/handoff.ts",
+    "src/lib/template-studio/assets.ts",
+    "src/lib/template-studio/templates.ts",
+    "src/lib/template-studio/context.ts"
+  ],
+  "decisions": [
+    "Optional explicit client defaults to shared Prisma outside the transaction; transaction admission supplies tx recursively.",
+    "HTTP private identity remains the lead-owned signed-session contract. No ordinary user-row projection substitutes for it.",
+    "Asset physical preflight stays on the existing outside-transaction path; inside the transaction fresh asset, reference, album and project authority is checked without network or media file I/O.",
+    "No pricing math, credential body, request identity, CAS, task admission tail, fee or historical row changes.",
+    "Standard retry uses standard-create; draft retry uses createSeedanceDraftUpgrade. IP create has no transactional resolveVideoPricingContext call, but shares the separately reported canvas and lineage leaks."
+  ],
+  "localProof": {
+    "command": "AUD_NODE_MODULES=/Users/gouki-youdoo/.codex/worktrees/audit-billing-20261027/video-api-debugger/node_modules node --test scripts/test-sql01-video-tx.cjs",
+    "final": "9 tests passed, 0 failed",
+    "actualSourceBoundary": "Actual pricing/access/handoff/context functions with synthetic delegates; actual create and draft transaction validation statements extracted before their first task write. This is not full HTTP-handler or native pool verification.",
+    "red": [
+      "sql01-video-red-final.txt: three actual helper failures on global connection reentry before the application edits",
+      "sql01-video-private-context-red.txt: two actual context helper failures on global userSession reentry before context edits"
+    ],
+    "fixtureFailuresPreserved": [
+      "sql01-video-red.txt: missing fixture import ipaddr.js",
+      "sql01-video-red-2.txt: missing fixture import next/server",
+      "sql01-video-red-3.txt: types directory alias missing",
+      "sql01-video-green-1.txt: relative secrets import not injected",
+      "sql01-video-green-2.txt: missing videoBranch/estimatedCost bindings",
+      "sql01-video-private-context-green.txt: private context fixture supplied empty template origins"
+    ],
+    "green": ["sql01-video-green-final.txt", "sql01-video-private-context-green-final.txt"],
+    "staticCommand": "AUD_NODE_MODULES=/Users/gouki-youdoo/.codex/worktrees/audit-billing-20261027/video-api-debugger/node_modules node scripts/check-sql01-video-tx.cjs",
+    "staticResult": "9 TS files syntax checked; two fresh context calls explicitly use tx; exact original admission tails and five credential/reference functions match base hashes; no Git-history runtime dependency",
+    "syntaxCommands": [
+      "node --check scripts/verify-sql01-video-tx-server.cjs",
+      "node --check scripts/check-sql01-video-tx.cjs",
+      "git diff --check"
+    ]
+  },
+  "integrationDependencies": [
+    {
+      "owner": "lead",
+      "contract": "getSession(client?), resolveSession(token, client), privatePromptRequestCapabilities(userId, origins, client?), requirePrivatePromptRequest(userId, origins, client?)",
+      "state": "Read-only lead source confirms private request third parameter; base lacks it. Private-template-editor changes remain solely lead-owned."
+    },
+    {
+      "owner": "Ohm",
+      "contract": "withDatabaseObservationScope<T>(scope: string, work: () => T): T",
+      "state": "Declared dependency, absent from this base. This candidate consumes it for video-task.create and video-task.draft-upgrade without editing observations/factory."
+    },
+    {
+      "owner": "lead assignment needed",
+      "path": "src/lib/creation/lineage.ts:18",
+      "state": "readCreationSource(db, ...) still calls assertCanViewTask(user, task) without db. The owned permission helper now accepts db; callsite is untouched. Actual Linux draft-prefix proof deliberately retains this real path and must not be mocked around it."
+    },
+    {
+      "owner": "lead assignment needed",
+      "path": "src/lib/canvas-video-batches-guards.ts:164,187",
+      "state": "assertCanvasVideoAdmission(db, ...) loses db in assertCanViewTask and explicitly calls canvasVideoRouteFingerprint with global prisma before the tx call. Untouched and not covered by the no-canvas prefix fixture."
+    }
+  ],
+  "linuxNativeProof": {
+    "executed": false,
+    "command": "NODE_ENV=test SD2_DATABASE_MODE=writer AUD_SQL01_VIDEO_SERVER=1 node --import tsx scripts/verify-sql01-video-tx-server.cjs",
+    "precondition": "Lead merges own session/private API, Ohm observation API and resolves the reported lineage dependency before expecting the draft-prefix gate to pass. Use existing installed engines, generated client and Next runtime. No downloads.",
+    "checks": "Own newly created full-schema synthetic SQLite only; shared factory database_list path, one constructed Prisma and connection_limit=1; actual cookie session, actual pricing/template/asset chain and two real admission prefixes; fresh project/card/album/template negative checks; under4000ms on existing transaction settings; no external requests, media I/O, task/hold/wallet/ledger/budget/approval/provider-receipt changes.",
+    "remainingGaps": [
+      "Not a complete provider submission or post-commit handler run; intentionally stops before task writes.",
+      "No local full tsc/build or native Prisma/concurrency execution. Lead runs central integrated checks and real session-renewal rollback proof.",
+      "No global SQL-01 acceptance or production claim."
+    ]
+  },
+  "guardrail": {
+    "newPrismaClient": false,
+    "poolTimeoutRetryChange": false,
+    "implicitTransactionRouting": false,
+    "schemaOrMigration": false,
+    "pushOrDeployment": false,
+    "classificationMisjudgment": false
+  }
+}

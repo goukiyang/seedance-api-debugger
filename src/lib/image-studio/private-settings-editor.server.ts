@@ -8,13 +8,13 @@ import { openPrivatePrompt, sealPrivatePrompt, privatePromptIndex, PrivatePrompt
 import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt, markPrivatePromptDraftApplied,
   PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
-type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
+type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'userSession'>;
 type Result = { state: 'saved' | 'not-applied'; requestId: string; revision: number };
 async function target(userId: string, client: Client = prisma) {
   const settings = await getImageStudioSettings(client);
   const origins = privateFieldOrigins(settings, 'context');
   if (!origins.length) throw new PrivatePromptError();
-  await requirePrivatePromptRequest(userId, origins);
+  await requirePrivatePromptRequest(userId, origins, client);
   return { settings, draftTarget: { kind: 'image-global', id: IMAGE_STUDIO_SETTING_KEY, origins, fields: ['prompt', 'context'] } };
 }
 function receiptScope(userId: string, requestId: string, origins: Awaited<ReturnType<typeof target>>['draftTarget']['origins']) {

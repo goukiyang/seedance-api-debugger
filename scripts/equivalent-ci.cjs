@@ -75,6 +75,18 @@ function reusablePrebuild(root, results) {
     try { const value = JSON.parse(line); return value.schema === 'contract-suites.v1' ? [value] : []; } catch { return []; }
   });
   const summary = summaries.at(-1);
+  if (summary?.mode === 'sql01') {
+    const base = summary.reusedBaseline;
+    try {
+      const prior = JSON.parse(fs.readFileSync(base.receipt, 'utf8'));
+      return config.version === '0.111.1' && prior.completed === true && prior.source === '2759dba29f15b413c866e89837b18f031a4333b3'
+        && hashFile(base.receipt) === base.receiptSha256 && hashFile(base.log) === base.logSha256
+        && prior.results.some(entry => entry.command === 'npm run test:contracts' && entry.exitCode === 0 && entry.logSha256 === base.logSha256)
+        && ['scripts/verify-sql01-template-server.ts', 'scripts/verify-sql01-video-tx-server.cjs',
+          'scripts/verify-sql01-observations-server.ts', 'scripts/test-auth-contract.mjs'].every(suite => summary.results.some(entry => entry.suite === suite && entry.exitCode === 0 && entry.passed === true))
+        && summary.results.every(entry => entry.exitCode === 0 && entry.passed === true);
+    } catch { return false; }
+  }
   return summary?.results?.some(entry => entry.suite === 'scripts/check-image-recovery.mjs' && entry.exitCode === 0 && entry.passed === true) === true
     && summary.results.every(entry => entry.exitCode === 0 && entry.passed === true);
 }
@@ -125,6 +137,7 @@ function main() {
     throw new Error('equivalent-ci-candidate-contains-runtime-data');
   }
   const source = fs.readFileSync(path.join(root, '.deployed-commit'), 'utf8').trim();
+  const sql01 = process.argv.includes('--sql01');
   if (path.basename(root) !== source) throw new Error('equivalent-ci-source-mismatch');
   const directory = fs.mkdtempSync(path.join(root, '.role-tests', 'equivalent-ci-'));
   const receiptFile = path.join(directory, 'receipt.json');
@@ -202,13 +215,16 @@ function main() {
     const startedAt = new Date().toISOString();
     let result;
     const reusePrebuild = name === 'build' && reusablePrebuild(root, receipt.results);
+    if (sql01 && name === 'build' && !reusePrebuild) throw new Error('sql01-required-targeted-proof-missing');
+    const commandArgs = ['run', name, ...(sql01 && name === 'test:contracts' ? ['--', '--sql01'] : [])];
     try {
-      result = spawnSync('npm', ['run', name], { cwd: root, stdio: ['ignore', fd, fd],
+      result = spawnSync('npm', commandArgs, { cwd: root, stdio: ['ignore', fd, fd],
         env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PATH: `${path.dirname(process.execPath)}:${process.env.PATH || ''}`,
           ...(reusePrebuild ? { npm_config_ignore_scripts: 'true' } : {}) } });
     } finally { fs.closeSync(fd); }
     receipt.results.push({ command: `npm run ${name}`, startedAt, finishedAt: new Date().toISOString(),
       exitCode: result.status, signal: result.signal, log: path.relative(root, log), logSha256: hashFile(log),
+      ...(commandArgs.length > 2 ? { arguments: commandArgs.slice(2) } : {}),
       ...(reusePrebuild ? { prebuildReusedFrom: 'npm run test:contracts' } : {}) });
     save();
     console.log(JSON.stringify(receipt.results.at(-1)));

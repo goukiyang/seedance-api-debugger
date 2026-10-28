@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { authenticatePrivateIdentity, PRIVATE_IDENTITY_COOKIE } from '@/lib/security/private-prompt-identity.server';
 import { verifyPassword } from './password';
 import { completeLogin, LoginRejectedError, toSessionUser } from './complete-login';
-import { resolveSession, revokeSession, type SessionDevice } from './session-store';
+import { resolveSession, revokeSession, type SessionClient, type SessionDevice } from './session-store';
 import { sessionCookieName } from './session-cookie-name';
 import { SessionUnavailableError } from './session-errors';
 
@@ -41,17 +41,17 @@ export function parseSessionCookie(rawCookie: string): string | null {
   return rawCookie.split(';').map((part) => part.trim()).find((part) => part.startsWith(prefix))?.slice(prefix.length) || null;
 }
 
-export async function getSession(): Promise<SessionUser | null> {
+export async function getSession(client?: SessionClient): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(sessionCookieName())?.value;
   if (!token) return null;
-  const user = await getSessionByToken(token);
+  const user = await getSessionByToken(token, client);
   if (user) authenticatePrivateIdentity(user, store.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
   return user;
 }
 
-export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
-  const user = await resolveSession(token);
+export async function getSessionByToken(token?: string | null, client?: SessionClient): Promise<SessionUser | null> {
+  const user = await resolveSession(token, client);
   return user ? toSessionUser(user) : null;
 }
 

@@ -79,7 +79,7 @@ export async function saveImageStudioSettingsInTx(tx: Prisma.TransactionClient, 
     const origins = current ? privateFieldOrigins(current, 'context') : origin ? [origin] : [];
     if (origins.length && !options.privatePromptEdit) input = { ...input, context: current?.context ?? '' };
     const contextChanged = input.context !== (current?.context ?? '');
-    if (contextChanged && origins.length) await requirePrivatePromptRequest(userId, origins);
+    if (contextChanged && origins.length) await requirePrivatePromptRequest(userId, origins, tx);
     const currentRevision = current?.revision ?? 0;
     if (currentRevision !== input.revision) return null;
     const oldPrices = current ? decodeSettings(current).prices : DEFAULT_STUDIO_PRICES;

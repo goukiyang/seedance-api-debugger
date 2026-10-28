@@ -415,18 +415,18 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
     if (sourceDefinition) {
       for (const field of ['prompt', 'context'] as const) {
         const origins = privateFieldOrigins(sourceDefinition, field);
-        if (origins.length && data[field] !== sourceDefinition[field]) await requirePrivatePromptRequest(userId, origins);
+        if (origins.length && data[field] !== sourceDefinition[field]) await requirePrivatePromptRequest(userId, origins, tx);
         transferPrivateFieldOrigin(sourceDefinition, field, data, field);
       }
     }
     if (historicalContext) {
       const origins = privateFieldOrigins(historicalContext, 'moduleContext');
-      if (origins.length && data.context !== historicalContext.moduleContext) await requirePrivatePromptRequest(userId, origins);
+      if (origins.length && data.context !== historicalContext.moduleContext) await requirePrivatePromptRequest(userId, origins, tx);
       transferPrivateFieldOrigin(historicalContext, 'moduleContext', data, 'context');
     }
     let created;
     if (target) {
-      const protectedData = await protectStudioDefinitionPatch('image-preset', target, { prompt: data.prompt, context: data.context }, userId);
+      const protectedData = await protectStudioDefinitionPatch('image-preset', target, { prompt: data.prompt, context: data.context }, userId, false, tx);
       const changed = await tx.imageStudioPreset.updateMany({ where: { id: target.id, owner_id: userId, updated_at: target.updated_at },
         data: { ...data, prompt: protectedData.prompt, context: protectedData.context, updated_at: new Date(Math.max(Date.now(), target.updated_at.getTime() + 1)) } });
       if (changed.count !== 1) throw new StudioModuleError('模板已在其他页面更新，请重新读取后修改', 409);

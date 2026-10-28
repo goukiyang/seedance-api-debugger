@@ -1,0 +1,73 @@
+TAP version 13
+# Subtest: actual video context project and card reads remain on the supplied transaction
+not ok 1 - actual video context project and card reads remain on the supplied transaction
+  ---
+  duration_ms: 3444.080584
+  type: 'test'
+  location: '/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:5:1'
+  failureType: 'testCodeFailure'
+  error: 'global_connection_reentered:videoCard.findUnique'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    Proxy.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:53:71)
+    resolveContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:73:54)
+    Object.resolveVideoPricingContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:147:22)
+    /Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:7:46
+    Object.run (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:112:72)
+    TestContext.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:7:26)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+not ok 2 - actual template handoff, version, asset and inherited album rights use the same transaction without media I/O
+  ---
+  duration_ms: 337.154208
+  type: 'test'
+  location: '/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:11:1'
+  failureType: 'testCodeFailure'
+  error: 'global_connection_reentered:project.findUnique'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    Proxy.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:53:71)
+    getProjectAccess (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:144:38)
+    assertCanGenerateInProject (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:224:26)
+    resolveContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:76:71)
+    Object.resolveVideoPricingContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:147:22)
+    /Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:14:46
+    Object.run (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:112:72)
+    TestContext.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:14:26)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+  ...
+# Subtest: actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+not ok 3 - actual create and draft-upgrade transaction validation prefixes reach their read-only stop
+  ---
+  duration_ms: 108.269292
+  type: 'test'
+  location: '/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:21:1'
+  failureType: 'testCodeFailure'
+  error: 'global_connection_reentered:project.findUnique'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    Proxy.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:53:71)
+    getProjectAccess (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:144:38)
+    assertCanGenerateInProject (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:224:26)
+    resolveContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:76:71)
+    Object.resolveVideoPricingContext (eval at load (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/audit-task-pagination-loader.cjs:29:5), <anonymous>:147:22)
+    /Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:25:49
+    Object.run (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/sql01-video-fixture.cjs:112:72)
+    TestContext.<anonymous> (/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/sql01-video-tx-20261028/video-api-debugger/scripts/test-sql01-video-tx.cjs:25:29)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 0
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5435.485333

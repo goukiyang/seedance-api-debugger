@@ -213,6 +213,7 @@ test('actual alert flow: fixed trusted identity, durable UUID, no unknown replay
   const config = { enabled: true, recipientId: admin.id, identity: 'pinned', appId: 'app', tenant: 'tenant' };
   const db = { user: { findUnique: async () => admin }, notification: {
     upsert: async ({ where, create }) => { if (!jobs.has(where.id)) jobs.set(where.id, { ...create, created_at: now }); },
+    findUnique: async ({ where }) => jobs.has(where.id) ? structuredClone(jobs.get(where.id)) : null,
     findMany: async () => [...jobs.values()].filter(job => job.status === 'pending'),
     updateMany: async ({ where, data }) => {
       const job = jobs.get(where.id); if (!job || job.status !== where.status || job.metadata_json !== where.metadata_json) return { count: 0 };

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { readPrivateVideoRecipe, videoTemplateOrigins, transformPrivateVideoRun } from './private-storage.server';
 import { transferPrivateOrigins } from '@/lib/security/private-prompt-fields.server';
@@ -23,21 +24,21 @@ function readRunSnapshot(json: string, id: string, draftId: string): StudioRunSn
   }
 }
 
-export async function ensureStudioSnapshotSourceStillUsable(user: SessionUser, snapshot: StudioRunSnapshot) {
+export async function ensureStudioSnapshotSourceStillUsable(user: SessionUser, snapshot: StudioRunSnapshot, db: Prisma.TransactionClient = prisma) {
   const ref = snapshot.templateVersion;
   if (!ref) return null;
   if (ref.templateSource === 'legacy') {
-    const current = await getStudioTemplate(user, ref.templateId, 'legacy');
+    const current = await getStudioTemplate(user, ref.templateId, 'legacy', false, db);
     if (!ref.sourceRevision || ref.sourceRevision !== `legacy:${current.template.updatedAt}`) {
       throw new StudioError('旧模板内容已变化，请回原生成流程重新确认', 409, 'CONFLICT');
     }
     return ref.templateId;
   }
-  const current = await prisma.videoStudioTemplate.findUnique({ where: { id: ref.templateId } });
+  const current = await db.videoStudioTemplate.findUnique({ where: { id: ref.templateId } });
   if (!current || current.status === 'archived') throw new StudioError('模板已归档或撤销，不能提交生成', 409, 'CONFLICT');
-  await getStudioTemplate(user, ref.templateId, 'studio');
+  await getStudioTemplate(user, ref.templateId, 'studio', false, db);
   if (ref.versionId) {
-    const version = await prisma.videoStudioTemplateVersion.findFirst({ where: { id: ref.versionId, template_id: ref.templateId } });
+    const version = await db.videoStudioTemplateVersion.findFirst({ where: { id: ref.versionId, template_id: ref.templateId } });
     if (!version || stableJson(readPrivateVideoRecipe(version.recipe_json, 'video-template-version', version.id, videoTemplateOrigins(current.id, current.owner_user_id))) !== stableJson(snapshot.recipe)) {
       throw new StudioError('模板版本不可用，请回工作台重新确认', 409, 'CONFLICT');
     }
@@ -48,14 +49,14 @@ export async function ensureStudioSnapshotSourceStillUsable(user: SessionUser, s
   return null;
 }
 
-export async function authorizeStudioRunForGeneration(user: SessionUser, runId: string): Promise<StudioGenerationHandoff> {
+export async function authorizeStudioRunForGeneration(user: SessionUser, runId: string, db: Prisma.TransactionClient = prisma): Promise<StudioGenerationHandoff> {
   requireStudioUser(user);
-  const run = await prisma.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
+  const run = await db.videoStudioRun.findFirst({ where: { id: runId, owner_user_id: user.id } });
   if (!run) throw new StudioError('运行记录不存在或无权访问', 404, 'NOT_FOUND');
   if (run.status !== 'succeeded') throw new StudioError('只有已完成的运行记录可以提交生成', 409, 'CONFLICT');
   const snapshot = readRunSnapshot(run.snapshot_json, run.id, run.draft_id);
-  const legacyTemplateId = await ensureStudioSnapshotSourceStillUsable(user, snapshot);
-  await authorizeStudioAssets(user, snapshot.assets);
+  const legacyTemplateId = await ensureStudioSnapshotSourceStillUsable(user, snapshot, db);
+  await authorizeStudioAssets(user, snapshot.assets, db);
   const prompt = visibleRunPrompt(run);
   if (!prompt) throw new StudioError('这条记录没有可安全使用的文案，请重新整理', 409, 'CONFLICT');
   return {

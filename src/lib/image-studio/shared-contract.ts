@@ -36,7 +36,7 @@ import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftR
 export type { SharedStudioIntent, SharedStudioPersonalOverrides } from './shared-types';
 export const SHARED_STUDIO_PROTOCOL = 'shared-live-v1' as const;
 export { StudioSharingError } from './shared-command-storage';
-export type SharedStudioClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'imageStudioPreset' | 'imageStudioModule' | 'imageStudioTask' | 'asset' | 'user' | 'contentAuditLog'>;
+export type SharedStudioClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'imageStudioPreset' | 'imageStudioModule' | 'imageStudioTask' | 'asset' | 'user' | 'userSession' | 'contentAuditLog'>;
 export type SharedStudioBinding = { protocol: typeof SHARED_STUDIO_PROTOCOL; ownerId: string; presetId: string; mode: 'publisher' | 'live' };
 export type SharedStudioReproduction = {
   version: 1 | 2;
@@ -292,7 +292,7 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
   };
   const sourceIdentity = await readStudioTemplateSourceIdentity(source.owner_id, source.id, client);
   const protectedOrigins = [...privateFieldOrigins(source, 'prompt'), ...privateFieldOrigins(definition, 'context')];
-  const privateCapabilities = await privatePromptRequestCapabilities(actor.id, protectedOrigins);
+  const privateCapabilities = await privatePromptRequestCapabilities(actor.id, protectedOrigins, client);
   const canSeeContext = !protectedOrigins.length && sourceIdentity.known && (actor.role === 'admin' || source.owner_id === actor.id);
   const sourceState = projectSharedStudioCapabilities({ objectKind: source.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active',
     sharing: source.is_shared ? 'shared' : 'private', dependency: 'ready', sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
@@ -742,7 +742,7 @@ async function privateEditorTarget(actor: ImageStudioIdentity, moduleId: string,
   const origins = [...privateFieldOrigins(row, 'prompt'), ...privateFieldOrigins(row, 'context'),
     ...(reproduction ? privateFieldOrigins(reproduction, 'moduleContext') : [])];
   if (!origins.length) throw new StudioSharingError('此模板尚未启用原文保护，请使用原设置入口', 409);
-  await requirePrivatePromptRequest(actor.id, origins);
+  await requirePrivatePromptRequest(actor.id, origins, tx);
   return { workspace, source, row, reproduction, origins,
     kind: source ? 'image-preset' : 'image-module',
     sourceRevision: source ? await sharedDefinitionToken(source, tx) : String(workspace.revision) };
@@ -795,7 +795,7 @@ export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleI
       return rejected;
     }
     if (target.source) {
-      const data = await protectStudioDefinitionPatch('image-preset', target.row, { prompt: input.prompt, context: input.context }, actor.id, true);
+      const data = await protectStudioDefinitionPatch('image-preset', target.row, { prompt: input.prompt, context: input.context }, actor.id, true, tx);
       const changed = await tx.imageStudioPreset.updateMany({ where: { id: target.source.id, owner_id: target.source.owner_id,
         updated_at: target.source.updated_at, prompt: target.source.prompt, context: target.source.context },
       data: { ...data, updated_at: new Date(Math.max(Date.now(), target.source.updated_at.getTime() + 1)) } });
@@ -811,7 +811,7 @@ export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleI
         after: { moduleRevision: target.workspace.revision + 1 }, changedFields: ['prompt', 'context'] });
     }
     const fields = target.source ? {} : await protectStudioDefinitionPatch('image-module', target.row,
-      { prompt: input.prompt, context: input.context }, actor.id, true);
+      { prompt: input.prompt, context: input.context }, actor.id, true, tx);
     const changed = await tx.imageStudioModule.updateMany({ where: { id: moduleId, owner_id: actor.id,
       revision: target.workspace.revision, prompt: target.workspace.prompt, context: target.workspace.context },
     data: { ...fields, revision: target.workspace.revision + 1 } });
@@ -910,8 +910,8 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       : stringField(has(input, 'templatePrompt') ? 'templatePrompt' : 'prompt', base.prompt, 20000);
     const context = !privateEdit && privateFieldOrigins(contextSource, contextField).length ? reproduction?.moduleContext ?? base.context
       : stringField('context', reproduction?.moduleContext ?? base.context, 20000);
-    if (prompt !== base.prompt && privateFieldOrigins(base, 'prompt').length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(base, 'prompt'));
-    if (context !== (reproduction?.moduleContext ?? base.context) && privateFieldOrigins(contextSource, contextField).length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(contextSource, contextField));
+    if (prompt !== base.prompt && privateFieldOrigins(base, 'prompt').length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(base, 'prompt'), tx);
+    if (context !== (reproduction?.moduleContext ?? base.context) && privateFieldOrigins(contextSource, contextField).length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(contextSource, contextField), tx);
     const settings = await getImageStudioSettings(tx);
     const model = (has(input, 'model') ? input.model : base.model || settings.model) as SharedStudioDefaults['model'];
     if (!IMAGE_STUDIO_MODELS.includes(model)) throw new StudioSharingError('模板模型无效', 400);
@@ -952,7 +952,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (reproduction) {
       if (taskSettings && has(input, 'globalContext')) throw new StudioSharingError('通用上下文由设置模式确定，不能随模板覆盖', 400);
       const globalContext = taskSettings?.mode === 'current' ? undefined : stringField('globalContext', reproduction.globalContext ?? '', 20000);
-      if (globalContext !== undefined && globalContext !== reproduction.globalContext && privateFieldOrigins(reproduction, 'globalContext').length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(reproduction, 'globalContext'));
+      if (globalContext !== undefined && globalContext !== reproduction.globalContext && privateFieldOrigins(reproduction, 'globalContext').length) await requirePrivatePromptRequest(actor.id, privateFieldOrigins(reproduction, 'globalContext'), tx);
       if (has(input, 'globalContext') && actor.role !== 'admin') throw new StudioSharingError('通用上下文只能由管理员修改', 403);
       const { globalContext: _oldGlobal, ...sourceRecord } = reproduction;
       const previousReproduction = reproduction;
@@ -966,7 +966,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       aspect_ratio: sharedRatio(has(input, 'aspectRatio') ? input.aspectRatio : base.aspect_ratio), banner_asset_id: bannerAssetId,
       reference_ids: JSON.stringify(templateIds), is_shared: has(input, 'isShared') ? input.isShared === true : source?.is_shared ?? true };
     if (source) {
-      const protectedFields = await protectStudioDefinitionPatch('image-preset', source, { prompt, context }, actor.id, privateEdit);
+      const protectedFields = await protectStudioDefinitionPatch('image-preset', source, { prompt, context }, actor.id, privateEdit, tx);
       const changed = await tx.imageStudioPreset.updateMany({ where: { id: presetId, owner_id: actor.id, updated_at: source.updated_at },
         data: { ...data, ...protectedFields, updated_at: new Date(Math.max(Date.now(), source.updated_at.getTime() + 1)) } });
       if (changed.count !== 1) throw new StudioSharingError('共享模板内容在保存时发生变化，本次未保存；当前草稿保留', 409, 'state-conflict', 'definition');

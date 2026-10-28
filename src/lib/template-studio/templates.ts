@@ -23,6 +23,7 @@ const templateInclude = {
   published_version: true,
   versions: { orderBy: { version_number: 'desc' as const } },
 };
+export type StudioTemplateReadClient = Pick<Prisma.TransactionClient, 'generationTemplate' | 'videoStudioTemplate' | 'userSession'>;
 
 function versionSummary(version: any): StudioTemplateVersionSummary {
   return {
@@ -33,19 +34,19 @@ function versionSummary(version: any): StudioTemplateVersionSummary {
   };
 }
 
-async function serializeStudioTemplate(row: any, user: SessionUser, includePrivate = false): Promise<StudioTemplateDto> {
+async function serializeStudioTemplate(row: any, user: SessionUser, includePrivate = false, db: Pick<StudioTemplateReadClient, 'userSession'> = prisma): Promise<StudioTemplateDto> {
   const canManage = user.role === 'admin' || row.owner_user_id === user.id;
   const canPublish = user.account_type === 'internal' && user.role === 'admin';
   const visibleRecipe = canManage ? row.recipe_json : row.published_version?.recipe_json;
   const origins = visibleRecipe ? privateFieldBinding(JSON.parse(visibleRecipe).instruction,
     canManage ? 'video-template' : 'video-template-version', canManage ? row.id : row.published_version.id,
     'instruction', videoTemplateOrigins(row.id, row.owner_user_id))?.origins || [] : videoTemplateOrigins(row.id, row.owner_user_id);
-  const capabilities = await privatePromptRequestCapabilities(user.id, origins);
-  if (includePrivate && origins.length) await requirePrivatePromptRequest(user.id, origins);
+  const capabilities = await privatePromptRequestCapabilities(user.id, origins, db);
+  if (includePrivate && origins.length) await requirePrivatePromptRequest(user.id, origins, db);
   const decodedRecipe = visibleRecipe ? readPrivateVideoRecipe(visibleRecipe, canManage ? 'video-template' : 'video-template-version',
     canManage ? row.id : row.published_version.id, origins) : null;
   const protectedRecipe = decodedRecipe && privateFieldOrigins(decodedRecipe, 'instruction').length > 0;
-  if (includePrivate && protectedRecipe) await requirePrivatePromptRequest(user.id, privateFieldOrigins(decodedRecipe!, 'instruction'));
+  if (includePrivate && protectedRecipe) await requirePrivatePromptRequest(user.id, privateFieldOrigins(decodedRecipe!, 'instruction'), db);
   return {
     id: row.id,
     source: 'studio',
@@ -176,15 +177,16 @@ export async function listStudioTemplates(user: SessionUser, query: { cursor?: s
   return { items: page.map(({ dto }) => dto), nextCursor };
 }
 
-export async function getStudioTemplate(user: SessionUser, id: string, source: 'legacy' | 'studio' = 'studio', includePrivate = false) {
+export async function getStudioTemplate(user: SessionUser, id: string, source: 'legacy' | 'studio' = 'studio', includePrivate = false,
+  db: StudioTemplateReadClient = prisma) {
   if (source === 'legacy') {
-    const row = await prisma.generationTemplate.findFirst({ where: { id, status: 'active' }, include: TEMPLATE_INCLUDE });
+    const row = await db.generationTemplate.findFirst({ where: { id, status: 'active' }, include: TEMPLATE_INCLUDE });
     if (!row) throw new StudioError('模板不存在或已撤销', 404, 'NOT_FOUND');
     return { template: serializeLegacy(row), versions: [] as StudioTemplateVersionSummary[] };
   }
-  const row = await prisma.videoStudioTemplate.findUnique({ where: { id }, include: templateInclude });
+  const row = await db.videoStudioTemplate.findUnique({ where: { id }, include: templateInclude });
   if (!row || !canReadTemplate(row, user)) throw new StudioError('模板不存在或无权访问', 404, 'NOT_FOUND');
-  const dto = await serializeStudioTemplate(row, user, includePrivate);
+  const dto = await serializeStudioTemplate(row, user, includePrivate, db);
   const versions = row.versions.map(versionSummary);
   return { template: dto, versions: user.role === 'admin' || row.owner_user_id === user.id ? versions : row.published_version ? versions.filter((version) => version.id === row.published_version_id) : [] };
 }

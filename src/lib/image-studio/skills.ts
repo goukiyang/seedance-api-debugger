@@ -7,6 +7,7 @@ import { studioVisibleAssetWhere } from './protected-assets';
 import { privateOrigin, privatePromptIndex, isStoredPrivatePrompt } from '@/lib/security/private-prompts.server';
 import { privateFieldOrigins, privateStoredValue, readPrivateFields, writePrivateFields, transferPrivateOrigins } from '@/lib/security/private-prompt-fields.server';
 import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
+import type { SessionClient } from '@/lib/auth/session-store';
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
 const PREFIX = 'studio_skill_v1:';
 const skillKey = (ownerId: string, id: string) => `${PREFIX}${ownerId}:${id}`;
@@ -59,13 +60,13 @@ export async function getSkill(user: ImageStudioIdentity, id: string, tx: Client
   if (skill.deleted && !historical) throw new StudioStyleError('提示词组已删除，请移除或使用历史文字副本', 409);
   return skill;
 }
-export async function skillDTO(skill: StudioSkill, user?: ImageStudioIdentity, includePrivate = false) {
+export async function skillDTO(skill: StudioSkill, user?: ImageStudioIdentity, includePrivate = false, client?: SessionClient) {
   const origins = privateFieldOrigins(skill, 'prompt');
-  const capabilities = user ? await privatePromptRequestCapabilities(user.id, origins)
+  const capabilities = user ? await privatePromptRequestCapabilities(user.id, origins, client)
     : { canReadPrivatePrompt: false, canEditPrivatePrompt: false, requiresIdentityVerification: false };
   if (includePrivate && origins.length) {
     if (!user) throw new StudioStyleError('需要本人身份验证', 403);
-    await requirePrivatePromptRequest(user.id, origins);
+    await requirePrivatePromptRequest(user.id, origins, client);
   }
   return { id: skill.id, ownerId: skill.ownerId, name: skill.name, revision: skill.revision,
     coverAssetId: skill.coverAssetId, deleted: skill.deleted, privatePrompt: origins.length > 0, ...capabilities,
@@ -161,7 +162,7 @@ export async function saveSkill(user: ImageStudioIdentity, body: Record<string, 
   identity(user);
   return prisma.$transaction(tx => saveSkillInTx(user, body, tx));
 }
-export async function saveSkillInTx(user: ImageStudioIdentity, body: Record<string, unknown>, tx: Client,
+export async function saveSkillInTx(user: ImageStudioIdentity, body: Record<string, unknown>, tx: Client & SessionClient,
   privateEdit = false) {
   identity(user);
   const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : '新建提示词组';
@@ -171,7 +172,7 @@ export async function saveSkillInTx(user: ImageStudioIdentity, body: Record<stri
     if (source && source.revision !== body.copyFromRevision) throw new StudioStyleError('提示词组已更新，请重新打开', 409);
     const origin = privateOrigin('skill', id, current?.ownerId || user.id);
     const origins = current ? privateFieldOrigins(current, 'prompt') : source ? privateFieldOrigins(source, 'prompt') : origin ? [origin] : [];
-    if (origins.length && (privateEdit || !current)) await requirePrivatePromptRequest(user.id, origins);
+    if (origins.length && (privateEdit || !current)) await requirePrivatePromptRequest(user.id, origins, tx);
     if (current && origins.length && !privateEdit && Object.prototype.hasOwnProperty.call(body, 'prompt')) throw new StudioStyleError('请通过原文入口修改提示词', 403);
     const prompt = source?.prompt ?? (current && origins.length && !privateEdit ? current.prompt : typeof body.prompt === 'string' ? body.prompt : '');
     if (!prompt.trim() || prompt.length > 8000 || name.length > 80) throw new StudioStyleError('请填写8000字以内的提示词，名称最多80字');
@@ -189,7 +190,7 @@ export async function saveSkillInTx(user: ImageStudioIdentity, body: Record<stri
       const updated = await tx.platformSetting.updateMany({ where: { key, value_json: storedJson.get(current)! }, data: { value_json, updated_by: user.id } });
       if (!updated.count) throw new StudioStyleError('提示词组已更新，请重新打开', 409);
     } else await tx.platformSetting.create({ data: { key, value_json, updated_by: user.id } });
-    return skillDTO(decodeSkill(value_json), user);
+    return skillDTO(decodeSkill(value_json), user, false, tx);
 }
 export async function deleteSkill(user: ImageStudioIdentity, body: Record<string, unknown>) {
   const skill = await getSkill(user, String(body.id));

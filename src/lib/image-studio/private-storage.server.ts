@@ -2,6 +2,7 @@ import 'server-only';
 import { privateOrigin, privatePromptPolicy, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateFieldOrigins, privateStoredValue, readPrivateFields, writePrivateFields, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
 import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
+import type { SessionClient } from '@/lib/auth/session-store';
 
 type Definition = { id: string; owner_id?: string; source_preset_id?: string | null; prompt: string; context: string };
 type Kind = 'image-module' | 'image-preset';
@@ -25,7 +26,7 @@ export function writePrivateStudioDefinition<T extends Definition>(kind: Kind, r
 }
 
 export async function protectStudioDefinitionPatch<T extends Partial<Pick<Definition, 'prompt' | 'context'>>>(
-  kind: Kind, current: Definition, patch: T, actorId: string, privateEdit = false,
+  kind: Kind, current: Definition, patch: T, actorId: string, privateEdit = false, client?: SessionClient,
 ): Promise<T> {
   const next = { ...patch };
   const stored = privateStoredValue(current);
@@ -36,7 +37,7 @@ export async function protectStudioDefinitionPatch<T extends Partial<Pick<Defini
     // Only the explicit private editor may replace a protected field.
     if (origins.length && !privateEdit) { next[field] = stored[field]; continue; }
     if (patch[field] === current[field]) { next[field] = stored[field]; continue; }
-    if (origins.length) await requirePrivatePromptRequest(actorId, origins);
+    if (origins.length) await requirePrivatePromptRequest(actorId, origins, client);
     const sealed = writePrivateFields({ [field]: patch[field] }, kind, current.id, [{ field, origins }]);
     next[field] = sealed[field] as T[typeof field];
   }

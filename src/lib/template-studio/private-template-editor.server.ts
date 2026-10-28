@@ -10,7 +10,7 @@ import { openPrivatePrompt, sealPrivatePrompt, privatePromptIndex, PrivatePrompt
 import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt, markPrivatePromptDraftApplied,
   PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
-type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'videoStudioTemplate'>;
+type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'videoStudioTemplate' | 'userSession'>;
 type Result = { state: 'saved' | 'not-applied'; requestId: string; revision: number };
 async function target(user: SessionUser, id: string, client: Client = prisma) {
   const row = await client.videoStudioTemplate.findUnique({ where: { id } });
@@ -18,7 +18,7 @@ async function target(user: SessionUser, id: string, client: Client = prisma) {
   const recipe = readPrivateVideoRecipe(row.recipe_json, 'video-template', id, videoTemplateOrigins(id, row.owner_user_id));
   const origins = privateFieldOrigins(recipe, 'instruction');
   if (!origins.length) throw new PrivatePromptError();
-  await requirePrivatePromptRequest(user.id, origins);
+  await requirePrivatePromptRequest(user.id, origins, client);
   return { row, recipe, draftTarget: { kind: 'video-template', id, origins, fields: ['prompt', 'context'] } };
 }
 function receiptScope(userId: string, id: string, requestId: string, origins: Awaited<ReturnType<typeof target>>['draftTarget']['origins']) {

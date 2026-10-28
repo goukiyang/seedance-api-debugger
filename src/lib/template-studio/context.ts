@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { StudioError } from './errors';
-import { getStudioTemplate } from './templates';
+import { getStudioTemplate, type StudioTemplateReadClient } from './templates';
 import type { Prisma } from '@prisma/client';
 import { privateOrigin, isPrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateFieldBinding, privateFieldOrigins, readPrivateFields, writePrivateFields } from '@/lib/security/private-prompt-fields.server';
@@ -11,7 +11,7 @@ import { readPrivateVideoRecipe, videoTemplateOrigins } from './private-storage.
 const GLOBAL_KEY = 'video_studio_context_v1';
 const moduleKey = (id: string) => `video_studio_module_context:${id}`;
 type ContextSetting = { context: string; revision: number };
-type ContextClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'videoStudioDraft'>;
+type ContextClient = Pick<Prisma.TransactionClient, 'platformSetting' | 'videoStudioDraft' | 'userSession'> & StudioTemplateReadClient;
 
 function fieldSpec(key: string, origins?: PrivateOrigin[]) {
   const kind = key === GLOBAL_KEY ? 'video-global' : 'video-module-context';
@@ -63,7 +63,7 @@ async function contextAccess(user: SessionUser, draftId?: string, client: Contex
   let inherited = '';
   let canEdit = true;
   if (draft.source_template_id) {
-    const detail = await getStudioTemplate(user, draft.source_template_id, draft.template_source as 'studio' | 'legacy');
+    const detail = await getStudioTemplate(user, draft.source_template_id, draft.template_source as 'studio' | 'legacy', false, client);
     canEdit = detail.template.canManage;
   }
   if (draft.template_snapshot_json) {
@@ -82,14 +82,14 @@ export async function privateVideoContextTarget(user: SessionUser, draftId?: str
   const spec = fieldSpec(access.key, access.origins);
   const origins = raw ? privateFieldBinding(JSON.parse(raw.value_json).context, spec.kind, spec.id, 'context', spec.fields[0].origins)?.origins || [] : spec.fields[0].origins;
   if (!origins.length) throw new StudioError('此设置不使用私密编辑入口', 409, 'CONFLICT');
-  await requirePrivatePromptRequest(user.id, origins);
+  await requirePrivatePromptRequest(user.id, origins, client);
   const setting = await readSetting(access.key, origins, client) || { context: access.inherited, revision: 0 };
   return { access, setting, draftTarget: { kind: 'video-context', id: access.key, origins, fields: ['prompt', 'context'] } };
 }
 
 export async function writePrivateVideoContext(tx: ContextClient, user: SessionUser, target: Awaited<ReturnType<typeof privateVideoContextTarget>>, context: string) {
   const { access, setting, draftTarget } = target;
-  await requirePrivatePromptRequest(user.id, draftTarget.origins);
+  await requirePrivatePromptRequest(user.id, draftTarget.origins, tx);
   const row = await tx.platformSetting.findUnique({ where: { key: access.key } });
   const revision = row ? JSON.parse(row.value_json).revision : 0;
   if (revision !== setting.revision) throw new StudioError('上下文已变化，请重新读取', 409, 'CONFLICT');
