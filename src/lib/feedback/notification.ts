@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 import { feedbackAttachmentNotice, validFeedbackAttachments, type FeedbackAttachments } from './attachments';
+import { initializeFeedbackAcknowledgment } from './flow-state';
+import { FEEDBACK_CARD_SOURCE } from '@/lib/feishu/feedback-relay';
 
 const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
 // Feedback may contain pasted credentials. Never let database errors print it.
@@ -9,6 +11,7 @@ export const feedbackPrisma = feedbackGlobal.feedbackPrisma ?? new PrismaClient(
 if (process.env.NODE_ENV !== 'production') feedbackGlobal.feedbackPrisma = feedbackPrisma;
 
 export const FEEDBACK_NOTIFICATION_TYPE = 'feedback_feishu_v1';
+export const FEEDBACK_ACK_NOTIFICATION_TYPE = 'feedback_ack_feishu_v1';
 export const FEEDBACK_SITE = 'https://sd2.youdooart.com';
 // Feishu deduplicates uuid for one hour. Leave a margin for clocks and requests.
 export const SEND_WINDOW_MS = 50 * 60_000;
@@ -31,6 +34,8 @@ export type FeedbackDelivery = {
   receiptId: string | null;
   ambiguousSend: boolean;
   lastErrorCode: string | null;
+  ackVersion?: 1;
+  ackNonce?: string;
   message?: FeedbackMessage;
   preparation?: {
     authorId: string | null;
@@ -69,8 +74,13 @@ export function validFeedbackRecipient(user: Recipient | null, config = feedback
     && recipientIdentity(user.id, user.feishu_open_id, config.appId, config.tenant) === config.identity);
 }
 
-export function feedbackEventId(feedbackId: string) {
-  return createHash('sha256').update(`${FEEDBACK_NOTIFICATION_TYPE}:${feedbackId}`).digest('hex').slice(0, 32);
+export function feedbackEventId(feedbackId: string, acknowledgment = false) {
+  return createHash('sha256').update(`${acknowledgment ? FEEDBACK_ACK_NOTIFICATION_TYPE : FEEDBACK_NOTIFICATION_TYPE}:${feedbackId}`).digest('hex').slice(0, 32);
+}
+
+function acknowledgmentButton(feedbackId: string, nonce: string | undefined) {
+  return nonce ? [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: '已收到' },
+    value: { source: FEEDBACK_CARD_SOURCE, feedbackId, nonce, action: 'ack' } }] : [];
 }
 
 export function safeFeedbackSummary(content: string) {
@@ -135,12 +145,13 @@ export function feedbackImageCard(meta: FeedbackDelivery): FeedbackMessage | nul
       ...(notice ? [{ tag: 'note', elements: [plain(notice)] }] : []),
       { tag: 'note', elements: [plain(`${preparation.author} · ${preparation.page}`), plain('Seedance2.0系统反馈通知')] },
       { tag: 'action', actions: [{ tag: 'button', type: 'primary', text: plain('查看意见'),
-        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(meta.feedbackId)}` }] },
+        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(meta.feedbackId)}` },
+        ...acknowledgmentButton(meta.feedbackId, meta.ackNonce)] },
     ],
   }) };
 }
 
-function feedbackCard(feedbackId: string, author: string, page: string, summary: string, attachmentCount: number): FeedbackMessage {
+function feedbackCard(feedbackId: string, author: string, page: string, summary: string, attachmentCount: number, ackNonce?: string): FeedbackMessage {
   const plain = (content: string) => ({ tag: 'plain_text', content });
   return { msgType: 'interactive', content: JSON.stringify({
     config: { wide_screen_mode: true },
@@ -151,7 +162,8 @@ function feedbackCard(feedbackId: string, author: string, page: string, summary:
       { tag: 'div', text: plain(summary) },
       ...(attachmentCount > 0 ? [{ tag: 'div', text: plain(`截图：${attachmentCount} 张`) }] : []),
       { tag: 'action', actions: [{ tag: 'button', type: 'primary', text: plain('查看意见'),
-        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(feedbackId)}` }] },
+        url: `${FEEDBACK_SITE}/admin/feedback?feedbackId=${encodeURIComponent(feedbackId)}` },
+        ...acknowledgmentButton(feedbackId, ackNonce)] },
     ],
   }) };
 }
@@ -160,8 +172,11 @@ export function parseFeedbackDelivery(value: string | null): FeedbackDelivery | 
   try {
     const data = JSON.parse(value || '') as FeedbackDelivery;
     if (![1, 2].includes(data.version) || !/^[a-zA-Z0-9_-]{1,80}$/.test(data.feedbackId)
-      || data.uuid !== feedbackEventId(data.feedbackId)
-      || data.eventKey !== `${FEEDBACK_NOTIFICATION_TYPE}:${data.feedbackId}`
+      || data.uuid !== feedbackEventId(data.feedbackId, data.ackVersion === 1)
+      || data.eventKey !== `${data.ackVersion === 1 ? FEEDBACK_ACK_NOTIFICATION_TYPE : FEEDBACK_NOTIFICATION_TYPE}:${data.feedbackId}`
+      || data.ackVersion !== undefined && data.ackVersion !== 1
+      || data.ackNonce !== undefined && (data.ackVersion !== 1 || !/^[a-f0-9]{48}$/.test(data.ackNonce))
+      || data.ackVersion === 1 && data.state === 'pending' && !data.ackNonce
       || !['pending', 'sent', 'failed', 'unknown'].includes(data.state)
       || !Number.isSafeInteger(data.attempts) || data.attempts < 0
       || !Number.isSafeInteger(data.nextAttemptAt) || data.nextAttemptAt < 0
@@ -208,16 +223,18 @@ export async function enqueueFeedbackNotification(
   const summary = safeFeedbackSummary(feedback.content);
   const page = feedbackPageName(feedback.pathname);
   const attachmentCount = typeof attachments === 'number' ? attachments : attachments.total;
+  const uuid = feedbackEventId(feedback.id, true);
+  const ackNonce = valid ? await initializeFeedbackAcknowledgment(tx, feedback.id, recipient.id, config.identity, uuid) : undefined;
   const meta: FeedbackDelivery = {
-    version: typeof attachments === 'number' ? 1 : 2, eventKey: `${FEEDBACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
-    uuid: feedbackEventId(feedback.id), identity: config.identity, state: valid ? 'pending' : 'failed',
+    version: typeof attachments === 'number' ? 1 : 2, eventKey: `${FEEDBACK_ACK_NOTIFICATION_TYPE}:${feedback.id}`, feedbackId: feedback.id,
+    uuid, identity: config.identity, state: valid ? 'pending' : 'failed', ackVersion: 1, ...(ackNonce ? { ackNonce } : {}),
     attempts: 0, nextAttemptAt: Date.now(), firstSendAt: null, leaseToken: null, leaseUntil: null, receiptId: null,
     ambiguousSend: false, lastErrorCode: null,
-    ...(typeof attachments === 'number' ? { message: feedbackCard(feedback.id, safeAuthor, page, summary, attachmentCount) }
+    ...(typeof attachments === 'number' ? { message: feedbackCard(feedback.id, safeAuthor, page, summary, attachmentCount, ackNonce) }
       : { preparation: { authorId: author?.id || null, author: safeAuthor, page, summary, until: Date.now() + 30 * 60_000, cycles: 0, attachments } }),
   };
   await tx.notification.create({ data: {
-    id: meta.uuid, type: FEEDBACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
+    id: meta.uuid, type: FEEDBACK_ACK_NOTIFICATION_TYPE, channel: 'feishu', status: valid ? 'pending' : 'failed',
     target_user_id: config.recipientId, title: '新修改意见',
     body: ['Seedance2.0系统反馈通知', '新修改意见',
       `提交人：${safeAuthor}`, `页面：${page}`, `摘要：${summary}`,

@@ -79,6 +79,9 @@
 .uploadFailureActions { display: flex; align-items: center; gap: 4px; flex: none; }
 .uploadFailureActions button { min-height: 36px; padding: 6px 8px; text-decoration: underline; text-underline-offset: 3px; }
 .notice { margin: 0 20px 12px; font-size: 13px; color: var(--text-secondary, #b4bec4); line-height: 1.5; }
+.removedUpload { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; overflow-wrap: anywhere; }
+.removedUpload > span { flex: 1 1 180px; min-width: 0; }
+.removedUpload button { display: inline-flex; align-items: center; gap: 4px; flex: none; min-height: 36px; }
 .meta .compatibility { flex-basis: 100%; min-width: 0; margin-top: 2px; color: #ffd7a3; overflow-wrap: anywhere; }
 .more { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; min-width: 0; color: var(--text-secondary, #b4bec4); margin-top: 12px; font-size: 12px; }
 .more button { border-color: var(--border, #3b4145); padding: 8px 12px; }

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
+import { feedbackPrisma } from '@/lib/feedback/notification';
+import { feedbackLifecycleView, markFeedbackFixed } from '@/lib/feedback/lifecycle';
+import { FeedbackFlowError } from '@/lib/feedback/flow-state';
 
 const VALID_STATUS = new Set(['new', 'reviewed', 'archived']);
 
@@ -9,10 +12,23 @@ function text(value: unknown) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  let admin;
   try {
-    await getAdminUser(request);
+    admin = await getAdminUser(request);
   } catch {
     return errorJson('权限不足', 403);
+  }
+
+  const search = new URL(request.url).searchParams;
+  if (search.get('lifecycle') === '1') {
+    try {
+      const result = await feedbackLifecycleView(feedbackPrisma, admin.id, params.id, {
+        admin: true, ...(search.has('round') ? { round: Number(search.get('round')) } : {}),
+      });
+      return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+    } catch (error) {
+      return errorJson(error instanceof FeedbackFlowError ? error.message : '处理记录暂不可核对', error instanceof FeedbackFlowError ? error.status : 503);
+    }
   }
 
   const feedback = await prisma.feedback.findUnique({
@@ -33,6 +49,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
   try {
     const body = await request.json();
+    if (body?.action === 'mark_fixed') {
+      try {
+        const result = await feedbackPrisma.$transaction(tx => markFeedbackFixed(tx, admin.id, params.id, body));
+        return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+      } catch (error) {
+        return errorJson(error instanceof FeedbackFlowError ? error.message : '修复记录未确认，请保留原操作编号重新读取', error instanceof FeedbackFlowError ? error.status : 503);
+      }
+    }
     const data: {
       status?: string;
       admin_note?: string | null;

@@ -3,6 +3,7 @@ import { createDecipheriv, createHash, createHmac, timingSafeEqual } from 'node:
 import { pathToFileURL } from 'node:url';
 
 const source = 'sd2_credit_requests_v1';
+const feedbackSource = 'sd2_feedback_ack_v1';
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b)
   && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -23,7 +24,8 @@ export function routePayload(raw, headers, env, now = Date.now()) {
       payload = JSON.parse(Buffer.concat([decipher.update(bytes.subarray(16)), decipher.final()]).toString('utf8'));
     }
   } catch { return { kind: 'legacy', body: raw }; }
-  if (payload?.event?.action?.value?.source !== source) return { kind: 'legacy', body: raw };
+  const actionSource = payload?.event?.action?.value?.source;
+  if (actionSource !== source && actionSource !== feedbackSource) return { kind: 'legacy', body: raw };
   const timestamp = String(headers['x-lark-request-timestamp'] || '');
   const nonce = String(headers['x-lark-request-nonce'] || '');
   const seconds = timestampSeconds(timestamp);
@@ -35,6 +37,15 @@ export function routePayload(raw, headers, env, now = Date.now()) {
     || payload.header?.app_id !== env.FEISHU_APP_ID || payload.header?.event_type !== 'card.action.trigger'
     || !equal(payload.header?.token, token)) throw new Error('invalid_credit_callback');
   // SD2 verifies the signed app/tenant/operator and its own request state again.
+  if (actionSource === feedbackSource) {
+    const body = JSON.stringify({ header: { app_id: payload.header.app_id, tenant_key: payload.header.tenant_key,
+      event_type: payload.header.event_type }, event: payload.event, context: payload.context ?? payload.event.context });
+    const time = String(now);
+    return { kind: 'feedback', body, headers: {
+      'x-sd2-feedback-time': time,
+      'x-sd2-feedback-signature': createHmac('sha256', env.FEISHU_APP_SECRET).update(`sd2-feedback-relay-v1\n${time}\n${body}`).digest('hex'),
+    } };
+  }
   const body = JSON.stringify({ header: { app_id: payload.header.app_id, tenant_key: payload.header.tenant_key, event_type: payload.header.event_type }, event: payload.event });
   const time = String(now);
   return { kind: 'credit', body, headers: {
@@ -65,9 +76,10 @@ export function createGateway(env = process.env, fetcher = fetch) {
           if (typeof request.headers[key] === 'string') headers[key] = request.headers[key];
         }
       } else Object.assign(headers, routed.headers);
-      const upstream = await fetcher(routed.kind === 'credit' ? 'http://127.0.0.1:3302/api/feishu/credit-actions'
+      const upstream = await fetcher(routed.kind === 'feedback' ? 'http://127.0.0.1:3302/api/feishu/feedback-actions'
+        : routed.kind === 'credit' ? 'http://127.0.0.1:3302/api/feishu/credit-actions'
         : 'http://127.0.0.1:8788/webhooks/feishu/card-actions', {
-        method: 'POST', headers, body: routed.body, signal: AbortSignal.timeout(routed.kind === 'credit' ? 2500 : 25000),
+        method: 'POST', headers, body: routed.body, signal: AbortSignal.timeout(routed.kind === 'legacy' ? 25000 : 2500),
       });
       const body = await upstream.text();
       response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json' });

@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { FEEDBACK_NOTIFICATION_TYPE, LEASE_MS, SEND_WINDOW_MS,
+import { FEEDBACK_NOTIFICATION_TYPE, FEEDBACK_ACK_NOTIFICATION_TYPE, LEASE_MS, SEND_WINDOW_MS,
   feedbackPrisma as prisma, feedbackConfig, feedbackDeliveryMessage, feedbackImageCard, parseFeedbackDelivery, validFeedbackRecipient, type FeedbackDelivery } from './notification';
 import { attachmentSelect, feedbackAttachmentStillValid, FeedbackImageError, FEEDBACK_IMAGE_ATTEMPTS,
   readFeedbackImage, uploadFeedbackImage, type FeedbackAttachment } from './attachments';
+import { readFeedbackFlow } from './flow-state';
 
-class DeliveryError extends Error {
+export class DeliveryError extends Error {
   constructor(public code: string, public ambiguous = false, public retryable = true) { super(code); }
 }
 
-async function feishuRequest(path: string, body: unknown, token?: string, deadline?: number, leaseUntil?: number) {
+export async function feishuRequest(path: string, body: unknown, token?: string, deadline?: number, leaseUntil?: number) {
   let response: Response;
   let data: Record<string, unknown>;
   if (token && (deadline === undefined || leaseUntil === undefined || Date.now() < deadline - SEND_WINDOW_MS
@@ -41,7 +42,7 @@ export async function processFeedbackDeliveries(limit = 10) {
   if (!config.enabled) return { enabled: false, sent: 0, failed: 0, unknown: 0 };
   if (!config.recipientId) throw new DeliveryError('feedback_recipient_configuration_invalid', false, false);
   const jobs = await prisma.notification.findMany({
-    where: { channel: 'feishu', type: FEEDBACK_NOTIFICATION_TYPE, status: 'pending', target_user_id: config.recipientId },
+    where: { channel: 'feishu', type: { in: [FEEDBACK_NOTIFICATION_TYPE, FEEDBACK_ACK_NOTIFICATION_TYPE] }, status: 'pending', target_user_id: config.recipientId },
     orderBy: { updated_at: 'asc' }, take: 100,
   });
   const result = { enabled: true, sent: 0, failed: 0, unknown: 0 };
@@ -51,7 +52,8 @@ export async function processFeedbackDeliveries(limit = 10) {
   for (const job of jobs) {
     if (claimedCount >= Math.max(1, Math.min(10, limit))) break;
     const parsed = parseFeedbackDelivery(job.metadata_json);
-    if (!parsed || job.id !== parsed.uuid || parsed.state !== 'pending') {
+    if (!parsed || job.id !== parsed.uuid || parsed.state !== 'pending'
+      || job.type !== (parsed.ackVersion === 1 ? FEEDBACK_ACK_NOTIFICATION_TYPE : FEEDBACK_NOTIFICATION_TYPE)) {
       await prisma.notification.updateMany({ where: { id: job.id, status: 'pending', metadata_json: job.metadata_json },
         data: { status: 'failed', error_message: 'feedback_metadata_invalid' } });
       result.failed++; continue;
@@ -86,6 +88,11 @@ export async function processFeedbackDeliveries(limit = 10) {
         id: true, status: true, role: true, expires_at: true, feishu_open_id: true, feishu_tenant_key: true,
       } });
       if (!validFeedbackRecipient(recipient, config) || meta.identity !== config.identity) throw new DeliveryError('feedback_identity_changed', false, false);
+      if (meta.ackVersion === 1) {
+        const { flow } = await readFeedbackFlow(prisma, meta.feedbackId), ack = flow.acknowledgment;
+        if (!ack || ack.nonce !== meta.ackNonce || ack.notificationId !== job.id || ack.recipientId !== job.target_user_id
+          || ack.identity !== meta.identity) throw new DeliveryError('feedback_ack_source_unavailable', false, false);
+      }
       let token: string | undefined;
       const getToken = async () => token ?? (token = await feedbackTenantToken());
       const attachmentValid = async (item: FeedbackAttachment) => {

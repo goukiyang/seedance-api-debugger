@@ -1,0 +1,28 @@
+.flow { min-width: 0; border-top: 1px solid var(--border-color); margin-top: 20px; padding-top: 16px; font-size: 14px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.toolbar h3 { margin: 0; font-size: 16px; }
+.flow button, .flow select, .flow textarea { font: inherit; color: var(--text-primary); border: 1px solid var(--border-color); background: var(--bg-input); border-radius: 6px; }
+.flow button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; min-height: 36px; cursor: pointer; }
+.flow button:disabled { opacity: .5; cursor: default; }
+.flow button:focus-visible, .flow textarea:focus-visible, .flow select:focus-visible { outline: 2px solid var(--accent-color, #577bcd); outline-offset: 2px; }
+.flow button.primary { background: var(--accent-color, #4262ab); color: #f4f7fc; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.meta { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.round { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+.round select { min-height: 36px; padding: 6px 10px; }
+.form { display: grid; gap: 12px; margin-top: 16px; }
+.form label { display: grid; gap: 6px; }
+.form textarea { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px 12px; resize: vertical; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choices button[aria-pressed="true"] { border-color: var(--accent-color, #577bcd); background: var(--bg-hover); }
+.message { overflow-wrap: anywhere; color: var(--text-secondary); }
+.images { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.images > div { display: flex; align-items: flex-start; gap: 2px; }
+.images button { padding: 4px; }
+.images img { display: block; width: 84px; height: 84px; object-fit: contain; }
+.page { max-width: 840px; margin: 0 auto; padding: 20px 20px 60px; }
+.list { list-style: none; padding: 0; margin: 16px 0; }
+.list li { border-bottom: 1px solid var(--border-color); padding: 14px 0; }
+.list a { display: block; overflow-wrap: anywhere; line-height: 1.55; }
+.list p { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; }
+@media (max-width: 600px) { .page { padding: 16px 12px 40px; } .form button { min-height: 40px; } }

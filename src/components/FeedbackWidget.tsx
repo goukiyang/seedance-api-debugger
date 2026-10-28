@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import Link from 'next/link';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { ImagePlus, MessageSquare, X } from 'lucide-react';
@@ -433,7 +434,8 @@ export default function FeedbackWidget() {
             </button>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+            {draftKey?.includes('user:') && <Link href="/feedback" onClick={() => setOpen(false)} style={{ marginRight: 'auto', fontSize: 13 }}>我的反馈</Link>}
             <button type="button" onClick={() => setOpen(false)} disabled={submitting} style={secondaryButtonStyle}>取消</button>
             <button type="button" onClick={submit} disabled={submitting} style={primaryButtonStyle}>
               {submitting ? '提交中' : '提交意见'}

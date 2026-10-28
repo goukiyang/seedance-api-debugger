@@ -13,6 +13,7 @@ import { RotateCcw, X } from 'lucide-react';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import workbenchStyles from '../integrations/workbench.module.css';
+import { FeedbackLifecyclePanel } from '@/components/feedback/FeedbackLifecyclePanel';
 
 type FeedbackUser = {
   id: string;
@@ -538,6 +539,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
                 <textarea disabled={actionBusy} value={note} onChange={(event) => setNote(event.target.value)} rows={4} style={{ ...controlStyle, resize: 'vertical' }} />
               </label>
             </div>
+            <FeedbackLifecyclePanel key={`${currentUser.id}:${active.id}`} owner={currentUser.id} feedbackId={active.id} admin />
             <details open={technicalOpen} onToggle={event => setTechnicalOpen(event.currentTarget.open)} style={{ marginTop: 16, fontSize: 13 }}>
               <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', padding: '8px 0' }}>技术信息 / 导出</summary>
               <dl style={{ margin: '8px 0', display: 'grid', gridTemplateColumns: '80px minmax(0, 1fr)', gap: '10px 12px', fontSize: 12 }}>
