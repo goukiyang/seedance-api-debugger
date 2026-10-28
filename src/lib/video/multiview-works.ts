@@ -286,7 +286,7 @@ export async function createMultiviewWork(user: SessionUser, input: Json) {
       return db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: recipe.schema } });
     }
     const data = { owner_id: user.id, source_task_id: taskId, source_id: parent?.source_id || null, project_id: source.project_id, video_card_id: source.video_card_id,
-      save_state: 'saved', schema_version: recipe.schema,
+      save_state: 'saved', schema_version: recipe.schema, ...(isReference ? { parent_work_id: parent?.id || null } : {}),
       source_version: version, source_info_json: JSON.stringify(info), title: title(input.title, previous?.title),
       draft_revision: previous ? previous.draft_revision + 1 : 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: 'queued', next_attempt_at: new Date(),
       lease_token: null, lease_until: null, attempts: 0, last_error: null };
