@@ -102,8 +102,8 @@ export async function withVideoSaveProcess<T>(kind: 'cache' | 'ingest' | 'public
       const stop = () => { child.kill('SIGTERM'); };
       signal?.addEventListener('abort', stop, { once: true });
       const timer = setTimeout(stop, VIDEO_SAVE_TOTAL_TIMEOUT_MS + 5 * 60_000);
-      child.stdout.on('data', bytes => { stdout += bytes.toString(); if (stdout.length > 1024 * 1024) stop(); });
-      child.stderr.on('data', bytes => { stderr += bytes.toString(); if (stderr.length > 65536) stderr = stderr.slice(-65536); });
+      child.stdout!.on('data', bytes => { stdout += bytes.toString(); if (stdout.length > 1024 * 1024) stop(); });
+      child.stderr!.on('data', bytes => { stderr += bytes.toString(); if (stderr.length > 65536) stderr = stderr.slice(-65536); });
       child.once('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', stop); reject(error); });
       child.once('close', code => {
         clearTimeout(timer); signal?.removeEventListener('abort', stop);
