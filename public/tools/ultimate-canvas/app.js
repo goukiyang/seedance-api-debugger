@@ -62,6 +62,8 @@
         documentId: null,
         documentRevision: 0,
         documentSchemaVersion: 2,
+        workspaceContext: null,
+        canvasReferenceVersion: null,
         documentTitle: '未命名画布',
         explicitDocumentId: new URLSearchParams(window.location.search).get('document_id'),
         explicitFocusNode: new URLSearchParams(window.location.search).get('focus_node'),
@@ -502,6 +504,7 @@
             promptMentions: payload.promptMentions || null,
             settings: payload.settings,
             referenceImageIds: payload.referenceImageIds || [],
+            canvasReferences: payload.canvasReferences,
             style: node.data?.canvasStyle || null
         });
     }
@@ -610,13 +613,16 @@
     }
 
     function canvasWorkspaceKey() {
-        if (!canvasRuntime.selectedProjectId) return '';
-        return canvasRuntime.selectedVideoCardId ? `ultimate-canvas:${canvasRuntime.selectedProjectId}:${canvasRuntime.selectedVideoCardId}` : `ultimate-canvas:v2:${canvasRuntime.bootstrap?.user?.id}:${canvasRuntime.selectedProjectId}:${canvasRuntime.documentId}`;
+        const scope = canvasRuntime.workspaceContext;
+        return scope?.owner_id === canvasRuntime.bootstrap?.user?.id && scope.project_id === canvasRuntime.selectedProjectId
+            && scope.document_id === canvasRuntime.documentId && /^uc2_[a-f0-9]{64}$/.test(scope.workspace_key) ? scope.workspace_key : '';
     }
 
-    function workspaceHeaders() {
+    function workspaceHeaders(nodeId = '') {
         const key = canvasWorkspaceKey();
-        return key ? { 'x-tab-id': key } : {};
+        return key ? { 'x-tab-id': key, 'x-canvas-project-id': canvasRuntime.selectedProjectId,
+            'x-canvas-document-id': canvasRuntime.documentId, 'x-canvas-card-id': canvasRuntime.selectedVideoCardId || '',
+            'x-canvas-node-id': nodeId, 'x-canvas-capabilities': 'role.v1,role.workflow.v1,role.collaboration.v2,canvas_video_batch_v1,canvas.references.v1' } : {};
     }
 
     async function requestJson(url, options = {}) {
@@ -631,8 +637,8 @@
             }, 'Canvas request endpoint is not allowed.');
         }
         const hasPayload = options.payload !== undefined;
-        const payload = hasPayload && endpoint.startsWith('/api/tools/ultimate-canvas/')
-            ? { ...options.payload, required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1'] } : options.payload;
+        const payload = hasPayload && endpoint.startsWith('/api/tools/ultimate-canvas/') && !/\/(?:images|styles)\/generate$/.test(endpoint)
+            ? { ...options.payload, required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1', 'canvas.references.v1'] } : options.payload;
         const body = options.body !== undefined
             ? options.body
             : hasPayload
@@ -641,7 +647,7 @@
         const requestHeaders = {
             ...(hasPayload ? { 'Content-Type': 'application/json' } : {}),
             ...workspaceHeaders(),
-            ...(endpoint.startsWith('/api/tools/ultimate-canvas/') ? { 'x-canvas-capabilities': 'role.v1,role.workflow.v1,role.collaboration.v2,canvas_video_batch_v1' } : {}),
+            ...(endpoint.startsWith('/api/tools/ultimate-canvas/') ? { 'x-canvas-capabilities': 'role.v1,role.workflow.v1,role.collaboration.v2,canvas_video_batch_v1,canvas.references.v1' } : {}),
             ...(options.headers || {})
         };
         const res = await fetch(endpoint, {
@@ -1291,6 +1297,7 @@
                         prompt: promptWithConnectedText(payload),
                         ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
                         referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
+                        canvasReferences: payload.canvasReferences || canvasReferencesForNode(payload.nodeId),
                         settings: payload.settings || {}
                     });
                     descriptor.url = backendEndpoint(capabilities.image?.endpoint, descriptor.url, 'image');
@@ -2153,6 +2160,7 @@
             });
             if (requestId !== canvasRuntime.bootstrapRequestId) return null;
             canvasRuntime.bootstrap = data;
+            canvasRuntime.workspaceContext = data.context?.workspace_context || null;
             canvasRuntime.bootstrapLoaded = true;
             canvasRuntime.bootstrapError = null;
             applyBootstrapState(data);
@@ -2346,6 +2354,8 @@
         canvasRuntime.explicitDocumentId = null;
         canvasRuntime.documentRevision = 0;
         canvasRuntime.documentSchemaVersion = 2;
+        canvasRuntime.workspaceContext = null;
+        canvasRuntime.canvasReferenceVersion = null;
         canvasRuntime.documentWritable = false;
         canvasRuntime.documentDirty = false;
         canvasRuntime.documentTitle = '未命名画布';
@@ -3460,6 +3470,14 @@
     function canvasDocumentPayload(context = {}) {
         syncAllNodesFromDom();
         const canvas = engine.serialize();
+        canvas.nodes.forEach(node => {
+            if (!['image', 'video'].includes(node.type)) return;
+            const items = generationReferenceItems(node.id);
+            if (node.data?.canvas_references !== undefined || items.some(item => item.available) && !hasCurrentGenerationSubmission(node.id) && !engine.nodes.get(node.id)?.data?.styleJob) {
+                node.data.canvas_references = canvasReferencesForNode(node.id);
+                canvasRuntime.canvasReferenceVersion = 1;
+            }
+        });
         // Drag previews, especially new copies, are not durable until mouseup.
         canvas.nodes = canvas.nodes.filter(node => !provisionalDuplicate?.ids.has(node.id)).map(node => {
             const start = engine.dragNodeStarts?.get(node.id);
@@ -3476,7 +3494,8 @@
                 || engine.roleWorkflows?.some(flow => Array.isArray(flow.relations)) ? 5
                 : canvasRuntime.documentSchemaVersion >= 4 || engine.roleWorkflows?.length ? 4
                 : canvasRuntime.documentSchemaVersion === 3 || [...engine.nodes.values()].some(n => n.type === 'role') ? 3 : 2,
-            requiredCapabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1'],
+            ...(canvasRuntime.canvasReferenceVersion === 1 ? { canvasReferenceVersion: 1 } : {}),
+            requiredCapabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1', ...(canvasRuntime.canvasReferenceVersion === 1 ? ['canvas.references.v1'] : [])],
             savedAt: new Date().toISOString(),
             context: {
                 project_id: context.projectId ?? canvasRuntime.selectedProjectId,
@@ -3511,7 +3530,7 @@
                 project_id: projectId,
                 title: canvasRuntime.documentTitle,
                 protocol_version: 2,
-                required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1'],
+                required_capabilities: ['role.v1', 'role.workflow.v1', 'role.collaboration.v2', 'canvas_video_batch_v1', 'canvas.references.v1'],
                 base_revision: canvasRuntime.documentRevision,
                 mutation_id: documentMutationId(),
                 active_generation_node_id: engine.selectedNodeId,
@@ -3561,6 +3580,18 @@
             const snapshot = job.snapshot;
             if (!canvasSaveContextMatches(snapshot)) return;
             canvasRuntime.documentId = result.document?.id || snapshot.documentId || canvasRuntime.documentId;
+            canvasRuntime.workspaceContext = result.document?.workspace_context || canvasRuntime.workspaceContext;
+            if (!canvasWorkspaceKey() && canvasRuntime.documentId) {
+                const id = canvasRuntime.documentId, epoch = canvasRuntime.contextEpoch;
+                void requestJson(`/api/tools/ultimate-canvas/document?document_id=${encodeURIComponent(id)}`, { cache: 'no-store' }).then(detail => {
+                    if (canvasRuntime.documentId === id && canvasRuntime.contextEpoch === epoch) canvasRuntime.workspaceContext = detail.document?.workspace_context || null;
+                }).catch(() => { /* Original mutation remains acknowledged; a missing scope cannot allocate another workspace. */ });
+            }
+            if (result.document?.canvasReferenceVersion === 1) canvasRuntime.canvasReferenceVersion = 1;
+            if (snapshot.editSequence === canvasRuntime.editSequence) for (const [nodeId, references] of Object.entries(result.document?.canvas_references_by_node || {})) {
+                const node = engine.nodes.get(nodeId);
+                if (node) node.data.canvas_references = window.UltimateCanvasGenerationNodes.normalizeCanvasReferences(references);
+            }
             canvasRuntime.documentProjectId = snapshot.projectId;
             canvasRuntime.documentVideoCardId = snapshot.videoCardId;
             canvasRuntime.documentRevision = result.document?.revision ?? canvasRuntime.documentRevision;
@@ -3822,6 +3853,8 @@
             canvasRuntime.explicitDocumentId = documentToRestore.id;
             canvasRuntime.documentRevision = documentToRestore.revision || 0;
             canvasRuntime.documentSchemaVersion = documentToRestore.schema_version || parsed.schemaVersion || 2;
+            canvasRuntime.workspaceContext = documentToRestore.workspace_context || null;
+            canvasRuntime.canvasReferenceVersion = parsed.canvasReferenceVersion === 1 ? 1 : null;
             canvasRuntime.documentTitle = recoveredDraft ? draft.request.title : documentToRestore.title || '未命名画布';
             canvasRuntime.failedSaveRequest = null;
             canvasRuntime.saveConflict = false;
@@ -4175,7 +4208,7 @@
                 canvasUploadRequests.set(requestId, { captured, nodeId: canvasNodeId, resolve, reject, onProgress });
                 window.parent.postMessage({ type: 'sd2-canvas-upload-request', requestId,
                     userId: canvasRuntime.bootstrap?.user?.id, documentId: canvasRuntime.documentId,
-                    projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId,
+                    projectId: canvasRuntime.selectedProjectId, cardId: canvasRuntime.selectedVideoCardId, workspaceKey: canvasWorkspaceKey(),
                     files: [{ file, nodeId: canvasNodeId }] }, window.location.origin);
             });
         } finally { canvasRuntime.uploadsInFlight -= 1; }
@@ -4201,7 +4234,7 @@
         if (message.nodeId !== pending.nodeId || typeof message.success !== 'boolean') return;
         canvasUploadRequests.delete(message.requestId);
         if (message.success && message.result?.success) pending.resolve(message.result);
-        else pending.reject(new Error(message.error || '上传结果尚未确认，未重传原文件'));
+        else pending.reject(Object.assign(new Error(message.error || '上传结果尚未确认，未重传原文件'), { assetId: message.assetId }));
     });
 
     function canvasFilePosition(clientX, clientY) {
@@ -4242,7 +4275,8 @@
             const run = async () => {
                 if (removed || running) return;
                 if (queuedContext !== uploadContextKey()) { status.textContent = '画布或账号已变化，未上传此文件'; retry.hidden = true; return; }
-                if (!/^(image|video|audio)\//.test(file.type) || (pendingConnection?.role === 'input' && !file.type.startsWith('image/'))) {
+                const target = pendingConnection?.role === 'input' ? engine.nodes.get(pendingConnection.nodeId) : null;
+                if (!/^(image|video|audio)\//.test(file.type) || target && !referenceMediaLimits(target)[file.type.split('/')[0]]) {
                     status.textContent = '此处不支持该文件类型'; return;
                 }
                 running = true; retry.hidden = true; remove.disabled = true; status.textContent = '正在读取原文件';
@@ -4261,7 +4295,7 @@
                         if (!applied) throw new Error('素材已上传，但当前画布暂不可编辑；请处理保存状态后恢复原上传条目。');
                     }
                     status.textContent = '已加入画布';
-                } catch (error) { status.textContent = error?.message || '上传未确认'; retry.hidden = false; }
+                } catch (error) { status.textContent = error?.assetId ? '原件已上传，关联待核对' : error?.message || '上传未确认'; retry.title = error?.assetId ? '核对原关联' : '恢复原上传'; retry.hidden = false; }
                 finally {
                     if (engine.nodes.has(nodeId) && !placedNodeIds.includes(nodeId)) placedNodeIds.push(nodeId);
                     running = false; remove.disabled = false;
@@ -4285,6 +4319,7 @@
             description: uploadResult.reference_image_id ? '已上传并加入参考图体系' : '已上传到站内资产库',
             assetId: asset.id,
             referenceImageId: uploadResult.reference_image_id || null,
+            sourceVersion: asset.sourceVersion,
             workspaceAssetId: uploadResult.workspace_asset_id || null,
             previewImage: imagePreview,
             thumbnailUrl: imagePreview,
@@ -4419,11 +4454,11 @@
         if (!model?.ready) return model?.disabledReason || '当前生图通道不支持所选模型；请手动选择其他模型或通道，参数未更改。';
         if (model.billingMode === 'fixed' && model.fixedPoints == null && !model.pricingBySpecification && !['shared', 'banana'].includes(channel.id)) return '当前通道固定点数尚未配置，暂不能生成。';
         if (!model.billingMode) return '当前生图通道计费方式尚未确认，暂不能生成。';
-        if (!model.qualities || !model.resolutions || !model.ratios || model.maxReferences == null) return '当前通道的图片参数支持范围尚未确认，暂不能生成。';
+        if (model.canvas?.issue) return model.canvas.issue;
+        if (!model.canvas || model.canvas.referenceLimit === null) return '当前通道的图片参数支持范围尚未确认，暂不能生成。';
         if (model.qualities && !model.qualities.includes(settings.quality)) return '当前通道不支持所选图片质量，请手动调整后再生成。';
         if (model.resolutions && !model.resolutions.includes(settings.resolution)) return '当前通道不支持所选分辨率，请手动调整后再生成。';
-        if (model.ratios && !model.ratios.includes(settings.requestedRatio)) return '当前通道不支持所选比例，请手动调整后再生成。';
-        if (Number.isSafeInteger(model.maxReferences) && generationReferenceImageIds(node.id).length > model.maxReferences) return `当前通道最多使用 ${model.maxReferences} 张参考图，请减少后再生成。`;
+        if (generationReferenceItems(node.id).filter(item => item.available).length > model.canvas.referenceLimit) return `当前通道最多使用 ${model.canvas.referenceLimit} 张参考图，请减少后再生成。`;
         return '';
     }
 
@@ -4507,7 +4542,8 @@
             return {
                 ...current,
                 count: current.count == null ? 1 : Number(current.count),
-                model, provider: current.provider || option?.provider || 'seedance', referenceImageLimit: option?.reference_media?.imageLimit || 9,
+                model, provider: current.provider || option?.provider || 'seedance', referenceImageLimit: option?.reference_media?.imageLimit ?? 9,
+                referenceMedia: option?.reference_media || { imageLimit: 9, videoLimit: 3, audioLimit: 3, audioOnly: false },
                 ratio: current.ratio || ratioFromContext(),
                 duration: Number(current.duration || durationFromContext()),
                 resolution: current.resolution || resolutionFromContext(),
@@ -4527,7 +4563,7 @@
             return { ...capability, enabled: model?.ready === true, interaction: {
                 modes: ['text-to-image', 'image-to-image', 'upscale-image', 'first-frame-draft', 'last-frame-draft'],
                 ratios: model?.ratios || [], size_options: model?.resolutions || [],
-                max_reference_images: Number.isSafeInteger(model?.maxReferences) ? model.maxReferences : 0
+                max_reference_images: model?.canvas?.referenceLimit ?? 0
             } };
         }
         if (node.type !== 'video') return capability;
@@ -4546,7 +4582,7 @@
             mode: payload.mode, prompt: promptWithConnectedText(payload), promptUserEdited: true,
             ...(payload.promptMentions ? { promptMentions: payload.promptMentions } : {}),
             referenceImageIds: payload.referenceImageIds || collectReferenceImageIds(payload),
-            referenceVideoUrls: payload.referenceVideoUrls || data.referenceVideoUrls || data.reference_video_urls || [],
+            canvasReferences: payload.canvasReferences || canvasReferencesForNode(payload.nodeId),
             settings: payload.settings || {} };
     }
 
@@ -4619,32 +4655,42 @@
 
     function generationReferenceItems(nodeId) {
         const seen = new Set();
+        const saved = engine.nodes.get(nodeId)?.data?.canvas_references?.items || [];
         const connected = engine.connections
             .filter(connection => connection.to === nodeId)
             .map((connection, index) => ({ node: engine.nodes.get(connection.from), index }))
-            .filter(item => item.node?.type === 'image')
+            .filter(item => ['image', 'video', 'audio'].includes(item.node?.type))
             .map(({ node, index }) => {
                 const data = node.data || {};
-                const referenceImageId = referenceIdsFromNodeData(data)[0] || '';
+                const selected = data.selectedVideoResult || data.generationResult || {};
+                const referenceImageId = node.type === 'image' ? referenceIdsFromNodeData(data)[0] || '' : '';
+                const assetId = data.assetId || selected.assetId || null;
+                const taskId = node.type === 'video' ? selected.taskId || data.taskId || undefined : undefined;
+                const prior = saved.find(item => item.sourceNodeId === node.id && (item.assetId && item.assetId === assetId || item.referenceImageId && item.referenceImageId === referenceImageId || item.taskId && item.taskId === taskId));
                 const preview = referenceUrlsFromNodeData(data)[0]
                     || data.previewImage
                     || data.thumbnailUrl
                     || '';
                 return {
                     nodeId: node.id,
+                    kind: node.type, sourceNodeId: node.id,
                     referenceImageId,
-                    assetId: data.assetId || null,
+                    assetId, taskId, sourceVersion: data.sourceVersion || prior?.sourceVersion,
                     preview,
                     title: data.title || `参考图 ${index + 1}`,
                     width: data.width || data.assetWidth || null,
                     height: data.height || data.assetHeight || null,
-                    available: Boolean(referenceImageId)
+                    available: Boolean(assetId || referenceImageId || taskId)
                 };
             })
             ;
-        return [...(engine.nodes.get(nodeId)?.data?.planReferences || []).map(item => ({ ...item,
-            preview: item.referenceImageId ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` : '' })), ...connected].filter(item => {
-                const key = item.referenceImageId || `node:${item.nodeId}`;
+        const imported = engine.nodes.get(nodeId)?.data?.planReferences || [];
+        const detached = saved.filter(item => !item.sourceNodeId && !imported.some(plan => item.assetId && plan.assetId === item.assetId || item.referenceImageId && plan.referenceImageId === item.referenceImageId || item.taskId && plan.taskId === item.taskId))
+            .map(item => ({ ...item, nodeId: `typed-reference-${item.assetId || item.referenceImageId || item.taskId}`, available: true, title: item.kind === 'image' ? '图片参考' : item.kind === 'video' ? '视频参考' : '音频参考' }));
+        return [...imported, ...detached, ...connected].map(item => ({ ...item, kind: item.kind || 'image',
+            available: item.available !== false && Boolean(item.assetId || item.referenceImageId || item.taskId),
+            preview: (item.kind || 'image') === 'image' && item.referenceImageId ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` : item.preview || '' })).filter(item => {
+                const key = `${item.kind}:${item.assetId || item.referenceImageId || item.taskId || `node:${item.nodeId}`}`;
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
@@ -4653,8 +4699,26 @@
 
     function generationReferenceImageIds(nodeId) {
         return generationReferenceItems(nodeId)
-            .filter(item => item.available)
+            .filter(item => item.available && item.kind === 'image' && item.referenceImageId)
             .map(item => item.referenceImageId);
+    }
+
+    function canvasReferencesForNode(nodeId) {
+        const node = engine.nodes.get(nodeId);
+        const frames = node?.type === 'video' && node.data?.mode === 'first-last-frame-video';
+        return window.UltimateCanvasGenerationNodes.normalizeCanvasReferences({ version: 1,
+            items: generationReferenceItems(nodeId).filter(item => item.available).map((item, index) => ({
+                kind: item.kind, role: frames ? index === 0 ? 'first' : 'last' : 'reference',
+                ...(item.assetId ? { assetId: item.assetId } : {}), ...(item.referenceImageId ? { referenceImageId: item.referenceImageId } : {}),
+                ...(item.taskId ? { taskId: item.taskId } : {}), ...(item.sourceNodeId ? { sourceNodeId: item.sourceNodeId } : {}),
+                ...(item.sourceVersion ? { sourceVersion: item.sourceVersion } : {}) })) });
+    }
+
+    function referenceMediaLimits(node) {
+        const image = referenceSelectionMaximum(node);
+        if (node.type !== 'video' || window.UltimateCanvasGenerationNodes.videoMode(node.data?.mode).generationMode !== 'all_in_one_reference') return { image, video: 0, audio: 0 };
+        const media = generationSettingsForNode(node).referenceMedia;
+        return { image, video: media?.videoLimit ?? 3, audio: media?.audioLimit ?? 3 };
     }
 
     function availableGenerationReferenceItems(nodeId) {
@@ -4668,7 +4732,12 @@
         );
         const selectedMode = node.data?.mode || node.data?.generationIntent?.mode
             || (node.type === 'video' ? 'text-to-video' : 'text-to-image');
-        const options = window.UltimateCanvasGenerationInteractions.modeOptions(node.type, capability, referenceCount);
+        const items = availableGenerationReferenceItems(node.id);
+        const options = window.UltimateCanvasGenerationInteractions.modeOptions(node.type, capability, referenceCount).map(option => {
+            if (node.type === 'video' && window.UltimateCanvasGenerationNodes.videoMode(option.id).generationMode === 'all_in_one_reference'
+                && items.length >= option.minimumReferences && items.filter(item => item.kind === 'image').length <= option.maximumReferences) return { ...option, enabled: true, reason: '' };
+            return option;
+        });
         return { capability, selectedMode, options, selected: options.find(option => option.id === selectedMode) };
     }
 
@@ -4676,7 +4745,7 @@
         if (node?.type === 'image') {
             const selected = selectedImageChannel();
             const settings = generationSettingsForNode(node);
-            const limit = !usesLegacyImageRoute(settings.model, selected) ? selected.channel?.models?.[settings.model]?.maxReferences : null;
+            const limit = !usesLegacyImageRoute(settings.model, selected) ? selected.channel?.models?.[settings.model]?.canvas?.referenceLimit : null;
             if (Number.isSafeInteger(limit) && limit >= 0) return limit;
         }
         const state = generationModeState(node);
@@ -4689,7 +4758,7 @@
     function referenceSelectionItems(nodeId) {
         return generationReferenceItems(nodeId)
             .filter(item => item.available)
-            .map(item => ({ nodeId: item.nodeId, referenceImageId: item.referenceImageId }));
+            .map(item => ({ nodeId: item.nodeId, referenceImageId: item.referenceImageId || item.assetId || item.taskId }));
     }
 
     function cancelReferenceImport() {
@@ -4805,7 +4874,9 @@
         const node = engine.nodes.get(nodeId);
         if (!node || !['image', 'video'].includes(node.type) || !canvasRuntime.documentWritable || canvasRuntime.contextSwitching) return false;
         if (window.parent === window) { showCanvasNotice('请从站内画布页面打开参考图选择器。', 'warn'); return false; }
-        const capacity = referenceSelectionMaximum(node) - availableGenerationReferenceItems(nodeId).length;
+        const limits = referenceMediaLimits(node), current = availableGenerationReferenceItems(nodeId);
+        const typeLimits = Object.fromEntries(Object.entries(limits).map(([kind, limit]) => [kind, Math.max(0, limit - current.filter(item => item.kind === kind).length)]));
+        const capacity = Object.values(typeLimits).reduce((sum, value) => sum + value, 0);
         if (capacity < 1 || hasCurrentGenerationSubmission(nodeId)) { showCanvasNotice('当前参考区已满或生成正在提交，请稍后再添加。', 'warn'); return false; }
         cancelReferenceImport(); closeGenerationPopover();
         const requestId = crypto.randomUUID();
@@ -4814,7 +4885,8 @@
             signature: referenceImportSignature(nodeId), capacity, returnFocus: document.activeElement };
         window.parent.postMessage({ type: 'sd2-canvas-reference-request', requestId, userId: pendingReferenceImport.userId,
             nodeId, documentId: canvasRuntime.documentId || null, projectId: canvasRuntime.selectedProjectId || null,
-            cardId: canvasRuntime.selectedVideoCardId || null, capacity,
+            cardId: canvasRuntime.selectedVideoCardId || null, workspaceKey: canvasWorkspaceKey(), capacity, typeLimits,
+            acceptedTypes: Object.keys(typeLimits).filter(kind => typeLimits[kind] > 0),
             currentReferenceImageIds: generationReferenceImageIds(nodeId),
             currentAssetIds: generationReferenceItems(nodeId).flatMap(item => item.assetId ? [item.assetId] : []) }, window.location.origin);
         return true;
@@ -4830,22 +4902,24 @@
         const pending = pendingReferenceImport;
         const valid = referenceImportMatches(message.requestId) && Array.isArray(message.references)
             && message.references.length > 0 && message.references.length <= pending.capacity
-            && message.references.every(item => item && typeof item.referenceImageId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(item.referenceImageId)
-                && (item.assetId === null || typeof item.assetId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(item.assetId))
+            && message.references.every(item => item && ['image', 'video', 'audio'].includes(item.kind)
+                && (!item.referenceImageId || /^[a-zA-Z0-9_-]{1,160}$/.test(item.referenceImageId))
+                && typeof item.assetId === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(item.assetId) && /^[a-f0-9]{64}$/.test(item.sourceVersion)
                 && typeof item.title === 'string' && item.title.length <= 240
                 && [item.width, item.height].every(value => value === null || Number.isSafeInteger(value) && value > 0));
         let success = false;
         if (valid) {
             const node = engine.nodes.get(pending.nodeId);
             const current = generationReferenceItems(node.id);
-            const seen = new Set(current.map(item => item.referenceImageId));
-            const additions = message.references.filter(item => { if (seen.has(item.referenceImageId)) return false; seen.add(item.referenceImageId); return true; });
-            if (current.filter(item => item.available).length + additions.length <= referenceSelectionMaximum(node)) {
+            const seen = new Set(current.map(item => item.assetId || item.referenceImageId || item.taskId));
+            const additions = message.references.filter(item => { if (seen.has(item.assetId)) return false; seen.add(item.assetId); return true; });
+            const limits = referenceMediaLimits(node);
+            if (Object.entries(limits).every(([kind, limit]) => [...current.filter(item => item.available), ...additions].filter(item => item.kind === kind).length <= limit)) {
                 // Reuse the existing durable reference-input list. Never write the generated result or processing URL.
                 node.data.planReferences = [...(node.data.planReferences || []), ...additions.map(item => ({
-                    nodeId: `import-reference-${item.referenceImageId}`, referenceImageId: item.referenceImageId,
-                    assetId: item.assetId, title: item.title, width: item.width, height: item.height, available: true,
-                    preview: `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail`
+                    nodeId: `import-reference-${item.assetId}`, kind: item.kind, referenceImageId: item.referenceImageId,
+                    assetId: item.assetId, sourceVersion: item.sourceVersion, title: item.title, width: item.width, height: item.height, available: true,
+                    preview: item.kind === 'image' && item.referenceImageId ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` : ''
                 }))];
                 renderGenerationNodeControls(node.id); finishReferenceSelection({ returnToTarget: false });
                 canvasRuntime.pendingGenerationReferenceTargetId = null;
@@ -4884,7 +4958,9 @@
         const state = canvasRuntime.referenceSelection;
         document.querySelectorAll('.canvas-node').forEach(nodeEl => {
             const node = engine.nodes.get(nodeEl.dataset.nodeId);
-            const compatible = Boolean(state && node?.type === 'image' && referenceIdsFromNodeData(node.data || {}).length);
+            const target = state && engine.nodes.get(state.targetNodeId);
+            const compatible = Boolean(target && ['image', 'video', 'audio'].includes(node?.type) && referenceMediaLimits(target)[node.type] > 0
+                && (node.data?.assetId || node.data?.taskId || node.data?.selectedVideoResult?.taskId || referenceIdsFromNodeData(node.data || {}).length));
             nodeEl.classList.toggle('is-reference-compatible', compatible);
             nodeEl.classList.toggle('is-reference-incompatible', Boolean(state && !compatible));
         });
@@ -4932,7 +5008,7 @@
         const target = engine.nodes.get(targetNodeId);
         if (!target || !['image', 'video'].includes(target.type)) return false;
         finishReferenceSelection({ returnToTarget: false });
-        const maximumReferences = referenceSelectionMaximum(target);
+        const maximumReferences = Object.values(referenceMediaLimits(target)).reduce((sum, limit) => sum + limit, 0);
         if (availableGenerationReferenceItems(targetNodeId).length >= maximumReferences) {
             showCanvasNotice(`当前模式最多支持 ${maximumReferences} 个参考图`, 'warn');
             return false;
@@ -4957,10 +5033,12 @@
         const state = canvasRuntime.referenceSelection;
         const source = engine.nodes.get(sourceNodeId);
         const target = state ? engine.nodes.get(state.targetNodeId) : null;
-        if (!state || !target || source?.type !== 'image') return false;
+        if (!state || !target || !['image', 'video', 'audio'].includes(source?.type)) return false;
+        const limit = referenceMediaLimits(target)[source.type];
+        if (!limit || availableGenerationReferenceItems(target.id).filter(item => item.kind === source.type).length >= limit) { showCanvasNotice('此类参考已达当前模型上限。', 'warn'); return false; }
         const decision = CanvasReferenceSelection.add(state, {
             nodeId: sourceNodeId,
-            referenceImageId: referenceIdsFromNodeData(source.data || {})[0] || ''
+            referenceImageId: referenceIdsFromNodeData(source.data || {})[0] || source.data?.assetId || source.data?.selectedVideoResult?.taskId || source.data?.taskId || ''
         });
         if (!decision.accepted) {
             showCanvasNotice('请选择尚未加入的合法图片参考。', 'warn');
@@ -4981,9 +5059,12 @@
 
     function removeGenerationReference(targetNodeId, sourceNodeId) {
         const node = engine.nodes.get(targetNodeId);
+        const removed = generationReferenceItems(targetNodeId).find(item => item.nodeId === sourceNodeId);
         if (node?.data?.planReferences?.some(item => item.nodeId === sourceNodeId)) {
             node.data.planReferences = node.data.planReferences.filter(item => item.nodeId !== sourceNodeId);
-        } else if (!engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
+        } else if (!removed || removed.sourceNodeId && !engine.disconnectNodes(sourceNodeId, targetNodeId)) return false;
+        if (node?.data?.canvas_references) node.data.canvas_references.items = node.data.canvas_references.items.filter(item =>
+            item.sourceNodeId !== sourceNodeId && !(removed && (removed.assetId && item.assetId === removed.assetId || removed.referenceImageId && item.referenceImageId === removed.referenceImageId || removed.taskId && item.taskId === removed.taskId)));
         syncReferenceSelection();
         renderGenerationNodeControls(targetNodeId);
         renderReferenceSelectionStatus();
@@ -5059,10 +5140,11 @@
         const promptInput = promptInputFor(nodeEl, node.type);
         const referenceCount = availableGenerationReferenceItems(nodeId).length;
         const importButton = nodeEl.querySelector('[data-generation-command="import-reference"]');
+        const referenceFull = Object.entries(referenceMediaLimits(node)).every(([kind, limit]) => availableGenerationReferenceItems(nodeId).filter(item => item.kind === kind).length >= limit);
         if (importButton) importButton.disabled = !canvasRuntime.documentWritable || canvasRuntime.contextSwitching
-            || hasCurrentGenerationSubmission(nodeId) || referenceCount >= referenceSelectionMaximum(node);
+            || hasCurrentGenerationSubmission(nodeId) || referenceFull;
         const importCount = nodeEl.querySelector('[data-import-reference-count]');
-        if (importCount) importCount.textContent = referenceCount ? `已添加 ${referenceCount} 张` : '';
+        if (importCount) importCount.textContent = referenceCount ? `已添加 ${referenceCount} 个` : '';
         const modeState = generationModeState(node, referenceCount);
         const mode = modeState.selected;
         const interactionReadiness = node.data?.canvasStyle ? { ready: true } : window.UltimateCanvasGenerationInteractions.generationInteractionReadiness(
@@ -5211,10 +5293,10 @@
                         ${item.preview ? `<img src="${escapeHtml(item.preview)}" alt="">` : '<span class="generation-reference-thumb"></span>'}
                         <strong>${escapeHtml(item.title)}</strong>
                         <span>${item.available
-                            ? escapeHtml(window.UltimateCanvasGenerationInteractions.referenceRole(nodeMode, index))
+                            ? escapeHtml(item.kind === 'video' ? '视频参考' : item.kind === 'audio' ? '音频参考' : window.UltimateCanvasGenerationInteractions.referenceRole(nodeMode, index))
                             : '未入库'}</span>
                         <button type="button" class="generation-reference-remove" data-generation-reference-remove="${escapeHtml(item.nodeId)}"
-                            title="移除参考图" aria-label="移除参考图">&times;</button>
+                            title="移除参考素材" aria-label="移除参考素材">&times;</button>
                     </span>`).join('')
                 : '';
         }
@@ -5749,6 +5831,7 @@
             spec: nodeEl.querySelector('[data-generation-spec]')?.textContent.trim() || '',
             sourceNodes: node.data?.planSource ? [] : nodeSourcePayloads(nodeId),
             referenceImageIds: generationReferenceImageIds(nodeId),
+            ...(['image', 'video'].includes(kind) ? { canvasReferences: canvasReferencesForNode(nodeId) } : {}),
             settings: generationSettingsForNode(node),
             cameraPresets: node.data?.cameraPresets || [],
             referenceImage: node.data?.previewImage || node.data?.referenceImage || '',
@@ -6760,7 +6843,7 @@
                 prompt: payload.prompt,
                 projectId: project.id,
                 cardId: card?.id || null,
-                referenceImageIds: payload.referenceImageIds || []
+                referenceImageIds: payload.referenceImageIds || [], canvasReferences: payload.canvasReferences
             });
             if (!validation.valid) return { ready: false, message: validation.message };
             return { ready: true };
@@ -6780,6 +6863,7 @@
                 projectId: project.id,
                 cardId: card?.id || null,
                 referenceImageIds: payload.referenceImageIds || [],
+                canvasReferences: payload.canvasReferences,
                 capabilities: capabilities.video,
                 settings: payload.settings || {}
             });
@@ -6866,9 +6950,8 @@
         const reusable = intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(intent.state);
         const requestId = reusable ? intent.request_id : suppliedRequestId || input.idempotency_key;
         const quote = await requestJson('/api/tasks/estimate', { method: 'POST', payload: {
-            provider: input.provider || 'seedance', model: input.model, resolution: input.resolution, duration: input.duration,
-            ratio: input.ratio, project_id: input.project_id, video_card_id: input.video_card_id,
-            draft: input.draft === true, reference_video_urls: input.reference_video_urls || [] } });
+            ...input, provider: input.provider || 'seedance', draft: input.draft === true } });
+        if (quote.canvas_references) input = { ...input, canvas_references: quote.canvas_references };
         const spec = { ...input, request_id: requestId, count, entry: 'canvas', creation_contract_version: 2,
             baseline_task_id: previous?.baseline_task_id || input.baseline_task_id || null, pricing_revision: quote.pricing_revision,
             ...(reusable ? { expected_revision: intent.revision } : {}) };
@@ -6883,7 +6966,7 @@
             renderCanvasCreationAvailability(nodeId, prepared, input, count);
             throw Error(prepared.availability?.reasons.map(item => item.message).join('；') || '请处理本次创作条件。');
         }
-        return { ...input, creation_contract_version: 2, intent_id: prepared.id, intent_revision: prepared.revision,
+        return { ...input, ...prepared.spec?.input, creation_contract_version: 2, intent_id: prepared.id, intent_revision: prepared.revision,
             idempotency_key: count === 1 ? prepared.request_id : input.idempotency_key,
             resolution_approval_id: prepared.approval_id || null, baseline_task_id: prepared.spec?.baseline_task_id || null,
             pricing_revision: prepared.quote?.pricing_revision || quote.pricing_revision,
@@ -9110,7 +9193,7 @@
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         const icon = window.UltimateCanvasIcons;
         const rows = [
-            ['text', '文本', 'Text'], ['image', '图片', 'ImagePlus'], ['video', '视频', 'Video'],
+            ['text', '文本', 'Text'], ['image', '图片生成', 'ImagePlus'], ['video', '视频生成', 'Video'],
             ['video-compose', '智能剪辑', 'Scissors'], ['director', '导演台', 'Clapperboard'],
             ['frame-analysis', '逐帧拉片', 'Film'], ['audio', '音频', 'AudioLines'], ['script', '脚本', 'ScrollText']
         ];
@@ -9118,9 +9201,9 @@
             if (type === 'frame-analysis') return '逐帧拉片尚未接入';
             if (type === 'video-compose') return '智能剪辑尚未接入';
             if (connection && owner?.type.startsWith('flow-')) return '工具流节点只能连接工具流';
-            if (connection && ['video-compose', 'audio'].includes(type)) return '当前尚无对应生成接口，可从素材库添加已有素材';
+            if (connection && type === 'video-compose') return '当前尚无对应生成接口，可从素材库添加已有素材';
             if (connection && type === 'director') return '导演台请从画布加号独立添加';
-            if (incoming && ['image', 'video'].includes(owner?.type) && !['image', 'text', 'script'].includes(type)) return '此节点目前仅接收图片或文字上下文';
+            if (incoming && ['image', 'video'].includes(owner?.type) && !['text', 'script'].includes(type) && !(referenceMediaLimits(owner)[type] > 0)) return '当前节点或模式不接受此类参考';
             if (connection && !incoming && ['image', 'video'].includes(type) && !['image', 'text', 'script', 'director'].includes(owner?.type)) return '当前输出不能作为该节点的参考';
             if (!incoming && ['image', 'video', 'text', 'script'].includes(type)) {
                 const capability = capabilities[type === 'script' ? 'text' : type];
@@ -9135,10 +9218,10 @@
         const canReference = incoming && ['image', 'video'].includes(owner?.type);
         menu.setAttribute('role', 'menu');
         menu.setAttribute('aria-label', connection ? incoming ? '添加上下文' : '引用该节点生成' : '添加节点');
-        menu.innerHTML = `<div class="menu-section-title">${menu.getAttribute('aria-label')}</div>${buttons}
+        menu.innerHTML = `<div class="menu-section-title">${menu.getAttribute('aria-label')}</div>
+            ${!connection || incoming ? `<button type="button" class="menu-item" role="menuitem" data-action="upload">${icon('Upload')}<span>上传素材</span></button><div class="menu-divider"></div>` : ''}${buttons}
             ${connection ? `<button type="button" role="menuitem" class="menu-item" data-action="reference-node" ${canReference ? '' : 'disabled title="请从接收图片的节点左侧选择已有参考"'}>${icon('Link')}<span>参考节点</span></button>` : ''}
             ${!connection || owner?.type.startsWith('flow-') ? `<details><summary>工具流节点</summary>${[['flow-input', '输入'], ['flow-template', '图片模板'], ['flow-select', '结果筛选'], ['flow-confirm', '人工确认'], ['flow-output', '输出']].map(([type, label]) => `<button type="button" role="menuitem" class="menu-item" data-node-type="${type}">${icon('Layers')}<span>${label}</span></button>`).join('')}</details>` : ''}
-            ${!connection || incoming ? `<div class="menu-divider"></div><button type="button" class="menu-item" role="menuitem" data-action="upload">${icon('Upload')}<span>上传素材</span></button>` : ''}
             ${!connection ? `<button type="button" class="menu-item" role="menuitem" data-action="from-history">${icon('History')}<span>生成历史</span></button>` : ''}`;
     };
 

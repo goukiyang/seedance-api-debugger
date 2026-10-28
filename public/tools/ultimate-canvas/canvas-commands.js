@@ -248,6 +248,14 @@
     function duplicateNodeData(node, idMap, groupIdMap) {
         const source = node.data || {};
         const data = {};
+        if (source.canvas_references !== undefined) {
+            const references = globalThis.UltimateCanvasGenerationNodes?.normalizeCanvasReferences(source.canvas_references);
+            if (!references) throw new Error('新版参考素材无法读取，未复制节点');
+            data.canvas_references = { version: 1, items: references.items.map(item => {
+                const { sourceNodeId, ...identity } = item;
+                return { ...identity, ...(sourceNodeId && idMap.has(sourceNodeId) ? { sourceNodeId: idMap.get(sourceNodeId) } : {}) };
+            }) };
+        }
         Object.entries(source).forEach(([key, value]) => {
             if (!CONFIG_KEYS.has(key)) return;
             const clean = sanitize(value, key);
@@ -279,7 +287,8 @@
         if (isRecord(data.storySource)) data.storySource.nodeId = idMap.get(String(data.storySource.nodeId || '')) || null;
         if (Array.isArray(data.planReferences)) {
             data.planReferences = data.planReferences.map(item => isRecord(item)
-                ? { ...item, nodeId: idMap.get(String(item.nodeId || '')) || item.nodeId }
+                ? { ...item, nodeId: idMap.get(String(item.nodeId || '')) || item.nodeId,
+                    sourceNodeId: item.sourceNodeId ? idMap.get(String(item.sourceNodeId)) : undefined }
                 : item);
         }
         const group = isRecord(data.canvasGroup) ? data.canvasGroup : null;
@@ -545,6 +554,16 @@
                     if (id !== idMap.get(node.id)) throw new Error('复制节点编号与预留编号不一致');
                     createdIds.push(id);
                 });
+                for (const id of createdIds) {
+                    const data = engine.nodes.get(id).data;
+                    if (!data.canvas_references) continue;
+                    data.canvas_references.items = data.canvas_references.items.map(item => {
+                        const source = engine.nodes.get(item.sourceNodeId)?.data;
+                        if (!item.sourceNodeId || source && [item.assetId && [source.assetId, source.asset_id].includes(item.assetId),
+                            item.referenceImageId && [source.referenceImageId, source.reference_image_id].includes(item.referenceImageId), item.taskId && source.taskId === item.taskId].some(Boolean)) return item;
+                        const { sourceNodeId, ...identity } = item; return identity;
+                    });
+                }
                 for (const edge of before.connections) {
                     if (!idMap.has(edge.from) || !idMap.has(edge.to)) continue;
                     if (!engine.connectNodesForCommand(idMap.get(edge.from), idMap.get(edge.to))) {

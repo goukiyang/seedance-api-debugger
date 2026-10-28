@@ -49,11 +49,40 @@
     }
 
     function requestReferenceIds(input, maximum) {
-        if (input.promptMentions == null) return uniqueStrings(input.referenceImageIds, maximum);
+        if (input.promptMentions == null) {
+            if (!Array.isArray(input.referenceImageIds || []) || (input.referenceImageIds || []).length > maximum) throw new Error('参考图清单超过当前模式上限，未删减素材。');
+            return uniqueStrings(input.referenceImageIds);
+        }
         const values = input.referenceImageIds || [];
         if (!Array.isArray(values) || values.length > maximum || values.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(id))) throw new Error('绑定参考图清单无效或超限，请重新选择。');
         if (new Set(values).size !== values.length) throw new Error('绑定参考图重复，未改变首尾角色或发送顺序，请重新选择。');
         return values.slice();
+    }
+
+    function normalizeCanvasReferences(value) {
+        if (value === undefined) return undefined;
+        const validId = id => typeof id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(id);
+        if (!value || value.version !== 1 || !Array.isArray(value.items) || value.items.length > 80
+            || Object.keys(value).some(key => !['version', 'items'].includes(key))) throw new Error('参考素材清单无效。');
+        const items = [], seen = new Map();
+        for (const raw of value.items) {
+            if (!raw || !['image', 'video', 'audio'].includes(raw.kind) || !['reference', 'first', 'last'].includes(raw.role)
+                || raw.role !== 'reference' && raw.kind !== 'image'
+                || Object.keys(raw).some(key => !['kind', 'role', 'assetId', 'referenceImageId', 'taskId', 'sourceNodeId', 'sourceVersion'].includes(key))) throw new Error('参考素材类型或角色无效。');
+            const item = { kind: raw.kind, role: raw.role };
+            for (const key of ['assetId', 'referenceImageId', 'taskId', 'sourceNodeId']) if (raw[key] !== undefined) {
+                if (!validId(raw[key])) throw new Error('参考素材编号无效。'); item[key] = raw[key];
+            }
+            if (!item.assetId && !item.referenceImageId && !item.taskId) throw new Error('参考素材缺少持久编号。');
+            if (raw.sourceVersion !== undefined) {
+                if (typeof raw.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(raw.sourceVersion)) throw new Error('参考素材版本无效。');
+                item.sourceVersion = raw.sourceVersion;
+            }
+            const key = JSON.stringify([item.kind, item.role, item.assetId || null, item.referenceImageId || null, item.taskId || null]);
+            if (seen.has(key)) { if (seen.get(key) !== JSON.stringify(item)) throw new Error('重复参考的来源或版本冲突。'); continue; }
+            seen.set(key, JSON.stringify(item)); items.push(item);
+        }
+        return { version: 1, items };
     }
 
     function videoMode(mode, referenceLimit = 9) {
@@ -69,8 +98,10 @@
 
     function validateImage(input = {}) {
         const mode = imageMode(input.mode);
-        const references = uniqueStrings(input.referenceImageIds, 10);
+        const typed = normalizeCanvasReferences(input.canvasReferences);
+        const references = typed ? typed.items : requestReferenceIds(input, 10);
         const errors = contextErrors(input);
+        if (typed && (typed.items.length > 10 || typed.items.some(item => item.kind !== 'image' || item.role !== 'reference'))) errors.push('当前图片参考清单类型或数量无效，未删减。');
         if (!clean(input.prompt) && input.mode !== 'upscale-image') errors.push('请先填写图片提示词。');
         if (mode.requiresReference && references.length === 0) errors.push('当前图片模式至少需要一张已入库参考图。');
         return { valid: errors.length === 0, errors, message: errors[0] || '' };
@@ -79,7 +110,8 @@
     function validateVideo(input = {}) {
         const selectedOption = input.capabilities?.model_options?.find(item => item.value === input.settings?.model);
         const mode = videoMode(input.mode, selectedOption?.reference_media?.imageLimit);
-        const references = uniqueStrings(input.referenceImageIds, mode.maximumReferences);
+        const typed = normalizeCanvasReferences(input.canvasReferences);
+        const references = typed ? typed.items : uniqueStrings(input.referenceImageIds);
         const settings = input.settings || {};
         const errors = contextErrors(input);
         if (!clean(input.prompt)) errors.push('请先填写视频提示词。');
@@ -101,7 +133,10 @@
         if (clean(input.prompt).length > 20000) errors.push('单个视频方案超过2万字，请调整分段。');
         if (!RATIOS.has(ratio)) errors.push('视频比例无效。');
         if (!Number.isInteger(duration) || !durations?.includes(duration)) errors.push('时长不在所选模型的能力范围内，请明确重新选择；不会自动截短。');
-        if ((input.referenceImageIds || []).length > mode.maximumReferences) errors.push('参考图数量超过当前模式上限，请明确移除多余图片。');
+        if ((typed ? typed.items.filter(item => item.kind === 'image').length : (input.referenceImageIds || []).length) > mode.maximumReferences) errors.push('参考图数量超过当前模式上限，请明确移除多余图片。');
+        const media = option?.reference_media || { videoLimit: 3, audioLimit: 3, audioOnly: false };
+        if (typed && (typed.items.filter(item => item.kind === 'video').length > media.videoLimit || typed.items.filter(item => item.kind === 'audio').length > media.audioLimit)) errors.push('参考音视频超过当前模型上限。');
+        if (typed?.items.some(item => item.kind === 'audio') && !media.audioOnly && !typed.items.some(item => ['image', 'video'].includes(item.kind))) errors.push('音频参考还需要图片或视频参考。');
         if (!RESOLUTIONS.has(resolution)) errors.push('视频分辨率无效。');
         if (option?.resolutions && !option.resolutions.includes(resolution)) errors.push('所选模型不支持此分辨率，请重新选择；原值未被替换。');
         return { valid: errors.length === 0, errors, message: errors[0] || '' };
@@ -124,6 +159,7 @@
                 video_card_id: clean(input.cardId) || null,
                 canvas_document_id: clean(input.documentId),
                 canvas_node_id: clean(input.nodeId),
+                ...(input.canvasReferences ? { canvas_references: normalizeCanvasReferences(input.canvasReferences), required_capabilities: ['canvas.references.v1'] } : {}),
                 tab_id: clean(input.workspaceKey),
                 source_request_id: sourceRequestId(input),
                 ...(clean(settings.channelId) && clean(settings.channelId) !== 'original' ? {
@@ -157,12 +193,15 @@
         const prompt = typeof input.prompt === 'string' ? input.prompt : '';
         const requestId = clean(input.requestId);
         const nodeId = clean(input.nodeId);
+        const references = normalizeCanvasReferences(input.canvasReferences);
+        const media = settings.referenceMedia || { videoLimit: 3, audioLimit: 3 };
         return {
             url: settings.provider === 'volcengine_ip' ? '/api/ip/tasks/create' : '/api/tasks/create',
             method: 'POST',
             payload: {
                 creation_contract_version: 2, entry: 'canvas', continuation: { mode: 'new' },
                 canvas_document_id: clean(input.documentId), canvas_node_id: nodeId,
+                ...(references ? { canvas_references: references, required_capabilities: ['canvas.references.v1'] } : {}),
                 prompt,
                 ...(input.promptMentions ? { promptMentions: input.promptMentions } : {}),
                 model: clean(settings.model),
@@ -184,7 +223,8 @@
                 video_card_id: clean(input.cardId) || null,
                 video_branch_id: clean(input.branchId) || null,
                 reference_image_ids: requestReferenceIds(input, mode.maximumReferences),
-                reference_video_urls: videoReferenceUrls(input.referenceVideoUrls),
+                ...(!references || input.referenceVideoUrls !== undefined ? { reference_video_urls: videoReferenceUrls(input.referenceVideoUrls, media.videoLimit) } : {}),
+                ...(!references || input.referenceAudioUrls !== undefined ? { reference_audio_urls: videoReferenceUrls(input.referenceAudioUrls, media.audioLimit) } : {}),
                 idempotency_key: `${nodeId}:${requestId}`,
                 final_prompt_snapshot: prompt,
                 prompt_user_edited: input.promptUserEdited !== false,
@@ -203,8 +243,8 @@
         };
     }
 
-    function videoReferenceUrls(value = []) {
-        if (!Array.isArray(value) || value.length > 3 || value.some(item => typeof item !== 'string' || !item.trim() || item.length > 4096)) {
+    function videoReferenceUrls(value = [], limit = 3) {
+        if (!Number.isSafeInteger(limit) || limit < 0 || limit > 10 || !Array.isArray(value) || value.length > limit || value.some(item => typeof item !== 'string' || !item.trim() || item.length > 4096)) {
             throw new Error('参考视频清单无效，请保留原输入重新选择。');
         }
         return [...new Set(value.map(item => item.trim()))];
@@ -216,7 +256,12 @@
             provider: body.provider || input.settings?.provider || 'seedance', model: body.model,
             resolution: body.resolution, duration: body.duration, ratio: body.ratio,
             project_id: body.project_id, video_card_id: body.video_card_id,
-            draft: body.draft === true, reference_video_urls: videoReferenceUrls(body.reference_video_urls),
+            draft: body.draft === true,
+            ...(body.canvas_references ? { canvas_references: body.canvas_references, canvas_document_id: body.canvas_document_id,
+                canvas_node_id: body.canvas_node_id, generation_mode: body.generation_mode, required_capabilities: body.required_capabilities,
+                reference_image_ids: body.reference_image_ids } : {}),
+            ...(body.reference_video_urls !== undefined ? { reference_video_urls: videoReferenceUrls(body.reference_video_urls, input.settings?.referenceMedia?.videoLimit ?? 3) } : {}),
+            ...(body.reference_audio_urls !== undefined ? { reference_audio_urls: videoReferenceUrls(body.reference_audio_urls, input.settings?.referenceMedia?.audioLimit ?? 3) } : {}),
         } };
     }
 
@@ -419,6 +464,7 @@
         normalizeVideoStatus,
         videoReceptionStatus,
         videoTaskSnapshot,
-        uniqueStrings
+        uniqueStrings,
+        normalizeCanvasReferences
     };
 });

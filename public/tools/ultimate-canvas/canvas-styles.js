@@ -56,7 +56,15 @@
         const json = (url, payload, signal) => hooks.request(url, {
             ...(payload ? { method: 'POST', payload } : {}), cache: 'no-store', signal: signal || AbortSignal.timeout(30000)
         });
-        const roleInput = input => { hooks.attachRoleMediaContext?.(input); return input; };
+        const roleInput = input => {
+            const nodeId = input.nodeId;
+            const payload = nodeId ? hooks.getGenerationPayload?.(nodeId) : null;
+            if (payload?.canvasReferences) {
+                input.canvas_references = payload.canvasReferences;
+                input.required_capabilities = ['canvas.references.v1'];
+            }
+            hooks.attachRoleMediaContext?.(input); return input;
+        };
         const quoteSnapshot = nodeId => hooks.getQuoteSnapshot?.(nodeId) || '';
         const quoteInputsMatch = (node, context, snapshot) => current(node, context)
             && context.writable === hooks.context().writable

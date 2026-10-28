@@ -1635,6 +1635,8 @@ class CanvasEngine {
         const source = nodes.get(fromId);
         const target = nodes.get(toId);
         if (!source || !target) return { message: '节点不存在', reason: 'missing-node' };
+        if (target.type === 'image' && ['video', 'audio'].includes(source.type)) return { message: '图片生成只接受图片参考', reason: 'image-reference-kind' };
+        if (target.type === 'video' && ['video', 'audio'].includes(source.type) && ['first-last-frame-video', 'smart-multi-frame-video'].includes(target.data?.mode)) return { message: '当前模式只接受图片参考', reason: 'video-reference-mode' };
         if (fromId === toId) return { message: '不能连接到自己', reason: 'self-connection' };
         if (connections.some(connection => connection.from === fromId && connection.to === toId)) {
             return { message: '这条连接已存在', reason: 'duplicate-connection' };

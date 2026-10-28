@@ -22,39 +22,55 @@ type CanvasMediaPreview = {
   title: string;
 };
 type ReferenceRequest = { requestId: string; userId: string; nodeId: string; documentId: string | null;
-  projectId: string | null; cardId: string | null; capacity: number; currentReferenceImageIds: string[]; currentAssetIds: string[] };
+  projectId: string | null; cardId: string | null; workspaceKey: string; capacity: number; currentReferenceImageIds: string[]; currentAssetIds: string[];
+  acceptedTypes: Array<'image' | 'video' | 'audio'>; typeLimits: Partial<Record<'image' | 'video' | 'audio', number>> };
 type ReferenceChild = Window & { UltimateCanvasReferenceContextMatches?: (requestId: string) => boolean;
   UltimateCanvasRoleMediaContextMatches?: (requestId: string) => boolean;
   UltimateCanvasMentionContextMatches?: (requestId: string) => boolean;
   UltimateCanvasUploadContextMatches?: (requestId: string) => boolean };
 type MentionRequest = { requestId: string; prompt: string; cursor: number; candidates: PromptMentionCandidate[]; left: number; top: number };
 type UploadRequest = { requestId: string; userId: string; documentId: string; projectId: string; cardId: string | null;
-  files: Array<{ file: File; nodeId: string }> };
+  workspaceKey: string; files: Array<{ file: File; nodeId: string }> };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+const validWorkspace = (value: unknown): value is string => typeof value === 'string' && /^uc2_[a-f0-9]{64}$/.test(value);
+const canvasHeaders = (context: { workspaceKey: string; projectId: string | null; documentId: string | null; cardId: string | null; nodeId?: string }) => ({
+  'x-tab-id': context.workspaceKey, 'x-canvas-project-id': context.projectId || '', 'x-canvas-document-id': context.documentId || '',
+  'x-canvas-card-id': context.cardId || '', 'x-canvas-node-id': context.nodeId || '', 'x-canvas-capabilities': 'canvas.references.v1',
+});
 
 async function uploadCanvasOriginal(file: File, context: Omit<UploadRequest, 'files'> & { nodeId?: string },
   matches: () => boolean, onProgress?: NonNullable<Parameters<typeof uploadFileAsAsset>[1]>['onProgress']) {
   let markerKey = '';
+  let originalRequestId = context.requestId;
   try {
     const asset = await uploadFileAsAsset(file, { preserveUnknown: true, fallbackToRaw: false, onProgress,
       beforeUpload: async identity => {
         if (!matches()) throw new Error('画布或账号已变化，未开始上传');
-        markerKey = context.cardId ? `sd2_canvas_upload:${context.userId}:${context.projectId}:${context.cardId}:${context.documentId}:${identity.hash}` : `sd2_canvas_upload:v2:${context.userId}:${context.projectId}:${context.documentId}:${context.nodeId || 'reference'}:${context.requestId}:${identity.hash}`;
-        if (localStorage.getItem(markerKey)) {
+        const oldKey = context.cardId ? `sd2_canvas_upload:${context.userId}:${context.projectId}:${context.cardId}:${context.documentId}:${identity.hash}` : `sd2_canvas_upload:v2:${context.userId}:${context.projectId}:${context.documentId}:${context.nodeId || 'reference'}:${context.requestId}:${identity.hash}`;
+        markerKey = `sd2_canvas_upload:v3:${context.userId}:${context.documentId}:${context.nodeId || 'reference'}:${context.requestId}:${identity.hash}`;
+        if (!localStorage.getItem(markerKey) && localStorage.getItem(oldKey)) markerKey = oldKey;
+        const existing = localStorage.getItem(markerKey);
+        if (existing) {
+          const marker = JSON.parse(existing);
+          if (!validId(marker.requestId)) throw new Error('原上传编号无法确认，未重传或重新关联');
+          originalRequestId = marker.requestId;
+          if (marker.nodeId !== undefined && marker.nodeId !== context.nodeId) throw new Error('原上传属于其他节点，未更换关联');
           const query = new URLSearchParams({ canvas_document_id: context.documentId, project_id: context.projectId,
-            video_card_id: context.cardId || '', creation_contract_version: context.cardId ? '1' : '2', hash: identity.hash, file_size: String(identity.fileSize), mime_type: identity.mimeType });
-          const response = await fetch(`/api/tools/ultimate-canvas/upload?${query}`, { credentials: 'same-origin' });
-          const result = await readJsonResponse<{ found?: boolean; asset?: { id?: string }; error?: string }>(response);
+            video_card_id: context.cardId || '', creation_contract_version: '2', request_id: originalRequestId,
+            ...(context.nodeId ? { canvas_node_id: context.nodeId } : {}), hash: identity.hash, file_size: String(identity.fileSize), mime_type: identity.mimeType });
+          const response = await fetch(`/api/tools/ultimate-canvas/upload?${query}`, { credentials: 'same-origin', headers: canvasHeaders(context) });
+          const result = await readJsonResponse<{ found?: boolean; associated?: boolean; asset?: { id?: string }; error?: string }>(response);
           if (!matches()) throw new Error('画布或账号已变化，未关联素材');
           if (!response.ok || !result.found || !validId(result.asset?.id)) throw new Error(result.error || '原上传结果仍未知，未重新上传；请稍后查询原请求');
+          if (marker.nodeId === undefined && !result.associated) throw new Error('旧上传缺少原关联目标，原件保留，未重新关联');
           return result.asset!;
         }
-        localStorage.setItem(markerKey, JSON.stringify({ requestId: context.requestId, ...identity }));
+        localStorage.setItem(markerKey, JSON.stringify({ requestId: context.requestId, nodeId: context.nodeId, ...identity }));
         return null;
       } });
     if (!matches()) throw new Error('画布或账号已变化，原素材保留，未写回旧画布');
     if (!validId(asset.id)) throw new Error('原上传尚未返回素材编号，未关联');
-    return { asset, markerKey };
+    return { asset, markerKey, requestId: originalRequestId };
   } catch (error) {
     if (error instanceof UploadNotAcceptedError && markerKey) localStorage.removeItem(markerKey);
     throw error;
@@ -117,7 +133,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         assetId = asset.id;
         if (!matches()) throw new Error('画布或账号已变化，原素材保留，未写回旧画布');
         const response = await fetch('/api/tools/ultimate-canvas/upload', { method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: request.requestId, asset_id: asset.id,
+          headers: { 'Content-Type': 'application/json', ...canvasHeaders({ ...request, nodeId: entry.nodeId }) }, body: JSON.stringify({ request_id: original.requestId, asset_id: asset.id,
             project_id: request.projectId, video_card_id: request.cardId, creation_contract_version: 2, canvas_document_id: request.documentId, canvas_node_id: entry.nodeId }) });
         const result = await readJsonResponse<{ success?: boolean; error?: string }>(response);
         if (!response.ok || !result.success) throw new Error(result.error || '原件已上传，关联尚未确认；重试只恢复关联');
@@ -159,24 +175,25 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     const request = currentReferenceRequest.current;
     const check = () => { if (!request || !referenceContextMatches(request)) throw new Error('画布、节点或账号已变化，未覆盖原输入，请重新打开参考图'); };
     check();
-    if (!request || !items.length || items.length > request.capacity || items.some(item => item.type !== 'image')) throw new Error('所选参考图数量或类型无效');
-    const references: Array<{ referenceImageId: string; assetId: string | null; title: string; width: number | null; height: number | null }> = [];
-    for (const item of items) {
+    if (!request || !items.length || items.length > request.capacity || items.some(item => !request.acceptedTypes.includes(item.type))) throw new Error('所选参考素材数量或类型无效');
+    for (const kind of request.acceptedTypes) if (items.filter(item => item.type === kind).length > (request.typeLimits[kind] ?? 0)) throw new Error('所选素材超过当前类型上限，未删减');
+    const references: Array<{ kind: 'image' | 'video' | 'audio'; referenceImageId?: string; assetId: string; sourceVersion: string; title: string; width: number | null; height: number | null }> = [];
+    for (const [index, item] of items.entries()) {
       check();
-      let referenceImageId = item.referenceImageId;
-      if (!referenceImageId) {
-        if (!validId(item.assetId)) throw new Error('原图片编号不可用，请重新选择');
+      {
+        if (!validId(item.assetId) && !validId(item.referenceImageId)) throw new Error('原素材编号不可用，请通过原件添加后重试');
         const response = await fetch('/api/workspace/assets', { method: 'POST', credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'x-tab-id': `ultimate-canvas:${request.projectId || request.documentId || request.userId}:${request.cardId || request.nodeId}` },
-          body: JSON.stringify({ assetId: item.assetId, role: 'reference_image' }) });
-        const data = await readJsonResponse<{ success?: boolean; referenceImageId?: string; message?: string; error?: string }>(response);
+          headers: { 'Content-Type': 'application/json', ...canvasHeaders(request), 'x-upload-owner-id': request.userId },
+          body: JSON.stringify({ requestId: `${request.requestId}-${index}`, ownerId: request.userId,
+            selection: [item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId }], role: 'reference_image' }) });
+        const data = await readJsonResponse<{ success?: boolean; items?: Array<{ kind: string; assetId: string; referenceImageId?: string; sourceVersion: string }>; message?: string; error?: string }>(response);
         check();
-        if (!response.ok || !data.success || !validId(data.referenceImageId)) throw new Error(data.message || data.error || '原图片尚未关联为参考图，原输入保持不变');
-        referenceImageId = data.referenceImageId;
+        const saved = data.items?.find(saved => item.assetId ? saved.assetId === item.assetId : saved.referenceImageId === item.referenceImageId);
+        if (!response.ok || !data.success || !saved || saved.kind !== item.type || item.referenceImageId && saved.referenceImageId !== item.referenceImageId
+          || !validId(saved.assetId) || !/^[a-f0-9]{64}$/.test(saved.sourceVersion)) throw new Error(data.message || data.error || '原素材关联尚未确认或编号不同，原输入保持不变');
+        references.push({ kind: item.type, ...(validId(saved.referenceImageId) ? { referenceImageId: saved.referenceImageId } : {}), assetId: saved.assetId,
+          sourceVersion: saved.sourceVersion, title: item.fileName.slice(0, 240), width: item.width, height: item.height });
       }
-      if (!validId(referenceImageId)) throw new Error('原图片参考编号不可用');
-      references.push({ referenceImageId, assetId: validId(item.assetId) ? item.assetId : null,
-        title: item.fileName.slice(0, 240), width: item.width, height: item.height });
     }
     check();
     await new Promise<void>((resolve, reject) => {
@@ -274,7 +291,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         return;
       }
       if (value?.type === 'sd2-canvas-upload-request') {
-        if (!validId(value.requestId) || value.userId !== userId.current || ![value.documentId, value.projectId].every(validId) || value.cardId !== null && !validId(value.cardId)
+        if (!validId(value.requestId) || !validWorkspace(value.workspaceKey) || value.userId !== userId.current || ![value.documentId, value.projectId].every(validId) || value.cardId !== null && !validId(value.cardId)
           || !Array.isArray(value.files) || value.files.length !== 1
           || !value.files.every((entry: { file?: unknown; nodeId?: unknown }) => entry.file instanceof File && validId(entry.nodeId))
           || !(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasUploadContextMatches?.(value.requestId)) return;
@@ -318,6 +335,8 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
       if (event.data?.type === 'sd2-canvas-reference-request') {
         const value = event.data;
         if (!validId(value.requestId) || value.userId !== userId.current || !validId(value.nodeId)
+          || !validWorkspace(value.workspaceKey) || !Array.isArray(value.acceptedTypes) || !value.acceptedTypes.length || value.acceptedTypes.some((kind: string) => !['image', 'video', 'audio'].includes(kind))
+          || !value.typeLimits || Object.entries(value.typeLimits).some(([kind, limit]) => !['image', 'video', 'audio'].includes(kind) || !Number.isSafeInteger(limit) || Number(limit) < 0 || Number(limit) > 30)
           || ![value.documentId, value.projectId, value.cardId].every(id => id === null || validId(id))
           || !Number.isSafeInteger(value.capacity) || value.capacity < 1 || value.capacity > 80
           || !Array.isArray(value.currentReferenceImageIds) || value.currentReferenceImageIds.length > 80
@@ -326,6 +345,7 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         if (!(frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasReferenceContextMatches?.(value.requestId)) return;
         const request: ReferenceRequest = { requestId: value.requestId, userId: value.userId, nodeId: value.nodeId,
           documentId: value.documentId, projectId: value.projectId, cardId: value.cardId,
+          workspaceKey: value.workspaceKey, acceptedTypes: value.acceptedTypes, typeLimits: value.typeLimits,
           capacity: value.capacity, currentReferenceImageIds: value.currentReferenceImageIds, currentAssetIds: value.currentAssetIds };
         referenceReceipt.current?.reject(new Error('参考目标已改变，未覆盖原输入'));
         referenceReceipt.current = null; currentReferenceRequest.current = request; setReferenceRequest(request);
@@ -499,7 +519,8 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
         onActiveIndexChange={setMentionIndex} onSelect={selectMention} />
     </div>}
     {referenceRequest && referenceRequest.userId === user?.id && <ResourceLibraryPicker key={referenceRequest.requestId}
-      open imageOnly target="workspace" title="添加参考图" confirmLabel="添加到参考区"
+      open imageOnly={referenceRequest.acceptedTypes.length === 1 && referenceRequest.acceptedTypes[0] === 'image'} target="workspace" title="添加参考素材" confirmLabel="添加到参考区"
+      acceptedTypes={referenceRequest.acceptedTypes} typeLimits={referenceRequest.typeLimits}
       contextKey={`${referenceRequest.userId}:canvas:${referenceRequest.documentId}:${referenceRequest.nodeId}`}
       purpose={`canvas-reference:${referenceRequest.documentId || 'unsaved'}:${referenceRequest.nodeId}`}
       maxSelection={referenceRequest.capacity} currentCount={referenceRequest.currentReferenceImageIds.length}
