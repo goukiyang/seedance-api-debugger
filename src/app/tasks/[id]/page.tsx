@@ -1,6 +1,7 @@
 'use client';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
+import { VideoFeishuStatus } from '@/components/generate/VideoFeishuStatus';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -2205,6 +2206,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
               )}
 
               {task.is_draft && <DraftUpgradeAction task={task} ownerId={ownerId} />}
+              <VideoFeishuStatus key={`${ownerId}:${task.id}`} owner={ownerId} taskId={task.id} />
               <VideoCreationHistory taskId={task.id} ownerId={ownerId} projectId={task.project_id} videoCardId={task.video_card_id} reuseHref={!isEnhanceTask ? taskActionHref : null} />
               {isAdmin && <EnhanceVideoAction task={task} />}
             </section>

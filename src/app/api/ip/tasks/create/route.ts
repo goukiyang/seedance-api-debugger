@@ -1,6 +1,9 @@
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { enqueueVideoFeishuNotification } from '@/lib/video/feishu-notification';
+import { VideoFeishuError } from '@/lib/video/feishu-contract';
+import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { isActiveBranchStatus } from '@/lib/video-branches';
 import { NextRequest, NextResponse } from 'next/server';
@@ -863,6 +866,7 @@ export async function POST(request: NextRequest) {
       })
     : [];
   const fingerprintPayload = {
+    ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }),
     prompt: body.prompt.trim(),
     ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
@@ -1298,6 +1302,7 @@ export async function POST(request: NextRequest) {
     contentOverride: content,
   });
   const taskParams = {
+    ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     requestedModel,
     model: selectedModel,
@@ -1409,6 +1414,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
       await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost, pricingRevision: priceQuote.revision,
         ...(canvasAdmission ? { batchChildId: canvasAdmission.reference.child_id } : {}) });
 
@@ -1590,6 +1596,7 @@ export async function POST(request: NextRequest) {
     taskId = result.id;
     createdTask = result;
   } catch (err) {
+    if (err instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(err.code), code: `video_feishu_${err.code}` }, { status: err.status });
     if (err instanceof CanvasVideoBatchError) {
       if (canvasAdmission && err.code === 'canvas_video_batch_child_accepted') {
         const original = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip');

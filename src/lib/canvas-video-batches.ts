@@ -24,6 +24,7 @@ import { getH3ApiSettings, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/inte
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { CANVAS_REFERENCES_CAPABILITY, normalizeCanvasReferences } from '@/lib/canvas-references';
+import { normalizeVideoFeishuChoice } from '@/lib/video/feishu-contract';
 import { CANVAS_VIDEO_BATCH_CAPABILITY, canvasBatchId, canvasBatchObject, canvasVideoCount,
   canvasVideoChildState, canvasVideoBatchState, canvasVideoBatchIsSettled } from './canvas-video-batch-contract';
 import { CanvasVideoBatchError, assertCanvasVideoBatchCreateEnabled, canvasBatchHash, canvasBatchBusinessFingerprint,
@@ -40,7 +41,7 @@ const QUOTE_TTL = 300000;
 const MAX_INPUT_BYTES = 262144;
 const inputFields = new Set(['prompt', 'promptMentions', 'model', 'provider', 'generation_mode', 'ratio', 'duration', 'resolution',
   'seed', 'generate_audio', 'return_last_frame', 'watermark', 'draft', 'project_id', 'video_card_id', 'video_branch_id',
-  'reference_image_ids', 'canvas_references', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url',
+  'reference_image_ids', 'canvas_references', 'video_feishu', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url',
   'first_frame_image_id', 'last_frame_image_id', 'final_prompt_snapshot', 'prompt_user_edited', 'client_name', 'source_metadata',
   'canvas_document_id', 'canvas_node_id', 'idempotency_key', 'source_request_id', 'resolution_approval_id',
   'pricing_revision', 'pricing_quote_token', 'pricing_fingerprint_version', 'max_estimated_cost', 'count', 'required_capabilities',
@@ -85,6 +86,7 @@ function normalizeInput(raw: unknown, documentId: string, nodeId: string): Body 
     client_name: 'ultimate_canvas', canvas_document_id: documentId, canvas_node_id: nodeId,
     source_metadata: { ...metadata, source: 'ultimate_canvas', provider: raw.provider, canvas_document_id: documentId, canvas_node_id: nodeId },
     ...(raw.canvas_references === undefined ? {} : { canvas_references: normalizeCanvasReferences(raw.canvas_references) }),
+    ...(raw.video_feishu === undefined ? {} : { video_feishu: normalizeVideoFeishuChoice(raw.video_feishu) }),
     required_capabilities: [CANVAS_VIDEO_BATCH_CAPABILITY, ...(Array.isArray(raw.required_capabilities) && raw.required_capabilities.includes(CANVAS_REFERENCES_CAPABILITY) ? [CANVAS_REFERENCES_CAPABILITY] : [])] };
 }
 async function assertScope(db: CanvasBatchDb, user: SessionUser, input: Body, documentId: string, nodeId: string) {

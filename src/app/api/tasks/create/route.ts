@@ -3,6 +3,9 @@ import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
+import { enqueueVideoFeishuNotification } from '@/lib/video/feishu-notification';
+import { VideoFeishuError } from '@/lib/video/feishu-contract';
+import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { MULTIVIEW_GENERATION_WRITES_ENABLED } from '@/lib/video/multiview-build-mode';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
@@ -1305,6 +1308,7 @@ export async function POST(request: NextRequest) {
       }))
     : [];
   const fingerprintPayload = {
+    ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }),
     prompt: body.prompt.trim(),
     ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
@@ -2078,6 +2082,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     ...(multiviewGeneration ? { multiviewGeneration } : {}),
     ...(body.max_estimated_cost !== undefined ? { max_estimated_cost: body.max_estimated_cost } : {}),
@@ -2299,6 +2304,7 @@ export async function POST(request: NextRequest) {
         }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)),
       });
 
+      await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
       await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost,
         pricingRevision: priceQuote.revision,
         ...(canvasAdmission ? { batchChildId: canvasAdmission.reference.child_id } : {}) });
@@ -2493,6 +2499,7 @@ export async function POST(request: NextRequest) {
     committedTaskId = taskId;
     createdTask = result;
   } catch (err) {
+    if (err instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(err.code), code: `video_feishu_${err.code}` }, { status: err.status });
     if (err instanceof CanvasVideoBatchError) {
       if (canvasAdmission && err.code === 'canvas_video_batch_child_accepted') {
         const original = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ordinary');

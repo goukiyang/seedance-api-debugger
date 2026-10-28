@@ -434,6 +434,7 @@ interface Props {
   onCollectionSave: (name: string) => Promise<void>;
   onCollectionNew: (name: string) => Promise<void>;
   require1080pApproval: boolean;
+  submitAccessory?: React.ReactNode;
   onSubmit: (params: {
     prompt: string;
     generationMode: GenerationMode;
@@ -519,6 +520,7 @@ export function GenerationComposer({
   onCollectionSave,
   onCollectionNew,
   onSubmit,
+  submitAccessory,
   submitError,
   submitErrorDebug,
   isSubmitting,
@@ -2543,6 +2545,7 @@ export function GenerationComposer({
           canSubmit={canPressSubmit}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
+          submitAccessory={submitAccessory}
           providerLabel={providerLabel}
           providerOptions={providerOptions}
           selectedProvider={selectedProvider}

@@ -6,6 +6,7 @@ import { Check, ImagePlus, RefreshCw, Send, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { RelativeTime } from '@/components/RelativeTime';
+import { LoadingSkeleton } from '@/components/LoadingState';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -23,6 +24,8 @@ function deliveryLabel(status: string, error: string | null) {
   if (status === 'sent') return '回测通知已发送';
   if (status === 'pending') return '回测通知待发送';
   if (error?.includes('unknown')) return '通知结果待核对';
+  if (error === 'feedback_retest_already_reviewed') return '本人已回测，无需再次通知';
+  if (error === 'feedback_retest_superseded') return '已有新的修复轮次，本轮未再通知';
   if (error === 'feedback_author_unbound') return '未绑定飞书，可在本站回测';
   if (error === 'feedback_author_missing') return '原反馈无提交账号，无法通知';
   return '通知未送达，修复记录已保留';
@@ -99,6 +102,8 @@ export function FeedbackLifecyclePanel({ owner, feedbackId, admin = false, initi
       if (!usable()) return;
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500) { remember(draft, null); setPending(null); }
+        if (response.status === 409) await refresh();
+        if (response.status === 401 || response.status === 403 || response.status === 404) setView(null);
         throw new Error(data.error || '处理结果待核对');
       }
       remember(empty, null); setPending(null); setDraft(empty);
@@ -108,9 +113,10 @@ export function FeedbackLifecyclePanel({ owner, feedbackId, admin = false, initi
   }
   if (!identity.current.ready || hydrated !== scope) return <p role="status">正在核对登录状态…</p>;
   const selected = view?.round, editable = !admin && selected && !selected.review && selected.number === view?.currentRound;
-  const picture = (url: string, i: number) => <button type="button" key={`${url}:${i}`} onClick={() => setPreview(url)} title={`查看截图${i + 1}`}><img src={url} alt={`反馈截图${i + 1}`} /></button>;
-  return <section className={styles.flow} aria-label="反馈处理与回测">
+  const picture = (url: string, i: number) => <button type="button" key={`${url}:${i}`} onClick={() => setPreview(url)} title={`查看截图${i + 1}`}><img src={url} loading="lazy" decoding="async" alt={`反馈截图${i + 1}`} /></button>;
+  return <section className={styles.flow} aria-label="反馈处理与回测" aria-busy={busy}>
     <header className={styles.toolbar}><h3>{admin ? '修复与回测' : '我的反馈'}</h3><button type="button" title="重新读取" aria-label="重新读取反馈处理记录" disabled={busy} onClick={() => void refresh()}><RefreshCw size={16} /></button></header>
+    {!view && busy && <LoadingSkeleton label="正在读取处理记录" />}
     {!admin && view && <><p className={styles.body}>{view.feedback.content}</p><RelativeTime value={view.feedback.created_at} /><div className={styles.images}>{images(view.feedback.image_urls_json).map(picture)}</div></>}
     {view && <p className={styles.meta}>{view.receivedAt ? <>已收到 · <RelativeTime value={new Date(view.receivedAt).toISOString()} /></> : '尚未收到接收确认'}</p>}
     {view && view.currentRound > 0 && <label className={styles.round}>修复轮次<select disabled={busy || Boolean(pending)} value={selected?.number || view.currentRound} onChange={event => setRound(Number(event.target.value))}>

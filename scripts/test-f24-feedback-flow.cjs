@@ -154,6 +154,18 @@ test('retest delivery rejects changed author binding or source, never falls back
     assert.equal(result.failed, 1); assert.equal(f.sends.length, 0);
   }
 });
+test('an already reviewed or superseded round never starts a new retest send', async () => {
+  for (const reason of ['reviewed', 'superseded']) {
+    const f = fixture();
+    await f.lifecycle.markFeedbackFixed(f.db, 'admin', 'feedback-one', { operationId: 'repair-op-one', revision: 0, summary: 'Synthetic fix' });
+    if (reason === 'reviewed') await f.lifecycle.reviewFeedbackFix(f.db, 'author', 'feedback-one', { operationId: 'review-op-one', round: 1, result: 'passed' });
+    else await f.lifecycle.markFeedbackFixed(f.db, 'admin', 'feedback-one', { operationId: 'repair-op-two', revision: 1, summary: 'Synthetic newer fix' });
+    await f.load('src/lib/feedback/retest-delivery.ts').processFeedbackRetestDeliveries(1);
+    const first = [...f.notifications.values()][0];
+    assert.equal(first.status, 'failed'); assert.equal(f.sends.length, 0);
+    assert.match(first.error_message, /already_reviewed|superseded/);
+  }
+});
 test('retest unknown send keeps original UUID and safety window, and never resends after the window', async () => {
   const f = fixture();
   await f.lifecycle.markFeedbackFixed(f.db, 'admin', 'feedback-one', { operationId: 'repair-op-one', revision: 0, summary: 'Synthetic fix' });

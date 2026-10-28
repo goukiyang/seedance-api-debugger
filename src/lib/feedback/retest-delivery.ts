@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { feedbackPrisma as prisma, feedbackConfig, LEASE_MS, SEND_WINDOW_MS } from './notification';
 import { DeliveryError, feedbackTenantToken, feishuRequest } from './delivery';
 import { feedbackAuthorBinding, feedbackRetestNotificationId, FEEDBACK_RETEST_TYPE } from './lifecycle';
-import { feedbackRoundKey, parseFeedbackRound, validFeedbackId } from './flow-state';
+import { feedbackRoundKey, parseFeedbackRound, readFeedbackFlow, validFeedbackId } from './flow-state';
 
 type RetestDelivery = {
   version: 1; feedbackId: string; round: number; uuid: string; identity: string;
@@ -67,6 +67,9 @@ export async function processFeedbackRetestDeliveries(limit = 3) {
       } });
       if (!user || feedback?.user_id !== job.target_user_id || !round || round.notificationId !== job.id
         || feedbackAuthorBinding(user) !== meta!.identity) throw new DeliveryError('feedback_retest_recipient_changed', false, false);
+      if (round.review) throw new DeliveryError('feedback_retest_already_reviewed', false, false);
+      const { flow } = await readFeedbackFlow(prisma, meta!.feedbackId);
+      if (flow.currentRound !== meta!.round) throw new DeliveryError('feedback_retest_superseded', false, false);
       return user;
     };
     let priorAmbiguity = meta.ambiguousSend;

@@ -14,11 +14,12 @@ import { creationTaskLineage, readCreationSource, creationParent, assertCreation
 import { consumeCreationApproval } from './approval';
 import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { normalizeCanvasReferences } from '@/lib/canvas-references';
+import { normalizeVideoFeishuChoice, VideoFeishuError } from '@/lib/video/feishu-contract';
 
 const INPUT_FIELDS = ['provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
   'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls',
-  'reference_image_ids', 'canvas_references', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
+  'reference_image_ids', 'canvas_references', 'video_feishu', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
   'source_task_id', 'source_draft_task_id', 'tool_version', 'fps', 'multiview_generation', 'multiview_settings',
   'canvas_document_id', 'canvas_node_id', 'workspace_id', 'preset_id', 'lora_id', 'audio_prompt', 'music_prompt',
   'scene', 'video_url', 'template_id', 'agent_run_id', 'selected_agent_plan_key', 'agent_prompt_snapshot', 'final_prompt_snapshot', 'prompt_user_edited', 'roleMediaContext', 'first_frame_asset_id', 'last_frame_asset_id', 'template_studio_parameters', 'omni_reference_task_type', 'promptMentions'] as const;
@@ -40,6 +41,10 @@ export function normalizeVideoCreationSpec(body: Record<string, unknown>): Video
   if (!Array.isArray(sourceIds) || sourceIds.length > 16) throw new CreationError('素材来源无效', 400);
   const input = Object.fromEntries(INPUT_FIELDS.filter(key => body[key] !== undefined).map(key => [key, body[key]]));
   if (input.canvas_references !== undefined) input.canvas_references = normalizeCanvasReferences(input.canvas_references);
+  if (input.video_feishu !== undefined) {
+    try { input.video_feishu = normalizeVideoFeishuChoice(input.video_feishu); }
+    catch (error) { if (error instanceof VideoFeishuError) throw new CreationError('飞书通知选择无效，请重新读取设置', error.status, error.code); throw error; }
+  }
   if (typeof input.model !== 'string' || !input.model || typeof input.duration !== 'number' || !Number.isFinite(input.duration)
     || input.duration <= 0 || input.duration > 3600 || typeof input.resolution !== 'string') throw new CreationError('型号、时长或分辨率无效，未提交生成', 400, 'creation_spec_invalid');
   return { version: 2, action: action as VideoCreationSpec['action'], entry: entry as VideoCreationSpec['entry'],

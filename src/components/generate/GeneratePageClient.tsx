@@ -16,6 +16,8 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import ComposerTopbar from '@/components/ComposerTopbar';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useVideoFeishu } from '@/lib/hooks/use-video-feishu';
+import { VideoFeishuToggle } from './VideoFeishuToggle';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import {
@@ -545,6 +547,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const previousAccountIdRef = useRef<string | null>(currentUser?.id || null);
   const surfaceConfig = GENERATE_SURFACE_CONFIG[surface];
   const isIpSurface = surface === 'ip';
+  const videoFeishu = useVideoFeishu(currentUser?.id || '', surface === 'standard' && !loadingUser && !userLoadError);
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
   const projectPickerMenuRef = useRef<HTMLDivElement>(null);
   const projectRemovalBackdropRef = useRef<HTMLDivElement>(null);
@@ -2829,6 +2832,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       const createEndpoint = isIpSurface ? '/api/ip/tasks/create' : '/api/tasks/create';
       const requestBody = {
+        ...(!isIpSurface && videoFeishu.choice ? { video_feishu: videoFeishu.choice } : {}),
         ...(params.pricingRevision ? { pricing_revision: params.pricingRevision } : {}),
         ...(params.pricingQuoteToken ? { pricing_quote_token: params.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
         ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
@@ -3023,6 +3027,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     h3Ready,
     h3VideoConfig,
     isIpSurface,
+    videoFeishu.choice,
     saveGenerationDefaults,
     selectedH3Preset?.id,
     selectedH3Lora?.id,
@@ -3760,6 +3765,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onPrepareReuseReady={reportPrepareReuseReady}
           onReuseDraftApplied={completeReuseDraftApplication}
           onSubmit={handleSubmit}
+          submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} /> : undefined}
           submitError={error}
           submitErrorDebug={errorDebug}
           isSubmitting={submitting}

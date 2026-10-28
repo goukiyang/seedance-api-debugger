@@ -326,7 +326,7 @@ test('actual cover reader bounds concurrency and cancels queued stale reads', as
   const results = await Promise.all([a, b]); await assert.rejects(cancelled, error => error.name === 'AbortError');
   assert.equal(maximum, 2); assert.equal(requests, 2); results.forEach(result => result.release?.());
 });
-test('changed TS/TSX parse and shared submit/actionbar code remains untouched', () => {
+test('changed TS/TSX parse and original submit assembly remains intact outside the exercised notification field', () => {
   const files = ['src/lib/media/image-read-session.ts', 'src/lib/media/image-preview-session.ts', 'src/lib/media/copy-image.ts',
     'src/lib/navigation/task-reuse-client.ts', 'src/lib/video/multiview-records.server.ts', 'src/app/multiview/page.tsx',
     'src/app/multiview/MultiviewFrameControls.tsx', 'src/app/multiview/MultiviewRecords.tsx', 'src/app/multiview/multiview-record-cover.ts',
@@ -336,14 +336,21 @@ test('changed TS/TSX parse and shared submit/actionbar code remains untouched', 
     const result = ts.transpileModule(fs.readFileSync(path.join(root, file), 'utf8'), { fileName: file, reportDiagnostics: true, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
     assert.equal(result.diagnostics?.filter(value => value.category === ts.DiagnosticCategory.Error).length, 0, file);
   }
-  // Actual 24e handleSubmit AST text hashes. Keep the fixture runnable in an archive without .git.
+  // Preserve 24e assembly, excluding only the two notification additions exercised by test-f24-video-ui.
   const expected = ['7f7f351f3f81c97d84cccb9953ecd6d80e8492f64c5d482ab2d6024d0d56049f', '57ffb387a66f2707e103681a4709217485c9b3a9cd6649cebe9f595e86cb3a19'];
   let index = 0;
   for (const file of ['src/components/generate/GeneratePageClient.tsx', 'src/components/GenerationComposer.tsx']) {
     const current = fs.readFileSync(path.join(root, file), 'utf8');
     const submit = source => { const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX); let found;
       const visit = node => { if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'handleSubmit' || ts.isFunctionDeclaration(node) && node.name?.text === 'handleSubmit') { assert.equal(found, undefined); found = node.getText(ast); } ts.forEachChild(node, visit); }; visit(ast); assert.ok(found); return found; };
-    assert.equal(require('node:crypto').createHash('sha256').update(submit(current)).digest('hex'), expected[index++], file + ' submit assembly');
+    let assembly = submit(current);
+    if (file.endsWith('/GeneratePageClient.tsx')) {
+      for (const addition of ['\n        ...(!isIpSurface && videoFeishu.choice ? { video_feishu: videoFeishu.choice } : {}),', '\n    videoFeishu.choice,']) {
+        assert.equal(assembly.split(addition).length, 2, 'exact notification addition only');
+        assembly = assembly.replace(addition, '');
+      }
+    }
+    assert.equal(require('node:crypto').createHash('sha256').update(assembly).digest('hex'), expected[index++], file + ' submit assembly');
   }
 });
 

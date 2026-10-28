@@ -43,6 +43,7 @@ interface Props {
   canSubmit: boolean;
   isSubmitting: boolean;
   onSubmit: () => void;
+  submitAccessory?: React.ReactNode;
   onModeChange: (m: GenerationMode) => void;
   onRatioChange: (r: VideoRatio) => void;
   onDurationChange: (d: VideoDuration) => void;
@@ -77,6 +78,7 @@ export function ComposerActionBar({
   canSubmit,
   isSubmitting,
   onSubmit,
+  submitAccessory,
   onModeChange,
   onRatioChange,
   onDurationChange,
@@ -414,6 +416,7 @@ export function ComposerActionBar({
 
       {/* 右侧：提交按钮与费用 */}
       <div className="composer-action-right">
+        {submitAccessory}
         <button
           type="button"
           className="composer-submit-btn"
