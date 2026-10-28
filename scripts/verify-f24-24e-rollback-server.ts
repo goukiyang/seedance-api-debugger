@@ -22,7 +22,8 @@ async function main() {
     assert.equal(databases.find(row => row.name === 'main')?.file, match![1]);
     assert.equal(await prisma.user.count(), 0); assert.equal(await prisma.videoTask.count(), 0);
     const user = await prisma.user.create({ data: { id: 'rollback-user', name: 'Synthetic', username: 'rollback-synthetic', email: 'rollback@invalid.example',
-      password_hash: 'synthetic-no-login', account_type: 'internal', role: 'user', status: 'active', user_profile: 'core_video' } }) as SessionUser;
+      password_hash: 'synthetic-no-login', account_type: 'internal', feature_profile_id: 'internal_email_authorized',
+      role: 'user', status: 'active', user_profile: 'core_video' } }) as SessionUser;
     await prisma.creditAccount.create({ data: { user_id: user.id, balance: 1234 } });
     const project = await prisma.project.create({ data: { id: 'rollback-project', name: 'Synthetic', owner_user_id: user.id, created_by: user.id, type: 'personal' } });
     const graph = { schema: 'ultimate_canvas.v1', schemaVersion: 2, context: { project_id: project.id, video_card_id: null },

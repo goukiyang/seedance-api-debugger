@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频提交修复', outline: [
-  '修复视频提交时数据库连接相互等待的问题',
-  '基于0.110.0修正，保留原权限、报价与费用规则',
+const notice = { title: '兼容回退', outline: [
+  '保留视频提交修复和原有功能',
+  '新版参考画布暂不改写或新生成，原件和原任务保留',
   '历史待确认请求保持原号，不自动重新提交',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

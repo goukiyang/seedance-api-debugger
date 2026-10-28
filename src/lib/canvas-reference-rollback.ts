@@ -29,7 +29,7 @@ export async function assertCanvasGenerationRollbackSafe(ownerId: string, body: 
   const metadata = record(body.source_metadata) ? body.source_metadata : {};
   const ids = new Set([body.canvas_document_id, body.canvasDocumentId, body.documentId, body.document_id,
     context.documentId, metadata.canvas_document_id].filter((value): value is string => typeof value === 'string' && Boolean(value)));
-  for (const id of ids) {
+  for (const id of Array.from(ids)) {
     const document = await db.canvasDocument.findUnique({ where: { id }, select: { owner_user_id: true, document_json: true } });
     if (!document || !canvasReferencesRequired(JSON.parse(document.document_json))) continue;
     if (document.owner_user_id !== ownerId) throw new AuthError('无权访问此画布', 403);
