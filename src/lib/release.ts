@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '提示词管理', outline: [
-  '新增创作者和管理员验证身份后管理模板原文的入口',
-  '受保护提示词的编辑草稿由服务器保存',
-  '保留原生成记录、素材和费用，不重新提交历史任务',
+const notice = { title: '视频提交修复', outline: [
+  '修复视频提交时数据库连接相互等待的问题',
+  '基于0.110.0修正，保留原权限、报价与费用规则',
+  '历史待确认请求保持原号，不自动重新提交',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
