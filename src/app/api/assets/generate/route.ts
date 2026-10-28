@@ -393,7 +393,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
-    const rollbackInput = { ...input, ...body, canvas_document_id: canvasDocumentId };
+    const rollbackInput: Record<string, unknown> = { ...input, ...body, canvas_document_id: canvasDocumentId };
     const originalRequestId = cleanString(body.requestId || input.requestId);
     const originalBatch = body.quote === true || !originalRequestId ? null : await prisma.imageStudioTask.findFirst({
       where: { owner_id: user.id, batch_id: createHash('sha256').update(`${user.id}:${originalRequestId}`).digest('hex') }, select: { id: true } });
