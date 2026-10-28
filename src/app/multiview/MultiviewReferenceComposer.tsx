@@ -80,7 +80,7 @@ export function MultiviewReferenceComposer(props: Props) {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, key, readWork]);
-  useEffect(()=>{if(!work?.id)return;live.current.onWorkBound(work.id);const url=new URL(window.location.href);url.searchParams.set('referenceWorkId',work.id);url.searchParams.delete('workId');window.history.replaceState(window.history.state,'',url.pathname+url.search);},[work?.id]);
+  useEffect(()=>{if(!work?.id)return;live.current.onWorkBound(work.id);const url=new URL(window.location.href);url.searchParams.set('referenceWorkId',work.id);window.history.replaceState(window.history.state,'',url.pathname+url.search);},[work?.id]);
   useEffect(() => {
     if (!hydrated) return;
     try {

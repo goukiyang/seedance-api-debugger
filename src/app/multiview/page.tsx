@@ -250,7 +250,7 @@ function MultiviewPageContent() {
     void fetch(`/api/video/multiview/works/${referenceId}`, {cache:'no-store',headers:{'x-app-session-user':owner},signal:AbortSignal.timeout(30000)}).then(async response=>{
       const value = await response.json(); if (!response.ok || value.work?.recipe?.schema!==3 || !value.work.info) throw new Error(value.error || '参考拼图暂不可读取。');
       if (cancelled || ownerRef.current!==capturedOwner || authorityRef.current!==capturedAuthority || isClientSessionBlocked()) return;
-      const work = value.work as MultiviewWorkDto; setLocation({owner,taskId:work.sourceTaskId});setEditorWork({owner,id:''});setPageView('editor');setReferenceEditor({scope:`${authority}:${work.sourceTaskId}:${work.sourceVersion}`,slots:work.recipe!.slots,workId:work.id,info:work.info!});
+      const work = value.work as MultiviewWorkDto; setLocation({owner,taskId:work.sourceTaskId});setEditorWork({owner,id:work.parentWorkId||''});setPageView('editor');setReferenceEditor({scope:`${authority}:${work.sourceTaskId}:${work.sourceVersion}`,slots:work.recipe!.slots,workId:work.id,info:work.info!});
     }).catch(cause=>{if(!cancelled&&ownerRef.current===capturedOwner)setReferenceNotice(cause.message);});
     return()=>{cancelled=true;};
   }, [query,owner,authority,sessionReady]);
@@ -1239,7 +1239,7 @@ function MultiviewPageContent() {
         const selectionEpoch = context.current; const selectionAuthority = authorityRef.current;
         if ((unsavedFrames || workState.unsaved) && !await confirm('当前编辑内容尚未保存在此设备，仍要打开另一件作品吗？', { title: '打开作品', confirmLabel: '放弃并打开' })) return;
         if (ownerRef.current !== owner || selectionEpoch !== context.current || selectionAuthority !== authorityRef.current || isClientSessionBlocked()) return;
-        if (work.recipe?.schema === 3) { setLocation({ owner, taskId: work.sourceTaskId }); setReferenceEditor({ scope: `${authority}:${work.sourceTaskId}:${work.sourceVersion}`, slots: work.recipe.slots, workId: work.id, info: work.info || undefined }); writeLocation('editor', '', work.sourceTaskId); return; }
+        if (work.recipe?.schema === 3) { setLocation({ owner, taskId: work.sourceTaskId }); setReferenceEditor({ scope: `${authority}:${work.sourceTaskId}:${work.sourceVersion}`, slots: work.recipe.slots, workId: work.id, info: work.info || undefined }); writeLocation('editor', work.parentWorkId || '', work.sourceTaskId); return; }
         setEditorWork({ owner, id: work.id }); setLocation({ owner, taskId: work.sourceTaskId }); setAllowWorkCreate(false); writeLocation('editor', work.id, work.sourceTaskId);
       })(); }}
       onNew={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} />}
