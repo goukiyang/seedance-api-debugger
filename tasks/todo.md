@@ -771,3 +771,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 | `src/lib/navigation.ts`、`src/components/template-studio/TemplateStudioShell.tsx`、`src/app/image-studio/page.tsx` | 统一入口、账号隔离恢复、旧地址兼容 |
 | `src/app/projects/[id]/page.tsx`、`video-cards/[cardId]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/approvals/page.tsx`、`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/lib/notifications/display.ts` | 隐藏视频卡管理和直达，保留生成归属和原数据 |
 | `package.json`、`package-lock.json`、`src/lib/release.ts`、`.gitignore`、`docs/materials/index.md`、`tasks/todo.md` | 版本/升级摘要、敏感截图本地归档与完整交接 |
+
+### MV-D01–D04 R06正式部署（2026-10-28）
+
+已部署v0.113.0，待用户手动验收。[原单§21.1](todo/2026-10-25-multiview-page-ux.md#211-已部署待用户手动验收2026-10-28)记录四项已实现上线、真实前景处理、原API动作视频、两加密规则及费用/原号恢复。主源d1e905e3、兼容guard5a733b9b均已push；两完整Next/启动门、精确增量与旧业务hash保护、公网资源匹配有证。原4timer恢复，旧finalizer不启。当前文案配置就绪，未收费/浏览器或独立功能验收；固定回退仅回程序、不回数据。详细资料仍私有保存。
