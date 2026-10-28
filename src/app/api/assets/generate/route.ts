@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'node:crypto';
@@ -27,7 +28,7 @@ import { StudioError, submitStudioBatch } from '@/lib/image-studio/tasks';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
 import { withImagePricing } from '@/lib/pricing/image';
 import { assertImageStudioAdmissionOpen, reserveImageStudioQueueCapacity, QueueMaintenanceError, QueueCapacityError } from '@/lib/image-studio/queue-capacity';
-import { createSynchronousImageAdmission, finishSynchronousImageAdmission, SynchronousImageAdmissionError } from '@/lib/image-studio/synchronous-admission';
+import { createSynchronousImageAdmission, finishSynchronousImageAdmission, assertNoSynchronousImageAdmission, SynchronousImageAdmissionError } from '@/lib/image-studio/synchronous-admission';
 import { attachAssetToSiteReferenceImage, ReferenceImportError } from '@/lib/assets/reference-import';
 import { getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { uploadAsset } from '@/lib/assets/storage';
@@ -392,6 +393,14 @@ export async function POST(request: NextRequest) {
     }
 
     const input = normalizeInput(body.input);
+    const rollbackInput = { ...input, ...body, canvas_document_id: canvasDocumentId };
+    const originalRequestId = cleanString(body.requestId || input.requestId);
+    const originalBatch = body.quote === true || !originalRequestId ? null : await prisma.imageStudioTask.findFirst({
+      where: { owner_id: user.id, batch_id: createHash('sha256').update(`${user.id}:${originalRequestId}`).digest('hex') }, select: { id: true } });
+    if (!originalBatch) {
+      if (body.quote !== true && originalRequestId) await assertNoSynchronousImageAdmission(prisma, user.id, originalRequestId);
+      await assertCanvasGenerationRollbackSafe(user.id, rollbackInput, prisma);
+    }
     await assertCanvasPromptCompatibility(user, canvasDocumentId, canvasNodeId, buildGenerationPrompt(body, input, action), input.promptMentions);
     if (inputTooLarge(input)) {
       return NextResponse.json({ error: '图形生成输入过长，请减少节点、参考图或提示词内容' }, { status: 400 });
@@ -502,7 +511,8 @@ export async function POST(request: NextRequest) {
       if (!capability.ok) throw new AuthError(capability.error, 400);
       if (referenceImages.some(image => !image.asset_id || !image.asset || image.asset.status !== 'active')) throw new AuthError('此通道需要持久原件参考图，请重新选择；未生成', 409);
       const studio = await getImageStudioSettings();
-      const submission = { requestId, channelId, projectId: project.id, imageChannel: body.imageChannel || imageChannel,
+      const submission = { requestId, channelId, projectId: project.id, canvas_document_id: canvasDocumentId,
+        ...(rollbackInput.canvas_references === undefined ? {} : { canvas_references: rollbackInput.canvas_references }), imageChannel: body.imageChannel || imageChannel,
         revision: body.settingsRevision ?? studio.revision, prompt: rawPrompt, count,
         referenceIds: referenceImages.map(image => image.asset_id!), model: selectedModel, quality,
         resolution, aspectRatio: requestedRatio, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };
@@ -538,7 +548,7 @@ export async function POST(request: NextRequest) {
     synchronousAdmission = await prisma.$transaction(async tx => {
       await reserveImageStudioQueueCapacity(tx, user.id, count);
       return createSynchronousImageAdmission(tx, { ownerId: user.id, requestId: cleanString(body.requestId || input.requestId) || undefined,
-        fingerprint, count, model: settings.default_model, scope });
+        fingerprint, count, model: settings.default_model, scope }, () => assertCanvasGenerationRollbackSafe(user.id, rollbackInput, tx));
     });
     const providerResult = await createImageGeneration({
       settings,

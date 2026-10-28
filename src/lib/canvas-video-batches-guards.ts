@@ -2,6 +2,7 @@ import { settleVideoCreationBatch } from '@/lib/creation/settlement';
 import { createHash, createHmac } from 'node:crypto';
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasReferenceRollbackSafe } from './canvas-reference-rollback';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewTask, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { creditCents } from '@/lib/credits/precision';
@@ -120,6 +121,9 @@ export async function restoreCanvasVideoBatchCreate(user: SessionUser, received:
   if (child.state !== 'prepared' || !child.batch.active_node_key) throw new CanvasVideoBatchError('本子项已停止或明确拒绝，不会重新生成', 409,
     'canvas_video_batch_child_sealed', { rejection_receipt: child.rejection_receipt ? JSON.parse(child.rejection_receipt) : null });
   if (ref.child_revision !== child.revision) throw new CanvasVideoBatchError('原子请求报价版本已结束，请查询原批次', 409, 'canvas_video_batch_child_changed');
+  assertCanvasReferenceRollbackSafe(frozen, received);
+  const document = await prisma.canvasDocument.findUnique({ where: { id: child.batch.document_id }, select: { document_json: true } });
+  if (document) assertCanvasReferenceRollbackSafe(document.document_json);
   assertCanvasVideoBatchCreateEnabled();
   const admission = { reference: ref, childRevision: child.revision, fingerprint: child.business_fingerprint };
   if (await canvasVideoRouteFingerprint(frozen.provider) !== child.route_fingerprint || child.quote_expires_at.getTime() <= Date.now()) {
@@ -136,6 +140,7 @@ export async function restoreCanvasVideoBatchCreate(user: SessionUser, received:
 export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: SessionUser, body: Record<string, unknown>,
   admission: CanvasVideoAdmission | null, input: { projectId: string; videoCardId: string | null; branchId: string | null; amount: number }) {
   const { documentId, nodeId } = canvasVideoNodeIdentity(body);
+  assertCanvasReferenceRollbackSafe(body);
   if (!documentId && !nodeId && !admission) return;
   if (!documentId || !nodeId) throw new CanvasVideoBatchError('画布视频归属不完整', 400);
   const doc = await db.canvasDocument.findUnique({ where: { id: documentId } });
@@ -150,6 +155,7 @@ export async function assertCanvasVideoAdmission(db: CanvasBatchDb, user: Sessio
     if (!branch || branch.video_card_id !== input.videoCardId || ['closed', 'merged', 'promoted'].includes(branch.status)) throw new CanvasVideoBatchError('原视频分支已关闭或归属变化，尚未生成', 403);
   }
   const snapshot = JSON.parse(doc.document_json);
+  assertCanvasReferenceRollbackSafe(snapshot);
   if (!snapshot.canvas?.nodes?.some((node: { id: string }) => node.id === nodeId)) throw new CanvasVideoBatchError('原画布节点已移除，尚未生成', 409);
   let slot = await db.canvasVideoBatch.findUnique({ where: { active_node_key: canvasBatchHash([user.id, documentId, nodeId]) } });
   if (!admission) {

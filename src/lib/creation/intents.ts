@@ -12,6 +12,15 @@ import { assertVideoCreationReady, readCreationContext, type CreationDb } from '
 import { readCreationAvailability, creationNeedsApproval } from './availability';
 import { creationTaskLineage, readCreationSource, creationParent, assertCreationLineageUnlocked } from './lineage';
 import { consumeCreationApproval } from './approval';
+import { assertCanvasGenerationRollbackSafe as assertCanvasRollback, CanvasReferenceRollbackError } from '@/lib/canvas-reference-rollback';
+
+async function assertCanvasGenerationRollbackSafe(...args: Parameters<typeof assertCanvasRollback>) {
+  try { await assertCanvasRollback(...args); }
+  catch (error) {
+    if (error instanceof CanvasReferenceRollbackError) throw new CreationError(error.message, error.status, error.code);
+    throw error;
+  }
+}
 
 const INPUT_FIELDS = ['provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
@@ -86,6 +95,8 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   if (previous && ['accepted', 'closed', 'batch_active', 'batch_settled'].includes(previous.state)) return projectIntent(user, previous, prisma);
   await assertVideoCreationReady();
   await assertNoPreparationRejection(prisma, user.id, requestId, body);
+  if (previous) await assertCanvasGenerationRollbackSafe(user.id, JSON.parse(previous.spec_json).input || {}, prisma);
+  await assertCanvasGenerationRollbackSafe(user.id, body, prisma);
   const spec = normalizeVideoCreationSpec(body), inputHash = creationSpecHash(spec);
   const context = await readCreationContext(user, spec.project_id, spec.video_card_id);
   const parentId = creationParent(spec);
@@ -102,6 +113,10 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   const row = await prisma.$transaction(async tx => {
     await assertProjectActiveInTransaction(tx, user, spec.project_id);
     const current = await tx.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
+    if (!current || !['accepted', 'closed', 'batch_active', 'batch_settled'].includes(current.state)) {
+      if (current) await assertCanvasGenerationRollbackSafe(user.id, JSON.parse(current.spec_json).input || {}, tx);
+      await assertCanvasGenerationRollbackSafe(user.id, body, tx);
+    }
     await assertNoPreparationRejection(tx, user.id, requestId, body);
     const data = { action: spec.action, entry: spec.entry, project_id: spec.project_id, legacy_card_id: spec.video_card_id,
       parent_task_id: parentId, baseline_task_id: spec.baseline_task_id, count: spec.count, payer_kind: context.payer.kind,
@@ -158,6 +173,7 @@ export async function acceptVideoCreationIntent(tx: Prisma.TransactionClient, us
   if (intent.revision !== body.intent_revision || (!isBatch && !['ready', 'awaiting_approval', 'prepared'].includes(intent.state))
     || isBatch && intent.state !== 'batch_active' || intent.state === 'closed') throw new CreationError('原创作请求已结束或变化，未重新生成');
   const spec = creationSubmissionSpec(body, intent);
+  await assertCanvasGenerationRollbackSafe(user.id, { ...spec.input, ...body }, tx);
   if (creationSpecHash(spec) !== intent.input_hash || (child ? child.quote_revision : intent.pricing_revision) !== accepted.pricingRevision
     || intent.request_id !== body.idempotency_key && !isBatch) throw new CreationError('本次内容与原创作请求不一致，请核对原请求', 409, 'creation_input_changed');
   const context = await readCreationContext(user, intent.project_id, spec.video_card_id, tx);

@@ -4,6 +4,8 @@ import { parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
 import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { AuthError } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
+import { canvasStyleBatchId } from '@/lib/canvas-style-bridge';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
 import { getCanvasImageQuote } from '@/lib/canvas-quote';
 import { defaultStudioModuleId, saveStudioModule, validStudioModuleId } from '@/lib/image-studio/modules';
@@ -45,6 +47,9 @@ export async function POST(request: NextRequest) {
     await assertCanvasPromptCompatibility(user, context.documentId, context.nodeId, String(body.prompt || ''), body.promptMentions);
     if (!context.documentId || !context.nodeId || !validStudioModuleId(body.moduleId, user.id)
       || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new AuthError('图片任务归属或编号无效', 400);
+    const original = body.action === 'quote' ? null : await prisma.imageStudioTask.findFirst({
+      where: { batch_id: canvasStyleBatchId(user.id, body.requestId), owner_id: user.id }, select: { id: true } });
+    if (!original) await assertCanvasGenerationRollbackSafe(user.id, body, prisma);
     const doc = await prisma.canvasDocument.findUniqueOrThrow({ where: { id: context.documentId } });
     const graph = JSON.parse(doc.document_json);
     const node = graph.canvas.nodes.find((item: { id: string }) => item.id === context.nodeId);
@@ -83,7 +88,8 @@ export async function POST(request: NextRequest) {
     if (!unframed && !existing) await saveStudioModule(user.id, { id: body.moduleId, revision: 0, name: '画布图片',
       prompt: '', count: Number(settings.count), referenceIds: [], model: settings.model, quality: settings.quality,
       resolution: settings.resolution, aspectRatio: settings.ratio, groupName: '画布图片' }, false, user.role === 'admin', undefined, user);
-    const submission = { requestId: body.requestId, projectId: context.projectId, ...(unframed ? {} : { moduleId: body.moduleId }),
+    const submission = { requestId: body.requestId, projectId: context.projectId, canvas_document_id: context.documentId,
+      ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }), ...(unframed ? {} : { moduleId: body.moduleId }),
       revision: body.settingsRevision, prompt: body.prompt, count: Number(settings.count), referenceIds: uniqueReferences,
       draft: { referencePolicy }, maxEstimatedCost: body.maxEstimatedCost, billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision,
       model: settings.model, ...(requestedChannelId === undefined ? {} : { channelId: requestedChannelId }),

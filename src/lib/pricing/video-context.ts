@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
@@ -64,6 +65,7 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   if (!projectId) throw new PricingChargeError('请先选择报价所属项目');
   const access = await assertCanGenerateInProject(user, projectId, db);
   if (videoCardId) await assertCanGenerateInVideoCard(user, projectId, videoCardId, db);
+  await assertCanvasGenerationRollbackSafe(user.id, body, db);
   const payer = shouldBillProjectBudget(access.project!) ? { kind: 'project' as const, id: projectId } : { kind: 'user' as const, id: user.id };
   const templateRunId = typeof body.template_studio_run_id === 'string' && body.template_studio_run_id ? body.template_studio_run_id : null;
   let templateVideoUrls: string[] | undefined;

@@ -5,6 +5,8 @@ import { getCanvasImageQuote, parseCanvasQuoteInput } from '@/lib/canvas-quote';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
 import { ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
 import { PricingItemUnavailableError } from '@/lib/pricing/item-unavailable';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,7 +46,9 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) throw new AuthError('未登录', 401);
     assertInternalOnly(user, '外部账号无权使用无限画布。');
-    const input = parseCanvasQuoteInput(await readInput(request));
+    const raw = await readInput(request);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) await assertCanvasGenerationRollbackSafe(user.id, raw as Record<string, unknown>, prisma);
+    const input = parseCanvasQuoteInput(raw);
     return NextResponse.json(await getCanvasImageQuote(user, input), { headers });
   } catch (error) {
     if (error instanceof ImageGenerationChannelError || error instanceof ImageGenerationQualityRouteError || error instanceof PricingItemUnavailableError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status, headers });

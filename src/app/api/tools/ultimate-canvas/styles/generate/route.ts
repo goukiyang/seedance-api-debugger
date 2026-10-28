@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
+import { canvasStyleBatchId } from '@/lib/canvas-style-bridge';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanUseReferenceImage, uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS } from '@/lib/image-studio/model-catalog';
@@ -46,6 +48,9 @@ export async function POST(request: NextRequest) {
     const body = await readCanvasStyleJson(request);
     const context = parseCanvasStyleContext(body);
     await assertCanvasStyleContext(user, context);
+    const original = body.action === 'quote' || typeof body.requestId !== 'string' ? null : await prisma.imageStudioTask.findFirst({
+      where: { batch_id: canvasStyleBatchId(user.id, body.requestId), owner_id: user.id }, select: { id: true } });
+    if (!original) await assertCanvasGenerationRollbackSafe(user.id, body, prisma);
     if (body.roleMediaContext !== undefined) {
       roleMediaFingerprint(body.roleMediaContext);
       const roleContext = body.roleMediaContext as Record<string, unknown>;
@@ -179,7 +184,8 @@ export async function POST(request: NextRequest) {
 
     const prompt = body.prompt.trim();
 
-    const submission = { requestId, projectId: context.projectId, moduleId, moduleRevision: Number(expectedModuleRevision),
+    const submission = { requestId, projectId: context.projectId, canvas_document_id: context.documentId,
+      ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }), moduleId, moduleRevision: Number(expectedModuleRevision),
       revision: Number(expectedSettingsRevision), prompt, count: Number(count), referenceIds: mergedReferenceIds,
       model: generation.model, ...(requestedChannelId !== undefined || !suppliedImageChannel ? { channelId } : {}), imageChannel: body.imageChannel || imageChannel, quality: generation.quality, resolution: generation.resolution, aspectRatio,
       billingQuoteId: body.billingQuoteId, pricingRevision: body.pricingRevision, maxEstimatedCost: body.maxEstimatedCost };

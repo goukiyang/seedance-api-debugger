@@ -20,6 +20,7 @@ import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-recei
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
 import { videoPricingBusinessFingerprint } from '@/lib/pricing/video-context';
+import { assertCanvasGenerationRollbackSafe, CanvasReferenceRollbackError } from '@/lib/canvas-reference-rollback';
 import { generationRequestFingerprint } from '@/lib/template-studio-video-fingerprint';
 import { bindRoleMediaTask, roleMediaFingerprint } from '@/lib/canvas-roles/media-bindings';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
@@ -914,9 +915,11 @@ export async function POST(request: NextRequest) {
   }
   let priceQuote: VideoPricingQuote;
   try {
+    await assertCanvasGenerationRollbackSafe(user.id, body, prisma);
     priceQuote = await quoteVideoPricing({ provider: 'volcengine_ip', model: selectedModel, resolution, duration });
     requireVideoPricingRevision(priceQuote, body.pricing_revision);
   } catch (error) {
+    if (error instanceof CanvasReferenceRollbackError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
   }

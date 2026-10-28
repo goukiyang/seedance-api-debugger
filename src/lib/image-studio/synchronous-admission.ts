@@ -49,7 +49,7 @@ export async function assertNoSynchronousImageAdmission(tx: Client, ownerId: str
 
 export async function createSynchronousImageAdmission(tx: Client & Pick<Prisma.TransactionClient, 'imageStudioTask'>, input: {
   ownerId: string; requestId?: string; fingerprint: string; count: number; model: string; scope: string;
-}) {
+}, beforeCreate?: () => Promise<void>) {
   const requestId = input.requestId || `sync-${randomUUID()}`;
   if (!/^[a-zA-Z0-9-]{16,100}$/.test(requestId)) throw new SynchronousImageAdmissionError('图片请求编号无效，未派发生成', 400);
   const key = `${PREFIX}${input.ownerId}:${requestId}`;
@@ -64,6 +64,7 @@ export async function createSynchronousImageAdmission(tx: Client & Pick<Prisma.T
       ? '此同步图片请求已有记录，请先核对原结果；没有重新生成'
       : '图片请求编号已用于其他设置，请核对原请求；没有重新生成', 409, requestId);
   }
+  if (beforeCreate) await beforeCreate();
   const record: SyncImageAdmission = { schema: 'image.sync-admission.v1', ...input, requestId,
     status: 'running', createdAt: new Date().toISOString(), finishedAt: null };
   await tx.platformSetting.create({ data: { key, value_json: JSON.stringify(record), updated_by: input.ownerId } });

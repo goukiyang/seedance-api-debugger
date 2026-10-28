@@ -8,6 +8,7 @@ import { recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { assertMultiviewRequestFence } from '@/lib/video/multiview-request-receipt';
 import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, savedVideoPricingContextInput, verifyVideoPricingCredential, videoPricingRequiresContext } from '@/lib/pricing/video-context';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
 import { assertCanGenerateInVideoCard } from '@/lib/video-cards/permissions';
 import { getProjectForGeneration, assertCanViewTask, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { validateRequestCostCeiling } from '@/lib/provider/seedance-video-edit';
@@ -41,6 +42,13 @@ export class DraftUpgradeError extends Error {
   ) {
     super(message);
   }
+}
+
+function parseObject(value: string | null): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }
 
 export type DraftUpgradeInput = {
@@ -268,6 +276,8 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       first_frame_url: true,
       last_frame_url: true,
       frame_image_urls: true,
+      params_json: true,
+      source_metadata_json: true,
       workspace_id: true,
       project_id: true,
       video_card_id: true,
@@ -324,6 +334,8 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   const billingScope = shouldBillProjectBudget(project) ? 'project' : 'user';
   const billingAccountId = billingScope === 'project' ? project.id : input.user.id;
 
+  const rollbackInput = { ...parseObject(draft.params_json), ...creationBody, source_metadata: parseObject(draft.source_metadata_json) };
+  await assertCanvasGenerationRollbackSafe(input.user.id, rollbackInput, prisma);
   const pricingContext = await resolveVideoPricingContext(input.user, { ...savedVideoPricingContextInput(draft, true), project_id: project.id, video_card_id: videoCardId }, 'draft_upgrade');
   const priceQuote = await quoteVideoPricing({ provider: 'seedance', model: draft.model, resolution: '1080p', duration, context: pricingContext });
   requireVideoPricingRevision(priceQuote, input.pricingRevision);
@@ -354,6 +366,9 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
     await assertProjectActiveInTransaction(tx, input.user, project.id);
     await assertLegacyCreationSourceLocks(tx, input.user, { ...creationBody, source_draft_task_id: draft.id }, project.id);
+    const rollbackSource = await tx.videoTask.findUniqueOrThrow({ where: { id: draft.id }, select: { params_json: true, source_metadata_json: true } });
+    await assertCanvasGenerationRollbackSafe(input.user.id, { ...parseObject(rollbackSource.params_json), ...creationBody,
+      source_metadata: parseObject(rollbackSource.source_metadata_json) }, tx);
     await assertVideoPricingAcceptance(priceQuote, input.pricingRevision, tx);
     if (needsPricingCredential) {
       const freshDraft = await tx.videoTask.findUnique({ where: { id: draft.id } });

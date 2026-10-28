@@ -50,6 +50,7 @@ import { studioTemplateTaskWhere } from './task-visibility';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, publicSkillVersion, publicSkillSnapshot, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
+import { assertCanvasGenerationRollbackSafe, CanvasReferenceRollbackError } from '@/lib/canvas-reference-rollback';
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
 import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
 import { studioPresetArchived } from './preset-lifecycle';
@@ -69,6 +70,7 @@ export class SharedStudioDefinitionError extends StudioError {
 }
 
 export function studioBusinessErrorStatus(error: unknown): number | null {
+  if (error instanceof CanvasReferenceRollbackError) return error.status;
   if (error instanceof StudioError) return error.status;
   const status = error instanceof Error ? (error as Error & { status?: unknown }).status : undefined;
   return typeof status === 'number' && [400, 403, 404, 409].includes(status) ? status : null;
@@ -483,6 +485,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!matchesRequest(previous)) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
     return batchId;
   }
+  await assertCanvasGenerationRollbackSafe(ownerId, body, prisma);
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
@@ -500,6 +503,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       return;
     }
     if (input.taskSettings) await assertStudioTaskSettingsWriter(tx);
+    await assertCanvasGenerationRollbackSafe(ownerId, body, tx);
     const settings = await getImageStudioSettings(tx);
     if (settings.revision !== input.revision) throw new StudioError('通用设置已更新，请重新读取并确认报价；尚未生成', 409);
     try { await assertNoSynchronousImageAdmission(tx, ownerId, input.requestId); }

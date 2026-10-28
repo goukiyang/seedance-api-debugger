@@ -6,6 +6,7 @@ import { creationParent, assertCreationLineageUnlocked } from '@/lib/creation/li
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Prisma, type CanvasVideoBatch, type CanvasVideoBatchChild } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasReferenceRollbackSafe } from './canvas-reference-rollback';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -93,6 +94,7 @@ async function assertScope(db: CanvasBatchDb, user: SessionUser, input: Body, do
     await readCreationContext(user, String(input.project_id), optionalId(input.video_card_id), db);
   }
   const nodes = JSON.parse(doc.document_json).canvas?.nodes;
+  assertCanvasReferenceRollbackSafe(doc.document_json, input);
   if (!Array.isArray(nodes) || !nodes.some((node: { id: string }) => node.id === nodeId)) throw new CanvasVideoBatchError('请先保存当前视频节点', 409);
   const card = input.video_card_id ? await db.videoCard.findUnique({ where: { id: String(input.video_card_id) } }) : null;
   if (input.video_card_id && (!card || card.project_id !== doc.project_id || !canGenerateInVideoCardStatus(card.status))) throw new CanvasVideoBatchError('视频卡已关闭或不属于当前项目', 403);
@@ -211,6 +213,7 @@ export async function projectCanvasVideoBatch(user: SessionUser, batch: Batch) {
 
 export async function quoteCanvasVideoBatch(user: SessionUser, body: Body) {
   assertActor(user);
+  assertCanvasReferenceRollbackSafe(body, body.input);
   let input: Body, requestId: string, requestHash: string, count: number, batch: Batch | null = null;
   if (body.batch_id) {
     batch = await ownedBatch(user, String(body.batch_id));
@@ -265,9 +268,10 @@ export async function prepareCanvasVideoBatch(user: SessionUser, body: Body) {
   let count;
   try { count = canvasVideoCount(body.count); } catch (error) { throw new CanvasVideoBatchError((error as Error).message, 400); }
   if (count === 1) throw new CanvasVideoBatchError('单视频沿原协议', 400);
+  const prior = await prisma.canvasVideoBatch.findUnique({ where: { owner_user_id_client_request_id: { owner_user_id: user.id, client_request_id: requestId } }, include: { children: true } });
+  if (!prior) assertCanvasReferenceRollbackSafe(body, body.input);
   const input = normalizeInput(body.input, documentId, nodeId), requestHash = canvasBatchHash({ documentId, nodeId, count, input });
   if ((body.contract_version === 2) !== (input.creation_contract_version === 2)) throw new CanvasVideoBatchError('父批与视频创作协议不一致，未生成', 400);
-  const prior = await prisma.canvasVideoBatch.findUnique({ where: { owner_user_id_client_request_id: { owner_user_id: user.id, client_request_id: requestId } }, include: { children: true } });
   if (prior) {
     if (prior.request_hash !== requestHash) throw new CanvasVideoBatchError('原请求编号已绑定其他内容，请查询原批次', 409, 'canvas_video_batch_payload_mismatch');
     return { batch: await projectCanvasVideoBatch(user, await ownedBatch(user, prior.id)) };

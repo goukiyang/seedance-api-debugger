@@ -15,6 +15,7 @@ import { getH3ApiSettings, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/inte
 import { getAiMediaKitApiSettings, isAiMediaKitApiReady } from '@/lib/integrations/aimediakit';
 import { resolveVideoPricingContext, issueVideoPricingCredential, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasGenerationRollbackSafe } from '@/lib/canvas-reference-rollback';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 
 export async function GET(request: NextRequest) {
@@ -124,6 +125,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
       if (task.model !== parsedModel.model || task.duration !== duration || task.resolution !== resolution) throw new AuthError('重试报价与原任务不同', 409);
       body = savedVideoPricingContextInput(task);
     }
+    await assertCanvasGenerationRollbackSafe(user.id, body || Object.fromEntries(searchParams), prisma);
     const context = body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
       ...body, provider, model: parsedModel.model, resolution, duration,
     }) : undefined;

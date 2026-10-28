@@ -4,6 +4,7 @@ import { COLLABORATION_CAPABILITY } from '@/lib/canvas-roles/types';
 import { isRoleCollaborationReadOnly } from '@/lib/canvas-roles/guard';
 import { Prisma, type CanvasDocument } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertCanvasReferenceRollbackSafe } from './canvas-reference-rollback';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getAccessibleProjectIds, getProjectAccess, assertProjectActiveInTransaction } from '@/lib/projects/permissions';
@@ -720,6 +721,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
       if (existing && existing.protocol_version < 2 && action === 'restore_revision') {
         throw new CanvasDocumentError('请先用新版保存此画布，再恢复历史版本', 409, 'history_unavailable');
       }
+      if (['save', 'duplicate', 'restore_revision'].includes(action)) assertCanvasReferenceRollbackSafe(existing?.document_json, body);
       let snapshot: Snapshot | null = null;
       let retainedRoleSource: Snapshot | null = null;
       let activeNode: string | null = existing?.active_generation_node_id ?? null;
@@ -729,6 +731,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
           try { retainedRoleSource = parseCanvasSnapshot(existing.document_json, projectId, false); }
           catch { /* Invalid stored content grants no archive exception. */ }
         }
+        assertCanvasReferenceRollbackSafe(rawSnapshot(body));
         snapshot = parseCanvasSnapshot(rawSnapshot(body), projectId, v2);
         // POST creation also serves conflict/draft copies, not only empty canvases.
         // Strip runtime bindings before reference validation and before any snapshot is stored.
@@ -751,6 +754,7 @@ export async function mutateCanvasDocument(user: SessionUser, body: ObjectValue,
           where: { document_id_revision: { document_id: documentId, revision: Number(body.target_revision) } },
         });
         if (!revision) throw new CanvasDocumentError('历史版本已过期或不存在', 404, 'revision_not_found');
+        assertCanvasReferenceRollbackSafe(revision.document_json);
         retainedRoleSource = parseCanvasSnapshot(revision.document_json, projectId, true);
         snapshot = await prepareDetachedSnapshot(db, user,
           retainedRoleSource, projectId, parseCanvasSnapshot(existing!.document_json, projectId, true));
