@@ -479,7 +479,7 @@ function MultiviewPageContent() {
         }
         const keepCurrent = previous?.sourceVersion === next.sourceVersion && preferencesReady.current === `${key}:view:v1`;
         if (!keepCurrent) setDraftEdited(false);
-        const state = keepCurrent ? previous! : restored || (shared?.id === shareId ? { ...shared.recipe, editing: null } : initialDraft(next));
+        const state: MultiviewDraft = keepCurrent ? previous! : restored || (shared?.id === shareId && shared.recipe.schema !== 3 ? { ...shared.recipe, editing: null } : initialDraft(next));
         if (!keepCurrent) setLocalPresent(Boolean(restored));
         if (!keepCurrent) setRetainedDraft(editingSignature(state));
         try { preference = keepCurrent ? { ...viewRef.current, x: window.scrollX, y: window.scrollY } : readView(localStorage.getItem(`${key}:view:v1`), state); }

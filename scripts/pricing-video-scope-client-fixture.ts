@@ -27,7 +27,7 @@ type CanvasSettings = {
 };
 type CanvasPayload = { kind: string; nodeId: string; requestId: string; mode: string; prompt: string; settings: CanvasSettings };
 type CanvasInput = Omit<CanvasPayload, 'kind'> & {
-  projectId: string; cardId: string; documentId: string; referenceVideoUrls: string[];
+  projectId: string; cardId: string; documentId: string; referenceVideoUrls?: string[]; canvasReferences?: unknown;
 };
 type Descriptor = { url: string; method: string; payload: Record<string, unknown> };
 type CanvasSubmission = { requestId: string; state: string; userId: string; documentId: string;
@@ -48,6 +48,7 @@ type CanvasConsumers = {
   submitNodeGeneration(nodeElement: object, button: object, payload: CanvasPayload): Promise<void>;
   imageChannelIssueForNode(node: { type: string; id: string }): string;
   canvasImageQuotePriceText(quote: unknown): string;
+  canvasReferencesForNode(nodeId: string): unknown;
 };
 
 function loadUmd<T>(file: string): T {
@@ -59,7 +60,7 @@ function loadUmd<T>(file: string): T {
 function loadCanvasConsumers(dependencies: Record<string, unknown>, assert: ReturnType<typeof fixtureChecks>): CanvasConsumers {
   const filename = resolve('public/tools/ultimate-canvas/app.js');
   const source = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names = ['installGenerationAdapter', 'videoGenerationRequestInput', 'videoEstimateSignature', 'scheduleVideoEstimate',
+  const names = ['installGenerationAdapter', 'videoGenerationRequestInput', 'canvasReferencesForNode', 'videoEstimateSignature', 'scheduleVideoEstimate',
     'currentGenerationContext', 'hasCurrentGenerationSubmission', 'submitNodeGeneration', 'imageChannelIssueForNode', 'canvasImageQuotePriceText',
     'canvasVideoBatchScope', 'canvasVideoBatchCurrent', 'canvasVideoBatchInputSignature', 'readCanvasVideoBatches'];
   const functions: ts.FunctionDeclaration[] = [];
@@ -103,7 +104,10 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   assert.throws(() => workflow.withVideoPricingQuote(settings, { ...quote, pricing_quote_token: '' }));
   assert.throws(() => workflow.videoPricingRequest({ ...input, referenceVideoUrls: ['a', 'b', 'c', 'd'] }));
 
-  const node: CanvasNode = { id: input.nodeId, type: 'video', data: { videoSettings: { ...settings }, referenceVideoUrls: input.referenceVideoUrls.slice() } };
+  const node: CanvasNode = { id: input.nodeId, type: 'video', data: { videoSettings: { ...settings }, referenceVideoUrls: input.referenceVideoUrls!.slice() } };
+  const referenceTasks = new Map([
+    ['https://fixture.invalid/reference-a', 'reference-task-a'], ['https://fixture.invalid/reference-b', 'reference-task-b'],
+  ]);
   const runtime = { bootstrap: { user: { id: 'actor-a' }, capabilities: {} }, contextEpoch: 1,
     selectedProjectId: input.projectId, selectedVideoCardId: input.cardId, selectedVideoBranchId: '', documentId: input.documentId,
     documentLoaded: true, documentRestoring: false,
@@ -132,7 +136,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   });
   const imageSettings = { model: 'gpt-image-2', quality: 'auto', resolution: '2K', requestedRatio: '1:1', count: 1 };
   const model = { ready: true, billingMode: 'fixed', fixedPoints: null, pricingBySpecification: true,
-    qualities: ['auto'], resolutions: ['2K'], ratios: ['1:1'], maxReferences: 9 };
+    qualities: ['auto'], resolutions: ['2K'], ratios: ['1:1'], maxReferences: 9, canvas: { referenceLimit: 9 as number | null } };
   const channel = { id: 'managed-fixture', ready: true, configured: true, enabled: true, models: { 'gpt-image-2': model } };
   const window = {
     UltimateCanvasGenerationNodes: workflow, UltimateCanvasGenerationInteractions: interactions,
@@ -156,6 +160,12 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
     decorateGeneratedNode: () => {}, notifyRoleMediaChanged: () => {}, roleMediaContextForNode: () => null,
     backendEndpoint: (url: string) => url, selectedImageChannel: () => ({ channel }), usesLegacyImageRoute: () => false,
     generationReferenceImageIds: () => [],
+    // The isolated graph supplies durable source identities; the real app helper and normalizer build the request.
+    generationReferenceItems: () => node.data.referenceVideoUrls.map(url => {
+      const taskId = referenceTasks.get(url);
+      if (!taskId) throw new Error('Unknown isolated reference source');
+      return { kind: 'video', available: true, taskId };
+    }),
   };
   const consumers = loadCanvasConsumers(dependencies, assert);
   const signature = consumers.videoEstimateSignature(node.data.videoSettings, node.id);
@@ -165,7 +175,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
     () => { node.data.referenceVideoUrls = ['https://fixture.invalid/reference-b']; }]) {
     change(); assert.notEqual(consumers.videoEstimateSignature(node.data.videoSettings, node.id), signature);
     runtime.bootstrap.user.id = 'actor-a'; runtime.selectedProjectId = input.projectId; runtime.selectedVideoCardId = input.cardId;
-    runtime.documentId = input.documentId; node.data.videoSettings = { ...settings }; node.data.referenceVideoUrls = input.referenceVideoUrls.slice();
+    runtime.documentId = input.documentId; node.data.videoSettings = { ...settings }; node.data.referenceVideoUrls = input.referenceVideoUrls!.slice();
   }
   let resolveOld: (value: unknown) => void = () => { throw Error('Old request was not started'); };
   request = async (_url, options) => {
@@ -185,7 +195,11 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
   consumers.installGenerationAdapter();
   const payload: CanvasPayload = { kind: 'video', nodeId: node.id, requestId: input.requestId, mode: input.mode, prompt: input.prompt,
     settings: { ...settings, maxEstimatedCost: 1 } };
-  const originalInput = workflow.videoRequest({ ...input, settings: { ...payload.settings, pricingRevision: 'old-revision', pricingQuoteToken: 'old-token' } }).payload;
+  const { referenceVideoUrls: _legacyUrls, ...typedInput } = input;
+  const originalInput = workflow.videoRequest({ ...typedInput, canvasReferences: consumers.canvasReferencesForNode(node.id),
+    settings: { ...payload.settings, pricingRevision: 'old-revision', pricingQuoteToken: 'old-token' } }).payload;
+  assert.equal((originalInput.canvas_references as { items: Array<{ taskId: string }> }).items[0].taskId, 'reference-task-a');
+  assert.equal('reference_video_urls' in originalInput, false, 'Current canvas references do not silently fall back to legacy URLs');
   const submission: CanvasSubmission = { requestId: payload.requestId, state: 'unconfirmed', userId: 'actor-a', documentId: input.documentId,
     input: structuredClone(originalInput), generationPayload: structuredClone(payload) };
   node.data.videoSubmission = submission;
@@ -235,6 +249,7 @@ async function canvasConsumerAssertions(assert: ReturnType<typeof fixtureChecks>
 
   const image = { id: 'image-a', type: 'image' };
   assert.equal(consumers.imageChannelIssueForNode(image), '', 'A legal specification price does not require a uniform fixedPoints value');
+  model.canvas.referenceLimit = null; assert.notEqual(consumers.imageChannelIssueForNode(image), '', 'Unknown canvas reference support must stay blocked'); model.canvas.referenceLimit = 9;
   model.pricingBySpecification = false; assert.notEqual(consumers.imageChannelIssueForNode(image), ''); model.pricingBySpecification = true;
   model.ready = false; assert.notEqual(consumers.imageChannelIssueForNode(image), ''); model.ready = true;
   channel.configured = false; assert.notEqual(consumers.imageChannelIssueForNode(image), ''); channel.configured = true;

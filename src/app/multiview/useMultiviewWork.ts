@@ -304,6 +304,7 @@ export function useMultiviewWork(options: Options) {
         if (!current(value)) return;
         // This explicit user action chooses the current local snapshot. The
         // fresh revision is still compared by the existing server-side CAS.
+        if(fresh.recipe.schema === 3) throw new Error('请从动作作品打开参考拼图，当前选帧保留。');
         existing = fresh.work; submittedRecipe = fresh.recipe;
       }
       const mutationId = crypto.randomUUID();

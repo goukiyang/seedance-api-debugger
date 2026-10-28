@@ -42,7 +42,7 @@ async function main() {
         if (parts[1] === 'assets') { uploads++; return Response.json({ asset_id: `asset-${uploads}`, width: 80, height: 120, size: sourceBytes.length }); }
         if (parts[1] === 'jobs' && request.method === 'POST') { jobs++; return failed ? Response.json({ submission_made: null }, { status: 502 }) : Response.json(job(`job-${jobs}`)); }
         if (parts[1] === 'jobs') return Response.json(job(parts[2]));
-        if (parts[1] === 'results') return new Response(foregroundBytes, { headers: { 'Content-Type': 'image/png', 'Content-Length': String(foregroundBytes.length) } });
+        if (parts[1] === 'results') return new Response(Uint8Array.from(foregroundBytes), { headers: { 'Content-Type': 'image/png', 'Content-Length': String(foregroundBytes.length) } });
         throw new Error('unexpected fake upstream path');
       } },
     '@/lib/cutout/receipt': require('../src/lib/cutout/receipt'), '@/lib/cutout/result-content': require('../src/lib/cutout/result-content'),
