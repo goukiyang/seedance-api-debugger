@@ -44,6 +44,56 @@ export function clampReferencePlacement(placement: ReferencePlacement, panel: Re
   const y = Math.max(panel.y, Math.min(panel.y + panel.height - height, finite(placement.y) ? placement.y : panel.y + (panel.height - height) / 2));
   return { slotId: panel.slotId, x, y, width, height, z: Number.isSafeInteger(placement.z) ? Math.max(0, Math.min(3, placement.z)) : 0 };
 }
+type ReferenceArrangement = Pick<MultiviewReferenceRecipe, 'placements' | 'panels'>;
+export type ReferenceScaleCorner = 'nw' | 'ne' | 'sw' | 'se' | 'center';
+/** Move every participating image by the same fraction of its own fixed shot. */
+export function moveReferencePlacements(recipe: ReferenceArrangement, slotId: string, dx: number, dy: number, synchronized = false): ReferencePlacement[] {
+  const selected = recipe.panels.find(panel => panel.slotId === slotId);
+  if (!selected || !finite(dx) || !finite(dy)) return recipe.placements;
+  const targets = recipe.placements.filter(item => synchronized || item.slotId === slotId);
+  if (!targets.length) return recipe.placements;
+  let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
+  for (const image of targets) {
+    const panel = recipe.panels.find(item => item.slotId === image.slotId);
+    if (!panel) return recipe.placements;
+    minX = Math.max(minX, (panel.x - image.x) / panel.width);
+    maxX = Math.min(maxX, (panel.x + panel.width - image.width - image.x) / panel.width);
+    minY = Math.max(minY, (panel.y - image.y) / panel.height);
+    maxY = Math.min(maxY, (panel.y + panel.height - image.height - image.y) / panel.height);
+  }
+  const x = Math.max(minX, Math.min(maxX, dx / selected.width));
+  const y = Math.max(minY, Math.min(maxY, dy / selected.height));
+  if (Math.abs(x) < 1e-12 && Math.abs(y) < 1e-12) return recipe.placements;
+  return recipe.placements.map(image => {
+    if (!synchronized && image.slotId !== slotId) return image;
+    const panel = recipe.panels.find(item => item.slotId === image.slotId)!;
+    return { ...image, x: image.x + x * panel.width, y: image.y + y * panel.height };
+  });
+}
+/** A common scale limit keeps the group in step; no image is clamped separately. */
+export function scaleReferencePlacements(recipe: ReferenceArrangement, slotId: string, factor: number, corner: ReferenceScaleCorner = 'center', synchronized = false): ReferencePlacement[] {
+  if (!finite(factor) || !recipe.placements.some(item => item.slotId === slotId)) return recipe.placements;
+  const anchorX = corner === 'center' ? .5 : corner.includes('w') ? 1 : 0;
+  const anchorY = corner === 'center' ? .5 : corner.includes('n') ? 1 : 0;
+  const targets = recipe.placements.filter(item => synchronized || item.slotId === slotId);
+  let minimum = 0, maximum = Infinity;
+  for (const image of targets) {
+    const panel = recipe.panels.find(item => item.slotId === image.slotId);
+    if (!panel) return recipe.placements;
+    const x = image.x + image.width * anchorX, y = image.y + image.height * anchorY;
+    minimum = Math.max(minimum, epsilon / image.width);
+    if (anchorX > 0) maximum = Math.min(maximum, (x - panel.x) / (image.width * anchorX));
+    if (anchorX < 1) maximum = Math.min(maximum, (panel.x + panel.width - x) / (image.width * (1 - anchorX)));
+    if (anchorY > 0) maximum = Math.min(maximum, (y - panel.y) / (image.height * anchorY));
+    if (anchorY < 1) maximum = Math.min(maximum, (panel.y + panel.height - y) / (image.height * (1 - anchorY)));
+  }
+  const applied = Math.max(minimum, Math.min(maximum, factor));
+  if (Math.abs(applied - 1) < 1e-12) return recipe.placements;
+  return recipe.placements.map(image => !synchronized && image.slotId !== slotId ? image : {
+    ...image, x: image.x + image.width * anchorX * (1 - applied), y: image.y + image.height * anchorY * (1 - applied),
+    width: image.width * applied, height: image.height * applied,
+  });
+}
 export function createMultiviewReferenceRecipe(info: MultiviewInfo, slots: MultiviewSlot[], options: ReferenceOutput & { layout?: ReferenceLayout }): MultiviewReferenceRecipe {
   const output = { width: options.width, height: options.height, background: options.background || '#d6dbdf' };
   const panels = referencePanels(slots, options.layout);

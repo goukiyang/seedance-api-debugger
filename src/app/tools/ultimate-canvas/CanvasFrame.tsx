@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ProjectManagementDialog, type ProjectManagementRequest } from '@/components/ProjectManagementDialog';
+import { PROJECT_CATALOG_CHANGED, type ProjectCatalogChange } from '@/lib/projects/selector-client';
 import CanvasReactions from '@/components/content-reactions/CanvasReactions';
 import { invalidateReaction, installChannel } from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
@@ -86,8 +88,16 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
   const [preview, setPreview] = useState<CanvasMediaPreview | null>(null);
   const [styleGalleryOpen, setStyleGalleryOpen] = useState(false);
   const [exitNotice, setExitNotice] = useState('');
+  const [projectManagement, setProjectManagement] = useState<{ userId: string; requestId: string; request: ProjectManagementRequest } | null>(null);
   const { user, refreshCredits } = useAppSession();
   const userId = useRef(user?.id); userId.current = user?.id;
+  useEffect(() => { setProjectManagement(null); }, [user?.id]);
+  useEffect(() => {
+    const changed = (event: Event) => { const detail = (event as CustomEvent<ProjectCatalogChange>).detail;
+      if (detail?.ownerId === userId.current) frame.current?.contentWindow?.postMessage({ type: 'sd2-canvas-project-catalog-changed', ...detail }, location.origin);
+    };
+    window.addEventListener(PROJECT_CATALOG_CHANGED, changed); return () => window.removeEventListener(PROJECT_CATALOG_CHANGED, changed);
+  }, []);
   const [mention, setMention] = useState<MentionRequest | null>(null);
   const mentionRef = useRef(mention); mentionRef.current = mention;
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -252,6 +262,11 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow) return;
       const value = event.data;
+      if (value?.type === 'sd2-canvas-project-manage') {
+        if (value.userId !== userId.current || !validId(value.requestId) || !['create','edit','delete','archive'].includes(value.mode)
+          || value.mode !== 'create' && !validId(value.projectId)) return;
+        setProjectManagement({ userId: value.userId, requestId: value.requestId, request: { mode: value.mode, projectId: value.projectId } }); return;
+      }
       if (value?.type === 'sd2-canvas-role-media-context') {
         const matches = () => alive && value.userId === userId.current
           && Boolean((frame.current?.contentWindow as ReferenceChild | null)?.UltimateCanvasRoleMediaContextMatches?.(value.requestId));
@@ -510,9 +525,11 @@ export default function CanvasFrame({ documentId, focusNodeId }: { documentId?: 
   return <>
     {exitNotice && <div role="status" style={{ position: 'fixed', bottom: 20, left: 20, zIndex: 10006, maxWidth: 'min(42ch, calc(100vw - 40px))', padding: '10px 14px', borderRadius: 8, background: 'var(--bg-secondary, #20232b)', color: 'var(--text-primary, #e5e7eb)', boxShadow: '0 3px 16px #10121866' }}>{exitNotice}</div>}
     <iframe ref={frame} title="无限画布" src={`/tools/ultimate-canvas/index.html${initialDocumentId.current ? `?document_id=${encodeURIComponent(initialDocumentId.current)}` : ''}${initialFocusNodeId.current ? `${initialDocumentId.current ? '&' : '?'}focus_node=${encodeURIComponent(initialFocusNodeId.current)}` : ''}`} className="ultimate-canvas-frame" referrerPolicy="no-referrer" allow="fullscreen"
-      onLoad={() => { setStyleGalleryOpen(false); closeReferencePicker(); closeMention(); }}
+      onLoad={() => { setProjectManagement(null); setStyleGalleryOpen(false); closeReferencePicker(); closeMention(); }}
       style={styleGalleryOpen ? { position: 'fixed', inset: 0, width: '100vw', height: '100dvh', zIndex: 10000, borderRadius: 0 } : undefined} />
     <CanvasReactions frame={frame} />
+    {projectManagement && projectManagement.userId === user?.id && <ProjectManagementDialog key={projectManagement.requestId}
+      request={projectManagement.request} onClose={() => { setProjectManagement(null); frame.current?.focus(); }} />}
     {mention && <div onPointerDown={event => event.stopPropagation()} style={{ position: 'fixed', left: mention.left, top: mention.top,
       width: 320, maxWidth: 'calc(100vw - 16px)', zIndex: 10005 }}>
       <PromptMentionPopover candidates={mention.candidates} activeIndex={mentionIndex}

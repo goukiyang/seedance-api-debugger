@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
     const managementAllowed = isFeatureAllowed(user, 'team_project_manage');
     const capabilities = { can_create_team_project: managementAllowed, create_operation_version: 1 };
 
@@ -341,6 +343,8 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
 
     const body = await request.json();
     if (body.type === 'personal' && body.requestId === undefined && body.operationVersion === undefined) {

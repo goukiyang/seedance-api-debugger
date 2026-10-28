@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -249,11 +250,11 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
       <label>时区<select className="input" value={query.time_zone} onChange={(e) => update({ time_zone: e.target.value })}>
         {Array.from(new Set([query.time_zone, Intl.DateTimeFormat().resolvedOptions().timeZone, 'Asia/Shanghai', 'America/Los_Angeles', 'UTC'])).filter(Boolean).map((zone) => <option key={zone} value={zone}>{zone}</option>)}
       </select></label>
-      {!projectId && <label>项目<select className="input" value={query.project_id || ''} onChange={(e) => update({ project_id: e.target.value || null })}>
+      {!projectId && <label>项目<ProjectSelector onCatalogChange={usage.reload}  className="input" value={query.project_id || ''} onChange={(e) => update({ project_id: e.target.value || null })}>
         <option value="">全部可读项目</option><option value="unassigned">未归属项目</option>
         {query.project_id && query.project_id !== 'unassigned' && !report?.projects.some((p) => p.id === query.project_id) && <option value={query.project_id}>所选项目（待核对）</option>}
         {report?.projects.filter((p) => p.id).map((p) => <option key={p.id} value={p.id!}>{p.label}</option>)}
-      </select></label>}
+      </ProjectSelector></label>}
       {projectId && <label>成员<select className="input" value={query.member_owner_id || ''} onChange={(e) => update({ member_owner_id: e.target.value || null })}>
         <option value="">全部可读成员</option><option value={ownerId}>仅本人</option>
         {query.member_owner_id && query.member_owner_id !== ownerId && !members.some((m) => m.id === query.member_owner_id) && <option value={query.member_owner_id}>所选成员（待核对）</option>}

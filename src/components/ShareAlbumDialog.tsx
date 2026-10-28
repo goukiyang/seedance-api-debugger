@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProductDialog } from '@/components/useProductDialog';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -403,10 +404,10 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
             {targetType === 'project' && (
               <label>
                 选择项目
-                <select
+                <ProjectSelector onCatalogChange={() => void loadShareTargets()}
                   value={targetId}
                   onChange={(event) => setTargetId(event.target.value)}
-                  disabled={optionsLoading || shareableProjects.length === 0}
+                  disabled={optionsLoading || savingKey !== null}
                 >
                   {shareableProjects.length === 0 ? (
                     <option value="">{optionsLoading ? '正在读取项目...' : '暂无可选项目'}</option>
@@ -417,7 +418,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
                       </option>
                     ))
                   )}
-                </select>
+                </ProjectSelector>
               </label>
             )}
             {targetType === 'user' && (

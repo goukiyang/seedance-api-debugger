@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { readJsonResponse } from '@/lib/http/json-response';
@@ -8,7 +8,7 @@ import { TemplateAuthorCard } from './TemplateAuthorCard';
 import { RelativeTime } from './RelativeTime';
 import { useDialogDismiss } from './useDialogDismiss';
 import styles from './TemplateRead.module.css';
-export function TemplateDefinitionRead({ target, scopeKey, onClose }: { target: { presetId?: string; moduleId?: string }; scopeKey: string; onClose: () => void }) {
+export function TemplateDefinitionRead({ target, scopeKey, onClose, attributes }: { target: { presetId?: string; moduleId?: string }; scopeKey: string; onClose: () => void; attributes?: ReactNode }) {
   const { user, sessionChanged } = useAppSession();
   const [data, setData] = useState<StudioTemplateDefinitionRead | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null), sequence = useRef(0), owner = useRef(user?.id);
@@ -26,6 +26,7 @@ export function TemplateDefinitionRead({ target, scopeKey, onClose }: { target: 
     return () => { sequence.current++; controller.abort(); };
   }, [scopeKey, target.presetId, target.moduleId, user?.id, sessionChanged, retry]);
   return createPortal(<dialog ref={dialog} className={styles.definitionDialog} aria-labelledby="template-definition-heading"><header><h2 id="template-definition-heading">模板上下文</h2><button type="button" aria-label="关闭上下文" onClick={onClose}>关闭</button></header>
+    {attributes}
     {error ? <p role="status">{error}<button type="button" onClick={() => setRetry(value => value + 1)}>重新读取</button></p> : !data ? <p role="status">正在读取模板上下文</p> : <>
       <h3>{data.definition.name}</h3><TemplateAuthorCard templateRead={data.templateRead} name={data.definition.name} scopeKey={scopeKey} />
       <p>{data.lifecycle === 'archived' ? '已归档' : '现存模板'} · {data.generation.available === true ? '当前可生成' : data.generation.available === false ? '当前不可生成' : '生成条件待确认'}</p>

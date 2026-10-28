@@ -60,6 +60,8 @@ import { assertRestoredStudioDraft, assertRestoredStudioSourceRelation, assertRe
   RestoredStudioSettingsError } from './restored-settings';
 import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputIssue, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
 import { studioInputMainPreview } from './input-main';
+import { normalizeImageFeishuChoice, type FrozenImageFeishuChoice } from './feishu-contract';
+import { freezeImageFeishuChoice, enqueueFrozenImageFeishuNotification, wakeImageFeishuAfterOutputReady, imageFeishuTaskStatuses } from './feishu-notification';
 
 export class StudioError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -403,7 +405,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
   // This version comes only from persisted server preparation, never from body.
   const sizePolicyVersion = preparation?.sizePolicyVersion ?? CURRENT_STUDIO_SIZE_POLICY_VERSION;
   if (sizePolicyVersion !== 1 && sizePolicyVersion !== 2) throw new StudioError('图片尺寸策略版本无效', 409);
@@ -515,6 +517,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     await assertUsageProject(tx, user, usageProjectId);
     const identity: ImageStudioIdentity = user;
     if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
+    const imageFeishuChoice = normalizeImageFeishuChoice(body.image_feishu);
+    if (imageFeishuChoice?.enabled && (avatar || canvasUse || canvasPrompt || roleMedia || typeof moduleId !== 'string')) {
+      throw new StudioError('图片飞书选择仅用于模板图片生成', 400);
+    }
+    const imageFeishu = preparation ? preparation.imageFeishuFrozen ?? null : await freezeImageFeishuChoice(tx, ownerId, imageFeishuChoice);
     const canvasInput = canvasUse?.referenceInput ? await resolveCanvasReferenceInputs(canvasUse.user, canvasUse.referenceInput, tx, { target: 'image' }) : null;
     const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds, tx) : new Map<string, string>();
     for (const item of canvasInput?.references.items || []) {
@@ -1053,6 +1060,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         : undefined);
     const snapshot = JSON.stringify({
       version: 1,
+      ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
       requestId: input.requestId, batchId, inputFingerprint: requestFingerprint,
@@ -1132,6 +1140,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if (preparation) await preparation.save(tx, protectedTaskData);
       else {
         const created = await tx.imageStudioTask.create({ data: protectedTaskData });
+        await enqueueFrozenImageFeishuNotification(tx, created, imageFeishu);
         if (roleMedia && roleMedia.context && typeof roleMedia.context === 'object' && 'runId' in roleMedia.context) {
           await inheritUsageAttribution(tx, { sourceKind: 'image_task', sourceId: created.id,
             actorUserId: ownerId, ownerUserId: ownerId, billingSubjectType: 'user', billingSubjectId: ownerId,
@@ -1183,6 +1192,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
       if (asset.status !== 'active' || asset.mime_type !== prepared.mime_type || asset.original_url !== prepared.original_url
         || !asset.thumbnail_url || asset.width !== prepared.width || asset.height !== prepared.height) throw new Error('Output asset unavailable');
       await tx.imageStudioTask.update({ where: { id: task.id }, data: { asset_id: asset.id } });
+      await wakeImageFeishuAfterOutputReady(tx, task);
     }
     // A channel request with an unknown result must remain visible and retain
     // its original reservation. It is not permission to refund or re-submit.
@@ -1345,6 +1355,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
+  const feishu = await imageFeishuTaskStatuses(prisma, ownerId, items.map(task => task.id));
   const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
   return items.map(task => {
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
@@ -1353,6 +1364,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
+      feishu: feishu.get(task.id),
       prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status),
       error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation) : task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,

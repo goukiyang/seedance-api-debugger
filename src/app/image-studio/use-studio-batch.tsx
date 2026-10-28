@@ -114,7 +114,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     ? billingQuote!.quote : null;
   const live = useRef({ scope: scopedKey, signature, mounted: true }); live.current = { scope: scopedKey, signature, mounted: live.current.mounted };
   const { confirm, productDialog } = useProductDialog();
-  const automaticPayload = quotePayload ? JSON.stringify({ ...quotePayload, ...(sharedLive ? { sharedLive } : {}) }) : '';
+  const automaticPayload = quotePayload ? JSON.stringify({ ...Object.fromEntries(Object.entries(quotePayload).filter(([key]) => key !== 'image_feishu')), ...(sharedLive ? { sharedLive } : {}) }) : '';
   useEffect(() => {
     if (sessionChanged || isClientSessionBlocked() || !sourceAvailable || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
       || !quoteInputReady) return;

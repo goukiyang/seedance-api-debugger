@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
 import { VideoFeishuStatus } from '@/components/generate/VideoFeishuStatus';
@@ -885,7 +886,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       setDownloadError('文件准备已停止，请刷新任务状态，或重试准备文件');
     }
   }, [task, downloadPhase]);
-  
+
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -1334,9 +1335,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     setDownloadProgress('正在准备稳定下载视频...');
     setDownloadError(null);
     setOpenError(null);
-    
+
     const startTime = Date.now();
-    
+
     try {
       const res = await fetch(`/api/video/download/${taskId}`, {
         method: 'POST',
@@ -1344,7 +1345,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       });
       const data = await res.json();
       if (!activePageRef.current) return null;
-      
+
       if (res.status === 202) {
         setDownloadProgress(data.message || '视频已生成，正在准备稳定下载文件，请稍后重试。');
         setTask((current) => (
@@ -1366,14 +1367,14 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       if (res.ok && data.success && data.local_video_path) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         const fileSizeMB = (data.file_size / 1024 / 1024).toFixed(2);
-        
+
         setDownloadPhase('ready');
         setDownloadProgress(`文件已准备好，可下载到设备；${fileSizeMB} MB，准备耗时 ${elapsed}s`);
-        
+
         if (data.already_exists) {
           setDownloadProgress(`服务器文件已准备好，可下载到设备；${fileSizeMB} MB`);
         }
-        
+
         const localVideoPath = data.local_video_path as string;
         setTask((current) => (
           current ? { ...current, local_video_path: localVideoPath } : current
@@ -1686,7 +1687,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     && !hasPublicVideo
     && hasFallbackVideo
     && Boolean(task.public_video_storage_provider);
-  
+
   // 从 provider_payload_json 解析 resolved_mode
   const resolvedMode = (() => {
     if (!task.provider_payload_json) return null;
@@ -2611,7 +2612,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 <div className="info-label">移动到其他项目</div>
                 <p className="text-gray text-sm">用于修正选错项目后的成本归属，旧账本不会被覆盖，会追加转移记录。</p>
               </div>
-              <select
+              <ProjectSelector onCatalogChange={() => void fetchProjects()}
                 className="input"
                 value={targetProjectId}
                 onChange={(event) => {
@@ -2626,7 +2627,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     {project.name}{project.type === 'personal' ? ' · 个人' : ''}
                   </option>
                 ))}
-              </select>
+              </ProjectSelector>
               <select
                 className="input"
                 value={targetVideoCardId}

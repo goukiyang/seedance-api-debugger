@@ -36,13 +36,15 @@ import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
+import { normalizeImageFeishuChoice, type FrozenImageFeishuChoice } from './feishu-contract';
+import { freezeImageFeishuChoice, enqueueFrozenImageFeishuNotification, imageFeishuTaskStatuses } from './feishu-notification';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
 const CHANNEL_PREFIX = 'studio_channel_batch_v1:';
 const CHANNEL_ITEM_PREFIX = 'studio_channel_batch_item_v1:';
 type BatchItem = { ordinal: number; sourceName: string; assetId?: string; taskId: string | null; attempt: number; prepared: boolean; cancelled: boolean };
-type BatchRecord = { version: 1 | 2; sizePolicyVersion?: StudioSizePolicyVersion; usageContext?: { version: 1; projectId: string | null }; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
+type BatchRecord = { version: 1 | 2; sizePolicyVersion?: StudioSizePolicyVersion; usageContext?: { version: 1; projectId: string | null }; imageFeishu?: FrozenImageFeishuChoice; pricing?: true; id: string; ownerId: string; requestId: string; fingerprint: string; requestFingerprint?: string; moduleId: string; moduleName: string; state: string; note: string; createdAt: string; total: number; budget: number; committedCredits: number; unitCredits: number; prepared: number; input: Record<string, unknown>; items: BatchItem[]; billingMode?: 'actual' | 'fixed'; billingContracts?: Array<ImageBillingContract | null>; definitionConfirmationRequired?: boolean };
 const key = (owner: string, id: string, channel = false, pricing = false) => `${pricing ? PRICING_BATCH_PREFIX : channel ? CHANNEL_PREFIX : PREFIX}${owner}:${id}`;
 const batchKeys = (owner: string, id: string) => [key(owner, id), key(owner, id, true), key(owner, id, false, true)];
 const itemKey = (batch: BatchRecord, ordinal: number) => `${batch.pricing ? PRICING_BATCH_ITEM_PREFIX : batch.input.imageChannel && (batch.input.imageChannel as ImageGenerationChannelSnapshot).channelId !== 'original' ? CHANNEL_ITEM_PREFIX : ITEM_PREFIX}${batch.id}:${ordinal}`;
@@ -297,6 +299,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
     const usageUser = await tx.user.findUnique({ where: { id: ownerId }, select: { id: true, role: true, status: true } });
     if (!usageUser || usageUser.status !== 'active') throw new StudioError('当前账号不可用', 403);
     await assertUsageProject(tx, usageUser, input.projectId ?? null);
+    const imageFeishu = await freezeImageFeishuChoice(tx, ownerId, normalizeImageFeishuChoice(body.image_feishu));
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId },
       select: { name: true, model: true, quality: true, resolution: true, prices_json: true } });
     if (!workspace) throw new StudioError('模板不存在或无权使用', 404);
@@ -358,6 +361,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       : requestFingerprint;
     const batch: BatchRecord = { version: 1, sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION, id, ownerId, requestId: input.requestId, fingerprint, requestFingerprint, moduleId: body.moduleId as string, moduleName: sharedUse?.definition.name || workspace.name, state: 'preparing', note: '', createdAt: new Date().toISOString(), total: items.length, budget: Number(body.budget), committedCredits: 0, unitCredits, prepared: 0, input: shared, items,
       usageContext: { version: 1, projectId: input.projectId ?? null },
+      ...(imageFeishu ? { imageFeishu } : {}),
       ...(billingQuote ? { billingMode: billingQuote.mode, billingContracts: billingQuote.contracts } : {}) };
     if (billingQuote?.contracts.some(contract => contract.pricing)) { batch.pricing = true; batch.version = 2; }
     await tx.platformSetting.create({ data: { key: key(ownerId, id, isChannelBatch(batch), batch.pricing), value_json: JSON.stringify(batch), updated_by: ownerId } });
@@ -377,7 +381,7 @@ async function prepareBatch(owner: string, id: string) {
       const draft = initial.input.draft as Record<string, unknown> | undefined;
       const itemInput = { ...initial.input, requestId: `${id.slice(0, 48)}-${item.ordinal}`, referenceIds: references,
         ...(item.assetId && draft && policy ? { draft: { ...draft, referencePolicy: { ...policy, primaryIds: [item.assetId] } } } : {}) };
-      await submitStudioBatch(owner, itemInput, undefined, { batchItem: true, sizePolicyVersion: initial.sizePolicyVersion ?? 1,
+      await submitStudioBatch(owner, itemInput, undefined, { batchItem: true, sizePolicyVersion: initial.sizePolicyVersion ?? 1, imageFeishuFrozen: initial.imageFeishu,
         frozenContract: initial.billingContracts?.[item.ordinal - 1] || undefined, save: async (tx, task) => {
         const { row, batch } = await readOwned(owner, id, tx);
         if (batch.state !== 'preparing') throw new StudioError('批次已停止准备');
@@ -479,6 +483,7 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const assets = includeItems ? await prisma.asset.findMany({ where: { id: { in: tasks.flatMap(task => !task.deleted_at && studioTaskHasViewableOutput(task) && task.asset_id ? [task.asset_id] : []) }, owner_id: owner, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity)] }, select: { id: true, file_size: true, file_name: true, mime_type: true } }) : [];
   const statuses = batch.items.map(item => item.cancelled ? 'cancelled' : item.taskId
     ? (() => { const task = tasks.find(task => task.id === item.taskId); return task && studioTaskHasViewableOutput(task) ? 'succeeded' : publicImageTaskStatus(task?.status || 'uncertain'); })() : batch.definitionConfirmationRequired ? 'needs-confirmation' : 'pending');
+  const feishu = includeItems ? await imageFeishuTaskStatuses(prisma, owner, tasks.map(task => task.id)) : new Map();
   const active = statuses.filter(state => ['running', 'queued'].includes(state)).length;
   const pending = statuses.filter(state => state === 'pending' || state === 'needs-confirmation').length;
   const uncertain = statuses.filter(state => state === 'uncertain').length;
@@ -502,6 +507,7 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
         : { source: { kind: 'batch-item' as const, batchId: batch.id, ordinal: item.ordinal, attempt: item.attempt },
           state: item.prepared ? 'unknown' as const : 'unavailable' as const };
       return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index],
+        ...(task ? { feishu: feishu.get(task.id) } : {}),
         error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation) : task?.error,
         resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' as const : 'dimensions_mismatch' as const : null,
         outputIssue: task ? studioOutputIssue(task) : null, inputMainPreview,
@@ -723,6 +729,7 @@ export async function dispatchStudioBatches() {
         const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
         await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
         const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
+        await enqueueFrozenImageFeishuNotification(tx, created, batch.imageFeishu);
         await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: taskId,
           actorUserId: batch.ownerId, ownerUserId: batch.ownerId, billingSubjectType: 'user', billingSubjectId: batch.ownerId,
           projectId: batch.usageContext?.projectId ?? null, occurredAt: created.created_at,

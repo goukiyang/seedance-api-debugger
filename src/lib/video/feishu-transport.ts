@@ -47,7 +47,15 @@ export async function uploadVideoFeishuCover(token: string, file: Blob) {
   if (typeof data.image_key !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(data.image_key)) throw new VideoFeishuError('cover_upload_unknown', 503, true);
   return data.image_key;
 }
-export async function sendVideoFeishuMessage(token: string, openId: string, uuid: string, type: 'media' | 'text', content: Record<string, unknown>, deadline: number, leaseUntil: number) {
+export async function uploadImageFeishuOriginal(token: string, file: Blob, extension: string) {
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/x-icon'].includes(file.type)
+    || file.size < 1 || file.size > 10_000_000 || !/^[a-z]{2,5}$/.test(extension)) throw new VideoFeishuError('image_original_invalid', 409);
+  const form = new FormData(); form.set('image_type', 'message'); form.set('image', file, `image.${extension}`);
+  const data = await request('images', token, form);
+  if (typeof data.image_key !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(data.image_key)) throw new VideoFeishuError('image_upload_unknown', 503, true);
+  return data.image_key;
+}
+export async function sendVideoFeishuMessage(token: string, openId: string, uuid: string, type: 'media' | 'text' | 'image', content: Record<string, unknown>, deadline: number, leaseUntil: number) {
   if (!/^ou_[A-Za-z0-9_-]{1,180}$/.test(openId) || !/^[a-f0-9-]{36}$/.test(uuid)) throw new VideoFeishuError('binding_unavailable', 409);
   if (!Number.isSafeInteger(deadline) || !Number.isSafeInteger(leaseUntil) || Date.now() >= deadline || Date.now() >= leaseUntil) throw new VideoFeishuError('message_window_ended', 409);
   const data = await request('messages?receive_id_type=open_id', token, JSON.stringify({ receive_id: openId, uuid, msg_type: type, content: JSON.stringify(content) }));

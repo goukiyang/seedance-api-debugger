@@ -11,7 +11,8 @@ function preference(value: unknown): Preference {
   if (v?.version !== 1 || typeof v.enabled !== 'boolean' || !Number.isSafeInteger(v.revision) || v.revision < 0 || typeof v.available !== 'boolean') throw new Error('飞书设置暂不可核对');
   return v;
 }
-export function useVideoFeishu(owner: string, active: boolean) {
+export function useVideoFeishu(owner: string, active: boolean, kind: 'video' | 'image' = 'video') {
+  const endpoint = kind === 'image' ? '/api/user/image-feishu' : '/api/user/video-feishu';
   const scope = active ? owner : '';
   const current = useRef(scope); current.current = scope;
   const sequence = useRef(0), alive = useRef(true), lock = useRef(false);
@@ -24,7 +25,7 @@ export function useVideoFeishu(owner: string, active: boolean) {
     if (!valid(captured) || lock.current) return;
     setBusy(true); setError('');
     try {
-      const response = await fetch('/api/user/video-feishu', { cache: 'no-store', headers: { 'x-app-session-user': captured }, signal: AbortSignal.timeout(15_000) });
+      const response = await fetch(endpoint, { cache: 'no-store', headers: { 'x-app-session-user': captured }, signal: AbortSignal.timeout(15_000) });
       const data = await response.json();
       if (!valid(captured) || seq !== sequence.current) return;
       if (!response.ok) throw new Error(videoFeishuErrorText(data.error));
@@ -36,7 +37,7 @@ export function useVideoFeishu(owner: string, active: boolean) {
     finally { if (valid(captured) && seq === sequence.current) setBusy(false); }
     // The mutable desired choice never causes a second automatic read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, [scope, endpoint]);
   useEffect(() => {
     alive.current = true; sequence.current++; lock.current = false;
     desiredRef.current = null; setDesired(null); setSaved(null); setError(''); setBusy(false);
@@ -50,7 +51,7 @@ export function useVideoFeishu(owner: string, active: boolean) {
     desiredRef.current = enabled; setDesired(enabled); setError(''); setBusy(true); lock.current = true;
     const seq = ++sequence.current;
     try {
-      const response = await fetch('/api/user/video-feishu', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-app-session-user': captured },
+      const response = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'x-app-session-user': captured },
         body: JSON.stringify({ version: 1, enabled, revision: value.revision }), signal: AbortSignal.timeout(15_000) });
       const data = await response.json();
       if (!valid(captured) || seq !== sequence.current) return;

@@ -1,9 +1,6 @@
-import { stat, unlink } from 'fs/promises';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { prisma } from '@/lib/prisma';
+import { stat } from 'fs/promises';
 import { uploadPublicVideoFile, type PublicUploadResult } from '@/lib/assets/public-storage';
-import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult } from './local-cache';
+import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult, validateLocalMp4 } from './local-cache';
 import { isVideoDeliveryFastPathTask } from './delivery-policy';
 import {
   ensureTaskThumbnail,
@@ -13,8 +10,7 @@ import {
 
 const VIDEO_MIME_TYPE = 'video/mp4';
 const LOCAL_FALLBACK_PROVIDER = 'not_configured';
-const DEFAULT_FFPROBE_BIN = 'ffprobe';
-const execFileAsync = promisify(execFile);
+import { assertVideoSaveOwnership, commitVideoSaveTask, withVideoSaveProcess, VIDEO_SAVE_TOTAL_TIMEOUT_MS, type VideoSaveOptions } from './save-lock';
 
 export type MediaIngestTask = CacheableVideoTask & {
   generation_mode?: string | null;
@@ -81,16 +77,14 @@ function uploadResultIsUsableForVideo(result: PublicUploadResult, allowLocalPubl
   return result.isPubliclyReachable && isAcceleratedVideoDeliveryProvider(result.storageProvider, { allowLocalPublic });
 }
 
-async function markLocalFallback(taskId: string, fileSize: number | null, message: string): Promise<MediaIngestResult> {
+async function markLocalFallback(task: MediaIngestTask, fileSize: number | null, message: string): Promise<MediaIngestResult> {
   const cachedAt = new Date();
-  await prisma.videoTask.update({
-    where: { id: taskId },
-    data: {
+  await assertVideoSaveOwnership(task);
+  await commitVideoSaveTask(task, {
       public_video_storage_provider: LOCAL_FALLBACK_PROVIDER,
       public_video_storage_key: null,
       public_video_file_size: fileSize,
       public_video_cached_at: cachedAt,
-    },
   });
   return {
     success: false,
@@ -128,47 +122,17 @@ async function resolveLocalVideo(task: MediaIngestTask, cacheTimeoutMs?: number)
   };
 }
 
-async function validateLocalMp4(filePath: string) {
-  const { stdout } = await execFileAsync(process.env.FFPROBE_PATH || DEFAULT_FFPROBE_BIN, [
-    '-v',
-    'error',
-    '-select_streams',
-    'v:0',
-    '-show_entries',
-    'stream=width,height,codec_type:format=duration',
-    '-of',
-    'json',
-    filePath,
-  ], { timeout: 15_000, maxBuffer: 1024 * 32 });
-  const parsed = JSON.parse(String(stdout || '{}')) as {
-    streams?: Array<{ codec_type?: string; width?: number; height?: number }>;
-    format?: { duration?: string | number };
-  };
-  const videoStream = parsed.streams?.find((stream) => stream.codec_type === 'video') || parsed.streams?.[0];
-  const duration = Number(parsed.format?.duration);
-  if (!videoStream || !videoStream.width || !videoStream.height || !Number.isFinite(duration) || duration <= 0) {
-    throw new Error('MP4 文件不可读或缺少有效视频流');
-  }
-}
-
-async function discardInvalidLocalVideo(taskId: string, localPath: string, absolutePath: string) {
-  await unlink(absolutePath).catch(() => undefined);
-  await prisma.videoTask.updateMany({
-    where: {
-      id: taskId,
-      local_video_path: localPath,
-      public_video_url: null,
-    },
-    data: {
-      local_video_path: null,
-    },
-  });
-}
-
 export async function ingestTaskMediaFromProvider(
   task: MediaIngestTask,
-  options: { allowLocalPublic?: boolean; cacheTimeoutMs?: number } = {},
+  options: VideoSaveOptions = {},
 ): Promise<MediaIngestResult> {
+  if (task.public_video_url) return { success: true, public_video_url: task.public_video_url,
+    storage_provider: task.public_video_storage_provider, storage_key: task.public_video_storage_key,
+    file_size: task.public_video_file_size, cached_at: task.public_video_cached_at, local_video_path: task.local_video_path, already_exists: true };
+  return withVideoSaveProcess('ingest', task, options, () => ingestTaskMediaFromProviderInner(task, options));
+}
+
+async function ingestTaskMediaFromProviderInner(task: MediaIngestTask, options: VideoSaveOptions): Promise<MediaIngestResult> {
   if (task.public_video_url) {
     return {
       success: true,
@@ -190,7 +154,7 @@ export async function ingestTaskMediaFromProvider(
     };
   }
 
-  const localVideo = await resolveLocalVideo(task, options.cacheTimeoutMs);
+  const localVideo = await resolveLocalVideo(task, options.cacheTimeoutMs ?? VIDEO_SAVE_TOTAL_TIMEOUT_MS);
   if (!localVideo.cacheResult.success || !localVideo.localPath || !localVideo.absolutePath || !localVideo.fileSize) {
     return {
       success: false,
@@ -203,7 +167,7 @@ export async function ingestTaskMediaFromProvider(
   try {
     await validateLocalMp4(localVideo.absolutePath);
   } catch (error) {
-    await discardInvalidLocalVideo(task.id, localVideo.localPath, localVideo.absolutePath);
+    // Preserve the existing original; a probe failure never deletes a previously published file.
     return {
       success: false,
       cacheResult: localVideo.cacheResult,
@@ -214,6 +178,8 @@ export async function ingestTaskMediaFromProvider(
     };
   }
 
+  task = { ...task, result_video_url: localVideo.cacheResult.result_video_url || task.result_video_url };
+  await assertVideoSaveOwnership(task);
   const thumbnailResult = await ensureTaskThumbnail({
     id: task.id,
     public_video_url: task.public_video_url,
@@ -224,8 +190,9 @@ export async function ingestTaskMediaFromProvider(
 
   const allowLocalPublic = options.allowLocalPublic === true || envAllowsLocalPublicDelivery();
   if (!canAttemptPublicUpload({ allowLocalPublic })) {
+    await assertVideoSaveOwnership(task);
     const fallbackResult = await markLocalFallback(
-      task.id,
+      task,
       localVideo.fileSize,
       '未配置 R2/TOS 视频分发，当前使用本站慢速备用播放。',
     );
@@ -246,17 +213,16 @@ export async function ingestTaskMediaFromProvider(
   const cachedAt = new Date();
   const usableForVideo = uploadResultIsUsableForVideo(uploadResult, allowLocalPublic);
 
-  await prisma.videoTask.update({
-    where: { id: task.id },
-    data: {
+  await assertVideoSaveOwnership(task);
+  await commitVideoSaveTask(task, {
       public_video_url: usableForVideo ? uploadResult.publicUrl : null,
       public_video_storage_provider: uploadResult.storageProvider,
       public_video_storage_key: uploadResult.storageKey || null,
       public_video_file_size: uploadResult.size || localVideo.fileSize,
       public_video_cached_at: cachedAt,
       local_video_path: localVideo.localPath,
-    },
   });
+
 
   if (!usableForVideo) {
     const message = uploadResult.warning || '视频已落到备用存储，但该地址不是稳定 CDN 下载地址。';

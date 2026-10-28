@@ -1485,7 +1485,7 @@
                         const selected = project.id === selectedProjectId;
                         const removalAction = project.removal_action || '';
                         return `
-                            <div class="context-menu-row ${selected ? 'is-selected' : ''}">
+                            <div class="context-menu-row ${selected ? 'is-selected' : ''}" data-project-search-row="${escapeHtml(projectDisplayNameFor(project).toLocaleLowerCase())}">
                                 <button type="button" class="context-menu-row-main" data-project-select="${escapeHtml(project.id)}" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>
                                     ${identityAvatarHtml(project.owner, project.owner_user_id)}
                                     <span class="context-menu-row-copy">
@@ -1495,13 +1495,12 @@
                                     </span>
                                     <span class="context-menu-check" aria-hidden="true">${selected ? '✓' : ''}</span>
                                 </button>
-                                ${removalAction ? `
-                                    <button type="button" class="context-row-action ${removalAction === 'delete' ? 'danger' : ''}"
-                                        data-project-remove="${escapeHtml(project.id)}"
-                                        data-removal-action="${escapeHtml(removalAction)}"
-                                        title="${escapeHtml(project.removal_reason || (removalAction === 'delete' ? '删除空项目' : '归档项目'))}">
-                                        ${removalAction === 'delete' ? '删除' : '归档'}
-                                    </button>
+                                ${canvasRuntime.projectManagement?.ownerId === canvasRuntime.bootstrap?.user?.id && canvasRuntime.projectManagement.projects?.some(item => item.id === project.id && item.can_manage_project) && !['personal','system'].includes(project.type) ? `
+                                    <details class="context-project-actions"><summary class="context-row-action" aria-label="管理项目：${escapeHtml(projectDisplayNameFor(project))}">更多</summary>
+                                        <button type="button" class="context-row-action" data-project-manage="edit" data-project-id="${escapeHtml(project.id)}">编辑项目</button>
+                                        ${removalAction === 'archive' ? `<button type="button" class="context-row-action" data-project-manage="archive" data-project-id="${escapeHtml(project.id)}">归档项目</button>` : ''}
+                                        <button type="button" class="context-row-action danger" data-project-manage="delete" data-project-id="${escapeHtml(project.id)}">删除项目</button>
+                                    </details>
                                 ` : ''}
                             </div>`;
                     }).join('')}
@@ -1512,14 +1511,9 @@
             <div class="canvas-context-menu ${canvasRuntime.openContextMenu === 'project' ? 'is-open' : ''}" data-context-menu="project">
                 <div class="context-menu-head">
                     <span><strong>项目列表</strong><small>${projects.length} 个可生成项目</small></span>
-                    <button type="button" class="context-command" data-project-create-toggle>${canvasRuntime.projectCreateOpen ? '取消' : '新建项目'}</button>
+                    ${canvasRuntime.projectManagement?.ownerId === canvasRuntime.bootstrap?.user?.id && canvasRuntime.projectManagement.canCreate ? '<button type="button" class="context-command" data-project-manage="create">新建项目</button>' : ''}
                 </div>
-                ${canvasRuntime.projectCreateOpen ? `
-                    <form class="context-create-form" data-project-create-form>
-                        <label>项目名称<input name="project_name" maxlength="80" autocomplete="off" placeholder="例如：品牌短片" required></label>
-                        <button type="submit" class="context-primary-command" ${canvasRuntime.contextSwitching ? 'disabled' : ''}>创建并选中</button>
-                    </form>
-                ` : ''}
+                ${projects.length > 7 ? '<label class="context-create-form">搜索项目<input type="search" data-project-search aria-label="搜索项目" autocomplete="off"></label>' : ''}
                 <div class="context-menu-list">
                     ${sections || '<div class="context-menu-empty">还没有可用项目，可以先新建一个。</div>'}
                 </div>
@@ -1997,7 +1991,7 @@
                 <button type="button" class="canvas-context-trigger" data-context-toggle="project" aria-expanded="${canvasRuntime.openContextMenu === 'project'}">
                     ${project ? identityAvatarHtml(project.owner, project.owner_user_id, 'is-trigger') : '<span class="context-trigger-placeholder"></span>'}
                     <span class="context-trigger-copy">
-                        <strong>${escapeHtml(projectDisplayNameFor(project))}</strong>
+                        <strong>${escapeHtml(!project && canvasRuntime.selectedProjectId ? `${canvasRuntime.selectedProjectId}（当前不可用）` : projectDisplayNameFor(project))}</strong>
                         <small>${escapeHtml(projectMetaFor(project))}</small>
                     </span>
                     ${contextChevronHtml()}
@@ -2438,71 +2432,49 @@
         }
     }
 
-    async function createProjectFromMenu(form) {
-        const name = form.elements.project_name?.value?.trim() || '';
-        if (!name || canvasRuntime.contextSwitching) return;
-        setContextSwitching(true);
-        try {
-            const data = await postJson('/api/projects', { name, type: 'team' });
-            if (!data?.project?.id) throw new Error('后端没有返回新项目 ID');
-            const saved = await flushCanvasSave('before_project_create_switch');
-            if (!saved) throw new Error('当前画布保存失败，新项目已创建但未切换。');
-            const projects = canvasRuntime.bootstrap?.context?.projects;
-            if (projects && !projects.some(project => project.id === data.project.id)) projects.push(data.project);
-            invalidateGenerationContext();
-            stopAllVideoPolling();
-            disposeCanvasPricing();
-            canvasRuntime.documentWritable = false;
-            await window.UltimateCanvasDocuments?.show({ projectId: data.project.id });
-            showCanvasNotice(`已新建「${data.project.name}」，请选择新建画布。`, 'info');
-        } catch (error) {
-            showCanvasNotice(error?.message || '新建项目失败。', 'error');
-        } finally {
-            canvasRuntime.openContextMenu = null;
-            canvasRuntime.projectCreateOpen = false;
-            setContextSwitching(false);
-        }
+    function requestProjectManagement(mode, projectId) {
+        const userId = canvasRuntime.bootstrap?.user?.id;
+        const capability = canvasRuntime.projectManagement;
+        if (!userId || canvasRuntime.contextSwitching || capability?.ownerId !== userId) return;
+        if (mode === 'create' ? !capability.canCreate : !capability.projects?.some(project => project.id === projectId && project.can_manage_project)) return;
+        if (window.parent === window) { showCanvasNotice('请从站内画布入口管理项目。', 'warn'); return; }
+        window.parent.postMessage({ type: 'sd2-canvas-project-manage', userId, mode, projectId,
+            requestId: crypto.randomUUID() }, location.origin);
+        closeContextMenus();
     }
 
-    async function removeProjectFromMenu(projectId, action) {
-        const project = canvasRuntime.bootstrap?.context?.projects?.find(item => item.id === projectId);
-        if (!project || !action || canvasRuntime.contextSwitching) return;
-        const confirmed = await requestCanvasConfirmation({
-            title: action === 'archive' ? '归档项目' : '删除空项目',
-            message: action === 'archive'
-                ? '这个项目已有任务或图集，将转为只读归档，不会删除历史内容。'
-                : '这个项目当前没有任务或图集，删除后不会再出现在项目列表中。',
-            detail: `${projectDisplayNameFor(project)} · ${projectMetaFor(project)}`,
-            confirmLabel: action === 'archive' ? '确认归档' : '确认删除',
-            danger: action === 'delete'
-        });
-        if (!confirmed) return;
-
-        setContextSwitching(true);
+    let projectDirectoryRead = 0;
+    async function refreshCanvasProjectDirectory() {
+        const ownerId = canvasRuntime.bootstrap?.user?.id, contextEpoch = canvasRuntime.contextEpoch;
+        if (!ownerId) return;
+        const read = ++projectDirectoryRead;
         try {
-            if (projectId === canvasRuntime.selectedProjectId) {
-                const saved = await flushCanvasSave('before_project_remove');
-                if (!saved) throw new Error('当前画布保存失败，已取消项目操作。');
+            const [directory, catalog] = await Promise.all([
+                requestJson('/api/tools/ultimate-canvas/bootstrap', { cache: 'no-store' }),
+                requestJson('/api/projects?lite=true&include_all=true&include_archived=true', { cache: 'no-store', headers: { 'x-app-session-user': ownerId } })
+            ]);
+            if (read !== projectDirectoryRead || ownerId !== canvasRuntime.bootstrap?.user?.id || directory.user?.id !== ownerId || contextEpoch !== canvasRuntime.contextEpoch) return;
+            if (!Array.isArray(directory.context?.projects) || !Array.isArray(catalog.projects)) throw Error('项目列表暂未确认，原画布保留。');
+            // Only the original canvas query supplies options. Never adopt its default selection or document.
+            canvasRuntime.bootstrap.context.projects = directory.context.projects;
+            canvasRuntime.projectManagement = { ownerId, projects: catalog.projects,
+                canCreate: catalog.capabilities?.can_create_team_project === true && catalog.capabilities?.create_operation_version === 1 };
+            if (canvasRuntime.selectedProjectId && !directory.context.projects.some(project => project.id === canvasRuntime.selectedProjectId)) {
+                canvasRuntime.documentWritable = false;
+                canvasRuntime.bootstrap.context.generation_blocked_reason = '原项目暂不可用，原选择和画布已保留。';
+                clearAllVideoEstimates(); updateDocumentInteraction();
+                showCanvasNotice('原项目暂不可用，原选择和画布已保留；请选择有权使用的项目。', 'warn');
             }
-            if (action === 'archive') await patchJson(`/api/projects/${encodeURIComponent(projectId)}`, { action: 'archive' });
-            else await deleteJson(`/api/projects/${encodeURIComponent(projectId)}`);
-
-            if (projectId === canvasRuntime.selectedProjectId) {
-                resetProjectScopedRuntime(null);
-                clearCanvasForContext();
-                canvasRuntime.bootstrapLoaded = false;
-                await loadCanvasBootstrap(null, null, { restoreDocument: true, clearWhenMissing: true });
-            } else {
-                await loadCanvasBootstrap(canvasRuntime.selectedProjectId, canvasRuntime.selectedVideoCardId, { restoreDocument: false });
-            }
-            showCanvasNotice(action === 'archive' ? '项目已归档。' : '空项目已删除。', 'info');
+            renderRuntimeContextControls();
         } catch (error) {
-            showCanvasNotice(error?.message || '项目操作失败。', 'error');
-        } finally {
-            canvasRuntime.openContextMenu = null;
-            setContextSwitching(false);
+            if (read === projectDirectoryRead && ownerId === canvasRuntime.bootstrap?.user?.id) showCanvasNotice(error?.message || '项目列表暂不可读，原选择和画布保留。', 'warn');
         }
     }
+    window.addEventListener('message', event => {
+        if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'sd2-canvas-project-catalog-changed'
+            || event.data.ownerId !== canvasRuntime.bootstrap?.user?.id) return;
+        void refreshCanvasProjectDirectory();
+    });
 
     async function createVideoCardFromValues(title, objective, confirmDuplicate = false) {
         if (!title || !canvasRuntime.selectedProjectId || canvasRuntime.contextSwitching) return;
@@ -2619,6 +2591,11 @@
         }
     });
 
+    document.addEventListener('input', event => {
+        if (!event.target.matches?.('[data-project-search]')) return;
+        const query = event.target.value.toLocaleLowerCase();
+        document.querySelectorAll('[data-project-search-row]').forEach(row => { row.hidden = !row.dataset.projectSearchRow.includes(query); });
+    });
     document.addEventListener('click', event => {
         const toggle = event.target.closest('[data-context-toggle]');
         if (toggle) {
@@ -2636,6 +2613,7 @@
                 };
             }
             renderRuntimeContextControls();
+            if (kind === 'project' && opening) void refreshCanvasProjectDirectory();
             if (kind === 'video-card' && opening) {
                 refreshProjectVideoCards().catch(error => {
                     showCanvasNotice(error?.message || '\u89c6\u9891\u5361\u5217\u8868\u5237\u65b0\u5931\u8d25\u3002', 'warn');
@@ -2770,13 +2748,8 @@
             return;
         }
 
-        const projectCreateToggle = event.target.closest('[data-project-create-toggle]');
-        if (projectCreateToggle) {
-            canvasRuntime.projectCreateOpen = !canvasRuntime.projectCreateOpen;
-            renderRuntimeContextControls();
-            document.querySelector('[data-project-create-form] input')?.focus();
-            return;
-        }
+        const projectManage = event.target.closest('[data-project-manage]');
+        if (projectManage) { requestProjectManagement(projectManage.dataset.projectManage, projectManage.dataset.projectId); return; }
 
         const videoCardCreateToggle = event.target.closest('[data-video-card-create-toggle]');
         if (videoCardCreateToggle) {
@@ -2789,12 +2762,6 @@
         const projectSelect = event.target.closest('[data-project-select]');
         if (projectSelect) {
             switchProjectContext(projectSelect.dataset.projectSelect);
-            return;
-        }
-
-        const projectRemove = event.target.closest('[data-project-remove]');
-        if (projectRemove) {
-            removeProjectFromMenu(projectRemove.dataset.projectRemove, projectRemove.dataset.removalAction);
             return;
         }
 
@@ -2961,12 +2928,6 @@
             return;
         }
 
-        const projectForm = event.target.closest('[data-project-create-form]');
-        if (projectForm) {
-            event.preventDefault();
-            createProjectFromMenu(projectForm);
-            return;
-        }
         const videoCardForm = event.target.closest('[data-video-card-create-form]');
         if (videoCardForm) {
             event.preventDefault();

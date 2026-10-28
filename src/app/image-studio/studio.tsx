@@ -104,6 +104,9 @@ import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-default
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
 import { useStudioBatch, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
 import { ImageUsageProjectSelect, useImageUsageProject } from '@/components/ImageUsageProjectSelect';
+import { useVideoFeishu } from '@/lib/hooks/use-video-feishu';
+import { VideoFeishuToggle } from '@/components/generate/VideoFeishuToggle';
+import { ImageFeishuStatus, type ImageFeishuView } from '@/components/image-studio/ImageFeishuStatus';
 import { BatchResults } from './batch-results';
 import { watchGenerationCompletion } from '@/components/GenerationCompletion';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
@@ -119,7 +122,7 @@ import { fetchReadWithRetry } from '@/lib/http/read-retry';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { taskSettings?: StudioTaskSettings; imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
+type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
 type StudioRecheckScope = { key: string; active: boolean };
 type RestoredTaskSettings = { sourceTaskId: string; snapshot: StudioSnapshot & {
   templateReferenceCount?: number; templateReferenceImages?: UploadedAssetPayload[]; templatePrompt?: string;
@@ -1544,6 +1547,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const styleSkillSelector = useRef<StudioStyleSkillSelectorHandle>(null);
   const { user: sessionUser, sessionChanged } = useAppSession();
+  const imageFeishu = useVideoFeishu(userId, templateWorkbench && active && !hidden && !sessionChanged && sessionUser?.id === userId, 'image');
   const sharedLive = module.sharedLive;
   const canViewTemplateContext = module.templateRead?.canViewTemplateContext === true
     || module.privateDefinition && (module.canReadPrivatePrompt || module.requiresIdentityVerification);
@@ -1929,7 +1933,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId),
   });
   function effectiveSignature(payload: ReturnType<typeof generationPayload>, channelId: string) {
-    return JSON.stringify([userId, Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'requestId')),
+    return JSON.stringify([userId, Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'requestId' && key !== 'image_feishu')),
       channelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined, generationDefinitionSignature,
       imageStudioChannelModel(selectedChannel, payload.model)?.pricingBySpecification === true]);
   }
@@ -3179,7 +3183,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
     const historicalUsage = (retryTask?.snapshot as (StudioSnapshot & { usageAttribution?: { projectId?: string | null } }) | undefined)?.usageAttribution;
-    return { requestId, ...(sharedLive ? { sharedLive: sharedLive.intent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
+    return { requestId, ...(templateWorkbench && !retryTask && imageFeishu.choice ? { image_feishu: imageFeishu.choice } : {}),
+      ...(sharedLive ? { sharedLive: sharedLive.intent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
       ...(!retryTask ? { taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) } : {}),
       ...(restoredTaskSettings && !retryTask ? { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: restoredTaskSettings.sourceTaskId } } : {}),
       projectId: retryTask ? historicalUsage?.projectId ?? null : usageProject.projectId,
@@ -3914,6 +3919,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     return () => document.removeEventListener('paste', paste);
   }, [addImages, preview, active, referenceLimit, assetPickerOpen]);
 
+  const canManageTemplateSharing = Boolean(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing);
+  const sharingControls = <>
+    {canManageTemplateSharing && <label className={`toggle-switch ${styles.moduleShareSwitch}`} data-tip={sharingTip} title={sharingTip}>
+      <input type="checkbox" role="switch" aria-label={`共享给同事：${sharingTip}`} checked={module.sourcePresetShared === true || unpublishedSharing}
+        disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
+      <span className="toggle-slider" />
+    </label>}
+    {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
+  </>;
+  const templateSharingAttributes = templateWorkbench && (canManageTemplateSharing || sharingPending)
+    ? <div className={styles.counts} aria-label="模板属性"><span>共享给同事</span>{sharingControls}</div> : undefined;
   function activateDraft() {
     onActivate();
     if (draftRestoring || !draftLoaded) beginCurrentInput();
@@ -3929,16 +3945,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {sharedLive && (!sharedLive.available || module.sourcePresetShared === true) && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
-        {(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing) &&
-          <label className={`toggle-switch ${styles.moduleShareSwitch}`} data-tip={sharingTip} title={sharingTip}>
-            <input type="checkbox" role="switch" aria-label={`共享给同事：${sharingTip}`} checked={module.sourcePresetShared === true || unpublishedSharing}
-              disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
-            <span className="toggle-slider" />
-          </label>}
-        {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
+        {templateWorkbench ? <VideoFeishuToggle state={imageFeishu} label="完成后发飞书" disabled={!draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} /> : sharingControls}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        {canViewTemplateContext && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable || module.privateDefinition ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />模板上下文</button></span>}
+        {(canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable || module.privateDefinition ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />模板上下文</button></span>}
         <button type="button" disabled={!draftLoaded || draftRestoring} onClick={() => openModuleDialog(true)}>本次生成设置</button>
         {(module.coverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
@@ -4238,6 +4248,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
+            {templateWorkbench && <ImageFeishuStatus owner={userId} taskId={task.id} initial={task.feishu} onChanged={() => void loadTasks(undefined, 'silent')} />}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {studioTaskAsyncRecovery(task) && <>
               {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}
@@ -4258,7 +4269,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     </div>
     {copyFeedback && <ImageResultOperationFeedback feedback={copyFeedback} anchorRef={copyFeedbackAnchor} onDismiss={operationId => setCopyFeedback(current => current?.operationId === operationId ? null : current)} onRetry={copyFeedback.phase === 'error' ? () => { const task = tasks.find(item => item.id === copyFeedback.id); if (task) void copyTaskContext(task); } : undefined} />}
     {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${taskReadScope}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
-    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} onClose={() => setReadingDefinition(false)} />}
+    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} attributes={templateSharingAttributes} onClose={() => setReadingDefinition(false)} />}
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio" contextTemplateId={module.sourcePresetId || sharedLive?.intent.presetId || module.id}
       contextKey={inputScopeKey(imageSourceTarget)} focusIntent={inputFocusIntents[imageSourceTarget]}
       onFocusIntentConsumed={id => setInputFocusIntents(previous => { if (previous[imageSourceTarget]?.id !== id) return previous; const next = { ...previous }; delete next[imageSourceTarget]; return next; })}
@@ -4361,6 +4372,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>
       <header className={styles.header}><h2>{personalSettingsOpen ? '本次生成设置' : repairDefinition ? '修复模板' : '模板上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
+      {!personalSettingsOpen && templateSharingAttributes}
       <div className={styles.contextEditorTools}>{!personalSettingsOpen && <span>模块上下文版本：<ContextVersionLabel {...contextVersion} /></span>}
         {!personalSettingsOpen && module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}
         <button type="button" disabled={!settings?.templateDefaults || !draftLoaded || draftRestoring || moduleSaving || moduleDeleting || presetSaving || Boolean(quickPresetApplying) || submitting || Boolean(pendingSubmission) || uploading || bannerUploading || ratioEditing}

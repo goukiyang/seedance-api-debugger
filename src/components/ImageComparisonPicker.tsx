@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
@@ -71,9 +72,9 @@ export function ImageComparisonPicker({ side, candidates, container, anchorRef, 
         if (sequence !== querySequence.current) return;
         setItems(previous => page === 1 ? data.items : [...previous, ...data.items.filter(item => !previous.some(old => old.identity === item.identity))]);
         setAlbums(data.albums); setHasMore(data.hasMore);
-        if (prefs.album && !data.albums.some(album => album.scope === prefs.scope && album.id === prefs.album)
-          || prefs.project && !data.albums.some(album => album.scope === prefs.scope && album.project?.id === prefs.project)) {
-          setPage(1); setPrefs(current => ({ ...current, album: '', project: '' }));
+        if (prefs.project && !data.albums.some(album => album.scope === prefs.scope && album.project?.id === prefs.project)) setError('所选项目暂不可用，原筛选已保留。');
+        else if (prefs.album && !data.albums.some(album => album.scope === prefs.scope && album.id === prefs.album)) {
+          setPage(1); setPrefs(current => ({ ...current, album: '' }));
         }
       }).catch(e => { if (sequence === querySequence.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : '素材读取失败'); })
         .finally(() => { if (sequence === querySequence.current) setLoading(false); });
@@ -101,7 +102,7 @@ export function ImageComparisonPicker({ side, candidates, container, anchorRef, 
           <select aria-label="素材范围" value={prefs.scope} onChange={event => change({ scope: event.target.value as PickerScope, album: '', project: '' })}>{comparisonScopes.map(scope => <option key={scope} value={scope}>{scopeLabels[scope]}</option>)}</select>
           <select aria-label="素材来源" value={prefs.source} onChange={event => change({ source: event.target.value })}><option value="all">全部来源</option><option value="uploaded">上传图片</option><option value="generated">生成图片</option></select>
           <select aria-label="图集" value={prefs.album} onChange={event => change({ album: event.target.value })}><option value="">全部图集</option>{albums.filter(album => album.scope === prefs.scope).map(album => <option key={album.id} value={album.id}>{album.name}</option>)}</select>
-          <select aria-label="项目" value={prefs.project} onChange={event => change({ project: event.target.value, album: '' })}><option value="">全部项目</option>{Array.from(new Map(albums.filter(album => album.scope === prefs.scope && album.project).map(album => [album.project!.id, album.project!])).values()).map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+          <ProjectSelector onCatalogChange={() => setEpoch(value => value + 1)}  aria-label="项目" value={prefs.project} onChange={event => change({ project: event.target.value, album: '' })}><option value="">全部项目</option>{Array.from(new Map(albums.filter(album => album.scope === prefs.scope && album.project).map(album => [album.project!.id, album.project!])).values()).map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector>
           <select aria-label="排序" value={prefs.sort} onChange={event => change({ sort: event.target.value })}><option value="newest">最近优先</option><option value="name">名称</option></select>
         </>}
         <button type="button" title="还原选图筛选" aria-label="还原选图筛选" onClick={() => change({ ...defaults, view: candidates.length ? 'context' : 'library' })}><RotateCcw size={16} /></button>

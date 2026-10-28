@@ -7,7 +7,7 @@ import { authorizedVideoFeishuTask, videoFeishuBinding } from './feishu-notifica
 import { prepareVideoFeishuSource, videoFeishuSourceStamp, type PreparedVideoFeishuSource } from './feishu-source';
 import { uploadVideoFeishuFile, uploadVideoFeishuCover, sendVideoFeishuMessage } from './feishu-transport';
 import { VIDEO_FEISHU_TYPE, VIDEO_FEISHU_SITE, VIDEO_FEISHU_ATTEMPTS, VideoFeishuError, parseVideoFeishuEvent,
-  type VideoFeishuStep } from './feishu-contract';
+  videoFeishuSameOriginal, type VideoFeishuStep } from './feishu-contract';
 
 type Db = Prisma.TransactionClient;
 type Row = Pick<Notification, 'id' | 'type' | 'channel' | 'status' | 'target_user_id' | 'metadata_json'>;
@@ -74,13 +74,14 @@ export async function deliverVideoFeishuNotification(db: Db, row: Row, heartbeat
     if (waiting.has(initial.task.local_status)) return await defer('generation_not_ready', 5 * 60_000);
     if (failed.has(initial.task.local_status)) return await terminal('generation_not_completed');
     if (initial.task.local_status !== 'succeeded') return await defer('generation_state_unconfirmed', 5 * 60_000);
+    if (initial.task.delivery_status === 'failed' && !initial.task.local_video_path && !initial.task.public_video_url) return await terminal('original_save_failed');
     source = await prepareVideoFeishuSource(initial.task);
-    const stamp = videoFeishuSourceStamp(initial.task);
-    if (meta.sourceVersion && meta.sourceVersion !== source.version || meta.contentHash && meta.contentHash !== source.hash) return await terminal('original_changed');
+    const stamp = videoFeishuSourceStamp(initial.task, source.origin);
+    if (!videoFeishuSameOriginal(meta, source)) return await terminal('original_changed');
     meta.sourceVersion = source.version; meta.contentHash = source.hash;
     const authority = async () => {
       const current = await fresh();
-      if (current.task.local_status !== 'succeeded' || videoFeishuSourceStamp(current.task) !== stamp || !await source!.current()) throw new VideoFeishuError('original_changed', 409);
+      if (current.task.local_status !== 'succeeded' || videoFeishuSourceStamp(current.task, source!.origin) !== stamp || !await source!.current()) throw new VideoFeishuError('original_changed', 409);
       if (!await heartbeat()) throw new VideoFeishuError('delivery_lease_lost', 409);
       return current.actor.feishu_open_id!;
     };
@@ -149,7 +150,8 @@ export async function deliverVideoFeishuNotification(db: Db, row: Row, heartbeat
     const failure = safeError(error);
     if (!owned || failure.code === 'delivery_lease_lost') return 'lease_lost';
     if (failure.retryable) {
-      if (failure.code !== 'original_not_ready') meta.preparations++;
+      meta.preparations++;
+      if (failure.code === 'original_not_ready' && meta.preparations >= VIDEO_FEISHU_ATTEMPTS) return await terminal('original_wait_ended');
       if (meta.preparations >= VIDEO_FEISHU_ATTEMPTS) return await terminal('preparation_attempts_ended');
       return await defer(failure.code, 5 * 60_000);
     }

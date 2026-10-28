@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -280,8 +281,8 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
       onEdit={onEdit} onUseReference={onUseReference} onRename={rename} onBranch={() => namedAction('branch')} onRemove={() => void mutate(work.removed ? 'restore' : 'remove')} onShare={() => setSharing(true)}
       onRefresh={() => { setNotice(''); setChecking(true); void fetchDetail(work.id, true).finally(() => setChecking(false)); }} onRetry={() => void mutate('save', work.title)} /> : detailOnly ? <p role="status">{notice || '正在读取方案…'}<button type="button" onClick={onClose}>返回记录</button></p> : <>
       <div className={styles.filters}>
-        <label>项目<select value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>
-          <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select></label>
+        <label>项目<ProjectSelector onCatalogChange={() => void fetchList()}  value={preferences.projectId} onChange={event => savePreferences({ ...preferences, projectId: event.target.value, selected: '', y: 0 })}>
+          <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</ProjectSelector></label>
         <label className={styles.search}><Search size={16} /><input aria-label="搜索作品" placeholder="搜索作品" maxLength={120} value={search} onChange={event => setSearch(event.target.value)} /></label>
         <label><input type="checkbox" checked={preferences.removed} onChange={event => savePreferences({ ...preferences, removed: event.target.checked, selected: '', y: 0 })} />已移出</label>
         <button type="button" className={styles.button} disabled={loading} onClick={() => void fetchList()}><RefreshCw size={16} />刷新</button>

@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
@@ -10,6 +11,7 @@ import { actualRangeLabel, defaultUsageSearch, usageHref, type QueryPatch, type 
 type Props = {
   search: string; view: UsageView; report: UsageReport | null; busy: boolean; stale: boolean;
   update: (patch: QueryPatch) => void; reset: () => void;
+  onCatalogChange: () => void;
   advancedOpen: boolean; onAdvanced: (open: boolean) => void;
 };
 const RANGES = [['month', '月'], ['quarter', '季度'], ['half', '半年'], ['year', '年'], ['recent6m', '最近6个日历月'], ['all', '全部'], ['custom', '自定义'], ['7d', '最近7天'], ['30d', '最近30天']];
@@ -23,7 +25,7 @@ function SelectOptions({ value, values, empty }: { value: string; values: Array<
   </>;
 }
 
-export default function UsageFilters({ search, view, report, busy, stale, update, reset, advancedOpen, onAdvanced }: Props) {
+export default function UsageFilters({ search, view, report, busy, stale, update, reset, advancedOpen, onAdvanced, onCatalogChange }: Props) {
   const params = new URLSearchParams(search);
   const [draft, setDraft] = useState(() => Object.fromEntries(params));
   useEffect(() => { setDraft(Object.fromEntries(new URLSearchParams(search))); }, [search]);
@@ -59,7 +61,7 @@ export default function UsageFilters({ search, view, report, busy, stale, update
       <div className="au-common-filters">
         <label><span>业务类型</span><select className="input" value={params.get('kind') || ''} onChange={event => update({ kind: event.target.value })}><SelectOptions value={params.get('kind') || ''} values={Object.entries(KIND_LABELS)} empty="全部业务" /></select></label>
         {view !== 'members' && <label><span>消费归属成员</span><select className="input" value={params.get('owner_user_id') || ''} onChange={event => update({ owner_user_id: event.target.value })}><SelectOptions value={params.get('owner_user_id') || ''} values={ownerOptions} empty="全部成员" /></select><Link className="au-quiet-link" href={usageHref('members', search)}>查找全部成员</Link></label>}
-        {view !== 'projects' && <label><span>项目</span><select className="input" value={params.get('project_id') || ''} onChange={event => update({ project_id: event.target.value })}><SelectOptions value={params.get('project_id') || ''} values={projectOptions} empty="全部项目" /></select><Link className="au-quiet-link" href={usageHref('projects', search)}>查找全部项目</Link></label>}
+        {view !== 'projects' && <label><span>项目</span><ProjectSelector onCatalogChange={onCatalogChange}  className="input" value={params.get('project_id') || ''} onChange={event => update({ project_id: event.target.value })}><SelectOptions value={params.get('project_id') || ''} values={projectOptions} empty="全部项目" /></ProjectSelector><Link className="au-quiet-link" href={usageHref('projects', search)}>查找全部项目</Link></label>}
       </div>
     </div>
     <div className="au-filter-meta">

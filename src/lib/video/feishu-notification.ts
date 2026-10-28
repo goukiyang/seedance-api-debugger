@@ -1,4 +1,5 @@
 import type { Prisma, VideoTask } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { feedbackConfig, recipientIdentity } from '@/lib/feedback/notification';
@@ -78,28 +79,52 @@ export async function authorizedVideoFeishuTask(db: Db, actorId: string, taskId:
   const actor = await videoFeishuActor(db, actorId);
   const task = await db.videoTask.findUnique({ where: { id: taskId }, select: { id: true, user_id: true, owner_user_id: true, project_id: true,
     retention_status: true, source_metadata_json: true, local_status: true, local_video_path: true, public_video_url: true,
-    public_video_storage_provider: true, public_video_storage_key: true, public_video_file_size: true, public_video_cached_at: true } });
+    public_video_storage_provider: true, public_video_storage_key: true, public_video_file_size: true, public_video_cached_at: true,
+    delivery_status: true, delivery_error: true } });
   if (!task || task.user_id !== actorId || isPrivateMultiviewTask(task) || isTaskHiddenFromRegularUsers(task)) throw new VideoFeishuError('task_unavailable', 404);
   try { await assertCanViewTask(actor, task, db); }
   catch (error) { if (error instanceof AuthError) throw new VideoFeishuError('task_unavailable', 404); throw error; }
   return { actor, task };
 }
 async function taskEvent(db: Db, actorId: string, taskId: string) {
-  await authorizedVideoFeishuTask(db, actorId, taskId);
+  const current = await authorizedVideoFeishuTask(db, actorId, taskId);
   const row = await db.notification.findUnique({ where: { id: videoFeishuUuid(taskId, 'event') } });
-  if (!row) return { row: null, meta: null };
+  if (!row) return { row: null, meta: null, task: current.task };
   const meta = parseVideoFeishuEvent(row.metadata_json);
   if (!meta || row.type !== VIDEO_FEISHU_TYPE || row.channel !== 'feishu' || row.target_user_id !== actorId || meta.actorId !== actorId || meta.taskId !== taskId) throw new VideoFeishuError('notification_unavailable', 503);
-  return { row, meta };
+  return { row, meta, task: current.task };
 }
-export async function readVideoFeishuStatus(db: Db, actorId: string, taskId: string) { return videoFeishuStatus((await taskEvent(db, actorId, taskId)).meta); }
+export async function readVideoFeishuStatus(db: Db, actorId: string, taskId: string) {
+  const { meta, task } = await taskEvent(db, actorId, taskId);
+  return videoFeishuStatus(meta, task.delivery_status, Boolean(task.local_video_path || task.public_video_url));
+}
+
+/** Only the same already-requested event can resume after its original became ready. */
+export async function wakeVideoFeishuAfterOriginalReady(taskId: string, db: Db = prisma) {
+  const row = await db.notification.findUnique({ where: { id: videoFeishuUuid(taskId, 'event') } });
+  const meta = row && parseVideoFeishuEvent(row.metadata_json);
+  if (!row || !meta || row.type !== VIDEO_FEISHU_TYPE || row.channel !== 'feishu' || meta.taskId !== taskId
+    || row.target_user_id !== meta.actorId || !meta.choice.enabled || !['pending', 'failed'].includes(meta.state)
+    || !['original_not_ready', 'original_save_failed', 'original_wait_ended'].includes(meta.reason || '')
+    || (meta.leaseUntil || 0) > Date.now() || meta.externalStartedAt !== null
+    || [meta.video, meta.explanation].some(step => step.firstSendAt !== null || step.receiptId || step.ambiguous)
+    || [meta.upload, meta.cover].some(step => step.startedAt !== null || step.key || step.state === 'unknown')) return false;
+  const current = await authorizedVideoFeishuTask(db, meta.actorId, taskId);
+  if (current.task.local_status !== 'succeeded' || !current.task.local_video_path && !current.task.public_video_url
+    || videoFeishuBinding(current.actor) !== meta.identity) return false;
+  meta.state = 'pending'; meta.reason = null; meta.nextAttemptAt = Date.now(); meta.preparations = 0;
+  meta.leaseToken = null; meta.leaseUntil = null;
+  for (const step of [meta.video, meta.explanation]) { if (step.state === 'failed') step.state = 'pending'; }
+  return (await db.notification.updateMany({ where: { id: row.id, type: VIDEO_FEISHU_TYPE, status: row.status, metadata_json: row.metadata_json },
+    data: { status: 'pending', error_message: null, metadata_json: JSON.stringify(meta) } })).count === 1;
+}
 export async function cancelVideoFeishuNotification(db: Db, actorId: string, taskId: string) {
   const { row, meta } = await taskEvent(db, actorId, taskId);
   if (!row || !meta) return videoFeishuStatus(null);
   if (meta.state === 'cancelled') return videoFeishuStatus(meta);
-  if (row.status !== 'pending' || !videoFeishuCanCancel(meta)) throw new VideoFeishuError('notification_cannot_cancel', 409);
+  if (!['pending', 'failed'].includes(row.status) || !videoFeishuCanCancel(meta)) throw new VideoFeishuError('notification_cannot_cancel', 409);
   const next = { ...meta, state: 'cancelled' as const, reason: 'cancelled' };
-  const result = await db.notification.updateMany({ where: { id: row.id, type: VIDEO_FEISHU_TYPE, status: 'pending', metadata_json: row.metadata_json },
+  const result = await db.notification.updateMany({ where: { id: row.id, type: VIDEO_FEISHU_TYPE, status: row.status, metadata_json: row.metadata_json },
     data: { status: 'failed', metadata_json: JSON.stringify(next), error_message: 'video_feishu_cancelled' } });
   if (result.count !== 1) throw new VideoFeishuError('notification_changed', 409);
   return videoFeishuStatus(next);

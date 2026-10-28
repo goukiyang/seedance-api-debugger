@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
+import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
 import { handBulkVideoZipToBrowser } from '@/lib/video/native-bulk-download';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
@@ -716,6 +718,7 @@ function AssetsPageContent() {
   const hasExplicitSource = params.has('source');
   const [viewSelection, setViewSelection] = useState<{ userId: string | null; view: AssetView }>({ userId: null, view: 'history' });
   const assetView = viewSelection.userId === (user?.id ?? null) && (viewSelection.view !== 'user' || user?.role === 'admin') ? viewSelection.view : 'history';
+  const projectCatalogRevision = useProjectCatalogRevision();
   const setAssetView = useCallback((view: AssetView) => setViewSelection({ userId: user?.id ?? null, view }), [user?.id]);
   const rememberReactionView = useCallback((view: AssetView) => {
     if (!user?.id) return;
@@ -1142,7 +1145,7 @@ function AssetsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, scope, movePanelOpen, bulkTarget]);
+  }, [user, scope, movePanelOpen, bulkTarget, projectCatalogRevision]);
 
   useEffect(() => {
     if (!user || user.role !== 'admin' || scope !== 'user') return;
@@ -2188,7 +2191,7 @@ function AssetsPageContent() {
         </select>
 
         {scope === 'project' && (
-          <select
+          <ProjectSelector
             value={projectId}
             onChange={(event) => {
               setProjectId(event.target.value);
@@ -2199,7 +2202,7 @@ function AssetsPageContent() {
             {projects.map((project) => (
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
-          </select>
+          </ProjectSelector>
         )}
 
         {scope === 'user' && isAdmin && (
@@ -2365,12 +2368,12 @@ function AssetsPageContent() {
             <strong>移动视频任务</strong>
             <span>需要选择目标项目和该项目下的视频卡。</span>
           </div>
-          <select value={moveProjectId} onChange={(event) => setMoveProjectId(event.target.value)}>
+          <ProjectSelector  value={moveProjectId} onChange={(event) => setMoveProjectId(event.target.value)}>
             <option value="">选择目标项目</option>
             {manageableProjects.map((project) => (
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
-          </select>
+          </ProjectSelector>
           <select value={moveVideoCardId} onChange={(event) => setMoveVideoCardId(event.target.value)} disabled={!moveProjectId || videoCards.length === 0}>
             <option value="">选择目标视频卡</option>
             {videoCards.map((card) => (

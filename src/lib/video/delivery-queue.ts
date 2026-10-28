@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { isVideoDeliveryFastPathTask } from './delivery-policy';
 
@@ -79,6 +80,9 @@ export async function enqueueVideoDeliveryJob(taskId: string, options: EnqueueOp
       provider: true,
       generation_mode: true,
       public_video_url: true,
+      local_status: true,
+      provider_task_id: true,
+      result_video_url: true,
     },
   });
   if (!task) {
@@ -87,69 +91,57 @@ export async function enqueueVideoDeliveryJob(taskId: string, options: EnqueueOp
   if (!isVideoDeliveryFastPathTask(task)) {
     return { queued: false, skippedReason: 'not_fast_path_task' as const };
   }
+  if (task.local_status !== 'succeeded' || !task.result_video_url && !task.public_video_url) {
+    return { queued: false, skippedReason: 'original_not_ready' as const };
+  }
 
   if (task.public_video_url) {
-    await prisma.videoTask.update({
-      where: { id: taskId },
-      data: {
-        delivery_status: VIDEO_DELIVERY_STATUS_SUCCEEDED,
-        delivery_completed_at: now,
-        delivery_error: null,
-      },
-    });
     return { queued: false, skippedReason: 'already_public' as const };
   }
 
   const priority = options.priority ?? 0;
-  const payloadJson = stringifyPayload(options.payload);
-  const existing = await deliveryJobs().findUnique({ where: { task_id: taskId } });
-
-  if (existing && existing.status === VIDEO_DELIVERY_STATUS_SUCCEEDED && !options.force) {
-    return { queued: false, skippedReason: 'job_already_succeeded' as const, job: existing };
+  const newId = randomUUID();
+  // Reads precede the conditional write, avoiding a SQLite deferred-read/write upgrade under concurrent retries.
+  const tx = prisma;
+  {
+    const existing = await tx.videoDeliveryJob.findUnique({ where: { task_id: taskId } });
+    const present = existing || await tx.videoDeliveryJob.upsert({ where: { task_id: taskId }, update: {},
+      create: { id: newId, task_id: taskId, status: VIDEO_DELIVERY_STATUS_PENDING, priority,
+        max_attempts: DEFAULT_MAX_ATTEMPTS, run_after: now, payload_json: stringifyPayload(options.payload) } });
+    if (present.id !== newId || existing) {
+      if (present.status === VIDEO_DELIVERY_STATUS_PENDING || present.status === VIDEO_DELIVERY_STATUS_RUNNING) {
+        return { queued: true, job: present, alreadyExists: true, retryable: false };
+      }
+      if (present.status !== VIDEO_DELIVERY_STATUS_FAILED || !options.force || present.locked_by || present.locked_at) {
+        return { queued: false, skippedReason: present.status === VIDEO_DELIVERY_STATUS_FAILED ? 'job_failed_requires_explicit_retry' as const
+          : 'job_already_succeeded' as const, job: present, retryable: present.status === VIDEO_DELIVERY_STATUS_FAILED };
+      }
+      let prior: Record<string, unknown> = {};
+      try { const parsed = JSON.parse(present.payload_json || '{}'); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) prior = parsed; } catch { /* Preserve the original raw payload below. */ }
+      const history = Array.isArray(prior.recoveries) ? prior.recoveries : [];
+      const budget = present.attempts + DEFAULT_MAX_ATTEMPTS;
+      if (!Number.isSafeInteger(budget) || budget > 2147483647) throw new Error('Video save retry budget unavailable');
+      const payload = JSON.stringify({ ...prior, source: options.payload?.source || prior.source,
+        ...(present.payload_json && !Object.keys(prior).length ? { previousPayload: present.payload_json } : {}),
+        recoveries: [...history, { requestedAt: now.toISOString(), previousAttempts: present.attempts,
+          previousMaxAttempts: present.max_attempts, previousError: present.last_error, previousCompletedAt: present.completed_at }] });
+      const changed = await tx.videoDeliveryJob.updateMany({ where: { id: present.id, status: VIDEO_DELIVERY_STATUS_FAILED,
+        attempts: present.attempts, max_attempts: present.max_attempts, updated_at: present.updated_at, locked_at: null, locked_by: null },
+      data: { status: VIDEO_DELIVERY_STATUS_PENDING, priority: Math.max(present.priority, priority), max_attempts: budget,
+        run_after: now, completed_at: null, payload_json: payload } });
+      if (changed.count !== 1) {
+        const actual = await tx.videoDeliveryJob.findUnique({ where: { id: present.id } });
+        return { queued: actual?.status === VIDEO_DELIVERY_STATUS_PENDING || actual?.status === VIDEO_DELIVERY_STATUS_RUNNING,
+          job: actual || present, alreadyExists: true, retryable: false };
+      }
+    }
+    await tx.videoTask.updateMany({ where: { id: taskId, local_status: 'succeeded',
+      provider_task_id: task.provider_task_id, result_video_url: task.result_video_url,
+      OR: [{ delivery_status: null }, { delivery_status: VIDEO_DELIVERY_STATUS_FAILED }] }, data: { delivery_status: VIDEO_DELIVERY_STATUS_PENDING,
+      delivery_queued_at: now, delivery_error: null, delivery_completed_at: null } });
+    const job = await tx.videoDeliveryJob.findUnique({ where: { id: present.id } });
+    return { queued: true, job: job!, alreadyExists: Boolean(existing), retryable: false };
   }
-  if (
-    existing
-    && !options.force
-    && (existing.status === VIDEO_DELIVERY_STATUS_PENDING || existing.status === VIDEO_DELIVERY_STATUS_RUNNING)
-  ) {
-    return { queued: true, job: existing, alreadyExists: true };
-  }
-
-  const job = existing
-    ? await deliveryJobs().update({
-        where: { id: existing.id },
-        data: {
-          status: VIDEO_DELIVERY_STATUS_PENDING,
-          priority: Math.max(existing.priority, priority),
-          run_after: now,
-          locked_at: null,
-          locked_by: null,
-          last_error: null,
-          payload_json: payloadJson ?? existing.payload_json,
-          completed_at: null,
-        },
-      })
-    : await deliveryJobs().create({
-        data: {
-          task_id: taskId,
-          status: VIDEO_DELIVERY_STATUS_PENDING,
-          priority,
-          max_attempts: DEFAULT_MAX_ATTEMPTS,
-          run_after: now,
-          payload_json: payloadJson,
-        },
-      });
-
-  await prisma.videoTask.update({
-    where: { id: taskId },
-    data: {
-      delivery_status: VIDEO_DELIVERY_STATUS_PENDING,
-      delivery_queued_at: now,
-      delivery_error: null,
-    },
-  });
-
-  return { queued: true, job };
 }
 
 export async function claimNextVideoDeliveryJob(options: ClaimOptions) {
@@ -169,10 +161,19 @@ export async function claimNextVideoDeliveryJob(options: ClaimOptions) {
     ],
   });
   if (!job) return null;
+  if (job.attempts >= job.max_attempts) {
+    const exhausted = await deliveryJobs().updateMany({ where: { id: job.id, status: job.status, attempts: job.attempts,
+      locked_at: job.locked_at, locked_by: job.locked_by }, data: { status: VIDEO_DELIVERY_STATUS_FAILED,
+      locked_at: null, locked_by: null, completed_at: now, last_error: job.last_error || 'Video save attempts exhausted' } });
+    if (exhausted.count === 1) await prisma.videoTask.updateMany({ where: { id: job.task_id, delivery_status: job.status },
+      data: { delivery_status: VIDEO_DELIVERY_STATUS_FAILED, delivery_error: job.last_error || 'Video save attempts exhausted' } });
+    return null;
+  }
 
   const claim = await deliveryJobs().updateMany({
     where: {
       id: job.id,
+      attempts: job.attempts,
       OR: [
         { status: VIDEO_DELIVERY_STATUS_PENDING, run_after: { lte: now } },
         { status: VIDEO_DELIVERY_STATUS_RUNNING, locked_at: { lte: staleBefore } },
@@ -189,10 +190,12 @@ export async function claimNextVideoDeliveryJob(options: ClaimOptions) {
   if (claim.count !== 1) return null;
 
   const claimed = await deliveryJobs().findUnique({ where: { id: job.id } });
-  if (!claimed) return null;
+  if (!claimed || claimed.locked_by !== options.workerId || claimed.attempts !== job.attempts + 1
+    || claimed.locked_at?.getTime() !== now.getTime()) return null;
 
-  await prisma.videoTask.update({
-    where: { id: claimed.task_id },
+  await prisma.videoTask.updateMany({
+    where: { id: claimed.task_id, video_delivery_jobs: { some: { id: claimed.id, status: VIDEO_DELIVERY_STATUS_RUNNING,
+      attempts: claimed.attempts, locked_by: claimed.locked_by, locked_at: claimed.locked_at } } },
     data: {
       delivery_status: VIDEO_DELIVERY_STATUS_RUNNING,
       delivery_started_at: now,
@@ -205,52 +208,23 @@ export async function claimNextVideoDeliveryJob(options: ClaimOptions) {
 }
 
 export async function completeVideoDeliveryJob(job: VideoDeliveryJobRecord, details: {
-  now?: Date;
-  publicVideoUrl: string;
-  storageProvider: string | null;
-  storageKey: string | null;
-  fileSize: number | null;
+  now?: Date; publicVideoUrl: string; storageProvider: string | null; storageKey: string | null; fileSize: number | null;
+  source?: { provider_task_id: string | null; result_video_url: string | null };
 }) {
   const now = details.now || new Date();
-  const completion = await deliveryJobs().updateMany({
-    where: {
-      id: job.id,
-      status: VIDEO_DELIVERY_STATUS_RUNNING,
-      locked_at: job.locked_at,
-      locked_by: job.locked_by,
-    },
-    data: {
-      status: VIDEO_DELIVERY_STATUS_SUCCEEDED,
-      locked_at: null,
-      locked_by: null,
-      last_error: null,
-      completed_at: now,
-    },
+  return prisma.$transaction(async tx => {
+    const changed = await tx.videoDeliveryJob.updateMany({ where: { id: job.id, status: VIDEO_DELIVERY_STATUS_RUNNING,
+      locked_at: job.locked_at, locked_by: job.locked_by, attempts: job.attempts },
+    data: { status: VIDEO_DELIVERY_STATUS_SUCCEEDED, locked_at: null, locked_by: null, last_error: null, completed_at: now } });
+    if (changed.count !== 1) throw new Error('VIDEO_SAVE_LEASE_LOST');
+    const saved = await tx.videoTask.updateMany({ where: { id: job.task_id, local_status: 'succeeded', ...details.source },
+      data: { public_video_url: details.publicVideoUrl, public_video_storage_provider: details.storageProvider,
+        public_video_storage_key: details.storageKey, public_video_file_size: details.fileSize,
+        public_video_cached_at: now, delivery_status: VIDEO_DELIVERY_STATUS_SUCCEEDED,
+        delivery_completed_at: now, delivery_attempts: job.attempts, delivery_error: null } });
+    if (saved.count !== 1) throw new Error('VIDEO_SAVE_SOURCE_CHANGED');
+    return (await tx.videoDeliveryJob.findUnique({ where: { id: job.id } }))!;
   });
-  const updated = await deliveryJobs().findUnique({ where: { id: job.id } });
-  if (!updated) {
-    throw new Error(`视频交付任务 ${job.id} 不存在`);
-  }
-  if (completion.count !== 1) {
-    return updated;
-  }
-
-  await prisma.videoTask.update({
-    where: { id: job.task_id },
-    data: {
-      public_video_url: details.publicVideoUrl,
-      public_video_storage_provider: details.storageProvider,
-      public_video_storage_key: details.storageKey,
-      public_video_file_size: details.fileSize,
-      public_video_cached_at: now,
-      delivery_status: VIDEO_DELIVERY_STATUS_SUCCEEDED,
-      delivery_completed_at: now,
-      delivery_attempts: updated.attempts,
-      delivery_error: null,
-    },
-  });
-
-  return updated;
 }
 
 export async function failVideoDeliveryJob(job: VideoDeliveryJobRecord, error: unknown, options: { now?: Date } = {}) {
@@ -259,40 +233,30 @@ export async function failVideoDeliveryJob(job: VideoDeliveryJobRecord, error: u
   const terminal = job.attempts >= job.max_attempts;
   const status = terminal ? VIDEO_DELIVERY_STATUS_FAILED : VIDEO_DELIVERY_STATUS_PENDING;
   const runAfter = terminal ? job.run_after : nextVideoDeliveryRunAfter(job.attempts, now);
-
-  const failure = await deliveryJobs().updateMany({
-    where: {
-      id: job.id,
-      status: VIDEO_DELIVERY_STATUS_RUNNING,
-      locked_at: job.locked_at,
-      locked_by: job.locked_by,
-    },
-    data: {
-      status,
-      run_after: runAfter,
-      locked_at: null,
-      locked_by: null,
-      last_error: message,
-      completed_at: terminal ? now : null,
-    },
+  return prisma.$transaction(async tx => {
+    const changed = await tx.videoDeliveryJob.updateMany({ where: { id: job.id, status: VIDEO_DELIVERY_STATUS_RUNNING,
+      locked_at: job.locked_at, locked_by: job.locked_by, attempts: job.attempts }, data: {
+      status, run_after: runAfter, locked_at: null, locked_by: null, last_error: message, completed_at: terminal ? now : null } });
+    if (changed.count === 1) await tx.videoTask.update({ where: { id: job.task_id }, data: {
+      delivery_status: status, delivery_attempts: job.attempts, delivery_error: message, delivery_completed_at: terminal ? now : null } });
+    return (await tx.videoDeliveryJob.findUnique({ where: { id: job.id } }))!;
   });
-  const updated = await deliveryJobs().findUnique({ where: { id: job.id } });
-  if (!updated) {
-    throw new Error(`视频交付任务 ${job.id} 不存在`);
-  }
-  if (failure.count !== 1) {
-    return updated;
-  }
+}
 
-  await prisma.videoTask.update({
-    where: { id: job.task_id },
-    data: {
-      delivery_status: status,
-      delivery_attempts: job.attempts,
-      delivery_error: message,
-      delivery_completed_at: terminal ? now : null,
-    },
-  });
+/** Renewal changes only the current claim; it never grants a fresh attempt. */
+export async function renewVideoDeliveryJob(job: VideoDeliveryJobRecord, now = new Date()) {
+  const changed = await deliveryJobs().updateMany({ where: { id: job.id, status: VIDEO_DELIVERY_STATUS_RUNNING,
+    locked_at: job.locked_at, locked_by: job.locked_by, attempts: job.attempts }, data: { locked_at: now } });
+  if (changed.count !== 1) return false;
+  job.locked_at = now;
+  return true;
+}
 
-  return updated;
+export function videoDeliveryProjection(task: { local_status?: string | null; delivery_status?: string | null;
+  delivery_attempts?: number | null; delivery_error?: string | null; result_video_url?: string | null;
+  public_video_url?: string | null; local_video_path?: string | null }) {
+  return { delivery_status: task.delivery_status || null, delivery_attempts: task.delivery_attempts || 0,
+    delivery_error: task.delivery_error || null,
+    delivery_retryable: task.local_status === 'succeeded' && task.delivery_status === VIDEO_DELIVERY_STATUS_FAILED
+      && Boolean(task.result_video_url) && !task.public_video_url };
 }

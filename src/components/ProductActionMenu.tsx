@@ -7,8 +7,8 @@ import { useDialogDismiss } from './useDialogDismiss';
 import styles from './ProductActionMenu.module.css';
 
 export type ProductMenuAction = { id: string; label: string; icon?: ReactNode; disabled?: boolean; danger?: boolean; onSelect: (anchor: HTMLElement) => void };
-export function ProductActionMenu({ label, actions, disabled, children, onOpenChange }: {
-  label: string; actions: ProductMenuAction[]; disabled?: boolean; children?: ReactNode; onOpenChange?: (open: boolean) => void;
+export function ProductActionMenu({ label, actions, disabled, children, onOpenChange, portalTarget }: {
+  label: string; actions: ProductMenuAction[]; disabled?: boolean; children?: ReactNode; onOpenChange?: (open: boolean) => void; portalTarget?: HTMLElement | null;
 }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
@@ -51,6 +51,6 @@ export function ProductActionMenu({ label, actions, disabled, children, onOpenCh
       }}>
       {actions.map(action => <button key={action.id} type="button" role="menuitem" disabled={action.disabled} data-danger={action.danger || undefined}
         onClick={() => { setOpen(false); if (trigger.current) action.onSelect(trigger.current); }}>{action.icon}<span>{action.label}</span></button>)}
-    </div>, document.body)}
+    </div>, portalTarget || document.body)}
   </>;
 }

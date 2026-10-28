@@ -7,10 +7,11 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import styles from './video-feishu.module.css';
 
-type Status = { version: 1; state: string; canCancel: boolean; videoSent: boolean; explanationSent: boolean; mode: 'video' | 'link' | null };
+type Status = { version: 1; state: string; canCancel: boolean; videoSent: boolean; explanationSent: boolean; mode: 'video' | 'link' | null; canRetrySave?: boolean; reason?: string | null };
 const labels: Record<string, string> = { pending: '等待成品与飞书发送', preparing: '正在准备飞书发送', uploading: '正在上传视频到飞书',
   sending: '正在发送到本人飞书', sent_video: '视频与说明已发送到本人飞书', sent_link: '成品链接已发送到本人飞书',
-  video_sent_explanation_pending: '视频已发送，说明待发送', cancelled: '已取消本次飞书发送', failed: '飞书发送未完成', unknown: '飞书发送结果待核对' };
+  video_sent_explanation_pending: '视频已发送，说明待发送', cancelled: '已取消本次飞书发送', failed: '飞书发送未完成', unknown: '飞书发送结果待核对',
+  preparing_original: '正在准备飞书视频', original_save_failed: '视频保存失败，尚未发送飞书' };
 export function VideoFeishuStatus({ owner, taskId }: { owner: string; taskId: string }) {
   const session = useAppSession(), scope = `${owner}:${taskId}`;
   const current = useRef({ scope, ready: false }), alive = useRef(true), lock = useRef(false), sequence = useRef(0);
@@ -36,6 +37,19 @@ export function VideoFeishuStatus({ owner, taskId }: { owner: string; taskId: st
     } catch (cause) { if (valid() && seq === sequence.current) setError(cause instanceof Error ? cause.message : '飞书发送记录暂不可核对'); }
     finally { if (valid() && seq === sequence.current) { lock.current = false; setBusy(false); } }
   }
+  async function retrySave() {
+    if (!valid() || lock.current || value?.canRetrySave !== true) return;
+    const seq = ++sequence.current; lock.current = true; setBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/video/download/${encodeURIComponent(taskId)}`, { method: 'POST', cache: 'no-store',
+        headers: { 'x-app-session-user': owner }, signal: AbortSignal.timeout(15_000) });
+      const data = await response.json();
+      if (!valid() || seq !== sequence.current) return;
+      if (!response.ok) throw new Error(data.error || '保存状态暂未确认，请核对原任务');
+      setValue(previous => previous ? { ...previous, state: 'preparing_original', canRetrySave: false } : previous);
+    } catch (cause) { if (valid() && seq === sequence.current) setError(cause instanceof Error ? cause.message : '保存状态待核对'); }
+    finally { if (valid() && seq === sequence.current) { lock.current = false; setBusy(false); void run(); } }
+  }
   useEffect(() => {
     alive.current = true; sequence.current++; lock.current = false; setValue(null); setError(''); setUncertainCancel(false);
     if (current.current.ready) void run();
@@ -49,6 +63,7 @@ export function VideoFeishuStatus({ owner, taskId }: { owner: string; taskId: st
   return <div className={styles.status} role="status" aria-busy={busy}>
     <span>{label || '飞书发送记录暂不可核对'}</span><button type="button" title="核对飞书发送状态" aria-label="核对飞书发送状态" disabled={busy} onClick={() => void run()}><RefreshCw size={14} /></button>
     {value?.canCancel && !uncertainCancel && <button type="button" disabled={busy} onClick={() => void run(true)}>取消本次发送</button>}
+    {value?.canRetrySave && <button type="button" disabled={busy} onClick={() => void retrySave()}>重试保存视频</button>}
     {error && <span>{error}{uncertainCancel ? '；取消结果未确认，请先核对状态' : ''}</span>}
   </div>;
 }

@@ -10,6 +10,8 @@ import { listStudioResultFeed } from '@/lib/image-studio/result-feed';
 import { StudioPinError } from '@/lib/image-studio/result-pins';
 import { STUDIO_RESULT_FEED } from '@/lib/image-studio/result-pin-types';
 import { requestStudioAsyncRecheck, StudioAsyncRecoveryError } from '@/lib/image-studio/async-recovery';
+import { VideoFeishuError } from '@/lib/video/feishu-contract';
+import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -74,6 +76,7 @@ export async function POST(request: NextRequest) {
     const batchId = await submitStudioBatch(user.id, await request.json());
     return NextResponse.json({ batchId }, { status: 202 });
   } catch (error) {
+    if (error instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(error.code), code: error.code, submitted: false }, { status: error.status });
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });

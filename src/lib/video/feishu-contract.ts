@@ -78,14 +78,25 @@ export function parseVideoFeishuEvent(raw: string | null): VideoFeishuEvent | nu
   } catch { return null; }
 }
 export function videoFeishuCanCancel(meta: VideoFeishuEvent) {
-  return meta.state === 'pending' && meta.leaseToken === null && meta.externalStartedAt === null && meta.upload.startedAt === null
+  const cancellable = meta.state === 'pending' || meta.state === 'failed' && ['original_save_failed', 'original_wait_ended'].includes(meta.reason || '');
+  return cancellable && meta.leaseToken === null && meta.externalStartedAt === null && meta.upload.startedAt === null
     && meta.cover.startedAt === null && meta.video.firstSendAt === null && meta.explanation.firstSendAt === null;
 }
-export function videoFeishuStatus(meta: VideoFeishuEvent | null) {
+/** A completed second cache destination changes old aggregate stamps. Only a verified full-byte hash can bridge that change. */
+export function videoFeishuSameOriginal(previous: { sourceVersion: string | null; contentHash: string | null }, current: { version: string; hash: string | null }) {
+  if (previous.contentHash && previous.contentHash !== current.hash) return false;
+  return !previous.sourceVersion || previous.sourceVersion === current.version
+    || Boolean(previous.contentHash && current.hash && previous.contentHash === current.hash);
+}
+export function videoFeishuStatus(meta: VideoFeishuEvent | null, originalStatus?: string | null, hasOriginalPath = false) {
   if (!meta) return { version: 1 as const, state: 'not_requested', canCancel: false, videoSent: false, explanationSent: false, mode: null };
-  const state = meta.state === 'sent' ? meta.mode === 'video' ? 'sent_video' : 'sent_link'
+  const originalFailed = !meta.video.receiptId && meta.externalStartedAt === null
+    && (meta.reason === 'original_save_failed' || meta.reason === 'original_wait_ended' || originalStatus === 'failed' && !hasOriginalPath);
+  const state = originalFailed && meta.state !== 'cancelled' ? 'original_save_failed'
+    : meta.state === 'sent' ? meta.mode === 'video' ? 'sent_video' : 'sent_link'
     : meta.state !== 'pending' ? meta.state : meta.video.receiptId ? 'video_sent_explanation_pending'
       : meta.upload.state === 'uploading' || meta.cover.state === 'uploading' ? 'uploading'
         : meta.video.state === 'sending' || meta.explanation.state === 'sending' ? 'sending' : meta.leaseToken ? 'preparing' : 'pending';
-  return { version: 1 as const, state, canCancel: videoFeishuCanCancel(meta), videoSent: Boolean(meta.video.receiptId), explanationSent: Boolean(meta.explanation.receiptId), mode: meta.mode };
+  return { version: 1 as const, state, canCancel: videoFeishuCanCancel(meta), canRetrySave: originalFailed && originalStatus === 'failed',
+    reason: meta.reason, videoSent: Boolean(meta.video.receiptId), explanationSent: Boolean(meta.explanation.receiptId), mode: meta.mode };
 }

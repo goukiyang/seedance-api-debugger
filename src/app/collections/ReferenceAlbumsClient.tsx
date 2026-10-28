@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProductDialog } from '@/components/useProductDialog';
 
 import Link from 'next/link';
@@ -922,7 +923,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
                 : projectContextId ? '当前项目的参考图集' : '所有可访问的项目图集'}
             </span>
           </div>
-          <select aria-label="筛选项目图集" value={projectFilterId} onChange={(event) => setProjectFilterId(event.target.value)}>
+          <ProjectSelector onCatalogChange={() => setReloadVersion(value => value + 1)}  aria-label="筛选项目图集" value={projectFilterId} onChange={(event) => setProjectFilterId(event.target.value)}>
             <option value="all">{scope === 'other_project' ? '全部他人项目' : '全部项目'}</option>
             {projectFilterId !== 'all' && !projectFilterChoices.some((project) => project.id === projectFilterId) && (
               <option value={projectFilterId}>{currentProject ? projectDisplayName(currentProject) : '链接指定的项目'}</option>
@@ -930,7 +931,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
             {projectFilterChoices.map((project) => (
               <option key={project.id} value={project.id}>{projectDisplayName(project)}</option>
             ))}
-          </select>
+          </ProjectSelector>
         </section>
       )}
 
@@ -1084,11 +1085,11 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
                     </select>
                   </label>
                   {albumType === 'project' && <label>项目
-                    <select value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={creating || Boolean(pendingCreate)}>
+                    <ProjectSelector onCatalogChange={() => setReloadVersion(value => value + 1)}  value={projectId} onChange={(event) => setProjectId(event.target.value)} disabled={creating || Boolean(pendingCreate)}>
                       <option value="">选择项目</option>
                       {projectId && !projectChoices.some((project) => project.id === projectId) && <option value={projectId}>{currentProject ? projectDisplayName(currentProject) : '原项目待确认'}</option>}
                       {projectChoices.map((project) => <option key={project.id} value={project.id}>{projectDisplayName(project)}</option>)}
-                    </select>
+                    </ProjectSelector>
                   </label>}
                 </>
               )}

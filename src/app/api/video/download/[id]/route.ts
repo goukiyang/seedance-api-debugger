@@ -7,10 +7,11 @@ import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { cacheTaskVideoToLocal } from '@/lib/video/local-cache';
-import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { enqueueVideoDeliveryJob, videoDeliveryProjection } from '@/lib/video/delivery-queue';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
+import { VIDEO_SAVE_TOTAL_TIMEOUT_MS } from '@/lib/video/save-lock';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -164,6 +165,7 @@ export async function POST(
         message: '稳定下载已就绪',
         public_video_url: task.public_video_url,
         stable_download_ready: true,
+        ...videoDeliveryProjection(task),
       });
     }
 
@@ -177,11 +179,13 @@ export async function POST(
     if (task.provider === 'volcengine_ark') {
       await prisma.videoTask.updateMany({
         where: { id: task.id, OR: [{ delivery_status: null }, { delivery_status: { not: 'running' } }] },
-        data: { delivery_status: 'pending', delivery_attempts: 0, delivery_started_at: null, delivery_error: null },
+        data: { delivery_status: 'pending', delivery_started_at: null, delivery_error: null },
       });
-      startTaskLocalization(task.id, { initialDelayMs: 0, cacheTimeoutMs: 180_000 });
+      startTaskLocalization(task.id, { initialDelayMs: 0, cacheTimeoutMs: VIDEO_SAVE_TOTAL_TIMEOUT_MS });
+      const current = await prisma.videoTask.findUnique({ where: { id: task.id } });
       return NextResponse.json({ success: false, error: 'STABLE_DOWNLOAD_PREPARING',
-        message: '正在重新保存已有视频，不会重新生成或再次扣点。', stable_download_ready: false }, { status: 202 });
+        message: '正在保存已有视频，不会重新生成或再次扣点。', stable_download_ready: false,
+        ...videoDeliveryProjection(current || task) }, { status: 202 });
     }
 
     if (isVideoDeliveryFastPathTask(task) && !task.local_video_path) {
@@ -190,6 +194,7 @@ export async function POST(
         force: true,
         payload: { source: 'download_route' },
       });
+      const current = await prisma.videoTask.findUnique({ where: { id: task.id } });
       return NextResponse.json(
         {
           success: false,
@@ -198,6 +203,7 @@ export async function POST(
           delivery_queued: enqueueResult.queued,
           delivery_skipped_reason: enqueueResult.skippedReason ?? null,
           stable_download_ready: false,
+          ...videoDeliveryProjection(current || task),
         },
         { status: 202 },
       );
@@ -217,6 +223,7 @@ export async function POST(
           success: false,
           error: result.error || 'Download failed',
           message: result.message || '视频保存失败',
+          ...videoDeliveryProjection(await prisma.videoTask.findUnique({ where: { id: task.id } }) || task),
         },
         { status: result.status || 500 },
       );
@@ -229,6 +236,7 @@ export async function POST(
       file_size: result.file_size,
       already_exists: result.already_exists || false,
       refreshed_url: result.refreshed_url || false,
+      ...videoDeliveryProjection(await prisma.videoTask.findUnique({ where: { id: task.id } }) || task),
     });
 
   } catch (error) {

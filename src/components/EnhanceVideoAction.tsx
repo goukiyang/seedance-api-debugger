@@ -1,4 +1,6 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
+import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 
@@ -35,6 +37,7 @@ type ConfigResponse = {
 const RESOLUTION_OPTIONS = ['720p', '1080p', '2k'] as const;
 
 export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
+  const projectCatalogRevision = useProjectCatalogRevision();
   const router = useRouter();
   const [toolVersion, setToolVersion] = useState<'standard' | 'professional'>('standard');
   const [resolution, setResolution] = useState<typeof RESOLUTION_OPTIONS[number]>('1080p');
@@ -73,7 +76,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
   const [destinationConfirmed, setDestinationConfirmed] = useState(Boolean(task.project_id));
   const creation = useCreationContext({ ownerId: pricing.actorId, entry: 'enhance', draftId: task.id, projectId: destination, legacyCardId: task.video_card_id, onProjectChange: setDestination, enabled: shouldRender });
   const [destinations, setDestinations] = useState<Array<{id:string;name:string}>>([]);
-  useEffect(() => { let active = true; if (!shouldRender || task.project_id) return; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setDestinations(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [shouldRender, task.project_id]);
+  useEffect(() => { let active = true; if (!shouldRender || task.project_id) return; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setDestinations(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [shouldRender, task.project_id, projectCatalogRevision]);
 
   if (!shouldRender) return null;
 
@@ -137,7 +140,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
         </span>
         <strong>{estimatedCost !== null ? `预估冻结 ${estimatedCost} 点` : '待估算'}</strong>
       </summary>
-      {!task.project_id && <label>本次保存到<select className="input" value={destinationConfirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setDestinationConfirmed(Boolean(event.target.value)); }}><option value="">选择项目</option>{destinations.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+      {!task.project_id && <label>本次保存到<ProjectSelector  className="input" value={destinationConfirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setDestinationConfirmed(Boolean(event.target.value)); }}><option value="">选择项目</option>{destinations.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector></label>}
       <CreationAvailability controller={creation} />
 
       <div className="enhance-video-action-body">

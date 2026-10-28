@@ -247,12 +247,13 @@ export async function finalizeMultiviewAction(user: SessionUser, input: unknown)
   value.sourceRunId = sourceRunId;
   value.privateContext = { global: format.context, module: sync.context, globalRevision: format.revision, moduleRevision: sync.revision };
   if (containsPrivateContext(text, value)) throw invalid('动作疑似包含内部规则，不能提交视频');
+  const backgroundPolicy = 'current-composition-v1' as const;
   const frozen = { ...reference, geometry: JSON.parse(JSON.stringify(reference.geometry)) as Record<string, StudioJsonValue>, parameters,
-    actionText: text, formatRevision: format.revision, syncRevision: sync.revision, format: format.context, sync: sync.context };
+    actionText: text, formatRevision: format.revision, syncRevision: sync.revision, format: format.context, sync: sync.context, backgroundPolicy };
   const inputHash = makeFingerprint(frozen);
   value.multiviewAction = { stage: 'final', attemptId: normalizedAttemptId, workId: parsed.workId, revision: parsed.workRevision, recipeHash: reference.recipeHash, outputHash: reference.outputHash,
     sourceTaskId: reference.sourceTaskId, sourceVersion: reference.sourceVersion, geometry: frozen.geometry, assetId: reference.assetId,
-    inputHash, formatRevision: format.revision, syncRevision: sync.revision };
+    inputHash, formatRevision: format.revision, syncRevision: sync.revision, backgroundPolicy };
   const requestId = `mv-action-final:${makeFingerprint([inputHash, draft.id, normalizedAttemptId])}`;
   const row = await prisma.$transaction(async tx => {
     const old = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
@@ -292,9 +293,15 @@ export async function resolveMultiviewActionForGeneration(user: SessionUser, inp
   if (!text || !value.privateContext?.module.trim()) throw conflict('动作快照暂不可用');
   const parameters = normalizeMultiviewActionParameters(value.parameters, true);
   const frozen = { ...reference, geometry: action.geometry, parameters, actionText: text, formatRevision: action.formatRevision, syncRevision: action.syncRevision,
-    format: value.privateContext.global, sync: value.privateContext.module };
+    format: value.privateContext.global, sync: value.privateContext.module,
+    ...(action.backgroundPolicy === 'current-composition-v1' ? { backgroundPolicy: action.backgroundPolicy } : {}) };
   if (makeFingerprint(frozen) !== action.inputHash) throw conflict('动作快照签名不同，请重新准备费用');
-  const prompt = `${text}\n\n${value.privateContext.module}\n\n${JSON.stringify({ panels: action.geometry.panels, placements: action.geometry.placements, output: action.geometry.output, divider: action.geometry.divider })}`;
+  // Freeze this policy only for new finals; historical accepted snapshots retain
+  // their original hash and prompt contract.
+  const backgroundInstruction = action.backgroundPolicy === 'current-composition-v1'
+    ? '\n\n本次以参考拼图当前的背景与构图为准。背景处理可选，未处理区域保留原图背景；画布底色只描述空白区域，不主动去背景或更换背景。'
+    : '';
+  const prompt = `${text}\n\n${value.privateContext.module}\n\n${JSON.stringify({ panels: action.geometry.panels, placements: action.geometry.placements, output: action.geometry.output, divider: action.geometry.divider })}${backgroundInstruction}`;
   return { ...parsed, actionText: text, prompt, assetId: action.assetId, outputHash: action.outputHash, sourceTaskId: action.sourceTaskId, sourceVersion: action.sourceVersion,
     geometry: action.geometry, origins: multiviewActionContextOrigins('sync'), parameters, formatRevision: action.formatRevision, syncRevision: action.syncRevision };
 }

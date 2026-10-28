@@ -1,14 +1,17 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
+import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from './CreationAvailability';
 export default function DraftUpgradeAction({ task, ownerId, enabled = true, onAccepted }: { task: { id: string; project_id?: string | null; video_card_id?: string | null; local_status: string }; ownerId?: string | null; enabled?: boolean; onAccepted?: (id: string) => void }) {
+  const projectCatalogRevision = useProjectCatalogRevision();
   const [destination, setDestination] = useState(task.project_id || ''), [confirmed, setConfirmed] = useState(Boolean(task.project_id));
   const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]), [body, setBody] = useState<Record<string, unknown> | null>(null);
   const [cost, setCost] = useState<number | null>(null), [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [accepted, setAccepted] = useState('');
   const creation = useCreationContext({ ownerId, entry: 'draft_upgrade', draftId: task.id, projectId: destination, legacyCardId: task.video_card_id, enabled: false, onProjectChange: setDestination });
-  useEffect(() => { if (task.project_id) return; let active = true; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setProjects(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [task.project_id]);
+  useEffect(() => { if (task.project_id) return; let active = true; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setProjects(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [task.project_id, projectCatalogRevision]);
   const pendingKey = `sd2-draft-upgrade-request-v1:${ownerId}:${task.id}`, requestId = `draft-upgrade:${task.id}`;
   const prepare = async (baseline?: string) => {
     if (!destination || !confirmed || !ownerId) { setMessage('请先确认本次结果的保存项目'); return; }
@@ -44,7 +47,7 @@ export default function DraftUpgradeAction({ task, ownerId, enabled = true, onAc
     finally { setBusy(false); }
   };
   return <details><summary>沿用样片生成1080p</summary>
-    {!task.project_id && <label>保存到<select className="input" value={confirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setConfirmed(Boolean(event.target.value)); setBody(null); }}><option value="">选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
+    {!task.project_id && <label>保存到<ProjectSelector  className="input" value={confirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setConfirmed(Boolean(event.target.value)); setBody(null); }}><option value="">选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector></label>}
     {message && <p role="status">{message}</p>}
     {accepted ? <Link href={`/tasks/${accepted}`}>查看原升级任务 {accepted}</Link> : <>
       <button type="button" className="btn btn-secondary" disabled={busy || !enabled || task.local_status !== 'succeeded'} onClick={() => void prepare()}>{busy ? '正在核对' : body ? '重新核对原升级请求' : '准备1080p升级'}</button>

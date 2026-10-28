@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -311,8 +312,9 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
               setPrefs(p => p.template === prefs.template ? { ...p, template: template.id } : p); return;
             }
           }
-          if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope) || prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) {
-            restoring.current = false; setPrefs(p => ({ ...p, album: '', project: '', pages: 1, scroll: 0 })); return;
+          if (prefs.project && !data.albums.some(a => a.project?.id === prefs.project && a.scope === prefs.scope)) setDirectoryNotice('所选项目暂不可用，原筛选已保留。');
+          else if (prefs.album && !data.albums.some(a => a.id === prefs.album && a.scope === prefs.scope)) {
+            restoring.current = false; setPrefs(p => ({ ...p, album: '', pages: 1, scroll: 0 })); return;
           }
           if (!data.hasMore) break;
         }
@@ -664,13 +666,13 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </div></div>
           <div id={`${pickerId}-filters`} className={`${styles.filterDetails} ${prefs.filtersOpen ? styles.filterDetailsOpen : ''}`}>
           <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><select aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}>
+          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><ProjectSelector onCatalogChange={() => setEpoch(value => value + 1)}  aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}>
             <option value="">全部素材</option>
             {prefs.album && !scopedAlbums.some(album => album.id === prefs.album) && <option value={`album:${prefs.album}`} disabled>所选图集暂不可用</option>}
             {prefs.project && !projects.some(project => project.id === prefs.project) && <option value={`project:${prefs.project}`} disabled>所选项目暂不可用</option>}
             {!!scopedAlbums.length && <optgroup label="图集">{scopedAlbums.map(album => <option key={album.id} value={`album:${album.id}`}>{album.name}</option>)}</optgroup>}
             {!!projects.length && <optgroup label="项目素材">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}
-          </select></label>
+          </ProjectSelector></label>
           {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
           {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>

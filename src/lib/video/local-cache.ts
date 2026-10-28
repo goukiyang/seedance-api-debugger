@@ -1,12 +1,17 @@
 import { createWriteStream } from 'fs';
-import { mkdir, rename, stat, unlink } from 'fs/promises';
+import { mkdir, link, stat, unlink, chmod, open } from 'fs/promises';
+import { constants } from 'fs';
 import path from 'path';
 import { once } from 'events';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 import { downloadH3JobOutput, parseH3InternalOutputUrl } from '@/lib/provider/h3';
+import { assertVideoSaveOwnership, commitVideoSavePublication, commitVideoSaveTask, updateVideoSaveSource, videoSaveSignal, videoSaveSource, isVideoSaveProcess, withVideoSaveProcess,
+  VIDEO_SAVE_HEADER_TIMEOUT_MS, VIDEO_SAVE_IDLE_TIMEOUT_MS, VIDEO_SAVE_TOTAL_TIMEOUT_MS, type VideoSaveOptions } from './save-lock';
 
-const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
+const DOWNLOAD_TIMEOUT_MS = VIDEO_SAVE_TOTAL_TIMEOUT_MS;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
 const activeCacheTasks = new Map<string, Promise<LocalVideoCacheResult>>();
 
@@ -31,6 +36,7 @@ export type LocalVideoCacheResult = {
   error?: string;
   message?: string;
   status?: number;
+  in_progress?: boolean;
 };
 
 async function fileSizeIfExists(filePath: string) {
@@ -64,11 +70,16 @@ async function fetchVideo(url: string, signal: AbortSignal) {
 
 async function fetchVideoWithTimeout(url: string, timeoutMs: number) {
   const controller = new AbortController();
+  const external = videoSaveSignal();
+  const stop = () => controller.abort();
+  external?.addEventListener('abort', stop, { once: true });
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    if (external?.aborted) controller.abort();
     return await fetchVideo(url, controller.signal);
   } finally {
     clearTimeout(timeoutId);
+    external?.removeEventListener('abort', stop);
   }
 }
 
@@ -89,22 +100,29 @@ function downloadTimeoutResult(timeoutMs: number): LocalVideoCacheResult {
   };
 }
 
-async function readWithTimeout<T>(readPromise: Promise<T>, timeoutMs: number, startedAt: number) {
+async function readWithTimeout<T>(readPromise: Promise<T>, timeoutMs: number, startedAt: number,
+  idleTimeoutMs: number, signal?: AbortSignal) {
   const remainingMs = timeoutMs - (Date.now() - startedAt);
   if (remainingMs <= 0) {
     throw createDownloadTimeoutError(timeoutMs);
   }
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let abort: (() => void) | undefined;
   try {
+    if (signal?.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
     return await Promise.race([
       readPromise,
       new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(createDownloadTimeoutError(timeoutMs)), remainingMs);
+        timeoutId = setTimeout(() => reject(remainingMs <= idleTimeoutMs ? createDownloadTimeoutError(timeoutMs)
+          : new Error(`视频下载停滞（连续${idleTimeoutMs / 1000}秒未取得数据）`)), Math.min(remainingMs, idleTimeoutMs));
+        abort = () => reject(new Error('VIDEO_SAVE_LEASE_LOST'));
+        signal?.addEventListener('abort', abort, { once: true });
       }),
     ]);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    if (abort) signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -113,6 +131,8 @@ export async function writeResponseToFile(
   targetPath: string,
   expectedBytes: number,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
+  options: { idleTimeoutMs?: number; signal?: AbortSignal; beforePublish?: () => Promise<void>; validateMp4?: boolean;
+    publish?: (temporary: string, target: string) => Promise<void> } = {},
 ) {
   const body = response.body;
   if (!body) {
@@ -120,10 +140,12 @@ export async function writeResponseToFile(
   }
 
   const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  const stream = createWriteStream(tempPath);
+  const stream = createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
   const reader = body.getReader();
   let receivedBytes = 0;
   const startedAt = Date.now();
+  const idleTimeoutMs = options.idleTimeoutMs ?? VIDEO_SAVE_IDLE_TIMEOUT_MS;
+  const read = <T,>(promise: Promise<T>) => readWithTimeout(promise, timeoutMs, startedAt, idleTimeoutMs, options.signal);
   let cleanupDestroy = false;
   let streamError: Error | null = null;
 
@@ -137,48 +159,67 @@ export async function writeResponseToFile(
 
   try {
     while (true) {
-      const { done, value } = await readWithTimeout(reader.read(), timeoutMs, startedAt);
+      const { done, value } = await read(reader.read());
       if (done) break;
       if (!value) continue;
       receivedBytes += value.length;
       if (!stream.write(Buffer.from(value))) {
-        await readWithTimeout(once(stream, 'drain'), timeoutMs, startedAt);
+        await read(once(stream, 'drain'));
         throwIfStreamErrored();
       }
       throwIfStreamErrored();
     }
 
     stream.end();
-    await readWithTimeout(once(stream, 'finish'), timeoutMs, startedAt);
+    await read(once(stream, 'finish'));
     throwIfStreamErrored();
 
     const info = await stat(tempPath);
     if (!info.isFile() || info.size <= 0) {
       throw new Error('下载后的视频文件为空');
     }
-    if (expectedBytes > 0 && info.size < expectedBytes) {
+    if (expectedBytes > 0 && info.size !== expectedBytes) {
       throw new Error(`下载后的视频文件不完整: expected ${expectedBytes}, got ${info.size}`);
     }
-    if (receivedBytes > 0 && info.size < receivedBytes) {
+    if (receivedBytes > 0 && info.size !== receivedBytes) {
       throw new Error(`视频文件写入不完整: received ${receivedBytes}, got ${info.size}`);
     }
+    const durable = await open(tempPath, constants.O_RDWR | constants.O_NOFOLLOW);
+    try { await durable.sync(); } finally { await durable.close(); }
 
-    await rename(tempPath, targetPath);
+    if (options.validateMp4) await validateLocalMp4(tempPath);
+    await options.beforePublish?.();
+    if (options.signal?.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
+    await chmod(tempPath, 0o644);
+    // A content target is immutable. Never overwrite another save or an existing original.
+    if (options.publish) await options.publish(tempPath, targetPath);
+    else await link(tempPath, targetPath);
+    await unlink(tempPath);
     return info.size;
   } catch (error) {
     cleanupDestroy = true;
     await reader.cancel().catch(() => undefined);
-    stream.destroy();
+    if (!stream.closed) {
+      const closed = new Promise<void>(resolve => stream.once('close', () => resolve()));
+      stream.destroy(); await closed;
+    }
     await unlink(tempPath).catch(() => undefined);
     throw error;
   }
 }
 
-async function updateTaskLocalPath(taskId: string, publicPath: string) {
-  await prisma.videoTask.update({
-    where: { id: taskId },
-    data: { local_video_path: publicPath },
-  });
+export async function validateLocalMp4(file: string) {
+  const { stdout } = await promisify(execFile)(process.env.FFPROBE_PATH || 'ffprobe',
+    ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', file], { timeout: 20_000, maxBuffer: 1024 * 1024, signal: videoSaveSignal() });
+  const value = JSON.parse(stdout) as { format?: { format_name?: string; duration?: string }; streams?: Array<{ codec_type?: string; width?: number; height?: number }> };
+  const video = value.streams?.find(item => item.codec_type === 'video');
+  const duration = Number(value.format?.duration);
+  if (!value.format?.format_name?.split(',').some(item => item === 'mp4' || item === 'mov')
+    || !video?.width || !video.height || !Number.isFinite(duration) || duration <= 0) throw new Error('MP4 文件不可读或缺少有效视频流');
+}
+
+async function updateTaskLocalPath(task: CacheableVideoTask, publicPath: string) {
+  await commitVideoSavePublication(task, publicPath);
 }
 
 async function refreshResultUrl(task: CacheableVideoTask) {
@@ -197,7 +238,11 @@ async function refreshResultUrl(task: CacheableVideoTask) {
     updateData.raw_status_response = JSON.stringify(refreshed.raw);
   }
 
-  await prisma.videoTask.update({ where: { id: task.id }, data: updateData });
+  await assertVideoSaveOwnership(task);
+  const updated = await prisma.videoTask.updateMany({ where: { id: task.id, provider_task_id: task.provider_task_id,
+    result_video_url: task.result_video_url, local_status: 'succeeded' }, data: updateData });
+  if (updated.count !== 1) throw new Error('VIDEO_SAVE_SOURCE_CHANGED');
+  await updateVideoSaveSource({ ...task, ...updateData });
 
   return {
     result_video_url: refreshed.result_video_url,
@@ -207,12 +252,22 @@ async function refreshResultUrl(task: CacheableVideoTask) {
 
 export async function cacheTaskVideoToLocal(
   task: CacheableVideoTask,
-  options: { timeoutMs?: number; refreshOnForbidden?: boolean } = {},
+  options: VideoSaveOptions = {},
 ): Promise<LocalVideoCacheResult> {
+  // Reading an already published original never starts a new save process.
+  if (!isVideoSaveProcess(task.id) && task.local_video_path?.startsWith('/videos/') && !task.local_video_path.includes('..')) {
+    const current = await prisma.videoTask.findUnique({ where: { id: task.id } });
+    const size = await fileSizeIfExists(path.join(process.cwd(), 'public', task.local_video_path.slice(1)));
+    if (current && current.delivery_status !== 'failed' && videoSaveSource(current) === videoSaveSource(task)
+      && current.local_video_path === task.local_video_path && size) {
+      return { success: true, local_video_path: task.local_video_path, file_size: size, already_exists: true,
+        result_video_url: task.result_video_url || undefined, result_last_frame_url: task.result_last_frame_url };
+    }
+  }
   const activeCacheTask = activeCacheTasks.get(task.id);
   if (activeCacheTask) return activeCacheTask;
 
-  const cachePromise = cacheTaskVideoToLocalInner(task, options)
+  const cachePromise = withVideoSaveProcess('cache', task, options, () => cacheTaskVideoToLocalInner(task, options))
     .finally(() => {
       activeCacheTasks.delete(task.id);
     });
@@ -222,26 +277,39 @@ export async function cacheTaskVideoToLocal(
 
 async function cacheTaskVideoToLocalInner(
   task: CacheableVideoTask,
-  options: { timeoutMs?: number; refreshOnForbidden?: boolean } = {},
+  options: VideoSaveOptions = {},
 ): Promise<LocalVideoCacheResult> {
   const timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const remaining = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
   const refreshOnForbidden = options.refreshOnForbidden !== false;
-  const publicPath = publicVideoPath(task.id);
-  const targetPath = localVideoPath(task.id);
+  // A new complete save gets its own immutable file; previous originals are retained.
+  const generation = Date.now().toString(36) + '-' + process.pid;
+  const publicPath = publicVideoPath(task.id).replace(/\.mp4$/, `-${generation}.mp4`);
+  const targetPath = localVideoPath(task.id).replace(/\.mp4$/, `-${generation}.mp4`);
 
-  const existingSize = await fileSizeIfExists(targetPath);
+  const existingPath = task.local_video_path?.startsWith('/videos/') && !task.local_video_path.includes('..')
+    ? path.join(process.cwd(), 'public', task.local_video_path.slice(1)) : localVideoPath(task.id);
+  const existingSize = await fileSizeIfExists(existingPath);
   if (existingSize) {
-    if (task.local_video_path !== publicPath) {
-      await updateTaskLocalPath(task.id, publicPath);
+    let valid = true;
+    try { await validateLocalMp4(existingPath); } catch { valid = false; }
+    if (valid) {
+    const existingPublicPath = task.local_video_path || publicVideoPath(task.id);
+    if (!task.local_video_path) {
+      await updateTaskLocalPath(task, existingPublicPath);
     }
     return {
       success: true,
-      local_video_path: publicPath,
+      local_video_path: existingPublicPath,
       file_size: existingSize,
       already_exists: true,
       result_video_url: task.result_video_url || undefined,
       result_last_frame_url: task.result_last_frame_url,
     };
+    }
+    // Keep the bad legacy bytes for recovery, but never adopt them as the new completed original.
+    await commitVideoSaveTask(task, { local_video_path: null });
   }
 
   if (task.local_status !== 'succeeded') {
@@ -291,10 +359,11 @@ async function cacheTaskVideoToLocalInner(
     }
   } else {
     try {
-      response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
+      response = await fetchVideoWithTimeout(sourceUrl, Math.min(remaining(), VIDEO_SAVE_HEADER_TIMEOUT_MS));
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        return downloadTimeoutResult(timeoutMs);
+        if (videoSaveSignal()?.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
+        return downloadTimeoutResult(Math.min(timeoutMs, VIDEO_SAVE_HEADER_TIMEOUT_MS));
       }
       throw error;
     }
@@ -307,11 +376,12 @@ async function cacheTaskVideoToLocalInner(
       lastFrameUrl = refreshed.result_last_frame_url;
       refreshedUrl = true;
       try {
-        response = await fetchVideoWithTimeout(sourceUrl, timeoutMs);
+        response = await fetchVideoWithTimeout(sourceUrl, Math.min(remaining(), VIDEO_SAVE_HEADER_TIMEOUT_MS));
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
+          if (videoSaveSignal()?.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
           return {
-            ...downloadTimeoutResult(timeoutMs),
+            ...downloadTimeoutResult(Math.min(timeoutMs, VIDEO_SAVE_HEADER_TIMEOUT_MS)),
             refreshed_url: refreshedUrl,
           };
         }
@@ -342,13 +412,32 @@ async function cacheTaskVideoToLocalInner(
 
   const contentLength = response.headers.get('content-length');
   const expectedBytes = contentLength ? Number.parseInt(contentLength, 10) : 0;
+  const contentRange = response.headers.get('content-range');
+  if (contentRange) {
+    const range = /^bytes 0-(\d+)\/(\d+)$/.exec(contentRange);
+    if (!range || Number(range[1]) + 1 !== Number(range[2])) {
+      await response.body?.cancel().catch(() => undefined);
+      return { success: false, error: 'INCOMPLETE_VIDEO_RESPONSE', message: '原片只返回了部分文件，尚未发布。', status: 502 };
+    }
+  }
+  const currentSource = { ...task, result_video_url: sourceUrl, result_last_frame_url: lastFrameUrl };
   let fileSize: number;
   try {
     fileSize = await writeResponseToFile(
       response,
       targetPath,
       Number.isFinite(expectedBytes) ? expectedBytes : 0,
-      timeoutMs,
+      remaining(),
+      { idleTimeoutMs: VIDEO_SAVE_IDLE_TIMEOUT_MS, signal: videoSaveSignal(), validateMp4: true,
+        beforePublish: () => assertVideoSaveOwnership(currentSource), publish: async (temporary, target) => {
+          let linked = false;
+          try { await commitVideoSavePublication(currentSource, publicPath, async () => {
+            await link(temporary, target); linked = true;
+            const directory = await open(path.dirname(target), constants.O_RDONLY | constants.O_DIRECTORY);
+            try { await directory.sync(); } finally { await directory.close(); }
+          }); }
+          catch (error) { if (linked) await unlink(target).catch(() => undefined); throw error; }
+        } },
     );
   } catch (error) {
     if (isDownloadTimeoutError(error)) {
@@ -360,7 +449,9 @@ async function cacheTaskVideoToLocalInner(
     throw error;
   }
 
-  await updateTaskLocalPath(task.id, publicPath);
+  // Only this task's pre-existing selected event may continue. Notification failure cannot undo the original.
+  try { await (await import('./feishu-notification')).wakeVideoFeishuAfterOriginalReady(task.id); }
+  catch { console.warn('[video-save] Original is ready; notification wake deferred to its existing consumer.'); }
 
   return {
     success: true,

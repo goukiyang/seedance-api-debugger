@@ -6,6 +6,8 @@ import { StudioError, studioBusinessErrorStatus } from '@/lib/image-studio/tasks
 import { quoteStudioBatch } from '@/lib/image-studio/batch-billing-quote';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
+import { VideoFeishuError } from '@/lib/video/feishu-contract';
+import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -53,6 +55,7 @@ async function handle(request: NextRequest, write = false) {
     }
     return NextResponse.json(await listStudioBatches(user.id, request.nextUrl.searchParams.get('cursor') || undefined), { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(error.code), code: error.code, submitted: false }, { status: error.status });
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });

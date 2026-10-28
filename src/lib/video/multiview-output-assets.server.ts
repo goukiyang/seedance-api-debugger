@@ -241,7 +241,7 @@ export async function readMultiviewReferenceBinding(user: SessionUser, workId: s
     || !work.source_info_json || !work.ready_recipe_json || !work.ready_manifest_json || work.recipe_json !== work.ready_recipe_json) throw new MultiviewWorkError('本次参考拼图尚未准备好，原草稿保留。', 409, 'REFERENCE_NOT_READY');
   await assertMultiviewWorkReference(user, work, db);
   const info = JSON.parse(work.source_info_json), recipe = parseMultiviewWorkRecipe(work.ready_recipe_json, info);
-  if (recipe?.schema !== 3 || recipe.foregrounds.length !== recipe.slots.length) throw new MultiviewWorkError('请先完成每张图片的背景处理，原图仍可查看和导出。', 409, 'REFERENCE_BACKGROUND_PENDING');
+  if (recipe?.schema !== 3) throw new MultiviewWorkError('参考拼图配方暂不可用，原草稿保留。', 409, 'REFERENCE_NOT_READY');
   const recipeHash = sha(work.ready_recipe_json), manifest = parseMultiviewWorkManifest(work.ready_manifest_json, recipe, revision, recipeHash);
   const output = manifest?.files.find(file => file.role === 'collage');
   if (!manifest || !output) throw unavailable();

@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -558,7 +559,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
 
             <section>
               <h3>目标项目</h3>
-              <select className="input" value={targetProjectId} onChange={(event) => {
+              <ProjectSelector onCatalogChange={() => void loadProjects()}  className="input" value={targetProjectId} onChange={(event) => {
                 setTargetProjectId(event.target.value);
                 setMergePreview(null);
                 setMergeConfirmed(false);
@@ -569,7 +570,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
                     {projectDisplayName(project)} · {project.status}
                   </option>
                 ))}
-              </select>
+              </ProjectSelector>
               {!targetCandidates.some((project) => project.name === SMOKE_ARCHIVE_PROJECT_NAME) && (
                 <button className="btn btn-secondary" type="button" onClick={createArchiveProject} disabled={mergeLoading || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
                   创建 Smoke Project Archive

@@ -5,7 +5,7 @@ import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { VOLCENGINE_IP_VIDEO_PROVIDER } from '@/lib/provider/volcengine-ip';
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from '@/lib/video/task-finalizer';
-import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
+import { enqueueVideoDeliveryJob, videoDeliveryProjection } from '@/lib/video/delivery-queue';
 import { isCodexInternalServiceUser } from '@/lib/integrations/codex';
 import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
@@ -38,6 +38,7 @@ function serializeTaskIdentity<T extends {
       ? visibleProviderErrorMessage(task.error_message)
       : task.error_message,
     ...taskThumbnailProjection(task as T & TaskThumbnailProjectionSource),
+    ...videoDeliveryProjection(task),
   });
 }
 

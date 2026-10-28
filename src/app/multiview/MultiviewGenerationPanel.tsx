@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, ImagePlus, Plus, RefreshCw, Upload } from 'lucide-react';
@@ -1257,7 +1258,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
           if (currentProject && !cardSelectionInvalid) toggleSection('dest', event.currentTarget.open);
         }}>
           <summary>保存到：{currentProject ? currentProject.name : '请选择项目'} · {currentCard ? currentCard.title : '不关联视频卡'}</summary>
-          <label>保存到项目<select value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>保存到项目<ProjectSelector onCatalogChange={() => setRevision(value => value + 1)}  value={draft.projectId} disabled={formDisabled || projectLoading} onChange={event => change({ projectId: event.target.value, videoCardId: '', resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{projectLoading ? '正在读取项目…' : '选择项目'}</option>{draft.projectId && !currentProject && <option value={draft.projectId}>原项目暂不可用，请重新选择</option>}{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</ProjectSelector></label>
           <details open={cardSelectionInvalid || sections.owner === owner && sections.card} onToggle={event => toggleSection('card', event.currentTarget.open)}>
             <summary>关联视频卡（可选）{currentCard ? `：${currentCard.title}` : ''}</summary>
             <label>视频卡（可选）<select value={draft.videoCardId} disabled={formDisabled || cardLoading || !currentProject} onChange={event => change({ videoCardId: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}><option value="">{cardLoading ? '正在读取视频卡…' : '不关联视频卡'}</option>{draft.videoCardId && !currentCard && <option value={draft.videoCardId}>原视频卡暂不可用，请重新选择或取消关联</option>}{cards.map(item => <option key={item.id} value={item.id} disabled={!canGenerateInCard(item)}>{item.title}{!canGenerateInCard(item) ? '（不可生成）' : ''}</option>)}</select></label>

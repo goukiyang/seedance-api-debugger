@@ -8,6 +8,8 @@ export async function GET(_request: NextRequest, { params }: { params: { request
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = _request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
     return NextResponse.json(await getProjectCreateOperation(user, params.requestId), { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, ...(error instanceof ProjectOperationError ? { code: error.code } : {}) }, { status: error.status });

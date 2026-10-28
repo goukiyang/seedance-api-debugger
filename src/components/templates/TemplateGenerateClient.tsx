@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 import { useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 
@@ -512,7 +513,7 @@ export function TemplateGenerateClient() {
     };
   }, [currentUser?.role, selectedProvider, triggerH3AutoCheck]);
 
-  const loadProjects = useCallback(async (preferredProjectId?: string | null) => {
+  const loadProjects = useCallback(async (preferredProjectId?: string | null, preserveSelected = false) => {
     setLoadingProjects(true);
     try {
       const response = await fetch('/api/projects', { cache: 'no-store' });
@@ -523,6 +524,7 @@ export function TemplateGenerateClient() {
       const data = await readJsonResponse<{ projects?: ProjectOption[] }>(response);
       const list: ProjectOption[] = (data.projects || []).filter((project: ProjectOption) => project.can_generate !== false);
       setProjects(list);
+      if (preserveSelected) return;
       const requestedProjectId = new URLSearchParams(window.location.search).get('project_id');
       const rememberedProjectId = window.localStorage.getItem(`${PROJECT_STORAGE_KEY}:${currentUser?.id}`);
       const preferredId = preferredProjectId || requestedProjectId || rememberedProjectId || '';
@@ -1132,101 +1134,10 @@ export function TemplateGenerateClient() {
             </div>
           </summary>
           <section className="template-generate-scope" aria-label="保存范围">
-          <div className="composer-project-picker" ref={projectPickerRef}>
-            <button
-              type="button"
-              className="composer-project-trigger"
-              onClick={() => setProjectPickerOpen((open) => !open)}
-              disabled={loadingProjects || projectBusy}
-              aria-expanded={projectPickerOpen}
-              aria-haspopup="dialog"
-            >
-              <span className="composer-project-trigger-icon" aria-hidden="true"><Folder size={16} /></span>
-              <span className="composer-project-trigger-copy">
-                <span className="composer-project-trigger-label">保存到 / 当前项目</span>
-                <span className="composer-project-trigger-name">{selectedProjectLabel}</span>
-                <span className="composer-project-trigger-meta">{selectedProjectMeta}</span>
-                {selectedProject && (
-                  <span className="composer-project-trigger-owner">
-                    <UserIdentityBadge user={projectOwnerUser(selectedProject)} size="sm" />
-                  </span>
-                )}
-              </span>
-              <ChevronDown className="composer-project-trigger-chevron" size={16} aria-hidden="true" />
-            </button>
-
-            {projectPickerOpen && (
-              <div className="composer-project-menu" role="dialog" aria-label="项目列表">
-                <div className="composer-project-menu-head">
-                  <div>
-                    <span className="composer-project-menu-title">项目列表</span>
-                    <span className="composer-project-menu-subtitle">{projects.length} 个可生成项目</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="composer-project-menu-action"
-                    onClick={() => setProjectCreateOpen((open) => !open)}
-                    disabled={projectBusy}
-                  >
-                    <Plus size={15} aria-hidden="true" />
-                    新建项目
-                  </button>
-                </div>
-                {projectCreateOpen && (
-                  <form className="composer-project-create composer-project-create-inline" onSubmit={handleCreateProject}>
-                    <input
-                      className="composer-project-input"
-                      value={projectName}
-                      disabled={projectCreate.busy || Boolean(projectCreate.pending)}
-                      onChange={(event) => setProjectName(event.currentTarget.value)}
-                      placeholder="输入项目名称"
-                      maxLength={40}
-                      autoFocus
-                    />
-                    <button type="submit" className="composer-project-btn composer-project-btn-primary" disabled={projectBusy || projectCreate.busy || !projectCreate.ready || Boolean(projectCreate.pending)}>
-                      {projectBusy ? '创建中...' : '创建'}
-                    </button>
-                  </form>
-                )}
-                <div className="composer-project-list" role="listbox" aria-label="选择保存项目">
-                  {loadingProjects ? (
-                    <div className="composer-project-list-empty">正在加载项目...</div>
-                  ) : projects.length === 0 ? (
-                    <div className="composer-project-list-empty">暂无可生成项目，先新建一个项目。</div>
-                  ) : projects.map((project) => {
-                    const duplicateName = projectNameCounts[projectDisplayName(project)] > 1;
-                    const isSelected = project.id === selectedProjectId;
-                    return (
-                      <button
-                        key={project.id}
-                        type="button"
-                        className={['composer-project-option', isSelected ? 'active' : ''].filter(Boolean).join(' ')}
-                        onClick={() => {
-                          setSelectedProjectId(project.id);
-                          setProjectPickerOpen(false);
-                          setProjectCreateOpen(false);
-                          setProjectMessage(null);
-                        }}
-                      >
-                        <span className="composer-project-option-mark" aria-hidden="true">
-                          {isSelected ? <Check size={16} /> : <Folder size={16} />}
-                        </span>
-                        <span className="composer-project-option-copy">
-                          <span className="composer-project-option-name">{projectDisplayName(project)}</span>
-                          <span className="composer-project-option-meta">{projectMetaLabel(project)}</span>
-                          {duplicateName && (
-                            <span className="composer-project-option-owner">
-                              <UserIdentityBadge user={projectOwnerUser(project)} size="sm" />
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          <ProjectSelector className="composer-project-picker" aria-label="保存项目" value={selectedProjectId} disabled={loadingProjects || projectBusy || Boolean(projectCreate.pending)}
+            onCatalogChange={() => void loadProjects(undefined, true)} onChange={event => { setSelectedProjectId(event.target.value); setProjectMessage(null); }}>
+              <option value="">选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{projectDisplayName(project)} · {projectMetaLabel(project)}</option>)}
+            </ProjectSelector>
 
           <div className="template-generate-video-card">
             <div className="template-generate-video-card-picker">

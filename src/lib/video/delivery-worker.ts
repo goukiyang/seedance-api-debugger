@@ -3,10 +3,12 @@ import {
   claimNextVideoDeliveryJob,
   completeVideoDeliveryJob,
   failVideoDeliveryJob,
+  renewVideoDeliveryJob,
   type VideoDeliveryJobRecord,
 } from './delivery-queue';
 import { ensurePublicVideoDeliveryFromProvider } from './public-delivery';
 import { wakeMultiviewWorkForTask } from './multiview-works';
+import { VIDEO_SAVE_TOTAL_TIMEOUT_MS } from './save-lock';
 
 type WorkerOptions = {
   workerId?: string;
@@ -55,7 +57,18 @@ export async function processVideoDeliveryJob(job: VideoDeliveryJobRecord) {
     throw new Error(`视频任务尚未成功，当前状态：${task.local_status || 'unknown'}`);
   }
 
-  const result = await ensurePublicVideoDeliveryFromProvider(task);
+  const controller = new AbortController();
+  let renewal: Promise<void> | null = null;
+  const timer = setInterval(() => {
+    if (!renewal) renewal = renewVideoDeliveryJob(job).then(held => { if (!held) controller.abort(); })
+      .catch(() => { controller.abort(); }).finally(() => { renewal = null; });
+  }, 20_000);
+  let result: Awaited<ReturnType<typeof ensurePublicVideoDeliveryFromProvider>>;
+  try {
+    result = await ensurePublicVideoDeliveryFromProvider(task, { cacheTimeoutMs: VIDEO_SAVE_TOTAL_TIMEOUT_MS,
+      saveFence: { jobId: job.id, workerId: job.locked_by!, attempt: job.attempts }, signal: controller.signal });
+  } finally { clearInterval(timer); if (renewal) await renewal; }
+  if (controller.signal.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
   if (!result.success || !result.public_video_url) {
     throw new Error(result.message || result.error || '稳定视频交付未完成');
   }
@@ -65,10 +78,13 @@ export async function processVideoDeliveryJob(job: VideoDeliveryJobRecord) {
     storageProvider: result.storage_provider ?? null,
     storageKey: result.storage_key ?? null,
     fileSize: result.file_size ?? null,
+    source: { provider_task_id: task.provider_task_id, result_video_url: result.cacheResult?.result_video_url || task.result_video_url },
   });
   // This only wakes an existing intent. A work failure must never reverse successful video delivery.
   try { await wakeMultiviewWorkForTask(task.id); }
   catch { console.warn('[video-delivery-worker] multiview work wake deferred to its persistent consumer'); }
+  try { await (await import('./feishu-notification')).wakeVideoFeishuAfterOriginalReady(task.id); }
+  catch { console.warn('[video-delivery-worker] notification wake deferred to its existing consumer'); }
   return completed;
 }
 

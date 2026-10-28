@@ -1,14 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
-import { ArrowLeft, Copy, Download, Move, Undo2, Redo2 } from 'lucide-react';
+import { ArrowLeft, Copy, Download, LockKeyhole, Move, Undo2, Redo2, UnlockKeyhole } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
 import { DEFAULT_CUTOUT_SETTINGS } from '@/lib/cutout/settings';
 import { copyPngBlob } from '@/lib/media/copy-image';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
-import { createMultiviewReferenceRecipe, clampReferencePlacement, referencePixelGeometry, resizeMultiviewReference, referencePanels,
-  type ReferenceLayout, type ReferencePlacement } from '@/lib/video/multiview-reference-layout';
+import { createMultiviewReferenceRecipe, referencePixelGeometry, resizeMultiviewReference, referencePanels, moveReferencePlacements, scaleReferencePlacements,
+  type ReferenceLayout, type ReferencePlacement, type ReferenceScaleCorner } from '@/lib/video/multiview-reference-layout';
 import { MULTIVIEW_SAVE_PROTOCOL, parseMultiviewWorkRecipe, type MultiviewReferenceRecipe, type MultiviewWorkDto, type MultiviewSourceAccess } from '@/lib/video/multiview-work-contract';
 import type { MultiviewInfo, MultiviewSlot } from '@/lib/video/multiview-contract';
 import { MultiviewActionPanel } from './MultiviewActionPanel';
@@ -31,6 +31,7 @@ export function MultiviewReferenceComposer(props: Props) {
   const { confirm, productDialog } = useProductDialog();
   const [backgrounds, setBackgrounds] = useState<Record<string,BackgroundState>>({}), [backgroundBusy, setBackgroundBusy] = useState('');
   const [showStyle, setShowStyle] = useState(false), [precise, setPrecise] = useState(false);
+  const [syncAdjust, setSyncAdjust] = useState(false), [dragging, setDragging] = useState(false);
   const [activeView, setActiveView] = useState<'reference' | 'video'>('reference');
   const recipeRef = useRef(recipe); recipeRef.current = recipe;
   const workRef = useRef(work); workRef.current = work;
@@ -39,7 +40,7 @@ export function MultiviewReferenceComposer(props: Props) {
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const numericGesture = useRef<MultiviewReferenceRecipe | null>(null);
   const lock = useRef(false), canvas = useRef<HTMLDivElement>(null), saved = useRef('');
-  const drag = useRef<{ id: string; pointer: number; x: number; y: number; rectWidth: number; rectHeight: number; start: MultiviewReferenceRecipe; mode: 'move' | 'scale'; corner?: string } | null>(null);
+  const drag = useRef<{ id: string; pointer: number; target: Element; x: number; y: number; rectWidth: number; rectHeight: number; start: MultiviewReferenceRecipe; synchronized: boolean; mode: 'move' | 'scale'; corner: ReferenceScaleCorner } | null>(null);
   const headers = useCallback(() => ({ 'Content-Type': 'application/json', 'x-app-session-user': props.ownerId }), [props.ownerId]);
   const valid = (scope = identity) => currentIdentity.current === scope && !isClientSessionBlocked();
   const signature = JSON.stringify(recipe);
@@ -48,7 +49,7 @@ export function MultiviewReferenceComposer(props: Props) {
   const ratio = recipe.output.width === recipe.output.height ? '1:1' : recipe.output.width > recipe.output.height ? '16:9' : '9:16';
   const geometry = referencePixelGeometry(recipe, props.info);
   function edit(next: MultiviewReferenceRecipe, undo = true) {
-    if (!valid()) return;
+    if (!valid() || JSON.stringify(next) === JSON.stringify(recipeRef.current)) return;
     if (undo) { setHistory(values => [...values.slice(-29), recipeRef.current]); setFuture([]); }
     recipeRef.current = next; setRecipe(next); setMessage('');
   }
@@ -59,7 +60,9 @@ export function MultiviewReferenceComposer(props: Props) {
     return value.work;
   }, [headers]);
   useEffect(() => {
-    let cancelled = false; const scope = identity; setHydrated(false);
+    let cancelled = false; const scope = identity; setHydrated(false); setSyncAdjust(false); setDragging(false);
+    const previousDrag = drag.current; drag.current = null; numericGesture.current = null; setHistory([]); setFuture([]);
+    if (previousDrag?.target.hasPointerCapture(previousDrag.pointer)) previousDrag.target.releasePointerCapture(previousDrag.pointer);
     void (async () => {
       try {
         const raw = localStorage.getItem(key); const stored = raw ? JSON.parse(raw) : null;
@@ -69,6 +72,7 @@ export function MultiviewReferenceComposer(props: Props) {
         if (cancelled || !valid(scope)) return;
         const restored = local?.schema === 3 ? local : next?.recipe?.schema === 3 ? next.recipe : recipeRef.current;
         recipeRef.current = restored; setRecipe(restored); setSelected(restored.slots[0]?.id || '');
+        setSyncAdjust(stored?.syncAdjust === true);
         setReferenceKey(typeof stored?.referenceKey === 'string' ? stored.referenceKey : crypto.randomUUID());
         if (next) { setWork(next); saved.current = JSON.stringify(next.recipe); if(local && stored?.baseRevision !== undefined && stored.baseRevision !== next.revision && JSON.stringify(local)!==JSON.stringify(next.recipe)){setBlocked(true);setMessage('作品已在另一处更新，当前排版保留，请先核对最新版本。');} }
         if (stored?.pending) setPending(stored.pending);
@@ -84,12 +88,12 @@ export function MultiviewReferenceComposer(props: Props) {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      const retained=JSON.stringify({ recipe, referenceKey, workId: work?.id || null, baseRevision:work?.revision, pending });
+      const retained=JSON.stringify({ recipe, referenceKey, workId: work?.id || null, baseRevision:work?.revision, pending, syncAdjust });
       localStorage.setItem(key, retained);
       if(work?.id)localStorage.setItem(`sd2:multiview-reference:v3:${props.ownerId}:${props.taskId}:${props.info.sourceVersion}:${work.id}`,retained);
       localStorage.setItem(`sd2:multiview-reference-style:${props.ownerId}`, JSON.stringify({ background: recipe.output.background, divider: recipe.divider.enabled }));
     } catch { setBlocked(true); setMessage('当前排版暂不能在本机保留，请保留页面。'); }
-  }, [hydrated, key, recipe, referenceKey, work?.id, pending, props.ownerId]);
+  }, [hydrated, key, recipe, referenceKey, work?.id, pending, props.ownerId, syncAdjust]);
   async function queryOriginal() {
     if (!pending || lock.current) return;
     const scope = identity; lock.current = true; setBusy(true);
@@ -112,7 +116,7 @@ export function MultiviewReferenceComposer(props: Props) {
     try {
       const body = original ? { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId: mutation.mutationId, action: 'save', baseRevision: original.revision, recipe: frozen, title: original.title }
         : { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId: mutation.mutationId, referenceKey, taskId: props.taskId, sourceVersion: props.info.sourceVersion, recipe: frozen, title: '动作参考拼图', ...(props.access?.kind === 'work' ? { sourceWorkId: props.access.id } : {}) };
-      localStorage.setItem(key, JSON.stringify({ recipe: frozen, referenceKey, workId: original?.id || null, baseRevision:original?.revision,pending: mutation }));
+      localStorage.setItem(key, JSON.stringify({ recipe: frozen, referenceKey, workId: original?.id || null, baseRevision:original?.revision,pending: mutation,syncAdjust }));
       setPending(mutation); sent = true;
       const response = await fetch(original ? `/api/video/multiview/works/${original.id}` : '/api/video/multiview/works', { method: original ? 'PATCH' : 'POST', headers: headers(), body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
       const value = await readJsonResponse<{ work?: MultiviewWorkDto; workId?: string; receipt?: { mutationId: string }; error?: string; notCommitted?: boolean }>(response);
@@ -132,29 +136,57 @@ export function MultiviewReferenceComposer(props: Props) {
     const timer = setTimeout(() => { void readWork(work.id).then(next => { if (!cancelled && valid(scope)) {if(next.revision!==work.revision&&JSON.stringify(next.recipe)!==saved.current){setBlocked(true);setMessage('作品已在另一处更新，当前排版保留，请核对最新版本。');}setWork(next);} }).catch(cause => { if (!cancelled && valid(scope)) setMessage(cause.message); }); }, 3000);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [work, identity, readWork]);
-  function start(event: PointerEvent, id: string, mode: 'move' | 'scale', corner = 'se') {
-    if (busy || !hydrated || !canvas.current || event.button !== 0) return;
-    event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setSelected(id);
-    const rect = canvas.current.getBoundingClientRect(); drag.current = { id, pointer: event.pointerId, x: event.clientX, y: event.clientY, rectWidth: rect.width, rectHeight: rect.height, start: recipeRef.current, mode, corner };
+  function start(event: PointerEvent, id: string, mode: 'move' | 'scale', corner: ReferenceScaleCorner = 'se') {
+    if (busy || !hydrated || drag.current || !canvas.current || event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); setSelected(id); setDragging(true);
+    const rect = canvas.current.getBoundingClientRect(); drag.current = { id, pointer: event.pointerId, target: event.currentTarget, x: event.clientX, y: event.clientY, rectWidth: rect.width, rectHeight: rect.height, start: recipeRef.current, synchronized: syncAdjust, mode, corner };
   }
   function moving(event: PointerEvent) {
     const operation = drag.current; if (!operation || operation.pointer !== event.pointerId) return;
-    const placement = operation.start.placements.find(item => item.slotId === operation.id)!, panel = operation.start.panels.find(item => item.slotId === operation.id)!;
-    const dx = (event.clientX - operation.x) / operation.rectWidth, dy = (event.clientY - operation.y) / operation.rectHeight;
-    const scaledWidth = Math.max(.000001, placement.width + dx * (operation.corner?.includes('w') ? -1 : 1));
-    const scaledHeight = placement.height * scaledWidth / placement.width;
-    const next = clampReferencePlacement({ ...placement, ...(operation.mode === 'move' ? { x: placement.x + dx, y: placement.y + dy } : { width: scaledWidth, x: operation.corner?.includes('w') ? placement.x + placement.width - scaledWidth : placement.x, y: operation.corner?.includes('n') ? placement.y + placement.height - scaledHeight : placement.y }) }, panel, props.info, operation.start.output);
-    edit({ ...operation.start, placements: operation.start.placements.map(item => item.slotId === operation.id ? next : item) }, false);
+    const dx = event.clientX - operation.x, dy = event.clientY - operation.y;
+    const placement = operation.start.placements.find(item => item.slotId === operation.id)!;
+    const width = placement.width * operation.rectWidth, height = placement.height * operation.rectHeight;
+    const factor = 1 + (dx * (operation.corner.includes('w') ? -1 : 1) * width + dy * (operation.corner.includes('n') ? -1 : 1) * height) / (width * width + height * height);
+    const placements = operation.mode === 'move'
+      ? moveReferencePlacements(operation.start, operation.id, dx / operation.rectWidth, dy / operation.rectHeight, operation.synchronized)
+      : scaleReferencePlacements(operation.start, operation.id, factor, operation.corner, operation.synchronized);
+    edit({ ...recipeRef.current, placements }, false);
+  }
+  function releaseDrag() {
+    const operation = drag.current; if (!operation) return null; drag.current = null; setDragging(false);
+    if (operation.target.hasPointerCapture(operation.pointer)) operation.target.releasePointerCapture(operation.pointer);
+    return operation;
+  }
+  function cancelDrag() {
+    const operation = releaseDrag(); if (operation) edit({ ...recipeRef.current, placements: operation.start.placements }, false);
   }
   function finish(event: PointerEvent, cancel = false) {
-    const operation = drag.current; if (!operation || operation.pointer !== event.pointerId) return; drag.current = null;
-    if (cancel) { edit(operation.start, false); return; }
-    setHistory(values => [...values.slice(-29), operation.start]); setFuture([]);
+    if (!drag.current || drag.current.pointer !== event.pointerId) return;
+    if (cancel) { cancelDrag(); return; }
+    const operation = releaseDrag()!;
+    if (JSON.stringify(operation.start.placements) === JSON.stringify(recipeRef.current.placements)) return;
+    setHistory(values => [...values.slice(-29), { ...recipeRef.current, placements: operation.start.placements }]); setFuture([]);
   }
-  function adjust(change: Partial<ReferencePlacement>, record = true) {
-    const placement = recipe.placements.find(item => item.slotId === selected), panel = recipe.panels.find(item => item.slotId === selected); if (!placement || !panel) return;
-    const next = clampReferencePlacement({ ...placement, ...change }, panel, props.info, recipe.output);
-    edit({ ...recipe, placements: recipe.placements.map(item => item.slotId === selected ? next : item) }, record);
+  function adjust(change: Partial<ReferencePlacement>, record = true, id = selected) {
+    const current = recipeRef.current, placement = current.placements.find(item => item.slotId === id); if (!placement || drag.current) return;
+    let placements = typeof change.width === 'number' ? scaleReferencePlacements(current, id, change.width / placement.width, 'center', syncAdjust) : current.placements;
+    const resized = placements.find(item => item.slotId === id)!;
+    placements = moveReferencePlacements({ ...current, placements }, id, typeof change.x === 'number' ? change.x - resized.x : 0, typeof change.y === 'number' ? change.y - resized.y : 0, syncAdjust);
+    edit({ ...current, placements }, record);
+  }
+  function resetPlacement() {
+    if (drag.current) return;
+    const current = recipeRef.current, ratio = props.info.width / props.info.height * current.output.height / current.output.width;
+    edit({ ...current, placements: current.placements.map(item => {
+      if (!syncAdjust && item.slotId !== selected) return item;
+      const panel = current.panels.find(value => value.slotId === item.slotId)!, width = Math.min(panel.width, panel.height * ratio) * .94, height = width / ratio;
+      return { ...item, width, height, x: panel.x + (panel.width - width) / 2, y: panel.y + (panel.height - height) / 2 };
+    }) });
+  }
+  function finishNumericGesture() {
+    const original = numericGesture.current; numericGesture.current = null;
+    if (!original || JSON.stringify(original.placements) === JSON.stringify(recipeRef.current.placements)) return;
+    setHistory(values => [...values.slice(-29), { ...recipeRef.current, placements: original.placements }]); setFuture([]);
   }
   async function output(copy: boolean) {
     if (!collage) return;
@@ -218,22 +250,22 @@ export function MultiviewReferenceComposer(props: Props) {
       <div className={styles.visual} hidden={activeView === 'video'}>
         <div className={styles.compact}><span>{recipe.slots.length} 个镜头</span><label>画幅<select value={ratio} onChange={event => { const [width,height] = dimensions[event.target.value as keyof typeof dimensions]; edit(resizeMultiviewReference(recipe, props.info, { ...recipe.output, width, height })); }}><option>16:9</option><option>9:16</option><option>1:1</option></select></label><label>排版<select onChange={event => edit(resizeMultiviewReference(recipe, props.info, recipe.output, event.target.value as ReferenceLayout))} value={layoutOptions.find(([name])=>JSON.stringify(referencePanels(recipe.slots,name))===JSON.stringify(recipe.panels))?.[0]||layoutOptions[0][0]}>{layoutOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>背景<input type="color" value={recipe.output.background} onChange={event => edit({ ...recipe, output: { ...recipe.output, background: event.target.value } })} /></label><label><input type="checkbox" checked={recipe.divider.enabled} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, enabled: event.target.checked } })} />分隔线</label>{recipe.divider.enabled && <button type="button" onClick={() => setShowStyle(value => !value)}>样式</button>}</div>
         {showStyle && recipe.divider.enabled && <div className={styles.compact}><label>线色<input type="color" value={recipe.divider.color} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, color: event.target.value } })} /></label><label>线宽<input type="number" min={1} max={24} value={recipe.divider.widthPx} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, widthPx: Number(event.target.value) } })} />px</label></div>}
-        <div ref={canvas} className={styles.referenceCanvas} style={{ aspectRatio: `${geometry.width}/${geometry.height}`, background: recipe.output.background }}>
+        <div ref={canvas} className={styles.referenceCanvas} data-dragging={dragging || undefined} style={{ aspectRatio: `${geometry.width}/${geometry.height}`, background: recipe.output.background }}>
           <svg viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={`${recipe.slots.length}镜头参考拼图`}>
             {geometry.placements.map(item => { const slot = recipe.slots.find(slot => slot.id === item.slotId)!, foreground = recipe.foregrounds.find(value => value.slotId === slot.id);
               return <image key={item.slotId} href={foreground ? backgrounds[slot.id]?.resultUrl || undefined : `${props.mediaBase}?version=${props.info.sourceVersion}&frame=${slot.frame}`} x={item.x} y={item.y} width={item.width} height={item.height} preserveAspectRatio="xMidYMid meet" />; })}
             {recipe.divider.enabled && <path d={geometry.dividers.map(line => `M${line.x1},${line.y1}L${line.x2},${line.y2}`).join(' ')} stroke={recipe.divider.color} strokeWidth={recipe.divider.widthPx} fill="none" />}
           </svg>
-          {recipe.placements.map(item => <div key={item.slotId} className={styles.subjectControl} data-selected={item.slotId === selected || undefined} style={{ left: `${item.x*100}%`, top: `${item.y*100}%`, width: `${item.width*100}%`, height: `${item.height*100}%` }} onClick={() => setSelected(item.slotId)} onKeyDown={event => { if(event.key==='Escape'&&drag.current){event.preventDefault();edit(drag.current.start,false);drag.current=null;return;} if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) { event.preventDefault(); setSelected(item.slotId); const step = (event.shiftKey ? 10 : 1); const next = { x: item.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0)/geometry.width, y: item.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)/geometry.height }; const panel = recipe.panels.find(panel => panel.slotId === item.slotId)!; edit({ ...recipe, placements: recipe.placements.map(value => value.slotId === item.slotId ? clampReferencePlacement({ ...value, ...next }, panel, props.info, recipe.output) : value) }); } }} tabIndex={0} role="group" aria-label={`镜头${recipe.slots.findIndex(slot => slot.id === item.slotId)+1}主体`}>
-            <button type="button" className={styles.moveHandle} aria-label="移动此镜头主体" onPointerDown={event => start(event,item.slotId,'move')} onPointerMove={moving} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event,true)}><Move size={16} /></button>
-            {['nw','ne','sw','se'].map(corner=><button key={corner} type="button" className={styles.scaleHandle} data-corner={corner} aria-label="等比缩放此镜头主体" onPointerDown={event => start(event,item.slotId,'scale',corner)} onPointerMove={moving} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event,true)}>{corner==='nw'?'↖':corner==='ne'?'↗':corner==='sw'?'↙':'↘'}</button>)}
+          {recipe.placements.map(item => <div key={item.slotId} className={styles.subjectControl} data-selected={item.slotId === selected || undefined} style={{ left: `${item.x*100}%`, top: `${item.y*100}%`, width: `${item.width*100}%`, height: `${item.height*100}%` }} onClick={() => setSelected(item.slotId)} onPointerDown={event => { if (event.pointerType === 'mouse' && event.target === event.currentTarget) start(event,item.slotId,'move'); }} onPointerMove={moving} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event,true)} onLostPointerCapture={event => finish(event,true)} onKeyDown={event => { if(event.key==='Escape'&&drag.current){event.preventDefault();cancelDrag();return;} if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) { event.preventDefault(); setSelected(item.slotId); const step = (event.shiftKey ? 10 : 1); adjust({ x: item.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0)/geometry.width, y: item.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)/geometry.height }, true, item.slotId); } }} tabIndex={0} role="group" aria-label={`镜头${recipe.slots.findIndex(slot => slot.id === item.slotId)+1}主体`}>
+            <button type="button" className={styles.moveHandle} aria-label="移动此镜头主体" onPointerDown={event => start(event,item.slotId,'move')}><Move size={16} /></button>
+            {(['nw','ne','sw','se'] as const).map(corner=><button key={corner} type="button" className={styles.scaleHandle} data-corner={corner} aria-label="等比缩放此镜头主体" onPointerDown={event => start(event,item.slotId,'scale',corner)}>{corner==='nw'?'↖':corner==='ne'?'↗':corner==='sw'?'↙':'↘'}</button>)}
           </div>)}
         </div>
-        <div className={styles.compact}><small>{geometry.width} × {geometry.height}</small><span className={styles.spacer} /><button type="button" disabled={!history.length} onClick={() => { const next=history[history.length-1]; setHistory(value=>value.slice(0,-1));setFuture(value=>[recipe,...value]);edit(next,false); }}><Undo2 size={14}/>撤销</button><button type="button" disabled={!future.length} onClick={() => { const next=future[0];setFuture(value=>value.slice(1));setHistory(value=>[...value,recipe]);edit(next,false); }}><Redo2 size={14}/>重做</button></div>
-        <div className={styles.compact}><span>镜头 {recipe.slots.findIndex(slot=>slot.id===selected)+1}</span>{placement && <><button onClick={()=>adjust({x:placement.x-2/geometry.width})} aria-label="向左微移">←</button><button onClick={()=>adjust({x:placement.x+2/geometry.width})} aria-label="向右微移">→</button><button onClick={()=>adjust({y:placement.y-2/geometry.height})} aria-label="向上微移">↑</button><button onClick={()=>adjust({y:placement.y+2/geometry.height})} aria-label="向下微移">↓</button><span>大小</span><button onClick={()=>adjust({width:placement.width*.95})}>−</button><button onClick={()=>adjust({width:placement.width*1.05})}>＋</button><button onClick={()=>setPrecise(value=>!value)}>精调</button><button onClick={()=>{ const reset=createMultiviewReferenceRecipe(props.info,recipe.slots,{...recipe.output});adjust(reset.placements.find(item=>item.slotId===selected)!); }}>复位</button></>}</div>
-        {precise && placement && <div className={styles.compact}>{(['x','y','width'] as const).map(field=><label key={field}>{field==='width'?'宽度':field.toUpperCase()}<input type="number" value={Math.round(placement[field]*(field==='y'?geometry.height:geometry.width))} onFocus={()=>{numericGesture.current=recipeRef.current;}} onChange={event=>adjust({[field]:Number(event.target.value)/(field==='y'?geometry.height:geometry.width)},false)} onBlur={()=>{if(numericGesture.current&&JSON.stringify(numericGesture.current)!==JSON.stringify(recipeRef.current)){setHistory(value=>[...value.slice(-29),numericGesture.current!]);setFuture([]);}numericGesture.current=null;}} />px</label>)}</div>}
+        <div className={styles.compact}><small>{geometry.width} × {geometry.height}</small><span className={styles.spacer} /><button type="button" disabled={dragging || !history.length} onClick={() => { const next=history[history.length-1]; setHistory(value=>value.slice(0,-1));setFuture(value=>[recipe,...value]);edit(next,false); }}><Undo2 size={14}/>撤销</button><button type="button" disabled={dragging || !future.length} onClick={() => { const next=future[0];setFuture(value=>value.slice(1));setHistory(value=>[...value,recipe]);edit(next,false); }}><Redo2 size={14}/>重做</button></div>
+        <div className={styles.compact}><button type="button" className={styles.syncAdjust} aria-pressed={syncAdjust} disabled={!hydrated || dragging} title={syncAdjust ? '一起移动和缩放所有镜头主体' : '只调整当前镜头主体'} onClick={()=>setSyncAdjust(value=>!value)}>{syncAdjust ? <LockKeyhole size={14}/> : <UnlockKeyhole size={14}/>}同步调整</button><span>镜头 {recipe.slots.findIndex(slot=>slot.id===selected)+1}</span>{placement && <><button onClick={()=>adjust({x:placement.x-2/geometry.width})} aria-label="向左微移">←</button><button onClick={()=>adjust({x:placement.x+2/geometry.width})} aria-label="向右微移">→</button><button onClick={()=>adjust({y:placement.y-2/geometry.height})} aria-label="向上微移">↑</button><button onClick={()=>adjust({y:placement.y+2/geometry.height})} aria-label="向下微移">↓</button><span>大小</span><button onClick={()=>adjust({width:placement.width*.95})}>−</button><button onClick={()=>adjust({width:placement.width*1.05})}>＋</button><button onClick={()=>setPrecise(value=>!value)}>精调</button><button onClick={resetPlacement}>{syncAdjust ? '全部复位' : '复位'}</button></>}</div>
+        {precise && placement && <div className={styles.compact}>{(['x','y','width'] as const).map(field=><label key={field}>{field==='width'?'宽度':field.toUpperCase()}<input type="number" value={Math.round(placement[field]*(field==='y'?geometry.height:geometry.width))} onFocus={()=>{numericGesture.current=recipeRef.current;}} onChange={event=>adjust({[field]:Number(event.target.value)/(field==='y'?geometry.height:geometry.width)},false)} onBlur={finishNumericGesture} />px</label>)}</div>}
         <div className={styles.compact}>{recipe.slots.map((slot,index)=><button type="button" key={slot.id} aria-pressed={selected===slot.id} onClick={()=>setSelected(slot.id)}>镜头 {index+1}</button>)}<button type="button" onClick={()=>{ const fresh=createMultiviewReferenceRecipe(props.info,recipe.slots,recipe.output);edit({...fresh,divider:recipe.divider,foregrounds:recipe.foregrounds}); }}>恢复推荐排版</button></div>
-        <div className={styles.compact} aria-label="统一背景">{recipe.foregrounds.length === recipe.slots.length ? <span>同色背景已就绪</span> : <span>背景待处理 {recipe.foregrounds.length}/{recipe.slots.length}</span>}{selected && <button type="button" disabled={!work || Boolean(backgroundBusy)} onClick={()=>void background(selected,true)}>{backgroundBusy===selected?'正在核对…':backgrounds[selected] && ['accepted','unknown','submitting','preparing'].includes(backgrounds[selected].stage)?'查询本张处理':'处理本张背景'}</button>}{backgrounds[selected]?.message && <span className={styles.notice}>{backgrounds[selected].message}</span>}</div>
+        <div className={styles.compact} aria-label="背景处理，可选">{recipe.foregrounds.length === recipe.slots.length ? <span>透明前景已就绪</span> : recipe.foregrounds.length ? <span>已处理背景 {recipe.foregrounds.length}/{recipe.slots.length}</span> : <span>保留原背景</span>}{selected && <button type="button" disabled={!work || Boolean(backgroundBusy)} onClick={()=>void background(selected,true)}>{backgroundBusy===selected?'正在核对…':backgrounds[selected] && ['accepted','unknown','submitting','preparing'].includes(backgrounds[selected].stage)?'查询本张处理':'处理本张背景'}</button>}{backgrounds[selected]?.message && <span className={styles.notice}>{backgrounds[selected].message}</span>}</div>
         <div className={styles.compact}><button disabled={!collage} onClick={()=>void output(true)}><Copy size={14}/>复制图片</button><button disabled={!collage} onClick={()=>void output(false)}><Download size={14}/>下载PNG</button><button disabled={!collage} onClick={async()=>{try{const response=await fetch(`/api/video/multiview/works/${work!.id}/files/collage/asset`,{headers:headers(),cache:'no-store'});const value=await response.json();if(!response.ok)throw new Error(value.error);setMessage('已保存到我的素材。');}catch(cause){setMessage(cause instanceof Error?cause.message:'素材登记尚未完成。');}}}>保存素材</button></div>
         <div role="status" className={styles.notice}>{pending ? <>保存结果待确认 <button onClick={()=>void queryOriginal()}>查询原保存</button></> : busy || work && ['queued','rendering','waiting_source'].includes(work.status) ? '正在准备拼图…' : work?.status === 'failed' ? <>{work.lastError || '拼图准备失败'}<button onClick={()=>void prepare()}>重新准备</button></> : ''}{message}{blocked && <button onClick={async()=>{try{if(work){const latest=await readWork(work.id);if(!valid())return;setWork(latest);}setBlocked(false);setMessage('已核对最新版本，当前排版保留。');}catch(cause){setMessage(cause instanceof Error?cause.message:'最新版本暂不可读取。');}}}>核对最新并保留排版</button>}</div>
       </div>

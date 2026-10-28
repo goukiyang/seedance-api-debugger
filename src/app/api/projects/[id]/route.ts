@@ -9,6 +9,7 @@ import { getVideoCardSummaryMap, serializeVideoCardSummary } from '@/lib/video-c
 import { getVideoCardArchiveAnomalies } from '@/lib/video-cards/suggestions';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
+import { isFeatureAllowed } from '@/lib/access/feature-guard';
 import { readProjectAlbumPage } from '@/lib/projects/album-projection';
 import { isPrivateMultiviewTask, projectSelectedMultiviewTask, safeVideoTaskKeywordWhere, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
 
@@ -436,8 +437,19 @@ export async function GET(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
 
     const access = await assertCanViewProject(user, params.id);
+    if (request.nextUrl.searchParams.get('view') === 'selector') {
+      const project = access.project!;
+      const canManage = isFeatureAllowed(user, 'team_project_manage') && access.canManageProject;
+      const operations = await readProjectOperationProjection(prisma, project, canManage);
+      return NextResponse.json({ project: { id: project.id, name: project.name, description: project.description,
+        type: project.type, status: project.status, updated_at: project.updated_at, status_version: projectStatusVersion(project) },
+        permission: { can_manage_project: canManage, can_delete: operations.can_delete, can_archive: operations.can_archive } },
+      { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
     const section = request.nextUrl.searchParams.get('section');
     if (section) {
       const response = await getProjectSection(request, user, access, params.id, section);
@@ -837,6 +849,8 @@ export async function PATCH(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
 
     const body = await request.json();
     const expected = expectedProjectVersion(body);
@@ -903,6 +917,8 @@ export async function DELETE(
   try {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
 
     const body = await request.json().catch(() => ({}));
     const expected = expectedProjectVersion(body);

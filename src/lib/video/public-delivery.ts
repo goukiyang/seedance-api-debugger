@@ -1,11 +1,11 @@
 import { stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
 import { uploadPublicVideoFile, type PublicUploadResult } from '@/lib/assets/public-storage';
-import { prisma } from '@/lib/prisma';
 import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult } from './local-cache';
 import { localPublicVideoPath } from './thumbnail';
 import { isVideoDeliveryFastPathTask } from './delivery-policy';
 import { ingestTaskMediaFromProvider } from './media-ingest';
+import { assertVideoSaveOwnership, commitVideoSaveTask, withVideoSaveProcess, type VideoSaveOptions } from './save-lock';
 
 const VIDEO_MIME_TYPE = 'video/mp4';
 const LOCAL_FALLBACK_PROVIDER = 'not_configured';
@@ -85,16 +85,14 @@ async function existingLocalVideo(task: Pick<PublicVideoDeliveryTask, 'local_vid
   return null;
 }
 
-async function markLocalFallback(taskId: string, fileSize: number | null, message: string): Promise<PublicVideoDeliveryResult> {
+async function markLocalFallback(task: PublicVideoDeliveryTask, fileSize: number | null, message: string): Promise<PublicVideoDeliveryResult> {
   const cachedAt = new Date();
-  await prisma.videoTask.update({
-    where: { id: taskId },
-    data: {
+  await assertVideoSaveOwnership(task);
+  await commitVideoSaveTask(task, {
       public_video_storage_provider: LOCAL_FALLBACK_PROVIDER,
       public_video_storage_key: null,
       public_video_file_size: fileSize,
       public_video_cached_at: cachedAt,
-    },
   });
   return {
     success: false,
@@ -114,15 +112,22 @@ function uploadResultIsUsableForVideo(result: PublicUploadResult, allowLocalPubl
 
 export async function ensurePublicVideoDeliveryFromProvider(
   task: ProviderVideoDeliveryTask | VideoTask,
-  options: { allowLocalPublic?: boolean } = {},
+  options: VideoSaveOptions = {},
 ): Promise<PublicVideoDeliveryResult> {
   return ingestTaskMediaFromProvider(task, options);
 }
 
 export async function ensurePublicVideoDelivery(
   task: PublicVideoDeliveryTask | VideoTask,
-  options: { allowLocalPublic?: boolean } = {},
+  options: VideoSaveOptions = {},
 ): Promise<PublicVideoDeliveryResult> {
+  if (task.public_video_url) return { success: true, public_video_url: task.public_video_url,
+    storage_provider: task.public_video_storage_provider, storage_key: task.public_video_storage_key,
+    file_size: task.public_video_file_size, cached_at: task.public_video_cached_at, already_exists: true };
+  return withVideoSaveProcess('public', task, options, () => ensurePublicVideoDeliveryInner(task, options));
+}
+
+async function ensurePublicVideoDeliveryInner(task: PublicVideoDeliveryTask | VideoTask, options: VideoSaveOptions): Promise<PublicVideoDeliveryResult> {
   if (task.public_video_url) {
     return {
       success: true,
@@ -148,6 +153,7 @@ export async function ensurePublicVideoDelivery(
       };
     }
     localVideo = await existingLocalVideo({ local_video_path: cacheResult.local_video_path });
+    task = { ...task, result_video_url: cacheResult.result_video_url || task.result_video_url };
   }
 
   if (!localVideo) {
@@ -161,9 +167,10 @@ export async function ensurePublicVideoDelivery(
 
   const allowLocalPublic = options.allowLocalPublic === true || envAllowsLocalPublicDelivery();
   if (!canAttemptPublicUpload({ allowLocalPublic })) {
-    return markLocalFallback(task.id, localVideo.size, '未配置 R2/TOS 视频分发，当前使用本站慢速备用播放。');
+    return markLocalFallback(task, localVideo.size, '未配置 R2/TOS 视频分发，当前使用本站慢速备用播放。');
   }
 
+  await assertVideoSaveOwnership(task);
   const uploadResult = await uploadPublicVideoFile({
     filePath: localVideo.absolutePath,
     fileName: `seedance-video-${task.id}.mp4`,
@@ -173,16 +180,15 @@ export async function ensurePublicVideoDelivery(
   const cachedAt = new Date();
   const usableForVideo = uploadResultIsUsableForVideo(uploadResult, allowLocalPublic);
 
-  await prisma.videoTask.update({
-    where: { id: task.id },
-    data: {
+  await assertVideoSaveOwnership(task);
+  await commitVideoSaveTask(task, {
       public_video_url: usableForVideo ? uploadResult.publicUrl : null,
       public_video_storage_provider: uploadResult.storageProvider,
       public_video_storage_key: uploadResult.storageKey || null,
       public_video_file_size: uploadResult.size,
       public_video_cached_at: cachedAt,
-    },
   });
+
 
   if (!usableForVideo) {
     const message = uploadResult.warning || '视频已落到本地公开目录，但该地址仍不是对象存储/CDN，继续使用慢速备用播放。';

@@ -1,4 +1,5 @@
 'use client';
+import { ProjectSelector } from '@/components/ProjectSelector';
 /* eslint-disable @next/next/no-img-element */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, Search, X } from 'lucide-react';
@@ -213,7 +214,7 @@ export function MultiviewRecords(props: Props) {
   return <section ref={library} hidden={!active} className={styles.library} aria-label="3D多视图记录">
     <header className={styles.header}><div className={styles.actions}>
       <label><Search size={15} /><input aria-label="搜索记录" placeholder="搜索记录" maxLength={120} value={q} onChange={event => setQ(event.target.value)} /></label>
-      <select aria-label="筛选项目" value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select>
+      <ProjectSelector onCatalogChange={() => void load()}  aria-label="筛选项目" value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</ProjectSelector>
       <label><input type="checkbox" checked={removed} onChange={event => setRemoved(event.target.checked)} />已移出</label>
       <span>{total} 条</span></div><button type="button" disabled={loading} onClick={() => void load()} aria-label="刷新记录" title="刷新"><RefreshCw size={16} /></button></header>
     {error && <p role="status">{error}</p>}

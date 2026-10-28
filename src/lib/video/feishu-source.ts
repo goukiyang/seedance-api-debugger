@@ -11,17 +11,19 @@ import type { authorizedVideoFeishuTask } from './feishu-notification';
 
 type Task = Awaited<ReturnType<typeof authorizedVideoFeishuTask>>['task'];
 type Bytes = AsyncIterable<Uint8Array> & { destroy?: () => void };
-type Origin = { size: number; version: string; stream: () => Promise<Bytes>; current: () => Promise<boolean>; close: () => Promise<void> };
+type Origin = { kind: 'local' | 'remote'; size: number; version: string; stream: () => Promise<Bytes>; current: () => Promise<boolean>; close: () => Promise<void> };
 export type PreparedVideoFeishuSource = {
+  origin: Origin['kind'];
   version: string; hash: string | null; mode: 'video' | 'link'; reason: string | null;
   video: Blob | null; cover: Blob | null; durationMs: number | null;
   current: () => Promise<boolean>; close: () => Promise<void>;
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const unavailable = () => new VideoFeishuError('original_not_ready', 409, false, true);
-export function videoFeishuSourceStamp(task: Task) {
-  return hash([task.id, task.local_video_path, task.public_video_storage_provider, task.public_video_storage_key,
-    task.public_video_url, task.public_video_file_size, task.public_video_cached_at?.toISOString() || null]);
+export function videoFeishuSourceStamp(task: Task, origin: Origin['kind'] = task.local_video_path ? 'local' : 'remote') {
+  // Completing the other cache destination does not replace this original.
+  if (origin === 'local') return hash([task.id, task.local_video_path]);
+  return hash([task.id, task.public_video_storage_provider, task.public_video_storage_key, task.public_video_url]);
 }
 const sameStat = (a: Awaited<ReturnType<typeof stat>>, b: Awaited<ReturnType<typeof stat>>) => a.isFile() && b.isFile()
   && a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
@@ -43,7 +45,7 @@ async function localOrigin(task: Task): Promise<Origin | null> {
       try { return await realpath(path.join(process.cwd(), 'public', task.local_video_path!)) === file
         && sameStat(initial, await stat(file)) && sameStat(initial, await fd.stat()); } catch { return false; }
     };
-    return { size: initial.size, version: hash([videoFeishuSourceStamp(task), root, initial.dev, initial.ino, initial.size, initial.mtimeMs, initial.ctimeMs]),
+    return { kind: 'local', size: initial.size, version: hash([videoFeishuSourceStamp(task, 'local'), root, initial.dev, initial.ino, initial.size, initial.mtimeMs, initial.ctimeMs]),
       stream: async () => fd.createReadStream({ autoClose: false }), current, close: async () => { await fd.close(); } };
   } catch (error) {
     await handle?.close();
@@ -107,7 +109,7 @@ async function remoteOrigin(task: Task): Promise<Origin> {
     const initial = await head();
     if (!Number.isSafeInteger(initial.size) || initial.size < 1 || !initial.etag || initial.etag.length > 256
       || task.public_video_file_size !== null && task.public_video_file_size !== initial.size) throw unavailable();
-    return { size: initial.size, version: hash([videoFeishuSourceStamp(task), initial]), stream: () => stream(initial.etag, initial.version),
+    return { kind: 'remote', size: initial.size, version: hash([videoFeishuSourceStamp(task, 'remote'), initial]), stream: () => stream(initial.etag, initial.version),
       current: async () => { try { const next = await head(); return hash(initial) === hash(next); } catch { return false; } }, close };
   } catch { await close(); throw unavailable(); }
 }
@@ -163,7 +165,7 @@ export async function prepareVideoFeishuSource(task: Task): Promise<PreparedVide
     origin = await localOrigin(task) || await remoteOrigin(task);
     const source = origin;
     const close = async () => { await source.close(); if (directory) await rm(directory, { recursive: true, force: true }); };
-    if (videoFeishuSizeMode(source.size) === 'link') return { version: source.version, hash: null, mode: 'link', reason: 'video_oversize',
+    if (videoFeishuSizeMode(source.size) === 'link') return { origin: source.kind, version: source.version, hash: null, mode: 'link', reason: 'video_oversize',
       video: null, cover: null, durationMs: null, current: source.current, close };
     if (typeof openAsBlob !== 'function') throw new VideoFeishuError('runtime_blob_stream_unavailable', 503);
     // Private bounded copies are disposable; never reuse a public thumbnail with no source-version receipt.
@@ -172,11 +174,11 @@ export async function prepareVideoFeishuSource(task: Task): Promise<PreparedVide
     directory = await mkdtemp(path.join(await realpath(root), 'delivery-'));
     const videoPath = path.join(directory, 'original.mp4'), coverPath = path.join(directory, 'cover.jpg');
     const copied = await copyBounded(source, videoPath), contentHash = copied.hash;
-    if (!copied.mp4) return { version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
+    if (!copied.mp4) return { origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
       video: null, cover: null, durationMs: null, current: source.current, close };
     const probe = videoFeishuProbe(JSON.parse(await command('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-show_entries',
       'format=format_name,duration:stream=codec_type', '-of', 'json', videoPath], 15_000)));
-    if (!probe.supported) return { version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
+    if (!probe.supported) return { origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
       video: null, cover: null, durationMs: null, current: source.current, close };
     let cover: Blob | null = null;
     try {
@@ -185,7 +187,7 @@ export async function prepareVideoFeishuSource(task: Task): Promise<PreparedVide
       const info = await stat(coverPath);
       if (info.isFile() && info.size > 0 && info.size <= 1024 * 1024) cover = await openAsBlob(coverPath, { type: 'image/jpeg' });
     } catch { /* The official media cover is optional; never substitute an unrelated cached frame. */ }
-    return { version: source.version, hash: contentHash, mode: 'video', reason: null,
+    return { origin: source.kind, version: source.version, hash: contentHash, mode: 'video', reason: null,
       video: await openAsBlob(videoPath, { type: 'video/mp4' }), cover, durationMs: probe.durationMs, current: source.current, close };
   } catch (error) {
     await origin?.close();

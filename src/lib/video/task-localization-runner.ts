@@ -1,11 +1,12 @@
 import { finalizeVideoTaskStatus, isTerminalLocalStatus } from './task-finalizer';
 import { enqueueVideoDeliveryJob } from './delivery-queue';
 import { isVideoDeliveryFastPathTask } from './delivery-policy';
+import { VIDEO_SAVE_TOTAL_TIMEOUT_MS } from './save-lock';
 
 const DEFAULT_INITIAL_DELAY_MS = 10_000;
 const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_MAX_RUNTIME_MS = 5 * 60 * 1000;
-const DEFAULT_SUCCESS_CACHE_TIMEOUT_MS = 120_000;
+const DEFAULT_SUCCESS_CACHE_TIMEOUT_MS = VIDEO_SAVE_TOTAL_TIMEOUT_MS;
 
 type RunnerOptions = {
   initialDelayMs?: number;

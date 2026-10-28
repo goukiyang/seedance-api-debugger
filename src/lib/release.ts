@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '动作视频工作台', outline: [
-  '选好镜头后，同页排版并制作动作视频',
-  '支持统一背景、分隔线和逐镜头微调',
-  '动作整理、费用确认和视频结果连在一起',
+const notice = { title: '创作体验更新', outline: [
+  '模板图片可选择完成后发到本人飞书',
+  '参考拼图支持拖移、同步调整，背景处理可选',
+  '项目选择入口统一支持新建和管理',
+  '修复视频保存与飞书等待状态',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
