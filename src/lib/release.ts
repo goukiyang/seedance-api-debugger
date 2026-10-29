@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '生成区优化', outline: [
-  '视频提示词输入框底色加深',
-  '飞书开关文案缩短，费用紧邻生成按钮',
+const notice = { title: '动作生成修复', outline: [
+  '动作视频准备遇到短暂繁忙时继续核对原请求',
+  '保留当前拼图、动作内容和原任务记录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

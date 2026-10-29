@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { studioErrorResponse } from '@/lib/template-studio/errors';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { requireStudioUser, makeFingerprint, parseCursor, encodeCursor } from '@/lib/template-studio/common';
 import { StudioError } from '@/lib/template-studio/errors';
@@ -256,19 +256,35 @@ export async function finalizeMultiviewAction(user: SessionUser, input: unknown)
     sourceTaskId: reference.sourceTaskId, sourceVersion: reference.sourceVersion, geometry: frozen.geometry, assetId: reference.assetId,
     inputHash, formatRevision: format.revision, syncRevision: sync.revision, backgroundPolicy };
   const requestId = `mv-action-final:${makeFingerprint([inputHash, draft.id, normalizedAttemptId])}`;
-  const row = await prisma.$transaction(async tx => {
-    const old = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
-    if (old) { if (old.purpose !== purpose || old.draft_id !== draft.id || old.mode !== 'direct') throw conflict('动作版本冲突'); return old; }
-    const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
-    if (!current) throw conflict('动作草稿已变化，请重新保存；当前输入保留');
-    const fresh = await readMultiviewReferenceBinding(user, parsed.workId, parsed.workRevision, tx);
-    if (fresh.outputHash !== reference.outputHash || fresh.recipeHash !== reference.recipeHash || fresh.assetId !== reference.assetId) throw conflict('参考拼图已变化，请重新准备');
-    const [freshFormat, freshSync] = await Promise.all([readMultiviewActionContext('format', tx), readMultiviewActionContext('sync', tx)]);
-    if (freshFormat.revision !== format.revision || freshSync.revision !== sync.revision) throw conflict('固定规则已变化，请重新准备费用');
-    const id = randomUUID();
-    return tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
-      request_fingerprint: inputHash, source: 'blank', mode: 'direct', status: 'succeeded', delivery_state: 'not_sent', prompt: text,
-      snapshot_json: JSON.stringify(transformPrivateVideoRun(value, id, draft.id, true)), completed_at: new Date() } });
+  let attempt = 0;
+  // A busy SQLite start has not accepted a video. Reuse the same immutable key
+  // and recheck the entire write snapshot on the existing bounded retry path.
+  const row = await retrySqliteBusy(async () => {
+    const started = Date.now(); let entered = false;
+    attempt++;
+    try {
+      return await prisma.$transaction(async tx => {
+        entered = true;
+        const old = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
+        if (old) { if (old.purpose !== purpose || old.draft_id !== draft.id || old.mode !== 'direct') throw conflict('动作版本冲突'); return old; }
+        const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
+        if (!current) throw conflict('动作草稿已变化，请重新保存；当前输入保留');
+        const fresh = await readMultiviewReferenceBinding(user, parsed.workId, parsed.workRevision, tx);
+        if (fresh.outputHash !== reference.outputHash || fresh.recipeHash !== reference.recipeHash || fresh.assetId !== reference.assetId) throw conflict('参考拼图已变化，请重新准备');
+        const [freshFormat, freshSync] = await Promise.all([readMultiviewActionContext('format', tx), readMultiviewActionContext('sync', tx)]);
+        if (freshFormat.revision !== format.revision || freshSync.revision !== sync.revision) throw conflict('固定规则已变化，请重新准备费用');
+        const id = randomUUID();
+        return tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
+          request_fingerprint: inputHash, source: 'blank', mode: 'direct', status: 'succeeded', delivery_state: 'not_sent', prompt: text,
+          snapshot_json: JSON.stringify(transformPrivateVideoRun(value, id, draft.id, true)), completed_at: new Date() } });
+      });
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (typeof code === 'string' && /^P\d{4}$/.test(code)) console.warn('[MultiviewActionFinal]', JSON.stringify({
+        at: Date.now(), pid: process.pid, phase: entered ? 'transaction_body' : 'transaction_wait', attempt, elapsedMs: Date.now() - started, code,
+      }));
+      throw error;
+    }
   });
   const run = await runDto(row);
   return { run, binding: run.binding!, requestId: `multiview-action:${row.id}` };

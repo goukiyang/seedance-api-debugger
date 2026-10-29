@@ -62,7 +62,8 @@ async function main() {
     assert.equal(decoded.privateContext?.global, format); assert.equal(decoded.privateContext?.module, sync);
     assert.ok(!JSON.stringify(projection.publicRunSnapshot(decoded)).includes(format) && !JSON.stringify(projection.publicRunSnapshot(decoded)).includes(sync), 'private fixed rule leaked to public projection');
     const tampered = { ...encrypted, privateContext: { ...encrypted.privateContext!, global: encrypted.privateContext!.module } };
-    assert.throws(() => privateStorage.transformPrivateVideoRun(tampered, 'fixture-action-run', actionDraft.id, false), security.PrivatePromptError, 'fixed rule source binding was interchangeable');
+    assert.throws(() => privateStorage.transformPrivateVideoRun(tampered, 'fixture-action-run', actionDraft.id, false),
+      (error: any) => error?.code === 'PRIVATE_PROMPT_UNAVAILABLE', 'fixed rule source binding was interchangeable');
     const actionRun = await prisma.videoStudioRun.create({ data: { id: 'fixture-action-run', owner_user_id: user.id, purpose: 'multiview-action', draft_id: actionDraft.id, request_id: 'mv-action:fixture-request',
       request_fingerprint: 'fixture', source: 'blank', mode: 'direct', status: 'succeeded', prompt: value.prompt, snapshot_json: JSON.stringify(encrypted) } });
     const oldDraft = await drafts.createStudioDraft(user, {});
@@ -122,6 +123,27 @@ async function main() {
     assert.notEqual(initialFinal.run.id, repeatedFinal.run.id, 'explicit new attempt could not create a fresh immutable version');
     assert.equal(initialFinal.binding.inputHash, repeatedFinal.binding.inputHash, 'attempt identity changed the actual frozen input signature');
     assert.equal(await prisma.videoStudioRun.count({ where: { purpose: 'multiview-action', mode: 'direct', prompt: finalInput.text } }), 2, 'same-attempt replay wrote an extra version');
+    const transaction = prisma.$transaction.bind(prisma);
+    let attempts = 0;
+    try {
+      prisma.$transaction = (async (...args: Parameters<typeof transaction>) => {
+        if (++attempts === 1) throw Object.assign(new Error('isolated busy transaction'), { code: 'P1008' });
+        return transaction(...args);
+      }) as typeof prisma.$transaction;
+      const busyInput = { ...finalInput, attemptId: 'ff9da034-c478-4410-b577-86cd6bdb08f4' };
+      const busyFinal = await finalActions.finalizeMultiviewAction(user, busyInput);
+      assert.equal(attempts, 2, 'rolled-back busy preparation was not retried');
+      assert.equal((await finalActions.finalizeMultiviewAction(user, busyInput)).run.id, busyFinal.run.id, 'busy retry changed the immutable request identity');
+      attempts = 0;
+      prisma.$transaction = (async () => { attempts++; throw Object.assign(new Error('isolated non-busy failure'), { code: 'P2002' }); }) as typeof prisma.$transaction;
+      await assert.rejects(finalActions.finalizeMultiviewAction(user, { ...finalInput, attemptId: '73b77315-b7d5-4e57-a537-faa9d8b9aabb' }), (error: any) => error.code === 'P2002');
+      assert.equal(attempts, 1, 'a non-busy or uncertain error was retried');
+      attempts = 0;
+      prisma.$transaction = (async () => { attempts++; throw Object.assign(new Error('isolated persistent busy failure'), { code: 'P1008' }); }) as typeof prisma.$transaction;
+      await assert.rejects(finalActions.finalizeMultiviewAction(user, { ...finalInput, attemptId: '73b77315-b7d5-4e57-a537-faa9d8b9aabb' }), (error: any) => error.code === 'P1008');
+      assert.equal(attempts, 3, 'preparation retry was unbounded');
+    } finally { prisma.$transaction = transaction; }
+    assert.equal(await prisma.videoStudioRun.count({ where: { purpose: 'multiview-action', mode: 'direct', prompt: finalInput.text } }), 3, 'busy or rejected preparation created duplicate versions');
     await assert.rejects(finalActions.finalizeMultiviewAction(user, { ...finalInput, attemptId: 'not-a-uuid' }), /编号无效/);
     process.env.MULTIVIEW_ACTION_ACCEPTING = '0';
     assert.equal((await actions.getMultiviewActionCapabilities(user)).actionReady, false);
