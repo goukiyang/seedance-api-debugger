@@ -125,7 +125,7 @@ export function ComposerActionBar({
   useDialogDismiss({ open: videoRedesign && settingsOpen, dialogRef: settingsPanel, layerSurfaceRef: settingsPanel,
     branchRefs: [settingsTrigger], modal: false, onDismiss: () => onSettingsOpenChange?.(false) });
   useEffect(() => {
-    if (!videoRedesign || !settingsOpen) return;
+    if (!videoRedesign || !settingsOpen) { setSettingsPosition(null); return; }
     const place = () => {
       if (!settingsTrigger.current || !settingsPanel.current) return;
       const anchor = settingsTrigger.current.getBoundingClientRect(), viewport = window.visualViewport;
@@ -138,14 +138,15 @@ export function ComposerActionBar({
         top: anchor.bottom + panelHeight + 6 <= top + height - 8 ? anchor.bottom + 6 : Math.max(top + 8, anchor.top - panelHeight - 6) });
     };
     place();
+    const focusFrame = requestAnimationFrame(() => settingsPanel.current?.querySelector<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)')?.focus());
     const observer = new ResizeObserver(place);
     if (settingsPanel.current) observer.observe(settingsPanel.current);
     window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
     window.visualViewport?.addEventListener('resize', place); window.visualViewport?.addEventListener('scroll', place);
-    return () => { observer.disconnect(); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
+    return () => { cancelAnimationFrame(focusFrame); observer.disconnect(); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
       window.visualViewport?.removeEventListener('resize', place); window.visualViewport?.removeEventListener('scroll', place); };
   }, [videoRedesign, settingsOpen]);
-  useEffect(() => { if (settingsDisabled) onSettingsOpenChange?.(false); }, [settingsDisabled, onSettingsOpenChange]);
+  useEffect(() => { if (videoRedesign && settingsDisabled) onSettingsOpenChange?.(false); }, [videoRedesign, settingsDisabled, onSettingsOpenChange]);
   const hasProviderOptions = providerOptions.length > 1;
   const selectedProviderOption = providerOptions.find((option) => option.id === selectedProvider)
     || providerOptions.find((option) => !option.disabled)

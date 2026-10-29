@@ -944,7 +944,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
   const markReuseSelectionChanged = useCallback(() => {
     reuseEditEpochRef.current += 1;
-  }, []);
+    if (!isIpSurface && !studioHandoff && !imageResultHandoff && !unconfirmedGenerationRequest && !generationOperation.current) {
+      setError(null); setErrorDebug(null);
+    }
+  }, [isIpSurface, studioHandoff, imageResultHandoff, unconfirmedGenerationRequest]);
 
   const reportWorkspaceBusy = useCallback((
     busy: boolean,
@@ -3666,7 +3669,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onPrepareReuseReady={reportPrepareReuseReady}
           onReuseDraftApplied={completeReuseDraftApplication}
           onSubmit={handleSubmit}
-          submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} /> : undefined}
+          submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} label={normalVideoRedesign ? '发送到我的飞书' : undefined} /> : undefined}
           submitError={error}
           submitErrorDebug={errorDebug}
           isSubmitting={submitting}
@@ -3676,6 +3679,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onReset={handleReset}
           resultReturnTo={generationReturnTo}
           studioReturnTo={studioReturnTo}
+          submitDisabledReasonExternal={normalVideoRedesign && Boolean(creation.loading || creation.error)}
           submitDisabledReason={creation.loading || creation.error ? creation.error || '正在确认保存位置' : studioRunId && (studioHandoffLoading || !studioHandoff)
             ? studioHandoffLoading ? '模板运行记录加载中，请稍候' : studioHandoffError || '模板运行记录尚未通过授权校验'
             : surfaceConfig.submitDisabledReason}
