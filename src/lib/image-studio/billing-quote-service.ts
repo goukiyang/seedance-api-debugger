@@ -110,6 +110,9 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   const task = prepared[0];
   const base = parseImageBillingContract(String(task.billing_contract_json));
   if (!base) throw new Error('Billing snapshot missing');
+  if (base.mode === 'none') {
+    throw new StudioError('本地 GPU 不使用收费报价，请直接提交文生图任务', 400);
+  }
   let taskSnapshot: Record<string, unknown>;
   try { taskSnapshot = JSON.parse(String(task.snapshot_json)) as Record<string, unknown>; }
   catch { throw new StudioError('图片报价快照无效，请重新报价', 409); }

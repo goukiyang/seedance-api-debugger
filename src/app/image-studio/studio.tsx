@@ -116,13 +116,13 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import type { StudioAsyncRecoveryView as StudioAsyncRecovery } from '@/lib/image-studio/async-recovery';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy';
-import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
+import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, normalizeImageStudioChannels, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { fetchReadWithRetry } from '@/lib/http/read-retry';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 type StudioSnapshot = { taskSettings?: StudioTaskSettings; imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
+type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number | null; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
 type StudioRecheckScope = { key: string; active: boolean };
 type RestoredTaskSettings = { sourceTaskId: string; snapshot: StudioSnapshot & {
   templateReferenceCount?: number; templateReferenceImages?: UploadedAssetPayload[]; templatePrompt?: string;
@@ -589,6 +589,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const globalEditor = useStudioSettings(userId, isAdmin);
   const settings = globalEditor.settings;
   const imageChannel = useImageStudioChannel(userId, 'image-studio', settings?.imageChannels, Boolean(settings));
+  const hasLocalGpuChannel = imageChannel.channels.items.some(channel => channel.backendType === 'local_gpu');
+  useEffect(() => {
+    if (!hasLocalGpuChannel) return;
+    const refresh = () => { if (document.visibilityState === 'visible') void globalEditor.controller.refreshAvailability(); };
+    const timer = window.setInterval(refresh, 15000);
+    return () => window.clearInterval(timer);
+  }, [globalEditor.controller, hasLocalGpuChannel]);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [allDefinitions, setAllDefinitions] = useState(false);
@@ -1861,15 +1868,33 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const moduleDirty = JSON.stringify(moduleSaveSnapshot) !== moduleSaved;
   const baseline = moduleSaved ? JSON.parse(moduleSaved) as typeof moduleDraft : moduleDraft;
   const qualityRouted = moduleModel === 'gpt-image-2.5-sunburst';
-  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, imageChannelId, quality);
-  const selectedChannel = imageChannels.items.find(item => item.id === (qualityRouted ? effectiveImageChannelId : imageChannelId));
+  function channelSelectionForModel(model: string, channels = imageChannels) {
+    const localChannel = channels.items.find(item => item.backendType === 'local_gpu' && Boolean(imageStudioChannelModel(item, model)));
+    return localChannel?.id || imageChannelId;
+  }
+  const generationChannelSelectionId = channelSelectionForModel(moduleModel);
+  const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannels, moduleModel, generationChannelSelectionId, quality);
+  const selectedChannel = imageChannels.items.find(item => item.id === effectiveImageChannelId);
   const selectedChannelModel = imageStudioChannelModel(selectedChannel, moduleModel);
   const allowsUnconfirmedParameters = (moduleModel === 'gemini-3-pro-image-preview' || moduleModel === 'gemini-nano-banana-2.1') && selectedChannelModel?.allowsUnconfirmedParameters === true;
   const qualitySupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.qualities == null;
   const resolutionSupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.resolutions == null;
-  const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
+  const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, generationChannelSelectionId);
   const channelModels = imageStudioChannelModels(imageChannels, IMAGE_STUDIO_NEW_REQUEST_MODELS);
   const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
+  function modelChoiceAvailability(model: string) {
+    const candidateQuality = model === moduleModel ? quality : defaultImageStudioQuality(model);
+    const routedId = imageStudioEffectiveChannelId(imageChannels, model, channelSelectionForModel(model), candidateQuality);
+    const channel = imageChannels.items.find(item => item.id === routedId);
+    if (channel?.backendType !== 'local_gpu') return { disabled: false, suffix: imageChannelReady
+      && !imageStudioChannelReadyForModel(channel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : '' };
+    const capability = imageStudioChannelModel(channel, model);
+    if (!channel.configured) return { disabled: true, suffix: '（本地 GPU 未配置）' };
+    if (!channel.enabled) return { disabled: true, suffix: '（本地 GPU 已停用）' };
+    if (!channel.ready || !capability?.ready) return { disabled: true, suffix: '（本地 GPU 离线）' };
+    if (!imageStudioChannelReadyForModel(channel, model)) return { disabled: true, suffix: '（本地 GPU 暂不可用）' };
+    return { disabled: false, suffix: '' };
+  }
   function selectModuleModel(value: string, resetParameters = false) {
     if (!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || pendingSubmission || batch.pending) return;
     const next = imageStudioModelForNewSelection(value);
@@ -1883,7 +1908,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
   const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
-  const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: generationChannelSelectionId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify({ ...generationInputs, taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) });
   // Ordinary edits still use the saved definition. Explicit task restoration is
   // a separate, server-verified source and never publishes the editor draft.
@@ -1934,7 +1959,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   });
   function effectiveSignature(payload: ReturnType<typeof generationPayload>, channelId: string) {
     return JSON.stringify([userId, Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'requestId' && key !== 'image_feishu')),
-      channelId, imageChannelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined, generationDefinitionSignature,
+      channelId, payload.channelId === 'original' ? imageChannels.defaultRoutes?.revision : undefined, generationDefinitionSignature,
       imageStudioChannelModel(selectedChannel, payload.model)?.pricingBySpecification === true]);
   }
   const effectiveGenerationSignature = settings ? effectiveSignature(generationPayload(undefined, ''), effectiveImageChannelId) : '';
@@ -1942,6 +1967,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const actualQuoteRequired = legacyImageRoute ? settings?.billingReadiness?.models?.[moduleModel]?.ready === true
     : selectedChannelModel?.actualQuoteRequired === true || selectedChannelModel?.billingMode === 'actual';
   const pricingBySpecification = selectedChannelModel?.pricingBySpecification === true;
+  const noChargeGeneration = selectedChannelModel?.billingMode === 'none';
+  const localGpuGeneration = selectedChannel?.backendType === 'local_gpu';
   const moduleUnitCredits = imageStudioChannelUnitCredits(selectedChannelModel, legacyImageRoute, effectiveImageChannelId,
     settings ? settings.prices?.[moduleModel] : module.prices[moduleModel]);
   const definitionChanges = sharedLive?.mode === 'publisher' ? [
@@ -1963,7 +1990,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   };
   const definitionReviewPlan = definitionReview ? planStudioDefinitionRebase(definitionBaselineFields.current,
     currentDefinitionFields, studioDefinitionFields(definitionReview), definitionFieldLabels) : null;
-  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady && !restoredSettingsError, onSourceChanged: onSharedRefresh, quotePayload: settings && !restoredSettingsError ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, noCharge: noChargeGeneration, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady && !restoredSettingsError, onSourceChanged: onSharedRefresh, quotePayload: settings && !restoredSettingsError ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
     draftSignature: effectiveGenerationSignature, readSettings: onReloadSettings });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: effectiveGenerationDefinition.context || '', taskId: restoredTaskSettings?.sourceTaskId || reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
@@ -3188,7 +3215,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       ...(!retryTask ? { taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) } : {}),
       ...(restoredTaskSettings && !retryTask ? { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: restoredTaskSettings.sourceTaskId } } : {}),
       projectId: retryTask ? historicalUsage?.projectId ?? null : usageProject.projectId,
-      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive && !restoredTaskSettings ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: (retryTask?.model || moduleModel) === 'gpt-image-2.5-sunburst' ? 'original' : imageChannelId,
+      moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive && !restoredTaskSettings ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: (retryTask?.model || moduleModel) === 'gpt-image-2.5-sunburst' ? 'original' : channelSelectionForModel(retryTask?.model || moduleModel),
       referenceIds: retryTask?.referenceIds || generationReferenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
       draft: { moduleContext: !sharedLive && !reproduceSourceTaskId && !restoredTaskSettings && contextEditable ? effectiveGenerationDefinition.context || '' : undefined,
@@ -3218,6 +3245,24 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (isClientSessionBlocked() || liveGenerationSignature.current !== beforeRefresh || fresh.revision !== settings.revision) {
         setBillingQuote(null); setError('设置已更新，请核对新报价后生成。'); return;
       }
+      const requestModel = retryTask?.model || moduleModel;
+      const requestQuality = retryTask?.quality || quality;
+      const freshChannels = normalizeImageStudioChannels(fresh.imageChannels);
+      const freshSelection = requestModel === 'gpt-image-2.5-sunburst' ? 'original' : channelSelectionForModel(requestModel, freshChannels);
+      const freshChannelId = imageStudioEffectiveChannelId(freshChannels, requestModel, freshSelection, requestQuality);
+      const freshChannel = freshChannels.items.find(item => item.id === freshChannelId);
+      const freshLegacyRoute = imageStudioUsesLegacyRoute(freshChannels, requestModel, freshSelection);
+      if (!imageStudioChannelReadyForModel(freshChannel, requestModel, fresh.modelReady?.[requestModel] ?? fresh.providerReady)) {
+        const issue = imageStudioChannelIssue(freshChannel, requestModel, {
+          legacyReady: fresh.modelReady?.[requestModel] ?? fresh.providerReady,
+          legacyRoute: freshLegacyRoute,
+          quality: requestQuality,
+          resolution: retryTask?.snapshot?.resolution || resolution,
+          ratio: retryTask?.aspectRatio || aspectRatio,
+          referenceCount: freshChannel?.supportsImageToImage === false ? 0 : retryTask?.referenceIds.length ?? generationReferenceCount,
+        });
+        setBillingQuote(null); setError(issue || '当前模型的图片服务尚未就绪，输入已保留，请稍后重试。'); return;
+      }
     } finally { submitLock.current = false; setSubmitting(false); }
     if (batch.mode === 'batch' && !retryTask) {
       submitLock.current = true; setSubmitting(true);
@@ -3233,16 +3278,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
     const currentPayload = generationPayload(retryTask);
-    const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, imageChannelId);
-    const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId, currentPayload.quality);
+    const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, currentPayload.channelId);
+    const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, currentPayload.channelId, currentPayload.quality);
+    const requestChannel = imageChannels.items.find(item => item.id === requestChannelId);
+    const requestNoCharge = imageStudioChannelModel(requestChannel, currentPayload.model)?.billingMode === 'none';
+    const requestReferenceCount = retryTask ? currentPayload.referenceIds.length : generationReferenceCount;
+    if (requestChannel?.backendType === 'local_gpu' && currentPayload.count !== 1) {
+      setError(`本地 GPU 当前仅支持单次生成 1 张，已保留原来的 ${currentPayload.count} 张设置；请改为 1 张后再生成。`); return;
+    }
+    if (requestChannel?.supportsImageToImage === false && requestReferenceCount > 0) {
+      setError('本地 GPU 当前仅支持文字生成；已选主图、参考图和模板固定图均已保留。请换用支持参考图的模型，或移除图片后再生成。'); return;
+    }
     const expectedFormSignature = liveGenerationSignature.current;
     const signature = effectiveSignature(currentPayload, requestChannelId);
-    const reusableQuote = imageUiQuoteAction(null, signature, billingQuote?.signature, billingQuote?.quote) === 'submit' ? billingQuote : null;
+    const reusableQuote = !requestNoCharge && imageUiQuoteAction(null, signature, billingQuote?.signature, billingQuote?.quote) === 'submit' ? billingQuote : null;
     const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
     submitLock.current = true; setSubmitting(true); setError('');
     const confirmedQuote = reusableQuote?.quote || null;
     try {
-      if (!confirmedQuote) {
+      if (!requestNoCharge && !confirmedQuote) {
         const quote = await readResponse(await fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) })) as StudioImageQuote;
         if (liveGenerationSignature.current !== expectedFormSignature) throw new Error('本次参数已变化，报价未用于生成，请重新确认。');
         if (!validImageUiQuote(quote)) {
@@ -3264,13 +3318,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       return;
     }
     if (isClientSessionBlocked()) { submitLock.current = false; setSubmitting(false); return; }
-    if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
-    if (!requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
+    if (!requestNoCharge && !confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
+    if (!requestNoCharge && confirmedQuote && !requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
       || typeof confirmedQuote.imageChannel.configRevision !== 'string' || !confirmedQuote.imageChannel.configRevision)) {
       setBillingQuote(null); setError('生图通道配置已变化，当前报价未用于生成；请重新获取报价。');
       submitLock.current = false; setSubmitting(false); return;
     }
-    if (confirmedQuote.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
+    if (confirmedQuote?.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
       setBillingQuote(null); setError('本次报价已过期，尚未提交图片；请再次点击获取新报价。');
       submitLock.current = false; setSubmitting(false); return;
     }
@@ -3281,7 +3335,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const submission = { ...payload, ...imageUiQuoteFields(confirmedQuote) };
+      const submission = requestNoCharge ? payload : { ...payload, ...imageUiQuoteFields(confirmedQuote!) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) { onReloadSettings(); if (sharedLive) onSharedRefresh(); } await readResponse(response); }
@@ -3537,7 +3591,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
   const estimateSignature = effectiveGenerationSignature;
   useEffect(() => {
-    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || restoredSettingsError || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
+    if (sessionChanged || isClientSessionBlocked() || sourceSharingBlocked || restoredSettingsError || noChargeGeneration || !estimateSignature || hidden || !active || !quoteVisible || !draftLoaded || draftRestoring
       || submitting || pendingSubmission || batch.mode !== 'single'
       || !Number.isInteger(count) || count < 1 || count > 8) return;
     if (billingQuote && validImageUiQuote(billingQuote.quote)) return;
@@ -3560,7 +3614,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         }).catch(cause => { if (!abort.signal.aborted && sharedLive && [401, 403, 404, 409].includes(Number(cause?.status))) onSharedRefresh(); });
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [sessionChanged, sourceSharingBlocked, restoredSettingsError, actualQuoteRequired, pricingBySpecification, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
+  }, [sessionChanged, sourceSharingBlocked, restoredSettingsError, noChargeGeneration, actualQuoteRequired, pricingBySpecification, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
   const visibleQuote = billingQuote?.signature === estimateSignature
     && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote.quote : null;
   useEffect(() => {
@@ -3579,8 +3633,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     legacyReady: settings?.modelReady?.[moduleModel] ?? settings?.providerReady,
     legacyRoute: legacyImageRoute,
     quality: generationInputs.quality, resolution: generationInputs.resolution,
-    ratio: aspectRatio, referenceCount: generationReferenceCount,
+    ratio: aspectRatio, referenceCount: selectedChannel?.supportsImageToImage === false ? 0 : generationReferenceCount,
   });
+  const textOnlyReferenceIssue = selectedChannel?.supportsImageToImage === false && generationReferenceCount > 0
+    ? '本地 GPU 当前仅支持文字生成；已选主图、参考图和模板固定图均已保留。请换用支持参考图的模型，或移除图片后再生成。' : '';
+  const localGpuCountIssue = localGpuGeneration && batch.mode === 'single' && count !== 1
+    ? `本地 GPU 当前仅支持单次生成 1 张，已保留原来的 ${count} 张设置；请改为 1 张后再生成。` : '';
   const hasContext = restoredSnapshot ? Boolean(restoredSnapshot.contextConfigured || restoredSnapshot.templatePrompt?.trim() || generationSkills.length)
     : reproduceSourceTaskId ? reproductionContextConfigured : Boolean((isAdmin ? effectiveGlobalContext?.trim() : settings?.contextConfigured)
     || effectiveGenerationDefinition.contextConfigured || effectiveGenerationDefinition.context?.trim()
@@ -3603,6 +3661,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : settingsError ? { message: `设置暂不可用：${settingsError}`, tone: 'info' }
     : !settings ? { message: '正在读取生成设置，请稍候；长时间无变化请刷新页面。', tone: 'progress' }
     : channelIssue ? { message: channelIssue, tone: imageChannelMessage ? 'info' : 'warning' }
+    : textOnlyReferenceIssue ? { message: textOnlyReferenceIssue, tone: 'info' }
+    : localGpuCountIssue ? { message: localGpuCountIssue, tone: 'info' }
     : !selectedProviderReady ? { message: '当前模型的图片服务尚未就绪，请换一个模型或联系管理员检查接口。', tone: 'warning' }
     : !actualQuoteRequired && !pricingBySpecification && moduleUnitCredits === null ? { message: '当前模型尚未设置点数，请换一个模型或联系管理员配置。', tone: 'warning' }
     : generationFixedReferences.some(item => item.available === false) ? { message: '已保存模板的固定参考图不可用，请在设置中处理。', tone: 'info' }
@@ -4063,7 +4123,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         }} />
         <div className={styles.generationToolbar}>
           <div className={styles.generationActions}>
-            <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
+            <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} title={localGpuGeneration ? '本地 GPU 当前仅支持单次生成 1 张' : noChargeGeneration ? '当前通道不支持批量生成' : undefined} disabled={noChargeGeneration || submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
             <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
           </div>
           {batch.mode === 'single' && <div className={`${styles.counts} ${styles.generationQuantity}`} role="group" aria-label="单次生成张数">
@@ -4073,7 +4133,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>}
           {batch.mode === 'batch' && batch.controls}
           {batch.mode === 'single' && <p className={styles.generationEstimate}>
-            {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
+            {localGpuGeneration ? count === 1 ? '本地 GPU 当前仅支持单次 1 张，不计点数' : '不计点数'
+              : noChargeGeneration ? '不计点数'
+              : visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
               ? imageUiQuotePriceText(visibleQuote)
               : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置'
                 : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}
@@ -4095,11 +4157,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
-              {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
+              {modelChoices.map(model => {
+                const availability = modelChoiceAvailability(model);
+                return <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview' || availability.disabled}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{availability.suffix}</option>;
+              })}
             </select>
           </label>
           {!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
-            <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
+            <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={generationChannelSelectionId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
           </label>}
           <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
             <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed && !qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>

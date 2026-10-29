@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import type { ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { getImageGenerationChannelOptions, getImageGenerationChannels, selectPricingImageGenerationSettings,
-  readPricingImageActualReadiness, type ImageGenerationChannels } from '@/lib/integrations/image-generation';
+  readPricingImageActualReadiness, getLocalGpuImageChannelOption, type ImageGenerationChannels } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel, getImageGenerationDefaultRoutes, ImageGenerationDefaultRoutesError } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality } from '@/lib/image-studio/quality-routing';
 import type { ImageStudioModel } from '@/lib/image-studio/model-catalog';
@@ -39,6 +39,7 @@ export async function pricingImageIdentity(settings: ImageGenerationResolvedSett
 export async function withImagePricing(settings: ImageGenerationResolvedSettings, model: string,
   client: Client = prisma, accepted?: ImageBillingContract, specifications: PricingImageSpecifications = {}) {
   const capability = settings.modelCapabilities[model as ImageStudioModel];
+  if (capability?.billingMode === 'none') return { settings, quote: null };
   const channelId = settings.channelId === 'original' ? model.startsWith('gemini-') ? 'banana' : 'shared' : settings.channelId;
   let quote: Awaited<ReturnType<typeof quotePricingCharge>> = null;
   if (!accepted) {
@@ -72,7 +73,7 @@ export async function resolvePricingImageCandidate(channels: ImageGenerationChan
       modelId: model, billingMode: 'fixed', unit: 'image', specifications: normalizePricingImageSpecifications(specifications) };
     return { identity, settings: null, unavailable: new PricingItemUnavailableError(identity, 'specification_unsupported', error.message) };
   }
-  if (!['original', 'shared', 'banana', 'fluxport'].includes(channelId)
+  if (!['original', 'shared', 'banana', 'fluxport', 'local_gpu'].includes(channelId)
     && !/^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(channelId)) throw new Error('图片通道身份无效');
   if (channelId.startsWith('image-') && !channels.managed.some(item => item.channelId === channelId && !item.deleted)) {
     const identity: PricingAdminIdentity = { kind: 'image', channelId, modelId: model, billingMode: 'fixed', unit: 'image', specifications: normalizePricingImageSpecifications(specifications) };
@@ -97,7 +98,19 @@ let displayOptions: { at: number; value: Promise<PricingImageChannelOptions> } |
 export async function getPricingImageChannelOptions(client: Client = prisma): Promise<PricingImageChannelOptions> {
   if (client === prisma) {
     if (displayOptions && Date.now() - displayOptions.at < 15000) return displayOptions.value;
-    const value = retrySqliteBusy(() => prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 }));
+    const value = retrySqliteBusy(() => prisma.$transaction(tx => getPricingImageChannelOptions(tx), { maxWait: 10000, timeout: 30000 }))
+      .then(async options => {
+        const local = await getLocalGpuImageChannelOption(true);
+        const index = options.items.findIndex(item => item.id === local.id);
+        if (index >= 0) options.items[index] = local; else options.items.push(local);
+        for (const [model, id] of Object.entries(options.defaultRoutes?.models || {})) {
+          if (id === local.id && local.models[model as ImageStudioModel]) {
+            const original = options.items.find(item => item.id === 'original');
+            if (original) original.models[model as ImageStudioModel] = { ...local.models[model as ImageStudioModel]! };
+          }
+        }
+        return options;
+      });
     displayOptions = { at: Date.now(), value };
     value.catch(() => { if (displayOptions?.value === value) displayOptions = null; });
     return value;
@@ -108,6 +121,7 @@ export async function getPricingImageChannelOptions(client: Client = prisma): Pr
   for (const item of options.items.filter(channel => channel.id !== 'original')) for (const model of Object.keys(item.models) as ImageStudioModel[]) {
     const original = item.models[model];
     if (!original) continue;
+    if (original.billingMode === 'none') continue;
     const candidate = await resolvePricingImageCandidate(channels, model, item.id, client);
     try {
       if (candidate.unavailable) throw candidate.unavailable;
@@ -159,7 +173,7 @@ export async function getPricingImageChannelOptions(client: Client = prisma): Pr
   }
   for (const item of options.items) {
     item.ready = Object.values(item.models).some(model => model?.ready === true);
-    item.disabledReason = item.ready ? null : '暂无可用且计价就绪的型号';
+    item.disabledReason = item.ready ? null : item.id === 'local_gpu' ? item.disabledReason : '暂无可用且计价就绪的型号';
   }
   return options;
 }

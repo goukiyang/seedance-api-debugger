@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { IMAGE_BILLING_VERSION, IMAGE_POINTS_PER_USD,
-  billedCredits, creditsToCents, type ImageBillingContract } from './billing-contract';
+  NO_CHARGE_IMAGE_BILLING_VERSION, billedCredits, creditsToCents, type ImageBillingContract } from './billing-contract';
 import type { ImageSupplierCharge } from './billing-provider';
 import { PRICING_IMAGE_BILLING_VERSION } from './billing-contract';
 import type { FrozenPricingCharge } from '../pricing/charge';
@@ -34,6 +34,13 @@ export function fixedImageBillingContract(input: { scope: string; model: string;
     multiplier: 1, rounding: 'half_up_cent', authorizedCredits: input.credits, scope: input.scope,
     model: input.model, specification: input.specification, issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(), deadline: null, estimateSource: 'legacy_fixed', estimateVersion: 'legacy-fixed-v1' };
+}
+
+export function noChargeImageBillingContract(input: { scope: string; model: string; specification: string }, now = Date.now()): ImageBillingContract {
+  return { version: NO_CHARGE_IMAGE_BILLING_VERSION, mode: 'none', pointsPerUsd: 0,
+    multiplier: 1, rounding: 'half_up_cent', authorizedCredits: 0, scope: input.scope,
+    model: input.model, specification: input.specification, issuedAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(), deadline: null, estimateSource: 'not_billed', estimateVersion: 'local-gpu-none-v1' };
 }
 
 export function withPricingImageContract(base: ImageBillingContract, pricing: FrozenPricingCharge, authorizedCredits: number): ImageBillingContract {

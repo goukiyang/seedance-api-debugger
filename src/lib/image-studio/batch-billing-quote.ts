@@ -182,6 +182,7 @@ export async function quoteStudioBatch(owner: string, body: Record<string, unkno
   if (contracts.some(contract => !contract)) throw new StudioError('批量准备期间计费状态发生变化，请重新报价', 409);
   const exactContracts = contracts as ImageBillingContract[];
   const first = exactContracts[0];
+  if (first?.mode === 'none') throw new StudioError('本地 GPU 当前不支持文件夹整批生成；尚未创建任务', 409);
   if (!first || exactContracts.some(contract => contract.scope !== first.scope || contract.model !== first.model
     || contract.mode !== first.mode || !samePricingImageCharge(contract.pricing, first.pricing))) {
     throw new StudioError('整批条目不是同一私有账单范围和型号，未报价', 409);
@@ -284,6 +285,7 @@ export async function consumeBatchQuote(tx: Prisma.TransactionClient, owner: str
   if (sumCredits(contracts.map(contract => contract!.authorizedCredits)) !== stored.total
     || contracts.some(contract => contract!.mode !== contracts[0]!.mode)) throw new StudioError('本批报价金额或收费模式不一致', 409);
   if ((await tx.platformSetting.deleteMany({ where: { id: row.id, value_json: row.value_json } })).count !== 1) throw new StudioError('整批报价已被使用', 409);
+  if (contracts[0]!.mode === 'none') throw new StudioError('本地 GPU 当前不支持文件夹整批生成；尚未创建任务', 409);
   return { contracts: contracts as ImageBillingContract[], mode: contracts[0]!.mode, total: stored.total, unitCredits: stored.unitCredits,
     sizePolicyVersion: stored.sizePolicyVersion,
     ...(sharedUse ? { sharedLive: sharedUse.definition.intent } : {}),

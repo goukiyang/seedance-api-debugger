@@ -39,7 +39,7 @@ export function imageApiGroupModelMissingRequirements(value: ImageApiGroupModelC
   if (!value.resolutions?.length) missing.push('尚未确认支持的分辨率');
   if (!value.ratios?.length) missing.push('尚未确认支持的图片比例');
   if (!Number.isSafeInteger(value.maxReferences) || Number(value.maxReferences) < 0) missing.push('尚未确认参考图上限');
-  if (value.billingMode !== 'fixed' && value.billingMode !== 'actual') missing.push('尚未设置计费方式');
+  if (value.billingMode !== 'fixed' && value.billingMode !== 'actual' && value.billingMode !== 'none') missing.push('尚未设置计费方式');
   if (value.billingMode === 'fixed' && (!Number.isSafeInteger(value.fixedPoints) || Number(value.fixedPoints) < 0)) {
     missing.push('固定点数未填写或无效，明确免费时请填写 0');
   }
@@ -74,11 +74,12 @@ export const IMAGE_GENERATION_RESERVED_CHANNEL_IDS = [
   'shared',
   'banana',
   'fluxport',
+  'local_gpu',
 ] as const;
 
-export type ImageGenerationChannelProtocol = 'gemini_native' | 'openai_images';
+export type ImageGenerationChannelProtocol = 'gemini_native' | 'openai_images' | 'local_gpu_jobs';
 export type ImageGenerationResolvedProtocol = ImageGenerationChannelProtocol | 'legacy' | 'mixed';
-export type ImageGenerationBillingMode = 'fixed' | 'actual';
+export type ImageGenerationBillingMode = 'fixed' | 'actual' | 'none';
 
 /** These explicitly approved native models can send parameters without a supplier declaration.
  * This is not a support claim: explicit limits, enablement and a real fixed price still apply.
@@ -117,12 +118,15 @@ export type ImageGenerationModelCapabilityDto = {
 /** Safe for generator settings responses. Never add credential fields here. */
 export type ImageGenerationChannelDto = {
   id: ImageGenerationChannelId;
+  backendType?: 'remote_api' | 'local_gpu';
   label: string;
   supplierName: string | null;
   ready: boolean;
   enabled: boolean;
   configured: boolean;
   disabledReason: string | null;
+  supportsTextToImage?: boolean;
+  supportsImageToImage?: boolean;
   models: Partial<Record<ImageStudioModel, ImageGenerationModelCapabilityDto>>;
 };
 
@@ -159,7 +163,7 @@ export type ImageGenerationManagedChannelDto = {
   id: ImageGenerationChannelId;
   label: string;
   supplierName: string;
-  supplierKind: 'fluxport' | 'musk' | 'other';
+  supplierKind: 'fluxport' | 'musk' | 'other' | 'local_gpu';
   protocol: ImageGenerationChannelProtocol | 'mixed';
   baseUrl: string;
   enabled: boolean;

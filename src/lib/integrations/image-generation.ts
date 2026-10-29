@@ -37,6 +37,13 @@ import {
   type ImageGenerationManagedChannelDto,
   type ImageGenerationResolvedProtocol,
 } from '@/lib/integrations/image-generation-channel';
+import {
+  LOCAL_GPU_IMAGE_CHANNEL_ID,
+  LOCAL_GPU_IMAGE_MODELS,
+  checkLocalGpuImageHealth,
+  readLocalGpuImageConfig,
+} from '@/lib/integrations/local-gpu-image';
+import { LOCAL_GPU_QWEN_PROFILE } from '@/lib/integrations/local-gpu-image-contract';
 export type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 
 export const IMAGE_GENERATION_API_SETTING_KEY = 'image_generation_api_v1';
@@ -48,7 +55,7 @@ export const FLUXPORT_IMAGE_GENERATION_BASE_URL = 'https://api.uselg.top';
 
 export const IMAGE_GENERATION_PROVIDERS = ['musk', 'ai_media_vip', 'seedream'] as const;
 export type LegacyImageGenerationProvider = typeof IMAGE_GENERATION_PROVIDERS[number];
-export type ImageGenerationProvider = LegacyImageGenerationProvider | 'fluxport' | 'managed';
+export type ImageGenerationProvider = LegacyImageGenerationProvider | 'fluxport' | 'managed' | 'local_gpu';
 export const DEFAULT_MUSK_IMAGE_MODEL = 'gemini-3.1-flash-image-preview';
 export const DEFAULT_MUSK_IMAGE_BASE_URL = 'https://api.muskapis.com/';
 export const DEFAULT_AI_MEDIA_IMAGE_BASE_URL = 'https://api.ai-media.vip/v1/';
@@ -94,7 +101,7 @@ export type ImageGenerationModelCapability = {
   resolutions: string[] | null;
   ratios: string[] | null;
   maxReferences: number | null;
-  billingMode: 'fixed' | 'actual' | null;
+  billingMode: 'fixed' | 'actual' | 'none' | null;
   fixedPoints: number | null;
   billingSource: string | null;
   /** Computed from this model's frozen API Key scope, never accepted from the client. */
@@ -105,7 +112,8 @@ export type ImageGenerationResolvedSettings = ImageGenerationApiSettings & {
   channelId: ImageGenerationChannelId;
   configRevision: string;
   supplierName: string;
-  supplierKind: 'fluxport' | 'musk' | 'other' | 'legacy';
+  supplierKind: 'fluxport' | 'musk' | 'other' | 'local_gpu' | 'legacy';
+  backendType?: 'remote_api' | 'local_gpu';
   protocol: ImageGenerationResolvedProtocol;
   modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>;
   /** Private frozen overrides. Never include these in registry or public DTOs. */
@@ -203,7 +211,7 @@ function providerDefaults(provider: ImageGenerationProvider) {
 }
 
 export function isStudioImageGenerationProvider(provider: ImageGenerationProvider) {
-  return provider === 'musk' || provider === 'ai_media_vip' || provider === 'fluxport' || provider === 'managed';
+  return provider === 'musk' || provider === 'ai_media_vip' || provider === 'fluxport' || provider === 'managed' || provider === 'local_gpu';
 }
 
 function normalizeDefaultModel(value: unknown, provider: ImageGenerationProvider) {
@@ -368,6 +376,7 @@ export type ImageGenerationChannels = {
   legacyPrices: Record<ImageStudioModel, number | null>;
   fluxport: ImageGenerationResolvedSettings;
   managed: ImageGenerationResolvedSettings[];
+  localGpu: ImageGenerationResolvedSettings;
   registry: ManagedChannelRegistry;
   legacyModelApis: Record<'shared' | 'banana', LegacyModelApiRegistry>;
 };
@@ -386,12 +395,14 @@ export async function getImageGenerationChannels(client: Prisma.TransactionClien
     await resolveCurrentManagedSettings(record, client), client, strictPricing,
   )));
   const fluxport = versions.find(item => item.channelId === 'fluxport') || emptyFluxPortSettings();
+  const localGpu = localGpuImageGenerationSettings();
   return {
     shared,
     banana,
     legacyPrices: studioSettings?.prices || Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, null])) as Record<ImageStudioModel, number | null>,
     fluxport,
-    managed: versions.filter(item => item.channelId !== 'fluxport'),
+    managed: [...versions.filter(item => item.channelId !== 'fluxport'), localGpu],
+    localGpu,
     registry,
     legacyModelApis: { shared: sharedModels, banana: bananaModels },
   };
@@ -483,7 +494,8 @@ export async function getImageGenerationDefaultSettingsForModel(
     getImageGenerationChannels(client),
     getImageGenerationDefaultRoutes(client),
   ]);
-  const channelId = defaults.models[model] || (isGeminiImageModel(model) ? 'banana' : 'shared');
+  const channelId = defaults.models[model] || (LOCAL_GPU_IMAGE_MODELS.includes(model as typeof LOCAL_GPU_IMAGE_MODELS[number])
+    ? LOCAL_GPU_IMAGE_CHANNEL_ID : isGeminiImageModel(model) ? 'banana' : 'shared');
   return selectImageGenerationSettings(channels, model, channelId);
 }
 
@@ -628,7 +640,7 @@ const GPT_IMAGE_CHANNEL_MODELS = new Set<ImageStudioModel>([
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
 ]);
-const FLUXPORT_PROTOCOL_BY_MODEL: Record<ImageStudioModel, ImageGenerationChannelProtocol> = {
+const FLUXPORT_PROTOCOL_BY_MODEL: Partial<Record<ImageStudioModel, ImageGenerationChannelProtocol>> = {
   'gemini-nano-banana-2.1': 'gemini_native',
   'gemini-3.1-flash-image-preview': 'gemini_native',
   'gemini-3-pro-image-preview': 'gemini_native',
@@ -662,7 +674,10 @@ function emptyFluxPortRecord(): ManagedChannelRegistryRecord {
     enabled: false,
     deleted: false,
     configRevision: null,
-    modelCapabilities: Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, blankCapability(FLUXPORT_PROTOCOL_BY_MODEL[model])])) as Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>,
+    modelCapabilities: Object.fromEntries(IMAGE_STUDIO_MODELS.flatMap(model => {
+      const protocol = FLUXPORT_PROTOCOL_BY_MODEL[model];
+      return protocol ? [[model, blankCapability(protocol)]] : [];
+    })) as Partial<Record<ImageStudioModel, ImageGenerationModelCapability>>,
   };
 }
 
@@ -672,7 +687,7 @@ function isDynamicImageChannelId(value: unknown): value is ImageGenerationChanne
 }
 
 function assertImageGenerationChannelId(value: unknown): asserts value is ImageGenerationChannelId {
-  if (value === 'original' || value === 'shared' || value === 'banana' || value === 'fluxport' || isDynamicImageChannelId(value)) return;
+  if (value === 'original' || value === 'shared' || value === 'banana' || value === 'fluxport' || value === LOCAL_GPU_IMAGE_CHANNEL_ID || isDynamicImageChannelId(value)) return;
   throw new ImageGenerationChannelError('图片供应商配置编号无效', 400, 'image_channel_invalid_id');
 }
 
@@ -1128,6 +1143,7 @@ function providerSupplierName(provider: ImageGenerationProvider): string | null 
   if (provider === 'ai_media_vip') return 'AI Media VIP';
   if (provider === 'seedream') return 'Seedream';
   if (provider === 'fluxport') return 'FluxPort';
+  if (provider === 'local_gpu') return '本地 GPU';
   return null;
 }
 
@@ -1364,6 +1380,56 @@ function emptyFluxPortSettings(): ImageGenerationResolvedSettings {
   } as ImageGenerationResolvedSettings;
 }
 
+export function localGpuImageGenerationSettings(options: { strictConfig?: boolean } = {}): ImageGenerationResolvedSettings {
+  let config;
+  try { config = readLocalGpuImageConfig(); }
+  catch (error) {
+    if (options.strictConfig) throw error;
+    config = { enabled: false, baseUrl: '', apiKey: '', configRevision: '00000000-0000-4000-8000-000000000000' };
+  }
+  const modelCapabilities: Partial<Record<ImageStudioModel, ImageGenerationModelCapability>> = {};
+  for (const model of LOCAL_GPU_IMAGE_MODELS) {
+    modelCapabilities[model] = {
+      enabled: true,
+      protocol: 'local_gpu_jobs',
+      upstreamModel: LOCAL_GPU_QWEN_PROFILE.id,
+      qualities: ['auto'],
+      resolutions: ['1K', '2K'],
+      ratios: ['auto', ...STUDIO_RATIOS],
+      maxReferences: 0,
+      billingMode: 'none',
+      fixedPoints: null,
+      billingSource: 'not_billed',
+    };
+  }
+  return {
+    ...DEFAULT_IMAGE_GENERATION_API_SETTINGS,
+    enabled: config.enabled,
+    provider: 'local_gpu',
+    base_url: config.baseUrl,
+    api_key: config.apiKey || null,
+    default_model: LOCAL_GPU_IMAGE_MODELS[0],
+    timeout_ms: 300_000,
+    max_outputs_per_request: 1,
+    output_format: 'png',
+    response_format: 'url',
+    watermark: false,
+    supports_text_to_image: true,
+    supports_image_to_image: false,
+    supports_async_task: true,
+    channelId: LOCAL_GPU_IMAGE_CHANNEL_ID,
+    configRevision: config.configRevision,
+    supplierName: '本地 GPU',
+    supplierKind: 'local_gpu',
+    backendType: 'local_gpu',
+    protocol: 'local_gpu_jobs',
+    modelCapabilities,
+    managedChannel: false,
+    label: '本地 GPU',
+    deleted: false,
+  };
+}
+
 async function resolveCurrentManagedSettings(record: ManagedChannelRegistryRecord, client: Prisma.TransactionClient | typeof prisma) {
   if (!record.configRevision) {
     if (record.id === 'fluxport') return { ...emptyFluxPortSettings(), enabled: record.enabled, modelCapabilities: record.modelCapabilities };
@@ -1407,6 +1473,15 @@ export async function captureImageGenerationChannel(
   assertImageGenerationChannelId(channelId);
   if (!IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)) {
     throw new ImageGenerationChannelError('所选图片型号不在允许列表中', 400, 'image_channel_model_not_allowed');
+  }
+  if (channelId === LOCAL_GPU_IMAGE_CHANNEL_ID) {
+    const current = resolveImageGenerationModelSettings(localGpuImageGenerationSettings(), model);
+    if (!current.enabled || !current.base_url || !current.api_key) {
+      throw new ImageGenerationChannelError('本地 GPU 后端尚未配置或未启用', 409, 'image_channel_not_available');
+    }
+    const validation = validateImageGenerationChannel(current, { model });
+    if (!validation.ok) throw new ImageGenerationChannelError(validation.error, 409, validation.code);
+    return { channelId, configRevision: current.configRevision };
   }
   if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
     const channels = await getImageGenerationChannels(tx);
@@ -1506,6 +1581,16 @@ export async function resolveImageGenerationChannelSnapshot(
   if (!/^[0-9a-f-]{36}$/i.test(snapshot.configRevision)) {
     throw new ImageGenerationChannelError('图片供应商配置修订无效', 400, 'image_channel_invalid_revision');
   }
+  if (snapshot.channelId === LOCAL_GPU_IMAGE_CHANNEL_ID) {
+    const current = localGpuImageGenerationSettings();
+    if (current.configRevision !== snapshot.configRevision) {
+      throw new ImageGenerationChannelError('本地 GPU 配置已变化；原任务保留，不会改用新地址或新 Key', 409, 'image_channel_revision_stale');
+    }
+    if (forSubmission && (!current.enabled || !current.base_url || !current.api_key)) {
+      throw new ImageGenerationChannelError('本地 GPU 后端尚未配置或未启用', 409, 'image_channel_not_available');
+    }
+    return model ? resolveImageGenerationModelSettings(current, model) : current;
+  }
   const version = await readPrivateChannelVersion(tx, snapshot.channelId, snapshot.configRevision);
   const settings = managedSettingsFromVersion(version);
   if (forSubmission) {
@@ -1561,6 +1646,11 @@ export async function assertImageGenerationChannelDispatchOpen(
   client: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
   if (snapshot.channelId === 'original') return;
+  if (snapshot.channelId === LOCAL_GPU_IMAGE_CHANNEL_ID) {
+    const current = localGpuImageGenerationSettings();
+    if (current.enabled && current.base_url && current.api_key && current.configRevision === snapshot.configRevision) return;
+    throw new ImageGenerationChannelError('本地 GPU 后端已停用或配置已变化；未提交新任务，原任务保留。', 409, 'image_channel_dispatch_paused');
+  }
   if (snapshot.channelId === 'shared' || snapshot.channelId === 'banana') {
     const current = await getImageGenerationApiSettings(client, snapshot.channelId === 'banana' ? 'banana' : 'default');
     const modelApis = await readLegacyModelApiRegistry(snapshot.channelId, client);
@@ -1696,6 +1786,33 @@ async function channelOption(
   };
 }
 
+export async function getLocalGpuImageChannelOption(probeHealth = true): Promise<ImageGenerationChannelDto> {
+  let settings: ImageGenerationResolvedSettings;
+  try { settings = localGpuImageGenerationSettings({ strictConfig: true }); }
+  catch {
+    return { id: LOCAL_GPU_IMAGE_CHANNEL_ID, backendType: 'local_gpu', label: '本地 GPU', supplierName: '本地 GPU',
+      ready: false, enabled: false, configured: false, disabledReason: '本地 GPU 后端配置无效',
+      supportsTextToImage: true, supportsImageToImage: false, models: {} };
+  }
+  const configured = Boolean(settings.base_url && settings.api_key);
+  const health = probeHealth && settings.enabled && configured
+    ? await checkLocalGpuImageHealth() : { ready: false, reason: settings.enabled ? configured ? '本地 GPU Worker 状态尚未检查' : '本地 GPU 后端尚未配置' : '本地 GPU 通道未启用', supportedModels: [] };
+  const models: ImageGenerationChannelDto['models'] = {};
+  for (const model of LOCAL_GPU_IMAGE_MODELS) {
+    const capability = settings.modelCapabilities[model]!;
+    const modelReady = health.ready && health.supportedModels.includes(model);
+    models[model] = { ready: modelReady,
+      disabledReason: modelReady ? null : health.reason || '本地 GPU Worker 未加载所选模型',
+      billingMode: 'none', fixedPoints: null, billingSource: 'not_billed', actualQuoteRequired: false,
+      qualities: capability.qualities, resolutions: capability.resolutions, ratios: capability.ratios,
+      maxReferences: 0 };
+  }
+  return { id: LOCAL_GPU_IMAGE_CHANNEL_ID, backendType: 'local_gpu', label: '本地 GPU', supplierName: '本地 GPU',
+    ready: Object.values(models).some(model => model?.ready), enabled: settings.enabled, configured,
+    disabledReason: Object.values(models).some(model => model?.ready) ? null : health.reason,
+    supportsTextToImage: true, supportsImageToImage: false, models };
+}
+
 export async function getImageGenerationChannelOptions(
   client: Prisma.TransactionClient | typeof prisma = prisma,
   strictPricing = false,
@@ -1715,6 +1832,10 @@ export async function getImageGenerationChannelOptions(
   items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean((fluxport.api_key || Object.values(fluxport.modelApiKeys || {}).some(Boolean)) && fluxport.base_url), fluxport.enabled, client, strictPricing));
   for (const settings of channels.managed) {
     if (settings.deleted) continue;
+    if (settings.channelId === LOCAL_GPU_IMAGE_CHANNEL_ID) {
+      items.push(await getLocalGpuImageChannelOption(client === prisma && !strictPricing));
+      continue;
+    }
     const group = IMAGE_API_GROUPS.find(item => imageApiGroupSources(channels).some(id => imageApiGroupChannelId(item, id) === settings.channelId));
     const label = `${settings.label || settings.supplierName}${group ? `（${group === 'banana' ? 'Banana' : 'Image'}组）` : ''}`;
     items.push(await channelOption(settings, label, settings.supplierName,
@@ -1723,7 +1844,8 @@ export async function getImageGenerationChannelOptions(
 
   const originalModels: ImageGenerationChannelDto['models'] = {};
   for (const model of IMAGE_STUDIO_MODELS) {
-    const defaultChannelId = defaultRoutes.models[model] || (isGeminiImageModel(model) ? 'banana' : 'shared');
+    const defaultChannelId = defaultRoutes.models[model] || (LOCAL_GPU_IMAGE_MODELS.includes(model as typeof LOCAL_GPU_IMAGE_MODELS[number])
+      ? LOCAL_GPU_IMAGE_CHANNEL_ID : isGeminiImageModel(model) ? 'banana' : 'shared');
     const defaultChannel = items.find(item => item.id === defaultChannelId);
     originalModels[model] = defaultChannel?.models[model] || {
       ready: false,
@@ -1765,7 +1887,8 @@ async function registryDto(
     const reason = await modelDisabledReason(settings, model, client);
     models[model] = {
       enabled: capability?.enabled === true,
-      protocol: capability?.protocol || (record.protocol === 'gemini_native' ? 'gemini_native' : record.id === 'fluxport' ? FLUXPORT_PROTOCOL_BY_MODEL[model] : 'openai_images'),
+      protocol: capability?.protocol || (record.protocol === 'gemini_native' ? 'gemini_native'
+        : record.id === 'fluxport' ? FLUXPORT_PROTOCOL_BY_MODEL[model] || 'openai_images' : 'openai_images'),
       upstreamModel: capability?.upstreamModel || null,
       baseUrl: capability?.baseUrl || null,
       apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key),
@@ -1844,7 +1967,7 @@ export async function setImageGenerationModelDefaultRoute(
       throw new ImageGenerationChannelError('默认供应商设置版本已达上限，未保存更改', 409, 'image_generation_default_revision_exhausted');
     }
 
-    if (channelId && channelId !== 'shared' && channelId !== 'banana' && channelId !== 'fluxport') {
+    if (channelId && channelId !== 'shared' && channelId !== 'banana' && channelId !== 'fluxport' && channelId !== LOCAL_GPU_IMAGE_CHANNEL_ID) {
       const registry = await readManagedChannelRegistry(tx);
       const selected = registry.channels.find(item => item.id === channelId);
       if (!selected || selected.deleted) {
@@ -1978,6 +2101,9 @@ async function imageApiGroupSource(channels: ImageGenerationChannels, group: Ima
 }
 
 function imageApiGroupSettings(settings: ImageGenerationResolvedSettings): ImageApiGroupSettings {
+  if (settings.provider === 'local_gpu') {
+    throw new ImageGenerationChannelError('本地 GPU 使用服务器固定配置，不能复制为远程 API 组', 409, 'local_gpu_group_unsupported');
+  }
   return { label: settings.label || '图片接口', supplierName: settings.supplierName || providerSupplierName(settings.provider) || '原供应商',
     provider: settings.provider, baseUrl: settings.inherited_base_url || settings.base_url,
     defaultModel: settings.default_model,
@@ -2198,6 +2324,9 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
         supports_image_to_image: shared.supportsImageToImage, supports_async_task: shared.supportsAsyncTask,
       };
       const configRevision = randomUUID();
+      if (source.settings.supplierKind === 'local_gpu') {
+        throw new ImageGenerationChannelError('本地 GPU 固定通道不能另存为远程供应商', 409, 'local_gpu_group_unsupported');
+      }
       const version: PrivateImageGenerationChannelVersion = {
         version: 1, channelId: source.copyId, configRevision, label: shared.label.trim(),
         supplierName: shared.supplierName.trim(),
@@ -2278,7 +2407,9 @@ export async function getImageModelApiForms(client: Prisma.TransactionClient | t
         supplierName: channel.supplierName, revision: channel.configRevision, sourceRevision: modelApiSourceRevision(channel),
         apiKeyConfigured: Boolean(resolveImageGenerationModelSettings(settings, model).api_key), canSave: true, reason });
     }
-    forms.push({ model, defaultChannelId: defaults.models[model] || (model.startsWith('gemini-') ? 'banana' : 'shared'), providers });
+    forms.push({ model, defaultChannelId: defaults.models[model]
+      || (LOCAL_GPU_IMAGE_MODELS.includes(model as typeof LOCAL_GPU_IMAGE_MODELS[number])
+        ? LOCAL_GPU_IMAGE_CHANNEL_ID : model.startsWith('gemini-') ? 'banana' : 'shared'), providers });
   }
   return forms;
 }

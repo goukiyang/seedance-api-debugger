@@ -15,7 +15,7 @@ import { beginStudioRequest, recordStudioResponse, createStudioBase64Delivery, c
   discardStudioDelivery, studioDeliveryCanRetry, studioDeliveryStatus, cleanupStudioDeliveries, updateStudioDelivery, type StudioDelivery,
   createStudioAsyncReceipt, readStudioAsyncReceipt, updateStudioAsyncReceipt, readStudioRequestReceipt, resetStudioAsyncDelivery, setStudioUnsentRequestState, type StudioAsyncReceipt } from './delivery';
 import { prepareStudioOutput } from './output';
-import { imageBillingScope } from './billing-scope';
+import { imageBillingScope, imageNoChargeScope } from './billing-scope';
 import { parseImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
 import { reserveImageStudioQueueCapacity } from './queue-capacity';
@@ -28,6 +28,14 @@ import { withImagePricing } from '@/lib/pricing/image';
 import { registerCommittedStudioHd } from '@/lib/media/hd-registration';
 import { createStudioProviderErrorRecorder } from './provider-error-evidence';
 import { buildStudioProviderErrorEvent, sanitizeStudioProviderErrorRequest, type StudioProviderErrorObservation } from './provider-error-diagnostics';
+import {
+  LocalGpuImageError,
+  assertLocalGpuImageWorkerReady,
+  downloadLocalGpuImageOutput,
+  queryLocalGpuImageJob,
+  submitLocalGpuImageJob,
+  type LocalGpuImageModel,
+} from '@/lib/integrations/local-gpu-image';
 
 function workerProviderErrorRecorder(task: ImageStudioTask) {
   const record = createStudioProviderErrorRecorder(task);
@@ -60,6 +68,12 @@ export async function assertStudioPostAuthorization(task: ImageStudioTask) {
       || current.billing_status !== billingStatus || current.gateway_request_id
       || !current.billing_deadline || current.billing_deadline <= new Date()
       || Date.parse(contract.deadline!) <= Date.now()) throw new Error('图片费用授权已停止，未向供应商提交');
+  } else if (current.billing_mode === 'none') {
+    const contract = parseImageBillingContract(current.billing_contract_json);
+    if (!contract || contract.mode !== 'none' || contract.scope !== current.billing_scope
+      || contract.model !== current.model || contract.authorizedCredits !== 0
+      || current.unit_credits !== 0 || current.freeze_snapshot || current.actual_credits !== null
+      || current.billing_settled_at) throw new Error('免计价图片任务合同无效，未向本地 GPU 提交');
   }
 }
 
@@ -336,16 +350,24 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await assertImageGenerationChannelDispatchOpen(imageChannel);
         const frozenContract = parseImageBillingContract(task.billing_contract_json);
         if (!frozenContract) throw new Error('原图片收费合同不可用，未向供应商提交');
-        settings = (await withImagePricing(settings, task.model, prisma, frozenContract)).settings;
+        if (frozenContract.mode !== 'none') {
+          settings = (await withImagePricing(settings, task.model, prisma, frozenContract)).settings;
+        }
         const validation = validateImageGenerationChannel(settings, { model: task.model, quality: task.quality,
           resolution: typeof snapshot.resolution === 'string' ? snapshot.resolution : undefined,
           ratio: task.aspect_ratio || undefined, referenceCount: JSON.parse(task.reference_ids).length }, snapshot.ratioContractVersion !== 2);
         if (!validation.ok) throw new Error(validation.error);
         capability = validation.capability;
         if (!settings.api_key || !settings.base_url || !capability.protocol) throw new Error('图片通道接口暂不可用');
-        const scope = imageBillingScope(settings);
+        const scope = frozenContract.mode === 'none' ? imageNoChargeScope(settings) : imageBillingScope(settings);
         if (scope !== task.billing_scope) throw new Error('提交时的图片通道账单范围已变化，未向供应商提交');
-        if (task.billing_mode === 'actual') {
+        if (task.billing_mode === 'none') {
+          if (frozenContract.mode !== 'none' || frozenContract.authorizedCredits !== 0
+            || capability.billingMode !== 'none' || settings.provider !== 'local_gpu'
+            || capability.protocol !== 'local_gpu_jobs' || task.unit_credits !== 0 || task.freeze_snapshot) {
+            throw new Error('免计价图片任务合同或本地 GPU 通道已变化，未提交');
+          }
+        } else if (task.billing_mode === 'actual') {
           const contract = parseImageBillingContract(task.billing_contract_json);
           if (!contract || contract.mode !== 'actual' || contract.scope !== scope || contract.model !== task.model
             || contract.authorizedCredits !== task.unit_credits || capability.billingMode !== 'actual'
@@ -364,17 +386,28 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         }
         const images = [];
         const owners = (snapshot.authorizedReferenceOwners || {}) as Record<string, string>;
-        for (const id of JSON.parse(task.reference_ids) as string[]) {
+        const referenceIds = JSON.parse(task.reference_ids) as string[];
+        if (settings.provider === 'local_gpu' && referenceIds.length) {
+          throw new Error('本地 GPU 当前只支持文生图；任务中的图片仍保留，未提交');
+        }
+        for (const id of referenceIds) {
           const asset = await prisma.asset.findFirst({ where: { id, owner_id: owners[id] || task.owner_id, status: 'active', type: 'image' } });
           if (!asset) throw new Error('参考图已不可用');
           images.push({ bytes: await normalizeStudioImage(await readStudioImage(asset.original_url, taskSignal)), mimeType: 'image/png' });
         }
+        const privateOrigins = privateImageTaskOrigins(task);
+        if (settings.provider !== 'local_gpu') {
+          assertPrivateStudioDestination({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
+            upstreamModel: capability.upstreamModel, protocol: capability.protocol,
+            provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', images, privateOrigins });
+        }
         await assertLease();
         await assertStudioPostAuthorization(task);
-        const privateOrigins = privateImageTaskOrigins(task);
-        assertPrivateStudioDestination({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model,
-          upstreamModel: capability.upstreamModel, protocol: capability.protocol,
-          provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', images, privateOrigins });
+        if (settings.provider === 'local_gpu') {
+          await assertLocalGpuImageWorkerReady(task.model);
+          await assertLease();
+          await assertStudioPostAuthorization(task);
+        }
         stage = 'provider';
         await beginStudioRequest(task);
         preparedRequest = true;
@@ -384,6 +417,25 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         await setStudioUnsentRequestState(task, 'attempted');
         preparedRequest = false;
         providerStarted = true;
+        if (settings.provider === 'local_gpu') {
+          let identity;
+          try {
+            identity = await submitLocalGpuImageJob({ requestId: task.id, model: task.model as LocalGpuImageModel,
+              prompt: task.prompt.trim() ? `${task.context}\n\n---\n本次画面要求：\n${task.prompt}` : task.context,
+              quality: task.quality, size: task.output_size || undefined,
+              ratio: standardRatioContract ? snapshot.resolvedAspectRatio as string : task.aspect_ratio });
+          } catch (error) {
+            if (error instanceof LocalGpuImageError && error.identity) {
+              asyncReceipt = await createStudioAsyncReceipt(task, error.identity);
+            }
+            throw error;
+          }
+          asyncReceipt = await createStudioAsyncReceipt(task, identity);
+          await updateStudioAsyncReceipt(asyncReceipt, { state: 'accepted', waitingStatus: 'pending',
+            pollAfterMs: identity.pollAfterMs });
+          await retainChannelTask(task, '本地 GPU 已受理，仍在生成；正在轮询原任务，不会重复提交。', identity.pollAfterMs);
+          return;
+        } else {
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key, model: task.model, privateOrigins,
           upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability.protocol,
@@ -417,12 +469,57 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         if (!delivery) { await assertLease(); delivery = await createStudioBase64Delivery(task, result.images[0], result.usage); }
         if (asyncReceipt) await updateStudioAsyncReceipt(asyncReceipt, { state: 'success' });
         original = await download(delivery); usage = result.usage;
+        }
       }
 
       if (!settings || !capability) throw new Error('图片通道型号配置缺失；原任务已保留');
       if (resuming) {
         stage = 'provider';
         providerStarted = true;
+        if (settings.provider === 'local_gpu') {
+          const queried = await queryLocalGpuImageJob({ identity: {
+            taskId: asyncReceipt!.providerTaskId,
+            queryIdentity: asyncReceipt!.queryIdentity || 'provider_task_id',
+            pollAfterMs: asyncReceipt!.pollAfterMs,
+          } });
+          if (queried.state === 'failed') {
+            throw new LocalGpuImageError('本地 GPU 原任务已明确失败', 'local_gpu_failed', 'failed');
+          }
+          if (queried.state === 'reconciling') {
+            throw new LocalGpuImageError('本地 GPU 原任务待管理员核对，已停止自动查询', 'local_gpu_reconciling', 'unknown', undefined, queried.identity);
+          }
+          if (queried.state === 'pending') {
+            if (!recovering && (queried.identity.taskId !== asyncReceipt!.providerTaskId
+              || queried.identity.queryIdentity !== asyncReceipt!.queryIdentity
+              || queried.identity.pollAfterMs !== asyncReceipt!.pollAfterMs)) {
+              await updateStudioAsyncReceipt(asyncReceipt!, {
+                providerTaskId: queried.identity.taskId,
+                queryIdentity: queried.identity.queryIdentity,
+                pollAfterMs: queried.identity.pollAfterMs,
+                state: 'accepted', waitingStatus: 'pending',
+              });
+            }
+            if (recovering) await deferStudioAsyncRecovery(task, 'local_gpu_pending');
+            else {
+              await updateStudioAsyncReceipt(asyncReceipt!, { state: 'accepted', waitingStatus: 'pending',
+                pollAfterMs: queried.identity.pollAfterMs });
+              await retainChannelTask(task, '本地 GPU 已受理，仍在生成；正在轮询原任务，不会重复提交。', queried.identity.pollAfterMs);
+            }
+            return;
+          }
+          if (!recovering && (asyncReceipt!.providerTaskId !== queried.providerTaskId
+            || asyncReceipt!.queryIdentity !== 'provider_task_id')) {
+            await updateStudioAsyncReceipt(asyncReceipt!, { providerTaskId: queried.providerTaskId, queryIdentity: 'provider_task_id' });
+          }
+          const bytes = await downloadLocalGpuImageOutput({ providerTaskId: queried.providerTaskId, outputId: queried.outputId });
+          await assertLease();
+          delivery = await createStudioBase64Delivery(task, bytes.toString('base64'), {
+            provider: 'local_gpu', providerTaskId: queried.providerTaskId, outputId: queried.outputId,
+          });
+          await updateStudioAsyncReceipt(asyncReceipt!, { state: 'success' });
+          original = await download(delivery);
+          usage = delivery.usage;
+        } else {
         const result = await generate({ baseUrl: settings.base_url, apiKey: settings.api_key!, model: task.model,
           upstreamModel: capability.upstreamModel,
           provider: settings.provider === 'ai_media_vip' ? 'ai_media_vip' : 'musk', protocol: capability!.protocol,
@@ -440,6 +537,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
         if (!delivery) { await assertLease(); delivery = await createStudioBase64Delivery(task, result.images[0], result.usage); }
         await updateStudioAsyncReceipt(asyncReceipt!, { state: 'success' });
         original = await download(delivery); usage = result.usage;
+        }
       }
     }
 
@@ -464,6 +562,52 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       await completeToolFlowTask(task.id);
     }
   } catch (error) {
+    if (error instanceof LocalGpuImageError) {
+      if (error.kind === 'offline' && !providerStarted) {
+        if (preparedRequest) await setStudioUnsentRequestState(task, 'held');
+        await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
+          data: { status: studioTaskState(task, 'channel_queued'), lease_token: null, lease_until: null,
+            error: '本地 GPU Worker 当前离线；任务输入已保留，恢复后再提交。' } });
+        return;
+      }
+      if (error.identity && !asyncReceipt) {
+        asyncReceipt = await createStudioAsyncReceipt(task, error.identity);
+      }
+      if (error.kind === 'rejected' && !asyncReceipt) {
+        const finished = await finishStudioTask(task, 'failed', { error: `${error.message}；没有扣点。` });
+        if (finished) await completeToolFlowTask(task.id);
+        return;
+      }
+      if (asyncReceipt && (error.kind === 'rejected' || ['local_gpu_reconciling', 'local_gpu_identity_conflict'].includes(error.code))) {
+        await updateStudioAsyncReceipt(asyncReceipt, { state: 'accepted', waitingStatus: 'unconfirmed' });
+        if (recovering) await deferStudioAsyncRecovery(task, error.code, true);
+        else {
+          const finished = await finishStudioTask(task, 'uncertain', {
+            error: `${error.message}；原请求已保留，没有重新生成或扣点。请管理员核对。`,
+          });
+          if (finished) await completeToolFlowTask(task.id);
+        }
+        return;
+      }
+      if (error.kind === 'failed') {
+        if (asyncReceipt) await updateStudioAsyncReceipt(asyncReceipt, { state: 'failed' });
+        const finished = await finishStudioTask(task, 'failed', { error: '本地 GPU 原任务已明确失败；没有重提或扣点。' });
+        if (finished) await completeToolFlowTask(task.id);
+        return;
+      }
+      if (error.kind === 'invalid') {
+        const finished = await finishStudioTask(task, 'failed', { error: `${error.message}；原任务没有重提，也没有扣点。` });
+        if (finished) await completeToolFlowTask(task.id);
+        return;
+      }
+      if (asyncReceipt) {
+        await updateStudioAsyncReceipt(asyncReceipt, { state: 'accepted', waitingStatus: 'unconfirmed' });
+        if (recovering) await deferStudioAsyncRecovery(task, error.code);
+        else await retainChannelTask(task, `${error.message}；正在查询原号，不会重复提交。`,
+          Math.max(30_000, asyncReceipt.pollAfterMs * 4));
+        return;
+      }
+    }
     if (error instanceof PrivatePromptError && recovering) {
       await deferStudioAsyncRecovery(task, error.code, true);
       return;

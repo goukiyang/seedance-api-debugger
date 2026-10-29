@@ -252,6 +252,9 @@ export async function estimateAvatarDraft(owner: string, body: Record<string, un
   if (imageChannel) {
     const validation = validateImageGenerationChannel(api, { model, quality, resolution, ratio, referenceCount: referenceIds.length });
     if (!validation.ok) throw new StudioError(validation.error, 409);
+    if (validation.capability.billingMode === 'none') {
+      throw new StudioError('本地 GPU 当前仅用于生图工作台的单张文生图', 409);
+    }
     fixed = validation.capability.fixedPoints;
     requestedMode = validation.capability.billingMode ?? undefined;
   }

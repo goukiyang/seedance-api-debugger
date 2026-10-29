@@ -69,7 +69,7 @@ export function parseImageUiBudget(value: string, precision: 0.01 | 0.1 | 1 = 0.
 type StudioBatchQuote = ImageUiQuote & { batchQuoteId: string | null; expiresAt: string };
 type CachedStudioBatchQuote = { signature: string; requestId: string; quote: StudioBatchQuote; expired?: boolean };
 
-export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, pricingBySpecification = false, quotePayload, effectiveChannelId, sharedLive, sourceAvailable = true, onSourceChanged, readSettings }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; pricingBySpecification?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string; sharedLive?: SharedStudioIntent; sourceAvailable?: boolean; onSourceChanged?: () => void; readSettings: () => Promise<import('./settings-controller').SettingsValue | null> }) {
+export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, actualQuoteRequired = false, pricingBySpecification = false, noCharge = false, quotePayload, effectiveChannelId, sharedLive, sourceAvailable = true, onSourceChanged, readSettings }: { userId: string; moduleId: string; unitCredits: number | null; draftSignature: string; actualQuoteRequired?: boolean; pricingBySpecification?: boolean; noCharge?: boolean; quotePayload?: Record<string, unknown> | null; effectiveChannelId?: string; sharedLive?: SharedStudioIntent; sourceAvailable?: boolean; onSourceChanged?: () => void; readSettings: () => Promise<import('./settings-controller').SettingsValue | null> }) {
   const settingsReader = useRef(readSettings); settingsReader.current = readSettings;
   const { sessionChanged } = useAppSession();
   const channelQuoteMatches = (quote: StudioBatchQuote, payload: Record<string, unknown>) => !payload.channelId
@@ -95,6 +95,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     actualQuoteRequired, pricingBySpecification, files.map(local => [local.file.name, local.file.size, local.file.lastModified])]);
   const sourceChanged = useRef(onSourceChanged); sourceChanged.current = onSourceChanged;
   const previousDefinition = useRef(sharedLive?.definitionToken);
+  useEffect(() => { if (noCharge && !pending) setMode('single'); }, [noCharge, pending]);
   useEffect(() => {
     if (previousDefinition.current && previousDefinition.current !== sharedLive?.definitionToken) {
       setBillingQuote(null);
@@ -116,7 +117,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   const { confirm, productDialog } = useProductDialog();
   const automaticPayload = quotePayload ? JSON.stringify({ ...Object.fromEntries(Object.entries(quotePayload).filter(([key]) => key !== 'image_feishu')), ...(sharedLive ? { sharedLive } : {}) }) : '';
   useEffect(() => {
-    if (sessionChanged || isClientSessionBlocked() || !sourceAvailable || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
+    if (sessionChanged || isClientSessionBlocked() || noCharge || !sourceAvailable || !quoteVisible || mode !== 'batch' || !loaded || busy || previewing || pending || !automaticPayload
       || !quoteInputReady) return;
     if (billingQuote?.signature === quoteSignature && !billingQuote.expired && Date.parse(billingQuote.quote.expiresAt) > Date.now()) return;
     const abort = new AbortController();
@@ -137,7 +138,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
         }).catch(() => {});
     }, 500);
     return () => { window.clearTimeout(timer); abort.abort(); };
-  }, [sessionChanged, sourceAvailable, actualQuoteRequired, pricingBySpecification, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote, effectiveChannelId]);
+  }, [sessionChanged, noCharge, sourceAvailable, actualQuoteRequired, pricingBySpecification, quoteVisible, mode, loaded, busy, previewing, pending, automaticPayload, quoteSignature, quoteInputReady, billingQuote, effectiveChannelId]);
   useEffect(() => { live.current.mounted = true; return () => { live.current.mounted = false; fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); }; }, []);
   useEffect(() => { if (previousQuoteSignature.current !== quoteSignature) setBillingQuote(null); previousQuoteSignature.current = quoteSignature; }, [quoteSignature]);
   useEffect(() => {
@@ -214,6 +215,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   }
   async function submit(payload: Record<string, unknown>) {
     if (isClientSessionBlocked()) return false;
+    if (noCharge) { setError('本地 GPU 当前仅支持上方单次模式，一次生成 1 张；当前批量设置已保留。'); return false; }
     if (imageUiQuoteAction(pending, quoteSignature, billingQuote?.signature, billingQuote?.quote, Date.now(), true) === 'query') { await query(); return false; }
     if (!sourceAvailable) { setError('模板已不可用，不能新建批次；原批次和素材保留。'); return false; }
     if (lock.current || !loaded) return false;
@@ -336,9 +338,9 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     } catch (error) { if (sameScope()) { setError(error instanceof Error ? error.message : '批次提交结果未确认'); if (submittedRequest) setPending(submittedRequest); } return false; }
     finally { lock.current = false; if (live.current.mounted && live.current.scope === scope) { setBusy(false); setProgress(''); } }
   }
-  const blocker = mode !== 'batch' ? '' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !sourceAvailable ? '模板已不可用，原批次和素材保留' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请先选择有效素材，本批最多100张' : '';
+  const blocker = mode !== 'batch' ? '' : noCharge ? '本地 GPU 当前仅支持单次生成 1 张，当前批量设置已保留' : previewing ? '正在本机读取图片' : busy ? '正在处理本批' : pending ? '' : !sourceAvailable ? '模板已不可用，原批次和素材保留' : !loaded ? '正在恢复批次设置' : !Number.isInteger(total) || total < 1 || total > STUDIO_BATCH_LIMITS.images ? '请先选择有效素材，本批最多100张' : '';
   const controls = <div className={styles.controls}>
-    <p>{visibleQuote ? imageUiQuotePriceText(visibleQuote) : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}</p>
+    {!noCharge && <p>{visibleQuote ? imageUiQuotePriceText(visibleQuote) : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}</p>}
     <div className={styles.actions}>
       {source === 'folder' && <button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => void chooseSources()}><FolderOpen size={16} />{canSelectBatchDirectory() ? '选择素材文件夹' : '选择素材'}</button>}
       <label><input type="checkbox" checked={pack} disabled={busy} onChange={event => setPack(event.target.checked)} />完成后打包</label>

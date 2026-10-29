@@ -5,6 +5,7 @@ export const IMAGE_STUDIO_MODELS = [
   'gpt-image-2',
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
+  'qwen-bf16-cu130-v1',
 ] as const;
 
 // Historical model ids remain readable; only explicit new selections use this list.
@@ -27,6 +28,7 @@ export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
   'gpt-image-2': 'GPT Image 2',
   'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
   'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
+  'qwen-bf16-cu130-v1': 'Qwen Image 2.1 BF16',
 };
 
 export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> = {
@@ -36,6 +38,7 @@ export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> =
   'gpt-image-2': 'img2',
   'gpt-image-2.5-flare': 'img2.5-F',
   'gpt-image-2.5-sunburst': 'img2.5-S',
+  'qwen-bf16-cu130-v1': 'qwen2.1',
 };
 
 // Provider USD cost is deliberately separate from the site's credit price.
@@ -46,6 +49,7 @@ export const IMAGE_STUDIO_MODEL_COST_USD: Record<ImageStudioModel, number | null
   'gpt-image-2': null,
   'gpt-image-2.5-flare': 0.064,
   'gpt-image-2.5-sunburst': 0.064,
+  'qwen-bf16-cu130-v1': null,
 };
 
 export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageStudioQuality[]> = {
@@ -55,6 +59,7 @@ export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageS
   'gpt-image-2': ['auto', 'low', 'medium', 'high'],
   'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
   'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+  'qwen-bf16-cu130-v1': ['auto'],
 };
 
 export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, import('@/lib/image-generation/resolution').ImageResolution[]> = {
@@ -64,6 +69,7 @@ export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, imp
   'gpt-image-2': ['1K', '2K', '4K'],
   'gpt-image-2.5-flare': ['1K', '2K', '4K'],
   'gpt-image-2.5-sunburst': ['1K', '2K', '4K'],
+  'qwen-bf16-cu130-v1': ['1K', '2K'],
 };
 
 export const IMAGE_STUDIO_QUALITY_LABELS: Record<ImageStudioQuality, string> = {

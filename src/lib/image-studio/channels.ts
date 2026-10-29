@@ -4,6 +4,7 @@ import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality, type ImageQualityRoutes } from './quality-routing';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
 import { sharedImageStudioChannelIssue } from './shared-capabilities';
+import { LOCAL_GPU_IMAGE_MODELS } from '@/lib/integrations/local-gpu-image-contract';
 
 export const ORIGINAL_IMAGE_CHANNEL_ID = 'original';
 
@@ -15,7 +16,7 @@ export type ImageStudioChannel = Omit<ImageGenerationChannelDto, 'models'> & {
 
 export type ImageStudioChannels = ImageGenerationChannelsDto & { items: ImageStudioChannel[] };
 
-const CHANNEL_IDS = new Set(['original', 'shared', 'banana', 'fluxport']);
+const CHANNEL_IDS = new Set(['original', 'shared', 'banana', 'fluxport', 'local_gpu']);
 const ORIGINAL_FALLBACK: ImageStudioChannel = {
   id: ORIGINAL_IMAGE_CHANNEL_ID,
   label: '原接口',
@@ -55,7 +56,7 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
           models[model] = {
             ready: capability.ready === true,
             disabledReason: typeof capability.disabledReason === 'string' && capability.disabledReason.length <= 240 ? capability.disabledReason : null,
-            billingMode: capability.billingMode === 'fixed' || capability.billingMode === 'actual' ? capability.billingMode : null,
+            billingMode: capability.billingMode === 'fixed' || capability.billingMode === 'actual' || capability.billingMode === 'none' ? capability.billingMode : null,
             fixedPoints: capability.pricingBySpecification === true ? null
               : Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0 ? Number(capability.fixedPoints) : null,
             billingSource: typeof capability.billingSource === 'string' && capability.billingSource.length <= 160 ? capability.billingSource : null,
@@ -72,12 +73,15 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
       }
       items.push({
         id: row.id,
+        ...(row.backendType === 'local_gpu' ? { backendType: 'local_gpu' as const } : {}),
         label: row.label.trim(),
         supplierName: typeof row.supplierName === 'string' && row.supplierName.trim() ? row.supplierName.trim().slice(0, 120) : null,
         ready: row.ready === true,
         enabled: row.enabled === true,
         configured: row.configured === true,
         disabledReason: typeof row.disabledReason === 'string' && row.disabledReason.length <= 240 ? row.disabledReason : null,
+        ...(typeof row.supportsTextToImage === 'boolean' ? { supportsTextToImage: row.supportsTextToImage } : {}),
+        ...(typeof row.supportsImageToImage === 'boolean' ? { supportsImageToImage: row.supportsImageToImage } : {}),
         models,
       });
     }
@@ -106,7 +110,8 @@ export function normalizeImageStudioChannels(value: unknown): ImageStudioChannel
 
 export function imageStudioDefaultChannelId(channels: ImageStudioChannels, model: string) {
   return channels.defaultRoutes?.models[model as (typeof IMAGE_STUDIO_MODELS)[number]]
-    || (isGeminiImageModel(model) ? 'banana' : 'shared');
+    || (LOCAL_GPU_IMAGE_MODELS.includes(model as (typeof LOCAL_GPU_IMAGE_MODELS)[number]) ? 'local_gpu'
+      : isGeminiImageModel(model) ? 'banana' : 'shared');
 }
 
 export function imageStudioUsesLegacyRoute(channels: ImageStudioChannels, model: string, selectedId: string) {
@@ -137,6 +142,7 @@ export function imageStudioChannelUnitCredits(
   legacyPrice: number | null | undefined,
 ) {
   if (capability?.pricingBySpecification) return null;
+  if (capability?.billingMode === 'none') return 0;
   const price = legacyRoute ? legacyPrice : capability?.billingMode === 'fixed'
     ? capability.fixedPoints ?? (['shared', 'banana'].includes(effectiveChannelId) ? legacyPrice : null)
     : null;

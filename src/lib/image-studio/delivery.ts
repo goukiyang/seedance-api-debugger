@@ -48,6 +48,7 @@ export type StudioReceipt = { taskId: string; ownerId: string; localRequestId: s
 type AsyncIdentity = Identity & { snapshot_json: string | null };
 export type StudioAsyncReceipt = { schema: 'image.async-receipt.v1'; taskId: string; ownerId: string;
   channelId: string; configRevision: string; providerTaskId: string; pollAfterMs: number; acceptedAt: number;
+  queryIdentity?: 'provider_task_id' | 'client_request_id';
   expiresAt?: string; state: 'accepted' | 'success' | 'failed'; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed' };
 function asyncIdentity(task: AsyncIdentity) {
   let snapshot;
@@ -71,6 +72,7 @@ export async function readStudioAsyncReceipt(task: AsyncIdentity): Promise<Studi
       if (value.schema !== 'image.async-receipt.v1' || value.taskId !== task.id || value.ownerId !== task.owner_id
         || value.channelId !== expected.channelId || value.configRevision !== expected.configRevision
         || !/^[a-zA-Z0-9_-]{1,180}$/.test(value.providerTaskId) || !Number.isFinite(value.acceptedAt)
+        || (value.queryIdentity !== undefined && value.queryIdentity !== 'provider_task_id' && value.queryIdentity !== 'client_request_id')
         || !Number.isSafeInteger(value.pollAfterMs) || value.pollAfterMs < 2000 || value.pollAfterMs > 30000
         || (value.expiresAt !== undefined && (typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt))))
         || !['accepted', 'success', 'failed'].includes(value.state)) throw new Error('Async receipt identity mismatch');
@@ -79,20 +81,24 @@ export async function readStudioAsyncReceipt(task: AsyncIdentity): Promise<Studi
   }
   return null;
 }
-export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: { taskId: string; pollAfterMs?: number; expiresAt?: string }) {
+export async function createStudioAsyncReceipt(task: AsyncIdentity, accepted: { taskId: string; pollAfterMs?: number; expiresAt?: string;
+  queryIdentity?: 'provider_task_id' | 'client_request_id' }) {
   const identity = asyncIdentity(task);
   if (!/^[a-zA-Z0-9_-]{1,180}$/.test(accepted.taskId)) throw new Error('Invalid upstream task identity');
   const previous = await readStudioAsyncReceipt(task);
   if (previous) { if (previous.providerTaskId !== accepted.taskId) throw new Error('Async task identity changed'); return previous; }
   const receipt: StudioAsyncReceipt = { schema: 'image.async-receipt.v1', taskId: task.id, ownerId: task.owner_id, ...identity,
     providerTaskId: accepted.taskId, pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(accepted.pollAfterMs || 2000))),
+    ...(accepted.queryIdentity ? { queryIdentity: accepted.queryIdentity } : {}),
     ...(typeof accepted.expiresAt === 'string' && Number.isFinite(Date.parse(accepted.expiresAt)) ? { expiresAt: accepted.expiresAt } : {}),
     acceptedAt: Date.now(), state: 'accepted', waitingStatus: 'pending' };
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt));
   await writePrivate(task.id, 'async.json', JSON.stringify(receipt), true);
   return receipt;
 }
-export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number; waitingStatus?: StudioAsyncReceipt['waitingStatus'] }) {
+export async function updateStudioAsyncReceipt(receipt: StudioAsyncReceipt, changes: { state?: StudioAsyncReceipt['state']; pollAfterMs?: number;
+  waitingStatus?: StudioAsyncReceipt['waitingStatus']; providerTaskId?: string; queryIdentity?: StudioAsyncReceipt['queryIdentity'] }) {
+  if (changes.providerTaskId !== undefined && !/^[a-zA-Z0-9_-]{1,180}$/.test(changes.providerTaskId)) throw new Error('Invalid upstream task identity');
   Object.assign(receipt, changes, { pollAfterMs: Math.min(30000, Math.max(2000, Math.floor(changes.pollAfterMs || receipt.pollAfterMs))) });
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt));
   await writePrivate(receipt.taskId, 'async.json', JSON.stringify(receipt), true);

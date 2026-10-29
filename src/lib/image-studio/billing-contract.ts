@@ -6,10 +6,11 @@ import { publicPricingBillingState } from './pricing-state';
 export const IMAGE_BILLING_VERSION = 'cost02-v1';
 export const IMAGE_POINTS_PER_USD = 35;
 export const PRICING_IMAGE_BILLING_VERSION = 'pricing-image-v1';
+export const NO_CHARGE_IMAGE_BILLING_VERSION = 'local-gpu-none-v1';
 
 export type ImageBillingContract = {
-  version: typeof IMAGE_BILLING_VERSION | typeof PRICING_IMAGE_BILLING_VERSION;
-  mode: 'fixed' | 'actual';
+  version: typeof IMAGE_BILLING_VERSION | typeof PRICING_IMAGE_BILLING_VERSION | typeof NO_CHARGE_IMAGE_BILLING_VERSION;
+  mode: 'fixed' | 'actual' | 'none';
   pointsPerUsd: number;
   multiplier: 1;
   rounding: 'half_up_cent' | 'half_up_tenth';
@@ -21,13 +22,13 @@ export type ImageBillingContract = {
   issuedAt: string;
   expiresAt: string;
   deadline: string | null;
-  estimateSource: 'legacy_fixed' | 'confirmed_p90' | 'provider_rule' | 'scope_model_history' | 'exact_spec_sparse';
+  estimateSource: 'legacy_fixed' | 'confirmed_p90' | 'provider_rule' | 'scope_model_history' | 'exact_spec_sparse' | 'not_billed';
   estimateVersion: string;
 };
 
 export type ImageBillingView = {
   status: string;
-  mode?: 'fixed' | 'actual' | null;
+  mode?: 'fixed' | 'actual' | 'none' | null;
   pollUntil?: string | null;
   amountMicros: number | null;
   chargedCredits: number | null;
@@ -53,20 +54,23 @@ export function parseImageBillingContract(value: string | null | undefined): Ima
   try {
     const contract = JSON.parse(value) as ImageBillingContract;
     const legacy = contract.version === IMAGE_BILLING_VERSION;
-    if (!legacy && contract.version !== PRICING_IMAGE_BILLING_VERSION) return null;
-    if (!['fixed', 'actual'].includes(contract.mode)
-      || contract.multiplier !== 1 || contract.rounding !== (legacy || contract.pricing?.mode === 'legacy_actual' ? 'half_up_cent' : 'half_up_tenth')
+    const noCharge = contract.version === NO_CHARGE_IMAGE_BILLING_VERSION;
+    if (!legacy && !noCharge && contract.version !== PRICING_IMAGE_BILLING_VERSION) return null;
+    if (!['fixed', 'actual', 'none'].includes(contract.mode) || noCharge !== (contract.mode === 'none')
+      || contract.multiplier !== 1 || contract.rounding !== (legacy || noCharge || contract.pricing?.mode === 'legacy_actual' ? 'half_up_cent' : 'half_up_tenth')
       || !/^[a-f0-9]{64}$/.test(contract.scope) || typeof contract.model !== 'string'
       || !/^[a-f0-9]{64}$/.test(contract.specification)
       || legacy && contract.pointsPerUsd !== IMAGE_POINTS_PER_USD
-      || !['legacy_fixed', 'confirmed_p90', 'provider_rule', 'scope_model_history', 'exact_spec_sparse'].includes(contract.estimateSource)
+      || noCharge && (contract.pointsPerUsd !== 0 || contract.authorizedCredits !== 0 || contract.deadline !== null || contract.pricing !== undefined)
+      || !['legacy_fixed', 'confirmed_p90', 'provider_rule', 'scope_model_history', 'exact_spec_sparse', 'not_billed'].includes(contract.estimateSource)
+      || noCharge !== (contract.estimateSource === 'not_billed')
       || typeof contract.estimateVersion !== 'string'
       || !Number.isFinite(Date.parse(contract.issuedAt)) || !Number.isFinite(Date.parse(contract.expiresAt))
       || Date.parse(contract.expiresAt) <= Date.parse(contract.issuedAt)
       || contract.mode === 'actual' && (!contract.deadline || !Number.isFinite(Date.parse(contract.deadline))
         || Date.parse(contract.deadline) <= Date.parse(contract.expiresAt))) return null;
     creditsToCents(contract.authorizedCredits);
-    if (!legacy) {
+    if (!legacy && !noCharge) {
       const pricing = parseFrozenPricingCharge(contract.pricing);
       if (!pricing || pricing.identity.kind !== 'image' || pricing.identity.modelId !== contract.model
         || pricing.identity.billingMode !== contract.mode || pricing.quantity !== '1'
@@ -79,6 +83,7 @@ export function parseImageBillingContract(value: string | null | undefined): Ima
 }
 
 export function billedImageContractCredits(contract: ImageBillingContract, amountMicros: number) {
+  if (contract.mode === 'none') throw new Error('No-charge image contract has no billable credits');
   return contract.version === IMAGE_BILLING_VERSION ? billedCredits(amountMicros, contract.pointsPerUsd)
     : contract.pricing ? frozenPricingCredits(contract.pricing, amountMicros, 'USD').credits
       : (() => { throw new Error('Frozen pricing contract missing'); })();
@@ -102,6 +107,7 @@ export function imageBillingPending(view: ImageBillingView | null | undefined, n
 }
 
 export function imageBillingLabel(view: ImageBillingView) {
+  if (view.mode === 'none') return '不计点数';
   if (view.status === 'confirmed' && view.mode === 'fixed'
     && view.chargedCredits !== null && Number.isFinite(view.chargedCredits) && view.chargedCredits >= 0) {
     return `固定 ${view.chargedCredits.toFixed(view.creditPrecision === 0.1 ? 1 : 2)} 点 · 供应商费用未核实`;

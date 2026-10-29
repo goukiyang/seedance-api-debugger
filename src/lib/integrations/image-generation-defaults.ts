@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { IMAGE_STUDIO_MODELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import type { ImageGenerationChannelId } from '@/lib/integrations/image-generation-channel';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality, type ImageQualityRoutes, type ImageQualityRouteSnapshot } from '@/lib/image-studio/quality-routing';
+import { LOCAL_GPU_IMAGE_MODELS } from '@/lib/integrations/local-gpu-image';
 
 export const IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY = 'image_generation_model_defaults_v1';
 
@@ -31,7 +32,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isConcreteDefaultChannelId(value: unknown): value is string {
-  return value === 'shared' || value === 'banana' || value === 'fluxport'
+  return value === 'shared' || value === 'banana' || value === 'fluxport' || value === 'local_gpu'
     || (typeof value === 'string'
       && /^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
 }
@@ -125,6 +126,7 @@ export async function resolveImageGenerationRequestChannel(
   }
   const defaults = await getImageGenerationDefaultRoutes(client);
   if (defaults.models[validatedModel]) return defaults.models[validatedModel]!;
+  if (LOCAL_GPU_IMAGE_MODELS.includes(validatedModel as (typeof LOCAL_GPU_IMAGE_MODELS)[number])) return 'local_gpu';
   const legacyChannel = validatedModel.startsWith('gemini-') ? 'banana' : 'shared';
   const { hasLegacyImageGenerationModelOverride } = await import('@/lib/integrations/image-generation');
   return await hasLegacyImageGenerationModelOverride(validatedModel, legacyChannel, client) ? legacyChannel : null;
