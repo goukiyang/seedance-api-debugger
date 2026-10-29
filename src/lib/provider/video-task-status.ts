@@ -94,12 +94,13 @@ export async function getProviderTaskStatus(
 
   const provider = normalizeProvider(task.provider);
   const fetchers = options.fetchers || defaultFetchers;
+  const protectGroupStatus = task.source_metadata_json === undefined || hasVideoPromptGroups(task);
   let result: ProviderStatusResponse;
   try { result = await (provider === VIDEO_TASK_PROVIDER_SEEDANCE
     ? fetchers.seedance(providerTaskId, seedanceQueryContext(task))
     : fetcherForProvider(provider, fetchers)(providerTaskId)); }
-  catch (error) { if (hasVideoPromptGroups(task)) throw new Error('原任务状态暂时无法核对，请稍后查询同一任务'); throw error; }
-  if (!hasVideoPromptGroups(task)) return result;
+  catch (error) { if (protectGroupStatus) throw new Error('原任务状态暂时无法核对，请稍后查询同一任务'); throw error; }
+  if (!protectGroupStatus) return result;
   // Keep billing facts while excluding free-form supplier diagnostics and echoed input.
   const usage = numericUsage(result.usage);
   const safe = { ...result, provider_model: task.model || undefined, provider_status: result.local_status, usage,

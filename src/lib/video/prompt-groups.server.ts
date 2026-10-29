@@ -1,11 +1,11 @@
 import 'server-only';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
-import { privateOrigin, sealPrivatePrompt, openPrivatePrompt, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { privateOrigin, privatePromptIndex, sealPrivatePrompt, openPrivatePrompt, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privatePromptCapabilities, requirePrivatePromptIdentity } from '@/lib/security/private-prompt-identity.server';
 import { parseVideoPromptGroupRefs, composeVideoPromptGroups, VideoPromptGroupError,
   type VideoPromptGroupRef, type VideoPromptGroupSummary } from './prompt-groups';
@@ -21,7 +21,7 @@ const PREFIX = 'video_prompt_group_v1:';
 const headKey = (id: string) => PREFIX + id;
 const versionKey = (id: string, version: string) => `video_prompt_group_version_v1:${id}:${version}`;
 const receiptKey = (userId: string, requestId: string) => `video_prompt_group_receipt_v1:${userId}:${requestId}`;
-const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const hash = (v: unknown) => privatePromptIndex('video-prompt-group-fingerprint', JSON.stringify(v));
 function internal(user: SessionUser) {
   if (!canUseCompanyTemplates(user)) throw new VideoPromptGroupError('当前账号不能使用同事提示词组', 403);
 }
