@@ -1,1 +1,1 @@
-export const STUDIO_STYLE_GROUP_WRITES_ENABLED = true;
+export const STUDIO_STYLE_GROUP_WRITES_ENABLED = false;
