@@ -4,6 +4,7 @@ const notice = { title: '生成页优化', outline: [
   '收拢项目与视频卡，输入和添加入口更紧凑',
   '参数、设置、飞书与费用移到输入区底栏',
   '缺项按需提示，重新计算时不显示旧费用',
+  '多视图的编辑入口和生成按钮各自归位',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

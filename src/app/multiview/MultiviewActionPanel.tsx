@@ -17,7 +17,7 @@ import { parseMultiviewActionBinding, type MultiviewActionBinding, type Multivie
 import type { VideoCreationIntentDTO } from '@/lib/creation/contract';
 import styles from './multiview-action.module.css';
 
-type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; triggerHost: HTMLDivElement | null; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
+type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number; pricingRevision: string; token: string };
 type Original = { key: string; runId: string; taskId: string | null };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
@@ -221,8 +221,8 @@ export function MultiviewActionPanel(props: Props) {
       {saving&&<p className={styles.notice}>正在保存动作…</p>}
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
+      {!showVideo&&<button type="button" className={styles.primary} disabled={!currentQuote||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>}
     </aside>
-    {props.triggerHost&&createPortal(<button type="button" disabled={!currentQuote||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>,props.triggerHost)}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
     {confirming&&currentQuote&&<ConfirmDialog quote={currentQuote} parameters={currentQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
   </>;
