@@ -8,6 +8,8 @@
 
 0.117.1再次真实失败：截图原名`mv-test01-final500-v1171.png`（221567字节）在同私有implementation，原页面/同作品/余额保留。实际final500异常类型、同秒P1008旁证及断网隔离副本的原路径复现分别记录，不混成同一证据；`mv-test01/final500-isolated-result.json`、`final500-contention-red.json`、`final500-contention-green.json`、`final500-source-permission.json`核无竞争准备、占锁拒绝、有限原号重试和原源失权拒绝。新候选0.117.3保最新0.117.2；正式原单§23.6.2，关键词：写事务等锁、P1008、真实源权限、未受理、单条手验。真实出片未通过，主线程独占浏览器，不用工程检查冒用户生成成功。
 
+后续0.117.3/de314efe于18:01:24Z保护部署完成，完整构建/6门/7服务/公网同源；私有资料mv-test01/final500-release/保总回执、公网、self-review及恢复入口。已通知主线程刷新继续同一真实样本，实际出片/费用尚未验收，MV-TEST01仍进行中。
+
 ## MV-GEN02 动作生成链路定位（2026-10-29）
 
 来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。0.116.3/12c41394已部署，完整构建/6门/7服务/公网同源，私有证据沿同目录mv-gen02/deployment-result.json及public-deployed.json；0.116.2恢复保留。原图沿§23.4附件，未新增或外发媒体；完整原记录不推Git，最终收费生成用户手验。
