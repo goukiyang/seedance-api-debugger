@@ -43,9 +43,46 @@ test('actual workspace consumer accepts server scope only and isolates account/d
   const ctx = vm.createContext({ canvasRuntime: runtime });
   const actual = functions('public/tools/ultimate-canvas/app.js', ['canvasWorkspaceKey'], ctx);
   assert.equal(actual.canvasWorkspaceKey(), runtime.workspaceContext.workspace_key);
+  runtime.selectedProjectId = 'other'; assert.equal(actual.canvasWorkspaceKey(), '');
+  runtime.selectedProjectId = 'p';
   runtime.documentId = 'other'; assert.equal(actual.canvasWorkspaceKey(), '');
   runtime.documentId = 'd'; runtime.bootstrap.user.id = 'other'; assert.equal(actual.canvasWorkspaceKey(), '');
   runtime.bootstrap.user.id = 'u'; runtime.workspaceContext = null; assert.equal(actual.canvasWorkspaceKey(), '', 'no historical/default key invention');
+});
+test('actual workspace consumer rejects absent identity and malformed keys', () => {
+  const scope = { project_id: 'p', document_id: 'd', workspace_key: 'uc2_' + 'a'.repeat(64) };
+  const runtime = { selectedProjectId: 'p', documentId: 'd', bootstrap: null, workspaceContext: scope };
+  const actual = functions('public/tools/ultimate-canvas/app.js', ['canvasWorkspaceKey'], vm.createContext({ canvasRuntime: runtime }));
+  for (const bootstrap of [null, {}, { user: {} }, { user: { id: '' } }]) {
+    runtime.bootstrap = bootstrap;
+    assert.equal(actual.canvasWorkspaceKey(), '', 'missing identity must not match a missing owner');
+  }
+  runtime.bootstrap = { user: { id: 'u' } }; scope.owner_id = 'u';
+  for (const key of ['', 'legacy-workspace', 'uc2_short']) {
+    scope.workspace_key = key;
+    assert.equal(actual.canvasWorkspaceKey(), '');
+  }
+});
+test('actual initial reads reach fetch without an uninitialized workspace header', async () => {
+  const runtime = { selectedProjectId: null, documentId: null, bootstrap: null, workspaceContext: null };
+  const requests = [];
+  const ctx = vm.createContext({ canvasRuntime: runtime, backendEndpoint: url => url,
+    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, text: async () => '{"ok":true}' }; },
+  });
+  const actual = functions('public/tools/ultimate-canvas/app.js', ['canvasWorkspaceKey', 'workspaceHeaders', 'requestJson'], ctx);
+  for (const endpoint of ['/api/tools/ultimate-canvas/bootstrap', '/api/tools/ultimate-canvas/document?document_id=existing']) {
+    assert.deepEqual(plain(await actual.requestJson(endpoint, { cache: 'no-store' })), { ok: true });
+    const request = requests.at(-1);
+    assert.equal(request.url, endpoint);
+    assert.equal(request.options.method, 'GET');
+    assert.equal(request.options.credentials, 'same-origin');
+    assert.equal(request.options.headers['x-tab-id'], undefined);
+    assert.equal(request.options.headers['x-canvas-project-id'], undefined);
+    assert.ok(request.options.headers['x-canvas-capabilities'].includes('canvas.references.v1'));
+  }
+  assert.equal(requests.length, 2);
+  assert.equal(runtime.bootstrap, null);
+  assert.equal(runtime.workspaceContext, null);
 });
 test('actual duplicate preserves typed input task identity but strips execution state', () => {
   const references = { version: 1, items: [{ kind: 'video', role: 'reference', taskId: 'input-task', sourceNodeId: 'source', sourceVersion: 'a'.repeat(64) }] };

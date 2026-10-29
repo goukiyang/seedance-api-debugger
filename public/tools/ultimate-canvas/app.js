@@ -614,7 +614,9 @@
 
     function canvasWorkspaceKey() {
         const scope = canvasRuntime.workspaceContext;
-        return scope?.owner_id === canvasRuntime.bootstrap?.user?.id && scope.project_id === canvasRuntime.selectedProjectId
+        const userId = canvasRuntime.bootstrap?.user?.id;
+        if (!scope || !userId) return '';
+        return scope.owner_id === userId && scope.project_id === canvasRuntime.selectedProjectId
             && scope.document_id === canvasRuntime.documentId && /^uc2_[a-f0-9]{64}$/.test(scope.workspace_key) ? scope.workspace_key : '';
     }
 
