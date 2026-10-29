@@ -40,7 +40,7 @@
 .primary { background: var(--accent-color, oklch(52% .18 250)); color: oklch(98% .005 240) !important; border-color: transparent; }
 .button:disabled { opacity: .45; cursor: default; }
 .status { margin: 0; padding: 10px 18px; font-size: 13px; overflow-wrap: anywhere; }
-.form { display: grid; gap: 14px; }
+.form { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .form label { display: grid; gap: 6px; font-size: 13px; }
 .form input, .form textarea, .filters input { color: inherit; font: inherit; background: var(--bg-primary, oklch(15% .01 240)); border: 1px solid var(--border-color, oklch(60% .01 240 / .3)); border-radius: 5px; padding: 10px; min-width: 0; width: 100%; }
 .form textarea { min-height: 82px; resize: vertical; }

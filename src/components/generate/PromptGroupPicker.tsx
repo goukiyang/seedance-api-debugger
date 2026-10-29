@@ -198,7 +198,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     <div className={styles.actions}><button type="button" className={styles.button} onClick={() => void close()}>取消</button>
       {pending || draftPending ? <button type="button" className={styles.button} disabled={busy} onClick={() => void query()}><RefreshCw size={15} />核对原保存</button>
         : <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || loading || readFailed || conflict || !fields.name.trim() || !fields.body.trim()} onClick={() => void save()}>保存</button>}</div>
-  </>}>{loading ? <p role="status">正在读取…</p> : <div className={styles.form}>
+  </>}>{loading ? <p role="status">正在读取…</p> : <fieldset className={styles.form} disabled={Boolean(pending)}>
     <label>名称<input maxLength={80} value={fields.name} onChange={e => setFields(v => ({ ...v, name: e.target.value }))} /></label>
     <label>用途简介<textarea maxLength={800} value={fields.description} onChange={e => setFields(v => ({ ...v, description: e.target.value }))} /></label>
     <label>适用条件<textarea maxLength={800} value={fields.conditions} onChange={e => setFields(v => ({ ...v, conditions: e.target.value }))} /></label>
@@ -209,7 +209,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
       <button type="button" className={styles.button} onClick={() => { void read(`${api}?mode=versions&groupId=${item.groupId}&versionId=${item.versionId}`).then(value => setVersions(value.versions)).catch(cause => setNotice(cause.message)); }}>版本记录</button>
       {versions?.map(version => <p className={styles.meta} key={version.versionId}>{version.name} · {version.current ? '当前版本' : '已保存版本'} · <RelativeTime value={version.createdAt} /></p>)}
     </details>}
-  </div>}</Modal><Modal open={Boolean(latestView)} narrow title="当前已保存版本" onClose={() => setLatestView(null)}>{latestView && <div className={styles.detail}><h3>{latestView.name}</h3><p>{latestView.description}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{latestView.body}</pre></div>}</Modal>{onUploadFile && <ResourceLibraryPicker open={coverOpen} onClose={() => setCoverOpen(false)} title="选择提示词组封面" imageOnly currentCount={0}
+  </fieldset>}</Modal><Modal open={Boolean(latestView)} narrow title="当前已保存版本" onClose={() => setLatestView(null)}>{latestView && <div className={styles.detail}><h3>{latestView.name}</h3><p>{latestView.description}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{latestView.body}</pre></div>}</Modal>{onUploadFile && <ResourceLibraryPicker open={coverOpen} onClose={() => setCoverOpen(false)} title="选择提示词组封面" imageOnly currentCount={0}
     currentAssetIds={[]} maxSelection={1} onUploadFile={onUploadFile} onConfirm={async ids => { setFields(v => ({ ...v, coverAssetId: ids[0] || null })); setCoverOpen(false); return true; }} />}{productDialog}</>;
 }
 
