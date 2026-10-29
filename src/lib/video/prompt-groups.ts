@@ -9,6 +9,15 @@ import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from './prompt-groups-build-mode';
 
 export const VIDEO_GROUP_CONTRACT = 1;
 export const VIDEO_GROUP_LIMIT = 12;
+export function containsVideoPromptGroupDraft(value: unknown): boolean {
+  if (typeof value === 'string') {
+    try { return containsVideoPromptGroupDraft(JSON.parse(value)); }
+    catch { return /"videoPromptGroups"\s*:/.test(value); }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const refs = (value as Record<string, unknown>).videoPromptGroups;
+  return refs !== undefined && (!Array.isArray(refs) || refs.length > 0);
+}
 export class VideoPromptGroupError extends Error {
   constructor(message: string, public status = 409, public code = 'VIDEO_PROMPT_GROUP_INVALID') { super(message); }
 }

@@ -25,6 +25,7 @@ import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
+import { containsVideoPromptGroupDraft } from '@/lib/video/prompt-groups';
 import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
@@ -531,7 +532,7 @@ export function GenerationComposer({
   reuseDraft,
   studioHandoff = null,
   imageResultHandoff = null,
-  interactionLocked = false,
+  interactionLocked: externalInteractionLocked = false,
   onWorkspaceBusyChange,
   onWorkspaceRefreshReady,
   inputRecoveryScope = '',
@@ -573,6 +574,9 @@ export function GenerationComposer({
     message: '供应商 Draft 能力尚未完成核验，暂不可用。',
   },
 }: Props) {
+  const [readerGroupDraft, setReaderGroupDraft] = useState(false);
+  const interactionLocked = externalInteractionLocked || readerGroupDraft;
+  const readerDraftMessage = '此保护版本不能编辑或生成含提示词组的草稿，原草稿仍保留，请更新后继续。';
   const workspace = useWorkspace();
   const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
@@ -742,10 +746,11 @@ export function GenerationComposer({
     returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
     currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
   const captureInputRecovery = useCallback(() => {
+    if (readerGroupDraft) { setInputRecoveryMessage(readerDraftMessage); setInputRecoveryIssue(true); return false; }
     const value = makeInputRecovery();
     if (!value) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
     setRecoveryBinding(null); setInputRecovery(hasTaskReuseInput(value.backup) ? value : null); setInputRecoveryIssue(false); setInputRecoveryMessage(''); return value.backup;
-  }, [makeInputRecovery]);
+  }, [makeInputRecovery, readerGroupDraft]);
   useEffect(() => { onInputRecoveryReady?.(captureInputRecovery); return () => onInputRecoveryReady?.(null); }, [onInputRecoveryReady, captureInputRecovery]);
   const restoredBackupScope = React.useRef('');
   useEffect(() => {
@@ -760,6 +765,7 @@ export function GenerationComposer({
         || typeof value.resolution !== 'string' || !Number.isFinite(value.duration) || !Number.isFinite(value.seed)) return;
       const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
       setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, backup, restoreFields: () => {
+        if (containsVideoPromptGroupDraft(value)) { setReaderGroupDraft(true); return; }
         settingsTouchedRef.current = true;
         setPrompt(value.prompt); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
         setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
@@ -789,8 +795,10 @@ export function GenerationComposer({
   React.useLayoutEffect(() => {
     if (!ordinaryDraftKey || ordinaryDraftLoaded === ordinaryDraftKey || !preferencesReady) return;
     try {
+      const raw = localStorage.getItem(ordinaryDraftKey);
+      if (containsVideoPromptGroupDraft(raw)) { setReaderGroupDraft(true); setOrdinaryDraftLoaded(ordinaryDraftKey); return; }
       if (!studioHandoff && !imageResultHandoff && !reuseDraft && !interactionLocked && !settingsTouchedRef.current) {
-        const saved = JSON.parse(localStorage.getItem(ordinaryDraftKey) || 'null');
+        const saved = JSON.parse(raw || 'null');
         if (saved?.version === 2 && typeof saved.prompt === 'string' && saved.prompt.length <= 20000
           && ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(saved.generationMode)
           && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
@@ -1030,6 +1038,7 @@ export function GenerationComposer({
 
   const submitBlockerState = useMemo(() => {
     const reason = (() => {
+    if (readerGroupDraft) return { message: readerDraftMessage, tone: 'hint' as const };
     if (imageResultHandoff) {
       if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
       if (generationMode !== 'first_last_frame') return '这张图已放在首帧。请选择首尾帧模式后生成；不会改放参考图。';
@@ -1139,7 +1148,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  }, [readerGroupDraft, durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1176,7 +1185,7 @@ export function GenerationComposer({
       ...(studioHandoff ? { template_studio_assets: workspace.assets.map(asset => ({ assetId: asset.assetId,
         role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff), type: asset.type,
         ...(studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey ? { slotKey: studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey } : {}) })) } : {}),
-    } }, !durationBlocker && preferencesReady);
+    } }, !readerGroupDraft && !durationBlocker && preferencesReady);
   const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
   const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
@@ -1999,6 +2008,7 @@ export function GenerationComposer({
 
   return (
     <>
+      {readerGroupDraft && <p className={recoveryStyles.recovery} role="status">{readerDraftMessage}</p>}
       {inputRecoveryMessage && (inputRecoveryIssue || !inputRecovery || inputRecoveryPair) && <p className={recoveryStyles.recovery} role="status">{inputRecoveryMessage}</p>}
       {inputRecovery && <details className={recoveryStyles.recovery} open={inputRecoveryPair ? true : undefined}><summary>输入恢复</summary>
         {recoveryBinding && !undoAllowed && <p>保存位置或账号已变化，当前不能恢复这份输入。</p>}
@@ -2011,7 +2021,8 @@ export function GenerationComposer({
         ref={generationComposerRef}
         className="generation-composer"
         onChangeCapture={markReuseInputChanged}
-        aria-busy={interactionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
+        aria-disabled={readerGroupDraft || undefined}
+        aria-busy={externalInteractionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
       >
         {imageResultHandoff && <p className="composer-prefill-notice" role="status">这次图片已放在首帧，生成时请选择首尾帧模式；模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}
         {templateEnabled && (

@@ -89,13 +89,20 @@ try {
     await assert.rejects(groups.videoPromptGroupDraft(author, groupId, {}));
     assert.equal(groups.videoPromptGroupCreateCapability(author), false);
     assert.deepEqual(await groups.resolveVideoPromptGroups(ordinary, [], 'legacy'), { refs: [], prompt: 'legacy', origins: [], fingerprint: '' });
+    assert.equal(contract.containsVideoPromptGroupDraft({ videoPromptGroups: [ref] }), true);
+    assert.equal(contract.containsVideoPromptGroupDraft(JSON.stringify({ videoPromptGroups: [ref] })), true);
+    assert.equal(contract.containsVideoPromptGroupDraft({ videoPromptGroups: null }), true);
+    assert.equal(contract.containsVideoPromptGroupDraft('{"videoPromptGroups":'), true);
+    assert.equal(contract.containsVideoPromptGroupDraft({ videoPromptGroups: [] }), false);
+    assert.equal(contract.containsVideoPromptGroupDraft({ prompt: 'legacy' }), false);
     const privacy = load('src/lib/video/multiview-task-privacy.ts');
     const task = { id: 'history', prompt: 'personal', local_status: 'succeeded', source_metadata_json: JSON.stringify({ video_prompt_groups: { schema: 1, refs: [ref] } }),
       final_prompt_snapshot: body, raw_status_response: body, public_video_url: 'https://fixture.invalid/output.mp4' };
     assert.equal(JSON.stringify(privacy.projectPrivateMultiviewTask(task)).includes(body), false);
     assert.equal(privacy.projectPrivateMultiviewTask(task).public_video_url, task.public_video_url);
     console.log(JSON.stringify({ passed: true, readerOnly: true, checks: ['immutable history readable', 'ordinary metadata excludes body',
-      'signed editor history readable', 'new execution/definition/draft blocked', 'legacy empty path preserved', 'historical task/media projection protected'],
+      'signed editor history readable', 'new execution/definition/draft blocked', 'legacy empty path preserved', 'historical task/media projection protected',
+      'grouped or malformed browser draft/backup must remain read-only on the legacy composer'],
       fixture, productionDatabaseAccess: 0, externalRequests: 0 }, null, 2));
     await db.$disconnect();
     process.exit(0);
