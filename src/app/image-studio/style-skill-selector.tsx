@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, FileText, Home, Layers, Plus, RotateCcw, Settings2, Star, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronLeft, ChevronRight, Copy, FileText, Home, Layers, Plus, RotateCcw, Settings2, Star, Undo2, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
@@ -13,7 +13,7 @@ type Category = 'all' | 'styles' | 'skills';
 type Kind = Exclude<Category, 'all'>;
 type Entry = { kind: 'styles'; value: StudioStyleSummary } | { kind: 'skills'; value: SkillSummary };
 type Paging = { cursor: string; previous: string[]; page: number };
-type Preferences = { category: Category; query: string; view: 'available' | 'selected'; scroll: number; pages: Record<Kind, Paging>; styleRecent: string[] };
+type Preferences = { category: Category; query: string; styleScope: 'all' | 'mine' | 'shared'; view: 'available' | 'selected'; scroll: number; pages: Record<Kind, Paging>; styleRecent: string[] };
 type PageState<T> = { items: T[]; next: string | null; loading: boolean; read: boolean; error: string; query: string; cursor: string };
 export type StudioStyleSkillSelectorHandle = { open: (category: Category) => void };
 export type StudioStyleSkillSelectorProps = {
@@ -23,7 +23,7 @@ export type StudioStyleSkillSelectorProps = {
 };
 const ids = (value: unknown): string[] => Array.isArray(value) ? Array.from(new Set(value.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))) : [];
 const pageDefaults = (): Paging => ({ cursor: '', previous: [], page: 1 });
-const defaults = (): Preferences => ({ category: 'all', query: '', view: 'available', scroll: 0, pages: { styles: pageDefaults(), skills: pageDefaults() }, styleRecent: [] });
+const defaults = (): Preferences => ({ category: 'all', query: '', styleScope: 'all', view: 'available', scroll: 0, pages: { styles: pageDefaults(), skills: pageDefaults() }, styleRecent: [] });
 const emptyPage = <T,>(): PageState<T> => ({ items: [], next: null, loading: false, read: false, error: '', query: '', cursor: '' });
 const itemKey = (entry: Entry) => `${entry.kind}:${entry.value.id}`;
 const typeName = (kind: Kind) => kind === 'styles' ? '风格组' : '提示词组';
@@ -35,6 +35,7 @@ function readPreferences(key: string): Preferences {
   if (saved.category === 'all' || saved.category === 'styles' || saved.category === 'skills') next.category = saved.category;
   if (typeof saved.query === 'string') next.query = saved.query.slice(0, 160);
   if (saved.view === 'selected') next.view = 'selected';
+  if (saved.styleScope === 'mine' || saved.styleScope === 'shared') next.styleScope = saved.styleScope;
   if (typeof saved.scroll === 'number' && Number.isFinite(saved.scroll)) next.scroll = Math.max(0, Math.min(1_000_000, saved.scroll));
   next.styleRecent = ids(saved.styleRecent).slice(0, 100);
   if (saved.pages && typeof saved.pages === 'object') for (const kind of ['styles', 'skills'] as const) {
@@ -49,8 +50,9 @@ function readPreferences(key: string): Preferences {
   }
   return next;
 }
-async function readPage(kind: Kind, query: string, cursor = '', keys?: string[], signal?: AbortSignal) {
+async function readPage(kind: Kind, query: string, cursor = '', keys?: string[], signal?: AbortSignal, sourceScope = 'all') {
   const params = new URLSearchParams({ page: '1', query });
+  if (kind === 'styles') params.set('scope', sourceScope);
   if (cursor) params.set('cursor', cursor);
   if (keys) params.set('keys', keys.join(','));
   const response = await fetch(`/api/image-studio/${kind === 'styles' ? 'style-groups' : 'skills'}?${params}`, { cache: 'no-store', signal });
@@ -59,12 +61,18 @@ async function readPage(kind: Kind, query: string, cursor = '', keys?: string[],
   return { items: (kind === 'styles' ? data.groups : data.skills) as StudioStyleSummary[] | SkillSummary[], next: data.nextCursor as string | null };
 }
 
-export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandle, StudioStyleSkillSelectorProps>(function StudioStyleSkillSelector({ userId, scope, selectedStyles, selectedSkills, onStylesChange, onSkillsChange, currentImages, maxReferences = MAX_REFERENCE_IMAGES, disabled = false }, ref) {
+export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandle, StudioStyleSkillSelectorProps>(function StudioStyleSkillSelector({ userId, scope, selectedStyles: appliedStyles, selectedSkills: appliedSkills, onStylesChange: applyStyles, onSkillsChange: applySkills, currentImages, maxReferences = MAX_REFERENCE_IMAGES, disabled = false }, ref) {
   const identity = `${userId}:${scope}`, key = `sd2:studio-style-skills:v1:${encodeURIComponent(userId)}:${encodeURIComponent(scope)}`, legacyKey = `sd2:skills:v1:${userId}`;
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const [initialized, setInitialized] = useState(''), [preferences, setPreferences] = useState<Preferences>(defaults);
   const preferencesRef = useRef(preferences); preferencesRef.current = preferences;
   const [open, setOpen] = useState(false), [detail, setDetail] = useState<Entry | null>(null);
+  const [pendingStyles, setPendingStyles] = useState(appliedStyles), [pendingSkills, setPendingSkills] = useState(appliedSkills);
+  const [undo, setUndo] = useState<{ styles: StudioStyleSummary[]; skills: SkillSummary[] } | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false), [detailError, setDetailError] = useState('');
+  const selectedStyles = open ? pendingStyles : appliedStyles, selectedSkills = open ? pendingSkills : appliedSkills;
+  const onStylesChange = (next: StudioStyleSummary[]) => { setUndo({ styles: selectedStyles, skills: selectedSkills }); if (open) setPendingStyles(next); else applyStyles(next); };
+  const onSkillsChange = (next: SkillSummary[]) => { setUndo({ styles: selectedStyles, skills: selectedSkills }); if (open) setPendingSkills(next); else applySkills(next); };
   const [manager, setManager] = useState<'menu' | Kind | null>(null);
   const [stylePage, setStylePage] = useState<PageState<StudioStyleSummary>>(emptyPage), [skillPage, setSkillPage] = useState<PageState<SkillSummary>>(emptyPage);
   const [recent, setRecent] = useState<Entry[]>([]), [recentError, setRecentError] = useState('');
@@ -86,7 +94,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
   useEffect(() => {
     sequences.current.styles++; sequences.current.skills++; sequences.current.recent++;
     const saved = readPreferences(key); setPreferences(saved); scroll.current = saved.scroll;
-    setOpen(false); setDetail(null); setManager(null); setStylePage(emptyPage()); setSkillPage(emptyPage()); setRecent([]); setMessage('');
+    setOpen(false); setDetail(null); setManager(null); setStylePage(emptyPage()); setSkillPage(emptyPage()); setRecent([]); setMessage(''); setUndo(null);
     refreshLegacy(); setInitialized(key);
     return () => { sequences.current.styles++; sequences.current.skills++; sequences.current.recent++; if (scrollTimer.current) clearTimeout(scrollTimer.current); };
   }, [key, refreshLegacy]);
@@ -95,8 +103,23 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
     const flush = () => savePreferences(); window.addEventListener('pagehide', flush);
     return () => { window.removeEventListener('pagehide', flush); savePreferences(); };
   }, [savePreferences]);
-  useEffect(() => { if (open) dialog.current?.showModal(); else dialog.current?.close(); }, [open]);
+  useEffect(() => { if (open && !detail && manager !== 'styles' && manager !== 'skills') dialog.current?.showModal(); else dialog.current?.close(); }, [open, detail, manager]);
   useEffect(() => { if (detail) details.current?.showModal(); else details.current?.close(); }, [Boolean(detail)]);
+  const detailId = detail?.kind === 'styles' && !detail.value.historical ? detail.value.id : '';
+  useEffect(() => {
+    setDetailError(''); setDetailLoading(false);
+    if (!detailId) return;
+    const controller = new AbortController(), actor = identity;
+    setDetailLoading(true);
+    void readPage('styles', '', '', [detailId], controller.signal).then(result => {
+      if (controller.signal.aborted || currentIdentity.current !== actor) return;
+      const group = result.items.find(item => item.id === detailId) as StudioStyleSummary | undefined;
+      if (!group) throw new Error('当前原组已不可用，未用空内容替代');
+      setDetail(current => current?.kind === 'styles' && current.value.id === detailId && !current.value.historical ? { kind: 'styles', value: group } : current);
+    }).catch(cause => { if (!controller.signal.aborted && currentIdentity.current === actor) setDetailError(cause.message); })
+      .finally(() => { if (!controller.signal.aborted && currentIdentity.current === actor) setDetailLoading(false); });
+    return () => controller.abort();
+  }, [detailId, identity]);
   const show = (category?: Category) => {
     if (initialized !== key) return;
     if (category) {
@@ -104,7 +127,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       setPreferences(current => ({ ...current, category, view: 'available', scroll: changed ? 0 : current.scroll }));
       pendingScroll.current = changed ? 0 : scroll.current;
     } else pendingScroll.current = scroll.current;
-    setMessage(''); setOpen(true);
+    setPendingStyles(appliedStyles); setPendingSkills(appliedSkills); setUndo(null); setMessage(''); setOpen(true);
   };
   useImperativeHandle(ref, () => ({ open: category => show(category) }));
   const close = () => {
@@ -112,19 +135,19 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
     if (manager === 'menu') { setManager(null); return; }
     savePreferences(); setOpen(false);
   };
-  useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
+  useDialogDismiss({ open: open && !detail && manager !== 'styles' && manager !== 'skills', dialogRef: dialog, nativeDialog: true, onDismiss: close });
   useDialogDismiss({ open: Boolean(detail), dialogRef: details, nativeDialog: true, onDismiss: () => setDetail(null) });
 
-  const query = preferences.query, styleCursor = preferences.pages.styles.cursor, skillCursor = preferences.pages.skills.cursor;
+  const query = preferences.query, styleScope = preferences.styleScope, styleCursor = preferences.pages.styles.cursor, skillCursor = preferences.pages.skills.cursor;
   useEffect(() => {
     if (!open || initialized !== key) return;
     const actor = identity, controller = new AbortController(), token = ++sequences.current.styles;
     setStylePage(current => ({ ...current, loading: true, error: '' }));
-    const timer = setTimeout(() => { void readPage('styles', query, styleCursor, undefined, controller.signal).then(result => {
+    const timer = setTimeout(() => { void readPage('styles', query, styleCursor, undefined, controller.signal, styleScope).then(result => {
       if (currentIdentity.current === actor && sequences.current.styles === token) setStylePage({ items: result.items as StudioStyleSummary[], next: result.next, loading: false, read: true, error: '', query, cursor: styleCursor });
     }).catch(error => { if (!controller.signal.aborted && currentIdentity.current === actor && sequences.current.styles === token) setStylePage(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : '风格组读取失败' })); }); }, 180);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [open, initialized, key, identity, query, styleCursor, retry.styles]);
+  }, [open, initialized, key, identity, query, styleScope, styleCursor, retry.styles]);
   useEffect(() => {
     if (!open || initialized !== key) return;
     const actor = identity, controller = new AbortController(), token = ++sequences.current.skills;
@@ -140,7 +163,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
     const actor = identity, controller = new AbortController(), token = ++sequences.current.recent;
     setRecentError(''); setRecentLoading(true);
     const timer = setTimeout(() => { void Promise.allSettled([
-      readPage('styles', query, '', recentStyles ? recentStyles.split(',') : [], controller.signal),
+      readPage('styles', query, '', recentStyles ? recentStyles.split(',') : [], controller.signal, styleScope),
       readPage('skills', query, '', recentSkills ? recentSkills.split(',') : [], controller.signal),
     ]).then(results => {
       if (controller.signal.aborted || currentIdentity.current !== actor || sequences.current.recent !== token) return;
@@ -160,7 +183,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       if (results.some(result => result.status === 'rejected')) setRecentError('部分最近使用内容未能读取，其他列表仍可使用');
     }); }, 180);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [open, initialized, key, identity, query, recentStyles, recentSkills, retry.recent]);
+  }, [open, initialized, key, identity, query, styleScope, recentStyles, recentSkills, retry.recent]);
   useLayoutEffect(() => {
     if (!open || detail || manager || pendingScroll.current === null) return;
     if (preferences.view !== 'selected' && (stylePage.loading || skillPage.loading || recentLoading
@@ -233,11 +256,19 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       <header className={styles.sectionHeader}><strong>{typeName(kind)}</strong><span>{state.loading ? '正在读取…' : currentPage ? `第 ${paging.page} 页` : state.error ? '保留上次成功结果' : '等待读取'}</span></header>
       {state.error && <p className={styles.error} role="alert">{state.error}，以下保留上次成功读取的内容，当前已选不变。<button type="button" onClick={() => setRetry(current => ({ ...current, [kind]: current[kind] + 1 }))}>重试{typeName(kind)}</button></p>}
       <div className={styles.grid}>{entries.filter(entry => !recentKeys.has(itemKey(entry))).map(card)}</div>
-      {!state.loading && !state.error && currentPage && !state.items.length && <p className={styles.muted}>{query ? '本页没有匹配内容' : '本页暂无可用内容'}{paging.page > 1 ? '，可回到上一页或首页' : ''}</p>}
+      {!state.loading && !state.error && currentPage && !state.items.length && <p className={styles.muted}>{query ? '没有匹配内容' : '暂无可用内容'}{query ? <button type="button" onClick={() => updateFilter({ query: '' })}>清除搜索</button> : kind === 'styles' && <button type="button" onClick={() => { setManager('styles'); styleManager.current?.edit(); }}><Plus size={16} />新建风格组</button>}</p>}
       {(paging.page > 1 || state.next) && <nav className={styles.pagination} aria-label={`${typeName(kind)}翻页`}><button type="button" disabled={state.loading || paging.page === 1} title="回到首页" aria-label={`${typeName(kind)}首页`} onClick={() => changePage(kind, 'home')}><Home size={16} /></button><button type="button" disabled={state.loading || Boolean(state.error) || !currentPage || !paging.previous.length} aria-label={`${typeName(kind)}上一页`} onClick={() => changePage(kind, 'previous')}><ChevronLeft size={16} /></button><span>{currentPage ? paging.page : '—'}</span><button type="button" disabled={state.loading || Boolean(state.error) || !currentPage || !state.next} aria-label={`${typeName(kind)}下一页`} onClick={() => changePage(kind, 'next')}><ChevronRight size={16} /></button></nav>}
     </section>;
   }
-  const styleUpdated = () => { pendingScroll.current = scroll.current; setRetry(current => ({ ...current, styles: current.styles + 1, recent: current.recent + 1 })); };
+  const styleUpdated = (group: StudioStyleSummary) => {
+    if (group.unavailable) {
+      const mark = (items: StudioStyleSummary[]) => items.map(item => item.id === group.id ? { ...item, unavailable: true } : item);
+      setPendingStyles(mark); applyStyles(mark(appliedStyles));
+    } else {
+      setPreferences(current => ({ ...current, query: '', styleScope: 'all', category: 'styles', view: 'available', styleRecent: [group.id, ...current.styleRecent.filter(id => id !== group.id)], pages: { ...current.pages, styles: pageDefaults() } }));
+    }
+    pendingScroll.current = scroll.current; setRetry(current => ({ ...current, styles: current.styles + 1, recent: current.recent + 1 }));
+  };
   const skillUpdated = () => { pendingScroll.current = scroll.current; setRetry(current => ({ ...current, skills: current.skills + 1, recent: current.recent + 1 })); };
   if (initialized !== key) return null;
   return <div className={styles.root}>
@@ -245,8 +276,9 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
     <button type="button" className={styles.addTile} title="选择风格组或提示词组" aria-label="添加风格组或提示词组" disabled={disabled} onClick={() => show()}><Plus size={24} /><span>添加风格组</span></button>
     <dialog ref={dialog} className={styles.dialog} aria-label="添加风格与提示词">
       <header className={styles.dialogHeader}><h2>添加风格与提示词</h2><button type="button" aria-label="关闭选择" disabled={Boolean(detail) || manager === 'styles' || manager === 'skills'} onClick={close}><X size={20} /></button></header>
-      <div className={styles.filters}><input aria-label="搜索风格组或提示词组名称及可查看说明" placeholder="搜索名称或说明" maxLength={160} value={query} onChange={event => updateFilter({ query: event.target.value })} /><button type="button" title="重置筛选与位置" aria-label="重置筛选与位置" onClick={() => { scroll.current = 0; pendingScroll.current = 0; setPreferences(current => ({ ...defaults(), styleRecent: current.styleRecent })); }}><RotateCcw size={16} /></button><button type="button" disabled={disabled} onClick={() => setManager(value => value === 'menu' ? null : 'menu')}><Settings2 size={16} />管理</button></div>
+      <div className={styles.filters}><input aria-label="搜索风格组或提示词组名称及可查看说明" placeholder="搜索名称或说明" maxLength={160} value={query} onChange={event => updateFilter({ query: event.target.value })} /><button type="button" title="重置筛选与位置" aria-label="重置筛选与位置" onClick={() => { scroll.current = 0; pendingScroll.current = 0; setPreferences(current => ({ ...defaults(), styleRecent: current.styleRecent })); }}><RotateCcw size={16} /></button><button type="button" disabled={disabled} onClick={() => { setManager('styles'); styleManager.current?.edit(); }}><Plus size={16} />新建风格组</button><button type="button" disabled={disabled} onClick={() => setManager(value => value === 'menu' ? null : 'menu')}><Settings2 size={16} />管理</button></div>
       <div className={styles.categories} role="group" aria-label="内容类型">{(['all', 'styles', 'skills'] as const).map(category => <button type="button" aria-pressed={preferences.category === category && preferences.view === 'available'} key={category} onClick={() => updateFilter({ category, view: 'available' })}>{category === 'all' ? '全部' : typeName(category)}</button>)}</div>
+      {preferences.category !== 'skills' && <div className={styles.categories} role="group" aria-label="风格组来源">{([['all', '全部风格'], ['mine', '我的'], ['shared', '共享']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={styleScope === value} onClick={() => setPreferences(current => ({ ...current, styleScope: value, pages: { ...current.pages, styles: pageDefaults() } }))}>{label}</button>)}</div>}
       {manager === 'menu' && <div className={styles.manageMenu}><button type="button" onClick={() => { setManager('styles'); styleManager.current?.open(); }}>管理风格组</button><button type="button" onClick={() => { setManager('skills'); skillManager.current?.open(); }}>管理提示词组</button><small>新建、编辑、复制、删除与合并在对应管理中完成。</small></div>}
       <div ref={body} className={styles.body} onScroll={event => { scroll.current = event.currentTarget.scrollTop; if (scrollTimer.current) clearTimeout(scrollTimer.current); scrollTimer.current = setTimeout(savePreferences, 200); }}>
         {message && <p role="status" className={styles.error}>{message}</p>}
@@ -256,9 +288,38 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
           {(preferences.category === 'all' || preferences.category === 'styles') && list('styles')}{(preferences.category === 'all' || preferences.category === 'skills') && list('skills')}
         </>}
       </div>
-      <footer className={styles.footer}><div><button type="button" onClick={() => updateFilter({ view: 'selected' })}>已选 {selected.length} 项 · 查看</button><small>风格组 {selectedStyles.length} · 提示词组 {selectedSkills.length}/12 · 风格图片 {imageCount}/{cap} 张</small><small>选择会立即更新当前设置，模板保存沿原入口。</small></div><button type="button" className={styles.primary} disabled={Boolean(detail) || manager === 'styles' || manager === 'skills'} onClick={close}>完成</button></footer>
+      <footer className={styles.footer}><div><button type="button" onClick={() => updateFilter({ view: 'selected' })}>已选 {selected.length} 项 · 查看</button><small>风格组 {selectedStyles.length} · 提示词组 {selectedSkills.length}/12 · 风格图片 {imageCount}/{cap} 张</small></div><button type="button" onClick={close}>取消</button><button type="button" className={styles.primary} disabled={Boolean(detail) || manager === 'styles' || manager === 'skills'} onClick={() => { applyStyles(pendingStyles); applySkills(pendingSkills); close(); }}>确认选择</button></footer>
     </dialog>
-    <dialog ref={details} className={`${styles.dialog} ${styles.details}`} aria-label="查看已选内容"><header className={styles.dialogHeader}><h2>{detail?.value.name}</h2><button type="button" aria-label="关闭详情" onClick={() => setDetail(null)}><X size={20} /></button></header>{detail && <div className={styles.detailBody}><p className={styles.muted}>{typeName(detail.kind)}{detail.value.unavailable ? ' · 已不可用，当前选择保留，请移除或重新选择' : ''}</p>{detail.value.coverUrl && !detail.value.unavailable && <img className={styles.detailCover} src={detail.value.coverUrl} alt={`${detail.value.name}封面`} />}{detail.kind === 'skills' ? <><pre>{detail.value.prompt || '当前未提供文字内容，请在管理中查看。'}</pre><button type="button" disabled={disabled || !detail.value.prompt} onClick={() => { const group = detail.value as SkillSummary; setDetail(null); setManager('skills'); skillManager.current?.edit(group, true); }}>保存文字副本</button>{!detail.value.unavailable && <button type="button" disabled={disabled} onClick={() => { const group = detail.value as SkillSummary; setDetail(null); setManager('skills'); skillManager.current?.edit(group); }}>编辑提示词组</button>}</> : <><p>{detail.value.referenceCount} 张风格参考图</p>{detail.value.canManage && !detail.value.unavailable && <><p>{detail.value.note || '未填写整体备注'}</p><div className={styles.referenceImages}>{detail.value.references?.map(reference => reference.thumbnailUrl && <figure key={reference.id}><img src={reference.thumbnailUrl} alt="风格参考图" /><figcaption>{reference.note}</figcaption></figure>)}</div><button type="button" disabled={disabled} onClick={() => { const group = detail.value as StudioStyleSummary; setDetail(null); setManager('styles'); styleManager.current?.edit(group); }}>编辑风格组</button></>}</>}</div>}</dialog>
+    {undo && <button type="button" title="撤销本次选择修改" aria-label="撤销本次选择修改" disabled={disabled} onClick={() => { if (open) { setPendingStyles(undo.styles); setPendingSkills(undo.skills); } else { applyStyles(undo.styles); applySkills(undo.skills); } setUndo(null); }}><Undo2 size={16} /></button>}
+    <dialog ref={details} className={`${styles.dialog} ${styles.details}`} aria-label="查看已选内容">
+      <header className={styles.dialogHeader}><h2>{detail?.value.name}</h2><button type="button" aria-label="关闭详情" onClick={() => setDetail(null)}><X size={20} /></button></header>
+      {detail && <div className={styles.detailBody}>
+        <p className={styles.muted}>{typeName(detail.kind)}{detail.value.unavailable ? ' · 已不可用，当前引用保留' : ''}{detail.kind === 'styles' && detail.value.historical ? ` · 当时版本${detail.value.revision === undefined ? '未记录' : ` ${detail.value.revision}`}` : ''}</p>
+        {detailLoading && <p role="status">正在读取完整内容…</p>}{detailError && <p role="status">{detailError}</p>}
+        {detail.value.coverUrl && <img className={styles.detailCover} src={detail.value.coverUrl} alt={`${detail.value.name}封面`} />}
+        {detail.kind === 'skills' ? <><pre>{detail.value.prompt || '当前未提供文字内容，请在管理中查看。'}</pre><button type="button" disabled={disabled || !detail.value.prompt} onClick={() => { const group = detail.value as SkillSummary; setDetail(null); setManager('skills'); skillManager.current?.edit(group, true); }}>保存文字副本</button>{!detail.value.unavailable && <button type="button" disabled={disabled} onClick={() => { const group = detail.value as SkillSummary; setDetail(null); setManager('skills'); skillManager.current?.edit(group); }}>编辑提示词组</button>}</> : <>
+          <p>{detail.value.referenceCount} 张风格参考图</p>
+          {!detailLoading && !detailError && (detail.value.canReadContent || detail.value.canManage) ? <>
+            <pre>{typeof detail.value.note === 'string' ? detail.value.note || '未填写整体备注' : '旧记录未保存整体备注，无法完整恢复'}</pre>
+            {detail.value.contentState === 'partial' && <p className={styles.muted}>这条旧记录缺少部分内容，仅展示已保存内容。</p>}
+            <div className={styles.referenceImages}>{detail.value.references?.map((reference, index) => <figure key={`${reference.id}:${index}`}>{reference.thumbnailUrl && <img src={reference.thumbnailUrl} alt={`风格参考图 ${index + 1}`} />}<figcaption>{reference.note || '未填写逐图备注'}</figcaption></figure>)}</div>
+            <button type="button" disabled={disabled} onClick={() => { const group = detail.value as StudioStyleSummary; setDetail(null); setManager('styles'); styleManager.current?.edit(group); }}>编辑当前原组</button>
+            <button type="button" disabled={disabled || !detail.value.canCopy} onClick={() => { const group = detail.value as StudioStyleSummary; setDetail(null); setManager('styles'); styleManager.current?.edit(group, true); }}><Copy size={16} />另存私人副本</button>
+            {(detail.value.historical || selectedStyles.some(group => group.id === detail.value.id && group.revision !== detail.value.revision)) && <button type="button" disabled={disabled} onClick={async () => {
+              const group = detail.value as StudioStyleSummary, actor = identity;
+              try {
+                const result = await readPage('styles', '', '', [group.id]);
+                if (currentIdentity.current !== actor) return;
+                const latest = result.items[0] as StudioStyleSummary | undefined;
+                if (!latest || latest.unavailable) throw new Error('当前原组不可用，历史选择保持不变');
+                if (selectedStyles.filter(item => item.id !== group.id).reduce((sum, item) => sum + item.referenceCount, 0) + latest.referenceCount > cap) throw new Error('本次风格图片额度不足，原选择保持不变');
+                onStylesChange(selectedStyles.map(item => item.id === group.id ? latest : item)); setDetail({ kind: 'styles', value: latest });
+              } catch (cause) { if (currentIdentity.current === actor) setDetailError(cause instanceof Error ? cause.message : '读取失败'); }
+            }}>用于本次：当前版本</button>}
+          </> : !detailLoading && !detailError && <p className={styles.muted}>可选用此组，内部备注和参考仅向有权读取者开放。</p>}
+        </>}
+      </div>}
+    </dialog>
     <StudioStyleGroups key={`styles:${identity}`} ref={styleManager} userId={userId} selected={selectedStyles} onChange={onStylesChange} currentImages={currentImages} maxReferences={cap} disabled={disabled} managementOnly onUpdated={styleUpdated} onClose={closeManager} />
     <StudioSkills key={`skills:${identity}`} ref={skillManager} userId={userId} selected={selectedSkills} onChange={onSkillsChange} disabled={disabled} managementOnly onUpdated={skillUpdated} onClose={closeManager} />
   </div>;

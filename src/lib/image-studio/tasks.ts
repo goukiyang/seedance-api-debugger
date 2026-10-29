@@ -9,6 +9,7 @@ import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
 import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { prisma } from '@/lib/prisma';
+import { historicalStudioStyles } from './style-history';
 import { assertUsageProject, inheritUsageAttribution, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
 import { getImageStudioSettings } from './settings';
@@ -761,7 +762,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         if (input.draft?.styleGroupIds !== undefined) {
           styleGroupIds = input.draft.styleGroupIds;
           const selected = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
-          if (restored) assertRestoredStudioStyleVersions(selected.groups, input.draft.styleGroupVersions!);
+          if (restored || input.draft.styleGroupVersions) assertRestoredStudioStyleVersions(selected.groups, input.draft.styleGroupVersions!);
           styleGroupSnapshot = selected.groups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
             referenceCount: group.references.length, ownerId: group.ownerId, ...(group.note ? { note: group.note } : {}) }));
           styleReferenceGroups = selected.groups.map((group, index) => ({ ...styleGroupSnapshot[index], references: group.references }));
@@ -809,6 +810,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw error;
       }
       const styleGroups = styleGroupIds.map(id => templateGroups.get(id) ?? chosen.get(id)!);
+      if (input.draft?.styleGroupVersions) assertRestoredStudioStyleVersions(styleGroups, input.draft.styleGroupVersions);
       if (styleGroups.flatMap(group => group.references).length > MAX_REFERENCE_IMAGES) throw new StudioError(`风格组图片合计不能超过 ${MAX_REFERENCE_IMAGES} 张`);
       styleGroupSnapshot = styleGroups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
         referenceCount: group.references.length, ownerId: group.ownerId, ...(group.note ? { note: group.note } : {}) }));
@@ -830,6 +832,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
           ? input.draft.styleGroupIds
           : workspace ? await getStudioModuleStyleIds(ownerId, workspace.id, tx) : [];
         const styles = await resolveStudioStyleReferences(identity, styleGroupIds, tx);
+        if (input.draft?.styleGroupVersions) assertRestoredStudioStyleVersions(styles.groups, input.draft.styleGroupVersions);
         styleGroupSnapshot = styles.groups.map(group => {
           const note = (group as { note?: unknown }).note;
           return { id: group.id, name: group.name, revision: group.revision, referenceCount: group.references.length,
@@ -1549,14 +1552,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     fixedReferenceCount: snapshotFixedReferences.length,
     templateFixedCount: typeof parsed.templateFixedCount === 'number' ? parsed.templateFixedCount : snapshotFixedReferences.length,
     styleGroupIds: Array.isArray(parsed.styleGroupIds) ? parsed.styleGroupIds.filter(id => typeof id === 'string') : [],
-    styleGroups: Array.isArray(parsed.styleGroups) ? parsed.styleGroups.flatMap(value => {
-      if (!value || typeof value !== 'object' || typeof value.id !== 'string' || typeof value.name !== 'string') return [];
-      const canViewNote = isAdmin || (typeof viewerOwnerId === 'string' && value.ownerId === viewerOwnerId);
-      return [{ id: value.id, name: value.name, referenceCount: typeof value.referenceCount === 'number' ? value.referenceCount : 0,
-        ...(Number.isSafeInteger(value.revision) && value.revision >= 0 ? { revision: value.revision as number } : {}),
-        ...(canViewNote && typeof value.note === 'string' ? { note: value.note } : {}),
-        coverUrl: `/api/image-studio/style-groups/${value.id}/cover`, canManage: false as const }];
-    }) : [],
+    styleGroups: historicalStudioStyles(parsed, task.id, { id: viewerOwnerId || '', role: isAdmin ? 'admin' : 'user' }),
     transientReferenceImages,
   };
 }

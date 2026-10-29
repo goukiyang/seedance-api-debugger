@@ -68,6 +68,72 @@ try {
   }
   const author = user('author', 'user', true), admin = user('admin', 'admin', true), ordinary = user('ordinary'); actor = author;
   const groups = load('src/lib/video/prompt-groups.server.ts'), contract = load('src/lib/video/prompt-groups.ts');
+  if (process.argv.includes('--management-safety')) {
+    const history = load('src/lib/image-studio/style-history.ts'), styles = load('src/lib/image-studio/style-groups.ts');
+    const groupId = randomUUID(), assetId = randomUUID(), taskId = randomUUID();
+    const snapshot = { styleGroups: [{ id: groupId, name: 'Frozen', revision: 2, ownerId: author.id, note: 'frozen-note', referenceCount: 1 }],
+      referenceImages: [{ id: assetId, referenceRole: 'style-fixed', note: 'frozen-image-note', hash: 'original-hash' }] };
+    const frozen = history.historicalStudioStyles(snapshot, taskId, author)[0];
+    assert.equal(frozen.note, 'frozen-note'); assert.equal(frozen.revision, 2); assert.equal(frozen.canManage, false);
+    assert.equal(frozen.canReadContent, true); assert.equal(frozen.canCopy, true); assert.equal(frozen.references[0].note, 'frozen-image-note');
+    assert.equal(frozen.references[0].originalUrl.includes(`/tasks/${taskId}/styles/`), true);
+    const restricted = history.historicalStudioStyles(snapshot, taskId, ordinary)[0];
+    assert.equal(restricted.canReadContent, false); assert.equal(JSON.stringify(restricted).includes('frozen-note'), false);
+    assert.equal(JSON.stringify(restricted).includes(assetId), false);
+    const partial = history.historicalStudioStyles({ ...snapshot, referenceImages: [] }, taskId, author)[0];
+    assert.equal(partial.contentState, 'partial'); assert.equal(partial.canCopy, false);
+    assert.equal(snapshot.styleGroups[0].revision, 2);
+    checks.push('frozen notes/references retain original version; foreign and incomplete histories fail closed');
+    await db.asset.create({ data: { id: assetId, owner_id: author.id, type: 'image', file_name: 'synthetic.png', mime_type: 'image/png', file_size: 1, original_url: 'https://fixture.invalid/input.png', status: 'active' } });
+    const input = { name: 'Image style', note: 'synthetic-image-note', references: [{ assetId, note: 'synthetic-reference-note' }], requestId: randomUUID() };
+    const created = await styles.saveStudioStyleGroup(author, input);
+    assert.equal((await styles.saveStudioStyleGroup(author, input)).id, created.id);
+    assert.equal((await styles.studioStyleOperationStatus(author, input.requestId)).state, 'saved');
+    assert.equal((await styles.studioStyleOperationStatus(ordinary, input.requestId)).state, 'unknown');
+    const copy = await styles.saveStudioStyleGroup(author, { ...input, requestId: randomUUID(), copyFrom: { id: created.id, revision: created.revision } });
+    assert.equal(copy.shared, false); await assert.rejects(styles.getStudioStyleGroup(ordinary, copy.id));
+    const draftId = randomUUID(), imageDraft = await styles.studioStyleDraft(author, draftId, { requestId: randomUUID(), expectedRevision: 0,
+      value: { id: copy.id, revision: copy.revision, name: copy.name, note: copy.note, coverAssetId: assetId, shared: false, disabled: false, references: [{ id: assetId, note: 'draft-note' }] } });
+    assert.equal(await styles.studioStyleDraft(ordinary, draftId), null);
+    assert.equal((await styles.studioStyleDraft(author, draftId)).value.references[0].originalUrl.startsWith('/api/'), true);
+    await styles.saveStudioStyleGroup(author, { ...input, id: copy.id, revision: copy.revision, requestId: randomUUID(), shared: false, draftId, draftRevision: imageDraft.revision });
+    assert.equal(await styles.studioStyleDraft(author, draftId), null);
+    const staleImageRequest = randomUUID();
+    assert.equal((await styles.saveStudioStyleGroup(author, { ...input, id: created.id, revision: 0, requestId: staleImageRequest })).operationState, 'conflict');
+    assert.equal((await styles.studioStyleOperationStatus(author, staleImageRequest)).state, 'conflict');
+    const deletion = randomUUID();
+    await assert.rejects(styles.deleteStudioStyleGroup(ordinary, created.id, created.revision, deletion));
+    await styles.deleteStudioStyleGroup(author, created.id, created.revision, deletion);
+    await styles.deleteStudioStyleGroup(author, created.id, created.revision, deletion);
+    assert.equal((await styles.studioStyleOperationStatus(author, deletion)).state, 'deleted');
+    await assert.rejects(styles.getStudioStyleGroup(author, created.id));
+    assert.equal(await db.asset.count({ where: { id: assetId } }), 1);
+    checks.push('image private-copy boundary, revision CAS, actor-scoped receipts and durable deletion preserve original asset');
+    const videoId = randomUUID(), savedInput = { groupId: videoId, revision: 0, requestId: randomUUID(), name: 'Video group', description: '', conditions: '', body: 'synthetic-video-secret', coverAssetId: null, shared: true, disabled: false };
+    const saved = await groups.saveVideoPromptGroup(author, savedInput), ref = { groupId: videoId, versionId: saved.versionId };
+    assert.equal((await groups.readVideoPromptGroupDetail(author, ref)).body, savedInput.body);
+    assert.equal(Object.hasOwn(await groups.readVideoPromptGroupDetail(ordinary, ref), 'body'), false);
+    assert.equal(groups.videoPromptGroupCreateState(author).canCreate, true);
+    assert.equal(groups.videoPromptGroupCreateState(ordinary).canCreate, false);
+    const draft = await groups.videoPromptGroupDraft(author, videoId, { requestId: randomUUID(), expectedRevision: 0, sourceRevision: String(saved.revision), values: { body: 'draft-body', metadata: '{}' } });
+    const updated = await groups.saveVideoPromptGroup(author, { ...savedInput, revision: saved.revision, requestId: randomUUID(), body: 'updated-body', draftRevision: draft.revision });
+    assert.equal(await groups.videoPromptGroupDraft(author, videoId), null);
+    const remove = { groupId: videoId, versionId: updated.versionId, revision: updated.revision, requestId: randomUUID() };
+    await assert.rejects(groups.deleteVideoPromptGroup(ordinary, remove));
+    const stale = await groups.deleteVideoPromptGroup(author, { ...remove, revision: 0, requestId: randomUUID() });
+    assert.equal(stale.state, 'conflict');
+    assert.equal((await groups.deleteVideoPromptGroup(author, remove)).state, 'deleted');
+    assert.equal((await groups.deleteVideoPromptGroup(author, remove)).state, 'deleted');
+    assert.equal((await groups.videoPromptGroupSaveStatus(author, remove.requestId)).state, 'deleted');
+    assert.equal((await groups.videoPromptGroupSelections(ordinary, [ref]))[0].unavailable, true);
+    assert.equal((await groups.readVideoPromptGroupDetail(author, ref)).body, savedInput.body);
+    assert.equal((await groups.listVideoPromptGroups(author, {})).groups.length, 0);
+    await assert.rejects(groups.saveVideoPromptGroup(author, { ...savedInput, revision: saved.revision, requestId: randomUUID() }));
+    assert.equal(await db.platformSetting.count({ where: { key: { startsWith: `video_prompt_group_version_v1:${videoId}:` } } }), 2);
+    checks.push('video private body authorization, stale-delete conflict receipt, tombstone/history retention and no resurrection');
+    console.log(JSON.stringify({ passed: true, mode: 'management-data-safety', checks, productionDatabaseAccess: 0, externalRequests: 0, functionalAcceptance: false, fixture }, null, 2));
+    await db.$disconnect(); process.exit(0);
+  }
   if (process.argv.includes('--reader-only')) {
     assert.equal(load('src/lib/video/prompt-groups-build-mode.ts').VIDEO_PROMPT_GROUP_WRITES_ENABLED, false);
     const groupId = randomUUID(), versionId = randomUUID(), body = 'synthetic-historical-secret';
@@ -87,6 +153,12 @@ try {
       creation_contract_version: 2, entry: 'ordinary' }));
     await assert.rejects(groups.saveVideoPromptGroup(author, {}));
     await assert.rejects(groups.videoPromptGroupDraft(author, groupId, {}));
+    await assert.rejects(groups.deleteVideoPromptGroup(author, { ...ref, revision: 1, requestId: randomUUID() }));
+    const styles = load('src/lib/image-studio/style-groups.ts');
+    assert.equal(load('src/lib/image-studio/style-groups-build-mode.ts').STUDIO_STYLE_GROUP_WRITES_ENABLED, false);
+    await assert.rejects(styles.saveStudioStyleGroup(author, {}));
+    await assert.rejects(styles.deleteStudioStyleGroup(author, groupId, 1, randomUUID()));
+    await assert.rejects(styles.studioStyleDraft(author, groupId, {}));
     assert.equal(groups.videoPromptGroupCreateCapability(author), false);
     const privacy = load('src/lib/video/multiview-task-privacy.ts');
     const task = { id: 'history', prompt: 'personal', local_status: 'succeeded', source_metadata_json: JSON.stringify({ video_prompt_groups: { schema: 1, refs: [ref] } }),

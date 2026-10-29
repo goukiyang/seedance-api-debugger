@@ -50,6 +50,17 @@ export async function readPrivatePromptDraft(actorId: string, target: DraftTarge
   const row = await prisma.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
   return row ? decode(row.value_json, binding, target) : null;
 }
+// The caller has already authorized the saved definition in this transaction.
+// Only consume the exact draft revision; keep newer drafts and every operation receipt.
+export async function clearAppliedPrivatePromptDraft(actorId: string, target: DraftTarget, revision: unknown,
+  client: Pick<Prisma.TransactionClient, 'platformSetting'>) {
+  if (!Number.isSafeInteger(revision) || Number(revision) < 1) return;
+  const { key, binding } = identity(actorId, target);
+  const row = await client.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
+  if (row && decode(row.value_json, binding, target).revision === revision) {
+    await client.platformSetting.deleteMany({ where: { key, value_json: row.value_json } });
+  }
+}
 export async function readPrivatePromptDraftReceipt(actorId: string, target: DraftTarget, requestId: string) {
   await requirePrivatePromptRequest(actorId, target.origins);
   if (!/^[A-Za-z0-9:_-]{1,160}$/.test(requestId)) throw new PrivatePromptError();

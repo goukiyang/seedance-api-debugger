@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { historicalStudioStyles } from './style-history';
 import { evolutionCapability } from './evolution';
 import { resolveModuleContextVersion } from './context-version';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
@@ -103,7 +104,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
       throw error;
     }
   }));
-  let reproductionState: { fixedReferenceCount: number; skills: unknown[]; styleGroups: Array<{ id: string; name: string; referenceCount: number; coverUrl: string; canManage: false }> } | null = null;
+  let reproductionState: { fixedReferenceCount: number; skills: unknown[]; styleGroups: ReturnType<typeof historicalStudioStyles> } | null = null;
   if (row.reproduce_task_id) {
     const sourceTask = await prisma.imageStudioTask.findFirst({ where: { id: row.reproduce_task_id, owner_id: ownerId }, select: { id: true, snapshot_json: true } });
     try {
@@ -112,8 +113,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
         skills: sourceTask && Array.isArray(snapshot.skills) ? snapshot.skills.flatMap((skill: SkillSnapshot, index: number) =>
           (isAdmin || skill.ownerId === ownerId) && typeof skill.prompt === 'string'
             ? [publicSkillSnapshot(skill, sourceTask.id, index)] : []) : [],
-        styleGroups: Array.isArray(snapshot.styleGroups) ? snapshot.styleGroups.filter((group: { id?: unknown; name?: unknown }) => typeof group.id === 'string' && typeof group.name === 'string')
-          .map((group: { id: string; name: string; referenceCount?: number }) => ({ id: group.id, name: group.name, referenceCount: Number(group.referenceCount) || 0, coverUrl: `/api/image-studio/style-groups/${group.id}/cover`, canManage: false })) : [] };
+        styleGroups: sourceTask ? historicalStudioStyles(snapshot, sourceTask.id, user) : [] };
     } catch { reproductionState = null; }
   }
   const assetIds = [...ids, ...(isAdmin ? fixedReferences.map(reference => reference.assetId) : []), ...(row.banner_asset_id ? [row.banner_asset_id] : [])];

@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '动作视频修复', outline: [
-  '修复3D多视图动作视频被旋转预设误拦截',
-  '保留拼图、动作内容和原请求保护',
+const notice = { title: '风格组修复', outline: [
+  '还原的风格组可查看当时备注与参考内容',
+  '完善风格组与视频提示词组的新建、另存和删除',
+  '保存与选用分开，保留历史和当前输入',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

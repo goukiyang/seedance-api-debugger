@@ -1,6 +1,6 @@
 import { getSession } from '@/lib/auth/session';
 import { listVideoPromptGroups, videoPromptGroupSelections, readVideoPromptGroupEditor,
-  saveVideoPromptGroup, videoPromptGroupSaveStatus, videoPromptGroupDraft, videoPromptGroupVersions } from '@/lib/video/prompt-groups.server';
+  saveVideoPromptGroup, videoPromptGroupSaveStatus, videoPromptGroupDraft, videoPromptGroupVersions, readVideoPromptGroupDetail, deleteVideoPromptGroup } from '@/lib/video/prompt-groups.server';
 import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 import { VideoPromptGroupError } from '@/lib/video/prompt-groups';
 import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
@@ -26,6 +26,8 @@ async function handle(request: Request) {
         p.get('groupId') || '', undefined, p.get('mode') === 'draft-status' ? p.get('requestId') || '' : undefined) }, { headers });
       if (p.get('mode') === 'editor') return Response.json(await readVideoPromptGroupEditor(user,
         { groupId: p.get('groupId') || '', versionId: p.get('versionId') || '' }, p.get('latest') === '1'), { headers });
+      if (p.get('mode') === 'detail') return Response.json(await readVideoPromptGroupDetail(user,
+        { groupId: p.get('groupId') || '', versionId: p.get('versionId') || '' }), { headers });
       if (p.has('refs')) {
         const raw = p.get('refs') || '[]';
         if (raw.length > 4096) throw new VideoPromptGroupError('选择内容过大', 400);
@@ -49,6 +51,7 @@ async function handle(request: Request) {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new VideoPromptGroupError('保存内容无效', 400);
     if (body.action === 'save-draft') return Response.json({ draft: await videoPromptGroupDraft(user, body.groupId, body) }, { headers });
+    if (body.action === 'delete') return Response.json(await deleteVideoPromptGroup(user, body), { headers });
     return Response.json(await saveVideoPromptGroup(user, body), { headers });
   } catch (error) {
     if (error instanceof PrivateDraftConflict) return Response.json({ error: error.message }, { status: 409, headers });
