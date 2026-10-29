@@ -64,7 +64,7 @@ export async function enqueueVideoFeishuNotification(tx: Db, actorId: string,
   const state = await preferenceState(tx, actorId);
   if (!state.identity || !state.view.enabled || state.view.revision !== selected.preferenceRevision) throw new VideoFeishuError('preference_changed', 409);
   const event = newVideoFeishuEvent(task.id, actorId, state.identity, selected);
-  event.presentation = newVideoFeishuPresentation(task.id, actual.project?.name, actual.video_card?.title);
+  // Compatible guard: existing frozen presentations stay readable; new events use legacy copy.
   const existing = await tx.notification.findUnique({ where: { id: event.eventId } });
   if (existing) {
     const previous = parseVideoFeishuEvent(existing.metadata_json);
