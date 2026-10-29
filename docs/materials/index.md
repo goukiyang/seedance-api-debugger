@@ -1,5 +1,11 @@
 # 项目资料索引
 
+## SAVE01 / DESIGN01 发布原证（2026-10-29）
+
+来源：本轮授权实施、已归档视频提示词组空库原图及实际构建/切换/公网回执；关键词：冻结历史、备注与逐图引用、当前鲜读、独立权限、耐久删除、原操作与相容恢复。正式根私有原单`tasks/todo/2026-10-12-style-skills-unified-selector.md`§11.3；原文件名`changed-files.json`、`main-build-success.json`、`rollback-build-success.json`、`public-deployed.json`、`health-final.json`及`FIXED-RECOVERY.txt`保存在既有`docs/materials/2026-10-12-studio-ui-clarity/save01-20261029/release-r04/`，关键JSON/源码与实际产物核同，旧阶段材料不冒最终。
+
+已部署v0.117.0/b4f21474/BUILD zQo3wUjN3JmY0kZzjpzXo，保12c41394新功能；新相容54f42bd8/BUILD Hm42dwM7PzTCvmPG639ut可程序恢复，不回DB/原件/回执。真实操作、小屏及旧端更新提醒待用户手验，无自动功能/浏览器/收费或独审。本公开提交只登记此脱敏入口，完整私人正文、原图与日志不上传。
+
 ## MV-GEN02 动作生成链路定位（2026-10-29）
 
 来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。原图沿该目录§23.4附件，未新增或外发媒体；完整原记录不推Git，候选0.116.3待部署，最终收费生成用户手验。
