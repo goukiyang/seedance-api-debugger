@@ -158,7 +158,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     onClose();
   };
   const applyResult = (data: { state: string }) => {
-    if (data.state === 'saved') { setPending(null); onSaved(); onClose(); }
+    if (data.state === 'saved') { remember(null, null); setPending(null); onSaved(); onClose(); }
     else if (data.state === 'conflict') { setPending(null); setConflict(true); setNotice('提示词组已有新版本，当前修改保留。'); }
     else setNotice('保存结果待确认，请继续查询原保存，勿重复保存。');
   };
