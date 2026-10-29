@@ -4,10 +4,10 @@
 
 | 编号 | 任务 | 完成标准 | 状态 |
 |---|---|---|---|
-| MV-GEN02 | 动作视频生成链路修复 | 查明断点、修复并完成必要检查和部署，交用户手验 | 根因与失败路径已证；最小修复/隔离检查通过，待完整构建和部署 |
+| MV-GEN02 | 动作视频生成链路修复 | 查明断点、修复并完成必要检查和部署，交用户手验 | 已完成工程/推送/部署v0.116.3；真实收费生成待用户手验 |
 
 仅 `/multiview` 的制作动作视频。普通生成UI不改，两入口共用原creation准备/计价、任务受理/费用事务、Seedance发送及status/结果后端。修复共用可用性检查误把动作绑定当旋转snapshot；不删源权限/私有规则检查，不另建收费机制，不重发未知或处理旧原请求。最新两个按钮位置、GEN-UX21–25及自由拼图/显式保存保持。
-原链路与实际失败→通过工程证据保正式根私有 `docs/materials/2026-10-29-multiview-action-fixes/implementation/mv-gen02-chain-evidence.json`；正式原单 `tasks/todo/2026-10-25-multiview-page-ux.md` §23.5。候选v0.116.3，风险L3，整批必要构建与本人Review后沿原保护发布；恢复复用0.116.2，不回业务数据。无收费生成/广泛浏览器/独审，功能最终用户手验。
+原链路与实际失败→通过工程证据保正式根私有 `docs/materials/2026-10-29-multiview-action-fixes/implementation/mv-gen02-chain-evidence.json`；正式原单 `tasks/todo/2026-10-25-multiview-page-ux.md` §23.5。已部署v0.116.3/12c41394，BUILD H8e1qqoC8QSRJWwNgrLaR；完整Next/type/lint、本人Review、6启动门/7服务及多视图公网资源同字节。回执沿同目录mv-gen02/deployment-result.json。风险L3，恢复复用0.116.2/29cfd72a，不回业务数据。无收费生成/广泛浏览器/独审，功能最终用户手验。
 
 ## FULL01 七组全量恢复（2026-10-23）
 

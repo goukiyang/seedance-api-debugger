@@ -2,7 +2,7 @@
 
 ## MV-GEN02 动作生成链路定位（2026-10-29）
 
-来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。原图沿该目录§23.4附件，未新增或外发媒体；完整原记录不推Git，候选0.116.3待部署，最终收费生成用户手验。
+来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。0.116.3/12c41394已部署，完整构建/6门/7服务/公网同源，私有证据沿同目录mv-gen02/deployment-result.json及public-deployed.json；0.116.2恢复保留。原图沿§23.4附件，未新增或外发媒体；完整原记录不推Git，最终收费生成用户手验。
 
 ## QUICK01 双请求头发布原证（2026-10-23）
 
