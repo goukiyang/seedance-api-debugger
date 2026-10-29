@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '项目菜单修复', outline: [
-  '项目菜单保持在素材区上方，长列表可独立滚动',
-  '新建项目固定显示在菜单顶部，选择和管理入口保留',
+const notice = { title: '创作恢复修复', outline: [
+  '修复无限画布首次打开时项目读取失败',
+  '原任务恢复后可继续创作，不再误报生成失败',
+  '提交结果待确认时保留原请求，避免重复生成',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
