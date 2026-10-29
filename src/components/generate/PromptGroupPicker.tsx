@@ -103,7 +103,7 @@ function GroupDetail({ item, onClose, onUse, onEdit, onCopy }: { item: Group | n
   return <><Modal open={Boolean(item) && Boolean(user?.id) && !sessionChanged} narrow title="提示词组详情" onClose={onClose} footer={<>
     {content?.canManage && onEdit && <button type="button" className={styles.button} onClick={onEdit}><Pencil size={15} />编辑当前原组</button>}
     {content?.canCopy && onCopy && <button type="button" className={styles.button} onClick={onCopy}><Copy size={15} />另存私人副本</button>}
-    {onUse && <button type="button" className={`${styles.button} ${styles.primary}`} disabled={Boolean(item?.unavailable)} onClick={onUse}>选用</button>}
+    {onUse && <button type="button" className={`${styles.button} ${styles.primary}`} disabled={loading || Boolean(error || item?.unavailable || content?.unavailable)} onClick={onUse}>选用</button>}
   </>}>{item && <div className={styles.detail}><div className={styles.cover}><Cover item={item} /></div><h3>{item.name || '提示词组不可用'}</h3>
     <Author item={item} onClick={() => setProfile(true)} /><p>{item.description || item.reason || '暂无用途简介'}</p>{item.conditions && <p>{item.conditions}</p>}
     <p className={styles.meta}>{item.shared ? '共享给同事' : '仅本人'} · {item.versionId === item.latestVersionId ? '当前版本' : '当时版本'}{item.disabled ? ' · 已停用' : ''}{content?.deleted ? ' · 已删除，历史保留' : ''}</p>

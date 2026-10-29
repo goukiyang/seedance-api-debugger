@@ -17,7 +17,7 @@ Object.assign(process.env, { NODE_ENV: 'test', PRIVATE_PROMPTS_FIXTURE_ROOT: fix
   SESSION_SECRET: randomBytes(48).toString('hex'), DATABASE_URL: `file:${fixture}/fixture.db` });
 const policy = { schema: 'private-prompt-policy.v1', revision: 'fixture-policy', state: 'compatible-read', minimumReader: 1,
   identities: [{ userId: 'author', tenant: 'tenant', subject: 'author-subject' }, { userId: 'admin', tenant: 'tenant', subject: 'admin-subject', administrator: true }],
-  origins: [], authorKinds: [{ ownerId: 'author', kinds: ['skill'] }], destinations: [], consumers: ['fixture'],
+  origins: [], authorKinds: [{ ownerId: 'author', kinds: ['skill'] }, { ownerId: 'admin', kinds: ['skill'] }], destinations: [], consumers: ['fixture'],
   keys: Object.fromEntries(['body', 'index', 'backup'].map(domain => { const file = path.join(fixture, `${domain}.key`); write(file, randomBytes(32)); return [domain, { active: domain, files: { [domain]: file } }]; })),
   activation: { inventoryId: 'fixture-inventory', restoreId: 'fixture-restore', writerFenceId: 'fixture-fence', attestationFile: path.join(fixture, 'consumers.json') },
   migrationVerified: { inventoryId: 'fixture-inventory', restoreId: 'fixture-restore', remainingPlaintext: 0 } };
@@ -92,6 +92,12 @@ try {
     assert.equal((await styles.studioStyleOperationStatus(ordinary, input.requestId)).state, 'unknown');
     const copy = await styles.saveStudioStyleGroup(author, { ...input, requestId: randomUUID(), copyFrom: { id: created.id, revision: created.revision } });
     assert.equal(copy.shared, false); await assert.rejects(styles.getStudioStyleGroup(ordinary, copy.id));
+    await db.platformSetting.createMany({ data: Array.from({ length: 50 }, (_, index) => {
+      const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+      return { key: `studio_style_group_v1:${id}`, value_json: JSON.stringify({ id, ownerId: admin.id, name: 'Private', coverAssetId: assetId, references: [{ assetId, note: '' }], revision: 1, shared: false }) };
+    }) });
+    assert.equal((await styles.listStudioStyleGroups(author)).groups.some(group => group.id === created.id), true);
+    await assert.rejects(styles.saveStudioStyleGroup(author, { ...input, id: created.id, revision: created.revision, requestId: randomUUID(), copyFrom: { id: created.id, revision: created.revision } }));
     const draftId = randomUUID(), imageDraft = await styles.studioStyleDraft(author, draftId, { requestId: randomUUID(), expectedRevision: 0,
       value: { id: copy.id, revision: copy.revision, name: copy.name, note: copy.note, coverAssetId: assetId, shared: false, disabled: false, references: [{ id: assetId, note: 'draft-note' }] } });
     assert.equal(await styles.studioStyleDraft(ordinary, draftId), null);
@@ -109,12 +115,18 @@ try {
     await assert.rejects(styles.getStudioStyleGroup(author, created.id));
     assert.equal(await db.asset.count({ where: { id: assetId } }), 1);
     checks.push('image private-copy boundary, revision CAS, actor-scoped receipts and durable deletion preserve original asset');
-    const videoId = randomUUID(), savedInput = { groupId: videoId, revision: 0, requestId: randomUUID(), name: 'Video group', description: '', conditions: '', body: 'synthetic-video-secret', coverAssetId: null, shared: true, disabled: false };
+    const videoId = randomUUID(), savedInput = { groupId: videoId, revision: 0, requestId: randomUUID(), name: 'Video group', description: '', conditions: '', body: 'synthetic-video-secret', coverAssetId: assetId, shared: true, disabled: false };
     const saved = await groups.saveVideoPromptGroup(author, savedInput), ref = { groupId: videoId, versionId: saved.versionId };
     assert.equal((await groups.readVideoPromptGroupDetail(author, ref)).body, savedInput.body);
     assert.equal(Object.hasOwn(await groups.readVideoPromptGroupDetail(ordinary, ref), 'body'), false);
     assert.equal(groups.videoPromptGroupCreateState(author).canCreate, true);
     assert.equal(groups.videoPromptGroupCreateState(ordinary).canCreate, false);
+    await assert.rejects(groups.saveVideoPromptGroup(author, { ...savedInput, revision: saved.revision, requestId: randomUUID(), copyFrom: ref }));
+    const copyInput = { ...savedInput, groupId: randomUUID(), requestId: randomUUID(), shared: false, copyFrom: ref };
+    const videoCopy = await groups.saveVideoPromptGroup(admin, copyInput);
+    const editedCopy = await groups.saveVideoPromptGroup(admin, { ...copyInput, copyFrom: undefined, revision: videoCopy.revision, requestId: randomUUID(), body: 'edited-copy' });
+    const copiedVersion = (await groups.readVideoPromptGroup(admin, { groupId: copyInput.groupId, versionId: editedCopy.versionId }, db, true)).version;
+    assert.equal(copiedVersion.coverOwnerId, author.id); assert.deepEqual(copiedVersion.source, ref);
     const draft = await groups.videoPromptGroupDraft(author, videoId, { requestId: randomUUID(), expectedRevision: 0, sourceRevision: String(saved.revision), values: { body: 'draft-body', metadata: '{}' } });
     const updated = await groups.saveVideoPromptGroup(author, { ...savedInput, revision: saved.revision, requestId: randomUUID(), body: 'updated-body', draftRevision: draft.revision });
     assert.equal(await groups.videoPromptGroupDraft(author, videoId), null);

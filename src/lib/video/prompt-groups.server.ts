@@ -54,7 +54,7 @@ export function videoPromptGroupCreateState(user: SessionUser) {
     return { canCreate: capability.canEditPrivatePrompt,
       createReason: capability.canEditPrivatePrompt ? '' : '请先通过飞书验证创作者身份，再新建提示词组',
       requiresIdentityVerification: capability.requiresIdentityVerification };
-  } catch { return { canCreate: false, createReason: '此账号尚无私有提示词创作配置，请联系管理员；现有共享组仍可选用' }; }
+  } catch { return { canCreate: false, createReason: '暂时无法确认新建权限，请刷新重试或联系管理员' }; }
 }
 export async function readVideoPromptGroup(user: SessionUser, ref: VideoPromptGroupRef, client: Client = prisma, manage = false) {
   internal(user); parseVideoPromptGroupRefs([ref]);
@@ -213,7 +213,7 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
   if (input.copyFrom !== undefined) {
     [source] = parseVideoPromptGroupRefs([input.copyFrom]);
     const original = await readVideoPromptGroup(user, source, prisma, true);
-    if (coverAssetId === original.version.coverAssetId) sourceCoverOwner = original.version.coverOwnerId || original.head.ownerId;
+    if (coverAssetId && coverAssetId === original.version.coverAssetId) sourceCoverOwner = original.version.coverOwnerId || original.head.ownerId;
   }
   const fingerprint = hash([groupId, input.revision, name, body, description, conditions, coverAssetId, input.shared, input.disabled, source]);
   return prisma.$transaction(async tx => {
@@ -226,6 +226,7 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
     const fresh = await tx.platformSetting.findUnique({ where: { key: headKey(groupId) }, select: { value_json: true } });
     const head = fresh ? JSON.parse(fresh.value_json) as Head : null;
     if (head?.deleted) throw new VideoPromptGroupError('原组已删除，当前输入保留，可另存副本');
+    if (source && head) throw new VideoPromptGroupError('另存必须使用新组编号，原组未修改');
     if (head && head.ownerId !== authority.ownerId) throw new VideoPromptGroupError('作者身份已变化，未保存', 409);
     if ((head?.revision || 0) !== input.revision) {
       if (!head) throw new VideoPromptGroupError('原提示词组已不可用', 409);
@@ -233,15 +234,18 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
       await tx.platformSetting.create({ data: { key: receiptKey(user.id, requestId), value_json: JSON.stringify({ ...result, fingerprint }), updated_by: user.id } });
       return result;
     }
+    const previous = head ? (await readVideoPromptGroup(user, { groupId, versionId: head.versionId }, tx, true)).version : null;
+    const inheritedCoverOwner = sourceCoverOwner || (previous?.coverAssetId === coverAssetId ? previous?.coverOwnerId : undefined);
+    const provenance = source || previous?.source;
     if (coverAssetId) {
-      const cover = await tx.asset.findFirst({ where: { id: coverAssetId, owner_id: sourceCoverOwner || authority.ownerId, status: 'active', type: 'image',
+      const cover = await tx.asset.findFirst({ where: { id: coverAssetId, owner_id: inheritedCoverOwner || authority.ownerId, status: 'active', type: 'image',
         AND: [await studioVisibleAssetWhere(user, tx)] }, select: { id: true } });
       if (!cover) throw new VideoPromptGroupError('封面不可用，请选择作者有权使用的图片', 403);
     }
     const next: Head = { schema: 1, id: groupId, ownerId: authority.ownerId, versionId: randomUUID(),
       revision: (head?.revision || 0) + 1, shared: source ? false : input.shared as boolean, disabled: input.disabled as boolean };
     const version: Version = { schema: 1, groupId, versionId: next.versionId, name, description, conditions, coverAssetId,
-      body: sealPrivatePrompt(body, binding(next, next.versionId)), operatorId: user.id, createdAt: new Date().toISOString(), ...(source ? { source } : {}), ...(sourceCoverOwner ? { coverOwnerId: sourceCoverOwner } : {}) };
+      body: sealPrivatePrompt(body, binding(next, next.versionId)), operatorId: user.id, createdAt: new Date().toISOString(), ...(provenance ? { source: provenance } : {}), ...(inheritedCoverOwner ? { coverOwnerId: inheritedCoverOwner } : {}) };
     await tx.platformSetting.create({ data: { key: versionKey(groupId, next.versionId), value_json: JSON.stringify(version), updated_by: user.id } });
     if (fresh) {
       const update = await tx.platformSetting.updateMany({ where: { key: headKey(groupId), value_json: fresh.value_json },
