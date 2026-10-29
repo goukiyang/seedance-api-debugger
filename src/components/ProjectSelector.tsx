@@ -19,8 +19,8 @@ export function ProjectSelector({ children, className, style, value, disabled, t
   const generatedId = useId(), id = suppliedId || generatedId;
   const [options, setOptions] = useState<Option[]>([]), [open, setOpen] = useState(false), [search, setSearch] = useState('');
   const [recovery, setRecovery] = useState<Array<{projectId:string;name:string;mode:'edit'|'delete'|'archive'}>>([]), [createRecovery, setCreateRecovery] = useState(false);
-  const [catalog, setCatalog] = useState<ProjectSelectorRecord[]>([]), [canCreate, setCanCreate] = useState(false), [notice, setNotice] = useState('');
-  const [position, setPosition] = useState<{left:number;top:number;width:number} | null>(null);
+  const [catalog, setCatalog] = useState<ProjectSelectorRecord[]>([]), [canCreate, setCanCreate] = useState(false), [catalogLoading, setCatalogLoading] = useState(false), [notice, setNotice] = useState('');
+  const [position, setPosition] = useState<{left:number;top:number;width:number;maxHeight:number} | null>(null);
   const [host, setHost] = useState<HTMLElement | null>(null), [management, setManagement] = useState<ProjectManagementRequest | null>(null);
   const catalogCallback = useRef(onCatalogChange); catalogCallback.current = onCatalogChange;
   useEffect(() => {
@@ -43,11 +43,11 @@ export function ProjectSelector({ children, className, style, value, disabled, t
     refresh(); const observer = new MutationObserver(refresh); observer.observe(element,{childList:true,subtree:true,attributes:true,characterData:true});
     return ()=>observer.disconnect();
   }, [children]);
-  useEffect(()=>{ setOpen(false); setManagement(null); setCatalog([]); setCanCreate(false); },[ownerId,sessionChanged]);
+  useEffect(()=>{ setOpen(false); setManagement(null); setCatalog([]); setCanCreate(false); setCatalogLoading(false); },[ownerId,sessionChanged]);
   useEffect(()=>{ if (disabled) setOpen(false); },[disabled]);
   useEffect(()=>{
     if (!open || !ownerId || sessionChanged) return;
-    let cancelled=false; setNotice('');
+    let cancelled=false; setNotice(''); setCatalogLoading(true);
     try {
       const prefix=`sd2:project-selector-mutation:v1:${ownerId}:`, createPrefix=`sd2-project-create:v1:${ownerId}:project-selector`;
       const originals:Array<{projectId:string;name:string;mode:'edit'|'delete'|'archive'}>=[];let creating=false;
@@ -62,23 +62,25 @@ export function ProjectSelector({ children, className, style, value, disabled, t
       setRecovery(originals);setCreateRecovery(creating);
     } catch { setNotice('原项目操作记录暂不可读取，可继续选择项目；没有再次提交。'); }
     void readProjectSelectorCatalog(ownerId).then(result=>{if(!cancelled){setCatalog(result.projects);setCanCreate(result.capabilities?.can_create_team_project === true && result.capabilities?.create_operation_version === 1);}})
-      .catch(cause=>{if(!cancelled){setCatalog([]);setCanCreate(false);setNotice(cause.message);}});
+      .catch(cause=>{if(!cancelled){setCatalog([]);setCanCreate(false);setNotice(cause.message);}})
+      .finally(()=>{if(!cancelled)setCatalogLoading(false);});
     return ()=>{cancelled=true;};
   },[open,ownerId,sessionChanged,revision]);
-  useDialogDismiss({open,dialogRef:panel,branchRefs:[trigger],modal:false,initialFocusRef:searchInput,onDismiss:()=>setOpen(false)});
+  useDialogDismiss({open,dialogRef:panel,layerSurfaceRef:panel,branchRefs:[trigger],modal:false,initialFocusRef:searchInput,onDismiss:()=>setOpen(false)});
   useEffect(()=>{
     if(!open) return;
     const place=()=>{
       if(!trigger.current || !panel.current) return;
       const anchor=trigger.current.getBoundingClientRect(),rect=panel.current.getBoundingClientRect(),viewport=window.visualViewport;
       const left=viewport?.offsetLeft || 0,top=viewport?.offsetTop || 0,right=left+(viewport?.width || innerWidth),bottom=top+(viewport?.height || innerHeight);
-      setPosition({left:Math.max(left+8,Math.min(anchor.left,right-rect.width-8)),top:anchor.bottom+rect.height+5<=bottom-8 ? anchor.bottom+5 : Math.max(top+8,anchor.top-rect.height-5),width:Math.max(240,Math.min(anchor.width,right-left-16))});
+      const width=Math.min(Math.max(240,anchor.width),right-left-16),maxHeight=Math.max(0,Math.min(460,bottom-top-16)),height=Math.min(rect.height,maxHeight);
+      setPosition({left:Math.max(left+8,Math.min(anchor.left,right-width-8)),top:anchor.bottom+height+5<=bottom-8 ? anchor.bottom+5 : Math.max(top+8,anchor.top-height-5),width,maxHeight});
     };
-    place(); const raf=requestAnimationFrame(()=>{place();(searchInput.current || panel.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"],button:not(:disabled)'))?.focus();});
+    place(); const raf=requestAnimationFrame(()=>{place();(searchInput.current || panel.current?.querySelector<HTMLButtonElement>('button[data-project-choice][aria-pressed="true"]:not(:disabled)') || panel.current?.querySelector<HTMLButtonElement>('button[data-project-choice]:not(:disabled)') || panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();});
     window.addEventListener('resize',place);window.addEventListener('scroll',place,true);window.visualViewport?.addEventListener('resize',place);
     return ()=>{cancelAnimationFrame(raf);window.removeEventListener('resize',place);window.removeEventListener('scroll',place,true);window.visualViewport?.removeEventListener('resize',place);};
-  },[open,options.length,notice]);
-  function toggle(){ setHost(trigger.current?.closest('dialog[open]') as HTMLElement || document.body);setSearch('');setPosition(null);setOpen(previous=>!previous); }
+  },[open,options.length,notice,search,recovery.length,createRecovery]);
+  function toggle(){ setHost(trigger.current?.closest('dialog[open]') as HTMLElement || document.body);setSearch('');setPosition(null);if(!open)setCatalogLoading(true);setOpen(previous=>!previous); }
   function choose(option:Option){
     if(disabled || option.disabled || !native.current) return;
     setOpen(false); if(option.value === selected) return;
@@ -103,6 +105,10 @@ export function ProjectSelector({ children, className, style, value, disabled, t
         event.preventDefault();const items=Array.from(panel.current?.querySelectorAll<HTMLButtonElement>('button[data-project-choice]:not(:disabled)') || []),index=items.indexOf(document.activeElement as HTMLButtonElement);
         const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;items[next]?.focus();
       }}>
+      <div className={styles.header}><span>选择项目</span><button type="button" className={styles.create}
+        disabled={!ownerId || sessionChanged || catalogLoading || !canCreate}
+        title={!ownerId ? '请先登录' : catalogLoading ? '正在确认项目权限' : !canCreate ? notice || '当前账号没有新建项目权限' : '新建项目'}
+        onClick={()=>manage({mode:'create'})}><Plus size={15}/><span>新建项目</span></button></div>
       {options.length>7 && <input ref={searchInput} type="search" className={styles.search} value={search} onChange={event=>setSearch(event.target.value)} placeholder="搜索项目" aria-label="搜索项目"/>}
       {unavailable && <p className={styles.notice} role="status">当前项目不可选，原选择和草稿已保留。</p>}
       <div className={styles.list}>{visible.map((option,index)=>{
@@ -113,14 +119,14 @@ export function ProjectSelector({ children, className, style, value, disabled, t
               {id:'edit',label:'编辑项目',icon:<Pencil size={14}/>,onSelect:()=>manage({mode:'edit',projectId:project.id})},
               ...(['personal','system'].includes(project.type) ? [] : [{id:'delete',label:'删除项目',icon:<Trash2 size={14}/>,danger:true,onSelect:()=>manage({mode:'delete',projectId:project.id})}]),
             ]}/>}</div></div>;
-      })}{!visible.length && <p className={styles.notice}>{search?'没有匹配项目':'暂无可选项目'}</p>}</div>
-      {notice && <p className={styles.notice} role="status">{notice}</p>}
+      })}{!visible.length && <p className={styles.notice}>{search?'没有匹配项目':'暂无可选项目'}</p>}
       {(recovery.length>0 || createRecovery) && <div className={styles.footer}>
         {createRecovery && <button type="button" className={styles.option} onClick={()=>manage({mode:'create'})}>核对原项目创建</button>}
         {recovery.map(original=><button key={original.projectId} type="button" className={styles.option}
           onClick={()=>manage({mode:original.mode,projectId:original.projectId})}><span>核对原{original.mode==='delete'?'删除':original.mode==='archive'?'归档':'保存'}：{original.name || original.projectId}</span></button>)}
       </div>}
-      {canCreate && <div className={styles.footer}><button type="button" className={styles.option} onClick={()=>manage({mode:'create'})}><Plus size={15}/><span>新建项目</span></button></div>}
+      </div>
+      {notice && <p className={styles.notice} role="status">{notice}</p>}
     </div>,host)}
     {management && ownerId && <ProjectManagementDialog key={`${ownerId}:${management.mode}:${management.projectId || ''}`} request={management} portalTarget={host} onClose={()=>{setManagement(null);trigger.current?.focus();}}/>}
   </span>;
