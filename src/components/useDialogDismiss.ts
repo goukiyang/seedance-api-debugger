@@ -10,6 +10,8 @@ export type DialogDismissOptions<T extends HTMLElement = HTMLElement> = {
   dialogRef: ElementRef<T>;
   /** Exact backdrop target for modal layers; omit for non-modal outside dismissal. */
   dismissSurfaceRef?: ElementRef;
+  /** Opt a non-modal popup into the same stacking order as its parent dialog. */
+  layerSurfaceRef?: ElementRef;
   /** External controls/popovers that belong to a non-modal layer. */
   branchRefs?: readonly ElementRef[];
   initialFocusRef?: ElementRef;
@@ -146,8 +148,8 @@ function focusLayer(layer: LayerRecord, preferInitial = false) {
 
 function syncLayerOrder() {
   layers.forEach((layer, index) => {
-    const surface = layer.surfaceRef?.current;
-    if (!surface || layer.optionsRef.current.modal === false) return;
+    const surface = layer.optionsRef.current.layerSurfaceRef?.current || layer.surfaceRef?.current;
+    if (!surface || layer.optionsRef.current.modal === false && !layer.optionsRef.current.layerSurfaceRef) return;
     if (layer.assignedSurface !== surface) {
       if (layer.assignedSurface) layer.assignedSurface.style.zIndex = layer.previousZIndex;
       layer.assignedSurface = surface;

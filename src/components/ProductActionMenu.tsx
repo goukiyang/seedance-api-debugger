@@ -16,7 +16,7 @@ export function ProductActionMenu({ label, actions, disabled, children, onOpenCh
   const id = useId();
   const onOpen = useRef(onOpenChange); onOpen.current = onOpenChange;
   useEffect(() => { onOpen.current?.(open); }, [open]);
-  useDialogDismiss({ open, dialogRef: menu, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
+  useDialogDismiss({ open, dialogRef: menu, layerSurfaceRef: portalTarget ? menu : undefined, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
   useEffect(() => {
     if (!open) return;
     const place = () => {
