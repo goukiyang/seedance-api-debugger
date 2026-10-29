@@ -1,5 +1,12 @@
 # V1.2 剩余模块落地 Todo
 
+## PLAN02 Generation Page UX Follow-up (2026-10-29)
+
+- [x] Documented the generation-page follow-up as revision R02, section 13 of the existing work order. The full work order and annotated source image are retained in the project's private local records.
+- [ ] UX21-UX25: consolidate ownership controls, compact the input area, distinguish asset/group add actions, align settings and submission controls, and preserve validation and request recovery semantics. Implementation is not authorized by this documentation-only request.
+- B01-B09 remain manual acceptance checks after implementation. Existing recent tasks, theme, permissions, pricing, saved preferences and original request identifiers must remain intact.
+- This commit contains only this sanitized index. No application code, release version, production configuration or deployment changes.
+
 ## FULL01 七组全量恢复（2026-10-23）
 
 用户最新授权“开始修改落地其他的全量”。当前恢复[联合单v1.3.0 §10](todo/2026-10-22-creation-experience-merged.md#10-full01-七组全量恢复实施2026-10-23)全部R01–R07及最终保护发布，保QUICK01 v0.103.2/129bf4fd、SIZE和旧差量；此前其余暂停状态转为历史。默认功能用户手验，不自动浏览器/收费生成/独审，整批实现后统一必要构建与发布保护，直接发布。effort4未确认仍默认6，pricing/canvas不盲开。
