@@ -13,7 +13,8 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS, DEFAULT_SEEDANCE_VIDEO_MODEL_ID, seedanceVideoDurationOptions, seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 import type { MultiviewWorkDto } from '@/lib/video/multiview-work-contract';
-import type { MultiviewActionBinding, MultiviewActionDraft, MultiviewActionRun, MultiviewActionState, MultiviewActionParameters, MultiviewActionContextKind } from '@/lib/video/multiview-action-contract';
+import { parseMultiviewActionBinding, type MultiviewActionBinding, type MultiviewActionDraft, type MultiviewActionRun, type MultiviewActionState, type MultiviewActionParameters, type MultiviewActionContextKind } from '@/lib/video/multiview-action-contract';
+import type { VideoCreationIntentDTO } from '@/lib/creation/contract';
 import styles from './multiview-action.module.css';
 
 type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; triggerHost: HTMLDivElement | null; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
@@ -156,6 +157,22 @@ export function MultiviewActionPanel(props: Props) {
       const requestId=`multiview-action:${binding.runId}`;
       const body:Record<string,unknown>={...frozen.parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:final.run.text,multiview_action:binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,max_estimated_cost:frozen.points,pricing_revision:frozen.pricingRevision,pricing_fingerprint_version:2};
       setMessage('正在核对本次费用并提交…');
+      if(creation.intent && !isResolvedCreationIntent(creation.intent) && creation.intent.request_id!==requestId){
+        const prior=await creation.queryOriginal();
+        if(!active(captured))return;
+        const priorBinding=parseMultiviewActionBinding(prior?.spec?.input.multiview_action);
+        if(prior && !isResolvedCreationIntent(prior) && priorBinding?.workId===binding.workId && prior.request_id===`multiview-action:${priorBinding.runId}`){
+          // Seal only an unused preparation in the existing CAS transaction. A late accepted task wins.
+          const closed=await api<{intent:VideoCreationIntentDTO}>(`/api/video/creation-intents/${encodeURIComponent(prior.id)}/close`,{expected_revision:prior.revision});
+          if(!active(captured))return;
+          if(closed.intent.accepted_task_id){
+            const accepted={key:prior.request_id,runId:priorBinding.runId,taskId:closed.intent.accepted_task_id};
+            setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));setSelectedRunId(priorBinding.runId);setConfirming(false);props.onView('video');
+            setMessage('原任务已经受理，已接回原任务；本次未重复提交。');await refresh();return;
+          }
+          if(closed.intent.state!=='closed')throw new Error('原准备仍待核对，尚未提交新的动作视频。');
+        }
+      }
       const previous=!isResolvedCreationIntent(creation.intent)?creation.intent:null;
       const prepared=await creation.prepare(body,requestId,previous);
       if(!active(captured))return;
@@ -205,7 +222,7 @@ export function MultiviewActionPanel(props: Props) {
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
     </aside>
-    {props.triggerHost&&createPortal(<button type="button" disabled={!currentQuote||submitting||saving||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>,props.triggerHost)}
+    {props.triggerHost&&createPortal(<button type="button" disabled={!currentQuote||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>,props.triggerHost)}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
     {confirming&&currentQuote&&<ConfirmDialog quote={currentQuote} parameters={currentQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
   </>;
