@@ -30,8 +30,8 @@
 .video-composer-extra-fields input[type=number] { width: 120px; padding: 6px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-primary); color: inherit; }
 .generation-composer--video .composer-action-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 0; padding: 12px 14px; border-top: 1px solid var(--border-color); }
 .generation-composer--video .composer-chips { flex: 1; display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
-.generation-composer--video .composer-chip { background: transparent; color: var(--text-primary); border: 0; padding: 8px 10px; border-radius: 4px; min-height: 36px; }
-.generation-composer--video .composer-chip-wrap { min-width: 0; }
+.generation-composer--video .composer-chip { background: transparent; color: var(--text-primary); border: 0; padding: 8px 10px; border-radius: 4px; min-height: 36px; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.generation-composer--video .composer-chip-wrap { min-width: 0; max-width: 100%; }
 .generation-composer--video .composer-action-right { display: grid; grid-template-columns: minmax(0, max-content) minmax(132px, max-content) 104px; align-items: center; gap: 10px; max-width: 100%; }
 .generation-composer--video .video-submit-accessory { grid-column: 1; min-width: 0; }
 .generation-composer--video .composer-action-right .composer-points { grid-column: 2; }
@@ -41,7 +41,7 @@
 .generation-composer--video .composer-resolution-approval { margin: 6px 14px; font-size: 12px; }
 .generation-composer--video .composer-queue-notice { margin: 8px 14px; }
 .composer-page--video .composer-project-controls { flex-wrap: wrap; gap: 10px; }
-.composer-page--video .video-selected-card { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.composer-page--video .video-selected-card { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .video-payer { font-size: 12px; }
 .video-settings-trigger { display: inline-flex; align-items: center; gap: 6px; }
 .video-composer-price { display: inline-flex; align-items: center; gap: 4px; min-width: 132px; min-height: 36px; font-variant-numeric: tabular-nums; }
