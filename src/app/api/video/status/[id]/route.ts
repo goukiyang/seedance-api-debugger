@@ -12,6 +12,7 @@ import { visibleProviderErrorMessage } from '@/lib/provider/error-message';
 import { publicVideoTaskPricing } from '@/lib/pricing/video';
 import { getVideoTaskStatusByClientRequestId } from '@/lib/provider/jimeng';
 import { isPrivateMultiviewTask, privateMultiviewFailure, projectPrivateMultiviewTask, type TaskProtectionSource } from '@/lib/video/multiview-task-privacy';
+import { hasVideoPromptGroups } from '@/lib/video/prompt-groups';
 import {
   taskThumbnailProjection,
   type TaskThumbnailProjectionSource,
@@ -79,7 +80,7 @@ export async function GET(
         { status: 404 },
       );
     }
-    protectedTask = isPrivateMultiviewTask(task);
+    protectedTask = isPrivateMultiviewTask(task) || hasVideoPromptGroups(task);
     if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) {
       return NextResponse.json(
         { error: '任务是 IP 生成任务', message: '请使用 IP 任务状态接口查询此任务' },
@@ -105,8 +106,8 @@ export async function GET(
               where: { id: task.id },
               data: {
                 provider_task_id: recovered.provider_task_id,
-                provider_status: recovered.provider_status,
-                raw_status_response: JSON.stringify(recovered.raw),
+                provider_status: hasVideoPromptGroups(task) ? recovered.local_status : recovered.provider_status,
+                raw_status_response: hasVideoPromptGroups(task) ? JSON.stringify({ recovered: true, local_status: recovered.local_status }) : JSON.stringify(recovered.raw),
                 error_message: null,
               },
             });

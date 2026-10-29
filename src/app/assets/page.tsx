@@ -30,6 +30,7 @@ import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapsh
 import { uploadSession } from '@/lib/http/upload-session';
 import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
 import MediaPreview from '@/components/MediaPreview';
+import { TaskPromptGroupOrigin } from '@/components/generate/TaskPromptGroupOrigin';
 import { InlineVideoCover } from '@/components/InlineVideoCover';
 import { AssetPreviewMedia } from '@/components/AssetPreviewMedia';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -2731,6 +2732,7 @@ function AssetsPageContent() {
           </div>
           {activeItemPrompt}
           {activeItemDetails()}
+          {activeItem.taskId && <TaskPromptGroupOrigin key={`${user?.id}:${activeItem.taskId}`} taskId={activeItem.taskId} />}
           </div>
           <div className={assetStyles.detailFooter}>
             {reuseEntryError && <span role="status">{reuseEntryError}</span>}

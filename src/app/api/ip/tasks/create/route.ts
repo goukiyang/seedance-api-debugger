@@ -7,6 +7,7 @@ import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { isActiveBranchStatus } from '@/lib/video-branches';
 import { NextRequest, NextResponse } from 'next/server';
+import { parseVideoPromptGroupRefs } from '@/lib/video/prompt-groups';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
 import { restoreCanvasVideoBatchCreate, assertCanvasVideoAdmission, bindCanvasVideoBatchTask,
   assertCanvasVideoBatchDedupe, recordCanvasVideoBatchRejection, canvasVideoBatchTaskResponse,
@@ -457,6 +458,8 @@ export async function POST(request: NextRequest) {
   }
 
   const receivedBody = await request.json();
+  try { if (parseVideoPromptGroupRefs(receivedBody.video_prompt_groups).length) return NextResponse.json({ error: '提示词组仅支持普通视频生成页，未提交本次生成' }, { status: 426 }); }
+  catch { return NextResponse.json({ error: '提示词组选择无效，未提交本次生成' }, { status: 400 }); }
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
     if (original?.request_fingerprint?.startsWith('pricing-v2:')

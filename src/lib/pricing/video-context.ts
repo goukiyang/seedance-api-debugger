@@ -19,6 +19,8 @@ import { parseMultiviewSettingsBinding } from '@/lib/video/multiview-generation-
 import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { resolveMultiviewActionForGeneration } from '@/lib/video/multiview-action.server';
 import { parseMultiviewActionBinding } from '@/lib/video/multiview-action-contract';
+import { assertVideoPromptGroupSurface } from '@/lib/video/prompt-groups';
+import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
 
 export type VideoPricingContext = {
   fingerprint: string;
@@ -61,6 +63,8 @@ export function assertVideoPricingFinalReferences(context: VideoPricingContext, 
 async function resolveContext(user: SessionUser, body: Record<string, unknown>,
   operation: 'create' | 'draft_upgrade', db: Prisma.TransactionClient): Promise<VideoPricingContext> {
   if (Buffer.byteLength(JSON.stringify(body)) > 262144) throw new PricingChargeError('视频报价上下文过大');
+  const groupRefs = assertVideoPromptGroupSurface(body);
+  const groups = groupRefs.length ? await resolveVideoPromptGroups(user, groupRefs, typeof body.prompt === 'string' ? body.prompt : '', db) : null;
   const canvasInput = await resolveCanvasReferenceInputs(user, body, db, { target: 'video' });
   let projectId = typeof body.project_id === 'string' ? body.project_id : '';
   const videoCardId = typeof body.video_card_id === 'string' && body.video_card_id ? body.video_card_id : null;
@@ -134,7 +138,13 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
     provider: body.provider || 'seedance', model: body.model, resolution: body.resolution, duration: body.duration,
     ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding,
     ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
-    ...(multiviewSettings ? { multiviewSettings } : {}) });
+    ...(multiviewSettings ? { multiviewSettings } : {}),
+    ...(groups ? { videoPromptGroups: { fingerprint: groups.fingerprint,
+      seed: body.seed ?? -1, generateAudio: body.generate_audio ?? true, returnLastFrame: body.return_last_frame ?? false,
+      watermark: body.watermark ?? false, generationMode: body.generation_mode || 'all_in_one_reference',
+      imageIds: body.reference_image_ids || [], imageUrls: body.reference_image_urls || [], audioUrls: body.reference_audio_urls || [],
+      firstFrameAssetId: body.first_frame_asset_id || null, lastFrameAssetId: body.last_frame_asset_id || null,
+      firstFrameUrl: body.first_frame_url || null, lastFrameUrl: body.last_frame_url || null, lora: body.lora_id || null } } : {}) });
   return { fingerprint, actorId: user.id, projectId, videoCardId, payer, referenceVideo, purpose, referenceVideoCount, referenceVideoFingerprint, templateRunId };
 }
 export async function resolveVideoPricingContext(user: SessionUser, body: Record<string, unknown>, operation: 'create' | 'draft_upgrade' = 'create',

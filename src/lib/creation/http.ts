@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession, AuthError, type SessionUser } from '@/lib/auth/session';
 import { CreationError } from './contract';
+import { VideoPromptGroupError } from '@/lib/video/prompt-groups';
 export async function creationHttp(action: (user: SessionUser) => Promise<unknown>) {
   const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
   try {
@@ -8,9 +9,9 @@ export async function creationHttp(action: (user: SessionUser) => Promise<unknow
     if (!user || user.status !== 'active' || user.expires_at && user.expires_at.getTime() <= Date.now()) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
     return NextResponse.json(await action(user), { headers });
   } catch (error) {
-    const known = error instanceof CreationError || error instanceof AuthError;
+    const known = error instanceof CreationError || error instanceof AuthError || error instanceof VideoPromptGroupError;
     return NextResponse.json({ error: known ? error.message : '操作结果暂时无法确认，请保留原请求号并查询',
-      code: error instanceof CreationError ? error.code : 'creation_result_unknown', stage: 'creation',
+      code: error instanceof CreationError || error instanceof VideoPromptGroupError ? error.code : 'creation_result_unknown', stage: 'creation',
       ...(error instanceof CreationError ? { field: error.field, action: error.action } : {}) },
     { status: known ? error.status : 503, headers });
   }

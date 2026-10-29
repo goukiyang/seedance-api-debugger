@@ -4,6 +4,7 @@ import { H3_VIDEO_PROVIDER, getH3TaskStatus } from './h3';
 import { getVideoTaskStatus } from './jimeng';
 import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from './volcengine-ip';
 import { isPrivateMultiviewTask } from '../video/multiview-task-privacy';
+import { hasVideoPromptGroups } from '../video/prompt-groups';
 
 export const VIDEO_TASK_PROVIDER_SEEDANCE = 'seedance';
 export const VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT = 'volcengine_mediakit';
@@ -11,6 +12,7 @@ export const VIDEO_TASK_PROVIDER_H3 = H3_VIDEO_PROVIDER;
 
 export type ProviderStatusTask = {
   provider?: string | null;
+  model?: string | null;
   provider_task_id: string | null;
   source_metadata_json?: string | null;
 };
@@ -69,7 +71,15 @@ function seedanceQueryContext(task: ProviderStatusTask): ProviderStatusQueryCont
     // not evidence that provider logs are safe, and must not cause another DB read.
     return { sensitiveRecipe: true };
   }
-  return { sensitiveRecipe: isPrivateMultiviewTask({ source_metadata_json: task.source_metadata_json }) };
+  return { sensitiveRecipe: isPrivateMultiviewTask({ source_metadata_json: task.source_metadata_json }) || hasVideoPromptGroups(task) };
+}
+
+function numericUsage(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(['completion_tokens', 'prompt_tokens', 'total_tokens', 'input_tokens', 'output_tokens',
+    'video_seconds', 'duration', 'frames'].filter(key => typeof source[key] === 'number' && Number.isFinite(source[key]))
+    .map(key => [key, source[key] as number]));
 }
 
 export async function getProviderTaskStatus(
@@ -84,9 +94,19 @@ export async function getProviderTaskStatus(
 
   const provider = normalizeProvider(task.provider);
   const fetchers = options.fetchers || defaultFetchers;
-  return provider === VIDEO_TASK_PROVIDER_SEEDANCE
+  let result: ProviderStatusResponse;
+  try { result = await (provider === VIDEO_TASK_PROVIDER_SEEDANCE
     ? fetchers.seedance(providerTaskId, seedanceQueryContext(task))
-    : fetcherForProvider(provider, fetchers)(providerTaskId);
+    : fetcherForProvider(provider, fetchers)(providerTaskId)); }
+  catch (error) { if (hasVideoPromptGroups(task)) throw new Error('原任务状态暂时无法核对，请稍后查询同一任务'); throw error; }
+  if (!hasVideoPromptGroups(task)) return result;
+  // Keep billing facts while excluding free-form supplier diagnostics and echoed input.
+  const usage = numericUsage(result.usage);
+  const safe = { ...result, provider_model: task.model || undefined, provider_status: result.local_status, usage,
+    error_message: result.error_message ? '视频服务未完成本次生成，请核对原任务及费用。' : undefined };
+  return { ...safe, raw: { provider_status: result.local_status, local_status: result.local_status,
+    actual_cost: result.actual_cost, currency_or_credit_type: result.currency_or_credit_type,
+    billing_status: result.billing_status, billing_time: result.billing_time, usage } };
 }
 
 export async function refreshProviderTaskResultUrl(

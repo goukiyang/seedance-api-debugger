@@ -4,6 +4,7 @@ import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { getExternalCallbackUrlFromParams } from '@/lib/video/delivery-policy';
 import { isPrivateMultiviewTask, projectPrivateMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { hasVideoPromptGroups } from '@/lib/video/prompt-groups';
 import { isPublicHttpUrl } from '@/lib/media/public-url';
 
 export const dynamic = 'force-dynamic';
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest) {
   const forwardResult = await forwardExternalCallback({
     taskId: task.id,
     paramsJson: finalTask.params_json || task.params_json,
-    payload: isPrivateMultiviewTask(task) ? (() => {
+    payload: isPrivateMultiviewTask(task) || hasVideoPromptGroups(task) ? (() => {
       const safe = projectPrivateMultiviewTask({ ...finalTask, source_metadata_json: task.source_metadata_json }) as unknown as Record<string, unknown>;
       const resultVideoUrl = finalTask.local_status === 'succeeded'
         ? [finalTask.public_video_url, finalTask.result_video_url].find(value => {

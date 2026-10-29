@@ -15,6 +15,8 @@ import {
   validateH3LoraPayload,
 } from '@/lib/integrations/h3';
 import { buildH3DiagnosticSnapshot } from '@/lib/provider/h3-diagnostics';
+import { privatePromptFetch, assertPrivateSend } from '@/lib/security/private-prompt-send.server';
+import type { PrivateOrigin } from '@/lib/security/private-prompts.server';
 
 export const H3_VIDEO_PROVIDER = 'h3';
 export const H3_ALLOWED_PRESET_IDS = H3_PRESET_OPTIONS.map((option) => option.id);
@@ -30,6 +32,7 @@ type H3FetchOptions = {
   adminToken?: string;
   signal?: AbortSignal;
   idempotencyKey?: string | null;
+  privateOrigins?: PrivateOrigin[];
 };
 
 export type H3GenerateInput = {
@@ -258,12 +261,16 @@ async function requestJson<T>(
     ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
   };
-  const response = await resolved.fetchImpl(`${resolved.baseUrl}${path}`, {
+  const endpoint = `${resolved.baseUrl}${path}`;
+  const init: RequestInit = {
     method: options.method || (options.body !== undefined ? 'POST' : 'GET'),
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     signal: resolved.signal,
-  });
+  };
+  const response = options.privateOrigins?.length
+    ? await privatePromptFetch({ endpoint, provider: 'h3', credential: token || '', model: String((options.body as Record<string, unknown>)?.preset_id || '') }, options.privateOrigins, init, resolved.fetchImpl)
+    : await resolved.fetchImpl(endpoint, init);
   const responseBody = await readResponseBody(response);
 
   if (!response.ok) {
@@ -276,6 +283,11 @@ async function requestJson<T>(
   }
 
   return responseBody as T;
+}
+
+export async function assertPrivateH3Destination(model: string, options: H3FetchOptions, origins: PrivateOrigin[]) {
+  const resolved = await resolveOptions(options, 'api');
+  assertPrivateSend({ endpoint: `${resolved.baseUrl}${H3_GENERATE_PATH}`, provider: 'h3', credential: resolved.apiToken || '', model }, origins);
 }
 
 export function buildH3GeneratePayload(input: H3GenerateInput): H3GeneratePayload {

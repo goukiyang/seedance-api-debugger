@@ -1,4 +1,5 @@
 import { CreationError } from '@/lib/creation/contract';
+import { parseVideoPromptGroupRefs } from '@/lib/video/prompt-groups';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -67,6 +68,8 @@ export async function POST(
     const body = parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
       ? parsedBody as Record<string, unknown>
       : {};
+    try { if (parseVideoPromptGroupRefs(body.video_prompt_groups).length) return NextResponse.json({ error: '样片升级沿原样片，不接受新组替换；未提交升级' }, { status: 426 }); }
+    catch { return NextResponse.json({ error: '提示词组选择无效，未提交升级' }, { status: 400 }); }
     if (
       body.provider_task_id
       || body.provider_draft_task_id

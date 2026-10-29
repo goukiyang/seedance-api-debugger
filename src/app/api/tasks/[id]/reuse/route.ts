@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isPrivateMultiviewTask, isPrivateMultiviewActionTask } from '@/lib/video/multiview-task-privacy';
+import { videoPromptGroupTaskRefs } from '@/lib/video/prompt-groups';
+import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from '@/lib/video/prompt-groups-build-mode';
+import { videoPromptGroupSelections } from '@/lib/video/prompt-groups.server';
 import { readSafePrivateMultiviewInput } from '@/lib/video/multiview-private-create.server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -288,6 +291,8 @@ export async function POST(
     }
 
     await assertCanViewTask(user, task);
+    const promptGroupRefs = videoPromptGroupTaskRefs(task);
+    const promptGroupSummaries = await videoPromptGroupSelections(user, promptGroupRefs);
 
     if (isPrivateMultiviewTask(task)) {
       if (isPrivateMultiviewActionTask(task)) return NextResponse.json({ error: '请在同步动作视频中继续编辑本次动作',
@@ -329,6 +334,13 @@ export async function POST(
     const operationRequest = taskReuseRequest(requestBody, user.id, params.id, request.headers.get('x-tab-id'));
     const previous = await readTaskReuseOperation(user, params.id, operationRequest);
     if (previous.body.reuse.status !== 'unknown') return NextResponse.json(previous.body, { status: previous.status, headers: taskReusePrivateHeaders });
+    if (promptGroupRefs.length && (!VIDEO_PROMPT_GROUP_WRITES_ENABLED || request.headers.get('x-video-prompt-groups-contract') !== '1')) {
+      const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, {
+        sourceStamp: taskReuseSourceStamp(task), items: [], payload: {}, rejection: { code: 'VIDEO_PROMPT_GROUP_CLIENT_REQUIRED',
+          message: '当前版本不能完整恢复提示词组，请更新后继续；原输入和成品保留。', status: 426 },
+      });
+      return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
+    }
     const requestedSurface = requestBody && typeof requestBody === 'object' && !Array.isArray(requestBody)
       ? (requestBody as { surface?: unknown }).surface
       : undefined;
@@ -410,7 +422,7 @@ export async function POST(
     if (hasSnapshotMappingData(snapshot?.asset_mapping_json) && snapshotAssetIds.length === 0) {
       warnings.add('原任务快照中的素材顺序记录无法识别，将按任务字段尝试恢复。');
     }
-    if (snapshot?.content_json && snapshotContent.length === 0) {
+    if (snapshot?.content_json && snapshotContent.length === 0 && !promptGroupRefs.length) {
       warnings.add('原任务快照中的素材用途记录无法识别，将按素材类型尝试恢复。');
     }
 
@@ -677,6 +689,7 @@ export async function POST(
     // Parameter recovery does not require mutating the reference workspace.
     // This same authorized projection also explains the definite no-write 409.
     const draft = {
+      ...(promptGroupRefs.length ? { video_prompt_groups: promptGroupRefs } : {}),
       task_id: task.id,
       provider,
       prompt: task.prompt,
@@ -710,7 +723,8 @@ export async function POST(
       draft,
       restored_references: preparedItems.length,
       skipped_references: skippedReferences,
-      inputWarnings: Array.from(warnings),
+      inputWarnings: [...Array.from(warnings), ...promptGroupSummaries.filter(group => group.unavailable)
+        .map(() => '原提示词组版本或权限已变化，引用已保留，请在生成页移除或替换；未冒充完整恢复。')],
       },
     });
     return NextResponse.json(outcome.body, { status: outcome.status, headers: taskReusePrivateHeaders });

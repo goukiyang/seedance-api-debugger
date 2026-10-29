@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
@@ -12,6 +13,7 @@ import {
 } from '@/lib/provider/reference-media-policy';
 
 interface Props {
+  accessibleOrdering?: boolean;
   assets: WorkspaceAssetItem[];
   uploadStatuses: Record<string, UploadStatus>;
   onUpload: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
@@ -90,6 +92,7 @@ function dragHasFiles(dataTransfer: DataTransfer): boolean {
 }
 
 export function ReferenceStrip({
+  accessibleOrdering = false,
   assets,
   uploadStatuses,
   onUpload,
@@ -162,7 +165,7 @@ export function ReferenceStrip({
 
   const handlePointerDown = useCallback((e: React.PointerEvent, asset: WorkspaceAssetItem) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.ref-thumb-remove, .ref-thumb-replace')) return;
+    if ((e.target as HTMLElement).closest('.ref-thumb-remove, .ref-thumb-replace, .ref-order-actions')) return;
     if (uploading || loading) return;
 
     const sourceKey = getItemKey(asset);
@@ -457,6 +460,13 @@ export function ReferenceStrip({
                 onPreview={onPreview}
               />
               {isLowResolution && <span className="ref-thumb-warning-badge">低清</span>}
+              {accessibleOrdering && displayAssets.length > 1 && <div className="ref-order-actions">
+                {[-1, 1].map(step => <button type="button" key={step} title={step < 0 ? '前移素材' : '后移素材'} aria-label={step < 0 ? '前移素材' : '后移素材'}
+                  disabled={uploading || loading || idx + step < 0 || idx + step >= displayAssets.length} onClick={() => {
+                    const next = [...orderedAssetsRef.current]; [next[idx], next[idx + step]] = [next[idx + step], next[idx]];
+                    void onReorder(next.map((item, index) => ({ assetId: item.assetId, sortOrder: index })));
+                  }}>{step < 0 ? <ArrowLeft size={12} /> : <ArrowRight size={12} />}</button>)}
+              </div>}
             </div>
           );
         })}

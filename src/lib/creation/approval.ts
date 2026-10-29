@@ -31,7 +31,8 @@ export async function requestVideoCreationApproval(user: SessionUser, id: string
     || !videoDeliveryStageForTask(baseline).stableDownloadReady) throw new CreationError('基准视频必须属于当前项目，且完整成品已就绪', 409, 'creation_baseline_unavailable');
   if (spec.video_card_id && (baseline.video_card_id !== spec.video_card_id || !['candidate','current_best','final'].includes(baseline.version_role) && !(spec.action === 'draft_upgrade' && baseline.id === spec.input.source_draft_task_id))) throw new CreationError('原视频卡的高清基准仍须属于原卡候选、最佳或最终版', 409, 'creation_legacy_baseline_invalid');
   const input = { ...spec.input, project_id: spec.project_id, video_card_id: spec.video_card_id };
-  const pricingContext = spec.input.provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, input, spec.action === 'draft_upgrade' ? 'draft_upgrade' : 'create');
+  const pricingContext = spec.input.provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, { ...input,
+    entry: spec.entry, creation_contract_version: 2 }, spec.action === 'draft_upgrade' ? 'draft_upgrade' : 'create');
   const quote = await quoteVideoPricing({ ...spec.input, provider: spec.input.provider || (spec.entry === 'ip' ? 'volcengine_ip' : 'seedance'),
     context: pricingContext } as VideoPricingInput);
   if (!intent.batch_id && quote.revision !== intent.pricing_revision) throw new CreationError('报价规则已变化，请重新确认未受理内容', 409, 'creation_requote_required', 'pricing_revision', 'requote');

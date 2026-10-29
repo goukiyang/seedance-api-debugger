@@ -14,6 +14,7 @@ import { quoteVideoPricing, requireVideoPricingRevision, videoPricingError } fro
 import { resolveVideoPricingContext, savedVideoPricingContextInput } from '@/lib/pricing/video-context';
 import { uniquePreserveOrder } from '@/lib/reference-albums/permissions';
 import { isPrivateMultiviewTask, isPrivateMultiviewActionTask, projectSelectedMultiviewTask, readMultiviewPrivateTaskMarker } from '@/lib/video/multiview-task-privacy';
+import { hasVideoPromptGroups } from '@/lib/video/prompt-groups';
 import { createPrivateMultiviewRetry } from '@/lib/video/multiview-private-create.server';
 import {
   PAID_GENERATION_INTENT_HEADER,
@@ -134,6 +135,9 @@ export async function POST(
         provider_task_id: acceptedRetry.provider_task_id, source_metadata_json: acceptedRetry.source_metadata_json }),
       { headers: { 'Cache-Control': 'private, no-store' } });
     }
+    if (hasVideoPromptGroups(originalTask)) return NextResponse.json({ error: '请复用输入到生成页，核对提示词组和费用后主动生成。',
+      code: 'VIDEO_PROMPT_GROUP_REUSE_REQUIRED', reuse_path: `/generate?reuse_source_task_id=${encodeURIComponent(originalTask.id)}` },
+      { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
     if (isPrivateMultiviewTask(originalTask)) {
       if (isPrivateMultiviewActionTask(originalTask)) return NextResponse.json({ error: 'MULTIVIEW_ACTION_REQUOTE_REQUIRED',
         message: '请回同步动作视频修改动作并确认新费用；原任务未重发。', target_path: '/multiview' }, { status: 409 });

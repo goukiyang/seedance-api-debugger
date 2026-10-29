@@ -20,6 +20,7 @@ import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/
 import { resolveMultiviewActionVideoInput } from '@/lib/video/multiview-action-video.server';
 import { StudioError } from '@/lib/template-studio/errors';
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { assertVideoPromptGroupSurface, VideoPromptGroupError } from '@/lib/video/prompt-groups';
 
 export async function GET(request: NextRequest) {
   return estimate(request);
@@ -120,6 +121,10 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
   }
 
   try {
+    if (body) {
+      const refs = assertVideoPromptGroupSurface(body);
+      if (refs.length && (hasCodexApiAuthSignal(request) || !body.project_id)) throw new VideoPromptGroupError('请选择普通视频创作项目后报价', 400);
+    }
     const actionInput = body?.multiview_action === undefined ? null : await resolveMultiviewActionVideoInput(user, {
       ...body, provider, model: parsedModel.model, duration, resolution,
     });
@@ -148,7 +153,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
     ...(actionInput ? { multiviewAction: actionInput.body.multiview_action } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    if (error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
+    if (error instanceof VideoPromptGroupError || error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
       { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof MultiviewSettingsError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code },
       { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });

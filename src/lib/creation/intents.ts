@@ -16,8 +16,9 @@ import { applyCanvasReferenceInputs, resolveCanvasReferenceInputs } from '@/lib/
 import { normalizeCanvasReferences } from '@/lib/canvas-references';
 import { normalizeVideoFeishuChoice, VideoFeishuError } from '@/lib/video/feishu-contract';
 import { resolveMultiviewActionVideoInput } from '@/lib/video/multiview-action-video.server';
+import { assertVideoPromptGroupSurface } from '@/lib/video/prompt-groups';
 
-const INPUT_FIELDS = ['provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
+const INPUT_FIELDS = ['video_prompt_groups', 'video_prompt_groups_contract', 'provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
   'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls',
   'reference_image_ids', 'canvas_references', 'video_feishu', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
@@ -25,6 +26,7 @@ const INPUT_FIELDS = ['provider', 'model', 'generation_mode', 'prompt', 'ratio',
   'canvas_document_id', 'canvas_node_id', 'workspace_id', 'preset_id', 'lora_id', 'audio_prompt', 'music_prompt',
   'scene', 'video_url', 'template_id', 'agent_run_id', 'selected_agent_plan_key', 'agent_prompt_snapshot', 'final_prompt_snapshot', 'prompt_user_edited', 'roleMediaContext', 'first_frame_asset_id', 'last_frame_asset_id', 'template_studio_parameters', 'omni_reference_task_type', 'promptMentions'] as const;
 export function normalizeVideoCreationSpec(body: Record<string, unknown>): VideoCreationSpec {
+  assertVideoPromptGroupSurface(body);
   if (Buffer.byteLength(JSON.stringify(body)) > 262144) throw new CreationError('创作输入过大', 400, 'creation_input_invalid');
   const action = body.action || 'generate', entry = body.entry || 'ordinary';
   if (!['generate', 'enhance', 'draft_upgrade'].includes(String(action))
@@ -56,7 +58,7 @@ export function normalizeVideoCreationSpec(body: Record<string, unknown>): Video
 export const creationSpecHash = (spec: VideoCreationSpec) => pricingFingerprint(spec);
 export function creationSubmissionSpec(body: Record<string, unknown>, intent: VideoCreationIntent) {
   const saved = JSON.parse(intent.spec_json) as VideoCreationSpec;
-  return normalizeVideoCreationSpec({ ...saved.input, ...body, action: saved.action, entry: saved.entry,
+  return normalizeVideoCreationSpec({ ...saved.input, ...body, creation_contract_version: 2, action: saved.action, entry: saved.entry,
     count: saved.count, continuation: body.continuation || saved.continuation,
     baseline_task_id: body.baseline_task_id === undefined ? saved.baseline_task_id : body.baseline_task_id,
     input_source_task_ids: body.input_source_task_ids === undefined ? saved.input_source_task_ids : body.input_source_task_ids });
@@ -103,7 +105,8 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   const parentId = creationParent(spec);
   if (parentId) await assertCreationLineageUnlocked(prisma, user, parentId, spec.project_id);
   for (const id of spec.input_source_task_ids) await readCreationSource(prisma, user, id);
-  const pricingBody = { ...spec.input, project_id: spec.project_id, video_card_id: spec.video_card_id, required_capabilities: body.required_capabilities };
+  const pricingBody = { ...spec.input, entry: spec.entry, creation_contract_version: 2,
+    project_id: spec.project_id, video_card_id: spec.video_card_id, required_capabilities: body.required_capabilities };
   const pricingContext = spec.action === 'enhance' || spec.input.provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, pricingBody, spec.action === 'draft_upgrade' ? 'draft_upgrade' : 'create');
   const provider = spec.action === 'enhance' ? 'volcengine_mediakit' : spec.input.provider || (spec.entry === 'ip' ? 'volcengine_ip' : 'seedance');
   const quote = await quoteVideoPricing({ ...spec.input, provider, model: spec.input.model, duration: spec.input.duration,

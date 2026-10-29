@@ -8,6 +8,7 @@ import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { canUseDirectAsset, assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { normalizeWorkspaceTabId } from '@/lib/assets/workspace';
 import { sharedStudioReadDiagnostics } from '@/lib/image-studio/read-snapshot';
+import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from '@/lib/video/prompt-groups-build-mode';
 import { canonicalTaskReuseOperation, parseTaskReuseOperationRequest, type TaskReuseOperationRequest,
   type TaskReuseOperationStatus, type TaskReuseWorkspaceItem } from './task-reuse-intent';
 
@@ -80,6 +81,10 @@ const workspaceItems = async (db: Db, workspaceId: string): Promise<TaskReuseWor
 })).map(item => ({ id: item.id, assetId: item.asset_id, referenceImageId: item.reference_image_id, role: item.role, sortOrder: item.sort_order }));
 async function result(db: Db, user: SessionUser, value: Stored) {
   const reuse = operation(value);
+  const draft = value.payload.draft as { video_prompt_groups?: unknown } | undefined;
+  if (!VIDEO_PROMPT_GROUP_WRITES_ENABLED && draft?.video_prompt_groups !== undefined) return { status: 200, body: {
+    reuse: { ...reuse, code: 'REUSE_RESULT_UNAVAILABLE', message: '原复用结果包含提示词组，请更新后继续；当前输入保留。' },
+  } };
   if (value.status === 'applied') {
     try { await assertSource(db, user, value.sourceTaskId); await assertItems(db, user, value.payload.workspace_assets as TaskReuseWorkspaceItem[]); }
     catch (error) {

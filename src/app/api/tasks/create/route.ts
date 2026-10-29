@@ -5,6 +5,10 @@ import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
 import { enqueueVideoFeishuNotification } from '@/lib/video/feishu-notification';
 import { VideoFeishuError } from '@/lib/video/feishu-contract';
+import { assertVideoPromptGroupSurface, hasVideoPromptGroups, VideoPromptGroupError } from '@/lib/video/prompt-groups';
+import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
+import { protectVideoPromptGroupTask } from '@/lib/video/prompt-group-execution.server';
+import { assertPrivateH3Destination } from '@/lib/provider/h3';
 import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { MULTIVIEW_GENERATION_WRITES_ENABLED } from '@/lib/video/multiview-build-mode';
 import { compileCanvasVideoPrompt } from '@/lib/canvas-video-prompt';
@@ -732,7 +736,7 @@ export async function POST(request: NextRequest) {
       await assertCanViewTask(user, original);
       if (original.request_fingerprint !== (isPrivateMultiviewActionTask(original) ? multiviewActionVideoFingerprint(receivedBody)
         : videoPricingBusinessFingerprint(receivedBody))) return NextResponse.json({ error: '原请求内容不同，请查询原任务；未重新生成', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
-      return isPrivateMultiviewTask(original)
+      return isPrivateMultiviewTask(original) || hasVideoPromptGroups(original)
         ? NextResponse.json(protectedMultiviewTaskPayload(original, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
         : NextResponse.json(canvasVideoBatchTaskResponse(original));
     }
@@ -859,7 +863,7 @@ export async function POST(request: NextRequest) {
   let response: NextResponse;
   try { response = await runCanvasAdmission(); }
   catch (error) {
-    if (error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
+    if (error instanceof VideoPromptGroupError || error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
       { status: error.status, headers: privateNoStore() });
     if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
@@ -886,7 +890,7 @@ export async function POST(request: NextRequest) {
         created_at: existing.created_at, project_id: existing.project_id, video_card_id: existing.video_card_id,
         template_studio_run_id: existing.template_studio_run_id, billing_scope: existing.billing_scope, billing_account_id: existing.billing_account_id,
         deduplicated: true, fingerprint_verified: true };
-      return isPrivateMultiviewTask(existing)
+      return isPrivateMultiviewTask(existing) || hasVideoPromptGroups(existing)
         ? NextResponse.json(protectedMultiviewTaskPayload(existing, { deduplicated: true, fingerprint_verified: true }), { headers: privateNoStore() })
         : NextResponse.json(payload);
     }
@@ -937,8 +941,14 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Validation ---
+  const groupRefs = assertVideoPromptGroupSurface(creationBody);
+  if (groupRefs.length && typeof body.prompt !== 'string') throw new VideoPromptGroupError('个人描述格式无法确认，请重新读取输入', 400);
+  if (groupRefs.length && (hasCodexApiAuthSignal(request) || !creationV2)) {
+    throw new VideoPromptGroupError('提示词组仅供普通视频创作入口执行，原输入保留', 403);
+  }
+  const videoGroups = await resolveVideoPromptGroups(user, groupRefs, typeof creationBody.prompt === 'string' ? creationBody.prompt : '');
   const privateMultiviewIntent = body.multiview_generation !== undefined;
-  if (!privateMultiviewIntent && (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim())) {
+  if (!privateMultiviewIntent && !groupRefs.length && (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim())) {
     return errorJson('提示词不能为空', 400);
   }
   if (!privateMultiviewIntent && exceedsGenerationPromptLimit(body.prompt)) {
@@ -1038,6 +1048,13 @@ export async function POST(request: NextRequest) {
       return errorJson(error instanceof Error ? error.message : 'H3 LoRA 无效', 400);
     }
     selectedModel = requestedPreset;
+    if (groupRefs.length) {
+      try { await assertPrivateH3Destination(selectedModel, { baseUrl: h3Settings.base_url, apiToken: h3Settings.api_token || undefined }, videoGroups.origins); }
+      catch (error) {
+        if (error instanceof PrivatePromptError) throw new VideoPromptGroupError('当前 H3 尚未获准接收提示词组内部正文，请改用 Seedance 或移除组；尚未受理，输入保留。', 403, 'VIDEO_PROMPT_GROUP_H3_DESTINATION_NOT_APPROVED');
+        throw error;
+      }
+    }
   } else {
     const parsedModel = parseSeedanceVideoModel(body.model);
     if (!parsedModel.ok) return errorJson(parsedModel.message, 400);
@@ -1455,7 +1472,7 @@ export async function POST(request: NextRequest) {
         billing_scope: existing.billing_scope,
         billing_account_id: existing.billing_account_id,
       };
-      return isPrivateMultiviewTask(existing)
+      return isPrivateMultiviewTask(existing) || hasVideoPromptGroups(existing)
         ? NextResponse.json(protectedMultiviewTaskPayload(existing, {
             deduplicated: true, fingerprint_verified: decision.fingerprintVerified,
           }), { headers: privateNoStore() })
@@ -1488,9 +1505,10 @@ export async function POST(request: NextRequest) {
       provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, draft: draftRequested });
     priceQuote = await quoteVideoPricing({ provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance', model: selectedModel, resolution, duration, context: pricingContext });
     requireVideoPricingRevision(priceQuote, body.pricing_revision);
-    requireScopeCredential = Boolean(multiviewAction || multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
+    requireScopeCredential = Boolean(groupRefs.length || multiviewAction || multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
     if (requireScopeCredential) verifyVideoPricingCredential(body.pricing_quote_token, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   } catch (error) {
+    if (error instanceof VideoPromptGroupError) throw error;
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });
   }
@@ -1540,6 +1558,7 @@ export async function POST(request: NextRequest) {
     ? { protected_module: multiviewActionPrivateTaskMarker(creationBody.multiview_action as MultiviewActionBinding) } : multiviewGeneration
     ? { protected_module: multiviewPrivateTaskMarker(multiviewGeneration.presetVersion) }
     : ordinarySourceMetadata;
+  if (groupRefs.length) sourceMetadata.video_prompt_groups = { schema: 1, refs: groupRefs };
   const workspace = multiviewGeneration ? await prisma.workspace.findFirst({
     where: trustedMultiviewSourceTask
       ? { id: trustedMultiviewSourceTask.workspace_id!, owner_id: user.id, status: 'active' }
@@ -1982,6 +2001,12 @@ export async function POST(request: NextRequest) {
       ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
       : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
     ({ promptRendered, assetMapping } = rendered);
+    if (groupRefs.length) {
+      // Render only personal asset references; groups cannot create hidden material bindings.
+      const compiled = await resolveVideoPromptGroups(user, groupRefs, promptRendered);
+      promptRendered = compiled.prompt;
+      finalPromptSnapshot = promptRendered;
+    }
     if ('canvasPromptFingerprint' in rendered) sourceMetadata.canvas_prompt_fingerprint = rendered.canvasPromptFingerprint;
   } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
@@ -2108,6 +2133,7 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Create snapshot ---
+  if (groupRefs.length && requestedProvider !== H3_VIDEO_PROVIDER) assertPrivateSeedanceDestination(selectedModel, videoGroups.origins);
   const content = requestedProvider === H3_VIDEO_PROVIDER ? [] : buildContentArray(providerInput);
   if (multiviewGeneration) assertPrivateSeedanceDestination(selectedModel);
   const snapshot = await createTaskSnapshot({
@@ -2115,6 +2141,8 @@ export async function POST(request: NextRequest) {
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
+    ...(groupRefs.length ? { promptRenderedOverride: promptRendered, assetMappingOverride: assetMapping,
+      protectedGroups: { origins: videoGroups.origins } } : {}),
     ...(multiviewGeneration ? {
       promptRenderedOverride: promptRendered,
       assetMappingOverride: assetMapping,
@@ -2143,6 +2171,7 @@ export async function POST(request: NextRequest) {
           ...(videoEditRequested ? { requested_duration: duration, source_video: editReference, ...seedanceVideoEditParameters(providerInput) } : {}) }),
   });
   const taskParams = {
+    ...(groupRefs.length ? { videoPromptGroups: groupRefs, videoPromptGroupsContract: 1 } : {}),
     ...(multiviewAction ? { multiviewAction: creationBody.multiview_action } : {}),
     ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
@@ -2317,7 +2346,7 @@ export async function POST(request: NextRequest) {
         }
       }
       const task = await tx.videoTask.create({
-        data: protectMultiviewActionVideoTask(transformPrivateVideoText('video-task', {
+        data: protectVideoPromptGroupTask(protectMultiviewActionVideoTask(transformPrivateVideoText('video-task', {
           id: randomUUID(),
           provider: requestedProvider,
           model: selectedModel,
@@ -2371,7 +2400,7 @@ export async function POST(request: NextRequest) {
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify(taskParams),
-        }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)), multiviewAction?.action || null),
+        }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)), multiviewAction?.action || null), videoGroups.origins),
       });
 
       await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
@@ -2616,7 +2645,7 @@ export async function POST(request: NextRequest) {
           deduplicated: true,
           fingerprint_verified: decision.fingerprintVerified,
         };
-        return isPrivateMultiviewTask(racedTask)
+        return isPrivateMultiviewTask(racedTask) || hasVideoPromptGroups(racedTask)
           ? NextResponse.json(protectedMultiviewTaskPayload(racedTask, {
               deduplicated: true, fingerprint_verified: decision.fingerprintVerified,
             }), { headers: privateNoStore() })
@@ -2694,7 +2723,9 @@ export async function POST(request: NextRequest) {
       endpoint: requestedProvider === H3_VIDEO_PROVIDER ? 'h3.generate' : 'seedance.createVideoTask',
       method: 'POST',
       idempotencyKey: providerIdempotencyKey,
-      requestPayload: requestedProvider === H3_VIDEO_PROVIDER
+      requestPayload: groupRefs.length ? { video_prompt_groups: { schema: 1, refs: groupRefs }, provider: requestedProvider,
+        model: selectedModel, generation_mode: generationMode, ratio, duration, resolution }
+        : requestedProvider === H3_VIDEO_PROVIDER
         ? {
             ...h3GeneratePayload,
             source: {
@@ -2730,12 +2761,13 @@ export async function POST(request: NextRequest) {
           baseUrl: h3Settings.base_url,
           apiToken: h3Settings.api_token || undefined,
           idempotencyKey: providerIdempotencyKey,
+          ...(groupRefs.length ? { privateOrigins: videoGroups.origins } : {}),
         })
       : await createVideoTask(
           { ...providerInput, ...seedanceReferenceTransport },
           diagnostic => { seedanceDiagnostic.value = diagnostic; },
-          { sensitiveRecipe: Boolean(multiviewGeneration || multiviewAction),
-            ...(multiviewAction ? { privateOrigins: multiviewAction.action.origins } : {}) },
+          { sensitiveRecipe: Boolean(groupRefs.length || multiviewGeneration || multiviewAction),
+            ...(groupRefs.length ? { privateOrigins: videoGroups.origins } : multiviewAction ? { privateOrigins: multiviewAction.action.origins } : {}) },
         );
 
     await prisma.videoTask.update({
@@ -2743,7 +2775,7 @@ export async function POST(request: NextRequest) {
       data: {
         provider_task_id: providerResult.provider_task_id,
         ...(draftRequested ? { provider_draft_task_id: providerResult.provider_task_id } : {}),
-        raw_create_response: JSON.stringify(providerResult.raw),
+        raw_create_response: groupRefs.length ? JSON.stringify({ accepted: true }) : JSON.stringify(providerResult.raw),
         local_status: 'submitted',
       },
     });
@@ -2805,7 +2837,7 @@ export async function POST(request: NextRequest) {
         : {});
     const referenceImageResizeSummary = buildReferenceImageResizeSummary(preparedImages);
 
-    if (multiviewGeneration || multiviewAction) {
+    if (groupRefs.length || multiviewGeneration || multiviewAction) {
       return NextResponse.json(protectedMultiviewTaskPayload({ ...createdTask,
         provider_task_id: providerResult.provider_task_id, local_status: 'submitted' }, {
         status: 'submitted', pricing: publicVideoPricing(priceQuote),
@@ -2856,7 +2888,7 @@ export async function POST(request: NextRequest) {
         data: { error_code: 'PRIVATE_PROMPT_UNCONFIRMED', error_message: '内部模板安全配置待核对，原请求及预留保留，请管理员核对；不会重新提交。' } });
       return errorJson('内部模板安全配置待核对，原请求及预留已保留，请按原请求查询，不要重新提交。', 503);
     }
-    const providerFailureMessage = err instanceof Error
+    const providerFailureMessage = groupRefs.length ? '视频服务暂未完成本次生成，请核对原任务状态和费用。' : err instanceof Error
       ? err.message
       : requestedProvider === H3_VIDEO_PROVIDER ? 'H3 调用异常' : 'Seedance 调用异常';
     const userFacingFailure = providerCreateFailureUserMessage(providerFailureMessage);
@@ -2892,7 +2924,7 @@ export async function POST(request: NextRequest) {
                 retryAfterSeconds: err instanceof H3RequestError ? err.retryAfterSeconds ?? null : null,
                 health: h3Settings?.health || null,
                 queue: h3Settings?.health?.queue || null,
-                raw: err instanceof H3RequestError ? err.raw : null,
+                raw: groupRefs.length ? null : err instanceof H3RequestError ? err.raw : null,
               })
             : undefined,
         },

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { taskThumbnailProjection, type TaskThumbnailProjectionSource } from './task-thumbnail-projection';
 import { parseMultiviewActionBinding, type MultiviewActionBinding } from './multiview-action-contract';
+import { hasVideoPromptGroups, videoPromptGroupTaskRefs } from './prompt-groups';
 
 /** This object is written only after the server has accepted a private recipe. */
 export type MultiviewPrivateTaskMarker = { kind: 'multiview' | 'multiview-action'; schema: 1; recipeVersion: string;
@@ -125,7 +126,7 @@ function relation(value: unknown, keys: string[]) {
 
 /** Positive allowlist for every browser surface, including the task owner. */
 export function projectPrivateMultiviewTask<T extends object & TaskProtectionSource>(task: T): T {
-  if (!isPrivateMultiviewTask(task)) return task;
+  if (!isPrivateMultiviewTask(task)) return hasVideoPromptGroups(task) ? projectVideoPromptGroupTask(task) : task;
   const source = task as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of scalarKeys) if (source[key] !== undefined && scalar(source[key])) result[key] = source[key];
@@ -164,9 +165,47 @@ export function projectPrivateMultiviewTask<T extends object & TaskProtectionSou
   return result as T;
 }
 
+/** Group execution material is never exposed, even to the task's own creator. */
+export function projectVideoPromptGroupTask<T extends object & TaskProtectionSource>(task: T): T {
+  if (!hasVideoPromptGroups(task)) return task;
+  const source = task as Record<string, unknown>, result: Record<string, unknown> = {};
+  for (const key of [...scalarKeys, 'prompt', 'source_label', 'first_frame_url', 'last_frame_url',
+    'public_video_url', 'local_video_path', 'result_video_url', 'result_last_frame_url',
+    'reference_image_ids', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'frame_image_urls',
+    'reference_album_ids', 'workspace_id', 'creation_intent_id', 'creation_parent_task_id', 'creation_baseline_task_id',
+    'source_draft_task_id', 'draft_upgrade_mode', 'draft_contract_version'] as const) {
+    if (source[key] !== undefined && scalar(source[key])) result[key] = source[key];
+  }
+  if (result.provider_status != null && !providerStatuses.has(String(result.provider_status).toLowerCase())) result.provider_status = 'unknown';
+  try { result.video_prompt_groups = videoPromptGroupTaskRefs(task); } catch { result.video_prompt_groups = []; result.prompt_groups_unavailable = true; }
+  result.video_prompt_groups_contract = 1;
+  result.source_metadata_json = null;
+  result.error_message = source.error_message ? '本次生成尚未完成，请核对原任务状态和费用；输入仍保留。' : null;
+  result.error_code = source.error_message ? 'GENERATION_CHECK_REQUIRED' : null;
+  result.final_prompt_snapshot = null;
+  for (const key of ['project', 'video_card', 'owner', 'user', 'submitted_user'] as const) {
+    if (source[key] !== undefined) result[key] = relation(source[key], key === 'project' ? ['id', 'name', 'type'] : key === 'video_card'
+      ? ['id', 'title', 'status', 'project_id'] : ['id', 'name', 'username', 'avatar_url', 'account_type']);
+  }
+  if (typeof source.params_json === 'string') {
+    try {
+      const params = JSON.parse(source.params_json);
+      const allowed = ['provider', 'model', 'generationMode', 'ratio', 'duration', 'resolution', 'seed', 'generateAudio', 'returnLastFrame', 'watermark'];
+      result.params_json = JSON.stringify(Object.fromEntries(allowed.filter(key => scalar(params[key]) && params[key] !== undefined).map(key => [key, params[key]])));
+    } catch { result.params_json = null; }
+  }
+  if (typeof source.pricing_snapshot === 'string') {
+    try { const pricing = JSON.parse(source.pricing_snapshot);
+      result.pricing_snapshot = JSON.stringify(Object.fromEntries(pricingKeys.filter(key => scalar(pricing[key]) && pricing[key] !== undefined).map(key => [key, pricing[key]])));
+    } catch { result.pricing_snapshot = null; }
+  }
+  if (typeof source.id === 'string' && typeof source.local_status === 'string') Object.assign(result, taskThumbnailProjection(task as unknown as TaskThumbnailProjectionSource));
+  return result as T;
+}
+
 /** Partial legacy DTOs must not acquire the newly selected internal column. */
 export function projectSelectedMultiviewTask<T extends object & TaskProtectionSource>(task: T): Omit<T, 'source_metadata_json'> {
-  if (isPrivateMultiviewTask(task)) return projectPrivateMultiviewTask(task);
+  if (isPrivateMultiviewTask(task) || hasVideoPromptGroups(task)) return projectPrivateMultiviewTask(task);
   const { source_metadata_json: _protection, ...publicFields } = task;
   return publicFields;
 }

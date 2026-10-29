@@ -3,6 +3,7 @@ import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
 import { NextRequest, NextResponse } from 'next/server';
+import { parseVideoPromptGroupRefs } from '@/lib/video/prompt-groups';
 import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import type { VideoTask } from '@prisma/client';
@@ -251,6 +252,8 @@ export async function POST(request: NextRequest) {
   }
 
   const creationBody = await request.json() as Record<string, unknown>;
+  try { if (parseVideoPromptGroupRefs(creationBody.video_prompt_groups).length) return NextResponse.json({ error: '超分不接受新的提示词组选取，未提交本次生成' }, { status: 426 }); }
+  catch { return NextResponse.json({ error: '提示词组选择无效，未提交本次生成' }, { status: 400 }); }
   if (typeof creationBody.idempotency_key === 'string') {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: creationBody.idempotency_key } } });
     if (original) { await assertCanViewTask(user, original); return NextResponse.json({ id: original.id, status: original.local_status, deduplicated: true, project_id: original.project_id, video_card_id: original.video_card_id }, { headers: { 'Cache-Control': 'private, no-store' } }); }

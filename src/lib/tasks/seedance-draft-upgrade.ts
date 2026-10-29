@@ -33,6 +33,9 @@ import {
 } from '@/lib/provider/seedance-draft';
 import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
+import { videoPromptGroupTaskRefs } from '@/lib/video/prompt-groups';
+import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from '@/lib/video/prompt-groups-build-mode';
+import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
 
 export class DraftUpgradeError extends Error {
   constructor(
@@ -253,6 +256,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     where: { id: input.draftTaskId },
     select: {
       id: true,
+      source_metadata_json: true,
       provider: true,
       model: true,
       generation_mode: true,
@@ -334,7 +338,11 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   const pricing = priceQuote.pricing, estimatedCost = pricing.estimatedCost;
   const ceilingError = validateRequestCostCeiling(input.maxEstimatedCost, estimatedCost);
   if (ceilingError) throw new DraftUpgradeError(ceilingError, 409, 'pricing_quote_changed');
+  const groupRefs = videoPromptGroupTaskRefs(draft);
+  if (groupRefs.length && !VIDEO_PROMPT_GROUP_WRITES_ENABLED) throw new DraftUpgradeError('此版本只保留提示词组历史读取，请更新后继续；原样片保留', 426, 'VIDEO_PROMPT_GROUP_READER_ONLY');
+  if (groupRefs.length) await resolveVideoPromptGroups(input.user, groupRefs, draft.prompt);
   const sourceMetadata = {
+    ...(groupRefs.length ? { video_prompt_groups: { schema: 1, refs: groupRefs } } : {}),
     source_type: input.sourceType || 'web',
     source_label: input.sourceLabel || 'Seedance Draft 升级',
     source_request_id: input.sourceRequestId || idempotencyKey,
@@ -359,6 +367,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
   };
 
   let task = await prisma.$transaction(async (tx) => {
+    if (groupRefs.length) await resolveVideoPromptGroups(input.user, groupRefs, draft.prompt, tx);
     await assertMultiviewRequestFence(tx, input.user.id, idempotencyKey);
     await assertProjectActiveInTransaction(tx, input.user, project.id);
     await assertLegacyCreationSourceLocks(tx, input.user, { ...creationBody, source_draft_task_id: draft.id }, project.id);
@@ -522,7 +531,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       where: { id: task.id },
       data: {
         provider_task_id: providerResult.provider_task_id,
-        raw_create_response: JSON.stringify(providerResult.raw),
+        raw_create_response: groupRefs.length ? JSON.stringify({ accepted: true }) : JSON.stringify(providerResult.raw),
         local_status: 'submitted',
       },
     });
@@ -552,7 +561,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
             data: {
               provider_task_id: recovered.provider_task_id,
               provider_status: recovered.provider_status,
-              raw_status_response: JSON.stringify(recovered.raw),
+              raw_status_response: groupRefs.length ? JSON.stringify({ recovered: true }) : JSON.stringify(recovered.raw),
               error_message: null,
             },
           });
@@ -593,7 +602,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       };
     }
 
-    const message = error instanceof Error ? error.message : 'Seedance Draft 升级提交失败';
+    const message = groupRefs.length ? '本次样片升级未完成，请核对原任务。' : error instanceof Error ? error.message : 'Seedance Draft 升级提交失败';
     if (providerRequest) {
       await markProviderApiRequestFailed({
         requestId: providerRequest.id,

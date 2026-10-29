@@ -16,6 +16,7 @@ import type { MultiviewActionBinding } from '@/lib/video/multiview-action-contra
 import type { PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { writePrivateFields } from '@/lib/security/private-prompt-fields.server';
 import { transformPrivateVideoText } from '@/lib/video/private-storage.server';
+import { protectVideoPromptGroupSnapshot } from '@/lib/video/prompt-group-execution.server';
 
 // ============================================================================
 // Snapshot 创建
@@ -33,6 +34,7 @@ export interface CreateSnapshotInput {
   assetMappingOverride?: AssetMapping;
   protectedRecipeVersion?: string;
   protectedAction?: { binding: MultiviewActionBinding; origins: PrivateOrigin[] };
+  protectedGroups?: { origins: PrivateOrigin[] };
 }
 
 /**
@@ -46,7 +48,9 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
 
   // 构建 content 数组（用于调试）
   let contentJson: string | null = null;
-  if (input.protectedAction) {
+  if (input.protectedGroups) {
+    contentJson = JSON.stringify(buildContentArray(input.input as CreateVideoInput).filter(item => item.type !== 'text'));
+  } else if (input.protectedAction) {
     contentJson = JSON.stringify({ protected_module: multiviewActionPrivateTaskMarker(input.protectedAction.binding) });
   } else if (input.protectedRecipeVersion) {
     contentJson = JSON.stringify({ protected_module: multiviewPrivateTaskMarker(input.protectedRecipeVersion) });
@@ -72,7 +76,8 @@ export async function createTaskSnapshot(input: CreateSnapshotInput) {
       provider_payload_json: input.protectedAction ? contentJson : input.providerPayloadJson ?? null,
     };
   const snapshot = await prisma.generationTaskSnapshot.create({
-    data: input.protectedAction ? writePrivateFields(data, 'video-generation-snapshot', data.id,
+    data: input.protectedGroups ? protectVideoPromptGroupSnapshot(data, input.protectedGroups.origins)
+      : input.protectedAction ? writePrivateFields(data, 'video-generation-snapshot', data.id,
       ['prompt_raw', 'prompt_rendered'].map(field => ({ field, origins: input.protectedAction!.origins })))
       : transformPrivateVideoText('video-generation-snapshot', data, ['prompt_raw', 'prompt_rendered'], true, Boolean(input.protectedRecipeVersion)),
   });

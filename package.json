@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.114.3",
+  "version": "0.116.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -14,6 +14,7 @@
     "seed:admin": "tsx scripts/seed-admin.ts",
     "test:api": "tsx scripts/test-seedance-api.ts",
     "test:image-recovery": "node scripts/check-image-recovery.mjs",
+    "test:video-prompt-groups": "node scripts/video-prompt-groups-engineering.mjs",
     "test:result-context-menu": "tsx scripts/test-image-result-next-controller.ts && tsx scripts/test-result-image-context-menu.ts && tsx scripts/test-result-card-context-menu-integration.ts",
     "test:hd-stability": "tsx scripts/test-hd-stability.ts && tsx scripts/test-hd-display.ts",
     "test:ui-account-boundaries": "tsx scripts/test-client-session-boundary.ts && tsx scripts/test-studio-navigation-visibility.ts",

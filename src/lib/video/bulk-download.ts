@@ -12,6 +12,7 @@ import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { cacheTaskVideoToLocal, type CacheableVideoTask } from '@/lib/video/local-cache';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
 import { isPrivateMultiviewTask, MULTIVIEW_PUBLIC_TASK_TITLE, privateMultiviewFailure } from '@/lib/video/multiview-task-privacy';
+import { hasVideoPromptGroups } from '@/lib/video/prompt-groups';
 
 export const BULK_VIDEO_DOWNLOAD_LIMIT = 20;
 
@@ -266,6 +267,7 @@ function csvCell(value: unknown) {
 }
 
 function publicDownloadFailure(item: BulkDownloadItem) {
+  if (item.task && hasVideoPromptGroups(item.task) && item.errorMessage) return '本次下载未完成，请核对原任务后重试。';
   return item.task && isPrivateMultiviewTask(item.task) && item.errorMessage
     ? privateMultiviewFailure(item.errorMessage, item.task.local_status)?.message || '视频暂时无法下载，请稍后重试'
     : item.errorMessage;
