@@ -50,6 +50,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
   const [readingEditor, setReadingEditor] = useState(false), [conflict, setConflict] = useState(false);
   const [latest, setLatest] = useState<StudioStyleSummary | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
+  const [draftPaused, setDraftPaused] = useState(false);
   const draftId = useRef(''), draftRevision = useRef(0), durable = useRef(''), editSequence = useRef(0);
   const storageKey = `sd2:style-editor:v2:${userId}`;
   const noteFieldId = useId();
@@ -72,7 +73,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     catch { setError('无法保留原操作编号，尚未发送；当前输入保留'); return false; }
   };
   useEffect(() => {
-    if (!draft || busy || pending || conflict || draftText(draft) === durable.current) return;
+    if (!draft || busy || pending || conflict || draftPaused || draftText(draft) === durable.current) return;
     const owner = userId, value = draft, serialized = draftText(value), generation = editSequence.current;
     const timer = setTimeout(() => {
       const operation: Pending = { requestId: crypto.randomUUID(), kind: 'draft' };
@@ -83,14 +84,14 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
         draftRevision.current = result.draft.revision; durable.current = serialized; remember(null);
       }).catch(cause => {
         if (!alive.current || actor.current !== owner || generation !== editSequence.current) return;
-        if (cause.status >= 400 && cause.status < 500) { remember(null); setConflict(cause.status === 409); }
+        if (cause.status >= 400 && cause.status < 500) { remember(null); setConflict(cause.status === 409); setDraftPaused(true); }
         setError(cause.message || '草稿结果待确认，请核对原操作');
       }).finally(() => { if (alive.current && actor.current === owner && generation === editSequence.current) setBusy(false); });
     }, 700);
     return () => clearTimeout(timer);
     // Draft payload stays on the authenticated server; browser storage keeps only ids.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, busy, pending, conflict, userId]);
+  }, [draft, busy, pending, conflict, draftPaused, userId]);
   function fetchDraft(value: Draft, requestId: string) {
     return fetch('/api/image-studio/style-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'draft', draftId: draftId.current, expectedRevision: draftRevision.current, requestId, value: JSON.parse(draftText(value)) }) });
   }
@@ -122,7 +123,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
   async function edit(group?: StudioStyleSummary, copy = false) {
     if (managementOnly && disabled) return;
     const generation = ++editSequence.current, owner = userId;
-    setReadingEditor(true); setError(''); setConflict(false); setLatest(null);
+    setReadingEditor(true); setError(''); setConflict(false); setDraftPaused(false); setLatest(null);
     try {
       if (group && !(copy && group.historical)) {
         const result = await responseValue(await fetch(`/api/image-studio/style-groups?page=1&keys=${encodeURIComponent(group.id)}`, { cache: 'no-store' }));
@@ -169,7 +170,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
       if (managementOnly) setOpen(false);
     } catch (cause) { if (alive.current && actor.current === owner) {
       const status = (cause as { status?: number }).status;
-      if (status && status >= 400 && status < 500) { remember(null); setConflict(status === 409); }
+      if (status && status >= 400 && status < 500) { remember(null); setConflict(status === 409); setDraftPaused(true); }
       setError(cause instanceof Error ? cause.message : '保存结果待确认，请核对原操作');
     } }
     finally { if (alive.current && actor.current === owner) setBusy(false); }
@@ -234,7 +235,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     if (!draft || pending || busy) return;
     const next: Draft = { ...draft, id: undefined, revision: undefined, shared: false, disabled: false,
       ...(draft.id ? { copyFrom: { id: draft.id, revision: draft.revision } } : {}) };
-    draftId.current = crypto.randomUUID(); draftRevision.current = 0; durable.current = ''; setDraft(next); setConflict(false); remember(null, draftId.current, undefined);
+    draftId.current = crypto.randomUUID(); draftRevision.current = 0; durable.current = ''; setDraft(next); setConflict(false); setDraftPaused(false); remember(null, draftId.current, undefined);
   }
   async function upload(files: File[]) {
     if (!draft || uploadLock.current || uploading || busy || !files.length) return;
@@ -341,6 +342,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
         <div className={styles.counts}><button type="button" disabled={busy || uploading || draft.references.length >= MAX_REFERENCE_IMAGES} onClick={() => setPicker(true)}><Plus size={16} />从资产库选择</button></div>
         {uploading && <p role="status">正在上传图片…</p>}
         {error && <p role="status" className={styles.muted}>{error}</p>}
+        {draftPaused && !conflict && !pending && <button type="button" disabled={busy} onClick={() => setDraftPaused(false)}><RefreshCw size={16} />重试草稿保存</button>}
         {conflict && <p role="status">原组或草稿已有更新，当前修改保留。<button type="button" onClick={copyDraft}><Copy size={16} />另存私人副本</button>{draft.id && <button type="button" onClick={async () => {
           const generation = editSequence.current;
           try {

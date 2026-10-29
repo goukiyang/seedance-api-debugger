@@ -128,6 +128,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
   const [draftPending, setDraftPending] = useState<string | null>(() => retainedRequests(receiptKey).draftPending);
   const [latestView, setLatestView] = useState<EditorFields | null>(null), [readFailed, setReadFailed] = useState(false);
   const [reload, setReload] = useState(0);
+  const [draftPaused, setDraftPaused] = useState(false);
   const [sourceVersion, setSourceVersion] = useState(item.versionId);
   const requestIntent = useRef({ action: retainedRequests(receiptKey).action || 'save', use: retainedRequests(receiptKey).use === true });
   const [versions, setVersions] = useState<Array<{ versionId: string; name: string; createdAt: string; current: boolean }> | null>(null);
@@ -161,7 +162,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     return () => { controller.abort(); sequence.current++; };
   }, [item.groupId, item.versionId, item.latestVersionId, item.revision, reload]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!open || loading || readFailed || conflict || pending || draftPending || busy || serialized === durable) return;
+    if (!open || loading || readFailed || conflict || draftPaused || pending || draftPending || busy || serialized === durable) return;
     const requestId = crypto.randomUUID(), value = serialized, generation = sequence.current;
     const timer = window.setTimeout(() => {
       if (!remember(pending, requestId)) return;
@@ -173,10 +174,14 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
         if (data.draft?.revision) { setDraftRevision(data.draft.revision); setDurable(value); setDraftPending(null); }
         else if (data.draft?.state === 'not-applied') { setDraftPending(null); setConflict(true); setNotice('草稿已有其他修改，当前编辑保留，可另存私人副本。'); }
         else setNotice('草稿保存结果待确认，请核对原保存。');
-      }).catch(() => { if (generation === sequence.current) setNotice('草稿保存结果待确认，当前编辑保留，请核对原保存。'); });
+      }).catch(cause => {
+        if (generation !== sequence.current) return;
+        if (cause.status >= 400 && cause.status < 500) { remember(pending, null); setDraftPending(null); setConflict(cause.status === 409); setDraftPaused(true); setNotice(cause.message); }
+        else setNotice('草稿保存结果待确认，当前编辑保留，请核对原保存。');
+      });
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [open, loading, readFailed, conflict, pending, draftPending, busy, serialized, durable, editorId, draftRevision, revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, loading, readFailed, conflict, draftPaused, pending, draftPending, busy, serialized, durable, editorId, draftRevision, revision]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = async () => {
     if (pending || draftPending) { setNotice('请先核对原保存，当前编辑仍保留。'); return; }
     if (serialized !== initial.current && serialized !== durable && !await confirm('当前编辑尚未可靠保存，关闭会丢失这次修改。', { title: '尚未保存', confirmLabel: '关闭' })) return;
@@ -197,7 +202,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     try { const data = await read(api, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fields, groupId: editorId, revision, draftRevision, requestId }) }); if (generation === sequence.current) applyResult(data); }
     catch (error) {
       if (generation !== sequence.current) return;
-      if (error && typeof error === 'object' && 'status' in error && Number(error.status) >= 400 && Number(error.status) < 500) setPending(null);
+      if (error && typeof error === 'object' && 'status' in error && Number(error.status) >= 400 && Number(error.status) < 500) { setPending(null); setDraftPaused(true); setConflict(Number(error.status) === 409); }
       setNotice(error instanceof Error ? error.message : '保存结果待确认，请核对原保存');
     }
     finally { if (generation === sequence.current) setBusy(false); }
@@ -231,10 +236,11 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     const id = crypto.randomUUID(), source = fields.copyFrom || (revision > 0 ? { groupId: item.groupId, versionId: sourceVersion } : undefined);
     try { localStorage.setItem(editorScope(user?.id || 'anonymous'), JSON.stringify({ groupId: id, versionId: id, copyFrom: source })); }
     catch { setNotice('浏览器无法保留副本现场，当前修改保留'); return; }
-    setEditorId(id); setRevision(0); setDraftRevision(0); setDurable(''); setFields(v => ({ ...v, shared: false, disabled: false, copyFrom: source })); setConflict(false); setNotice('已准备私人副本，请保存');
+    setEditorId(id); setRevision(0); setDraftRevision(0); setDurable(''); setFields(v => ({ ...v, shared: false, disabled: false, copyFrom: source })); setConflict(false); setDraftPaused(false); setNotice('已准备私人副本，请保存');
   };
   return <><Modal open={open} narrow title={revision ? '编辑提示词组' : '新建提示词组'} onClose={() => void close()} footer={<>
     {notice && <p className={styles.meta} role="status">{notice}</p>}
+    {draftPaused && !conflict && !pending && !draftPending && <button type="button" className={styles.button} disabled={busy} onClick={() => setDraftPaused(false)}><RefreshCw size={15} />重试草稿保存</button>}
     {(conflict || revision > 0) && <button type="button" className={styles.button} disabled={Boolean(pending || draftPending) || busy || loading || readFailed} onClick={prepareCopy}><Copy size={15} />另存私人副本</button>}
     {conflict && <>
       <button type="button" className={styles.button} onClick={() => { const generation = sequence.current; void read(`${api}?mode=editor&groupId=${item.groupId}&versionId=${item.versionId}&latest=1`).then(value => { if (generation === sequence.current) setLatestView(value); }).catch(cause => { if (generation === sequence.current) setNotice(cause.message); }); }}>查看最新版</button></>}
