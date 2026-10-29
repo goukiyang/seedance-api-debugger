@@ -50,7 +50,7 @@ import {
   mapStudioVideoParameters,
 } from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
-import { Bot, FileJson, RotateCcw, ChevronDown } from 'lucide-react';
+import { Bot, FileJson, Settings2, RotateCcw, ChevronDown } from 'lucide-react';
 import {
   GENERATION_PROMPT_LIMIT_MESSAGE,
   MAX_GENERATION_PROMPT_CHARS,
