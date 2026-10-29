@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '创作体验更新', outline: [
-  '模板图片可选择完成后发到本人飞书',
-  '参考拼图支持拖移、同步调整，背景处理可选',
-  '项目选择入口统一支持新建和管理',
-  '修复视频保存与飞书等待状态',
+const notice = { title: '飞书视频优化', outline: [
+  '修复视频准备完成后无法发送到飞书的问题',
+  '新视频通知显示项目、任务编号与详情入口',
+  '保留历史发送记录，避免重复通知',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

@@ -31,11 +31,11 @@ const permissions = load('src/lib/projects/permissions.ts', {
   // This flag only controls manage capabilities; actual getProjectAccess/read authorization is not mocked.
   '@/lib/access/feature-guard': { isFeatureAllowed: () => false, assertFeatureAllowed: () => { throw Error('unused manage guard'); } },
 });
-const privacy = load('src/lib/video/multiview-task-privacy.ts', { './task-thumbnail-projection': {
+const privacy = load('src/lib/video/multiview-task-privacy.ts', { './multiview-action-contract': load('src/lib/video/multiview-action-contract.ts'), './task-thumbnail-projection': {
   taskThumbnailProjection() { throw Error('unused thumbnail boundary'); },
 } });
 const notification = load('src/lib/video/feishu-notification.ts', {
-  '@/lib/auth/session': { AuthError }, '@/lib/feedback/notification': feedback, '@/lib/projects/permissions': permissions,
+  '@/lib/prisma': { prisma: noGlobalDb }, '@/lib/auth/session': { AuthError }, '@/lib/feedback/notification': feedback, '@/lib/projects/permissions': permissions,
   './multiview-task-privacy': privacy, '@/lib/tasks/retention': retention, './feishu-contract': contract,
 });
 const copy = value => structuredClone(value);

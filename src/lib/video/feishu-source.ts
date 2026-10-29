@@ -30,23 +30,30 @@ const sameStat = (a: Awaited<ReturnType<typeof stat>>, b: Awaited<ReturnType<typ
 
 async function localOrigin(task: Task): Promise<Origin | null> {
   if (!task.local_video_path) return null;
-  // This is the existing b9 cache receipt, not an arbitrary persisted URL/path.
-  if (!/^[A-Za-z0-9_-]{8,80}$/.test(task.id) || task.local_video_path !== `/videos/${task.id}.mp4`) throw unavailable();
+  // Accept only this task's legacy or fenced-generation cache receipt.
+  const publicPath = task.local_video_path;
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(task.id) || publicPath !== `/videos/${task.id}.mp4`
+    && !new RegExp(`^/videos/${task.id}-[1-9a-z][0-9a-z]*-[1-9][0-9]*\\.mp4$`).test(publicPath)) throw unavailable();
   let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
     const root = await realpath(path.join(process.cwd(), 'public', 'videos'));
-    const file = path.join(root, `${task.id}.mp4`);
-    if (await realpath(path.join(process.cwd(), 'public', task.local_video_path)) !== file) throw unavailable();
+    const file = path.join(root, path.posix.basename(publicPath));
+    if (await realpath(path.join(process.cwd(), 'public', publicPath)) !== file) throw unavailable();
     handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
     const initial = await handle.stat();
     if (!initial.isFile() || initial.size < 1 || !Number.isSafeInteger(initial.size)) throw unavailable();
     const fd = handle;
     const current = async () => {
-      try { return await realpath(path.join(process.cwd(), 'public', task.local_video_path!)) === file
+      try { return await realpath(path.join(process.cwd(), 'public', publicPath)) === file
         && sameStat(initial, await stat(file)) && sameStat(initial, await fd.stat()); } catch { return false; }
     };
+    let closing: Promise<void> | null = null;
+    const close = () => closing ||= fd.close().catch(error => {
+      // An interrupted ReadStream may already have closed its FileHandle.
+      if ((error as NodeJS.ErrnoException).code !== 'EBADF') throw error;
+    });
     return { kind: 'local', size: initial.size, version: hash([videoFeishuSourceStamp(task, 'local'), root, initial.dev, initial.ino, initial.size, initial.mtimeMs, initial.ctimeMs]),
-      stream: async () => fd.createReadStream({ autoClose: false }), current, close: async () => { await fd.close(); } };
+      stream: async () => fd.createReadStream({ autoClose: false }), current, close };
   } catch (error) {
     await handle?.close();
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -117,16 +124,18 @@ export function videoFeishuSizeMode(size: number) {
   if (!Number.isSafeInteger(size) || size < 1) throw unavailable();
   return size > VIDEO_FEISHU_MAX_BYTES ? 'link' as const : 'video' as const;
 }
-async function copyBounded(origin: Origin, destination: string) {
+async function copyBounded(origin: Origin, destination: string, signal?: AbortSignal) {
   const output = await open(destination, 'wx', 0o600), digest = createHash('sha256');
-  let input: Bytes | undefined, count = 0, header = Buffer.alloc(0);
+  let input: Bytes | undefined, count = 0, header = Buffer.alloc(0), ended = false;
   const until = Date.now() + 60_000;
   const deadline = setTimeout(() => input?.destroy?.(), 60_000);
+  const cancel = () => input?.destroy?.();
+  signal?.addEventListener('abort', cancel, { once: true });
   try {
     input = await origin.stream();
-    if (Date.now() >= until) throw unavailable();
+    if (signal?.aborted || Date.now() >= until) throw unavailable();
     for await (const chunk of input) {
-      if (Date.now() >= until) throw unavailable();
+      if (signal?.aborted || Date.now() >= until) throw unavailable();
       count += chunk.byteLength;
       if (count > VIDEO_FEISHU_MAX_BYTES || count > origin.size) throw unavailable();
       if (header.length < 32) header = Buffer.concat([header, chunk.subarray(0, 32 - header.length)]);
@@ -138,17 +147,24 @@ async function copyBounded(origin: Origin, destination: string) {
         offset += written;
       }
     }
-    if (count !== origin.size || !await origin.current()) throw unavailable();
+    ended = true;
+    if (signal?.aborted || Date.now() >= until || count !== origin.size || !await origin.current()) throw unavailable();
     return { hash: digest.digest('hex'), mp4: videoFeishuMp4Header(header) };
-  } finally { clearTimeout(deadline); input?.destroy?.(); await output.close(); }
+  } finally {
+    clearTimeout(deadline); signal?.removeEventListener('abort', cancel);
+    // Normal EOF deliberately keeps the source descriptor alive for current().
+    // The prepared source owns that descriptor until its idempotent close().
+    if (!ended) input?.destroy?.();
+    await output.close();
+  }
 }
 export function videoFeishuMp4Header(header: Uint8Array) {
   const bytes = Buffer.from(header);
   return bytes.length >= 12 && bytes.toString('ascii', 4, 8) === 'ftyp'
     && /^(?:isom|iso[2-9]|mp4[12]|avc1|M4V |MSNV|dash)$/.test(bytes.toString('ascii', 8, 12));
 }
-function command(binary: string, args: string[], timeout: number) {
-  return new Promise<string>((resolve, reject) => execFile(binary, args, { timeout, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
+function command(binary: string, args: string[], timeout: number, signal?: AbortSignal) {
+  return new Promise<string>((resolve, reject) => execFile(binary, args, { timeout, signal, maxBuffer: 64 * 1024, windowsHide: true }, (error, stdout) => {
     if (error) reject(unavailable()); else resolve(stdout);
   }));
 }
@@ -159,39 +175,50 @@ export function videoFeishuProbe(value: unknown): { supported: boolean; duration
   return { supported: Boolean(item.format?.format_name?.split(',').includes('mp4') && streams.some(stream => stream.codec_type === 'video')),
     durationMs: Math.round(duration * 1000) };
 }
-export async function prepareVideoFeishuSource(task: Task): Promise<PreparedVideoFeishuSource> {
+export async function prepareVideoFeishuSource(task: Task, options: { signal?: AbortSignal } = {}): Promise<PreparedVideoFeishuSource> {
   let origin: Origin | null = null, directory: string | null = null;
+  let closing: Promise<void> | null = null, closed = false;
+  const cancelPrepared = () => { void close().catch(() => undefined); };
+  const close = () => closing ||= (async () => {
+    closed = true; options.signal?.removeEventListener('abort', cancelPrepared);
+    try { await origin?.close(); }
+    finally { if (directory) await rm(directory, { recursive: true, force: true }); }
+  })();
+  const prepared = (value: Omit<PreparedVideoFeishuSource, 'current' | 'close'>): PreparedVideoFeishuSource => {
+    if (options.signal?.aborted) throw unavailable();
+    options.signal?.addEventListener('abort', cancelPrepared, { once: true });
+    return { ...value, current: async () => !closed && !options.signal?.aborted && Boolean(origin && await origin.current()), close };
+  };
   try {
+    if (options.signal?.aborted) throw unavailable();
     origin = await localOrigin(task) || await remoteOrigin(task);
     const source = origin;
-    const close = async () => { await source.close(); if (directory) await rm(directory, { recursive: true, force: true }); };
-    if (videoFeishuSizeMode(source.size) === 'link') return { origin: source.kind, version: source.version, hash: null, mode: 'link', reason: 'video_oversize',
-      video: null, cover: null, durationMs: null, current: source.current, close };
+    if (videoFeishuSizeMode(source.size) === 'link') return prepared({ origin: source.kind, version: source.version, hash: null, mode: 'link', reason: 'video_oversize',
+      video: null, cover: null, durationMs: null });
     if (typeof openAsBlob !== 'function') throw new VideoFeishuError('runtime_blob_stream_unavailable', 503);
     // Private bounded copies are disposable; never reuse a public thumbnail with no source-version receipt.
     const root = process.env.NODE_ENV === 'production' ? '/data/video-api-debugger/var-lib/storage/video-feishu-tmp' : path.join(os.tmpdir(), 'video-feishu');
     await mkdir(root, { recursive: true, mode: 0o700 });
     directory = await mkdtemp(path.join(await realpath(root), 'delivery-'));
     const videoPath = path.join(directory, 'original.mp4'), coverPath = path.join(directory, 'cover.jpg');
-    const copied = await copyBounded(source, videoPath), contentHash = copied.hash;
-    if (!copied.mp4) return { origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
-      video: null, cover: null, durationMs: null, current: source.current, close };
+    const copied = await copyBounded(source, videoPath, options.signal), contentHash = copied.hash;
+    if (!copied.mp4) return prepared({ origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
+      video: null, cover: null, durationMs: null });
     const probe = videoFeishuProbe(JSON.parse(await command('ffprobe', ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-show_entries',
-      'format=format_name,duration:stream=codec_type', '-of', 'json', videoPath], 15_000)));
-    if (!probe.supported) return { origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
-      video: null, cover: null, durationMs: null, current: source.current, close };
+      'format=format_name,duration:stream=codec_type', '-of', 'json', videoPath], 15_000, options.signal)));
+    if (!probe.supported) return prepared({ origin: source.kind, version: source.version, hash: contentHash, mode: 'link', reason: 'video_format_unsupported',
+      video: null, cover: null, durationMs: null });
     let cover: Blob | null = null;
     try {
       await command('ffmpeg', ['-v', 'error', '-nostdin', '-protocol_whitelist', 'file,pipe', '-ss', String(Math.min(2.5, probe.durationMs / 2000)),
-        '-i', videoPath, '-frames:v', '1', '-vf', 'scale=360:-2', '-q:v', '4', '-y', coverPath], 15_000);
+        '-i', videoPath, '-frames:v', '1', '-vf', 'scale=360:-2', '-q:v', '4', '-y', coverPath], 15_000, options.signal);
       const info = await stat(coverPath);
       if (info.isFile() && info.size > 0 && info.size <= 1024 * 1024) cover = await openAsBlob(coverPath, { type: 'image/jpeg' });
     } catch { /* The official media cover is optional; never substitute an unrelated cached frame. */ }
-    return { origin: source.kind, version: source.version, hash: contentHash, mode: 'video', reason: null,
-      video: await openAsBlob(videoPath, { type: 'video/mp4' }), cover, durationMs: probe.durationMs, current: source.current, close };
+    return prepared({ origin: source.kind, version: source.version, hash: contentHash, mode: 'video', reason: null,
+      video: await openAsBlob(videoPath, { type: 'video/mp4' }), cover, durationMs: probe.durationMs });
   } catch (error) {
-    await origin?.close();
-    if (directory) await rm(directory, { recursive: true, force: true });
+    await close();
     if (error instanceof VideoFeishuError) throw error;
     throw unavailable();
   }

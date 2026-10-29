@@ -30,12 +30,14 @@ async function request(endpoint: 'files' | 'images' | 'messages?receive_id_type=
     throw new VideoFeishuError('feishu_receipt_unknown', 503, true, true);
   }
 }
-export async function uploadVideoFeishuFile(token: string, taskId: string, file: Blob, durationMs: number) {
+export async function uploadVideoFeishuFile(token: string, taskId: string, file: Blob, durationMs: number, frozenFileName?: string) {
   if (!videoFeishuId(taskId) || file.type !== 'video/mp4' || file.size < 1 || file.size > VIDEO_FEISHU_MAX_BYTES
     || !Number.isSafeInteger(durationMs) || durationMs <= 0) throw new VideoFeishuError('video_file_invalid', 409);
+  const fileName = frozenFileName ?? `video-${taskId}.mp4`;
+  if (frozenFileName !== undefined && (!fileName.endsWith(`-${taskId}.mp4`) || new TextEncoder().encode(fileName).byteLength > 240 || /[<>:"/\\|?*\x00-\x1f\x7f]/.test(fileName))) throw new VideoFeishuError('video_file_invalid', 409);
   const form = new FormData();
-  form.set('file_type', 'mp4'); form.set('file_name', `video-${taskId}.mp4`); form.set('duration', String(durationMs));
-  form.set('file', file, `video-${taskId}.mp4`);
+  form.set('file_type', 'mp4'); form.set('file_name', fileName); form.set('duration', String(durationMs));
+  form.set('file', file, fileName);
   const data = await request('files', token, form);
   if (typeof data.file_key !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(data.file_key)) throw new VideoFeishuError('file_upload_unknown', 503, true);
   return data.file_key;

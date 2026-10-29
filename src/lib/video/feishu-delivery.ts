@@ -6,8 +6,8 @@ import { LEASE_MS, SEND_WINDOW_MS } from '@/lib/feedback/notification';
 import { authorizedVideoFeishuTask, videoFeishuBinding } from './feishu-notification';
 import { prepareVideoFeishuSource, videoFeishuSourceStamp, type PreparedVideoFeishuSource } from './feishu-source';
 import { uploadVideoFeishuFile, uploadVideoFeishuCover, sendVideoFeishuMessage } from './feishu-transport';
-import { VIDEO_FEISHU_TYPE, VIDEO_FEISHU_SITE, VIDEO_FEISHU_ATTEMPTS, VideoFeishuError, parseVideoFeishuEvent,
-  videoFeishuSameOriginal, type VideoFeishuStep } from './feishu-contract';
+import { VIDEO_FEISHU_TYPE, VIDEO_FEISHU_ATTEMPTS, VideoFeishuError, parseVideoFeishuEvent,
+  videoFeishuSameOriginal, videoFeishuExplanation, type VideoFeishuStep } from './feishu-contract';
 
 type Db = Prisma.TransactionClient;
 type Row = Pick<Notification, 'id' | 'type' | 'channel' | 'status' | 'target_user_id' | 'metadata_json'>;
@@ -99,7 +99,7 @@ export async function deliverVideoFeishuNotification(db: Db, row: Row, heartbeat
       meta.externalStartedAt ??= Date.now(); meta.upload.state = 'uploading'; meta.upload.startedAt = Date.now(); meta.upload.attempts++;
       await save();
       try {
-        meta.upload.key = await uploadVideoFeishuFile(token, meta.taskId, source.video, source.durationMs); meta.upload.state = 'ready';
+        meta.upload.key = await uploadVideoFeishuFile(token, meta.taskId, source.video, source.durationMs, meta.presentation?.videoFileName); meta.upload.state = 'ready';
       } catch (error) {
         const failure = safeError(error);
         if (!failure.ambiguous) return await terminal('file_upload_rejected');
@@ -129,7 +129,7 @@ export async function deliverVideoFeishuNotification(db: Db, row: Row, heartbeat
       let receipt: string;
       try {
         const content = part === 'video' ? { file_key: meta.upload.key!, ...(meta.cover.state === 'ready' ? { image_key: meta.cover.key! } : {}) }
-          : { text: `任务 ${meta.taskId}\n${meta.mode === 'link' ? '本次仅发送查看链接，未发送视频附件。' : '视频已发送。'}\n${VIDEO_FEISHU_SITE}/tasks/${encodeURIComponent(meta.taskId)}` };
+          : { text: videoFeishuExplanation(meta) };
         receipt = await sendVideoFeishuMessage(token, openId, step.uuid, part === 'video' ? 'media' : 'text', content,
           step.firstSendAt! + SEND_WINDOW_MS, meta.leaseUntil!);
       } catch (error) {

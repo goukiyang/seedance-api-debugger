@@ -7,7 +7,7 @@ import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isPrivateMultiviewTask } from './multiview-task-privacy';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { VIDEO_FEISHU_TYPE, VIDEO_FEISHU_PREFERENCE, VideoFeishuError, normalizeVideoFeishuChoice, videoFeishuHash, videoFeishuId,
-  newVideoFeishuEvent, parseVideoFeishuEvent, videoFeishuUuid, videoFeishuCanCancel, videoFeishuStatus, type VideoFeishuPreference } from './feishu-contract';
+  newVideoFeishuEvent, newVideoFeishuPresentation, parseVideoFeishuEvent, videoFeishuUuid, videoFeishuCanCancel, videoFeishuStatus, type VideoFeishuPreference } from './feishu-contract';
 
 type Db = Prisma.TransactionClient;
 type Stored = { version: 1; enabled: boolean; revision: number; identity: string | null };
@@ -59,11 +59,12 @@ export async function enqueueVideoFeishuNotification(tx: Db, actorId: string,
   const selected = normalizeVideoFeishuChoice(choice);
   if (!selected.enabled) return;
   if (!videoFeishuId(task.id) || task.user_id !== actorId || isPrivateMultiviewTask(task)) throw new VideoFeishuError('notification_source_forbidden', 403);
-  const actual = await tx.videoTask.findUnique({ where: { id: task.id }, select: { id: true, user_id: true, source_metadata_json: true } });
+  const actual = await tx.videoTask.findUnique({ where: { id: task.id }, select: { id: true, user_id: true, source_metadata_json: true, project: { select: { name: true } }, video_card: { select: { title: true } } } });
   if (!actual || actual.user_id !== actorId || isPrivateMultiviewTask(actual)) throw new VideoFeishuError('notification_source_forbidden', 403);
   const state = await preferenceState(tx, actorId);
   if (!state.identity || !state.view.enabled || state.view.revision !== selected.preferenceRevision) throw new VideoFeishuError('preference_changed', 409);
   const event = newVideoFeishuEvent(task.id, actorId, state.identity, selected);
+  event.presentation = newVideoFeishuPresentation(task.id, actual.project?.name, actual.video_card?.title);
   const existing = await tx.notification.findUnique({ where: { id: event.eventId } });
   if (existing) {
     const previous = parseVideoFeishuEvent(existing.metadata_json);
@@ -96,7 +97,7 @@ async function taskEvent(db: Db, actorId: string, taskId: string) {
 }
 export async function readVideoFeishuStatus(db: Db, actorId: string, taskId: string) {
   const { meta, task } = await taskEvent(db, actorId, taskId);
-  return videoFeishuStatus(meta, task.delivery_status, Boolean(task.local_video_path || task.public_video_url));
+  return videoFeishuStatus(meta, task.delivery_status, Boolean(task.local_video_path || task.public_video_url), task.local_status);
 }
 
 /** Only the same already-requested event can resume after its original became ready. */

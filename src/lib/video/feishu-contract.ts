@@ -5,6 +5,39 @@ export const VIDEO_FEISHU_PREFERENCE = 'video.feishu.preference.v1';
 export const VIDEO_FEISHU_SITE = 'https://sd2.youdooart.com';
 export const VIDEO_FEISHU_MAX_BYTES = 30_000_000;
 export const VIDEO_FEISHU_ATTEMPTS = 12;
+export type VideoFeishuPresentation = { version: 2; videoFileName: string; videoText: string; linkText: string };
+function videoFeishuContextLabel(value: unknown) {
+  if (typeof value !== 'string' || /(?:password|passwd|secret|token|cookie|authorization|api[_ -]?key|密码|口令|密钥|凭据|验证码)/i.test(value)) return '';
+  const clean = value.replace(/(?:https?:\/\/|www\.)\S+/gi, '').replace(/[<>@\x00-\x1f\x7f]/g, ' ').replace(/[\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
+  return Array.from(clean).slice(0, 40).join('');
+}
+/** Called only for a new accepted event. Never rebuild an existing event's message. */
+export function newVideoFeishuPresentation(taskId: string, projectName?: string | null, videoCardTitle?: string | null): VideoFeishuPresentation {
+  if (!videoFeishuId(taskId)) throw new VideoFeishuError('task_unavailable', 404);
+  const labels = Array.from(new Set([videoFeishuContextLabel(projectName), videoFeishuContextLabel(videoCardTitle)].filter(Boolean)));
+  const context = labels.join(' · '), title = `视频已生成${context ? `｜${context}` : ''}`;
+  const url = `${VIDEO_FEISHU_SITE}/tasks/${encodeURIComponent(taskId)}`;
+  const filenameLabel = Array.from(context.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, '').replace(/^[. ]+|[. ]+$/g, '')).slice(0, 16).join('') || '视频';
+  return { version: 2, videoFileName: `${filenameLabel}-${taskId}.mp4`,
+    videoText: `${title}\n任务：${taskId}\n查看参数与下载原片：\n${url}`,
+    linkText: `${title}\n任务：${taskId}\n仅发送查看链接，未发送视频附件。\n查看视频与下载原片：\n${url}` };
+}
+export function validVideoFeishuPresentation(value: unknown, taskId: string): value is VideoFeishuPresentation {
+  const item = value as VideoFeishuPresentation | null;
+  if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).sort().join(',') !== 'linkText,version,videoFileName,videoText'
+    || item.version !== 2 || typeof item.videoFileName !== 'string' || !item.videoFileName.endsWith(`-${taskId}.mp4`)
+    || new TextEncoder().encode(item.videoFileName).byteLength > 240 || /[<>:"/\\|?*\x00-\x1f\x7f]/.test(item.videoFileName)) return false;
+  const url = `${VIDEO_FEISHU_SITE}/tasks/${encodeURIComponent(taskId)}`;
+  return [item.videoText, item.linkText].every(text => typeof text === 'string' && text.length <= 1200 && text.startsWith('视频已生成')
+    && text.includes(`\n任务：${taskId}\n`) && text.endsWith(url) && !/[<>\r\x00-\x09\x0b-\x1f\x7f]/.test(text)
+    && Array.from(text.matchAll(/https?:\/\/\S+/g)).map(match => match[0]).join(',') === url)
+    && item.linkText.includes('仅发送查看链接，未发送视频附件。');
+}
+/** Old accepted events retain their exact legacy text and native filename. */
+export function videoFeishuExplanation(meta: Pick<VideoFeishuEvent, 'taskId' | 'mode' | 'presentation'>) {
+  if (meta.presentation) return meta.mode === 'link' ? meta.presentation.linkText : meta.presentation.videoText;
+  return `任务 ${meta.taskId}\n${meta.mode === 'link' ? '本次仅发送查看链接，未发送视频附件。' : '视频已发送。'}\n${VIDEO_FEISHU_SITE}/tasks/${encodeURIComponent(meta.taskId)}`;
+}
 export type VideoFeishuChoice = { version: 1; enabled: boolean; preferenceRevision: number };
 export type VideoFeishuPreference = { version: 1; enabled: boolean; revision: number; available: boolean };
 export class VideoFeishuError extends Error {
@@ -29,7 +62,7 @@ export function videoFeishuUuid(taskId: string, part: 'event' | 'video' | 'expla
 export type VideoFeishuStep = { uuid: string; state: 'pending' | 'sending' | 'sent' | 'skipped' | 'failed' | 'unknown';
   attempts: number; firstSendAt: number | null; receiptId: string | null; ambiguous: boolean; leaseToken: string | null; leaseUntil: number | null };
 export type VideoFeishuUpload = { state: 'pending' | 'uploading' | 'ready' | 'unknown' | 'skipped'; attempts: number; startedAt: number | null; key: string | null };
-export type VideoFeishuEvent = { version: 1; taskId: string; actorId: string; eventId: string; identity: string; choice: VideoFeishuChoice;
+export type VideoFeishuEvent = { version: 1; presentation?: VideoFeishuPresentation; taskId: string; actorId: string; eventId: string; identity: string; choice: VideoFeishuChoice;
   state: 'pending' | 'sent' | 'failed' | 'unknown' | 'cancelled'; mode: 'video' | 'link'; createdAt: number; nextAttemptAt: number; preparations: number;
   leaseToken: string | null; leaseUntil: number | null; externalStartedAt: number | null; sourceVersion: string | null; contentHash: string | null;
   upload: VideoFeishuUpload; cover: VideoFeishuUpload; video: VideoFeishuStep; explanation: VideoFeishuStep; reason: string | null };
@@ -49,9 +82,9 @@ export function parseVideoFeishuEvent(raw: string | null): VideoFeishuEvent | nu
     const time = (value: unknown) => value === null || Number.isSafeInteger(value) && Number(value) >= 0;
     const lease = (value: { leaseToken: unknown; leaseUntil: unknown }) => (value.leaseToken === null || videoFeishuId(value.leaseToken)) && time(value.leaseUntil);
     if (!item || !keys(item, ['version', 'taskId', 'actorId', 'eventId', 'identity', 'choice', 'state', 'mode', 'createdAt', 'nextAttemptAt', 'preparations',
-      'leaseToken', 'leaseUntil', 'externalStartedAt', 'sourceVersion', 'contentHash', 'upload', 'cover', 'video', 'explanation', 'reason'])
+      'leaseToken', 'leaseUntil', 'externalStartedAt', 'sourceVersion', 'contentHash', 'upload', 'cover', 'video', 'explanation', 'reason', 'presentation'])
       || item.version !== 1 || !videoFeishuId(item.taskId) || !videoFeishuId(item.actorId) || !videoFeishuHash(item.identity)
-      || item.eventId !== videoFeishuUuid(item.taskId, 'event') || !normalizeVideoFeishuChoice(item.choice).enabled
+      || item.eventId !== videoFeishuUuid(item.taskId, 'event') || item.presentation !== undefined && !validVideoFeishuPresentation(item.presentation, item.taskId) || !normalizeVideoFeishuChoice(item.choice).enabled
       || !['pending', 'sent', 'failed', 'unknown', 'cancelled'].includes(item.state) || !['video', 'link'].includes(item.mode)
       || !time(item.createdAt) || !time(item.nextAttemptAt) || item.createdAt === null || item.nextAttemptAt === null
       || !Number.isSafeInteger(item.preparations) || item.preparations < 0 || item.preparations > VIDEO_FEISHU_ATTEMPTS
@@ -88,7 +121,7 @@ export function videoFeishuSameOriginal(previous: { sourceVersion: string | null
   return !previous.sourceVersion || previous.sourceVersion === current.version
     || Boolean(previous.contentHash && current.hash && previous.contentHash === current.hash);
 }
-export function videoFeishuStatus(meta: VideoFeishuEvent | null, originalStatus?: string | null, hasOriginalPath = false) {
+export function videoFeishuStatus(meta: VideoFeishuEvent | null, originalStatus?: string | null, hasOriginalPath = false, generationStatus?: string | null) {
   if (!meta) return { version: 1 as const, state: 'not_requested', canCancel: false, videoSent: false, explanationSent: false, mode: null };
   const originalFailed = !meta.video.receiptId && meta.externalStartedAt === null
     && (meta.reason === 'original_save_failed' || meta.reason === 'original_wait_ended' || originalStatus === 'failed' && !hasOriginalPath);
@@ -98,5 +131,5 @@ export function videoFeishuStatus(meta: VideoFeishuEvent | null, originalStatus?
       : meta.upload.state === 'uploading' || meta.cover.state === 'uploading' ? 'uploading'
         : meta.video.state === 'sending' || meta.explanation.state === 'sending' ? 'sending' : meta.leaseToken ? 'preparing' : 'pending';
   return { version: 1 as const, state, canCancel: videoFeishuCanCancel(meta), canRetrySave: originalFailed && originalStatus === 'failed',
-    reason: meta.reason, videoSent: Boolean(meta.video.receiptId), explanationSent: Boolean(meta.explanation.receiptId), mode: meta.mode };
+    generationSucceeded: generationStatus === 'succeeded', reason: meta.reason, videoSent: Boolean(meta.video.receiptId), explanationSent: Boolean(meta.explanation.receiptId), mode: meta.mode };
 }
