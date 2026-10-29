@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## MV-TEST01 真实动作生成失败（2026-10-29）
+
+来源：主线程本轮独占xiaobo Chrome、杨波本人作品的一次真实确认，费用层未关闭、底部提示参考拼图素材不可用，未重试；原名mv-test01-first-failure.png已在正式根`docs/materials/2026-10-29-multiview-action-fixes/implementation/`，368796字节PNG可读。私有同目录mv-test01-chain-evidence.json核同一素材本地/公网地址身份冲突、原文件完整、最新相关旧closed准备与pending fence分立保留，无关联任务/上游/费用；不冒本次新run或手验通过。正式原单§23.6，关键词：动作素材、共享公网化、原源权限、确认关层、单条手验。候选0.116.4，最终真实Chrome及单条生成仍归主线程；本执行者无浏览器/生成API或服务号替验，完整资料不公开Git。
+
 ## MV-GEN02 动作生成链路定位（2026-10-29）
 
 来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。0.116.3/12c41394已部署，完整构建/6门/7服务/公网同源，私有证据沿同目录mv-gen02/deployment-result.json及public-deployed.json；0.116.2恢复保留。原图沿§23.4附件，未新增或外发媒体；完整原记录不推Git，最终收费生成用户手验。

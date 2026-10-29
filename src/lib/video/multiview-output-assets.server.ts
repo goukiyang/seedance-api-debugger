@@ -250,7 +250,12 @@ export async function readMultiviewReferenceBinding(user: SessionUser, workId: s
   const entry = Array.isArray(receipt?.outputs) ? receipt.outputs.find((value: Record<string, unknown>) => value && value.role === 'collage' && value.state === 'registered' && value.sha256 === output.sha256) : null;
   if (!entry || receipt.ownerId !== user.id || receipt.readyRevision !== revision) throw new MultiviewWorkError('参考拼图素材仍在准备，请稍后查询原保存结果。', 409, 'REFERENCE_ASSET_PENDING');
   const asset = await db.asset.findFirst({ where: { id: entry.assetId, owner_id: user.id, hash: output.sha256, status: 'active', type: 'image' } });
-  if (!asset || asset.original_url !== entry.originalUrl || asset.width !== recipe.output.width || asset.height !== recipe.output.height) throw new MultiviewWorkError('参考拼图素材已不可用，原作品仍保留。', 409, 'REFERENCE_ASSET_UNAVAILABLE');
+  // The shared video input preparation may make this same site file URL absolute.
+  // Match only a trusted site-upload path; a foreign host or different file is not equivalent.
+  const registeredPath = siteUploadPathFromUrl(entry.originalUrl);
+  const sameLocation = asset && (asset.original_url === entry.originalUrl
+    || registeredPath !== null && siteUploadPathFromUrl(asset.original_url) === registeredPath);
+  if (!asset || !sameLocation || asset.width !== recipe.output.width || asset.height !== recipe.output.height) throw new MultiviewWorkError('参考拼图素材已不可用，原作品仍保留。', 409, 'REFERENCE_ASSET_UNAVAILABLE');
   return { assetId: asset.id, recipeHash, outputHash: output.sha256, sourceTaskId: work.source_task_id, sourceVersion: recipe.sourceVersion,
     geometry: { output: recipe.output, panels: recipe.panels, placements: recipe.placements, divider: recipe.divider } };
 }

@@ -179,6 +179,7 @@ export function MultiviewActionPanel(props: Props) {
       if(prepared.request_id!==requestId){setConfirming(false);setMessage('原动作准备尚未结束，请先核对下方原请求；本次未重新提交。');return;}
       if(isResolvedCreationIntent(prepared)){
         if(prepared.accepted_task_id){const accepted={key:requestId,runId:binding.runId,taskId:prepared.accepted_task_id};setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));setSelectedRunId(binding.runId);await refresh();props.onView('video');}
+        else if(prepared.state==='closed'){setNewAttemptRequired(true);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));}
         setConfirming(false);setMessage(prepared.accepted_task_id?'已找到原任务，不会重复生成。':'原动作请求已结束，当前输入保留，请主动重新准备生成。');return;
       }
       if(!prepared.availability?.canSubmit){setConfirming(false);setMessage(prepared.availability?.reasons.map(reason=>reason.message).join('；')||'本次尚未提交，请完成下方创作条件。');return;}
@@ -189,7 +190,7 @@ export function MultiviewActionPanel(props: Props) {
       const taskId=result.id||result.task_id||result.existing_task_id;
       if(!taskId)throw new Error('提交结果待确认，原请求已保留。');
       const accepted={...pending,taskId};setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));void creation.acceptTask(requestId,taskId).catch(()=>undefined);setMessage('视频任务已受理。');props.onView('video');await refresh().catch(()=>setMessage('视频任务已受理，状态暂未更新，可查询原任务。'));
-    }catch(cause){if(active(captured)){const result=(cause as {result?:{new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}})?.result,receipt=result?.request_receipt;if(retained&&result?.new_request_allowed===true&&receipt?.state==='rejected'&&receipt.accepted===false&&receipt.key===`multiview-action:${binding?.runId}`){setOriginal(null);setNewAttemptRequired(true);localStorage.removeItem(requestKey);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));setMessage(receipt.message||'本次未受理，当前输入保留。');}else setMessage(retained?'提交结果待确认，请查询原请求，不会重复提交。':cause instanceof Error?cause.message:'尚未提交，当前输入保留。');}}
+    }catch(cause){if(active(captured)){setConfirming(false);const result=(cause as {result?:{new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}})?.result,receipt=result?.request_receipt;if(retained&&result?.new_request_allowed===true&&receipt?.state==='rejected'&&receipt.accepted===false&&receipt.key===`multiview-action:${binding?.runId}`){setOriginal(null);setNewAttemptRequired(true);localStorage.removeItem(requestKey);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));setMessage(receipt.message||'本次未受理，当前输入保留。');}else setMessage(retained?'提交结果待确认，请查询原请求，不会重复提交。':cause instanceof Error?cause.message:'尚未提交，当前输入保留。');}}
     finally{submitLock.current=false;if(active(captured))setSubmitting(false);}
   }
   function newAttempt() { if (original && !original.taskId) return false; const id=crypto.randomUUID(); try { localStorage.setItem(attemptKey,JSON.stringify({id,needsNew:false}));setAttemptId(id);setNewAttemptRequired(false);setOriginal(null);localStorage.removeItem(requestKey);setQuote(null);return true; } catch {setMessage('新操作编号未能保存，尚未准备新的生成。');return false;} }
