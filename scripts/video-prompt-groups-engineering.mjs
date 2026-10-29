@@ -182,6 +182,11 @@ try {
   assert.equal(status.actual_cost, 1.2); assert.equal(status.usage.completion_tokens, 42);
   assert.equal(JSON.stringify(status).includes(body), false);
   checks.push('supplier diagnostics exclude internal text while retaining real billing facts');
+  const partial = await statusRouter.getProviderTaskStatus({ provider: 'seedance', provider_task_id: 'synthetic-upstream' }, {
+    fetchers: { seedance: async () => ({ provider_status: 'succeeded', local_status: 'succeeded', actual_cost: 1.2,
+      currency_or_credit_type: 'CNY', usage: { completion_tokens: 42, echoed_prompt: body }, raw: { prompt: body } }) } });
+  assert.equal(JSON.stringify(partial).includes(body), false); assert.equal(partial.actual_cost, 1.2);
+  checks.push('legacy partial cache refresh cannot persist an unclassified supplier recipe');
   const h3 = load('src/lib/provider/h3.ts');
   let h3Calls = 0;
   await assert.rejects(h3.createH3VideoJob({ preset_id: 'lightx2v_4step_turbo', prompt: body,
