@@ -3,7 +3,7 @@ import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from './CreationAvailability';
 export default function DraftUpgradeAction({ task, ownerId, enabled = true, onAccepted }: { task: { id: string; project_id?: string | null; video_card_id?: string | null; local_status: string }; ownerId?: string | null; enabled?: boolean; onAccepted?: (id: string) => void }) {
   const projectCatalogRevision = useProjectCatalogRevision();
@@ -19,11 +19,13 @@ export default function DraftUpgradeAction({ task, ownerId, enabled = true, onAc
     try {
       const response = await fetch(`/api/tasks/${task.id}/draft-upgrade?project_id=${encodeURIComponent(destination)}`, { cache: 'no-store' });
       const quote = await response.json(); if (!response.ok) throw new Error(quote.message || quote.error || '升级资格暂时无法确认');
+      if (!creation.isCurrent()) return;
       if (quote.accepted?.id) { sessionStorage.removeItem(pendingKey); setAccepted(quote.accepted.id); onAccepted?.(quote.accepted.id); return; }
       if (sessionStorage.getItem(pendingKey)) throw new Error('原升级提交仍待确认，只查询原请求，不会再次发送');
       const input = { ...quote.creation_input, baseline_task_id: baseline || creation.intent?.spec?.baseline_task_id || task.id,
         creation_contract_version: 2, resolution_approval_confirmed: true, pricing_revision: quote.pricing_revision, idempotency_key: requestId };
       const intent = await creation.prepare(input, requestId, creation.intent);
+      if (isResolvedCreationIntent(intent)) { setMessage('原升级请求已有处理结果，请核对下方原任务。'); return; }
       setBody(input); setCost(intent.quote?.estimated_cost ?? quote.estimatedCost);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : '暂时无法确认'); }
     finally { setBusy(false); }
@@ -34,15 +36,16 @@ export default function DraftUpgradeAction({ task, ownerId, enabled = true, onAc
     try {
       // Refreshing a token never changes the original operation identity.
       const intent = await creation.prepare(body, requestId, creation.intent);
-      if (!intent.availability?.canSubmit) return;
+      if (isResolvedCreationIntent(intent) || !intent.availability?.canSubmit) return;
       sessionStorage.setItem(pendingKey, 'pending');
       const response = await fetch(`/api/tasks/${task.id}/draft-upgrade`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': ownerId || '' },
         body: JSON.stringify({ ...body, intent_id: intent.id, intent_revision: intent.revision,
           resolution_approval_id: intent.approval_id, pricing_quote_token: intent.quote?.pricing_quote_token,
           pricing_revision: intent.quote?.pricing_revision || body.pricing_revision, max_estimated_cost: cost }) });
       const data = await response.json();
+      if (!creation.isCurrent()) return;
       if (!response.ok || !(data.id || data.task_id)) throw new Error(data.message || data.error || '升级受理待确认，请查询原请求');
-      const id = data.id || data.task_id; sessionStorage.removeItem(pendingKey); setAccepted(id); onAccepted?.(id);
+      const id = data.id || data.task_id; await creation.acceptTask(requestId, id); sessionStorage.removeItem(pendingKey); setAccepted(id); onAccepted?.(id);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : '升级受理待确认'); }
     finally { setBusy(false); }
   };

@@ -177,5 +177,5 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
     return { items, navigation: entries, matches, total: matches.length, page, pageSize, catalogRevision: revision, capabilities: { independentReactions: true },
       removedDefaultGroups: await getStudioRemovedDefaultGroups(catalog.actor.id, catalog.client),
       deletedSourcePresetIds: (await listStudioDeletedSources(catalog.actor.id, catalog.client)).filter(row => !row.reopenedModuleId).map(row => row.presetId) };
-  });
+  }, 'gallery');
 }

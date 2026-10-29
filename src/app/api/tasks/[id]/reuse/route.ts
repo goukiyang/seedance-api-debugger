@@ -715,14 +715,14 @@ export async function POST(
     });
     return NextResponse.json(outcome.body, { status: outcome.status, headers: taskReusePrivateHeaders });
   } catch (error) {
-    if (error instanceof TaskReuseOperationError) return NextResponse.json({ error: error.message, message: error.message, code: error.code }, { status: error.status, headers: taskReusePrivateHeaders });
+    if (error instanceof TaskReuseOperationError) return NextResponse.json({ error: error.message, message: error.message, code: error.code, ...error.diagnostic }, { status: error.status, headers: taskReusePrivateHeaders });
     if (error instanceof AuthError) {
       return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
     }
     console.error('[ReuseTask]', error);
     return NextResponse.json(
-      { error: '复用任务失败', message: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 },
+      { code: 'REUSE_RESULT_UNKNOWN', action: 'query_original', error: '复用结果暂未确认', message: '当前输入已保留，请核对原复用操作；不会自动重复提交。' },
+      { status: 503, headers: taskReusePrivateHeaders },
     );
   }
 }

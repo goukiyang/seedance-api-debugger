@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { Copy, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { PrivateDefinitionEditor } from '@/app/image-studio/PrivateDefinitionEditor';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 import { RelativeTime } from '@/components/RelativeTime';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
@@ -135,9 +135,11 @@ export function MultiviewActionPanel(props: Props) {
     try{
       const requestId=`multiview-action:${frozen.binding.runId}`;
       const body:Record<string,unknown>={...parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:frozen.run.text,multiview_action:frozen.binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,max_estimated_cost:frozen.points,pricing_revision:frozen.pricingRevision,pricing_quote_token:frozen.token,pricing_fingerprint_version:2};
-      const previous=creation.intent&&!['accepted','closed','rejected'].includes(creation.intent.state)?creation.intent:null;
+      const previous=!isResolvedCreationIntent(creation.intent)?creation.intent:null;
       const prepared=await creation.prepare(body,requestId,previous);
       if(!active(captured)||currentQuoteKey.current!==keyAtClick)throw new Error('输入已变化，请重新确认当前费用。');
+      if(prepared.request_id!==requestId){setConfirming(false);setMessage('原动作准备尚未结束，请先核对下方原请求；本次未重新提交。');return;}
+      if(isResolvedCreationIntent(prepared)){setConfirming(false);setMessage('原动作请求已有处理结果，请核对下方原任务。');return;}
       if(!prepared.availability?.canSubmit){setConfirming(false);setMessage('请完成下方创作条件，当前动作保留。');return;}
       if(!prepared.quote||prepared.quote.estimated_cost!==frozen.points||prepared.quote.pricing_revision!==frozen.pricingRevision){setConfirming(false);setQuoteRetry(value=>value+1);throw new Error('费用已变化，请核对新报价后生成。');}
       Object.assign(body,{intent_id:prepared.id,intent_revision:prepared.revision,resolution_approval_id:prepared.approval_id||null,pricing_quote_token:prepared.quote.pricing_quote_token||frozen.token});

@@ -1,6 +1,6 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 
 import { useProductDialog } from '@/components/useProductDialog';
@@ -275,12 +275,15 @@ export function TemplateGenerateClient() {
   const [result, setResult] = useState<CreateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingRequestKey, setPendingRequestKey] = useState<string | null>(null);
+  const [generationNotice, setGenerationNotice] = useState('');
+  const [recoveredTaskId, setRecoveredTaskId] = useState('');
   const submitLock = useRef(false);
   const submissionScope = useRef('');
   const creation = useCreationContext({ ownerId: currentUser?.id, entry: 'template', draftId: 'template-generate', projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
   const [creationBaselineId, setCreationBaselineId] = useState('');
   const creationDraftBody = useRef<Record<string, unknown> | null>(null);
-  submissionScope.current = JSON.stringify([currentUser?.id, selectedProjectId]);
+  submissionScope.current = JSON.stringify([currentUser?.id, selectedProjectId, selectedVideoCardId, creation.contextKey]);
+  useEffect(() => { setGenerationNotice(''); setRecoveredTaskId(''); }, [currentUser?.id, selectedProjectId, selectedVideoCardId, creation.contextKey]);
   const submissionCard = useRef(selectedVideoCardId); submissionCard.current = selectedVideoCardId;
   const requestStorageKey = currentUser ? `sd2-template-generation-request-v2:${currentUser.id}` : null;
   useEffect(() => {
@@ -876,14 +879,17 @@ export function TemplateGenerateClient() {
     const data = await readJsonResponse<{ task?: { id: string } | null; error?: string; message?: string }>(response);
     if (scope !== submissionScope.current) throw new Error('账号或保存位置已变化，请回到原账号核对原请求');
     if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认，请继续查询原号');
-    if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+    if (!data.task?.id) { setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); return true; }
+    await creation.acceptTask(pending.key, data.task.id);
+    if (scope !== submissionScope.current) return true;
     sessionStorage.removeItem(requestStorageKey);
     setPendingRequestKey(null);
     setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
     void loadRecentTasksPage(1, 'replace');
-    setError('原请求已受理，已恢复原任务；本次没有再次生成');
+    setError(null); setErrorDebug(null); setRecoveredTaskId(data.task.id);
+    setGenerationNotice('原请求已受理，已恢复原任务；本次没有再次生成');
     return true;
-  }, [currentUser, requestStorageKey, loadRecentTasksPage]);
+  }, [currentUser, requestStorageKey, loadRecentTasksPage, creation.acceptTask]);
 
   const handleSubmit = useCallback(async (params: {
     pricingRevision?: string | null;
@@ -918,6 +924,7 @@ export function TemplateGenerateClient() {
     setSubmitting(true);
     setError(null);
     setResult(null);
+    setGenerationNotice(''); setRecoveredTaskId('');
     const scope = submissionScope.current;
     let selectedCard: VideoCardOption | null = null;
     try {
@@ -968,7 +975,7 @@ export function TemplateGenerateClient() {
       if (scope !== submissionScope.current || (selectedVideoCardId
         ? submissionCard.current !== (selectedCard?.id || '')
         : submissionCard.current && submissionCard.current !== (selectedCard?.id || ''))) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
-      const previous = creation.intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(creation.intent.state) ? creation.intent : null;
+      const previous = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       const requestBody = {
           creation_contract_version: 2, entry: 'template', continuation: { mode: 'new' }, baseline_task_id: creationBaselineId || null, video_branch_id: null,
           pricing_revision: quote.pricing_revision,
@@ -1004,7 +1011,9 @@ export function TemplateGenerateClient() {
       if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
       creationDraftBody.current = requestBody;
       const prepared = await creation.prepare(requestBody, requestBody.idempotency_key, previous);
-      if (!prepared.availability?.canSubmit) { setError('请完成下方本次创作条件'); return; }
+      if (scope !== submissionScope.current) return;
+      if (isResolvedCreationIntent(prepared)) { setGenerationNotice('原请求已有处理结果，当前输入保留，请核对下方原任务。'); return; }
+      if (!prepared.availability?.canSubmit) { setGenerationNotice('请完成下方本次创作条件'); return; }
       const acceptedBody = { ...requestBody, idempotency_key: prepared.request_id, intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
         ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
       sessionStorage.setItem(requestStorageKey!, JSON.stringify({ key: prepared.request_id,
@@ -1017,7 +1026,8 @@ export function TemplateGenerateClient() {
         body: JSON.stringify(acceptedBody),
       });
       const data = await readJsonResponse<CreateTaskResponse>(response);
-      if (response.ok && data.id) creation.setIntent({ ...prepared, state: 'accepted', accepted_task_id: data.id });
+      if (scope !== submissionScope.current) return;
+      if (response.ok && data.id) await creation.acceptTask(prepared.request_id, data.id);
       if (scope !== submissionScope.current) return;
       if (!response.ok) {
         if (typeof data.code === 'string' && data.code.startsWith('pricing_')) notifyVideoPricingChanged();
@@ -1081,7 +1091,11 @@ export function TemplateGenerateClient() {
         .then((data) => { if (data) setCredits(data); })
         .catch(() => {});
     } catch (error) {
-      if (error instanceof Error) setError(error.message);
+      if (scope !== submissionScope.current) return;
+      let retained = true;
+      try { retained = Boolean(requestStorageKey && sessionStorage.getItem(requestStorageKey)); } catch { /* Keep an unreadable original receipt fenced. */ }
+      if (retained) setGenerationNotice(error instanceof Error ? error.message : '提交结果待确认，请查询原请求');
+      else if (error instanceof Error) setError(error.message);
     } finally {
       setSubmitting(false);
       submitLock.current = false;
@@ -1097,6 +1111,14 @@ export function TemplateGenerateClient() {
     currentUser,
     requestStorageKey,
     checkPendingRequest,
+    creation.context,
+    creation.error,
+    creation.intent,
+    creation.prepare,
+    creation.acceptTask,
+    creationBaselineId,
+    videoCards,
+    loadRecentTasksPage,
   ]);
 
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
@@ -1106,10 +1128,11 @@ export function TemplateGenerateClient() {
     <div className="composer-page template-generate-page">
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
       <main className="composer-main template-generate-main">
+        {generationNotice && <p className="composer-prefill-notice" role="status">{generationNotice}{recoveredTaskId && <> <Link href={`/tasks/${encodeURIComponent(recoveredTaskId)}`}>查看原任务</Link></>}</p>}
         {pendingRequestKey && <div className="composer-prefill-notice" role="status">
           提交结果待确认，当前输入已保留。
           <button type="button" disabled={submitting} onClick={() => {
-            setSubmitting(true); void checkPendingRequest().catch(cause => setError(cause instanceof Error ? cause.message : '原请求暂时无法确认')).finally(() => setSubmitting(false));
+            setSubmitting(true); void checkPendingRequest().catch(cause => setGenerationNotice(cause instanceof Error ? cause.message : '原请求暂时无法确认')).finally(() => setSubmitting(false));
           }}>查询原请求</button>
         </div>}
         <section className="template-generate-hero" aria-label="模板生成工作台">

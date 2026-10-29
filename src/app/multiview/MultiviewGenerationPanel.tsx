@@ -3,7 +3,7 @@ import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, FolderOpen, ImagePlus, Plus, RefreshCw, Upload } from 'lucide-react';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
@@ -473,6 +473,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     }
     else { try { store(); setRequestStorageFailed(false); } catch { setRequestStorageFailed(true); } }
     receiptRef.current = value; setReceipt(value);
+    if (value.taskId) void creation.acceptTask(value.key, value.taskId).catch(() => {
+      // The task receipt is retained independently; a failed preparation read never resubmits it.
+    });
     refreshRequests();
   }
   function refreshRequests(offset = 0) {
@@ -971,7 +974,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     let submissionHttpStatus: number | null = null;
     try {
       if (!creation.context?.v2Available) throw new Error('当前创作流程尚未开放，输入已保留');
-      const previousIntent = creation.intent && !['accepted', 'closed', 'batch_active', 'batch_settled', 'rejected'].includes(creation.intent.state) ? creation.intent : null;
+      const previousIntent = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       let key = previousIntent?.request_id || crypto.randomUUID();
       const body: Record<string, unknown> = { ...buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points,
         pricingRevision: currentQuote.pricingRevision, pricingQuoteToken: currentQuote.pricingQuoteToken, preset: presetState.preset }),
@@ -981,6 +984,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       const prepared = await creation.prepare(body, key, previousIntent);
       key = prepared.request_id; body.idempotency_key = key;
       if (!current(scope)) return;
+      if (isResolvedCreationIntent(prepared)) { setStatus('原请求已有处理结果，当前输入保留，请核对下方原任务。'); setConfirmation(null); return; }
       if (!prepared.availability?.canSubmit) { setStatus('请完成本次创作条件，当前输入已保留。'); setConfirmation(null); return; }
       if (!prepared.quote || !validVideoPricingAmount(prepared.quote.estimated_cost)) {
         setConfirmationNotice('报价暂时无法确认，请返回修改后重新报价。'); setQuote(null); setRevision(value => value + 1); return;

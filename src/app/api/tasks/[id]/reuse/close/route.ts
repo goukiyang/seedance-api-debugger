@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json(outcome.body, { status: outcome.status, headers: taskReusePrivateHeaders });
   } catch (error) {
     if (error instanceof TaskReuseOperationError || error instanceof AuthError)
-      return NextResponse.json({ error: error.message, code: error instanceof TaskReuseOperationError ? error.code : 'REUSE_PERMISSION_DENIED' }, { status: error.status, headers: taskReusePrivateHeaders });
+      return NextResponse.json({ error: error.message, code: error instanceof TaskReuseOperationError ? error.code : 'REUSE_PERMISSION_DENIED', ...(error instanceof TaskReuseOperationError ? error.diagnostic : {}) }, { status: error.status, headers: taskReusePrivateHeaders });
     console.error('[TaskReuseClose]', error);
     return NextResponse.json({ code: 'REUSE_CLOSE_UNKNOWN', error: '暂未确认结束，原复用记录保留，请继续核对原操作。' }, { status: 503, headers: taskReusePrivateHeaders });
   }

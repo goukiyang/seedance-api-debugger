@@ -1,7 +1,7 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 
 import { useEffect, useState } from 'react';
@@ -102,7 +102,8 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       if (sessionStorage.getItem(pendingKey)) {
         const response = await fetch(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(key)}`, { cache: 'no-store' });
         const original = await response.json();
-        if (response.ok && original.task?.id) { sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, `/tasks/${task.id}`)); return; }
+        if (!creation.isCurrent()) return;
+        if (response.ok && original.task?.id) { await creation.acceptTask(key, original.task.id); sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, `/tasks/${task.id}`)); return; }
         throw new Error('原超分提交待确认，请查询原任务；不会再次发送');
       }
       const body = { provider: 'volcengine_mediakit', model: 'enhance-video', action: 'enhance', entry: 'enhance',
@@ -112,19 +113,25 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
         scene: toolVersion === 'standard' ? 'aigc' : undefined, resolution, fps: selectedFps, duration: task.duration,
         creation_contract_version: 2, idempotency_key: key };
       const prepared = await creation.prepare(body, key);
-      if (!prepared.availability?.canSubmit) throw new Error('原创作链当前不可继续，请查看下方原因');
+      if (prepared.request_id !== key) { setMessage('原超分准备尚未结束，请先核对下方原请求；本次未重新提交。'); return; }
+      if (isResolvedCreationIntent(prepared)) { setMessage('原超分请求已有处理结果，请核对下方原任务。'); return; }
+      if (!prepared.availability?.canSubmit) { setMessage('原创作链当前不可继续，请查看下方原因'); return; }
       sessionStorage.setItem(pendingKey, key);
       const res = await fetch('/api/tasks/enhance-video/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, intent_id: prepared.id, intent_revision: prepared.revision }) });
       const data = await res.json();
+      if (!creation.isCurrent()) return;
       if (!res.ok) {
         if (typeof data.code === 'string' && data.code.startsWith('pricing_') || typeof data.error === 'string' && data.error.startsWith('pricing_')) pricing.refresh();
         throw new Error(data.message || data.error || '创建超分任务失败');
       }
       sessionStorage.removeItem(pendingKey);
+      await creation.acceptTask(key, data.id);
+      if (!creation.isCurrent()) return;
       setMessage('已创建超分任务');
       router.push(taskDetailHref(data.id, `/tasks/${task.id}`));
     } catch (err) {
+      if (!creation.isCurrent()) return;
       setError(err instanceof Error ? err.message : '创建超分任务失败');
     } finally {
       setSubmitting(false);

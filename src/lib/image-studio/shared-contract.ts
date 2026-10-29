@@ -205,7 +205,7 @@ async function reproductionForPreset(client: SharedStudioClient, ownerId: string
 
 export async function resolveSharedStudioDefinition(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient = prisma) {
   try {
-    return await (client === prisma ? readSharedStudioSnapshot(tx => resolveSharedStudioDefinitionInternal(user, presetId, tx))
+    return await (client === prisma ? readSharedStudioSnapshot(tx => resolveSharedStudioDefinitionInternal(user, presetId, tx), 'definition')
       : resolveSharedStudioDefinitionInternal(user, presetId, client));
   }
   catch (error) { throw normalizeSharedError(error); }
@@ -455,7 +455,7 @@ export type SharedStudioModuleRead = {
 
 export async function readSharedStudioModules(ownerId: string, moduleIds: string[], client?: SharedStudioClient): Promise<Map<string, SharedStudioModuleRead>> {
   if (!moduleIds.length) return new Map();
-  if (!client) return readSharedStudioSnapshot(tx => readSharedStudioModules(ownerId, moduleIds, tx));
+  if (!client) return readSharedStudioSnapshot(tx => readSharedStudioModules(ownerId, moduleIds, tx), 'modules');
   const tx = client;
     const actor = await assertStudioActor(ownerId, tx);
     const entries = await Promise.all(Array.from(new Set(moduleIds), async moduleId => {
@@ -518,7 +518,7 @@ function inTransaction<T>(client: SharedStudioClient | undefined, action: (tx: S
 export async function studioSharedOpenStatus(user: ImageStudioIdentity, presetId: string, requestId: unknown,
   client?: SharedStudioClient): Promise<StudioOpenCommandStatus> {
   if (!presetId || presetId.length > 160) throw new StudioSharingError('打开请求查询参数无效', 400);
-  if (!client) return readSharedStudioSnapshot(tx => studioSharedOpenStatus(user, presetId, requestId, tx));
+  if (!client) return readSharedStudioSnapshot(tx => studioSharedOpenStatus(user, presetId, requestId, tx), 'open-status');
   const actor = await assertStudioActor(user.id, client);
   const stored = await readOwnedReceipt(client, actor.id, requestId);
   // An absent receipt cannot establish that an earlier write did not commit.
@@ -1334,7 +1334,7 @@ async function sharedCatalogState(user: ImageStudioIdentity, client: SharedStudi
   return { actor, visible, byId, catalogRevision };
 }
 export async function listSharedStudioCatalog(user: ImageStudioIdentity, options: { cursor?: string; catalogRevision?: string } = {}, client: SharedStudioClient = prisma): Promise<SharedStudioCatalog> {
-  if (client === prisma) return readSharedStudioSnapshot(tx => listSharedStudioCatalog(user, options, tx));
+  if (client === prisma) return readSharedStudioSnapshot(tx => listSharedStudioCatalog(user, options, tx), 'catalog');
   const { actor, visible, byId, catalogRevision } = await sharedCatalogState(user, client);
   if (options.catalogRevision && options.catalogRevision !== catalogRevision) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
   if (options.cursor && (!options.catalogRevision || !visible.some(row => row.id === options.cursor))) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
@@ -1410,5 +1410,5 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
       }
     }
     return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable, activeState };
-  });
+  }, 'revision');
 }

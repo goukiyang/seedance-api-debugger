@@ -1,7 +1,7 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
-import { useCreationContext } from '@/lib/hooks/use-creation-context';
+import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
 import { useProductDialog } from '@/components/useProductDialog';
 
@@ -633,6 +633,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [imageResultRequested, setImageResultRequested] = useState<boolean | null>(null);
   const [imageResultPendingReceipt, setImageResultPendingReceipt] = useState('');
   const [unconfirmedGenerationRequest, setUnconfirmedGenerationRequest] = useState(false);
+  const [generationNotice, setGenerationNotice] = useState('');
+  const generationOperation = useRef<object | null>(null);
   const studioHandoffRequestRef = useRef<string | null>(null);
   const unconfirmedGenerationParamsRef = useRef<GenerationSubmitParams | null>(null);
   const activeGenerationRequestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${imageResultHandoff?.receiptId || studioRunId || 'standard'}`;
@@ -817,6 +819,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     draftId: surface, projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
   const [creationBaselineId, setCreationBaselineId] = useState('');
   const creationDraftBodyRef = useRef<Record<string, unknown> | null>(null);
+  const generationScopeKey = JSON.stringify([currentUser?.id, creation.contextKey, selectedProjectId, selectedVideoCardId,
+    selectedVideoBranchId, studioRunId, imageResultHandoff?.receiptId, composerReuseState.editRevision]);
+  const generationScope = useRef({ key: generationScopeKey });
+  if (generationScope.current.key !== generationScopeKey) generationScope.current = { key: generationScopeKey };
+  useEffect(() => { setGenerationNotice(''); }, [generationScopeKey]);
 
   selectedProjectIdRef.current = selectedProjectId;
   selectedVideoCardIdRef.current = selectedVideoCardId;
@@ -2084,7 +2091,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       }
       if (!res.ok && !parameterOnly) {
         if (res.status >= 500 || !data.reuse || !['rejected', 'closed'].includes(data.reuse.status)) {
-          markOutcomeUnknown('服务器处理结果未确认。当前参数未替换，但参考区可能已变化；请重新读取并核对，不会自动重试。');
+          markOutcomeUnknown(data.code === 'REUSE_DATABASE_BUSY' ? data.message || '复用结果待核对，请查询原操作；不会重新发送。'
+            : '服务器处理结果未确认。当前参数未替换，但参考区可能已变化；请重新读取并核对，不会自动重试。');
           return;
         }
         const unrecoverable = res.status === 403 || res.status === 404;
@@ -2721,8 +2729,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }, [currentUser?.id, selectedProjectId, isIpSurface]);
 
   const checkOriginalGenerationRequest = useCallback(async () => {
-    if (!currentUser?.id || submitting) return;
-    setSubmitting(true); setError(null);
+    if (!currentUser?.id || generationOperation.current) return;
+    const captured = generationScope.current, operation = {};
+    const isCurrent = () => reuseMountedRef.current && generationScope.current === captured;
+    generationOperation.current = operation;
+    setSubmitting(true); setError(null); setGenerationNotice('');
     try {
       const raw = sessionStorage.getItem(activeGenerationRequestStorageKey);
       if (!raw) { setUnconfirmedGenerationRequest(false); return; }
@@ -2733,24 +2744,37 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const endpoint = isIpSurface ? '/api/ip/tasks/request-status' : studioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
       const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store', headers: { 'x-app-session-user': currentUser.id } });
       const data = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
-      if (activeAccountIdRef.current !== currentUser.id) return;
+      if (!isCurrent()) return;
       if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
-      if (!data.task?.id) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
+      if (!data.task?.id) { setUnconfirmedGenerationRequest(true); setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); return; }
       const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED';
+      await creation.acceptTask(pending.key, data.task.id);
+      if (!isCurrent()) return;
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed); setResult(unconfirmed ? null : data.task);
       setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
       void loadRecentTasksPage(0, 'replace');
-      setError(unconfirmed ? '上游受理结果待确认，请继续查询原任务' : '已恢复原任务，本次没有再次生成。当前输入保留。');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '原请求暂时无法确认'); }
-    finally { setSubmitting(false); }
-  }, [currentUser?.id, submitting, activeGenerationRequestStorageKey, studioRunId, isIpSurface, loadRecentTasksPage]);
+      setErrorDebug(null); setPolledResult(null);
+      setGenerationNotice(unconfirmed ? '上游受理结果待确认，请继续查询原任务' : '已恢复原任务，本次没有再次生成。当前输入保留。');
+    } catch (cause) { if (isCurrent()) setGenerationNotice(cause instanceof Error ? cause.message : '原请求暂时无法确认'); }
+    finally { if (generationOperation.current === operation) { generationOperation.current = null; setSubmitting(false); } }
+  }, [currentUser?.id, activeGenerationRequestStorageKey, studioRunId, isIpSurface, loadRecentTasksPage, creation.acceptTask]);
+
+  useEffect(() => {
+    if (unconfirmedGenerationRequest) void checkOriginalGenerationRequest();
+  }, [activeGenerationRequestStorageKey, unconfirmedGenerationRequest, checkOriginalGenerationRequest]);
 
   const handleSubmit = useCallback(async (params: GenerationSubmitParams) => {
+    if (generationOperation.current) return;
+    const captured = generationScope.current, operation = {};
+    const isCurrent = () => reuseMountedRef.current && generationScope.current === captured;
+    generationOperation.current = operation;
+    const finish = () => { if (generationOperation.current === operation) { generationOperation.current = null; setSubmitting(false); } };
     unconfirmedGenerationParamsRef.current = params;
     setSubmitting(true);
     setError(null);
     setErrorDebug(null);
+    setGenerationNotice('');
     setResult(null);
 
     const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.imageResultReceiptId || params.templateStudioRunId || 'standard'}`;
@@ -2762,17 +2786,20 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store',
         headers: currentUser?.id ? { 'x-app-session-user': currentUser.id } : {} });
       const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
-      if (activeAccountIdRef.current !== currentUser?.id) throw new Error('账号已变化，请回到原账号查询原请求');
+      if (!isCurrent()) throw new Error('账号或工作现场已变化，请回原位置查询原请求');
       if (!response.ok) throw new Error(payload.message || payload.error || '无法确认上次请求是否已受理');
       return payload.task || null;
     };
-    const acceptRecoveredTask = (task: CreateTaskResponse) => {
+    const acceptRecoveredTask = async (task: CreateTaskResponse, key: string) => {
+      if (!isCurrent()) return;
+      await creation.acceptTask(key, task.id);
+      if (!isCurrent()) return;
       const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
       if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
       setResult(unconfirmed ? null : task);
-      setError(unconfirmed ? task.message || '上游受理结果待确认，请继续查询原任务'
+      setGenerationNotice(unconfirmed ? task.message || '上游受理结果待确认，请继续查询原任务'
         : '已恢复原请求的任务，本次没有再次生成。当前输入保留。');
       setPolledResult(null);
       setActivePollingTaskIds(current => [task.id, ...current.filter(id => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
@@ -2784,20 +2811,22 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         const pending = JSON.parse(raw) as { key?: unknown };
         if (typeof pending.key !== 'string' || !pending.key) throw new Error('原请求记录无法读取，请先核对原任务');
         const accepted = await recoverAcceptedRequest(pending.key);
-        if (!accepted) throw new Error('提交结果待确认，请继续查询原请求；不会重新生成');
-        acceptRecoveredTask(accepted);
-        setSubmitting(false); return;
+        if (!accepted) { setUnconfirmedGenerationRequest(true); setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); finish(); return; }
+        await acceptRecoveredTask(accepted, pending.key);
+        finish(); return;
       }
     } catch (cause) {
-      setUnconfirmedGenerationRequest(true);
-      setError(cause instanceof Error ? cause.message : '原请求暂时无法确认，请继续查询原号');
-      setSubmitting(false); return;
+      if (isCurrent()) {
+        setUnconfirmedGenerationRequest(true);
+        setGenerationNotice(cause instanceof Error ? cause.message : '原请求暂时无法确认，请继续查询原号');
+      }
+      finish(); return;
     }
 
     let selectedVideoCard = videoCards.find((card) => card.id === selectedVideoCardId) || null;
     if (!selectedProjectId) {
       setError('请先选择项目');
-      setSubmitting(false);
+      finish();
       return;
     }
     const selectedH3Model = !isIpSurface && params.model === H3_INLINE_MODEL_ID;
@@ -2808,7 +2837,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     const durationModel = selectedH3Model ? null : requestedModel;
     if (!isSeedanceVideoDuration(params.duration, durationModel)) {
       setError(`当前模型仅支持 4–${seedanceVideoMaxDuration(durationModel)} 秒，请重新选择时长后提交。当前时长未自动修改，也未扣点。`);
-      setSubmitting(false);
+      finish();
       return;
     }
     const requestedH3LoraId = selectedH3Model
@@ -2819,12 +2848,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       : '';
     if (selectedH3Model && (!h3Ready || !requestedModel)) {
       setError(`${h3DisabledReason(h3VideoConfig)}，请先点击「检查状态」刷新机器状态。`);
-      setSubmitting(false);
+      finish();
       return;
     }
     if (selectedH3Model && !requestedH3LoraId) {
       setError('H3 LoRA 配置缺失，请刷新页面后重试。');
-      setSubmitting(false);
+      finish();
       return;
     }
 
@@ -2879,12 +2908,21 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         || (selectedVideoCardId ? selectedVideoCardIdRef.current !== readyVideoCard?.id
           : selectedVideoCardIdRef.current && selectedVideoCardIdRef.current !== readyVideoCard?.id)) throw new Error('账号或保存位置已变化，请重新报价；尚未生成');
       if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
-      const previous = creation.intent && !['accepted','closed','batch_active','batch_settled','rejected'].includes(creation.intent.state) ? creation.intent : null;
+      const previous = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       let idempotencyKey = previous?.request_id || window.crypto.randomUUID();
       creationDraftBodyRef.current = requestBody;
       const prepared = await creation.prepare(requestBody, idempotencyKey, previous);
+      if (!isCurrent()) return;
       idempotencyKey = prepared.request_id;
-      if (!prepared.availability?.canSubmit) { setError('请完成下方本次创作条件，输入已保留'); return; }
+      if (isResolvedCreationIntent(prepared)) {
+        if (prepared.accepted_task_id) {
+          const task = await recoverAcceptedRequest(prepared.request_id);
+          if (task) await acceptRecoveredTask(task, prepared.request_id);
+          else setGenerationNotice('原请求已受理，请核对原任务；当前输入保留。');
+        } else setGenerationNotice('原准备已有处理结果，当前输入保留，可主动开始下一次创作。');
+        return;
+      }
+      if (!prepared.availability?.canSubmit) { setGenerationNotice('请完成下方本次创作条件，输入已保留'); return; }
       const acceptedBody = { ...requestBody, idempotency_key: idempotencyKey, intent_id: prepared.id, intent_revision: prepared.revision,
         resolution_approval_id: prepared.approval_id || null, ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
       sessionStorage.setItem(requestStorageKey, JSON.stringify({ key: idempotencyKey, fingerprint: requestFingerprint, fingerprintVersion: 2 }));
@@ -2904,22 +2942,24 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         try {
           const accepted = await recoverAcceptedRequest(idempotencyKey);
           if (accepted) {
-            acceptRecoveredTask(accepted);
+            await acceptRecoveredTask(accepted, idempotencyKey);
             return;
           }
         } catch {
           // Keep the same request key when its acceptance state cannot be read.
         }
+        if (!isCurrent()) return;
         setUnconfirmedGenerationRequest(true);
         throw new Error('网络中断，提交结果待确认。请求号已保留，请查询原任务；不会重新生成。');
       }
 
       const data = await readJsonResponse<CreateTaskResponse>(res);
-      if (res.ok && data.id) creation.setIntent({ ...prepared, state: 'accepted', accepted_task_id: data.id });
-      if (activeAccountIdRef.current !== currentUser?.id) return;
+      if (!isCurrent()) return;
+      if (res.ok && data.id) await creation.acceptTask(idempotencyKey, data.id);
+      if (!isCurrent()) return;
 
       if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
-        acceptRecoveredTask(data);
+        await acceptRecoveredTask(data, idempotencyKey);
         return;
       }
 
@@ -2930,12 +2970,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           try {
             const accepted = await recoverAcceptedRequest(idempotencyKey);
             if (accepted) {
-              acceptRecoveredTask(accepted);
+              await acceptRecoveredTask(accepted, idempotencyKey);
               return;
             }
           } catch {
             // Keep the original request key while the task state is uncertain.
           }
+          if (!isCurrent()) return;
           setUnconfirmedGenerationRequest(true);
           throw new Error(data.message || data.error || `服务暂未确认请求结果 (HTTP ${res.status})；请求号已保留`);
         }
@@ -3017,14 +3058,18 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       // Refresh credit display after freeze
       fetch('/api/me/credits')
         .then((r) => r.ok ? r.json() : null)
-        .then((d) => { if (d) setCredits(d); })
+        .then((d) => { if (d && isCurrent()) setCredits(d); })
         .catch(() => {});
     } catch (err) {
-      try { if (sessionStorage.getItem(requestStorageKey)) setUnconfirmedGenerationRequest(true); }
-      catch { setUnconfirmedGenerationRequest(true); }
-      if (err instanceof Error) setError(err.message);
+      if (!isCurrent()) return;
+      let retained = true;
+      try { retained = Boolean(sessionStorage.getItem(requestStorageKey)); } catch { /* An unreadable receipt remains unknown. */ }
+      if (retained) {
+        setUnconfirmedGenerationRequest(true);
+        setGenerationNotice(err instanceof Error ? err.message : '提交结果待确认，请查询原请求');
+      } else if (err instanceof Error) setError(err.message);
     } finally {
-      setSubmitting(false);
+      finish();
     }
 	  }, [
     h3Ready,
@@ -3042,6 +3087,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     currentUser?.id,
     loadRecentTasksPage,
     surface,
+    creation.context,
+    creation.error,
+    creation.intent,
+    creation.prepare,
+    creation.acceptTask,
+    creationBaselineId,
   ]);
 
   // ============================================================================
@@ -3490,6 +3541,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       </div>
       )}
 
+        {generationNotice && <p className="composer-prefill-notice" role="status">{generationNotice}</p>}
         {surfaceConfig.notice && (
           <div className="composer-prefill-notice">
             {surfaceConfig.notice}

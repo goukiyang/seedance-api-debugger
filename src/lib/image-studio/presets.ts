@@ -569,7 +569,7 @@ export async function studioPresetDeletionStatus(user: ImageStudioIdentity, pres
     const source = await tx.imageStudioPreset.findFirst({ where: { id: presetId, owner_id: actor.id }, select: { updated_at: true } });
     return { status: 'completed', receipt, current: { exists: Boolean(source), archived: Boolean(source && await studioPresetArchived(presetId, tx)),
       sourceRevision: source?.updated_at.toISOString() ?? null } };
-  });
+  }, 'deletion-status');
 }
 
 export async function linkStudioQuickPreset(user: ImageStudioIdentity, moduleId: string, presetId: string) {
@@ -669,7 +669,7 @@ export async function studioSharingCommandStatus(user: ImageStudioIdentity, requ
     const receipt = stored.result.action === 'set-sharing' ? parseStudioSharingReceipt(stored.result) : publicStudioReceipt(stored.result);
     return { status: 'completed', receipt, current: typeof stored.result.presetId === 'string'
       ? await currentStudioSharing(tx, actor.id, stored.result.presetId) : null };
-  });
+  }, 'sharing-status');
 }
 export async function studioPresetLifecycleHistory(user: ImageStudioIdentity, presetId: string, cursor?: string): Promise<SharedStudioLifecycleHistory> {
   return readSharedStudioSnapshot(async tx => {
@@ -690,7 +690,7 @@ export async function studioPresetLifecycleHistory(user: ImageStudioIdentity, pr
     const page = rows.slice(0, 20);
     return { items: page.map(row => ({ id: row.id, action: row.action, actorUserId: row.actor_user_id, ownerUserId: row.owner_user_id,
       createdAt: row.created_at.toISOString(), detail: publicStudioLifecycleDetail(row.detail_json) })), nextCursor: rows.length > 20 ? page[page.length - 1].id : null };
-  });
+  }, 'lifecycle-history');
 }
 
 export async function applyStudioPreset(user: ImageStudioIdentity, presetId: string) {

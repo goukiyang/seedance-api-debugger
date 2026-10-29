@@ -7,6 +7,7 @@ import { getProjectAccess } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { canUseDirectAsset, assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { normalizeWorkspaceTabId } from '@/lib/assets/workspace';
+import { sharedStudioReadDiagnostics } from '@/lib/image-studio/read-snapshot';
 import { canonicalTaskReuseOperation, parseTaskReuseOperationRequest, type TaskReuseOperationRequest,
   type TaskReuseOperationStatus, type TaskReuseWorkspaceItem } from './task-reuse-intent';
 
@@ -20,7 +21,8 @@ const keyFor = (ownerId: string, requestId: string) => 'task_reuse_operation_v2:
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 export const taskReusePrivateHeaders = headers;
 export class TaskReuseOperationError extends Error {
-  constructor(readonly code: string, message: string, readonly status = 409) { super(message); }
+  constructor(readonly code: string, message: string, readonly status = 409,
+    readonly diagnostic?: { action: 'query_original'; phase: 'transaction_wait' | 'transaction_body'; diagnostic_id: string }) { super(message); }
 }
 export function taskReuseRequest(value: unknown, ownerId: string, sourceTaskId: string, tabHeader: string | null) {
   const request = parseTaskReuseOperationRequest(value);
@@ -95,28 +97,41 @@ export async function readTaskReuseOperation(user: SessionUser, sourceTaskId: st
 export async function finishTaskReuseOperation(user: SessionUser, sourceTaskId: string, request: TaskReuseOperationRequest,
   input: { close: true } | { sourceStamp: string; items: PreparedItem[]; payload: Payload; rejection?: { code: string; message: string; status: number } }) {
   const startedAt = Date.now(), correlation = digest(user.id + ':' + request.requestId).slice(0, 16);
+  let enteredAt: number | null = null;
+  let stage = 'transaction_wait', stageStartedAt = startedAt;
+  const stages: Record<string, number> = {};
+  const mark = (next: string) => { stages[stage] = (stages[stage] || 0) + Date.now() - stageStartedAt; stage = next; stageStartedAt = Date.now(); };
   const log = (phase: string, error?: unknown) => console.info('[TaskReuseOperation]', JSON.stringify({ correlation, role: process.env.PROCESS_ROLE || 'web',
-    pid: process.pid, phase, at: Date.now(), elapsedMs: Date.now() - startedAt, code: (error as { code?: string } | undefined)?.code || null }));
+    pid: process.pid, phase, at: Date.now(), elapsedMs: Date.now() - startedAt,
+    waitMs: (enteredAt ?? Date.now()) - startedAt, stage, stageMs: Date.now() - stageStartedAt, stages,
+    sharedReads: sharedStudioReadDiagnostics(), code: (error as { code?: string } | undefined)?.code || null }));
   log('transaction_requested');
   try {
     return await prisma.$transaction(async tx => {
+      enteredAt = Date.now(); mark('read_receipt');
       log('transaction_entered');
       const prior = await readStored(tx, user.id, sourceTaskId, request);
       if (prior) {
+        mark('read_original');
         const original = await result(tx, user, prior);
         return prior.status === 'closed' && !('close' in input) ? { ...original, status: 409 } : original;
       }
+      mark('read_workspace');
       const workspace = await tx.workspace.findFirst({ where: { id: request.workspaceId, owner_id: user.id, status: 'active', name: `默认工作台:${request.tabId}` } });
       if (!workspace) throw new TaskReuseOperationError('REUSE_WORKSPACE_CHANGED', '原工作区已变化，未覆盖其它工作区。');
       let status: Stored['status'] = 'closed', httpStatus = 200, payload: Payload = { code: 'REUSE_OPERATION_CLOSED', message: '已结束等待，当前输入保留；迟到的原操作不会再应用。' };
       if (!('close' in input)) {
         try {
+          mark('authorize_source');
           await assertSource(tx, user, sourceTaskId, input.sourceStamp);
+          mark('check_workspace');
           const current = await workspaceItems(tx, request.workspaceId);
           const canonical = (items: TaskReuseWorkspaceItem[]) => JSON.stringify([...items].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
           if (canonical(current) !== canonical(request.expectedWorkspaceAssets)) throw new TaskReuseOperationError('REUSE_WORKSPACE_CONFLICT', '参考区已被更新，未覆盖后来编辑。');
           if (input.rejection) throw new TaskReuseOperationError(input.rejection.code, input.rejection.message, input.rejection.status);
+          mark('authorize_items');
           await assertItems(tx, user, input.items);
+          mark('replace_items');
           await tx.workspaceAsset.deleteMany({ where: { workspace_id: request.workspaceId } });
           if (input.items.length) await tx.workspaceAsset.createMany({ data: input.items.map((item, index) => ({ workspace_id: request.workspaceId,
             asset_id: item.assetId, reference_image_id: item.referenceImageId, role: item.role, sort_order: index })) });
@@ -128,10 +143,18 @@ export async function finishTaskReuseOperation(user: SessionUser, sourceTaskId: 
         }
       }
       const value: Stored = { version: 2, ownerId: user.id, sourceTaskId, request, status, at: new Date().toISOString(), httpStatus, payload };
+      mark('write_receipt');
       await tx.platformSetting.create({ data: { key: keyFor(user.id, request.requestId), value_json: JSON.stringify(value), updated_by: user.id } });
+      mark('commit');
       return { status: httpStatus, body: { ...payload, reuse: operation(value) } };
     });
-  } catch (error) { log('transaction_failed', error); throw error; }
+  } catch (error) {
+    log('transaction_failed', error);
+    if ((error as { code?: string } | null)?.code === 'P1008') throw new TaskReuseOperationError('REUSE_DATABASE_BUSY',
+      '复用结果暂未确认，当前输入已保留。请核对原操作，不会自动重复复用。', 503,
+      { action: 'query_original', phase: enteredAt === null ? 'transaction_wait' : 'transaction_body', diagnostic_id: correlation });
+    throw error;
+  }
   finally { log('transaction_finished'); }
 }
 
