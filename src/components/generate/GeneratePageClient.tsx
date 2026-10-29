@@ -3669,7 +3669,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onPrepareReuseReady={reportPrepareReuseReady}
           onReuseDraftApplied={completeReuseDraftApplication}
           onSubmit={handleSubmit}
-          submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} label={normalVideoRedesign ? '发送到我的飞书' : undefined} /> : undefined}
+          submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} label={normalVideoRedesign ? '发到飞书' : undefined} /> : undefined}
           submitError={error}
           submitErrorDebug={errorDebug}
           isSubmitting={submitting}

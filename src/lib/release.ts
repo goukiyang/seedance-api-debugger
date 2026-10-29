@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '动作素材修复', outline: [
-  '修复动作拼图转为公网地址后被误判不可用',
-  '确认失败后直接显示原因，保留动作和原请求',
+const notice = { title: '生成区优化', outline: [
+  '视频提示词输入框底色加深',
+  '飞书开关文案缩短，费用紧邻生成按钮',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

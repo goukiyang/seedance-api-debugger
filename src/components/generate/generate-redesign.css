@@ -22,7 +22,7 @@
 .generation-composer--video .ref-thumb-img, .generation-composer--video .ref-thumb-video { object-fit: contain; }
 .generation-composer--video .ref-add-card { width: 64px; min-width: 64px; height: 86px; border-radius: 6px; }
 .generation-composer--video .composer-prompt-editor { border: 0; border-radius: 0; background: transparent; margin: 0; }
-.generation-composer--video .composer-prompt-textarea { min-height: 140px; max-height: min(320px, 42dvh); font-size: 17px; line-height: 1.65; color: var(--text-primary); padding: 14px; resize: none; }
+.generation-composer--video .composer-prompt-textarea { min-height: 140px; max-height: min(320px, 42dvh); font-size: 17px; line-height: 1.65; color: var(--text-primary); background: #0B0909; padding: 14px; resize: none; }
 .generation-composer--video .composer-prompt-textarea::placeholder { color: var(--text-tertiary, var(--text-secondary)); }
 .generation-composer--video .composer-status-line { margin: 0; padding: 0 14px; }
 .video-composer-extra-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 10px; }
@@ -32,11 +32,11 @@
 .generation-composer--video .composer-chips { flex: 1; display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
 .generation-composer--video .composer-chip { background: transparent; color: var(--text-primary); border: 0; padding: 8px 10px; border-radius: 4px; min-height: 36px; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .generation-composer--video .composer-chip-wrap { min-width: 0; max-width: 100%; }
-.generation-composer--video .composer-action-right { display: grid; grid-template-columns: minmax(0, max-content) minmax(132px, max-content) 104px; align-items: center; gap: 10px; max-width: 100%; }
+.generation-composer--video .composer-action-right { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, max-content) 104px; align-items: center; gap: 10px; max-width: 100%; }
 .generation-composer--video .video-submit-accessory { grid-column: 1; min-width: 0; }
-.generation-composer--video .composer-action-right .composer-points { grid-column: 2; }
+.generation-composer--video .composer-action-right .composer-points { grid-column: 2; justify-self: end; min-width: 0; text-align: right; }
 .generation-composer--video .composer-action-right .composer-submit-btn { grid-column: 3; }
-.generation-composer--video .composer-points { order: 1; font-size: 13px; color: var(--text-primary); white-space: nowrap; }
+.generation-composer--video .composer-points { order: 1; font-size: 13px; color: var(--text-primary); white-space: normal; overflow-wrap: anywhere; }
 .generation-composer--video .composer-submit-btn { order: 2; width: auto; height: 40px; min-width: 104px; display: inline-flex; justify-content: center; align-items: center; gap: 8px; border-radius: 5px; background: var(--accent-color, oklch(52% .18 250)); padding: 0 18px; color: oklch(98% .005 240); }
 .generation-composer--video .composer-resolution-approval { margin: 6px 14px; font-size: 12px; }
 .generation-composer--video .composer-queue-notice { margin: 8px 14px; }
@@ -44,7 +44,7 @@
 .composer-page--video .video-selected-card { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .video-payer { font-size: 12px; }
 .video-settings-trigger { display: inline-flex; align-items: center; gap: 6px; }
-.video-composer-price { display: inline-flex; align-items: center; gap: 4px; min-width: 132px; min-height: 36px; font-variant-numeric: tabular-nums; }
+.generation-composer--video .video-composer-price { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 36px; font-variant-numeric: tabular-nums; }
 .video-composer-validation, .video-composer-accepted { margin: 6px 14px; color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
 .video-composer-accepted { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .generation-composer--video .composer-status { color: var(--text-secondary); margin: 6px 14px; font-size: 13px; }
@@ -66,7 +66,7 @@
   .composer-page--video .composer-project-controls { min-width: 180px; }
   .generation-composer--video .composer-action-bar { padding: 10px; gap: 10px; }
   .generation-composer--video .composer-chips { flex-basis: 100%; }
-  .generation-composer--video .composer-action-right { width: 100%; gap: 10px; grid-template-columns: minmax(132px, 1fr) minmax(104px, 1fr); }
+  .generation-composer--video .composer-action-right { width: 100%; gap: 10px; grid-template-columns: minmax(0, 1fr) 104px; }
   .generation-composer--video .video-submit-accessory { grid-column: 1 / -1; }
   .generation-composer--video .composer-action-right .composer-points { grid-column: 1; }
   .generation-composer--video .composer-action-right .composer-submit-btn { grid-column: 2; }
