@@ -3199,7 +3199,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         styleGroupIds: restoredTaskSettings && !retryTask ? restoredStylesChanged ? generationStyles.map(group => group.id) : undefined
           : sharedLive && !definitionEditable && !retryTask ? generationStyles.map(group => group.id)
             : sharedLive || reproduceSourceTaskId ? undefined : generationStyles.map(group => group.id),
-        styleGroupVersions: restoredTaskSettings && !retryTask && restoredStylesChanged
+        styleGroupVersions: !retryTask && (restoredTaskSettings ? restoredStylesChanged : sharedLive ? !definitionEditable : !reproduceSourceTaskId)
           ? Object.fromEntries(generationStyles.filter(group => Number.isInteger(group.revision)).map(group => [group.id, group.revision!])) : undefined,
         referencePolicy: generationReferencePolicy } };
   }

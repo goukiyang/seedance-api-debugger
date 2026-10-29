@@ -234,6 +234,10 @@
 .styleActions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .page .styleActions button { padding: 6px; }
 .styleActions input[type=checkbox] { width: 18px; height: 18px; }
+.styleManagement { position: relative; margin-top: 4px; }
+.styleManagement > summary { display: inline-flex; align-items: center; justify-content: center; list-style: none; width: 32px; height: 32px; cursor: pointer; border-radius: 4px; }
+.styleManagement > summary::-webkit-details-marker { display: none; }
+.styleManagement > .styleActions { position: absolute; bottom: 100%; right: 0; padding: 6px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; z-index: 1; }
 .styleDialog > .counts { margin: 12px 0; }
 .styleDialog .referencesCompact { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 440px; }
 .dialog.sourceDialog { width: min(320px, calc(100vw - 32px)); padding: 18px; }

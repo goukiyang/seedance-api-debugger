@@ -10,13 +10,13 @@ import { privatePromptCapabilities, requirePrivatePromptIdentity } from '@/lib/s
 import { parseVideoPromptGroupRefs, composeVideoPromptGroups, VideoPromptGroupError,
   type VideoPromptGroupRef, type VideoPromptGroupSummary } from './prompt-groups';
 import { exceedsGenerationPromptLimit, GENERATION_PROMPT_LIMIT_MESSAGE } from '@/lib/prompt/limits';
-import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt } from '@/lib/security/private-prompt-drafts.server';
+import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt, clearAppliedPrivatePromptDraft } from '@/lib/security/private-prompt-drafts.server';
 import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from './prompt-groups-build-mode';
 
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset' | 'user'>;
-type Head = { schema: 1; id: string; ownerId: string; versionId: string; revision: number; shared: boolean; disabled: boolean };
+type Head = { schema: 1; id: string; ownerId: string; versionId: string; revision: number; shared: boolean; disabled: boolean; deleted?: boolean };
 type Version = { schema: 1; groupId: string; versionId: string; name: string; description: string; conditions: string;
-  coverAssetId: string | null; body: string; operatorId: string; createdAt: string };
+  coverAssetId: string | null; body: string; operatorId: string; createdAt: string; source?: VideoPromptGroupRef; coverOwnerId?: string };
 const PREFIX = 'video_prompt_group_v1:';
 const headKey = (id: string) => PREFIX + id;
 const versionKey = (id: string, version: string) => `video_prompt_group_version_v1:${id}:${version}`;
@@ -46,6 +46,16 @@ export function videoPromptGroupCreateCapability(user: SessionUser) {
   if (!canUseCompanyTemplates(user)) return false;
   try { return privatePromptCapabilities(user, origins({ id: 'new', ownerId: user.id })).canEditPrivatePrompt; } catch { return false; }
 }
+export function videoPromptGroupCreateState(user: SessionUser) {
+  if (!VIDEO_PROMPT_GROUP_WRITES_ENABLED) return { canCreate: false, createReason: '当前运行的是历史兼容版本，暂不接受新建' };
+  if (!canUseCompanyTemplates(user)) return { canCreate: false, createReason: '仅公司账号可创建提示词组' };
+  try {
+    const capability = privatePromptCapabilities(user, origins({ id: 'new', ownerId: user.id }));
+    return { canCreate: capability.canEditPrivatePrompt,
+      createReason: capability.canEditPrivatePrompt ? '' : '请先通过飞书验证创作者身份，再新建提示词组',
+      requiresIdentityVerification: capability.requiresIdentityVerification };
+  } catch { return { canCreate: false, createReason: '暂时无法确认新建权限，请刷新重试或联系管理员' }; }
+}
 export async function readVideoPromptGroup(user: SessionUser, ref: VideoPromptGroupRef, client: Client = prisma, manage = false) {
   internal(user); parseVideoPromptGroupRefs([ref]);
   const row = await client.platformSetting.findUnique({ where: { key: headKey(ref.groupId) }, select: { value_json: true } });
@@ -68,9 +78,10 @@ export async function videoPromptGroupSummary(user: SessionUser, ref: VideoPromp
   const canManage = privatePromptCapabilities(user, origins(head)).canEditPrivatePrompt;
   return { ...ref, name: version.name, description: version.description, conditions: version.conditions,
     revision: head.revision, ownerId: head.ownerId, author: author || { id: head.ownerId, name: '原作者', avatar_url: null },
-    shared: head.shared, disabled: head.disabled, latestVersionId: head.versionId, canManage,
+    shared: head.shared, disabled: head.disabled, deleted: head.deleted === true, latestVersionId: head.versionId, canManage: canManage && !head.deleted,
+    canReadContent: canManage, canCopy: canManage && VIDEO_PROMPT_GROUP_WRITES_ENABLED,
     coverUrl: version.coverAssetId ? `/api/video/prompt-groups/${head.id}/cover?version=${ref.versionId}` : null,
-    ...(head.disabled ? { unavailable: true, reason: '已停用，请移除或替换' } : {}) };
+    ...(head.deleted || head.disabled ? { unavailable: true, reason: head.deleted ? '已删除，历史保留，请移除或替换' : '已停用，请移除或替换' } : {}) };
 }
 export async function videoPromptGroupSelections(user: SessionUser, value: unknown, client: Client = prisma) {
   return Promise.all(parseVideoPromptGroupRefs(value).map(async ref => {
@@ -94,6 +105,7 @@ export async function listVideoPromptGroups(user: SessionUser, input: { query?: 
       SELECT key, value_json FROM PlatformSetting
       WHERE key >= ${PREFIX} AND key < ${PREFIX + '\uffff'} AND json_valid(value_json)
       AND (json_extract(value_json, '$.ownerId') = ${user.id} OR json_extract(value_json, '$.shared') = 1 OR ${manageDirectory ? 1 : 0} = 1)
+      AND COALESCE(json_extract(value_json, '$.deleted'), 0) != 1
       ${input.scope === 'mine' ? Prisma.sql`AND json_extract(value_json, '$.ownerId') = ${user.id}` : Prisma.empty}
       ${input.scope === 'shared' ? Prisma.sql`AND json_extract(value_json, '$.shared') = 1` : Prisma.empty}
       ${cursor ? Prisma.sql`AND key > ${headKey(cursor)}` : Prisma.empty}
@@ -111,7 +123,7 @@ export async function listVideoPromptGroups(user: SessionUser, input: { query?: 
     cursor = rows[rows.length - 1].key.slice(PREFIX.length);
   }
   return { groups: matches.slice(0, 24), nextCursor: matches.length > 24 ? matches[23].groupId : null,
-    canCreate: videoPromptGroupCreateCapability(user) };
+    ...videoPromptGroupCreateState(user) };
 }
 export async function resolveVideoPromptGroups(user: SessionUser, value: unknown, personal: string, client: Client = prisma) {
   const refs = parseVideoPromptGroupRefs(value);
@@ -119,7 +131,7 @@ export async function resolveVideoPromptGroups(user: SessionUser, value: unknown
   const bodies: string[] = [], allOrigins: PrivateOrigin[] = [];
   for (const ref of refs) {
     const { head, version } = await readVideoPromptGroup(user, ref, client);
-    if (head.disabled) throw new VideoPromptGroupError('已选提示词组已停用，请移除或替换');
+    if (head.deleted || head.disabled) throw new VideoPromptGroupError(head.deleted ? '已选提示词组已删除，请移除或替换' : '已选提示词组已停用，请移除或替换');
     const body = openPrivatePrompt(version.body, binding(head, ref.versionId));
     bodies.push(body); allOrigins.push(...origins(head));
   }
@@ -129,6 +141,7 @@ export async function resolveVideoPromptGroups(user: SessionUser, value: unknown
 }
 export async function readVideoPromptGroupEditor(user: SessionUser, ref: VideoPromptGroupRef, latest = false) {
   let { head, version } = await readVideoPromptGroup(user, ref, prisma, true);
+  if (head.deleted) throw new VideoPromptGroupError('原组已删除，仅保留历史查看，不能编辑');
   if (latest && head.versionId !== ref.versionId) {
     ref = { groupId: head.id, versionId: head.versionId };
     ({ head, version } = await readVideoPromptGroup(user, ref, prisma, true));
@@ -136,6 +149,12 @@ export async function readVideoPromptGroupEditor(user: SessionUser, ref: VideoPr
   return { ...await videoPromptGroupSummary(user, ref, prisma, true), revision: head.revision, latestVersionId: head.versionId,
     shared: head.shared, disabled: head.disabled, body: openPrivatePrompt(version.body, binding(head, ref.versionId)),
     coverAssetId: version.coverAssetId, draft: await readPrivatePromptDraft(user.id, draftTarget(head)) };
+}
+export async function readVideoPromptGroupDetail(user: SessionUser, ref: VideoPromptGroupRef) {
+  const { head, version } = await readVideoPromptGroup(user, ref, prisma, user.role === 'admin' && privatePromptCapabilities(user, []).canReadPrivatePrompt);
+  const summary = await videoPromptGroupSummary(user, ref, prisma, user.role === 'admin' && privatePromptCapabilities(user, []).canReadPrivatePrompt);
+  const canRead = privatePromptCapabilities(user, origins(head)).canReadPrivatePrompt;
+  return { ...summary, ...(canRead ? { body: openPrivatePrompt(version.body, binding(head, ref.versionId)), coverAssetId: version.coverAssetId } : {}) };
 }
 export async function videoPromptGroupVersions(user: SessionUser, ref: VideoPromptGroupRef) {
   const { head } = await readVideoPromptGroup(user, ref, prisma, true);
@@ -153,6 +172,7 @@ export async function videoPromptGroupDraft(user: SessionUser, groupId: string, 
   const row = await prisma.platformSetting.findUnique({ where: { key: headKey(groupId) }, select: { value_json: true } });
   const head = row ? JSON.parse(row.value_json) as Head : { id: groupId, ownerId: user.id };
   requireManage(user, head);
+  if (input && 'deleted' in head && head.deleted) throw new VideoPromptGroupError('原组已删除，未更新草稿');
   const target = draftTarget(head);
   if (input) return savePrivatePromptDraft(user.id, target, input);
   return requestId ? readPrivatePromptDraftReceipt(user.id, target, requestId) : readPrivatePromptDraft(user.id, target);
@@ -188,7 +208,14 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
   const current = existing ? JSON.parse(existing.value_json) as Head : null;
   const authority = current || { id: groupId, ownerId: user.id };
   requireManage(user, authority);
-  const fingerprint = hash([groupId, input.revision, name, body, description, conditions, coverAssetId, input.shared, input.disabled]);
+  let source: VideoPromptGroupRef | undefined;
+  let sourceCoverOwner: string | undefined;
+  if (input.copyFrom !== undefined) {
+    [source] = parseVideoPromptGroupRefs([input.copyFrom]);
+    const original = await readVideoPromptGroup(user, source, prisma, true);
+    if (coverAssetId && coverAssetId === original.version.coverAssetId) sourceCoverOwner = original.version.coverOwnerId || original.head.ownerId;
+  }
+  const fingerprint = hash([groupId, input.revision, name, body, description, conditions, coverAssetId, input.shared, input.disabled, source]);
   return prisma.$transaction(async tx => {
     const prior = await tx.platformSetting.findUnique({ where: { key: receiptKey(user.id, requestId) }, select: { value_json: true } });
     if (prior) {
@@ -198,6 +225,8 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
     }
     const fresh = await tx.platformSetting.findUnique({ where: { key: headKey(groupId) }, select: { value_json: true } });
     const head = fresh ? JSON.parse(fresh.value_json) as Head : null;
+    if (head?.deleted) throw new VideoPromptGroupError('原组已删除，当前输入保留，可另存副本');
+    if (source && head) throw new VideoPromptGroupError('另存必须使用新组编号，原组未修改');
     if (head && head.ownerId !== authority.ownerId) throw new VideoPromptGroupError('作者身份已变化，未保存', 409);
     if ((head?.revision || 0) !== input.revision) {
       if (!head) throw new VideoPromptGroupError('原提示词组已不可用', 409);
@@ -205,15 +234,18 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
       await tx.platformSetting.create({ data: { key: receiptKey(user.id, requestId), value_json: JSON.stringify({ ...result, fingerprint }), updated_by: user.id } });
       return result;
     }
+    const previous = head ? (await readVideoPromptGroup(user, { groupId, versionId: head.versionId }, tx, true)).version : null;
+    const inheritedCoverOwner = sourceCoverOwner || (previous?.coverAssetId === coverAssetId ? previous?.coverOwnerId : undefined);
+    const provenance = source || previous?.source;
     if (coverAssetId) {
-      const cover = await tx.asset.findFirst({ where: { id: coverAssetId, owner_id: authority.ownerId, status: 'active', type: 'image',
+      const cover = await tx.asset.findFirst({ where: { id: coverAssetId, owner_id: inheritedCoverOwner || authority.ownerId, status: 'active', type: 'image',
         AND: [await studioVisibleAssetWhere(user, tx)] }, select: { id: true } });
       if (!cover) throw new VideoPromptGroupError('封面不可用，请选择作者有权使用的图片', 403);
     }
     const next: Head = { schema: 1, id: groupId, ownerId: authority.ownerId, versionId: randomUUID(),
-      revision: (head?.revision || 0) + 1, shared: input.shared as boolean, disabled: input.disabled as boolean };
+      revision: (head?.revision || 0) + 1, shared: source ? false : input.shared as boolean, disabled: input.disabled as boolean };
     const version: Version = { schema: 1, groupId, versionId: next.versionId, name, description, conditions, coverAssetId,
-      body: sealPrivatePrompt(body, binding(next, next.versionId)), operatorId: user.id, createdAt: new Date().toISOString() };
+      body: sealPrivatePrompt(body, binding(next, next.versionId)), operatorId: user.id, createdAt: new Date().toISOString(), ...(provenance ? { source: provenance } : {}), ...(inheritedCoverOwner ? { coverOwnerId: inheritedCoverOwner } : {}) };
     await tx.platformSetting.create({ data: { key: versionKey(groupId, next.versionId), value_json: JSON.stringify(version), updated_by: user.id } });
     if (fresh) {
       const update = await tx.platformSetting.updateMany({ where: { key: headKey(groupId), value_json: fresh.value_json },
@@ -221,7 +253,37 @@ export async function saveVideoPromptGroup(user: SessionUser, input: Record<stri
       if (update.count !== 1) throw new VideoPromptGroupError('提示词组已有更新，当前输入保留', 409);
     } else await tx.platformSetting.create({ data: { key: headKey(groupId), value_json: JSON.stringify(next), updated_by: user.id } });
     const result = { state: 'saved', requestId, groupId, versionId: next.versionId, revision: next.revision };
+    await clearAppliedPrivatePromptDraft(user.id, draftTarget(next), input.draftRevision, tx);
     await tx.platformSetting.create({ data: { key: receiptKey(user.id, requestId), value_json: JSON.stringify({ ...result, fingerprint }), updated_by: user.id } });
     return result;
+  });
+}
+
+export async function deleteVideoPromptGroup(user: SessionUser, input: Record<string, unknown>) {
+  internal(user);
+  if (!VIDEO_PROMPT_GROUP_WRITES_ENABLED) throw new VideoPromptGroupError('此版本只保留历史读取，未删除', 426);
+  const [ref] = parseVideoPromptGroupRefs([{ groupId: input.groupId, versionId: input.versionId }]);
+  const requestId = input.requestId;
+  if (typeof requestId !== 'string' || !/^[A-Za-z0-9:_-]{1,160}$/.test(requestId) || !Number.isSafeInteger(input.revision)) throw new VideoPromptGroupError('删除编号或版本无效', 400);
+  await readVideoPromptGroup(user, ref, prisma, true);
+  const fingerprint = hash(['delete', ref, input.revision]);
+  return prisma.$transaction(async tx => {
+    const prior = await tx.platformSetting.findUnique({ where: { key: receiptKey(user.id, requestId) }, select: { value_json: true } });
+    if (prior) {
+      const saved = JSON.parse(prior.value_json);
+      if (saved.fingerprint !== fingerprint) throw new VideoPromptGroupError('原操作内容不同，请核对原删除', 409);
+      return { state: saved.state, requestId, ...ref, revision: saved.revision };
+    }
+    const { head, rawHead } = await readVideoPromptGroup(user, ref, tx, true);
+    const conflict = head.deleted || head.revision !== input.revision || head.versionId !== ref.versionId;
+    const state = conflict ? 'conflict' : 'deleted';
+    const revision = conflict ? head.revision : head.revision + 1;
+    if (!conflict) {
+      const changed = await tx.platformSetting.updateMany({ where: { key: headKey(head.id), value_json: rawHead },
+        data: { value_json: JSON.stringify({ ...head, deleted: true, revision }), updated_by: user.id } });
+      if (changed.count !== 1) throw new VideoPromptGroupError('原组已有更新，未删除', 409);
+    }
+    await tx.platformSetting.create({ data: { key: receiptKey(user.id, requestId), value_json: JSON.stringify({ state, requestId, ...ref, revision, fingerprint }), updated_by: user.id } });
+    return { state, requestId, ...ref, revision };
   });
 }

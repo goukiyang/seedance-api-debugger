@@ -3,7 +3,7 @@ export type VideoPromptGroupSummary = VideoPromptGroupRef & {
   name: string; description: string; conditions: string; revision: number;
   ownerId: string; author: { id: string; name: string; username?: string | null; avatar_url?: string | null };
   shared: boolean; disabled: boolean; coverUrl: string | null; latestVersionId: string;
-  canManage: boolean; unavailable?: boolean; reason?: string;
+  canManage: boolean; canReadContent?: boolean; canCopy?: boolean; deleted?: boolean; unavailable?: boolean; reason?: string;
 };
 import { VIDEO_PROMPT_GROUP_WRITES_ENABLED } from './prompt-groups-build-mode';
 

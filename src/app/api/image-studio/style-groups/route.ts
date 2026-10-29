@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, listStudioStyleGroupsPage, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO } from '@/lib/image-studio/style-groups';
+import { deleteStudioStyleGroup, getStudioStyleGroup, listStudioStyleGroups, listStudioStyleGroupsPage, parseStudioStyleIds, saveStudioStyleGroup, StudioStyleError, studioStyleDTO, studioStyleOperationStatus, studioStyleDraft } from '@/lib/image-studio/style-groups';
 
 export const dynamic = 'force-dynamic';
 function failure(error: unknown) {
@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
+    if (request.nextUrl.searchParams.get('mode') === 'status') return NextResponse.json(await studioStyleOperationStatus(user, request.nextUrl.searchParams.get('requestId')), { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    if (request.nextUrl.searchParams.get('mode') === 'draft') return NextResponse.json({ draft: await studioStyleDraft(user, request.nextUrl.searchParams.get('id')) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     const selectedIds = request.nextUrl.searchParams.get('ids');
     if (selectedIds !== null) {
       const ids = parseStudioStyleIds(selectedIds ? selectedIds.split(',') : []);
@@ -29,6 +31,7 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
     if (params.get('page') === '1') return NextResponse.json(await listStudioStyleGroupsPage(user, {
       cursor: params.get('cursor') || undefined, query: params.get('query') || undefined,
+      scope: params.get('scope') || undefined,
       ...(params.has('keys') ? { keys: params.get('keys')?.split(',').filter(Boolean) || [] } : {}),
     }), { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     return NextResponse.json(await listStudioStyleGroups(user, params.get('cursor') || undefined), { headers: { 'Cache-Control': 'no-store' } });
@@ -41,7 +44,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioStyleError('风格组内容无效');
-    return NextResponse.json(await saveStudioStyleGroup(user, body));
+    if (body.action === 'draft') return NextResponse.json({ draft: await studioStyleDraft(user, body.draftId, body) });
+    const result = await saveStudioStyleGroup(user, body);
+    if (result.operationState === 'conflict') return NextResponse.json({ error: '风格组已有新版本，当前草稿保留', operation: result }, { status: 409 });
+    return NextResponse.json(result);
   } catch (error) { return failure(error); }
 }
 export const PUT = POST;
@@ -50,7 +56,8 @@ export async function DELETE(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
     const body = await request.json();
-    await deleteStudioStyleGroup(user, String(body?.id || ''), body?.revision);
+    const result = await deleteStudioStyleGroup(user, String(body?.id || ''), body?.revision, body?.requestId);
+    if (result.state === 'conflict') return NextResponse.json({ error: '风格组已有新版本，未删除', operation: result }, { status: 409 });
     return NextResponse.json({ deleted: true });
   } catch (error) { return failure(error); }
 }
