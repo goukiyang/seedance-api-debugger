@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '风格组修复', outline: [
-  '还原的风格组可查看当时备注与参考内容',
-  '完善风格组与视频提示词组的新建、另存和删除',
-  '保存与选用分开，保留历史和当前输入',
+const notice = { title: '生成区优化', outline: [
+  '视频提示词输入框底色加深',
+  '飞书开关文案缩短，费用紧邻生成按钮',
+  '保留实际报价和手机换行布局',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
