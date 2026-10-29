@@ -215,10 +215,11 @@ async function main() {
   assert.equal(logWrites, 1);
 
   const captured: unknown[] = [], logs: string[] = [];
+  let transmittedBody = '';
   const fakeConsole = Object.fromEntries(['log', 'error', 'warn'].map(key => [key, (...items: unknown[]) => logs.push(items.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' '))]));
   const provider = await moduleUnderTest('src/lib/provider/jimeng.ts', {
     '@/lib/security/private-prompt-send.server': { assertPrivateSend: () => {}, privatePromptFetch: async (_identity: unknown, actual: unknown, init: RequestInit) => {
-      captured.push(actual); assert.ok(String(init.body).includes('PRIVATE SYNC RULE'));
+      captured.push(actual); transmittedBody = String(init.body); assert.ok(transmittedBody.includes('PRIVATE SYNC RULE'));
       return new Response(JSON.stringify({ id: 'provider-task', prompt: 'PRIVATE SYNC RULE', status: 'queued' }), { status: 200 });
     } },
     '@/lib/security/private-prompts.server': { PrivatePromptError }, '@/lib/video/private-storage.server': { privateMultiviewOrigins: () => [{ kind: 'old-rotation' }] },
@@ -231,6 +232,36 @@ async function main() {
   assert.deepEqual(captured[0], origins, 'action send substituted old rotation origins');
   assert.ok(!JSON.stringify(result).includes('PRIVATE SYNC RULE'), 'provider echo escaped safe response');
   assert.ok(!logs.join('\n').includes('PRIVATE SYNC RULE'), 'private rules escaped provider logs');
-  console.log('action video safety: frozen public input, baseline binding, actor/source denial, one durable claim, terminal rejection/late-writer fence, original acceptance, private Seedance send and echo/log projection passed');
+  const transport = await moduleUnderTest('src/lib/provider/reference-image-transport.ts', {
+    '@/lib/assets/site-url': { siteUploadPathFromUrl }, './jimeng': provider,
+  });
+  const routeText = await readFile('src/app/api/tasks/create/route.ts', 'utf8');
+  const routeAst = ts.createSourceFile('route.ts', routeText, ts.ScriptTarget.Latest, true);
+  const transportBranches: ts.IfStatement[] = [];
+  const locateTransport = (node: ts.Node) => { if (ts.isIfStatement(node) && node.expression.getText(routeAst).startsWith("requestedProvider === 'seedance'")
+    && node.thenStatement.getText(routeAst).includes('await seedanceLocalReferenceTransport(')) transportBranches.push(node); ts.forEachChild(node, locateTransport); };
+  locateTransport(routeAst); assert.equal(transportBranches.length, 1);
+  const inlineBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
+  const imageUrl = `https://sd2.youdooart.com${originalUrl}`;
+  const transportInput = { prompt: action.prompt, model: parameters.model, generation_mode: 'first_last_frame', first_frame_url: imageUrl, duration: 5, ratio: '16:9', resolution: '720p' };
+  const transportAsset = { original_url: imageUrl, type: 'image', status: 'active', mime_type: 'image/png', file_size: inlineBytes.length };
+  const transportContext = vm.createContext({ requestedProvider: 'seedance', multiviewGeneration: null, multiviewAction: action,
+    actionImageForTransport: { url: imageUrl, asset: transportAsset }, body: {}, cleanSourceMetadata: () => ({}), requestSource: {},
+    providerInput: transportInput, generationReferenceImages: [], multiviewSystemReference: null, requestCallbackUrl: undefined,
+    seedanceLocalReferenceTransport: (input: unknown, images: unknown, _read: unknown, privateImages: unknown) =>
+      transport.seedanceLocalReferenceTransport(input, images, async () => inlineBytes, privateImages),
+    errorJson: (error: string, status: number) => ({ error, status }),
+  });
+  const transportJs = ts.transpileModule(`async function prepare() { let seedanceReferenceTransport = {}; ${transportBranches[0].getText(routeAst)} return seedanceReferenceTransport; }`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  new vm.Script(transportJs).runInContext(transportContext);
+  const inline = await (transportContext as any).prepare();
+  assert.match(inline.first_frame_base64_data || '', /^data:image\/png;base64,/, 'action route skipped the shared private collage byte transport');
+  await provider.createVideoTask({ ...transportInput, ...inline }, undefined, { sensitiveRecipe: true, privateOrigins: origins });
+  assert.ok(!transmittedBody.includes(imageUrl), 'provider was told to anonymously fetch a protected collage URL');
+  assert.ok(transmittedBody.includes(inline.first_frame_base64_data));
+  assert.deepEqual(captured[1], origins, 'inline action send lost its action-specific private origins');
+  assert.equal(transportInput.first_frame_url, imageUrl, 'transient image bytes changed durable input identity');
+  console.log('action video safety: availability, same-site collage identity/source denial, failure modal/unknown retention, closed explicit recovery, durable original receipts, shared inline action image transport and private send projection passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

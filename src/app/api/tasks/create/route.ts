@@ -817,6 +817,7 @@ export async function POST(request: NextRequest) {
       { status: response.status, headers: privateNoStore() }) : response;
   }
   let multiviewAction: Awaited<ReturnType<typeof resolveMultiviewActionVideoInput>> = null;
+  let actionImageForTransport: Parameters<typeof seedanceLocalReferenceTransport>[1][number] | null = null;
   try {
     if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key.startsWith('multiview-action:')
       && receivedBody.multiview_action === undefined) throw new AuthError('动作视频原请求必须保留冻结绑定，请查询原任务', 409);
@@ -849,6 +850,7 @@ export async function POST(request: NextRequest) {
     if (!asset) return sealActionRejection(errorJson('参考拼图素材已不可用，原动作与布局保留', 409));
     const prepared = await ensureSiteAssetPublicUrl(asset.id);
     if (!prepared.isPubliclyReachable) return sealActionRejection(errorJson('参考拼图暂时无法提供给视频服务，尚未生成', 409));
+    actionImageForTransport = { url: prepared.asset.original_url, asset: { ...asset, original_url: prepared.asset.original_url } };
     body.first_frame_url = prepared.asset.original_url;
     body.prompt = multiviewAction.action.prompt;
     body.final_prompt_snapshot = multiviewAction.action.prompt;
@@ -2071,13 +2073,13 @@ export async function POST(request: NextRequest) {
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
   let seedanceReferenceTransport: Partial<CreateVideoInput> = {};
-  // Both callers have authorized their reference records above; keep private URLs out of upstream fetches.
-  if (requestedProvider === 'seedance' && (multiviewGeneration || body.canvas_document_id
+  // Each caller has authorized its images above; private URLs are not upstream-fetch grants.
+  if (requestedProvider === 'seedance' && (multiviewGeneration || multiviewAction || body.canvas_document_id
     || cleanSourceMetadata(body.source_metadata).canvas_document_id || requestSource.source_metadata?.canvas_document_id)) {
     try {
       seedanceReferenceTransport = await seedanceLocalReferenceTransport(
         { ...providerInput, callback_url: requestCallbackUrl || undefined },
-        generationReferenceImages,
+        [...generationReferenceImages, ...(actionImageForTransport ? [actionImageForTransport] : [])],
         undefined,
         multiviewSystemReference ? [{ mimeType: multiviewSystemReference.mimeType, bytes: multiviewSystemReference.bytes }] : [],
       );
