@@ -291,8 +291,12 @@ export async function composeMultiviewReferencePng(user: SessionUser, sourceTask
   for (const placement of geometry.placements) {
     const index = recipe.slots.findIndex(slot => slot.id === placement.slotId), foreground = recipe.foregrounds.find(item => item.slotId === placement.slotId);
     const input = foreground ? await (await import('./multiview-reference-cutout.server')).readMultiviewReferenceForeground(user, sourceTaskId, info, recipe.slots[index], foreground) : originals[index];
-    const data = await sharp(input, { limitInputPixels: 16777216 }).resize(placement.width, placement.height, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
-    layers.push({ input: data, left: placement.x, top: placement.y });
+    const left = Math.max(0, placement.x), top = Math.max(0, placement.y);
+    const right = Math.min(geometry.width, placement.x + placement.width), bottom = Math.min(geometry.height, placement.y + placement.height);
+    if (right <= left || bottom <= top) continue;
+    const resized = sharp(input, { limitInputPixels: 16777216 }).resize(placement.width, placement.height, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } });
+    const data = await resized.extract({ left: left - placement.x, top: top - placement.y, width: right - left, height: bottom - top }).png().toBuffer();
+    layers.push({ input: data, left, top });
   }
   if (recipe.divider.enabled) {
     // A single SVG path avoids duplicate strokes at collinear T intersections.

@@ -11,7 +11,7 @@ import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { MULTIVIEW_ACTION_ENABLED } from './multiview-action-capability';
 import { multiviewInfoForWork, multiviewSourceVersion, MultiviewError } from './multiview';
 import type { MultiviewInfo } from './multiview-contract';
-import { MULTIVIEW_SAVE_PROTOCOL, defaultMultiviewWorkRecipe, isMultiviewWorkId, isMultiviewWorkFileRole, parseMultiviewWorkRecipe,
+import { MULTIVIEW_SAVE_PROTOCOL, MULTIVIEW_REFERENCE_SAVE_PROTOCOL, defaultMultiviewWorkRecipe, isMultiviewWorkId, isMultiviewWorkFileRole, parseMultiviewWorkRecipe,
   parseMultiviewWorkManifest, multiviewWorkRecipesEqual, type MultiviewWorkDto, type MultiviewWorkRecipe, type MultiviewWorkReceipt,
   type MultiviewWorkManifest, type MultiviewWorkList, type MultiviewWorkStatus } from './multiview-work-contract';
 
@@ -33,10 +33,12 @@ export class MultiviewWorkError extends Error {
 const invalid = (message = '作品设置无效，原输入已保留。') => new MultiviewWorkError(message, 400, 'WORK_INVALID', { notCommitted: true });
 function requireExplicitSave(input: Json) {
   if (process.env.MULTIVIEW_FLOW_READ_ONLY === '1') throw new MultiviewWorkError('方案当前仅可读取，原保存回执与本机修改保留。', 503, 'WORK_READ_ONLY');
-  if (input.protocol !== MULTIVIEW_SAVE_PROTOCOL) throw new MultiviewWorkError('页面已更新，请保留本机修改并刷新后主动保存。原保存仍可查询。',
+  const reference = record(input.recipe) && input.recipe.schema === 3;
+  if (input.protocol !== (reference ? MULTIVIEW_REFERENCE_SAVE_PROTOCOL : MULTIVIEW_SAVE_PROTOCOL)) throw new MultiviewWorkError('页面已更新，请保留本机修改并刷新后主动保存。原保存仍可查询。',
     409, 'WORK_PROTOCOL_REQUIRED', { notCommitted: true });
   if (record(input.recipe) && input.recipe.schema === 3 && (!MULTIVIEW_ACTION_ENABLED || process.env.MULTIVIEW_REFERENCE_READ_ONLY === '1')) throw new MultiviewWorkError('参考拼图当前仅可读取，原保存和在途处理保留。', 503, 'WORK_READ_ONLY');
   if (input.recipe && (!record(input.recipe) || ![2, 3].includes(Number(input.recipe.schema)))) throw invalid('选帧设置需要新版保存协议，当前修改保留。');
+  if (input.draftOnly !== undefined && (typeof input.draftOnly !== 'boolean' || !reference)) throw invalid();
 }
 const conflict = () => new MultiviewWorkError('作品已在其他页面更新，未覆盖服务器内容；请打开服务器版本或将本机修改另存。', 409, 'WORK_REVISION_CONFLICT', { notCommitted: true });
 function title(value: unknown, fallback = '3D多视图作品') {
@@ -256,7 +258,7 @@ async function mutation(user: SessionUser, input: Json, action: MultiviewWorkRec
 export async function createMultiviewWork(user: SessionUser, input: Json) {
   const prior = await priorMutation(user, input, 'create', null); if (prior) return prior;
   requireExplicitSave(input);
-  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title', 'protocol', 'branchKey', 'referenceKey', 'sourceWorkId'].includes(key))
+  if (Object.keys(input).some(key => !['mutationId', 'taskId', 'sourceVersion', 'recipe', 'title', 'protocol', 'branchKey', 'referenceKey', 'sourceWorkId', 'draftOnly'].includes(key))
     || !isMultiviewWorkId(input.taskId) || typeof input.sourceVersion !== 'string' || !/^[a-f0-9]{64}$/.test(input.sourceVersion)) throw invalid();
   const taskId = input.taskId, version = input.sourceVersion;
   const isReference = record(input.recipe) && input.recipe.schema === 3;
@@ -283,12 +285,12 @@ export async function createMultiviewWork(user: SessionUser, input: Json) {
     if (previous?.recipe_json && previous.save_state !== 'intent') {
       if (previous.source_version !== version || !multiviewWorkRecipesEqual(readRecipe(previous)!, recipe) || input.title !== undefined && title(input.title) !== previous.title)
         throw new MultiviewWorkError('已有同一来源作品，未覆盖服务器内容；本机修改可以另存一版。', 409, 'WORK_EXISTS', { workId: previous.id, notCommitted: true });
-      return db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: recipe.schema } });
+      return input.draftOnly === true ? previous : db.multiviewWork.update({ where: { id: previous.id }, data: { save_state: 'saved', schema_version: recipe.schema } });
     }
     const data = { owner_id: user.id, source_task_id: taskId, source_id: parent?.source_id || null, project_id: source.project_id, video_card_id: source.video_card_id,
-      save_state: 'saved', schema_version: recipe.schema, ...(isReference ? { parent_work_id: parent?.id || null } : {}),
+      save_state: input.draftOnly === true ? 'intent' : 'saved', schema_version: recipe.schema, ...(isReference ? { parent_work_id: parent?.id || null } : {}),
       source_version: version, source_info_json: JSON.stringify(info), title: title(input.title, previous?.title),
-      draft_revision: previous ? previous.draft_revision + 1 : 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: 'queued', next_attempt_at: new Date(),
+      draft_revision: previous ? previous.draft_revision + 1 : 1, recipe_json: JSON.stringify(recipe), recipe_hash: recipeHash, status: input.draftOnly === true ? 'draft' : 'queued', next_attempt_at: new Date(),
       lease_token: null, lease_until: null, attempts: 0, last_error: null };
     if (previous) return db.multiviewWork.update({ where: { id: previous.id }, data: { ...data, revision: { increment: 1 }, write_epoch: { increment: 1 } } });
     return db.multiviewWork.create({ data: { id: independent ? `mvw_${digest(JSON.stringify([user.id, input.branchKey])).slice(0, 48)}` : isReference ? `mvw_${digest(JSON.stringify([user.id, taskId, workBaseKey])).slice(0, 48)}` : baseId(user.id, taskId),
@@ -299,8 +301,9 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
   const prior = await priorMutation(user, input, input.action as MultiviewWorkReceipt['action'], workId); if (prior) return prior;
   requireExplicitSave(input);
   if (!['save', 'branch', 'remove', 'restore'].includes(String(input.action)) || !Number.isSafeInteger(input.baseRevision)
-    || Number(input.baseRevision) < 1 || Object.keys(input).some(key => !['mutationId', 'baseRevision', 'action', 'recipe', 'title', 'branchKey', 'protocol'].includes(key))) throw invalid();
+    || Number(input.baseRevision) < 1 || Object.keys(input).some(key => !['mutationId', 'baseRevision', 'action', 'recipe', 'title', 'branchKey', 'protocol', 'draftOnly'].includes(key))) throw invalid();
   const action = input.action as 'save' | 'branch' | 'remove' | 'restore';
+  if (input.draftOnly === true) throw invalid('草稿仅在本机继续编辑，主动保存后才更新作品。');
   const before = await ownedWork(user, workId);
   if (before.schema_version === 3 && ['save', 'branch'].includes(action) && !MULTIVIEW_ACTION_ENABLED) throw new MultiviewWorkError('参考拼图当前仅可读取，原保存和在途处理保留。', 503, 'WORK_READ_ONLY');
   let info = readInfo(before);
@@ -346,7 +349,7 @@ export async function mutateMultiviewWork(user: SessionUser, workId: string, inp
       const hash = multiviewWorkRecipeHash(recipe!);
       if (!multiviewWorkRecipesEqual(readRecipe(row)!, recipe!)) Object.assign(patch, { draft_revision: row.draft_revision + 1, recipe_json: JSON.stringify(recipe), recipe_hash: hash,
         status: 'queued', next_attempt_at: new Date(), attempts: 0, last_error: null, lease_token: null, lease_until: null });
-      else if (row.status === 'failed') Object.assign(patch, { status: 'queued', next_attempt_at: new Date(), attempts: 0,
+      else if (row.status === 'failed' || row.status === 'draft') Object.assign(patch, { status: 'queued', next_attempt_at: new Date(), attempts: 0,
         last_error: null, lease_token: null, lease_until: null });
     }
     const updated = await db.multiviewWork.updateMany({ where: { id: row.id, owner_id: user.id, revision: Number(input.baseRevision) }, data: patch });

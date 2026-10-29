@@ -16,8 +16,8 @@ import type { MultiviewWorkDto } from '@/lib/video/multiview-work-contract';
 import type { MultiviewActionBinding, MultiviewActionDraft, MultiviewActionRun, MultiviewActionState, MultiviewActionParameters, MultiviewActionContextKind } from '@/lib/video/multiview-action-contract';
 import styles from './multiview-action.module.css';
 
-type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
-type Quote = { key: string; run: MultiviewActionRun; binding: MultiviewActionBinding; points: number; pricingRevision: string; token: string };
+type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; triggerHost: HTMLDivElement | null; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
+type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number; pricingRevision: string; token: string };
 type Original = { key: string; runId: string; taskId: string | null };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
@@ -31,7 +31,7 @@ function ConfirmDialog({ quote, parameters, busy, onClose, onConfirm }: { quote:
   const dialog=useRef<HTMLDialogElement>(null);
   useDialogDismiss({open:true,dialogRef:dialog,nativeDialog:true,onDismiss:()=>{if(!busy)onClose();}});
   useEffect(()=>{dialog.current?.showModal();return()=>dialog.current?.close();},[]);
-  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={onClose}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.run.text}</p><p className={styles.price}>本次预计 <strong>{quote.points} 点</strong></p><footer><button disabled={busy} onClick={onClose}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在受理…':'确认生成'}</button></footer></dialog>,document.body);
+  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={onClose}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>本次预计 <strong>{quote.points} 点</strong></p><footer><button disabled={busy} onClick={onClose}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备并提交…':'确认生成'}</button></footer></dialog>,document.body);
 }
 export function MultiviewActionPanel(props: Props) {
   const [state,setState]=useState<MultiviewActionState|null>(null),[draft,setDraft]=useState<MultiviewActionDraft|null>(null);
@@ -62,17 +62,25 @@ export function MultiviewActionPanel(props: Props) {
   const api=useCallback(async<T,>(url:string,body?:unknown,method='POST'):Promise<T>=>{const response=await fetch(url,{method:body===undefined?'GET':method,cache:'no-store',headers:headers(),...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(45000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||value.message||'暂时无法完成，当前输入保留。'),{status:response.status,result:value});return value as T;},[headers]);
   const creation=useCreationContext({ownerId:props.ownerId,entry:'multiview',draftId:`action:${props.work?.id||'preparing'}`,projectId:parameters.project_id||null,legacyCardId:parameters.video_card_id,enabled:Boolean(hydrated&&parameters.project_id),onProjectChange:id=>setParameters(value=>({...value,project_id:id}))});
   const content=JSON.stringify([text,parameters,props.work?.draftRevision]);
-  const quoteKey=JSON.stringify([scope,content,draft?.revision,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
-  const currentQuote=quote?.key===quoteKey&&props.outputReady?quote:null;
+  const quoteKey=JSON.stringify([scope,content,props.snapshotKey,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
+  const currentQuote=quote?.key===quoteKey?quote:null;
   const currentQuoteKey=useRef(quoteKey);currentQuoteKey.current=quoteKey;
   const selectedRun=state?.runs.find(run=>run.id===selectedRunId)||null;
   const selectedTask=selectedRun?.tasks[0]||null;
   const updateText=(value:string)=>{editRevision.current++;setText(value);setConfirming(false);};
   async function refresh(adopt=false,cursor?:string){
     if(!props.work)return;
-    const captured=scope;const value=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work.id}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
+    const captured=scope;
+    const tasks = state?.runs.flatMap(run=>run.tasks) || [];
+    const task = tasks.find(task=>task.taskId===original?.taskId || task.taskId===selectedTask?.taskId) || tasks.find(task=>!finished.has(task.status));
+    if (!cursor && task && !finished.has(task.status)) {
+      await api(`/api/video/status/${encodeURIComponent(task.taskId)}`).catch(()=>{if(active(captured))setMessage('原任务状态暂未更新，保留最后已知结果。');});
+      if (!active(captured)) return;
+    }
+    const value=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work.id}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
     if(!active(captured))return;
     setState(previous=>cursor&&previous?{...value,runs:[...previous.runs,...value.runs.filter(run=>!previous.runs.some(item=>item.id===run.id))]}:value);
+    if(!selectedRunId){const newest=value.runs.find(run=>run.tasks.length);if(newest)setSelectedRunId(newest.id);}
     if(adopt){setDraft(value.draft);draftRef.current=value.draft;if(value.draft){setText(value.draft.text);setParameters({...value.draft.parameters,ratio:props.ratio});saved.current=JSON.stringify([value.draft.text,value.draft.parameters,props.work.draftRevision]);}setLlmModel(value.capabilities.defaultLlmModel);setHydrated(true);}
   }
   useEffect(()=>{
@@ -80,11 +88,16 @@ export function MultiviewActionPanel(props: Props) {
     const captured=scope;let cancelled=false;
     if(!props.work)return;
     setParameters(value=>({...value,ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null}));
-    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey);if(ai){const value=JSON.parse(ai);if(typeof value.requestId!=='string')throw new Error('原文案请求记录无法确认。');setAiPending({...value,edit:-1});}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
+    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey);if(ai){const value=JSON.parse(ai);if(typeof value.requestId!=='string')throw new Error('原文案请求记录无法确认。');setAiPending({...value,edit:-1});}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
     return()=>{cancelled=true;};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[scope,api]);
   useEffect(()=>{if(!hydrated)return;setParameters(value=>value.ratio===props.ratio?value:{...value,ratio:props.ratio});},[props.ratio,hydrated]);
+  useEffect(()=>{
+    if(!hydrated)return;
+    try{localStorage.setItem(requestKey+':input',JSON.stringify({text,parameters}));}
+    catch{setDraftBlocked(true);setMessage('当前动作暂不能在本机保留，请保留页面。');}
+  },[hydrated,requestKey,text,parameters]);
   useEffect(()=>{const captured=scope;void api<{projects:Array<{id:string;name:string}>}>('/api/projects?lite=true').then(value=>{if(active(captured))setProjects(value.projects||[]);}).catch(()=>undefined);},[scope,api,active, projectCatalogRevision]);
   useEffect(()=>{setCards([]);if(!parameters.project_id)return;const captured=scope;void api<{cards?:Array<{id:string;title:string}>;videoCards?:Array<{id:string;title:string}>}>(`/api/projects/${encodeURIComponent(parameters.project_id)}/video-cards`).then(value=>{if(active(captured))setCards(value.cards||value.videoCards||[]);}).catch(()=>undefined);},[scope,parameters.project_id,api,active]);
   async function saveDraft(){
@@ -96,20 +109,18 @@ export function MultiviewActionPanel(props: Props) {
     catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'动作保存未完成，当前输入保留。');}return null;}
     finally{saveLock.current=false;if(active(captured))setSaving(false);}
   }
-  useEffect(()=>{if(!hydrated||draftBlocked||saving||saved.current===content)return;const timer=setTimeout(()=>void saveDraft(),550);return()=>clearTimeout(timer);});
+  useEffect(()=>{if(!hydrated||draftBlocked||saving||submitting||saved.current===content)return;const timer=setTimeout(()=>void saveDraft(),550);return()=>clearTimeout(timer);});
   useEffect(()=>{
-    if(newAttemptRequired||!hydrated||!draft||saved.current!==content||!text.trim()||!parameters.project_id||!props.outputReady||!state?.capabilities.actionReady||original&&!original.taskId){setQuote(null);return;}
+    if(newAttemptRequired||!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||original&&!original.taskId){setQuote(null);return;}
     const captured=scope,key=quoteKey;let cancelled=false;setQuoting(true);setQuoteError('');
     const timer=setTimeout(()=>{void (async()=>{try{
-      const final=await api<{run:MultiviewActionRun;binding:MultiviewActionBinding}>('/api/video/multiview/actions/final',{draftId:draft.id,revision:draft.revision,text,parameters,attemptId,...(appliedRunId?{sourceRunId:appliedRunId}:{})});
-      if(cancelled||!active(captured)||currentQuoteKey.current!==key)return;
-      const quoted=await api<{estimatedCost:number;pricing_revision:string;pricing_quote_token:string;multiviewAction?:MultiviewActionBinding}>('/api/tasks/estimate',{...parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:text,multiview_action:final.binding});
+      const quoted=await api<{estimatedCost:number;pricing_revision:string;pricing_quote_token:string}>('/api/tasks/estimate',{...parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:text});
       if(cancelled||!active(captured)||currentQuoteKey.current!==key)return;
       if(typeof quoted.estimatedCost!=='number'||!Number.isFinite(quoted.estimatedCost)||!quoted.pricing_quote_token)throw new Error('本次费用尚未确认。');
-      setQuote({key,run:final.run,binding:final.binding,points:quoted.estimatedCost,pricingRevision:quoted.pricing_revision,token:quoted.pricing_quote_token});
+      setQuote({key,text:text.trim(),parameters:{...parameters},points:quoted.estimatedCost,pricingRevision:quoted.pricing_revision,token:quoted.pricing_quote_token});
     }catch(cause){if(!cancelled&&active(captured))setQuoteError(cause instanceof Error?cause.message:'视频报价暂不可用。');}finally{if(!cancelled&&active(captured))setQuoting(false);}})();},550);
     return()=>{cancelled=true;clearTimeout(timer);};
-  },[quoteKey,quoteRetry,hydrated,draft,content,text,parameters,props.outputReady,state?.capabilities.actionReady,newAttemptRequired,original?.key,original?.taskId,scope,active,api]);
+  },[quoteKey,quoteRetry,hydrated,content,text,parameters,state?.capabilities.actionReady,newAttemptRequired,original?.key,original?.taskId,scope,active,api]);
   async function organize(){
     if(aiLock.current||aiPending||!state?.capabilities.llmEnabled||!text.trim())return;
     const savedDraft=await saveDraft();if(!savedDraft)return;
@@ -129,33 +140,46 @@ export function MultiviewActionPanel(props: Props) {
   async function queryOriginal(manual=true){if(!original)return;if(manual)videoPoll.current={key:original.key,count:0};const captured=scope;try{const value=await api<{task:{id:string}|null;new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}>(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(original.key)}`);if(!active(captured))return;if(value.task){const next={...original,taskId:value.task.id};setOriginal(next);localStorage.setItem(requestKey,JSON.stringify(next));await refresh();}else if(value.new_request_allowed===true&&value.request_receipt?.state==='rejected'&&value.request_receipt.accepted===false&&value.request_receipt.key===original.key){setOriginal(null);setNewAttemptRequired(true);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));localStorage.removeItem(requestKey);setMessage(value.request_receipt.message||'本次未受理，请调整后重新确认费用。');}else setMessage('提交结果待确认，原请求尚未查到，不会重新提交。');}catch(cause){if(active(captured))setMessage('原请求暂不可查询，保留最后已知状态。');}}
   useEffect(()=>{if(!hydrated||!props.work)return;const waiting=original&&!original.taskId||state?.runs.some(run=>['queued','running'].includes(run.status)||run.tasks.some(task=>!finished.has(task.status)));if(!waiting)return;if(original&&!original.taskId){if(videoPoll.current.key!==original.key)videoPoll.current={key:original.key,count:0};if(videoPoll.current.count>=12)return;}const timer=setTimeout(()=>{if(original&&!original.taskId){videoPoll.current.count++;void queryOriginal(false);}else void refresh().catch(()=>undefined);},5000);return()=>clearTimeout(timer);});
   async function submit(){
-    if(submitLock.current||!currentQuote||!props.outputReady)return;
-    const frozen=currentQuote,captured=scope,keyAtClick=quoteKey;submitLock.current=true;setSubmitting(true);setMessage('');
+    if(submitLock.current||saveLock.current||!currentQuote)return;
+    const frozen=currentQuote,captured=scope;submitLock.current=true;setSubmitting(true);setMessage('正在准备本次拼图…');
     let retained=false;
+    let binding: MultiviewActionBinding | null = null;
     try{
-      const requestId=`multiview-action:${frozen.binding.runId}`;
-      const body:Record<string,unknown>={...parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:frozen.run.text,multiview_action:frozen.binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,max_estimated_cost:frozen.points,pricing_revision:frozen.pricingRevision,pricing_quote_token:frozen.token,pricing_fingerprint_version:2};
+      const preparedWork=await props.onPrepare();
+      if(!active(captured))return;
+      const savedDraft=await api<{draft:MultiviewActionDraft}>('/api/video/multiview/actions/drafts',{workId:preparedWork.id,draftId:draftRef.current?.id,revision:draftRef.current?.revision||0,text:frozen.text,parameters:frozen.parameters});
+      if(!active(captured))return;
+      setDraft(savedDraft.draft);draftRef.current=savedDraft.draft;
+      const final=await api<{run:MultiviewActionRun;binding:MultiviewActionBinding}>('/api/video/multiview/actions/final',{draftId:savedDraft.draft.id,revision:savedDraft.draft.revision,text:frozen.text,parameters:frozen.parameters,attemptId,...(appliedRunId?{sourceRunId:appliedRunId}:{})});
+      binding=final.binding;
+      if(!active(captured))return;
+      const requestId=`multiview-action:${binding.runId}`;
+      const body:Record<string,unknown>={...frozen.parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:final.run.text,multiview_action:binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,max_estimated_cost:frozen.points,pricing_revision:frozen.pricingRevision,pricing_fingerprint_version:2};
+      setMessage('正在核对本次费用并提交…');
       const previous=!isResolvedCreationIntent(creation.intent)?creation.intent:null;
       const prepared=await creation.prepare(body,requestId,previous);
-      if(!active(captured)||currentQuoteKey.current!==keyAtClick)throw new Error('输入已变化，请重新确认当前费用。');
+      if(!active(captured))return;
       if(prepared.request_id!==requestId){setConfirming(false);setMessage('原动作准备尚未结束，请先核对下方原请求；本次未重新提交。');return;}
-      if(isResolvedCreationIntent(prepared)){setConfirming(false);setMessage('原动作请求已有处理结果，请核对下方原任务。');return;}
-      if(!prepared.availability?.canSubmit){setConfirming(false);setMessage('请完成下方创作条件，当前动作保留。');return;}
+      if(isResolvedCreationIntent(prepared)){
+        if(prepared.accepted_task_id){const accepted={key:requestId,runId:binding.runId,taskId:prepared.accepted_task_id};setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));setSelectedRunId(binding.runId);await refresh();props.onView('video');}
+        setConfirming(false);setMessage(prepared.accepted_task_id?'已找到原任务，不会重复生成。':'原动作请求已结束，当前输入保留，请主动重新准备生成。');return;
+      }
+      if(!prepared.availability?.canSubmit){setConfirming(false);setMessage(prepared.availability?.reasons.map(reason=>reason.message).join('；')||'本次尚未提交，请完成下方创作条件。');return;}
       if(!prepared.quote||prepared.quote.estimated_cost!==frozen.points||prepared.quote.pricing_revision!==frozen.pricingRevision){setConfirming(false);setQuoteRetry(value=>value+1);throw new Error('费用已变化，请核对新报价后生成。');}
       Object.assign(body,{intent_id:prepared.id,intent_revision:prepared.revision,resolution_approval_id:prepared.approval_id||null,pricing_quote_token:prepared.quote.pricing_quote_token||frozen.token});
-      const pending:Original={key:requestId,runId:frozen.binding.runId,taskId:null};localStorage.setItem(requestKey,JSON.stringify(pending));setOriginal(pending);retained=true;setConfirming(false);setSelectedRunId(frozen.binding.runId);
+      const pending:Original={key:requestId,runId:binding.runId,taskId:null};localStorage.setItem(requestKey,JSON.stringify(pending));setOriginal(pending);retained=true;setConfirming(false);setSelectedRunId(binding.runId);
       const result=await api<{id?:string;task_id?:string;existing_task_id?:string}>('/api/tasks/create',body);if(!active(captured))return;
       const taskId=result.id||result.task_id||result.existing_task_id;
       if(!taskId)throw new Error('提交结果待确认，原请求已保留。');
-      const accepted={...pending,taskId};setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));await refresh();props.onView('video');
-    }catch(cause){if(active(captured)){const result=(cause as {result?:{new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}})?.result,receipt=result?.request_receipt;if(retained&&result?.new_request_allowed===true&&receipt?.state==='rejected'&&receipt.accepted===false&&receipt.key===`multiview-action:${frozen.binding.runId}`){setOriginal(null);setNewAttemptRequired(true);localStorage.removeItem(requestKey);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));setMessage(receipt.message||'本次未受理，当前输入保留。');}else setMessage(retained?'提交结果待确认，请查询原请求，不会重复提交。':cause instanceof Error?cause.message:'尚未提交，当前输入保留。');}}
+      const accepted={...pending,taskId};setOriginal(accepted);localStorage.setItem(requestKey,JSON.stringify(accepted));void creation.acceptTask(requestId,taskId).catch(()=>undefined);setMessage('视频任务已受理。');props.onView('video');await refresh().catch(()=>setMessage('视频任务已受理，状态暂未更新，可查询原任务。'));
+    }catch(cause){if(active(captured)){const result=(cause as {result?:{new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}})?.result,receipt=result?.request_receipt;if(retained&&result?.new_request_allowed===true&&receipt?.state==='rejected'&&receipt.accepted===false&&receipt.key===`multiview-action:${binding?.runId}`){setOriginal(null);setNewAttemptRequired(true);localStorage.removeItem(requestKey);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));setMessage(receipt.message||'本次未受理，当前输入保留。');}else setMessage(retained?'提交结果待确认，请查询原请求，不会重复提交。':cause instanceof Error?cause.message:'尚未提交，当前输入保留。');}}
     finally{submitLock.current=false;if(active(captured))setSubmitting(false);}
   }
   function newAttempt() { if (original && !original.taskId) return false; const id=crypto.randomUUID(); try { localStorage.setItem(attemptKey,JSON.stringify({id,needsNew:false}));setAttemptId(id);setNewAttemptRequired(false);setOriginal(null);localStorage.removeItem(requestKey);setQuote(null);return true; } catch {setMessage('新操作编号未能保存，尚未准备新的生成。');return false;} }
   const applyParameters=(patch:Partial<MultiviewActionParameters>)=>{editRevision.current++;setParameters(value=>({...value,...patch}));setConfirming(false);};
   const showVideo=props.activeView==='video';
   return <>
-    {showVideo&&<div className={styles.videoResult}>{selectedTask?.playUrl?<video key={selectedTask.taskId} controls playsInline preload="metadata" src={selectedTask.playUrl} onLoadedMetadata={event=>event.currentTarget.pause()}/>:<p className={styles.notice}>{original&&!original.taskId?'提交结果待确认':selectedTask?`视频${({queued:'排队中',running:'生成中',processing:'生成中',failed:'生成失败',cancelled:'已取消'} as Record<string,string>)[selectedTask.status]||selectedTask.status}`:'选择下方视频记录'}</p>}{selectedTask&&<div className={styles.taskId}><code>{selectedTask.taskId}</code><button aria-label="复制完整视频编号" onClick={()=>void navigator.clipboard.writeText(selectedTask.taskId).then(()=>setMessage('已复制视频编号。')).catch(()=>setMessage('复制未完成，请选择编号复制。'))}><Copy size={14}/></button></div>}{selectedTask?.downloadUrl&&<a href={selectedTask.downloadUrl} download>下载视频</a>}<div className={styles.history}>{state?.runs.filter(run=>run.tasks.length).map(run=><button key={run.id} aria-pressed={selectedRunId===run.id} onClick={()=>setSelectedRunId(run.id)}>{seedanceVideoModelLabel(run.parameters.model)} · <RelativeTime value={run.createdAt}/></button>)}{state?.nextCursor&&<button onClick={()=>void refresh(false,state.nextCursor!)}>加载更多</button>}</div></div>}
+    {showVideo&&<div className={styles.videoResult}>{selectedTask?.playUrl?<video key={selectedTask.taskId} controls playsInline preload="metadata" src={selectedTask.playUrl} onLoadedMetadata={event=>event.currentTarget.pause()} onError={()=>setMessage('视频暂不能播放，可核对原任务或下载原视频。')}/>:<p className={styles.notice}>{original&&!original.taskId?'提交结果待确认':selectedTask?`视频${({submitted:'已受理',pending:'等待中',queued:'排队中',running:'生成中',processing:'生成中',failed:'生成失败',succeeded:'已完成，成品准备中',completed:'已完成，成品准备中',cancelled:'已取消'} as Record<string,string>)[selectedTask.status]||selectedTask.status}`:original?.taskId?'视频任务已受理，正在读取原任务状态…':'选择下方视频记录'}</p>}{selectedTask?.error&&<p className={styles.notice} role="status">{selectedTask.error}</p>}{selectedTask&&<div className={styles.taskId}><code>{selectedTask.taskId}</code><button aria-label="复制完整视频编号" onClick={()=>void navigator.clipboard.writeText(selectedTask.taskId).then(()=>setMessage('已复制视频编号。')).catch(()=>setMessage('复制未完成，请选择编号复制。'))}><Copy size={14}/></button></div>}{selectedTask?.downloadUrl&&<a href={selectedTask.downloadUrl} download>下载视频</a>}<div className={styles.history}>{state?.runs.filter(run=>run.tasks.length).map(run=><button key={run.id} aria-pressed={selectedRunId===run.id} onClick={()=>setSelectedRunId(run.id)}>{seedanceVideoModelLabel(run.parameters.model)} · <RelativeTime value={run.createdAt}/></button>)}{state?.nextCursor&&<button onClick={()=>void refresh(false,state.nextCursor!)}>加载更多</button>}</div></div>}
     <aside className={styles.action} aria-label="同步动作视频">
       <h3>动作</h3>
       {showVideo&&selectedRun?<><p className={styles.frozenText}>{selectedRun.text}</p><p className={styles.notice}>{seedanceVideoModelLabel(selectedRun.parameters.model)} · {selectedRun.parameters.duration} 秒 · {selectedRun.parameters.resolution}</p><button onClick={()=>{if(!newAttempt())return;updateText(selectedRun.text||'');setParameters(selectedRun.parameters);props.onView('reference');}}>修改动作再做</button></>:<>
@@ -170,19 +194,19 @@ export function MultiviewActionPanel(props: Props) {
         <div className={`${styles.compact} ${styles.params}`}><select aria-label="视频型号" value={parameters.model} onChange={event=>applyParameters({model:event.target.value})}>{SEEDANCE_VIDEO_MODEL_OPTIONS.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><select aria-label="视频时长" value={parameters.duration} onChange={event=>applyParameters({duration:Number(event.target.value)})}>{seedanceVideoDurationOptions(parameters.model).map(duration=><option key={duration} value={duration}>{duration} 秒</option>)}</select><select aria-label="分辨率" value={parameters.resolution} onChange={event=>applyParameters({resolution:event.target.value as MultiviewActionParameters['resolution']})}>{['480p','720p','1080p'].map(value=><option key={value}>{value}</option>)}</select><ProjectSelector  aria-label="项目" name="project_id" value={parameters.project_id} onChange={event=>applyParameters({project_id:event.target.value,video_card_id:null})}><option value="">选择项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector><select aria-label="视频卡，可选" name="video_card_id" value={parameters.video_card_id||''} onChange={event=>applyParameters({video_card_id:event.target.value||null})}><option value="">视频卡（可选）</option>{cards.map(card=><option key={card.id} value={card.id}>{card.title}</option>)}</select></div>
         <CreationAvailability controller={creation} onBaselineChange={setBaseline}/>
         {state&&!state.capabilities.actionReady&&<p className={styles.notice}>{state.capabilities.actionReason}</p>}
-        {!props.outputReady&&<p className={styles.notice}>参考拼图准备中，动作可继续编辑。</p>}
+        {props.work && ['queued','rendering'].includes(props.work.status)&&<p className={styles.notice}>拼图准备中…</p>}
         <div className={styles.price}>{currentQuote?<>预计 <strong>{currentQuote.points} 点</strong></>:quoting?'视频费用获取中…':quoteError||'视频费用待准备'}</div>
         {newAttemptRequired&&<button onClick={newAttempt}>重新准备生成</button>}
         {quoteError&&<button onClick={()=>setQuoteRetry(value=>value+1)}>重新报价</button>}
-        <button className={styles.primary} disabled={!currentQuote||submitting||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在受理…':'生成视频'}</button>
       </>}
       {original&&!original.taskId&&<p className={styles.notice}>提交结果待确认 <button onClick={()=>void queryOriginal()}>查询原请求</button></p>}
-      {original?.taskId&&<div className={styles.taskId}><code>{original.taskId}</code><button aria-label="复制完整任务编号" onClick={()=>void navigator.clipboard.writeText(original.taskId!).catch(()=>setMessage('复制未完成，请选择编号复制。'))}><Copy size={14}/></button></div>}
+      {original?.taskId&&<div className={styles.taskId}><code>{original.taskId}</code><button onClick={()=>void queryOriginal()}>查询原任务</button><button aria-label="复制完整任务编号" onClick={()=>void navigator.clipboard.writeText(original.taskId!).catch(()=>setMessage('复制未完成，请选择编号复制。'))}><Copy size={14}/></button></div>}
       {saving&&<p className={styles.notice}>正在保存动作…</p>}
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
     </aside>
+    {props.triggerHost&&createPortal(<button type="button" disabled={!currentQuote||submitting||saving||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>,props.triggerHost)}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
-    {confirming&&currentQuote&&<ConfirmDialog quote={currentQuote} parameters={parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
+    {confirming&&currentQuote&&<ConfirmDialog quote={currentQuote} parameters={currentQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
   </>;
 }

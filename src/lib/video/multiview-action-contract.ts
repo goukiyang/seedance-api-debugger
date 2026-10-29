@@ -10,7 +10,7 @@ export type MultiviewActionDraft = {
   id: string; workId: string; workRevision: number; revision: number; text: string;
   parameters: MultiviewActionParameters; updatedAt: string;
 };
-export type MultiviewActionTask = { taskId: string; status: string; deliveryStatus: string | null; playUrl: string | null; downloadUrl: string | null; createdAt: string };
+export type MultiviewActionTask = { taskId: string; status: string; error?: string | null; deliveryStatus: string | null; playUrl: string | null; downloadUrl: string | null; createdAt: string };
 export type MultiviewActionRun = {
   id: string; draftId: string; draftRevision: number; requestId: string; inputText: string; mode: 'direct' | 'llm'; status: StudioRunStatus;
   text: string | null; error: string | null; llmModel: string | null; parameters: MultiviewActionParameters;

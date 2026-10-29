@@ -4,6 +4,7 @@ import { candidateFrames, DEFAULT_MULTIVIEW_LAYOUT, validMultiviewLayout, multiv
 import { clampReferencePlacement, validReferenceColor, validReferenceRect, type ReferencePanel, type ReferencePlacement, type ReferenceOutput, type ReferenceDivider, type ReferenceForeground } from './multiview-reference-layout';
 
 export const MULTIVIEW_SAVE_PROTOCOL = 'explicit-v2';
+export const MULTIVIEW_REFERENCE_SAVE_PROTOCOL = 'reference-explicit-v3';
 export type MultiviewSourceAccess = { kind: 'work'; id: string } | { kind: 'share'; id: string };
 
 export type MultiviewSelectionRecipe = {
@@ -23,7 +24,7 @@ export type MultiviewWorkManifest = {
   files: Array<{ role: MultiviewWorkFileRole; file: string; mime: 'image/png' | 'image/jpeg' | 'application/zip';
     bytes: number; sha256: string; width?: number; height?: number }>;
 };
-export type MultiviewWorkStatus = 'waiting_source' | 'queued' | 'rendering' | 'ready' | 'failed' | 'source_changed';
+export type MultiviewWorkStatus = 'draft' | 'waiting_source' | 'queued' | 'rendering' | 'ready' | 'failed' | 'source_changed';
 export type MultiviewWorkDto = {
   id: string; title: string; sourceTaskId: string; sourceVersion: string | null; projectId: string | null;
   sourceId?: string | null; saveState?: 'legacy' | 'intent' | 'saved';
@@ -131,7 +132,8 @@ export function parseMultiviewReferenceRecipe(data: MultiviewReferenceRecipe, in
   const placements: ReferencePlacement[] = [];
   for (const placement of data.placements) {
     const panel = panels.find(item => item.slotId === placement.slotId);
-    if (!panel || !validReferenceRect(placement) || !Number.isSafeInteger(placement.z) || placement.z < 0 || placement.z > 3
+    if (!panel || !['x','y','width','height'].every(key => Number.isFinite(placement[key as keyof ReferenceRectLike]))
+      || !Number.isSafeInteger(placement.z) || placement.z < 0 || placement.z > 3
       || Math.round((placement.x + placement.width) * output.width) <= Math.round(placement.x * output.width)
       || Math.round((placement.y + placement.height) * output.height) <= Math.round(placement.y * output.height)) return null;
     const clean = clampReferencePlacement(placement, panel, info, output);

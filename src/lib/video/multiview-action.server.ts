@@ -20,6 +20,7 @@ import { privatePromptState, type PrivateOrigin } from '@/lib/security/private-p
 import type { StudioJsonValue, StudioRunSnapshot } from '@/lib/template-studio/types';
 import { getMultiviewWork, multiviewWorkRecipeHash, assertMultiviewWorkReference, MultiviewWorkError } from './multiview-works';
 import { ensureMultiviewReferenceAsset, readMultiviewReferenceBinding } from './multiview-output-assets.server';
+import { privateMultiviewFailure } from './multiview-task-privacy';
 import { multiviewActionContextMetadata, readMultiviewActionContext, multiviewActionContextOrigins } from './multiview-action-context.server';
 import { MULTIVIEW_ACTION_ENABLED } from './multiview-action-capability';
 import { MULTIVIEW_ACTION_PURPOSE, parseMultiviewActionBinding, type MultiviewActionBinding, type MultiviewActionDraft, type MultiviewActionParameters,
@@ -73,14 +74,14 @@ async function runDto(row: RunRow, db: Db = prisma): Promise<MultiviewActionRun>
   const value = snapshot(row);
   const action = value.multiviewAction!;
   const tasks = await db.videoTask.findMany({ where: { template_studio_run_id: row.id, owner_user_id: row.owner_user_id },
-    select: { id: true, local_status: true, delivery_status: true, result_video_url: true, public_video_url: true, local_video_path: true, created_at: true },
+    select: { id: true, local_status: true, error_message: true, delivery_status: true, result_video_url: true, public_video_url: true, local_video_path: true, created_at: true },
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 24 });
   return { id: row.id, draftId: row.draft_id, draftRevision: row.draft_revision, inputText: value.input.draftPrompt, requestId: row.request_id, mode: row.mode as 'direct' | 'llm', status: row.status as MultiviewActionRun['status'],
     text: visibleRunPrompt(row), error: row.error_message, llmModel: value.llmModel || row.model || null,
     parameters: normalizeMultiviewActionParameters(value.parameters),
     binding: action.stage === 'final' && action.inputHash ? { runId: row.id, workId: action.workId, revision: action.revision, recipeHash: action.recipeHash, inputHash: action.inputHash } : null,
     attemptId: action.attemptId || 'initial', createdAt: row.created_at.toISOString(), tasks: tasks.map(task => { const ready = task.local_status === 'succeeded' && Boolean(task.result_video_url || task.public_video_url || task.local_video_path);
-      return { taskId: task.id, status: task.local_status, deliveryStatus: task.delivery_status, playUrl: ready ? `/api/video/play/${encodeURIComponent(task.id)}` : null,
+      return { taskId: task.id, status: task.local_status, error: privateMultiviewFailure(task.error_message, task.local_status)?.message || null, deliveryStatus: task.delivery_status, playUrl: ready ? `/api/video/play/${encodeURIComponent(task.id)}` : null,
         downloadUrl: ready ? `/api/video/download/${encodeURIComponent(task.id)}` : null, createdAt: task.created_at.toISOString() }; }) };
 }
 export async function getMultiviewActionCapabilities(user: SessionUser): Promise<MultiviewActionCapabilities> {

@@ -35,13 +35,14 @@ export function referencePanels(slots: Array<Pick<MultiviewSlot, 'id'>>, layout:
   if (!boxes.length) return referencePanels(slots, count === 2 ? 'horizontal' : 'large-left');
   return slots.map((slot, index) => ({ slotId: slot.id, ...boxes[index] }));
 }
-/** Rectangles use canvas coordinates. Keep the complete source inside its own shot. */
+/** Panels are layout guides, not image clipping boundaries. Keep off-canvas edits recoverable. */
 export function clampReferencePlacement(placement: ReferencePlacement, panel: ReferencePanel, info: Pick<MultiviewInfo, 'width' | 'height'>, output: ReferenceOutput): ReferencePlacement {
   const sourceRatio = info.width / info.height * output.height / output.width;
-  const width = Math.max(.000001, Math.min(panel.width, panel.height * sourceRatio, finite(placement.width) ? placement.width : panel.width));
+  const maximum = Math.min(4, 4 * sourceRatio, Math.sqrt(64000000 * sourceRatio / (output.width * output.height)));
+  const width = Math.max(.000001, Math.min(maximum, finite(placement.width) ? placement.width : panel.width));
   const height = width / sourceRatio;
-  const x = Math.max(panel.x, Math.min(panel.x + panel.width - width, finite(placement.x) ? placement.x : panel.x + (panel.width - width) / 2));
-  const y = Math.max(panel.y, Math.min(panel.y + panel.height - height, finite(placement.y) ? placement.y : panel.y + (panel.height - height) / 2));
+  const x = Math.max(-8, Math.min(8, finite(placement.x) ? placement.x : panel.x + (panel.width - width) / 2));
+  const y = Math.max(-8, Math.min(8, finite(placement.y) ? placement.y : panel.y + (panel.height - height) / 2));
   return { slotId: panel.slotId, x, y, width, height, z: Number.isSafeInteger(placement.z) ? Math.max(0, Math.min(3, placement.z)) : 0 };
 }
 type ReferenceArrangement = Pick<MultiviewReferenceRecipe, 'placements' | 'panels'>;
@@ -56,10 +57,10 @@ export function moveReferencePlacements(recipe: ReferenceArrangement, slotId: st
   for (const image of targets) {
     const panel = recipe.panels.find(item => item.slotId === image.slotId);
     if (!panel) return recipe.placements;
-    minX = Math.max(minX, (panel.x - image.x) / panel.width);
-    maxX = Math.min(maxX, (panel.x + panel.width - image.width - image.x) / panel.width);
-    minY = Math.max(minY, (panel.y - image.y) / panel.height);
-    maxY = Math.min(maxY, (panel.y + panel.height - image.height - image.y) / panel.height);
+    minX = Math.max(minX, (-8 - image.x) / panel.width);
+    maxX = Math.min(maxX, (8 - image.x) / panel.width);
+    minY = Math.max(minY, (-8 - image.y) / panel.height);
+    maxY = Math.min(maxY, (8 - image.y) / panel.height);
   }
   const x = Math.max(minX, Math.min(maxX, dx / selected.width));
   const y = Math.max(minY, Math.min(maxY, dy / selected.height));
@@ -70,8 +71,8 @@ export function moveReferencePlacements(recipe: ReferenceArrangement, slotId: st
     return { ...image, x: image.x + x * panel.width, y: image.y + y * panel.height };
   });
 }
-/** A common scale limit keeps the group in step; no image is clamped separately. */
-export function scaleReferencePlacements(recipe: ReferenceArrangement, slotId: string, factor: number, corner: ReferenceScaleCorner = 'center', synchronized = false): ReferencePlacement[] {
+/** One resource limit for the whole gesture preserves synchronized scaling, including outside the canvas. */
+export function scaleReferencePlacements(recipe: ReferenceArrangement & { output?: ReferenceOutput }, slotId: string, factor: number, corner: ReferenceScaleCorner = 'center', synchronized = false): ReferencePlacement[] {
   if (!finite(factor) || !recipe.placements.some(item => item.slotId === slotId)) return recipe.placements;
   const anchorX = corner === 'center' ? .5 : corner.includes('w') ? 1 : 0;
   const anchorY = corner === 'center' ? .5 : corner.includes('n') ? 1 : 0;
@@ -82,10 +83,10 @@ export function scaleReferencePlacements(recipe: ReferenceArrangement, slotId: s
     if (!panel) return recipe.placements;
     const x = image.x + image.width * anchorX, y = image.y + image.height * anchorY;
     minimum = Math.max(minimum, epsilon / image.width);
-    if (anchorX > 0) maximum = Math.min(maximum, (x - panel.x) / (image.width * anchorX));
-    if (anchorX < 1) maximum = Math.min(maximum, (panel.x + panel.width - x) / (image.width * (1 - anchorX)));
-    if (anchorY > 0) maximum = Math.min(maximum, (y - panel.y) / (image.height * anchorY));
-    if (anchorY < 1) maximum = Math.min(maximum, (panel.y + panel.height - y) / (image.height * (1 - anchorY)));
+    maximum = Math.min(maximum, 4 / image.width, 4 / image.height);
+    if (recipe.output) maximum = Math.min(maximum, Math.sqrt(64000000 / (image.width * image.height * recipe.output.width * recipe.output.height)));
+    if (anchorX > 0) maximum = Math.min(maximum, (x + 8) / (image.width * anchorX));
+    if (anchorY > 0) maximum = Math.min(maximum, (y + 8) / (image.height * anchorY));
   }
   const applied = Math.max(minimum, Math.min(maximum, factor));
   if (Math.abs(applied - 1) < 1e-12) return recipe.placements;
@@ -148,11 +149,11 @@ export function resizeMultiviewReference(recipe: MultiviewReferenceRecipe, info:
     const oldRatio = info.width / info.height * recipe.output.height / recipe.output.width;
     const newRatio = info.width / info.height * output.height / output.width;
     const oldMaximum = Math.min(old.width, old.height * oldRatio), newMaximum = Math.min(panel.width, panel.height * newRatio);
-    const scale = Math.min(1, placement.width / oldMaximum), width = newMaximum * scale, height = width / newRatio;
-    const relativeX = old.width - placement.width > epsilon ? (placement.x - old.x) / (old.width - placement.width) : .5;
-    const relativeY = old.height - placement.height > epsilon ? (placement.y - old.y) / (old.height - placement.height) : .5;
-    return clampReferencePlacement({ ...placement, x: panel.x + (panel.width - width) * relativeX,
-      y: panel.y + (panel.height - height) * relativeY, width, height }, panel, info, output);
+    const scale = placement.width / oldMaximum, width = newMaximum * scale, height = width / newRatio;
+    const relativeX = (placement.x + placement.width / 2 - old.x) / old.width;
+    const relativeY = (placement.y + placement.height / 2 - old.y) / old.height;
+    return clampReferencePlacement({ ...placement, x: panel.x + panel.width * relativeX - width / 2,
+      y: panel.y + panel.height * relativeY - height / 2, width, height }, panel, info, output);
   });
   return { ...recipe, output, panels, placements };
 }

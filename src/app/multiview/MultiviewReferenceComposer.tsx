@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
-import { ArrowLeft, Copy, Download, LockKeyhole, Move, Undo2, Redo2, UnlockKeyhole } from 'lucide-react';
+import { ArrowLeft, ArrowUpToLine, ArrowDownToLine, Copy, Download, LockKeyhole, Move, Undo2, Redo2, UnlockKeyhole } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
 import { DEFAULT_CUTOUT_SETTINGS } from '@/lib/cutout/settings';
 import { copyPngBlob } from '@/lib/media/copy-image';
@@ -9,7 +9,7 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { createMultiviewReferenceRecipe, referencePixelGeometry, resizeMultiviewReference, referencePanels, moveReferencePlacements, scaleReferencePlacements,
   type ReferenceLayout, type ReferencePlacement, type ReferenceScaleCorner } from '@/lib/video/multiview-reference-layout';
-import { MULTIVIEW_SAVE_PROTOCOL, parseMultiviewWorkRecipe, type MultiviewReferenceRecipe, type MultiviewWorkDto, type MultiviewSourceAccess } from '@/lib/video/multiview-work-contract';
+import { MULTIVIEW_REFERENCE_SAVE_PROTOCOL, parseMultiviewWorkRecipe, type MultiviewReferenceRecipe, type MultiviewWorkDto, type MultiviewSourceAccess } from '@/lib/video/multiview-work-contract';
 import type { MultiviewInfo, MultiviewSlot } from '@/lib/video/multiview-contract';
 import { MultiviewActionPanel } from './MultiviewActionPanel';
 import styles from './multiview-action.module.css';
@@ -33,6 +33,7 @@ export function MultiviewReferenceComposer(props: Props) {
   const [showStyle, setShowStyle] = useState(false), [precise, setPrecise] = useState(false);
   const [syncAdjust, setSyncAdjust] = useState(false), [dragging, setDragging] = useState(false);
   const [activeView, setActiveView] = useState<'reference' | 'video'>('reference');
+  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
   const recipeRef = useRef(recipe); recipeRef.current = recipe;
   const workRef = useRef(work); workRef.current = work;
   const live = useRef(props); live.current = props;
@@ -107,29 +108,51 @@ export function MultiviewReferenceComposer(props: Props) {
     } catch (cause) { if (valid(scope)) setMessage(cause instanceof Error ? cause.message : '原保存结果待确认。'); }
     finally { lock.current = false; if (valid(scope)) setBusy(false); }
   }
-  async function prepare() {
-    if (!hydrated || blocked || pending || lock.current || saved.current === signature && work?.status !== 'failed') return;
+  async function prepare(draftOnly = false): Promise<MultiviewWorkDto | null> {
+    if (!hydrated || blocked || pending || lock.current) return null;
+    if (saved.current === JSON.stringify(recipeRef.current) && workRef.current?.saveState === 'saved' && workRef.current.status !== 'failed') return workRef.current;
     const scope = identity, frozen = recipeRef.current, serialized = JSON.stringify(frozen), original = workRef.current;
     lock.current = true; setBusy(true); setMessage('');
     const mutation: Pending = { mutationId: crypto.randomUUID(), workId: original?.id || null, signature: serialized };
     let sent = false;
     try {
-      const body = original ? { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId: mutation.mutationId, action: 'save', baseRevision: original.revision, recipe: frozen, title: original.title }
-        : { protocol: MULTIVIEW_SAVE_PROTOCOL, mutationId: mutation.mutationId, referenceKey, taskId: props.taskId, sourceVersion: props.info.sourceVersion, recipe: frozen, title: '动作参考拼图', ...(props.access?.kind === 'work' ? { sourceWorkId: props.access.id } : {}) };
+      const body = original ? { protocol: MULTIVIEW_REFERENCE_SAVE_PROTOCOL, mutationId: mutation.mutationId, action: 'save', baseRevision: original.revision, recipe: frozen, title: original.title }
+        : { protocol: MULTIVIEW_REFERENCE_SAVE_PROTOCOL, draftOnly, mutationId: mutation.mutationId, referenceKey, taskId: props.taskId, sourceVersion: props.info.sourceVersion, recipe: frozen, title: '动作参考拼图', ...(props.access?.kind === 'work' ? { sourceWorkId: props.access.id } : {}) };
       localStorage.setItem(key, JSON.stringify({ recipe: frozen, referenceKey, workId: original?.id || null, baseRevision:original?.revision,pending: mutation,syncAdjust }));
       setPending(mutation); sent = true;
       const response = await fetch(original ? `/api/video/multiview/works/${original.id}` : '/api/video/multiview/works', { method: original ? 'PATCH' : 'POST', headers: headers(), body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
       const value = await readJsonResponse<{ work?: MultiviewWorkDto; workId?: string; receipt?: { mutationId: string }; error?: string; notCommitted?: boolean }>(response);
-      if (!valid(scope)) return;
+      if (!valid(scope)) return null;
       if (!response.ok || !value.work || value.receipt?.mutationId !== mutation.mutationId) {
         if (value.notCommitted === true) { setPending(null); setBlocked(true); if(value.workId){const latest=await readWork(value.workId);if(valid(scope))setWork(latest);} throw new Error(value.error || '本次保存未受理，当前排版保留。'); }
         throw new Error('保存结果待确认，请查询原保存。');
       }
-      saved.current = serialized; setWork(value.work); setPending(null);
+      saved.current = serialized; workRef.current = value.work; setWork(value.work); setPending(null);
+      return value.work;
     } catch (cause) { if (valid(scope)) { if (!sent) setBlocked(true); setMessage(cause instanceof Error ? cause.message : '拼图准备未完成，当前编辑保留。'); } }
     finally { lock.current = false; if (valid(scope)) setBusy(false); }
+    return null;
   }
-  useEffect(() => { if (!hydrated || busy || blocked || pending || drag.current || saved.current === signature) return; const timer = setTimeout(() => void prepare(), 650); return () => clearTimeout(timer); });
+  // Only this hidden source intent is automatic; edits never render or enter the works library.
+  useEffect(() => { if (!hydrated || !referenceKey || work || busy || blocked || pending || drag.current) return; void prepare(true); });
+  async function prepareForVideo() {
+    const scope = identity;
+    const accepted = await prepare();
+    if (!accepted) throw new Error('请先核对拼图保存状态，尚未提交视频。');
+    const revision = accepted.draftRevision;
+    let current = accepted;
+    const until = Date.now() + 120000;
+    while (current.status !== 'ready' || current.ready?.revision !== revision) {
+      if (!valid(scope)) throw new Error('工作区已变化，原保存保留；尚未提交视频。');
+      if (current.draftRevision !== revision) throw new Error('拼图已在另一处更新，尚未提交视频。');
+      if (current.status === 'failed' || current.status === 'source_changed') throw new Error(current.lastError || '拼图未准备好，尚未提交视频。');
+      if (Date.now() >= until) throw new Error('拼图仍在准备，稍后可用同一保存继续生成；尚未提交视频。');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      current = await readWork(accepted.id);
+    }
+    if (valid(scope)) { workRef.current = current; setWork(current); }
+    return current;
+  }
   useEffect(() => {
     if (!work || !['waiting_source', 'queued', 'rendering'].includes(work.status)) return;
     const scope = identity; let cancelled = false;
@@ -183,15 +206,24 @@ export function MultiviewReferenceComposer(props: Props) {
       return { ...item, width, height, x: panel.x + (panel.width - width) / 2, y: panel.y + (panel.height - height) / 2 };
     }) });
   }
+  function layer(direction: -1 | 1) {
+    const current = recipeRef.current;
+    const ordered = [...current.placements].sort((a,b)=>a.z-b.z);
+    const index = ordered.findIndex(item=>item.slotId===selected), next = index + direction;
+    if(index<0 || next<0 || next>=ordered.length)return;
+    [ordered[index],ordered[next]]=[ordered[next],ordered[index]];
+    edit({...current,placements:current.placements.map(item=>({...item,z:ordered.findIndex(value=>value.slotId===item.slotId)}))});
+  }
   function finishNumericGesture() {
     const original = numericGesture.current; numericGesture.current = null;
     if (!original || JSON.stringify(original.placements) === JSON.stringify(recipeRef.current.placements)) return;
     setHistory(values => [...values.slice(-29), { ...recipeRef.current, placements: original.placements }]); setFuture([]);
   }
   async function output(copy: boolean) {
-    if (!collage) return;
+    if (!work || busy) return;
     const scope = identity; setMessage('');
-    const png = (async()=>{ const response = await fetch(collage.url, { cache: 'no-store', headers: headers() }); if (!response.ok) throw new Error('成品暂不可读取。'); const blob = await response.blob(); if (!valid(scope)) throw new Error('当前拼图已变化，输出已取消。'); return blob; })();
+    const frozen = recipeRef.current;
+    const png = (async()=>{ const response = await fetch('/api/video/multiview/works/preview', { method:'POST', cache:'no-store', headers:headers(), body:JSON.stringify({workId:work.id,recipe:frozen}), signal:AbortSignal.timeout(90000) }); if (!response.ok) {const value=await response.json();throw new Error(value.error||'拼图暂不可导出。');} const blob = await response.blob(); if (!valid(scope)) throw new Error('工作区已变化，输出已取消。'); return blob; })();
     try {
       if (copy) { await copyPngBlob(png); if(valid(scope))setMessage('已复制图片。'); }
       else { const blob=await png;const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = '动作参考拼图.png'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
@@ -250,13 +282,14 @@ export function MultiviewReferenceComposer(props: Props) {
       <div className={styles.visual} hidden={activeView === 'video'}>
         <div className={styles.compact}><span>{recipe.slots.length} 个镜头</span><label>画幅<select value={ratio} onChange={event => { const [width,height] = dimensions[event.target.value as keyof typeof dimensions]; edit(resizeMultiviewReference(recipe, props.info, { ...recipe.output, width, height })); }}><option>16:9</option><option>9:16</option><option>1:1</option></select></label><label>排版<select onChange={event => edit(resizeMultiviewReference(recipe, props.info, recipe.output, event.target.value as ReferenceLayout))} value={layoutOptions.find(([name])=>JSON.stringify(referencePanels(recipe.slots,name))===JSON.stringify(recipe.panels))?.[0]||layoutOptions[0][0]}>{layoutOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>背景<input type="color" value={recipe.output.background} onChange={event => edit({ ...recipe, output: { ...recipe.output, background: event.target.value } })} /></label><label><input type="checkbox" checked={recipe.divider.enabled} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, enabled: event.target.checked } })} />分隔线</label>{recipe.divider.enabled && <button type="button" onClick={() => setShowStyle(value => !value)}>样式</button>}</div>
         {showStyle && recipe.divider.enabled && <div className={styles.compact}><label>线色<input type="color" value={recipe.divider.color} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, color: event.target.value } })} /></label><label>线宽<input type="number" min={1} max={24} value={recipe.divider.widthPx} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, widthPx: Number(event.target.value) } })} />px</label></div>}
+        <div className={styles.previewToolbar} ref={setActionHost} />
         <div ref={canvas} className={styles.referenceCanvas} data-dragging={dragging || undefined} style={{ aspectRatio: `${geometry.width}/${geometry.height}`, background: recipe.output.background }}>
           <svg viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="img" aria-label={`${recipe.slots.length}镜头参考拼图`}>
             {geometry.placements.map(item => { const slot = recipe.slots.find(slot => slot.id === item.slotId)!, foreground = recipe.foregrounds.find(value => value.slotId === slot.id);
               return <image key={item.slotId} href={foreground ? backgrounds[slot.id]?.resultUrl || undefined : `${props.mediaBase}?version=${props.info.sourceVersion}&frame=${slot.frame}`} x={item.x} y={item.y} width={item.width} height={item.height} preserveAspectRatio="xMidYMid meet" />; })}
             {recipe.divider.enabled && <path d={geometry.dividers.map(line => `M${line.x1},${line.y1}L${line.x2},${line.y2}`).join(' ')} stroke={recipe.divider.color} strokeWidth={recipe.divider.widthPx} fill="none" />}
           </svg>
-          {recipe.placements.map(item => <div key={item.slotId} className={styles.subjectControl} data-selected={item.slotId === selected || undefined} style={{ left: `${item.x*100}%`, top: `${item.y*100}%`, width: `${item.width*100}%`, height: `${item.height*100}%` }} onClick={() => setSelected(item.slotId)} onPointerDown={event => { if (event.pointerType === 'mouse' && event.target === event.currentTarget) start(event,item.slotId,'move'); }} onPointerMove={moving} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event,true)} onLostPointerCapture={event => finish(event,true)} onKeyDown={event => { if(event.key==='Escape'&&drag.current){event.preventDefault();cancelDrag();return;} if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) { event.preventDefault(); setSelected(item.slotId); const step = (event.shiftKey ? 10 : 1); adjust({ x: item.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0)/geometry.width, y: item.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)/geometry.height }, true, item.slotId); } }} tabIndex={0} role="group" aria-label={`镜头${recipe.slots.findIndex(slot => slot.id === item.slotId)+1}主体`}>
+          {recipe.placements.map(item => <div key={item.slotId} className={styles.subjectControl} data-selected={item.slotId === selected || undefined} style={{ zIndex: item.z + 1, left: `${item.x*100}%`, top: `${item.y*100}%`, width: `${item.width*100}%`, height: `${item.height*100}%` }} onClick={() => setSelected(item.slotId)} onPointerDown={event => { if (event.pointerType === 'mouse' && event.target === event.currentTarget) start(event,item.slotId,'move'); }} onPointerMove={moving} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event,true)} onLostPointerCapture={event => finish(event,true)} onKeyDown={event => { if(event.key==='Escape'&&drag.current){event.preventDefault();cancelDrag();return;} if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) { event.preventDefault(); setSelected(item.slotId); const step = (event.shiftKey ? 10 : 1); adjust({ x: item.x + (event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0)/geometry.width, y: item.y + (event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)/geometry.height }, true, item.slotId); } }} tabIndex={0} role="group" aria-label={`镜头${recipe.slots.findIndex(slot => slot.id === item.slotId)+1}主体`}>
             <button type="button" className={styles.moveHandle} aria-label="移动此镜头主体" onPointerDown={event => start(event,item.slotId,'move')}><Move size={16} /></button>
             {(['nw','ne','sw','se'] as const).map(corner=><button key={corner} type="button" className={styles.scaleHandle} data-corner={corner} aria-label="等比缩放此镜头主体" onPointerDown={event => start(event,item.slotId,'scale',corner)}>{corner==='nw'?'↖':corner==='ne'?'↗':corner==='sw'?'↙':'↘'}</button>)}
           </div>)}
@@ -265,11 +298,12 @@ export function MultiviewReferenceComposer(props: Props) {
         <div className={styles.compact}><button type="button" className={styles.syncAdjust} aria-pressed={syncAdjust} disabled={!hydrated || dragging} title={syncAdjust ? '一起移动和缩放所有镜头主体' : '只调整当前镜头主体'} onClick={()=>setSyncAdjust(value=>!value)}>{syncAdjust ? <LockKeyhole size={14}/> : <UnlockKeyhole size={14}/>}同步调整</button><span>镜头 {recipe.slots.findIndex(slot=>slot.id===selected)+1}</span>{placement && <><button onClick={()=>adjust({x:placement.x-2/geometry.width})} aria-label="向左微移">←</button><button onClick={()=>adjust({x:placement.x+2/geometry.width})} aria-label="向右微移">→</button><button onClick={()=>adjust({y:placement.y-2/geometry.height})} aria-label="向上微移">↑</button><button onClick={()=>adjust({y:placement.y+2/geometry.height})} aria-label="向下微移">↓</button><span>大小</span><button onClick={()=>adjust({width:placement.width*.95})}>−</button><button onClick={()=>adjust({width:placement.width*1.05})}>＋</button><button onClick={()=>setPrecise(value=>!value)}>精调</button><button onClick={resetPlacement}>{syncAdjust ? '全部复位' : '复位'}</button></>}</div>
         {precise && placement && <div className={styles.compact}>{(['x','y','width'] as const).map(field=><label key={field}>{field==='width'?'宽度':field.toUpperCase()}<input type="number" value={Math.round(placement[field]*(field==='y'?geometry.height:geometry.width))} onFocus={()=>{numericGesture.current=recipeRef.current;}} onChange={event=>adjust({[field]:Number(event.target.value)/(field==='y'?geometry.height:geometry.width)},false)} onBlur={finishNumericGesture} />px</label>)}</div>}
         <div className={styles.compact}>{recipe.slots.map((slot,index)=><button type="button" key={slot.id} aria-pressed={selected===slot.id} onClick={()=>setSelected(slot.id)}>镜头 {index+1}</button>)}<button type="button" onClick={()=>{ const fresh=createMultiviewReferenceRecipe(props.info,recipe.slots,recipe.output);edit({...fresh,divider:recipe.divider,foregrounds:recipe.foregrounds}); }}>恢复推荐排版</button></div>
+        <div className={styles.compact}><button type="button" title="前移一层" aria-label="前移一层" disabled={!placement || placement.z===recipe.placements.length-1 || dragging} onClick={()=>layer(1)}><ArrowUpToLine size={16}/></button><button type="button" title="后移一层" aria-label="后移一层" disabled={!placement || placement.z===0 || dragging} onClick={()=>layer(-1)}><ArrowDownToLine size={16}/></button></div>
         <div className={styles.compact} aria-label="背景处理，可选">{recipe.foregrounds.length === recipe.slots.length ? <span>透明前景已就绪</span> : recipe.foregrounds.length ? <span>已处理背景 {recipe.foregrounds.length}/{recipe.slots.length}</span> : <span>保留原背景</span>}{selected && <button type="button" disabled={!work || Boolean(backgroundBusy)} onClick={()=>void background(selected,true)}>{backgroundBusy===selected?'正在核对…':backgrounds[selected] && ['accepted','unknown','submitting','preparing'].includes(backgrounds[selected].stage)?'查询本张处理':'处理本张背景'}</button>}{backgrounds[selected]?.message && <span className={styles.notice}>{backgrounds[selected].message}</span>}</div>
-        <div className={styles.compact}><button disabled={!collage} onClick={()=>void output(true)}><Copy size={14}/>复制图片</button><button disabled={!collage} onClick={()=>void output(false)}><Download size={14}/>下载PNG</button><button disabled={!collage} onClick={async()=>{try{const response=await fetch(`/api/video/multiview/works/${work!.id}/files/collage/asset`,{headers:headers(),cache:'no-store'});const value=await response.json();if(!response.ok)throw new Error(value.error);setMessage('已保存到我的素材。');}catch(cause){setMessage(cause instanceof Error?cause.message:'素材登记尚未完成。');}}}>保存素材</button></div>
+        <div className={styles.compact}><button disabled={!work || busy} onClick={()=>void output(true)}><Copy size={14}/>复制图片</button><button disabled={!work || busy} onClick={()=>void output(false)}><Download size={14}/>下载PNG</button><button disabled={!hydrated || busy || blocked || Boolean(pending)} onClick={async()=>{try{const next=await prepareForVideo();const response=await fetch(`/api/video/multiview/works/${next.id}/files/collage/asset`,{headers:headers(),cache:'no-store'});const value=await response.json();if(!response.ok)throw new Error(value.error);setMessage('已保存到我的素材。');}catch(cause){setMessage(cause instanceof Error?cause.message:'素材登记尚未完成。');}}}>保存素材</button></div>
         <div role="status" className={styles.notice}>{pending ? <>保存结果待确认 <button onClick={()=>void queryOriginal()}>查询原保存</button></> : busy || work && ['queued','rendering','waiting_source'].includes(work.status) ? '正在准备拼图…' : work?.status === 'failed' ? <>{work.lastError || '拼图准备失败'}<button onClick={()=>void prepare()}>重新准备</button></> : ''}{message}{blocked && <button onClick={async()=>{try{if(work){const latest=await readWork(work.id);if(!valid())return;setWork(latest);}setBlocked(false);setMessage('已核对最新版本，当前排版保留。');}catch(cause){setMessage(cause instanceof Error?cause.message:'最新版本暂不可读取。');}}}>核对最新并保留排版</button>}</div>
       </div>
-      <MultiviewActionPanel ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} ratio={ratio} activeView={activeView} onView={setActiveView} />
+      <MultiviewActionPanel ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} snapshotKey={signature} triggerHost={actionHost} onPrepare={prepareForVideo} ratio={ratio} activeView={activeView} onView={setActiveView} />
     </div>
   </section>;
 }
