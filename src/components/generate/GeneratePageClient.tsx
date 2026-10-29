@@ -7,8 +7,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw, Wrench } from 'lucide-react';
-import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video/prompt-groups';
+import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw } from 'lucide-react';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution, AssetCollection } from '@/types';
 import { RATIO_OPTIONS, RESOLUTION_OPTIONS } from '@/types';
 import { GenerationComposer } from '@/components/GenerationComposer';
@@ -114,7 +113,6 @@ type CreateTaskResponse = CreateResponse & {
 type WorkspaceBusyReason = 'read-error' | 'pending-attach' | 'uploading' | 'upload-failed' | 'saving' | 'picker-open' | 'loading' | null;
 
 type GenerationSubmitParams = {
-  videoPromptGroups?: VideoPromptGroupRef[];
   pricingRevision?: string | null;
   pricingQuoteToken?: string;
   quotedEstimatedCost?: number;
@@ -284,7 +282,6 @@ interface ProjectOption {
 }
 
 interface ReuseDraft {
-  videoPromptGroups?: VideoPromptGroupRef[];
   model?: string | null;
   taskId: string;
   reuseKey: number;
@@ -2001,7 +1998,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           headers: {
             'Content-Type': 'application/json',
             'x-tab-id': capturedTabId,
-            'x-video-prompt-groups-contract': '1',
           },
           body: JSON.stringify(operation),
         });
@@ -2027,7 +2023,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           model?: string | null;
           task_id?: string;
           prompt?: string;
-          video_prompt_groups?: VideoPromptGroupRef[];
           generation_mode?: GenerationMode;
           ratio?: VideoRatio;
           duration?: VideoDuration;
@@ -2160,7 +2155,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const backup = activeReuseRecord.current?.backup;
       const after: TaskReuseInputBackup | null = backup ? { ...backup,
         workspace: { ...backup.workspace, items: Array.isArray(data.workspace_assets) ? data.workspace_assets as TaskReuseInputBackup['workspace']['items'] : backup.workspace.items },
-        fields: { ...backup.fields, prompt: data.draft.prompt, videoPromptGroups: parseVideoPromptGroupRefs(data.draft.video_prompt_groups), model: data.draft.model || backup.fields.model,
+        fields: { ...backup.fields, prompt: data.draft.prompt, model: data.draft.model || backup.fields.model,
           provider: data.draft.provider || backup.fields.provider, generationMode: data.draft.generation_mode || backup.fields.generationMode,
           ratio: data.draft.ratio || backup.fields.ratio, duration: data.draft.duration ?? backup.fields.duration, resolution: data.draft.resolution || backup.fields.resolution,
           seed: data.draft.seed ?? backup.fields.seed, generateAudio: data.draft.generate_audio ?? backup.fields.generateAudio,
@@ -2190,7 +2185,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         taskId: data.draft.task_id,
         reuseKey,
         prompt: data.draft.prompt,
-        videoPromptGroups: parseVideoPromptGroupRefs(data.draft.video_prompt_groups),
         generationMode: data.draft.generation_mode || 'all_in_one_reference',
         ratio: data.draft.ratio || '16:9',
         duration: data.draft.duration || 5,
@@ -2875,7 +2869,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         ...(params.pricingQuoteToken ? { pricing_quote_token: params.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
         ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
         prompt: params.prompt,
-        ...(!isIpSurface && params.videoPromptGroups?.length ? { video_prompt_groups: params.videoPromptGroups, video_prompt_groups_contract: 1 } : {}),
         generation_mode: params.generationMode,
         ratio: params.ratio,
         duration: params.duration,
@@ -3250,19 +3243,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       ? '直接保存到项目，视频卡可选'
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
-  const normalVideoRedesign = !isIpSurface && !studioHandoff && !imageResultHandoff;
-  const relatedToolLinks = surfaceConfig.heroLinks
-    .filter(link => !link.adminOnly || currentUser?.role === 'admin')
-    .filter(link => !link.externalHidden || !isExternalUser(currentUser))
-    .filter(link => isNavItemVisible(link, currentUser))
-    .map(link => <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>{link.label}</Link>);
 
   // ============================================================================
   // Render
   // ============================================================================
 
   return (
-    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : normalVideoRedesign ? ' composer-page--video' : ''}`}>
+    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : ''}`}>
       {productDialog}
       {/* ===== 顶部导航栏 ===== */}
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
@@ -3317,25 +3304,36 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         {/* Hero 空状态 */}
         <div className="composer-hero">
           <h1 className="composer-hero-title">
-            {normalVideoRedesign ? '视频生成' : <>{surfaceConfig.titleLead}<span>{surfaceConfig.titleAccent}</span></>}
+            {surfaceConfig.titleLead}<span>{surfaceConfig.titleAccent}</span>
           </h1>
-          {!normalVideoRedesign && <p className="composer-hero-sub">
+          <p className="composer-hero-sub">
             {surfaceConfig.subtitle}
-          </p>}
+          </p>
           {!hideExternalIpInternalControls && (
-            !normalVideoRedesign ? <div className="composer-hero-actions">{relatedToolLinks}{isIpSurface && <span className="composer-hero-action composer-hero-action-muted">火山官方 API</span>}</div>
-            : <details className="composer-hero-actions video-related-tools">
-              <summary><Wrench size={16} />相关工具<ChevronDown size={14} /></summary>
-              {relatedToolLinks}
-            </details>
+            <div className="composer-hero-actions">
+              {surfaceConfig.heroLinks
+                .filter((link) => !link.adminOnly || currentUser?.role === 'admin')
+                .filter((link) => !link.externalHidden || !isExternalUser(currentUser))
+                .filter((link) => isNavItemVisible(link,currentUser))
+                .map((link) => (
+                <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>
+                  {link.label}
+                </Link>
+              ))}
+              {isIpSurface && (
+                <span className="composer-hero-action composer-hero-action-muted">
+                  火山官方 API
+                </span>
+              )}
+            </div>
           )}
         </div>
 
         <div ref={projectPanelRef} className="composer-project-panel" aria-busy={reuseUiLocked}>
           <div className="composer-project-row">
             <div className="composer-project-copy">
-              <span className="composer-project-label">{normalVideoRedesign ? '项目' : '保存到'}</span>
-              <span className="composer-project-help">{normalVideoRedesign ? creation.context?.payer.label || '付款归属待确认' : '本次生成的任务、成本和结果会写入所选项目。'}</span>
+              <span className="composer-project-label">保存到</span>
+              <span className="composer-project-help">本次生成的任务、成本和结果会写入所选项目。</span>
             </div>
 
             <div className="composer-project-controls">
@@ -3622,7 +3620,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           }}>继续准备原首帧</button>}
         </p>}
         {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
-          videoRedesign={normalVideoRedesign}
           key={`${currentUser?.id || 'anonymous'}:${studioHandoff?.runId || 'standard'}:${studioWorkspaceTabId || 'workspace'}`}
           collections={collections}
           initialSettings={generationDefaults}

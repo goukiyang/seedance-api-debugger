@@ -88,6 +88,7 @@ try {
     await assert.rejects(groups.saveVideoPromptGroup(author, {}));
     await assert.rejects(groups.videoPromptGroupDraft(author, groupId, {}));
     assert.equal(groups.videoPromptGroupCreateCapability(author), false);
+    assert.deepEqual(await groups.resolveVideoPromptGroups(ordinary, [], 'legacy'), { refs: [], prompt: 'legacy', origins: [], fingerprint: '' });
     const privacy = load('src/lib/video/multiview-task-privacy.ts');
     const task = { id: 'history', prompt: 'personal', local_status: 'succeeded', source_metadata_json: JSON.stringify({ video_prompt_groups: { schema: 1, refs: [ref] } }),
       final_prompt_snapshot: body, raw_status_response: body, public_video_url: 'https://fixture.invalid/output.mp4' };

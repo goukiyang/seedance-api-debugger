@@ -1,11 +1,9 @@
 import { parseTaskReuseOperationRequest, taskReuseReceiptKey, type TaskReuseContext, type TaskReuseOperationRequest, type TaskReuseOperationStatus } from './task-reuse-intent';
 import type { WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
-import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video/prompt-groups';
 export type TaskReuseInputBackup = { version: 1; hadInput?: boolean; workspace: WorkspaceInputRecovery; fields: {
   prompt: string; generationMode: string; ratio: string; duration: number; resolution: string; seed: number;
   generateAudio: boolean; returnLastFrame: boolean; watermark: boolean; resolutionApprovalConfirmed: boolean;
   model: string; provider?: string | null; auxiliary?: string | null; projectId?: string; videoCardId?: string; videoBranchId?: string;
-  videoPromptGroups?: VideoPromptGroupRef[];
 } };
 export type TaskReuseTarget = { projectId: string; videoCardId: string; videoBranchId: string };
 export type TaskReuseApplied = { reuseKey: number; workspaceBridgeKey: string; target: TaskReuseTarget; inputReplaced: boolean };
@@ -23,7 +21,6 @@ export function parseTaskReuseClientRecord(raw: string | null, owner: string, ta
       || value.backup.workspace.workspaceId !== operation.workspaceId || !Array.isArray(value.backup.workspace.items) || value.backup.workspace.items.length > 80
       || typeof value.backup.fields?.prompt !== 'string' || value.backup.fields.prompt.length > 20000
       || typeof value.backup.fields.model !== 'string' || !value.context || value.context.accountId !== owner || value.context.tabId !== operation.tabId) return null;
-    parseVideoPromptGroupRefs(value.backup.fields.videoPromptGroups);
     return { ...value, operation };
   } catch { return null; }
 }
@@ -73,12 +70,12 @@ export function taskReuseUndoMatches(record: CompletedTaskReuse, current: TaskRe
     && record.applied.workspaceBridgeKey === current.workspaceBridgeKey
     && ['projectId', 'videoCardId', 'videoBranchId'].every(key => (target[key as keyof TaskReuseTarget] || '') === current[key as keyof TaskReuseTarget]);
 }
-export function hasTaskReuseInput(backup: TaskReuseInputBackup) { return backup.hadInput === true || Boolean(backup.fields.prompt.trim() || backup.workspace.items.length || backup.fields.videoPromptGroups?.length); }
+export function hasTaskReuseInput(backup: TaskReuseInputBackup) { return backup.hadInput === true || Boolean(backup.fields.prompt.trim() || backup.workspace.items.length); }
 export function taskReuseInputSignature(backup: TaskReuseInputBackup) {
   const fields = backup.fields;
   return JSON.stringify([['prompt', 'generationMode', 'ratio', 'duration', 'resolution', 'seed', 'generateAudio', 'returnLastFrame', 'watermark', 'resolutionApprovalConfirmed', 'model', 'provider', 'auxiliary']
     .map(key => fields[key as keyof typeof fields] ?? null), [...backup.workspace.items].sort((a, b) => a.sortOrder - b.sortOrder || a.assetId.localeCompare(b.assetId))
-    .map(item => [item.assetId, item.referenceImageId || null, item.role || null, item.sortOrder]), fields.videoPromptGroups || []]);
+    .map(item => [item.assetId, item.referenceImageId || null, item.role || null, item.sortOrder])]);
 }
 export function taskReuseReplacedInput(before: TaskReuseInputBackup, after: TaskReuseInputBackup) {
   return hasTaskReuseInput(before) && taskReuseInputSignature(before) !== taskReuseInputSignature(after);

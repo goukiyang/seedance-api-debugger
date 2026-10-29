@@ -3,8 +3,6 @@ import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
 import { VideoFeishuStatus } from '@/components/generate/VideoFeishuStatus';
-import { PromptGroupHistory } from '@/components/generate/PromptGroupPicker';
-import type { VideoPromptGroupRef } from '@/lib/video/prompt-groups';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -49,7 +47,6 @@ import type { DisplayUser } from '@/lib/users/display';
 import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 
 interface VideoTask {
-  video_prompt_groups?: VideoPromptGroupRef[];
   id: string;
   provider: string;
   model: string;
@@ -2292,7 +2289,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 {task.prompt && (
                   <button className="btn btn-secondary" type="button" onClick={handleCopyPrompt}>
                     <Copy size={16} aria-hidden="true" />
-                    {promptCopied ? '已复制' : task.video_prompt_groups?.length ? '复制个人描述' : '复制提示词'}
+                    {promptCopied ? '已复制' : '复制提示词'}
                   </button>
                 )}
                 {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary" onClick={isEnhanceTask ? undefined : handleTaskReuseClick}>
@@ -2311,11 +2308,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
             </div>
 
             <div className="task-prompt-preview">
-              <span>{task.video_prompt_groups?.length ? '个人描述' : '提示词'}</span>
+              <span>提示词</span>
               <p>{promptPreview(task.prompt)}</p>
             </div>
-
-            {task.video_prompt_groups?.length ? <PromptGroupHistory refs={task.video_prompt_groups} /> : null}
 
             <details className="task-inline-details">
               <summary>查看完整提示词和参数</summary>

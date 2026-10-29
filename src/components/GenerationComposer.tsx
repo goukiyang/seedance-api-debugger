@@ -25,9 +25,6 @@ import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
 import { ComposerActionBar, type ComposerProviderStatus, type ComposerSelectOption } from '@/components/ComposerActionBar';
 import { ErrorTranslator } from '@/components/ErrorTranslator';
-import { PromptGroupSelection } from '@/components/generate/PromptGroupPicker';
-import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video/prompt-groups';
-import './generate/generate-redesign.css';
 import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
@@ -50,7 +47,7 @@ import {
   mapStudioVideoParameters,
 } from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
-import { Bot, FileJson, Settings2, RotateCcw, Library, ChevronDown } from 'lucide-react';
+import { Bot, FileJson, Settings2, RotateCcw } from 'lucide-react';
 import {
   GENERATION_PROMPT_LIMIT_MESSAGE,
   MAX_GENERATION_PROMPT_CHARS,
@@ -392,7 +389,6 @@ function createModuleBuilderDraft(params: {
 }
 
 interface Props {
-  videoRedesign?: boolean;
   collections: AssetCollection[];
   creationContextKey?: string;
   initialSettings?: GenerationDefaults | null;
@@ -410,7 +406,6 @@ interface Props {
     taskId: string;
     reuseKey: number;
     prompt: string;
-    videoPromptGroups?: VideoPromptGroupRef[];
     generationMode: GenerationMode;
     ratio: VideoRatio;
     duration: VideoDuration;
@@ -442,7 +437,6 @@ interface Props {
   submitAccessory?: React.ReactNode;
   onSubmit: (params: {
     prompt: string;
-    videoPromptGroups?: VideoPromptGroupRef[];
     generationMode: GenerationMode;
     ratio: VideoRatio;
     duration: VideoDuration;
@@ -516,7 +510,6 @@ interface Props {
 }
 
 export function GenerationComposer({
-  videoRedesign = false,
   collections,
   creationContextKey,
   initialSettings,
@@ -639,7 +632,6 @@ export function GenerationComposer({
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
   const [prompt, setPrompt] = useState('');
-  const [videoPromptGroups, setVideoPromptGroups] = useState<VideoPromptGroupRef[]>([]);
   const [ratio, setRatio] = useState<VideoRatio>(DEFAULT_RATIO);
   const [duration, setDuration] = useState<VideoDuration>(DEFAULT_DURATION);
   const [resolution, setResolution] = useState<VideoResolution>(DEFAULT_RESOLUTION);
@@ -733,12 +725,12 @@ export function GenerationComposer({
     const snapshot = workspace.captureRecovery();
     if (!snapshot) return null;
     const restoreTarget = onCaptureInputRecoveryTarget?.();
-    const backup: TaskReuseInputBackup = { version: 1, hadInput: Boolean(prompt.trim() || videoPromptGroups.length || snapshot.items.length || settingsTouchedRef.current), workspace: snapshot,
-      fields: { prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
+    const backup: TaskReuseInputBackup = { version: 1, hadInput: Boolean(prompt.trim() || snapshot.items.length || settingsTouchedRef.current), workspace: snapshot,
+      fields: { prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
         model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
     return { workspace: snapshot, backup, restoreFields: () => {
       settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
-      setPrompt(prompt); setVideoPromptGroups(videoPromptGroups); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
+      setPrompt(prompt); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
       setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
       setResolutionApprovalConfirmed(resolutionApprovalConfirmed); setSelectedModel(selectedModel);
       setCurrentReferenceAlbumId(currentReferenceAlbumId); setCurrentReferenceAlbumName(currentReferenceAlbumName);
@@ -746,7 +738,7 @@ export function GenerationComposer({
       onModelChange?.(selectedModel); if (selectedAuxiliary != null) onAuxiliaryChange?.(selectedAuxiliary);
       restoreTarget?.();
     } };
-  }, [workspace.captureRecovery, selectedVideoCardId, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio,
+  }, [workspace.captureRecovery, selectedVideoCardId, prompt, generationMode, ratio, duration, resolution, seed, generateAudio,
     returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
     currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
   const captureInputRecovery = useCallback(() => {
@@ -769,7 +761,7 @@ export function GenerationComposer({
       const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
       setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, backup, restoreFields: () => {
         settingsTouchedRef.current = true;
-        setPrompt(value.prompt); setVideoPromptGroups(parseVideoPromptGroupRefs(value.videoPromptGroups)); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
+        setPrompt(value.prompt); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
         setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
         setGenerateAudio(value.generateAudio === true); setReturnLastFrame(value.returnLastFrame === true); setWatermark(value.watermark === true); setResolutionApprovalConfirmed(false);
         if (value.model) { setSelectedModel(value.model); onModelChange?.(value.model); }
@@ -803,11 +795,9 @@ export function GenerationComposer({
           && ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'].includes(saved.generationMode)
           && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
           && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
-          const restoredGroups = parseVideoPromptGroupRefs(saved.videoPromptGroups);
-          settingsTouchedRef.current = true; setPrompt(saved.prompt); setVideoPromptGroups(restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
           setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
           setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
-          setDraftMode(saved.draftMode === true);
           if (saved.model) { setSelectedModel(saved.model); onModelChange?.(saved.model); }
         }
       }
@@ -818,11 +808,11 @@ export function GenerationComposer({
     if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || studioHandoff || imageResultHandoff || interactionLocked
       || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
     const timer = setTimeout(() => {
-      try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, model: selectedModel })); }
+      try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, model: selectedModel })); }
       catch { setInputRecoveryIssue(true); setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
     }, 200);
     return () => clearTimeout(timer);
-  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel]);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
   const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
   const readUndoScope = (): TaskReuseUndoScope | null => {
     const target = recoveryContextRef.current?.(), current = workspace.workspace;
@@ -976,8 +966,8 @@ export function GenerationComposer({
   const need1080pApproval = require1080pApproval && resolution === '1080p';
 
   useEffect(() => {
-    if (!videoRedesign && !studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
-  }, [videoRedesign, selectedModel, studioHandoff]);
+    if (!studioHandoff && selectedModel !== SEEDANCE_2_5_MODEL_ID) setDraftMode(false);
+  }, [selectedModel, studioHandoff]);
   const selectedTemplate = useMemo(() => {
     if (!templateEnabled) return null;
     return templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
@@ -1052,7 +1042,6 @@ export function GenerationComposer({
       }
     }
     if (durationBlocker) return durationBlocker;
-    if (videoRedesign && draftMode && selectedModel !== SEEDANCE_2_5_MODEL_ID) return '样片与当前型号不兼容，请关闭样片或选择 Seedance 2.5';
     if (reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)) {
       return '原任务模型目前不可选，已保留原参数，请明确选择可用模型后再生成。';
     }
@@ -1065,7 +1054,7 @@ export function GenerationComposer({
     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
     }
-    if (!prompt.trim() && !(videoRedesign && videoPromptGroups.length)) return videoRedesign ? '请填写本次要求或选择提示词组' : '请填写提示词';
+    if (!prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
     }
@@ -1150,7 +1139,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [durationBlocker, prompt, videoRedesign, videoPromptGroups, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  }, [durationBlocker, prompt, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1161,7 +1150,7 @@ export function GenerationComposer({
     if (mentionNotice && !submitBlocker && !submitDisabledReason) {
       return { message: mentionNotice, tone: 'hint' as const };
     }
-    if (!prompt.trim() && !(videoRedesign && videoPromptGroups.length)) {
+    if (!prompt.trim()) {
       return {
         message: '请填写提示词',
         tone: 'hint' as const,
@@ -1175,18 +1164,11 @@ export function GenerationComposer({
       return { message: submitDisabledReason, tone: 'hint' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, durationBlocker, mentionNotice, prompt, videoRedesign, videoPromptGroups, submitBlocker, submitDisabledReason, submitBlockerState]);
+  }, [isSubmitting, durationBlocker, mentionNotice, prompt, submitBlocker, submitDisabledReason, submitBlockerState]);
 
   const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
     model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
       project_id: pricingProjectId, video_card_id: selectedVideoCardId, ratio,
-      ...(videoRedesign && videoPromptGroups.length ? { video_prompt_groups: videoPromptGroups, video_prompt_groups_contract: 1,
-        creation_contract_version: 2, entry: 'ordinary', prompt, generation_mode: generationMode, seed,
-        generate_audio: generateAudio, return_last_frame: returnLastFrame, watermark, lora_id: selectedAuxiliary || undefined,
-        reference_image_ids: workspace.assets.filter(a => a.type === 'image')
-          .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
-          .map(a => a.referenceImageId).filter(Boolean),
-        reference_audio_urls: workspace.assets.filter(a => a.type === 'audio').map(a => a.originalUrl) } : {}),
       draft: selectedProvider === 'seedance' && selectedModel === SEEDANCE_2_5_MODEL_ID && draftMode,
       reference_video_urls: workspace.assets.filter(asset => asset.type === 'video' && Boolean(asset.originalUrl)
         && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference')).map(asset => asset.originalUrl),
@@ -1397,7 +1379,6 @@ export function GenerationComposer({
     appliedReuseDraftRef.current = reuseKey; settingsTouchedRef.current = true;
     if (reuseDraft.model && modelOptions.length && !modelOptions.some(option => option.id === reuseDraft.model)) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'unsupported', '原模型当前不可用，服务器素材已恢复，当前参数未替换。'); return; }
     setPrompt(reuseDraft.prompt);
-    setVideoPromptGroups(parseVideoPromptGroupRefs(reuseDraft.videoPromptGroups));
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
     setDuration(reuseDraft.duration);
@@ -1536,7 +1517,6 @@ export function GenerationComposer({
     if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
     await onSubmit({
       prompt,
-      ...(videoRedesign ? { videoPromptGroups } : {}),
       generationMode,
       ratio,
       duration,
@@ -1603,8 +1583,6 @@ export function GenerationComposer({
     onSubmit,
     imageResultHandoff,
     prompt,
-    videoRedesign,
-    videoPromptGroups,
     generationMode,
     ratio,
     duration,
@@ -2031,17 +2009,8 @@ export function GenerationComposer({
       </details>}
       <div
         ref={generationComposerRef}
-        className={`generation-composer ${videoRedesign ? 'generation-composer--video' : ''}`}
+        className="generation-composer"
         onChangeCapture={markReuseInputChanged}
-        onPaste={event => {
-          if (!videoRedesign || interactionLocked || isSubmitting || !(event.target instanceof HTMLElement)
-            || !event.target.closest('.generation-composer--video')) return;
-          const files = Array.from(event.clipboardData.files).filter(file => /^(image|video|audio)\//.test(file.type));
-          if (!files.length) return;
-          event.preventDefault();
-          void runWorkspaceOperation(async () => { for (const file of files) await workspace.uploadAsset(file); })
-            .catch(cause => setMentionNotice(cause instanceof Error ? cause.message : '素材未能加入，原输入已保留'));
-        }}
         aria-busy={interactionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
       >
         {imageResultHandoff && <p className="composer-prefill-notice" role="status">这次图片已放在首帧，生成时请选择首尾帧模式；模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}
@@ -2372,7 +2341,6 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             <ReferenceStrip
-              accessibleOrdering={videoRedesign}
               model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
@@ -2389,9 +2357,6 @@ export function GenerationComposer({
           </details>
         ) : (
           <>
-            {videoRedesign && <div className="video-composer-material-tools"><button type="button" className="btn-icon" onClick={() => setShowUploadedImagePicker(true)}><Library size={16} />素材库</button></div>}
-            <details className={videoRedesign ? 'video-composer-albums' : 'video-composer-albums-legacy'} open={videoRedesign ? undefined : true}>
-            <summary>{videoRedesign ? <>图集与素材集<ChevronDown size={14} /></> : null}</summary>
             <ImageSetToolbar
               collections={collections}
               onLoad={handleLoadCollection}
@@ -2406,9 +2371,7 @@ export function GenerationComposer({
               onReferenceAlbumCreate={handleCreateReferenceAlbum}
               loading={workspace.loading}
             />
-            </details>
             <ReferenceStrip
-              accessibleOrdering={videoRedesign}
               model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
@@ -2466,9 +2429,6 @@ export function GenerationComposer({
           />
         )}
 
-        {videoRedesign && <PromptGroupSelection refs={videoPromptGroups} disabled={interactionLocked || isSubmitting}
-          onChange={refs => { markReuseInputChanged(); setVideoPromptGroups(refs); }} onUploadFile={workspace.uploadAssetToHistory} />}
-
         {/* 状态行 */}
         <ComposerStatusLine
           message={composerStatus.message}
@@ -2505,18 +2465,12 @@ export function GenerationComposer({
           </label>
         )}
 
-        {videoRedesign && <details className="video-composer-extra-settings"><summary><Settings2 size={16} />参数设置</summary>
-          <div className="video-composer-extra-fields"><label><input type="checkbox" checked={generateAudio} onChange={e => setGenerateAudio(e.target.checked)} />生成声音</label>
-          <label><input type="checkbox" checked={watermark} onChange={e => setWatermark(e.target.checked)} />水印</label>
-          <label><input type="checkbox" checked={returnLastFrame} onChange={e => setReturnLastFrame(e.target.checked)} />返回尾帧</label>
-          <label>随机种子<input type="number" min={-1} max={2147483647} value={seed} onChange={e => setSeed(Number(e.target.value))} /></label></div>
-        </details>}
-        {(selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
+        {selectedModel === SEEDANCE_2_5_MODEL_ID && (
           <label className="composer-resolution-approval" title={seedanceDraft.message}>
             <input
               type="checkbox"
               checked={draftMode}
-              disabled={!draftMode && !seedanceDraft.createEnabled}
+              disabled={!seedanceDraft.createEnabled}
               onChange={(event) => {
                 markStudioParameterCorrected('draft');
                 setDraftMode(event.currentTarget.checked);
@@ -2583,7 +2537,6 @@ export function GenerationComposer({
           {videoPricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={16} aria-hidden="true" /></button>}
         </p>}
         <ComposerActionBar
-          videoRedesign={videoRedesign}
           generationMode={generationMode}
           ratio={ratio}
           duration={duration}

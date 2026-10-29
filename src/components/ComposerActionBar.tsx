@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
 import { seedanceRatioFollowsFirstFrame, seedanceVideoDurationOptions, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
@@ -36,7 +35,6 @@ export type ComposerProviderStatus = {
 };
 
 interface Props {
-  videoRedesign?: boolean;
   generationMode: GenerationMode;
   ratio: VideoRatio;
   duration: VideoDuration;
@@ -72,7 +70,6 @@ interface Props {
 }
 
 export function ComposerActionBar({
-  videoRedesign = false,
   generationMode,
   ratio,
   duration,
@@ -138,7 +135,7 @@ export function ComposerActionBar({
   const chips = (
     <div className="composer-chips">
         {/* 视频生成标签 */}
-        {!videoRedesign && <ParamChip label="视频生成" active />}
+        <ParamChip label="视频生成" active />
 
         {/* 生成引擎：只有多引擎并列时才显示，避免和模型下拉重复 */}
         {hasProviderOptions && (
@@ -425,11 +422,10 @@ export function ComposerActionBar({
           className="composer-submit-btn"
           disabled={!canSubmit || !durationValid || isSubmitting}
           onClick={onSubmit}
-          aria-label="生成视频"
         >
           {isSubmitting ? (
             <span className="loading" style={{ width: 20, height: 20, borderWidth: 2 }} />
-          ) : videoRedesign ? <><Sparkles size={19} aria-hidden="true" /><span>生成</span></> : (
+          ) : (
             <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
               <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
