@@ -3,7 +3,6 @@ import packageInfo from '../../package.json';
 const notice = { title: '生成区优化', outline: [
   '视频提示词输入框底色加深',
   '飞书开关文案缩短，费用紧邻生成按钮',
-  '保留实际报价和手机换行布局',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

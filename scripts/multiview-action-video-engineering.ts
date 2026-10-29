@@ -8,6 +8,9 @@ import { parseMultiviewActionBinding } from '../src/lib/video/multiview-action-c
 import { parseMultiviewGenerationSnapshot } from '../src/lib/video/multiview-generation-contract';
 import { multiviewActionPrivateTaskMarker, projectPrivateMultiviewTask, readMultiviewPrivateTaskMarker } from '../src/lib/video/multiview-task-privacy';
 import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../src/lib/provider/seedance-models';
+import { createMultiviewReferenceRecipe } from '../src/lib/video/multiview-reference-layout';
+import * as workContract from '../src/lib/video/multiview-work-contract';
+import { siteUploadPathFromUrl } from '../src/lib/assets/site-url';
 
 const require = createRequire(import.meta.url);
 class AuthError extends Error { constructor(message: string, public status = 403) { super(message); } }
@@ -94,6 +97,89 @@ async function main() {
     supplement: '', workspaceTabId: 'multiview-fixture', mainAssetId: 'main-asset', mainReferenceImageId: 'main-reference' };
   assert.equal((await available(rotation)).canSubmit, true, 'valid rotation input was rejected');
   assert.equal((await available({ prompt: 'ordinary video' }, 'ordinary')).canSubmit, true);
+
+  const info = { taskId: 'source-task', sourceVersion: 'a'.repeat(64), width: 1536, height: 1536, duration: 4,
+    timestamps: Array.from({ length: 100 }, (_, index) => index / 25) };
+  const recipe = createMultiviewReferenceRecipe(info, Array.from({ length: 4 }, (_, index) => ({
+    id: `shot-${index}`, frame: index * 20, name: '', manual: false,
+  })), { width: 1536, height: 1536, background: '#d6dbdf' });
+  const recipeJson = JSON.stringify(recipe), recipeHash = createHash('sha256').update(recipeJson).digest('hex');
+  const outputHash = 'c'.repeat(64), revision = 20, originalUrl = '/uploads/multiview-outputs/fixture/collage.png';
+  const work = { id: 'reference-work', owner_id: 'owner', schema_version: 3, removed_at: null, status: 'ready',
+    draft_revision: revision, ready_revision: revision, source_task_id: info.taskId, source_version: info.sourceVersion,
+    source_info_json: JSON.stringify(info), recipe_json: recipeJson, ready_recipe_json: recipeJson,
+    ready_manifest_json: JSON.stringify({ schema: 1, sourceVersion: info.sourceVersion, revision, recipeHash,
+      width: 1536, height: 1536, frameCount: 4,
+      files: ['thumbnail', 'collage', 'zip', ...recipe.slots.map(slot => `frame-${slot.id}`)].map(role => ({
+        role, file: `${role}.${role === 'zip' ? 'zip' : 'png'}`, mime: role === 'zip' ? 'application/zip' : 'image/png',
+        bytes: 64, sha256: outputHash, width: 1536, height: 1536,
+      })) }),
+  };
+  let sourcePermitted = true;
+  const asset = { id: 'collage-asset', owner_id: 'owner', hash: outputHash, status: 'active', type: 'image',
+    original_url: originalUrl, width: 1536, height: 1536 };
+  const bindingDb = { multiviewWork: { findFirst: async ({ where }: any) => where.owner_id === work.owner_id ? work : null },
+    asset: { findFirst: async ({ where }: any) => Object.entries(where).every(([key, value]) => asset[key as keyof typeof asset] === value) ? asset : null },
+    platformSetting: { findUnique: async () => ({ value_json: JSON.stringify({ ownerId: 'owner', readyRevision: revision,
+      outputs: [{ role: 'collage', state: 'registered', assetId: asset.id, sha256: outputHash, originalUrl }] }) }) } };
+  class MultiviewWorkError extends Error { constructor(message: string, public status: number, public code: string) { super(message); } }
+  const outputAssets = await moduleUnderTest('src/lib/video/multiview-output-assets.server.ts', {
+    '@/lib/prisma': { prisma: bindingDb }, '@/lib/assets/site-url': { siteUploadPathFromUrl }, '@/lib/image-studio/protected-assets': {},
+    './multiview-work-contract': workContract,
+    './multiview-works': { currentMultiviewActor: async () => {}, MultiviewWorkError,
+      assertMultiviewWorkReference: async () => { if (!sourcePermitted) throw new AuthError('Source access denied', 403); } },
+  });
+  const readBinding = (owner = 'owner') => outputAssets.readMultiviewReferenceBinding({ id: owner }, work.id, revision, bindingDb);
+  const beforePublicUrl = await readBinding();
+  asset.original_url = `https://sd2.youdooart.com${originalUrl}`;
+  const afterPublicUrl = await readBinding();
+  assert.deepEqual(afterPublicUrl, beforePublicUrl, 'same collage became unavailable after the shared asset URL was made public');
+  for (const url of [`https://foreign.invalid${originalUrl}`, '/uploads/another.png', 'https://sd2.youdooart.com/uploads/another.png']) {
+    asset.original_url = url;
+    await assert.rejects(readBinding(), (error: any) => error.code === 'REFERENCE_ASSET_UNAVAILABLE');
+  }
+  asset.original_url = `https://sd2.youdooart.com${originalUrl}`;
+  for (const patch of [{ status: 'hidden' }, { owner_id: 'another' }, { hash: 'd'.repeat(64) }, { width: 1024 }]) {
+    const original = { ...asset }; Object.assign(asset, patch);
+    await assert.rejects(readBinding()); Object.assign(asset, original);
+  }
+  await assert.rejects(readBinding('another'));
+  sourcePermitted = false; await assert.rejects(readBinding(), /Source access denied/); sourcePermitted = true;
+  work.draft_revision++; await assert.rejects(readBinding()); work.draft_revision--;
+
+  const panelSource = await readFile('src/app/multiview/MultiviewActionPanel.tsx', 'utf8');
+  const panelAst = ts.createSourceFile('panel.tsx', panelSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let submitNode: ts.FunctionDeclaration | undefined;
+  const locateSubmit = (node: ts.Node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'submit') submitNode = node; ts.forEachChild(node, locateSubmit); };
+  locateSubmit(panelAst); assert.ok(submitNode);
+  const submitJs = ts.transpileModule(`${submitNode.getText(panelAst)}; module.exports = submit;`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  for (const phase of ['prepare', 'create', 'closed']) {
+    const ui = { confirming: true, message: '', original: null as any, submitting: true, newAttemptRequired: false, stored: new Map(), createCalls: 0 };
+    const evaluated = { exports: undefined as any };
+    const submitContext = vm.createContext({ module: evaluated, Error, scope: 'owner-scope', active: () => true,
+      submitLock: { current: false }, saveLock: { current: false }, currentQuote: { text: 'action', parameters, points: 28.9, pricingRevision: 'fixture', token: 'fixture' },
+      draftRef: { current: null }, attemptId: 'initial', appliedRunId: undefined, baseline: null, requestKey: 'original-key', attemptKey: 'attempt-key',
+      props: { onPrepare: async () => { if (phase === 'prepare') throw new Error('参考拼图素材已不可用，原作品仍保留。'); return { id: work.id }; } },
+      creation: { intent: null, prepare: async () => ({ request_id: 'multiview-action:final-run', id: 'intent', revision: 1, state: phase === 'closed' ? 'closed' : 'ready',
+        availability: { canSubmit: true }, quote: { estimated_cost: 28.9, pricing_revision: 'fixture' } }) },
+      isResolvedCreationIntent: (intent: any) => intent?.state === 'closed', localStorage: { setItem: (key: string, value: string) => ui.stored.set(key, value) },
+      api: async (url: string) => { if (url.endsWith('/drafts')) return { draft: { id: 'draft', revision: 1 } };
+        if (url.endsWith('/final')) return { binding, run: { text: 'action' } };
+        assert.equal(url, '/api/tasks/create'); ui.createCalls++; throw new Error('network result unknown'); },
+      setDraft: () => {}, setMessage: (message: string) => { ui.message = message; },
+      setConfirming: (value: boolean) => { ui.confirming = value; }, setSubmitting: (value: boolean) => { ui.submitting = value; },
+      setNewAttemptRequired: (value: boolean) => { ui.newAttemptRequired = value; },
+      setOriginal: (value: any) => { ui.original = value; }, setSelectedRunId: () => {},
+    });
+    new vm.Script(submitJs).runInContext(submitContext); await evaluated.exports();
+    assert.equal(ui.confirming, false, `${phase} failure left the cost modal hiding the inline error`);
+    assert.equal(ui.submitting, false);
+    if (phase === 'prepare') { assert.match(ui.message, /参考拼图素材已不可用/); assert.equal(ui.stored.size, 0); assert.equal(ui.createCalls, 0); }
+    else if (phase === 'create') { assert.match(ui.message, /提交结果待确认/); assert.equal(ui.original.key, 'multiview-action:final-run'); assert.equal(ui.stored.size, 1); assert.equal(ui.createCalls, 1); assert.equal(ui.newAttemptRequired, false); }
+    else { assert.equal(ui.newAttemptRequired, true); assert.equal(ui.createCalls, 0); assert.equal(ui.original, null); assert.ok(ui.stored.has('attempt-key')); assert.ok(!ui.stored.has('original-key')); }
+  }
   const fingerprint = helper.multiviewActionVideoFingerprint(publicBody);
   assert.equal(fingerprint, helper.multiviewActionVideoFingerprint({ ...publicBody, seed: -1, generate_audio: true, return_last_frame: false, watermark: false }));
   for (const mutation of [{ prompt: 'changed' }, { baseline_task_id: 'another-baseline' }, { multiview_action: { ...binding, revision: 5 } }, { model: 'another-model' }]) {
@@ -129,10 +215,11 @@ async function main() {
   assert.equal(logWrites, 1);
 
   const captured: unknown[] = [], logs: string[] = [];
+  let transmittedBody = '';
   const fakeConsole = Object.fromEntries(['log', 'error', 'warn'].map(key => [key, (...items: unknown[]) => logs.push(items.map(value => typeof value === 'string' ? value : JSON.stringify(value)).join(' '))]));
   const provider = await moduleUnderTest('src/lib/provider/jimeng.ts', {
     '@/lib/security/private-prompt-send.server': { assertPrivateSend: () => {}, privatePromptFetch: async (_identity: unknown, actual: unknown, init: RequestInit) => {
-      captured.push(actual); assert.ok(String(init.body).includes('PRIVATE SYNC RULE'));
+      captured.push(actual); transmittedBody = String(init.body); assert.ok(transmittedBody.includes('PRIVATE SYNC RULE'));
       return new Response(JSON.stringify({ id: 'provider-task', prompt: 'PRIVATE SYNC RULE', status: 'queued' }), { status: 200 });
     } },
     '@/lib/security/private-prompts.server': { PrivatePromptError }, '@/lib/video/private-storage.server': { privateMultiviewOrigins: () => [{ kind: 'old-rotation' }] },
@@ -145,6 +232,36 @@ async function main() {
   assert.deepEqual(captured[0], origins, 'action send substituted old rotation origins');
   assert.ok(!JSON.stringify(result).includes('PRIVATE SYNC RULE'), 'provider echo escaped safe response');
   assert.ok(!logs.join('\n').includes('PRIVATE SYNC RULE'), 'private rules escaped provider logs');
-  console.log('action video safety: frozen public input, baseline binding, actor/source denial, one durable claim, terminal rejection/late-writer fence, original acceptance, private Seedance send and echo/log projection passed');
+  const transport = await moduleUnderTest('src/lib/provider/reference-image-transport.ts', {
+    '@/lib/assets/site-url': { siteUploadPathFromUrl }, './jimeng': provider,
+  });
+  const routeText = await readFile('src/app/api/tasks/create/route.ts', 'utf8');
+  const routeAst = ts.createSourceFile('route.ts', routeText, ts.ScriptTarget.Latest, true);
+  const transportBranches: ts.IfStatement[] = [];
+  const locateTransport = (node: ts.Node) => { if (ts.isIfStatement(node) && node.expression.getText(routeAst).startsWith("requestedProvider === 'seedance'")
+    && node.thenStatement.getText(routeAst).includes('await seedanceLocalReferenceTransport(')) transportBranches.push(node); ts.forEachChild(node, locateTransport); };
+  locateTransport(routeAst); assert.equal(transportBranches.length, 1);
+  const inlineBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
+  const imageUrl = `https://sd2.youdooart.com${originalUrl}`;
+  const transportInput = { prompt: action.prompt, model: parameters.model, generation_mode: 'first_last_frame', first_frame_url: imageUrl, duration: 5, ratio: '16:9', resolution: '720p' };
+  const transportAsset = { original_url: imageUrl, type: 'image', status: 'active', mime_type: 'image/png', file_size: inlineBytes.length };
+  const transportContext = vm.createContext({ requestedProvider: 'seedance', multiviewGeneration: null, multiviewAction: action,
+    actionImageForTransport: { url: imageUrl, asset: transportAsset }, body: {}, cleanSourceMetadata: () => ({}), requestSource: {},
+    providerInput: transportInput, generationReferenceImages: [], multiviewSystemReference: null, requestCallbackUrl: undefined,
+    seedanceLocalReferenceTransport: (input: unknown, images: unknown, _read: unknown, privateImages: unknown) =>
+      transport.seedanceLocalReferenceTransport(input, images, async () => inlineBytes, privateImages),
+    errorJson: (error: string, status: number) => ({ error, status }),
+  });
+  const transportJs = ts.transpileModule(`async function prepare() { let seedanceReferenceTransport = {}; ${transportBranches[0].getText(routeAst)} return seedanceReferenceTransport; }`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  new vm.Script(transportJs).runInContext(transportContext);
+  const inline = await (transportContext as any).prepare();
+  assert.match(inline.first_frame_base64_data || '', /^data:image\/png;base64,/, 'action route skipped the shared private collage byte transport');
+  await provider.createVideoTask({ ...transportInput, ...inline }, undefined, { sensitiveRecipe: true, privateOrigins: origins });
+  assert.ok(!transmittedBody.includes(imageUrl), 'provider was told to anonymously fetch a protected collage URL');
+  assert.ok(transmittedBody.includes(inline.first_frame_base64_data));
+  assert.deepEqual(captured[1], origins, 'inline action send lost its action-specific private origins');
+  assert.equal(transportInput.first_frame_url, imageUrl, 'transient image bytes changed durable input identity');
+  console.log('action video safety: availability, same-site collage identity/source denial, failure modal/unknown retention, closed explicit recovery, durable original receipts, shared inline action image transport and private send projection passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
