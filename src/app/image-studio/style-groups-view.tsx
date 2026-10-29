@@ -113,7 +113,11 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     editSequence.current++;
     setDraft(null); setLatest(null); setError('');
   };
-  useDialogDismiss({ open: open && !preview, dialogRef: dialog, nativeDialog: true, onDismiss: () => { if (!busy && !draft) setOpen(false); } });
+  const closeManager = () => {
+    if (busy || draft) return;
+    editSequence.current++; setReadingEditor(false); setOpen(false);
+  };
+  useDialogDismiss({ open: open && !preview, dialogRef: dialog, nativeDialog: true, onDismiss: closeManager });
   useDialogDismiss({ open: Boolean(draft) && !preview, dialogRef: editor, nativeDialog: true, onDismiss: closeEditor });
   async function edit(group?: StudioStyleSummary, copy = false) {
     if (managementOnly && disabled) return;
@@ -282,7 +286,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     </div>)}</div>}
     </>}
     <dialog ref={dialog} className={`${styles.dialog} ${styles.styleDialog}`} aria-label={managementOnly ? '管理风格组' : '风格组'}>
-      <header className={styles.header}><h2>{managementOnly ? '管理风格组' : '风格组'}</h2><button type="button" disabled={busy || Boolean(draft)} aria-label="关闭风格组" onClick={() => { editSequence.current++; setOpen(false); }}><X size={20} /></button></header>
+      <header className={styles.header}><h2>{managementOnly ? '管理风格组' : '风格组'}</h2><button type="button" disabled={busy || Boolean(draft)} aria-label="关闭风格组" onClick={closeManager}><X size={20} /></button></header>
       <div className={styles.counts}><button type="button" disabled={busy || readingEditor || Boolean(pending)} onClick={() => void edit()}><Plus size={16} />新建</button>
         {mergeIds.length > 0 && <button type="button" disabled={busy || mergeIds.length < 2} onClick={() => void merge()}><Combine size={16} />合并 {mergeIds.length} 组</button>}
       </div>
