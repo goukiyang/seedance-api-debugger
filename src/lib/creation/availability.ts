@@ -1,4 +1,5 @@
 import { parseMultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
+import { parseMultiviewActionBinding } from '@/lib/video/multiview-action-contract';
 import { getCreditSummary } from '@/lib/credits/policy';
 import { getProjectBudgetSummary } from '@/lib/projects/budget';
 import { creditCents } from '@/lib/credits/precision';
@@ -16,7 +17,15 @@ export async function readCreationAvailability(db: CreationDb, intent: VideoCrea
   const spec = JSON.parse(intent.spec_json) as VideoCreationSpec;
   const reasons: CreationAvailability['reasons'] = [];
   if (spec.action === 'generate' && spec.entry !== 'multiview' && (typeof spec.input.prompt !== 'string' || !spec.input.prompt.trim())) reasons.push({ code: 'creation_prompt_required', message: '请填写本次视频提示词', field: 'prompt', action: 'fix_input' });
-  if (spec.entry === 'multiview' && !parseMultiviewGenerationSnapshot(spec.input.multiview_generation)) reasons.push({ code: 'creation_multiview_invalid', message: '旋转预设或图1记录暂时无法确认，原输入保留', field: 'multiview_generation', action: 'fix_input' });
+  if (spec.entry === 'multiview') {
+    // Actions and rotations share an entry, but have mutually exclusive input contracts.
+    // Source ownership and frozen inputs are rechecked by preparation and acceptance.
+    if (spec.input.multiview_action !== undefined) {
+      if (!parseMultiviewActionBinding(spec.input.multiview_action) || spec.input.multiview_generation !== undefined) reasons.push({
+        code: 'creation_multiview_action_invalid', message: '动作与拼图记录暂时无法确认，原输入保留', field: 'multiview_action', action: 'fix_input' });
+    } else if (!parseMultiviewGenerationSnapshot(spec.input.multiview_generation)) reasons.push({
+      code: 'creation_multiview_invalid', message: '旋转预设或图1记录暂时无法确认，原输入保留', field: 'multiview_generation', action: 'fix_input' });
+  }
   if (spec.input.provider === 'seedance' && !isSeedanceVideoDuration(Number(spec.input.duration), String(spec.input.model))) reasons.push({ code: 'creation_duration_invalid', message: '当前时长不在所选模型范围内，原值保留，请重新选择', field: 'duration', action: 'fix_input' });
   if (user) {
     const parent = creationParent(spec);

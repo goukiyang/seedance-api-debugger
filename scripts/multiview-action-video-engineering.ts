@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
 import { parseMultiviewActionBinding } from '../src/lib/video/multiview-action-contract';
+import { parseMultiviewGenerationSnapshot } from '../src/lib/video/multiview-generation-contract';
 import { multiviewActionPrivateTaskMarker, projectPrivateMultiviewTask, readMultiviewPrivateTaskMarker } from '../src/lib/video/multiview-task-privacy';
 import { DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '../src/lib/provider/seedance-models';
 
@@ -69,6 +70,30 @@ async function main() {
   await assert.rejects(helper.resolveMultiviewActionVideoInput({ id: 'another' }, publicBody, {}, true));
   permitted = false; await assert.rejects(helper.resolveMultiviewActionVideoInput({ id: 'owner' }, publicBody, {}, true)); permitted = true;
   assert.ok(checks > 0);
+  const availability = await moduleUnderTest('src/lib/creation/availability.ts', {
+    '@/lib/video/multiview-generation-contract': { parseMultiviewGenerationSnapshot },
+    '@/lib/video/multiview-action-contract': { parseMultiviewActionBinding },
+    '@/lib/credits/policy': {}, '@/lib/projects/budget': {}, '@/lib/credits/precision': {},
+    '@/lib/provider/seedance-models': require('../src/lib/provider/seedance-models'),
+    './lineage': {}, './contract': {},
+  });
+  const payer = { kind: 'personal', id: 'owner' };
+  const available = (input: any, entry = 'multiview') => availability.readCreationAvailability({}, {
+    state: 'ready', payer_kind: payer.kind, payer_account_id: payer.id,
+    spec_json: JSON.stringify({ action: 'generate', entry, input }),
+  }, 'personal', payer);
+  // The production action intent has no rotation snapshot by design.
+  assert.equal((await available(resolved.body)).canSubmit, true, 'valid action intent was rejected as missing rotation input');
+  for (const multiview_action of [null, {}, { ...binding, revision: 0 }]) {
+    assert.equal((await available({ ...resolved.body, multiview_action })).canSubmit, false);
+  }
+  assert.equal((await available({ ...resolved.body, multiview_generation: {} })).canSubmit, false, 'mixed action/rotation input passed');
+  const rotation = { ...resolved.body }; delete rotation.multiview_action;
+  assert.equal((await available(rotation)).canSubmit, false, 'missing rotation snapshot passed');
+  rotation.multiview_generation = { schema: 2, presetId: 'multiview-360', presetVersion: '1.0.0',
+    supplement: '', workspaceTabId: 'multiview-fixture', mainAssetId: 'main-asset', mainReferenceImageId: 'main-reference' };
+  assert.equal((await available(rotation)).canSubmit, true, 'valid rotation input was rejected');
+  assert.equal((await available({ prompt: 'ordinary video' }, 'ordinary')).canSubmit, true);
   const fingerprint = helper.multiviewActionVideoFingerprint(publicBody);
   assert.equal(fingerprint, helper.multiviewActionVideoFingerprint({ ...publicBody, seed: -1, generate_audio: true, return_last_frame: false, watermark: false }));
   for (const mutation of [{ prompt: 'changed' }, { baseline_task_id: 'another-baseline' }, { multiview_action: { ...binding, revision: 5 } }, { model: 'another-model' }]) {

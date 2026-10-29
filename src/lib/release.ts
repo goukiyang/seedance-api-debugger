@@ -1,10 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '生成页优化', outline: [
-  '收拢项目与视频卡，输入和添加入口更紧凑',
-  '参数、设置、飞书与费用移到输入区底栏',
-  '缺项按需提示，重新计算时不显示旧费用',
-  '多视图的编辑入口和生成按钮各自归位',
+const notice = { title: '动作视频修复', outline: [
+  '修复3D多视图动作视频被旋转预设误拦截',
+  '保留拼图、动作内容和原请求保护',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

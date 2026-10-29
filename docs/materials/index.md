@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## MV-GEN02 动作生成链路定位（2026-10-29）
+
+来源：用户反馈 `/multiview` 制作动作视频不能生成及“与普通生成共用后端”的明确纠正。原文件名 `mv-gen02-chain-evidence.json`，私有路径在正式根 `docs/materials/2026-10-29-multiview-action-fixes/implementation/`，正式原单§23.5；关键词：动作绑定、旋转误判、准备/报价、共享任务/收费、来源保护。已核线上0.116.2真实原记录，定位共用availability错误要求旋转snapshot；隔离Linux原路径失败→修复后通过，不是上游真实生成证明。原图沿该目录§23.4附件，未新增或外发媒体；完整原记录不推Git，候选0.116.3待部署，最终收费生成用户手验。
+
 ## QUICK01 双请求头发布原证（2026-10-23）
 
 项目video-api-debugger；来源为用户“先挑简单项快速发布”授权、固定0816的差量源码与本次真实构建/发布回执。关键词：重试、ASCII请求头、审计中文、v0.103.2、仅Web、待手验。原文件名[final-evidence-index.json](2026-10-22-image-generation-failure-root-cause/implementation/quick01-ascii-retry-20261023/final-evidence-index.json)、同目录`final-release-evidence.tar.gz`与解包目录`final-release-evidence/`，接收日期2026-10-23，用于此子项交付与以后接续，替代未发布双头状态；旧失败及R04其它要求不覆盖。
