@@ -266,17 +266,19 @@ def reference_recipe(recipe, source_info):
     require(isinstance(output, dict) and integer(output.get('width'), 64) and integer(output.get('height'), 64)
             and max(output['width'], output['height']) <= 16384 and output['width'] * output['height'] <= 64000000
             and color(output.get('background')), 'reference_output_invalid')
-    def rectangle(rect):
+    def rectangle(rect, placement=False):
         return (isinstance(rect, dict) and all(type(rect.get(key)) in (int, float) and math.isfinite(rect[key])
-                for key in ('x', 'y', 'width', 'height')) and rect['x'] >= 0 and rect['y'] >= 0
-                and rect['width'] > 0 and rect['height'] > 0 and rect['x'] + rect['width'] <= 1.000001
-                and rect['y'] + rect['height'] <= 1.000001
+                for key in ('x', 'y', 'width', 'height')) and rect['width'] > 0 and rect['height'] > 0
+                and ((-8 <= rect['x'] <= 8 and -8 <= rect['y'] <= 8 and rect['width'] <= 4 and rect['height'] <= 4
+                      and rect['width'] * rect['height'] * output['width'] * output['height'] <= 64000000.01)
+                     if placement else (rect['x'] >= 0 and rect['y'] >= 0 and rect['x'] + rect['width'] <= 1.000001
+                                        and rect['y'] + rect['height'] <= 1.000001))
                 and math.floor((rect['x'] + rect['width']) * output['width'] + .5) > math.floor(rect['x'] * output['width'] + .5)
                 and math.floor((rect['y'] + rect['height']) * output['height'] + .5) > math.floor(rect['y'] * output['height'] + .5))
     panels, placements = recipe.get('panels'), recipe.get('placements')
     slot_ids = {slot['id'] for slot in slots}
-    for rects in (panels, placements):
-        require(isinstance(rects, list) and len(rects) == len(slots) and all(rectangle(rect) for rect in rects)
+    for rects, free in ((panels, False), (placements, True)):
+        require(isinstance(rects, list) and len(rects) == len(slots) and all(rectangle(rect, free) for rect in rects)
                 and {rect.get('slotId') for rect in rects} == slot_ids, 'reference_geometry_invalid')
     require(abs(sum(panel['width'] * panel['height'] for panel in panels) - 1) <= .000001, 'reference_panels_do_not_cover_canvas')
     for index, panel in enumerate(panels):
@@ -287,11 +289,12 @@ def reference_recipe(recipe, source_info):
     ratio = info['width'] / info['height'] * output['height'] / output['width']
     for image in placements:
         panel = next(panel for panel in panels if panel['slotId'] == image['slotId'])
-        width = max(.000001, min(panel['width'], panel['height'] * ratio, image['width']))
+        maximum = min(4, 4 * ratio, math.sqrt(64000000 * ratio / (output['width'] * output['height'])))
+        width = max(.000001, min(maximum, image['width']))
         height = width / ratio
         clean = {'width': width, 'height': height,
-                 'x': max(panel['x'], min(panel['x'] + panel['width'] - width, image['x'])),
-                 'y': max(panel['y'], min(panel['y'] + panel['height'] - height, image['y']))}
+                 'x': max(-8, min(8, image['x'])),
+                 'y': max(-8, min(8, image['y']))}
         require(integer(image.get('z'), 0) and image['z'] <= 3
                 and all(abs(clean[key] - image[key]) <= .00001 for key in clean), 'reference_placement_invalid')
     divider = recipe.get('divider', {'enabled': True, 'color': '#646b70', 'widthPx': 2})
