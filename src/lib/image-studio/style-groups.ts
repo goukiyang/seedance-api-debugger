@@ -68,13 +68,7 @@ export async function studioStyleDTO(user: ImageStudioIdentity, group: StudioSty
   };
 }
 export async function listStudioStyleGroups(user: ImageStudioIdentity, cursor?: string) {
-  identity(user);
-  const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: PREFIX, ...(cursor ? { gt: `${PREFIX}${cursor}` } : {}) } },
-    orderBy: { key: 'asc' }, take: 49, select: { key: true, value_json: true } });
-  const page = rows.slice(0, 48);
-  const groups = page.map(row => decode(row.value_json)).filter(group => !group.deleted && (group.shared !== false || canManageStudioStyle(user, group)) && (!group.disabled || canManageStudioStyle(user, group)));
-  return { groups: await Promise.all(groups.map(group => studioStyleDTO(user, group))),
-    nextCursor: rows.length > 48 ? page[page.length - 1].key.slice(PREFIX.length) : null };
+  return listStudioStyleGroupsPage(user, { cursor });
 }
 export type StudioSelectorPageOptions = { cursor?: string; query?: string; keys?: string[]; scope?: string };
 export function validateStudioSelectorPage(options: StudioSelectorPageOptions) {
@@ -158,6 +152,7 @@ export async function saveStudioStyleGroup(user: ImageStudioIdentity, body: Reco
     if (prior) { if (prior.fingerprint !== fingerprint) throw new StudioStyleError('原操作内容不同，请核对原保存', 409); return prior.result; }
     const current = body.id == null ? null : await getStudioStyleGroup(user, id, tx);
     if (current && !canManageStudioStyle(user, current)) throw new StudioStyleError('只有管理员或创建者能修改风格组', 403);
+    if (current && body.copyFrom) throw new StudioStyleError('另存必须使用新组编号，原组未修改', 409);
     if (current && body.revision !== current.revision) {
       if (!requestId) throw new StudioStyleError('风格组已更新，请重新打开后编辑', 409);
       const result = { operationState: 'conflict', id, revision: current.revision };
