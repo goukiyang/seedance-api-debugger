@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '动作视频修正', outline: [
-  '拼图图片可跨格移动、缩放和叠放，支持撤销',
-  '制作入口移到拼图右上方，原视频进度与结果可继续查询',
-  '编辑只保留草稿，主动保存或确认生成后才保存拼图',
+const notice = { title: '生成页优化', outline: [
+  '收拢项目与视频卡，输入和添加入口更紧凑',
+  '参数、设置、飞书与费用移到输入区底栏',
+  '缺项按需提示，重新计算时不显示旧费用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

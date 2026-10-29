@@ -22,6 +22,8 @@ interface ReferenceLabel {
 }
 
 interface Props {
+  compactVideo?: boolean;
+  validationMessage?: string | null;
   value: string;
   onChange: (value: string) => void;
   onFormat?: () => void;
@@ -53,7 +55,8 @@ function getPromptTextareaMaxHeight() {
 }
 
 function fitTextareaHeight(textarea: HTMLTextAreaElement) {
-  const maxHeight = getPromptTextareaMaxHeight();
+  const cssMaxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight);
+  const maxHeight = Math.min(getPromptTextareaMaxHeight(), Number.isFinite(cssMaxHeight) ? cssMaxHeight : Infinity);
   textarea.style.height = 'auto';
   const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
   textarea.style.height = `${nextHeight}px`;
@@ -61,6 +64,8 @@ function fitTextareaHeight(textarea: HTMLTextAreaElement) {
 }
 
 export function PromptEditor({
+  compactVideo = false,
+  validationMessage,
   value,
   onChange,
   onFormat,
@@ -393,13 +398,16 @@ export function PromptEditor({
         ref={textareaRef}
         className="composer-prompt-textarea"
         value={value}
-        aria-invalid={Boolean(limitNotice)}
+        aria-label="视频提示词"
+        aria-invalid={Boolean(limitNotice || validationMessage)}
+        aria-describedby={validationMessage ? 'video-prompt-validation' : undefined}
         onChange={handleChange}
         onKeyDown={(event) => { handleMentionKeyDown(event, 'main'); }}
         onSelect={(event) => updateMentionState('main', event.currentTarget.value, event.currentTarget.selectionStart)}
-        placeholder="描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……"
+        placeholder={compactVideo ? '描述你想生成的视频' : '描述你想生成的视频内容，可输入 @ 选择当前图片参考或历史素材……'}
         rows={4}
       />
+      {validationMessage && <p id="video-prompt-validation" className="video-composer-validation" role="status">{validationMessage}</p>}
       {mentionState?.target === 'main' && (
         <PromptMentionPopover
           candidates={visibleMentionCandidates}
@@ -415,9 +423,9 @@ export function PromptEditor({
 
       <div className="composer-prompt-footer">
         <div className="composer-prompt-tools">
-          <div className="composer-prompt-hint">
+          {!compactVideo && <div className="composer-prompt-hint">
             即梦规则：用 @图片1 指代当前第 1 个图片参考；音频会自动作为参考音频传入
-          </div>
+          </div>}
           <div className="composer-reference-buttons">
             {referenceButtons}
           </div>

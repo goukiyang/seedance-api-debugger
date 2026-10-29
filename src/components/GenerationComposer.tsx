@@ -50,7 +50,7 @@ import {
   mapStudioVideoParameters,
 } from '@/lib/template-studio-video-handoff';
 import { TemplateEditorDrawer } from '@/components/templates/TemplateEditorDrawer';
-import { Bot, FileJson, Settings2, RotateCcw, Library, ChevronDown } from 'lucide-react';
+import { Bot, FileJson, RotateCcw, ChevronDown } from 'lucide-react';
 import {
   GENERATION_PROMPT_LIMIT_MESSAGE,
   MAX_GENERATION_PROMPT_CHARS,
@@ -440,6 +440,9 @@ interface Props {
   onCollectionNew: (name: string) => Promise<void>;
   require1080pApproval: boolean;
   submitAccessory?: React.ReactNode;
+  settingsContent?: React.ReactNode;
+  settingsOpen?: boolean;
+  onSettingsOpenChange?: (open: boolean) => void;
   onSubmit: (params: {
     prompt: string;
     videoPromptGroups?: VideoPromptGroupRef[];
@@ -528,6 +531,9 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitAccessory,
+  settingsContent,
+  settingsOpen,
+  onSettingsOpenChange,
   submitError,
   submitErrorDebug,
   isSubmitting,
@@ -639,7 +645,10 @@ export function GenerationComposer({
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
   const [prompt, setPrompt] = useState('');
+  const [promptAttempted, setPromptAttempted] = useState(false);
   const [videoPromptGroups, setVideoPromptGroups] = useState<VideoPromptGroupRef[]>([]);
+  const ordinaryPromptMissing = videoRedesign && !prompt.trim() && !videoPromptGroups.length;
+  useEffect(() => { if (!ordinaryPromptMissing) setPromptAttempted(false); }, [ordinaryPromptMissing]);
   const [ratio, setRatio] = useState<VideoRatio>(DEFAULT_RATIO);
   const [duration, setDuration] = useState<VideoDuration>(DEFAULT_DURATION);
   const [resolution, setResolution] = useState<VideoResolution>(DEFAULT_RESOLUTION);
@@ -1065,7 +1074,7 @@ export function GenerationComposer({
     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
     }
-    if (!prompt.trim() && !(videoRedesign && videoPromptGroups.length)) return videoRedesign ? '请填写本次要求或选择提示词组' : '请填写提示词';
+    if (!videoRedesign && !prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
     }
@@ -1161,7 +1170,7 @@ export function GenerationComposer({
     if (mentionNotice && !submitBlocker && !submitDisabledReason) {
       return { message: mentionNotice, tone: 'hint' as const };
     }
-    if (!prompt.trim() && !(videoRedesign && videoPromptGroups.length)) {
+    if (!videoRedesign && !prompt.trim()) {
       return {
         message: '请填写提示词',
         tone: 'hint' as const,
@@ -1195,7 +1204,8 @@ export function GenerationComposer({
         role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff), type: asset.type,
         ...(studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey ? { slotKey: studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey } : {}) })) } : {}),
     } }, !durationBlocker && preferencesReady);
-  const canPressSubmit = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const canValidatePrompt = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const canPressSubmit = canValidatePrompt && !ordinaryPromptMissing;
   const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
   const activeRules = useMemo(() => {
@@ -1534,6 +1544,11 @@ export function GenerationComposer({
 
   const handleSubmit = useCallback(async () => {
     if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
+    if (ordinaryPromptMissing) {
+      setPromptAttempted(true);
+      generationComposerRef.current?.querySelector<HTMLTextAreaElement>('.composer-prompt-textarea')?.focus();
+      return;
+    }
     await onSubmit({
       prompt,
       ...(videoRedesign ? { videoPromptGroups } : {}),
@@ -1600,6 +1615,7 @@ export function GenerationComposer({
     submitDisabledReason,
     isSubmitting,
     videoPricing.quote,
+    ordinaryPromptMissing,
     onSubmit,
     imageResultHandoff,
     prompt,
@@ -2389,7 +2405,6 @@ export function GenerationComposer({
           </details>
         ) : (
           <>
-            {videoRedesign && <div className="video-composer-material-tools"><button type="button" className="btn-icon" onClick={() => setShowUploadedImagePicker(true)}><Library size={16} />素材库</button></div>}
             <details className={videoRedesign ? 'video-composer-albums' : 'video-composer-albums-legacy'} open={videoRedesign ? undefined : true}>
             <summary>{videoRedesign ? <>图集与素材集<ChevronDown size={14} /></> : null}</summary>
             <ImageSetToolbar
@@ -2409,6 +2424,7 @@ export function GenerationComposer({
             </details>
             <ReferenceStrip
               accessibleOrdering={videoRedesign}
+              addLabel={videoRedesign ? '素材' : undefined}
               model={selectedModel}
               assets={workspace.assets}
               uploadStatuses={workspace.uploadStatuses}
@@ -2458,6 +2474,8 @@ export function GenerationComposer({
           </details>
         ) : (
           <PromptEditor
+            compactVideo={videoRedesign}
+            validationMessage={ordinaryPromptMissing && promptAttempted ? '请填写本次要求或选择提示词组' : null}
             value={prompt}
             onChange={handlePromptChange}
             referenceLabels={referenceLabels}
@@ -2470,14 +2488,14 @@ export function GenerationComposer({
           onChange={refs => { markReuseInputChanged(); setVideoPromptGroups(refs); }} onUploadFile={workspace.uploadAssetToHistory} />}
 
         {/* 状态行 */}
-        <ComposerStatusLine
+        {(!videoRedesign || Boolean(composerStatus.message) && !submitError && composerStatus.message !== referenceMediaPreflightBlocker && !workspace.pendingWorkspaceAttach) && <ComposerStatusLine
           message={composerStatus.message}
           tone={composerStatus.tone}
           usedRefs={usedRefs}
           hasPrompt={prompt.trim().length > 0}
           hasAssets={workspace.assets.length > 0}
           hasBlockingUpload={Object.values(workspace.uploadStatuses).some((s) => s === 'uploading' || s === 'failed')}
-        />
+        />}
 
         {/* 错误 */}
         {submitError && (
@@ -2505,12 +2523,6 @@ export function GenerationComposer({
           </label>
         )}
 
-        {videoRedesign && <details className="video-composer-extra-settings"><summary><Settings2 size={16} />参数设置</summary>
-          <div className="video-composer-extra-fields"><label><input type="checkbox" checked={generateAudio} onChange={e => setGenerateAudio(e.target.checked)} />生成声音</label>
-          <label><input type="checkbox" checked={watermark} onChange={e => setWatermark(e.target.checked)} />水印</label>
-          <label><input type="checkbox" checked={returnLastFrame} onChange={e => setReturnLastFrame(e.target.checked)} />返回尾帧</label>
-          <label>随机种子<input type="number" min={-1} max={2147483647} value={seed} onChange={e => setSeed(Number(e.target.value))} /></label></div>
-        </details>}
         {(selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
           <label className="composer-resolution-approval" title={seedanceDraft.message}>
             <input
@@ -2530,7 +2542,11 @@ export function GenerationComposer({
         )}
 
         {/* 入队提示：短暂展示，不阻塞下一次生成 */}
-        {result && (
+        {result && videoRedesign && <div className="video-composer-accepted" role="status">
+          <span>已提交</span><a href={taskDetailHref(result.id, resultReturnTo)}>查看任务</a>
+          {result.reference_image_notice && <span>{result.reference_image_notice}</span>}
+        </div>}
+        {result && !videoRedesign && (
           <div className="composer-queue-notice">
             <div className="composer-queue-copy">
               <span className="composer-queue-kicker">已加入队列</span>
@@ -2557,7 +2573,7 @@ export function GenerationComposer({
         )}
 
         {/* 参数栏 */}
-        {onSettingsChange && !studioHandoff && (
+        {onSettingsChange && !studioHandoff && !videoRedesign && (
           <button
             type="button"
             className="composer-result-reset"
@@ -2579,7 +2595,7 @@ export function GenerationComposer({
             }}
           ><RotateCcw size={16} aria-hidden="true" /></button>
         )}
-        {!canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || (!videoPricing.quote ? videoPricing.error || '正在读取报价' : '请先确认1080p审批已通过。')}
+        {!videoRedesign && !canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || (!videoPricing.quote ? videoPricing.error || '正在读取报价' : '请先确认1080p审批已通过。')}
           {videoPricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={16} aria-hidden="true" /></button>}
         </p>}
         <ComposerActionBar
@@ -2589,10 +2605,33 @@ export function GenerationComposer({
           duration={duration}
           resolution={resolution}
           points={estimatedPoints}
-          canSubmit={canPressSubmit}
+          canSubmit={canPressSubmit || videoRedesign && ordinaryPromptMissing && canValidatePrompt}
           isSubmitting={isSubmitting}
           onSubmit={handleSubmit}
           submitAccessory={submitAccessory}
+          settingsOpen={settingsOpen}
+          onSettingsOpenChange={onSettingsOpenChange}
+          settingsDisabled={interactionLocked || isSubmitting}
+          settingsContent={videoRedesign ? <fieldset className="video-composer-settings-fields" disabled={interactionLocked || isSubmitting}>
+            <legend>生成设置</legend>
+            <div className="video-composer-extra-fields">
+              <label><input type="checkbox" checked={generateAudio} onChange={e => { markStudioParameterCorrected('generateAudio'); setGenerateAudio(e.target.checked); }} />生成声音</label>
+              <label><input type="checkbox" checked={watermark} onChange={e => { markStudioParameterCorrected('watermark'); setWatermark(e.target.checked); }} />水印</label>
+              <label><input type="checkbox" checked={returnLastFrame} onChange={e => { markStudioParameterCorrected('returnLastFrame'); setReturnLastFrame(e.target.checked); }} />返回尾帧</label>
+              <label>随机种子<input type="number" min={-1} max={2147483647} value={seed} onChange={e => { markStudioParameterCorrected('seed'); setSeed(Number(e.target.value)); }} /></label>
+            </div>
+            {settingsContent}
+            {onSettingsChange && !studioHandoff && <button type="button" className="composer-chip" disabled={!preferencesReady || isSubmitting}
+              title="重置参数，保留提示词、素材、提示词组和项目" onClick={() => {
+                markReuseInputChanged(); settingsTouchedRef.current = true;
+                setGenerationMode(DEFAULT_GENERATION_MODE); setRatio(DEFAULT_RATIO); setDuration(DEFAULT_DURATION); setResolution(DEFAULT_RESOLUTION);
+                setSeed(-1); setGenerateAudio(true); setReturnLastFrame(false); setWatermark(false); setResolutionApprovalConfirmed(false); setDraftMode(false);
+              }}><RotateCcw size={15} />重置参数</button>}
+          </fieldset> : undefined}
+          pricingStatus={videoRedesign ? <span className="video-composer-price" role="status" title={videoPricing.error || undefined}>
+            {videoPricing.loading ? '正在计算费用…' : videoPricing.quote ? `约 ${estimatedPoints} 点` : '费用暂不可用'}
+            {!videoPricing.loading && !videoPricing.quote && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={15} /></button>}
+          </span> : undefined}
           providerLabel={providerLabel}
           providerOptions={providerOptions}
           selectedProvider={selectedProvider}

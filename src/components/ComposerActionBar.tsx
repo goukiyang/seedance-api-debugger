@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Settings2, Sparkles } from 'lucide-react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { ParamChip } from '@/components/ParamChip';
 import type { GenerationMode, VideoRatio, VideoDuration, VideoResolution } from '@/types';
 import { seedanceRatioFollowsFirstFrame, seedanceVideoDurationOptions, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
@@ -46,6 +48,11 @@ interface Props {
   isSubmitting: boolean;
   onSubmit: () => void;
   submitAccessory?: React.ReactNode;
+  settingsContent?: React.ReactNode;
+  settingsOpen?: boolean;
+  onSettingsOpenChange?: (open: boolean) => void;
+  settingsDisabled?: boolean;
+  pricingStatus?: React.ReactNode;
   onModeChange: (m: GenerationMode) => void;
   onRatioChange: (r: VideoRatio) => void;
   onDurationChange: (d: VideoDuration) => void;
@@ -82,6 +89,11 @@ export function ComposerActionBar({
   isSubmitting,
   onSubmit,
   submitAccessory,
+  settingsContent,
+  settingsOpen = false,
+  onSettingsOpenChange,
+  settingsDisabled = false,
+  pricingStatus,
   onModeChange,
   onRatioChange,
   onDurationChange,
@@ -106,6 +118,34 @@ export function ComposerActionBar({
   selectedAuxiliary = null,
   onAuxiliaryChange,
 }: Props) {
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
+  const settingsPanel = useRef<HTMLDivElement>(null);
+  const settingsId = useId();
+  const [settingsPosition, setSettingsPosition] = useState<React.CSSProperties | null>(null);
+  useDialogDismiss({ open: videoRedesign && settingsOpen, dialogRef: settingsPanel, layerSurfaceRef: settingsPanel,
+    branchRefs: [settingsTrigger], modal: false, onDismiss: () => onSettingsOpenChange?.(false) });
+  useEffect(() => {
+    if (!videoRedesign || !settingsOpen) return;
+    const place = () => {
+      if (!settingsTrigger.current || !settingsPanel.current) return;
+      const anchor = settingsTrigger.current.getBoundingClientRect(), viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+      const width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
+      const panelWidth = Math.min(420, width - 16), maxHeight = Math.min(560, height - 16);
+      const panelHeight = Math.min(settingsPanel.current.scrollHeight, maxHeight);
+      setSettingsPosition({ width: panelWidth, maxHeight,
+        left: Math.max(left + 8, Math.min(anchor.left, left + width - panelWidth - 8)),
+        top: anchor.bottom + panelHeight + 6 <= top + height - 8 ? anchor.bottom + 6 : Math.max(top + 8, anchor.top - panelHeight - 6) });
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    if (settingsPanel.current) observer.observe(settingsPanel.current);
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    window.visualViewport?.addEventListener('resize', place); window.visualViewport?.addEventListener('scroll', place);
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
+      window.visualViewport?.removeEventListener('resize', place); window.visualViewport?.removeEventListener('scroll', place); };
+  }, [videoRedesign, settingsOpen]);
+  useEffect(() => { if (settingsDisabled) onSettingsOpenChange?.(false); }, [settingsDisabled, onSettingsOpenChange]);
   const hasProviderOptions = providerOptions.length > 1;
   const selectedProviderOption = providerOptions.find((option) => option.id === selectedProvider)
     || providerOptions.find((option) => !option.disabled)
@@ -389,6 +429,9 @@ export function ComposerActionBar({
             </>
           )}
         </div>
+      {videoRedesign && settingsContent && <button ref={settingsTrigger} type="button" className="composer-chip video-settings-trigger"
+        title="设置" aria-label="设置" aria-haspopup="dialog" aria-controls={settingsOpen ? settingsId : undefined} aria-expanded={settingsOpen}
+        disabled={settingsDisabled} onClick={() => { setSettingsPosition(null); onSettingsOpenChange?.(!settingsOpen); }}><Settings2 size={16} /><span>设置</span></button>}
     </div>
   );
 
@@ -419,7 +462,7 @@ export function ComposerActionBar({
 
       {/* 右侧：提交按钮与费用 */}
       <div className="composer-action-right">
-        {submitAccessory}
+        {videoRedesign && submitAccessory ? <div className="video-submit-accessory">{submitAccessory}</div> : submitAccessory}
         <button
           type="button"
           className="composer-submit-btn"
@@ -437,9 +480,11 @@ export function ComposerActionBar({
         </button>
 
         <div className="composer-points">
-          {points === null ? '费用待估算' : `合计约 ${points} 点数`}
+          {videoRedesign && pricingStatus ? pricingStatus : points === null ? '费用待估算' : `合计约 ${points} 点数`}
         </div>
       </div>
+      {videoRedesign && settingsOpen && settingsContent && createPortal(<div ref={settingsPanel} id={settingsId} role="dialog" aria-label="视频生成设置"
+        className="video-composer-settings-popover" style={settingsPosition || { left: 0, top: 0, visibility: 'hidden' }}>{settingsContent}</div>, document.body)}
     </div>
   );
 }

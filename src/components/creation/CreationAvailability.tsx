@@ -5,7 +5,7 @@ import type { CreationContextController } from '@/lib/hooks/use-creation-context
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { RelativeTime } from '@/components/RelativeTime';
 import styles from './creation.module.css';
-export default function CreationAvailability({ controller, onBaselineChange }: { controller: CreationContextController; onBaselineChange?: (id: string) => void }) {
+export default function CreationAvailability({ controller, onBaselineChange, hideSummary = false }: { controller: CreationContextController; onBaselineChange?: (id: string) => void; hideSummary?: boolean }) {
   const { context, intent, loading, error } = controller;
   const resolved = isResolvedCreationIntent(intent);
   const viewKey = JSON.stringify([controller.contextKey, context?.project.id]);
@@ -63,7 +63,7 @@ export default function CreationAvailability({ controller, onBaselineChange }: {
     } catch (cause) { if (active()) setMessage(cause instanceof Error ? cause.message : '暂时无法确认'); }
     finally { if (active()) setBusy(false); }
   };
-  if (!loading && !error && !intent) return context ? <p className={styles.summary}>保存到 {context.project.name} · {context.payer.label}{context.legacyCard ? ` · 原视频卡：${context.legacyCard.title}` : ''}</p> : null;
+  if (!loading && !error && !intent) return context && !hideSummary ? <p className={styles.summary}>保存到 {context.project.name} · {context.payer.label}{context.legacyCard ? ` · 原视频卡：${context.legacyCard.title}` : ''}</p> : null;
   return <div className={styles.status} aria-live="polite">
     {loading && <p>正在确认保存位置</p>}
     {error && <p>{error} <button className="btn btn-secondary" type="button" onClick={controller.refresh}>重新读取</button><button className={styles.textAction} type="button" disabled={busy} onClick={() => void queryOriginal()}>核对原请求</button></p>}

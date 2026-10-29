@@ -284,7 +284,7 @@ export function PromptGroupSelection({ refs, onChange, disabled = false, onUploa
       <button type="button" className={styles.icon} title="后移" aria-label="后移" disabled={disabled || index === refs.length - 1} onClick={() => move(index, 1)}><ArrowRight size={13} /></button>
       {item.latestVersionId && item.latestVersionId !== item.versionId && <button type="button" className={styles.icon} title="使用最新版本" aria-label="使用最新版本" disabled={disabled} onClick={() => change(refs.map(ref => ref.groupId === item.groupId ? { ...ref, versionId: item.latestVersionId! } : ref))}><RefreshCw size={14} /></button>}
       <button type="button" className={styles.icon} title="移除本次引用" aria-label="移除本次引用" disabled={disabled} onClick={() => change(refs.filter(ref => ref.groupId !== item.groupId))}><X size={14} /></button></div>)}
-    <button type="button" className={styles.add} title="添加提示词组" aria-label="添加提示词组" disabled={disabled} onClick={() => setOpen(true)}><Plus size={22} /></button>
+    <button type="button" className={styles.add} title="添加提示词组" aria-label="添加提示词组" disabled={disabled} onClick={() => setOpen(true)}><Plus size={18} /><span>提示词组</span></button>
     {refs.length > visibleLimit && <button type="button" className={styles.plain} onClick={() => setExpanded(v => !v)}>{expanded ? '收起' : `全部 ${refs.length} 个`}</button>}
     {undo && <button type="button" className={styles.icon} title="撤销组选取修改" aria-label="撤销组选取修改" disabled={disabled} onClick={() => { onChange(undo); setUndo(null); }}><Undo2 size={16} /></button>}
     {summaries.error && <span className={styles.meta} role="status">{summaries.error}<button type="button" className={styles.icon} title="重新核对提示词组" aria-label="重新核对提示词组" onClick={summaries.refresh}><RefreshCw size={14} /></button></span>}

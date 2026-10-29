@@ -771,3 +771,17 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 | `src/lib/navigation.ts`、`src/components/template-studio/TemplateStudioShell.tsx`、`src/app/image-studio/page.tsx` | 统一入口、账号隔离恢复、旧地址兼容 |
 | `src/app/projects/[id]/page.tsx`、`video-cards/[cardId]/page.tsx`、`src/app/tasks/[id]/page.tsx`、`src/app/approvals/page.tsx`、`src/components/generate/GeneratePageClient.tsx`、`src/components/templates/TemplateGenerateClient.tsx`、`src/lib/notifications/display.ts` | 隐藏视频卡管理和直达，保留生成归属和原数据 |
 | `package.json`、`package-lock.json`、`src/lib/release.ts`、`.gitignore`、`docs/materials/index.md`、`tasks/todo.md` | 版本/升级摘要、敏感截图本地归档与完整交接 |
+
+
+### GEN-UX21–UX25（2026-10-29）
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| UX21 | 页面去重与归属收拢 | 项目单一入口，视频卡无独立空面板，素材与底部归属不重复 | 候选实现；待工程发布 |
+| UX22 | 紧凑输入与添加入口 | 初始输入紧凑且可增长，素材和提示词组入口可区分，旧能力保留 | 候选实现；待工程发布 |
+| UX23 | 底栏与设置归位 | 高频参数常显，低频设置可达，飞书/费用/生成稳定对齐 | 候选实现；待工程发布 |
+| UX24 | 提示时机与报价状态 | 空白不提前报错，实际阻塞就近单条反馈，旧报价不冒当前费用 | 候选实现；待工程发布 |
+| UX25 | 连续创作及工程交付 | 原号未知保护、受理后继续创作及草稿连续性保持；按授权工程交付，用户手验 | 进行中；待工程发布 |
+
+- 仅普通生成页上方创作区；最近任务和后端请求/计价合同不重写，飞书沿原偏好。AGENTS仅同步三段现行部署授权。
+- 实际效果B01–B09由用户手验，不自动浏览器、收费生成、真实消息或独审。正式完整工单与截图、证据保留在项目正式根，不随公开Git外发。

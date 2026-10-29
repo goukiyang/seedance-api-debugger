@@ -3,9 +3,10 @@
 interface Props {
   onClick: () => void;
   disabled?: boolean;
+  label?: string;
 }
 
-export function AddReferenceCard({ onClick, disabled = false }: Props) {
+export function AddReferenceCard({ onClick, disabled = false, label = '参考' }: Props) {
   return (
     <button
       type="button"
@@ -15,7 +16,7 @@ export function AddReferenceCard({ onClick, disabled = false }: Props) {
       title="添加参考素材"
     >
       <span className="ref-add-icon">+</span>
-      <span className="ref-add-label">参考</span>
+      <span className="ref-add-label">{label}</span>
     </button>
   );
 }

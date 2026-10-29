@@ -925,12 +925,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const reportComposerReuseState = useCallback((next: ComposerReuseState) => {
     if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
     const previous = composerReuseStateRef.current;
-    if (previous.key === workspaceBridgeKey && next.editRevision !== previous.editRevision) reuseEditEpochRef.current += 1;
+    if (previous.key === workspaceBridgeKey && next.editRevision !== previous.editRevision) {
+      reuseEditEpochRef.current += 1;
+      if (!isIpSurface && !studioHandoff && !imageResultHandoff && !unconfirmedGenerationRequest && !generationOperation.current) {
+        setError(null); setErrorDebug(null);
+      }
+    }
     const value = { ...next, key: workspaceBridgeKey };
     composerReuseStateRef.current = value;
     setComposerReuseState((old) => old.key === value.key && old.initializing === value.initializing
       && old.reason === value.reason && old.editRevision === value.editRevision ? old : value);
-  }, [workspaceBridgeKey]);
+  }, [workspaceBridgeKey, isIpSurface, studioHandoff, imageResultHandoff, unconfirmedGenerationRequest]);
 
   const reportPrepareReuseReady = useCallback((prepare: (() => void) | null) => {
     if (workspaceBridgeKeyRef.current !== workspaceBridgeKey) return;
@@ -3257,163 +3262,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     .filter(link => isNavItemVisible(link, currentUser))
     .map(link => <Link href={link.href} className="composer-hero-action composer-hero-action-secondary" key={link.href}>{link.label}</Link>);
 
-  // ============================================================================
-  // Render
-  // ============================================================================
-
-  return (
-    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : normalVideoRedesign ? ' composer-page--video' : ''}`}>
-      {productDialog}
-      {/* ===== 顶部导航栏 ===== */}
-      <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
-
-      {(reuseOutcomeUnknown || reuseServerApplied) && (
-        <section className="composer-prefill-notice" role="alert" aria-live="polite">
-          <p>{reuseServerApplied ? '服务器已完成复用，页面恢复尚未完成；可重新读取同一结果。' : '旧任务复用结果尚未确认；查询原结果后再继续，输入和替换前备份均保留。'}</p>
-          <p>
-            {reuseRefreshInProgress
-              ? '正在重新读取参考区...'
-              : reuseRefreshRequested && workspaceBusy
-                ? '读取后仍有未确认状态，请重试读取；此复用结果仍待确认。'
-                : reuseRefreshRequested
-                  ? '已请求重新读取，请核对下方当前参考素材；这不代表刚才的复用请求未生效。'
-                  : '请先重新读取参考区，再核对当前素材。'}
-          </p>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={reuseRefreshInProgress || workspaceRefreshReadyKey !== workspaceBridgeKey || !workspaceRefreshRef.current || workspaceRefreshRef.current.key !== workspaceBridgeKey}
-            onClick={() => void requestWorkspaceReadAfterUnknownReuse()}
-          >
-            {reuseRefreshInProgress ? '正在查询...' : '查询原复用结果'}
-          </button>
-          {reuseCanClose && <button type="button" className="btn btn-secondary" disabled={reuseRefreshInProgress} onClick={() => void requestWorkspaceReadAfterUnknownReuse(true)}>结束本次复用</button>}
-          {reuseIntent && <Link href={taskDetailHref(reuseIntent.taskId, projectReturnTo)}>查看原任务</Link>}
-        </section>
-      )}
-
-      {!reuseOutcomeUnknown && workspaceBusy && workspaceBusySnapshot.key === workspaceBridgeKey && workspaceBusySnapshot.reason === 'read-error' && (
-        <section className="composer-prefill-notice" role="alert" aria-live="polite">
-          <p>参考素材区读取或更新失败，当前状态未确认；暂不发送复用请求。</p>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={reuseRefreshInProgress || workspaceRefreshReadyKey !== workspaceBridgeKey || !workspaceRefreshRef.current || workspaceRefreshRef.current.key !== workspaceBridgeKey}
-            onClick={() => void requestWorkspaceReadAfterBusyError()}
-          >
-            {reuseRefreshInProgress ? '正在读取...' : '重新读取参考区'}
-          </button>
-        </section>
-      )}
-
-      {/* ===== 页面主体 ===== */}
-      <main ref={composerMainRef} className="composer-main" aria-busy={reuseUiLocked}>
-        {projectReturnTo && (
-          <div>
-            <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>
-          </div>
-        )}
-
-        {/* Hero 空状态 */}
-        <div className="composer-hero">
-          <h1 className="composer-hero-title">
-            {normalVideoRedesign ? '视频生成' : <>{surfaceConfig.titleLead}<span>{surfaceConfig.titleAccent}</span></>}
-          </h1>
-          {!normalVideoRedesign && <p className="composer-hero-sub">
-            {surfaceConfig.subtitle}
-          </p>}
-          {!hideExternalIpInternalControls && (
-            !normalVideoRedesign ? <div className="composer-hero-actions">{relatedToolLinks}{isIpSurface && <span className="composer-hero-action composer-hero-action-muted">火山官方 API</span>}</div>
-            : <details className="composer-hero-actions video-related-tools">
-              <summary><Wrench size={16} />相关工具<ChevronDown size={14} /></summary>
-              {relatedToolLinks}
-            </details>
-          )}
-        </div>
-
-        <div ref={projectPanelRef} className="composer-project-panel" aria-busy={reuseUiLocked}>
-          <div className="composer-project-row">
-            <div className="composer-project-copy">
-              <span className="composer-project-label">{normalVideoRedesign ? '项目' : '保存到'}</span>
-              <span className="composer-project-help">{normalVideoRedesign ? creation.context?.payer.label || '付款归属待确认' : '本次生成的任务、成本和结果会写入所选项目。'}</span>
-            </div>
-
-            <div className="composer-project-controls">
-              <ProjectSelector className="composer-project-picker" aria-label="保存项目" value={selectedProjectId} disabled={loadingProjects || projectBusy || reuseUiLocked || Boolean(projectCreate.pending)}
-                onCatalogChange={() => { userChangedProjectRef.current = true; void loadProjects({ preserveValue: true }); }} onChange={event => {
-                  if (projectBusy || reuseUiLocked) return;
-                  markReuseSelectionChanged(); setInputRecoveryTarget(null); userChangedProjectRef.current = true;
-                  userChangedVideoCardRef.current = false; userChangedVideoBranchRef.current = false;
-                  setSelectedProjectId(event.target.value); setProjectMessage(null);
-                }}><option value="">选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{projectDisplayName(project)} · {projectMetaLabel(project)}</option>)}</ProjectSelector>
-            </div>
-          </div>
-
-        <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverCreatedProject} />
-        {projectMessage && (
-          <div className={`composer-project-message ${projectMessage.type}`}>
-            {projectMessage.text}
-          </div>
-        )}
-
-        {pendingProjectRemoval && (
-          <div ref={projectRemovalBackdropRef} className="modal-overlay" role="presentation">
-            <div ref={projectRemovalDialogRef} className="modal-panel project-removal-modal" role="dialog" aria-modal="true" aria-label={`${projectRemovalLabel(pendingProjectRemoval.project)}项目确认`}>
-              <div className="modal-header">
-                <div>
-                  <h2>
-                    {pendingProjectRemoval.action === 'archive' ? '归档项目' : '删除空项目'}
-                  </h2>
-                  <p>
-                    {pendingProjectRemoval.action === 'archive'
-                      ? '项目已有任务或图集，归档后历史记录仍会保留。'
-                      : '空项目删除后不会再出现在项目列表。'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="modal-close"
-                  onClick={() => setPendingProjectRemoval(null)}
-                  disabled={projectBusy || reuseUiLocked}
-                  aria-label="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <div className="project-removal-summary" data-action={pendingProjectRemoval.action}>
-                <strong>{projectDisplayName(pendingProjectRemoval.project)}</strong>
-                <span>{projectMetaLabel(pendingProjectRemoval.project)}</span>
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setPendingProjectRemoval(null)}
-                  disabled={projectBusy || reuseUiLocked}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className={pendingProjectRemoval.action === 'delete' ? 'btn btn-danger' : 'btn btn-primary'}
-                  onClick={() => void confirmProjectRemoval()}
-                  disabled={projectBusy || reuseUiLocked}
-                >
-                  {projectBusy
-                    ? '处理中...'
-                    : pendingProjectRemoval.action === 'archive'
-                      ? '确认归档'
-                      : '确认删除'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {!hideExternalIpInternalControls && (
+  const videoCardSettings = (
       <div ref={videoCardPanelRef} className={`composer-video-card-panel ${videoCardPanelOpen ? 'is-open' : ''}`} aria-busy={reuseUiLocked}>
-        <button
+        {!normalVideoRedesign && <button
           type="button"
           className="composer-video-card-summary"
           onClick={() => setVideoCardPanelOpen((open) => !open)}
@@ -3428,14 +3279,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
             {videoCardPanelOpen ? '收起' : '展开'}
             <ChevronDown className="composer-video-card-summary-icon" size={16} aria-hidden="true" />
           </span>
-        </button>
+        </button>}
 
         {videoCardPanelOpen && (
           <div className="composer-video-card-body">
             <div className="composer-project-row">
               <div className="composer-project-copy">
                 <span className="composer-project-label">视频卡归属</span>
-                <span className="composer-project-help">本次生成必须归入一张视频卡，后续成本、最佳版和最终版都按卡追踪。</span>
+                <span className="composer-project-help">可选；后续成本、最佳版和最终版按所选视频卡追踪。</span>
               </div>
               <div className="composer-video-card-controls">
                 <select
@@ -3541,7 +3392,166 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
       </div>
+  );
+
+  // ============================================================================
+  // Render
+  // ============================================================================
+
+  return (
+    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : normalVideoRedesign ? ' composer-page--video' : ''}`}>
+      {productDialog}
+      {/* ===== 顶部导航栏 ===== */}
+      <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
+
+      {(reuseOutcomeUnknown || reuseServerApplied) && (
+        <section className="composer-prefill-notice" role="alert" aria-live="polite">
+          <p>{reuseServerApplied ? '服务器已完成复用，页面恢复尚未完成；可重新读取同一结果。' : '旧任务复用结果尚未确认；查询原结果后再继续，输入和替换前备份均保留。'}</p>
+          <p>
+            {reuseRefreshInProgress
+              ? '正在重新读取参考区...'
+              : reuseRefreshRequested && workspaceBusy
+                ? '读取后仍有未确认状态，请重试读取；此复用结果仍待确认。'
+                : reuseRefreshRequested
+                  ? '已请求重新读取，请核对下方当前参考素材；这不代表刚才的复用请求未生效。'
+                  : '请先重新读取参考区，再核对当前素材。'}
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={reuseRefreshInProgress || workspaceRefreshReadyKey !== workspaceBridgeKey || !workspaceRefreshRef.current || workspaceRefreshRef.current.key !== workspaceBridgeKey}
+            onClick={() => void requestWorkspaceReadAfterUnknownReuse()}
+          >
+            {reuseRefreshInProgress ? '正在查询...' : '查询原复用结果'}
+          </button>
+          {reuseCanClose && <button type="button" className="btn btn-secondary" disabled={reuseRefreshInProgress} onClick={() => void requestWorkspaceReadAfterUnknownReuse(true)}>结束本次复用</button>}
+          {reuseIntent && <Link href={taskDetailHref(reuseIntent.taskId, projectReturnTo)}>查看原任务</Link>}
+        </section>
       )}
+
+      {!reuseOutcomeUnknown && workspaceBusy && workspaceBusySnapshot.key === workspaceBridgeKey && workspaceBusySnapshot.reason === 'read-error' && (
+        <section className="composer-prefill-notice" role="alert" aria-live="polite">
+          <p>参考素材区读取或更新失败，当前状态未确认；暂不发送复用请求。</p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={reuseRefreshInProgress || workspaceRefreshReadyKey !== workspaceBridgeKey || !workspaceRefreshRef.current || workspaceRefreshRef.current.key !== workspaceBridgeKey}
+            onClick={() => void requestWorkspaceReadAfterBusyError()}
+          >
+            {reuseRefreshInProgress ? '正在读取...' : '重新读取参考区'}
+          </button>
+        </section>
+      )}
+
+      {/* ===== 页面主体 ===== */}
+      <main ref={composerMainRef} className="composer-main" aria-busy={reuseUiLocked}>
+        {projectReturnTo && (
+          <div>
+            <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>
+          </div>
+        )}
+
+        {/* Hero 空状态 */}
+        <div className="composer-hero">
+          <h1 className="composer-hero-title">
+            {normalVideoRedesign ? '视频生成' : <>{surfaceConfig.titleLead}<span>{surfaceConfig.titleAccent}</span></>}
+          </h1>
+          {!normalVideoRedesign && <p className="composer-hero-sub">
+            {surfaceConfig.subtitle}
+          </p>}
+          {!hideExternalIpInternalControls && (
+            !normalVideoRedesign ? <div className="composer-hero-actions">{relatedToolLinks}{isIpSurface && <span className="composer-hero-action composer-hero-action-muted">火山官方 API</span>}</div>
+            : <details className="composer-hero-actions video-related-tools">
+              <summary><Wrench size={16} />相关工具<ChevronDown size={14} /></summary>
+              {relatedToolLinks}
+            </details>
+          )}
+        </div>
+
+        <div ref={projectPanelRef} className="composer-project-panel" aria-busy={reuseUiLocked}>
+          <div className="composer-project-row">
+            {!normalVideoRedesign && <div className="composer-project-copy">
+              <span className="composer-project-label">保存到</span>
+              <span className="composer-project-help">本次生成的任务、成本和结果会写入所选项目。</span>
+            </div>}
+
+            <div className="composer-project-controls">
+              <ProjectSelector className="composer-project-picker" aria-label="保存项目" value={selectedProjectId} disabled={loadingProjects || projectBusy || reuseUiLocked || Boolean(projectCreate.pending)}
+                onCatalogChange={() => { userChangedProjectRef.current = true; void loadProjects({ preserveValue: true }); }} onChange={event => {
+                  if (projectBusy || reuseUiLocked) return;
+                  markReuseSelectionChanged(); setInputRecoveryTarget(null); userChangedProjectRef.current = true;
+                  userChangedVideoCardRef.current = false; userChangedVideoBranchRef.current = false;
+                  setSelectedProjectId(event.target.value); setProjectMessage(null);
+                }}><option value="">选择项目</option>{projects.map(project => <option key={project.id} value={project.id}>{projectDisplayName(project)} · {projectMetaLabel(project)}</option>)}</ProjectSelector>
+              {normalVideoRedesign && selectedVideoCard && <button type="button" className="composer-chip video-selected-card" title="视频卡设置"
+                disabled={reuseUiLocked || submitting} onClick={() => setVideoCardPanelOpen(true)}>{selectedVideoCard.title}<ChevronDown size={14} /></button>}
+              {normalVideoRedesign && <span className="composer-project-help video-payer">{creation.context?.payer.label || '付款归属待确认'}</span>}
+            </div>
+          </div>
+
+        <ProjectCreateOperationNotice operation={projectCreate} onResolved={recoverCreatedProject} />
+        {projectMessage && (
+          <div className={`composer-project-message ${projectMessage.type}`}>
+            {projectMessage.text}
+          </div>
+        )}
+
+        {pendingProjectRemoval && (
+          <div ref={projectRemovalBackdropRef} className="modal-overlay" role="presentation">
+            <div ref={projectRemovalDialogRef} className="modal-panel project-removal-modal" role="dialog" aria-modal="true" aria-label={`${projectRemovalLabel(pendingProjectRemoval.project)}项目确认`}>
+              <div className="modal-header">
+                <div>
+                  <h2>
+                    {pendingProjectRemoval.action === 'archive' ? '归档项目' : '删除空项目'}
+                  </h2>
+                  <p>
+                    {pendingProjectRemoval.action === 'archive'
+                      ? '项目已有任务或图集，归档后历史记录仍会保留。'
+                      : '空项目删除后不会再出现在项目列表。'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setPendingProjectRemoval(null)}
+                  disabled={projectBusy || reuseUiLocked}
+                  aria-label="关闭"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="project-removal-summary" data-action={pendingProjectRemoval.action}>
+                <strong>{projectDisplayName(pendingProjectRemoval.project)}</strong>
+                <span>{projectMetaLabel(pendingProjectRemoval.project)}</span>
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPendingProjectRemoval(null)}
+                  disabled={projectBusy || reuseUiLocked}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className={pendingProjectRemoval.action === 'delete' ? 'btn btn-danger' : 'btn btn-primary'}
+                  onClick={() => void confirmProjectRemoval()}
+                  disabled={projectBusy || reuseUiLocked}
+                >
+                  {projectBusy
+                    ? '处理中...'
+                    : pendingProjectRemoval.action === 'archive'
+                      ? '确认归档'
+                      : '确认删除'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!normalVideoRedesign && !hideExternalIpInternalControls && videoCardSettings}
 
         {generationNotice && <p className="composer-prefill-notice" role="status">{generationNotice}</p>}
         {surfaceConfig.notice && (
@@ -3623,6 +3633,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         </p>}
         {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
           videoRedesign={normalVideoRedesign}
+          settingsContent={normalVideoRedesign && !hideExternalIpInternalControls ? videoCardSettings : undefined}
+          settingsOpen={videoCardPanelOpen}
+          onSettingsOpenChange={setVideoCardPanelOpen}
           key={`${currentUser?.id || 'anonymous'}:${studioHandoff?.runId || 'standard'}:${studioWorkspaceTabId || 'workspace'}`}
           collections={collections}
           initialSettings={generationDefaults}
@@ -3687,7 +3700,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           }}
         />}
 
-        <CreationAvailability controller={creation} onBaselineChange={(id) => {
+        <CreationAvailability controller={creation} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
           setCreationBaselineId(id);
           if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
         }} />

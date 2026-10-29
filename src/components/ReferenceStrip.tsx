@@ -14,6 +14,7 @@ import {
 
 interface Props {
   accessibleOrdering?: boolean;
+  addLabel?: string;
   assets: WorkspaceAssetItem[];
   uploadStatuses: Record<string, UploadStatus>;
   onUpload: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
@@ -93,6 +94,7 @@ function dragHasFiles(dataTransfer: DataTransfer): boolean {
 
 export function ReferenceStrip({
   accessibleOrdering = false,
+  addLabel,
   assets,
   uploadStatuses,
   onUpload,
@@ -472,6 +474,7 @@ export function ReferenceStrip({
         })}
 
         <AddReferenceCard
+          label={addLabel}
           onClick={handleAddClick}
           disabled={uploading || loading}
         />
