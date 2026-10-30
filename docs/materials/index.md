@@ -8,6 +8,8 @@
 
 [脱敏生产证据](2026-10-30-seedance-draft-enable/deployment-proof.json)、[真实视频与账本证据](2026-10-30-seedance-draft-enable/live-proof.json)和[仅回程序的恢复入口](2026-10-30-seedance-draft-enable/recovery.txt)已归档，JSON/路径与本轮产物核对。页面依项目规则待用户手验，供应商现金成本未据内部点数推算。
 
+交付前站点已接续到v0.119.0/f4ccc79e；[8个功能文件保留核对及当前校验](2026-10-30-seedance-draft-enable/final-runtime-continuation.json)通过。前述恢复入口已标为R04历史记录，不能直接用于现行v0.119.0；视频实际版本仍为v0.118.5/R01。
+
 ## MV-RESULT01 当前页结果与历史视频（2026-10-30）
 
 工程交付：2026-10-30T08:26:40Z已部署v0.118.0，源码d58cd491/BUILD `5Kn3bDOS7VrfyjoCAH4wZ`已推送；27项隔离工程检查、完整Next/types/lint、原主/回退6项启动门和公网multiview产物校验通过。7服务加载新源，恢复点4db784f9/v0.117.7已核，只回程序不回数据。常显结果/实扣与24条分页历史已接旋转和动作区；历史点选不改输入，未知不重发。零新生成/收费/浏览器/独审，实际页面效果待用户手动验收。完整证据见正式根原单§23.7.4及implementation/mv-result01/deployment-result.json。

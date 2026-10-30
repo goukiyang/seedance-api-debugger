@@ -1,3 +1,5 @@
+历史记录：R04之后站点已接续发布v0.119.0/f4ccc79e。本入口不得直接用于现行版本；当前恢复须沿接续发布自己的相容恢复点。本文件保留R04原操作供溯源，R04门禁和原guard不代表现行版本的恢复验收。
+
 C2 Draft 固定程序恢复，保留当前生产数据、账本、媒体、任务和既有配置值。
 
 ST=/data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04

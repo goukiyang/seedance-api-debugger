@@ -9,6 +9,8 @@
 
 [固定工单及七项交付记录](todo/2026-09-22-seedance-draft-1080p.md#7-交付记录2026-10-30)。R04 / v0.118.5 / `a8c6d4d7`已发布；源码及隔离编排审核通过，完整构建和真实480p→1080p视频、36点实扣、零冻结已验证。页面依项目约定待用户手验。
 
+交付前现行v0.119.0/f4ccc79e已核8个功能文件完全保留本次修复；R04恢复记录不直接用于该接续版本。
+
 ## PG-UX01/02 Video prompt group management (2026-10-30)
 
 | ID | Task | Completion criteria | Status |

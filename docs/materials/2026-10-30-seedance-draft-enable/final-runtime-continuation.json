@@ -1,0 +1,83 @@
+{
+  "currentSource": "f4ccc79eb2fe10f8fa6c3ecfeb9f54aa8a7d44dd",
+  "version": "0.119.0",
+  "build": "k3VgJtQpN-pOs1FD1z3sn",
+  "publicRelease": {
+    "version": "0.119.0",
+    "channel": "production",
+    "title": "",
+    "outline": [],
+    "summary": ""
+  },
+  "verifiedSource": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+  "files": [
+    {
+      "path": "src/lib/provider/seedance-draft.ts",
+      "unchanged": true,
+      "currentSha256": "3f43ea688f564fe314309dc34c3c8e4c71ece212bdad3e8ed814e12d25c8fb27",
+      "verifiedSha256": "3f43ea688f564fe314309dc34c3c8e4c71ece212bdad3e8ed814e12d25c8fb27"
+    },
+    {
+      "path": "src/app/api/tasks/create/route.ts",
+      "unchanged": true,
+      "currentSha256": "c1b2faed036e1aa6a2f225f3828e7e86ed06ef7245e36fe38b89082a74a3c7f5",
+      "verifiedSha256": "c1b2faed036e1aa6a2f225f3828e7e86ed06ef7245e36fe38b89082a74a3c7f5"
+    },
+    {
+      "path": "src/components/GenerationComposer.tsx",
+      "unchanged": true,
+      "currentSha256": "430b8d2b717472aaf59aa344eafe26973ed2bd78cd847d6b6a21fa55bb43e170",
+      "verifiedSha256": "430b8d2b717472aaf59aa344eafe26973ed2bd78cd847d6b6a21fa55bb43e170"
+    },
+    {
+      "path": "src/lib/provider/jimeng.ts",
+      "unchanged": true,
+      "currentSha256": "bf233a24f20c2a4ebfc76ed5b15fc52939bc9a05869f48b29ef527d63bf508b5",
+      "verifiedSha256": "bf233a24f20c2a4ebfc76ed5b15fc52939bc9a05869f48b29ef527d63bf508b5"
+    },
+    {
+      "path": "src/lib/tasks/seedance-draft-upgrade.ts",
+      "unchanged": true,
+      "currentSha256": "3cbb6effc2b987db9b28473b1ed96228c3cd3439caa1404efe2dfe95bb2e0575",
+      "verifiedSha256": "3cbb6effc2b987db9b28473b1ed96228c3cd3439caa1404efe2dfe95bb2e0575"
+    },
+    {
+      "path": "src/lib/integrations/codex.ts",
+      "unchanged": true,
+      "currentSha256": "bdc3d7f0a07ee4e59fd8392e48a103332381b12cabe195d011dfeb7be551693f",
+      "verifiedSha256": "bdc3d7f0a07ee4e59fd8392e48a103332381b12cabe195d011dfeb7be551693f"
+    },
+    {
+      "path": "src/app/api/codex/video/create/route.ts",
+      "unchanged": true,
+      "currentSha256": "14e4d0a7cda3514f671bcf50818421a551bf47030293e83a402b587c7603f1e2",
+      "verifiedSha256": "14e4d0a7cda3514f671bcf50818421a551bf47030293e83a402b587c7603f1e2"
+    },
+    {
+      "path": "src/app/api/codex/video/draft-upgrade/route.ts",
+      "unchanged": true,
+      "currentSha256": "e7330ca912ea8224bc62f3a2518f24d61b3b017d7ab4046c95dc4c92653d0bdb",
+      "verifiedSha256": "e7330ca912ea8224bc62f3a2518f24d61b3b017d7ab4046c95dc4c92653d0bdb"
+    }
+  ],
+  "observedAt": "2026-10-30T18:15:52.472247+00:00",
+  "actualProcessCwdMatches": true,
+  "allEightFunctionalSourcesUnchanged": true,
+  "currentRecoveryMustFollowNewRelease": true,
+  "validationOnlyProbe": {
+    "kind": "validation-only; missing request id and prompt",
+    "status": 400,
+    "code": "creation_input_invalid",
+    "message": "request_id无效",
+    "providerGenerationPossible": false,
+    "at": "2026-10-30T18:15:51.518Z"
+  },
+  "currentCapabilities": {
+    "create_enabled": true,
+    "upgrade_enabled": true,
+    "contract_version": "seedance-draft-v1",
+    "status": "enabled",
+    "message": "可生成 480p 样片，完成后可另行生成 1080p；两步分别计费。"
+  },
+  "currentPublicOrigin": "server-42-193"
+}

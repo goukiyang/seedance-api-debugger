@@ -122,7 +122,9 @@
 
 ## 7. 交付记录（2026-10-30）
 
-已发布 v0.118.5，实际应用提交 `a8c6d4d78df80ddab2be261a57ba25e21189fe23`，BUILD_ID `oGORrogXd002IRkOek7pG`，正式入口为 https://sd2.youdooart.com/generate 。本轮同一修复交付内的候选重建保持版本号，最终生产以本节提交和构建为准。R04 为发布候选轮次；真实视频验证为 R01，只有一组4秒两步生成。
+本轮修复在 v0.118.5 发布并完成实测，应用提交 `a8c6d4d78df80ddab2be261a57ba25e21189fe23`，BUILD_ID `oGORrogXd002IRkOek7pG`，正式入口为 https://sd2.youdooart.com/generate 。本轮同一修复交付内的候选重建保持版本号。R04为本次发布候选轮次；真实视频验证为v0.118.5 / R01，只有一组4秒两步生成。
+
+交付前另一轮发布已接续至 **v0.119.0 / `f4ccc79eb2fe10f8fa6c3ecfeb9f54aa8a7d44dd` / BUILD `k3VgJtQpN-pOs1FD1z3sn`**。已在实际运行进程目录逐一核对，本次8个功能源码的SHA256与实测版完全一致，公网版本、两个能力开关及Codex缺请求号的无生成校验均通过；没有重复生成视频或追加扣费。[接续版本保留核对](../../docs/materials/2026-10-30-seedance-draft-enable/final-runtime-continuation.json)记录当前状态。视频/扣费证据仍标注实际生成时的v0.118.5，不把后续站点版本冒作视频版本。
 
 原因已收口：缺省关闭的能力开关拦住入口；样片只允许480p；Codex旧入口缺少新版生成准备记录。启用时同时修正了旧升级链在结果未明时误退款的风险，沿用网页的准备、审批、报价与受理流程。
 
@@ -190,7 +192,7 @@ git ls-remote --tags origin refs/tags/rollback/sd2-before-codex-draft-prepare-20
 
 修改限定本次Seedance Draft/Codex调用链和必要发布记录。未改变费率、权限、身份签发、数据库结构，未直接写业务数据或恢复/覆盖数据库；两条测试任务和36点账本均由正常API写入。运行数据保留切换前相同位置；其中storage历史上位于 `/data/video-api-debugger/releases/80d5cf6f1ec489ea93257d42e8dd5c7e4e782560/storage`，与规则中规范var-lib位置有差异，已核实同原路径、位于数据盘且备份目录可写。本轮不迁移或清理该目录，避免影响现有数据。上传和视频继续位于var-lib持久目录。
 
-程序恢复为 `2c8b45fa4acbde7909b531120511ff139b9c1195` / `0.118.4+draft-disabled-guard.1`，已完整构建且通过本批原启动门，只关闭新样片/升级，保留已受理任务和当前身份协议；恢复入口见[固定程序恢复](../../docs/materials/2026-10-30-seedance-draft-enable/recovery.txt)。恢复不回数据库、媒体、扣费或业务值，未在线演练。守门员等价核对已完成；分级/归类误判：无。
+本次R04的历史程序恢复点为 `2c8b45fa4acbde7909b531120511ff139b9c1195` / `0.118.4+draft-disabled-guard.1`，曾完整构建并通过本批原启动门，只关闭新样片/升级，保留已受理任务和原身份协议，记录见[固定程序恢复](../../docs/materials/2026-10-30-seedance-draft-enable/recovery.txt)。**后续v0.119.0已接管发布，不得把R04旧入口直接用于现行站点；当前恢复须使用接续发布自己的相容恢复点。** 本任务未替接续发布验收恢复。恢复不回数据库、媒体、扣费或业务值，未在线演练。守门员等价核对已完成；分级/归类误判：无。
 
 ### 7.4 统一diff
 
