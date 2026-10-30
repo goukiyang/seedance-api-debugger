@@ -6,7 +6,6 @@ import {
   verifyFeishuOAuthState,
 } from '@/lib/auth/feishu';
 import { setSessionCookie } from '@/lib/auth/session-cookie';
-import { PRIVATE_IDENTITY_COOKIE, PRIVATE_IDENTITY_SECONDS } from '@/lib/security/private-prompt-identity.server';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,10 +68,6 @@ export async function GET(request: NextRequest) {
       next: storedState.next,
     });
     setSessionCookie(response, result.token);
-    response.cookies.set(PRIVATE_IDENTITY_COOKIE, result.privateIdentityProof || '', {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/',
-      maxAge: result.privateIdentityProof ? PRIVATE_IDENTITY_SECONDS : 0,
-    });
     return clearStateCookie(response);
   } catch (error) {
     if (error instanceof FeishuAuthError) {

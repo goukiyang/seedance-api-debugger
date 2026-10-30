@@ -2,8 +2,8 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { verifyPassword } from './password';
-import { sessionAccountPayload, sessionAccountPayloadMatches, type SessionAccount } from './session-account-binding';
-import { authenticatePrivateIdentity, PRIVATE_IDENTITY_COOKIE } from '@/lib/security/private-prompt-identity.server';
+import { SESSION_COOKIE_MAX_AGE, sessionAccountPayload, sessionAccountPayloadMatches, type SessionAccount, type VerifiedFeishuSession } from './session-account-binding';
+import { authenticatePrivateIdentity, authenticateVerifiedFeishuSession, PRIVATE_IDENTITY_COOKIE } from '@/lib/security/private-prompt-identity.server';
 
 export interface SessionUser {
   id: string;
@@ -58,31 +58,65 @@ export async function getSession(): Promise<SessionUser | null> {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   const user = await getSessionByToken(token);
-  if (user) authenticatePrivateIdentity(user, cookieStore.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
+  // A current OAuth session carries its own provenance. Only legacy sessions
+  // use the old, independently signed cookie, with its original fixed expiry.
+  if (user && !readSessionProvenance(token)) authenticatePrivateIdentity(user, cookieStore.get(PRIVATE_IDENTITY_COOKIE)?.value, token);
   return user;
+}
+
+function signedSessionPayload(token: string): string | null {
+  if (token.length > 8192) return null;
+  const [payload, sig, extra] = token.split('.');
+  if (!payload || !sig || extra !== undefined) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64');
+  const actualBytes = Buffer.from(sig), expectedBytes = Buffer.from(expected);
+  if (actualBytes.length !== expectedBytes.length || !crypto.timingSafeEqual(actualBytes, expectedBytes)) return null;
+  return Buffer.from(payload, 'base64').toString('utf8');
+}
+
+function parseSessionProvenance(raw: string): VerifiedFeishuSession | null {
+  try {
+    const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as VerifiedFeishuSession;
+    if (!value || Object.keys(value).sort().join(',') !== 'expiresAt,issuedAt,source,subject,tenant,version'
+      || value.version !== 1 || value.source !== 'feishu-oauth'
+      || typeof value.subject !== 'string' || !value.subject || value.subject.length > 256
+      || value.tenant !== null && (typeof value.tenant !== 'string' || !value.tenant || value.tenant.length > 256)
+      || !Number.isSafeInteger(value.issuedAt) || !Number.isSafeInteger(value.expiresAt)
+      || value.issuedAt > Date.now() || value.expiresAt <= Date.now() || value.expiresAt <= value.issuedAt
+      || value.expiresAt - value.issuedAt > SESSION_COOKIE_MAX_AGE * 1000) return null;
+    return value;
+  } catch { return null; }
+}
+
+function readSessionProvenance(token: string): VerifiedFeishuSession | null {
+  const payload = signedSessionPayload(token);
+  const raw = payload?.split('~')[2];
+  return raw ? parseSessionProvenance(raw) : null;
+}
+
+// Only the successful code-exchange login path calls this. A database Feishu
+// binding, password login or local CLI profile is never authentication provenance.
+export function bindVerifiedFeishuSession(token: string, identity: { tenant: string | null; subject: string }): string {
+  const payload = signedSessionPayload(token);
+  if (!payload || payload.split('~').length !== 2) throw new Error('Invalid session for verified Feishu login');
+  const now = Date.now();
+  const provenance: VerifiedFeishuSession = { version: 1, source: 'feishu-oauth', tenant: identity.tenant,
+    subject: identity.subject, issuedAt: now, expiresAt: now + SESSION_COOKIE_MAX_AGE * 1000 };
+  const raw = Buffer.from(JSON.stringify(provenance)).toString('base64url');
+  if (!parseSessionProvenance(raw)) throw new Error('Invalid verified Feishu identity');
+  const body = Buffer.from(`${payload}~${raw}`).toString('base64');
+  return `${body}.${crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64')}`;
 }
 
 export async function getSessionByToken(token?: string | null): Promise<SessionUser | null> {
   if (!token) return null;
   try {
-    const parts = token.split('.');
-    if (parts.length !== 2) return null;
-    const [userIdB64, sig] = parts;
-    // 注意：createSession 签名时 update 的是 base64 字符串本身（payload），
-    // 因此这里也必须用 userIdB64 做 HMAC，不能先解码。
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(userIdB64).digest('base64');
-    const providedBuffer = Buffer.from(sig);
-    const expectedBuffer = Buffer.from(expected);
-    if (
-      providedBuffer.length !== expectedBuffer.length ||
-      !crypto.timingSafeEqual(providedBuffer, expectedBuffer)
-    ) {
-      return null;
-    }
-
-    const decodedPayload = Buffer.from(userIdB64, 'base64').toString('utf8');
-    const [accountPayload, nonce, extra] = decodedPayload.split('~');
+    const decodedPayload = signedSessionPayload(token);
+    if (!decodedPayload) return null;
+    const [accountPayload, nonce, rawProvenance, extra] = decodedPayload.split('~');
     if (extra !== undefined || nonce !== undefined && !/^[A-Za-z0-9_-]{32}$/.test(nonce)) return null;
+    const provenance = rawProvenance === undefined ? null : parseSessionProvenance(rawProvenance);
+    if (rawProvenance !== undefined && (!nonce || !provenance)) return null;
     const userId = accountPayload.split(':')[0];
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -115,7 +149,7 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
     if (user.role !== 'admin' && user.role !== 'user') return null;
     if (user.account_type !== 'internal' && user.account_type !== 'external') return null;
     if (!sessionAccountPayloadMatches(accountPayload, user, SESSION_SECRET)) return null;
-    return {
+    const sessionUser: SessionUser = {
       id: user.id,
       name: user.name,
       username: user.username,
@@ -138,6 +172,8 @@ export async function getSessionByToken(token?: string | null): Promise<SessionU
         last_sync_at: user.last_feishu_sync_at,
       },
     };
+    if (provenance) authenticateVerifiedFeishuSession(sessionUser, provenance);
+    return sessionUser;
   } catch {
     return null;
   }

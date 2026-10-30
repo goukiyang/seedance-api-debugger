@@ -4,7 +4,7 @@ import { grantInitialCredits } from '@/lib/credits/policy';
 import { prisma } from '@/lib/prisma';
 import { getDefaultFeatureProfileId } from '@/lib/users/profiles';
 import { hashPassword } from './password';
-import { createSession, type SessionUser } from './session';
+import { bindVerifiedFeishuSession, createSession, type SessionUser } from './session';
 
 const DEFAULT_AUTHORIZE_URL = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize';
 const DEFAULT_OPENAPI_BASE_URL = 'https://open.feishu.cn';
@@ -720,13 +720,5 @@ export async function loginWithFeishuCode(code: string, requestOrigin?: string) 
   const userAccessToken = await exchangeCodeForUserAccessToken(code, config);
   const profile = await getFeishuUserInfo(userAccessToken, config);
   const result = await completeFeishuLogin(profile, config);
-  const { signVerifiedFeishuIdentity } = await import('@/lib/security/private-prompt-identity.server');
-  let privateIdentityProof: string | null = null;
-  try {
-    privateIdentityProof = signVerifiedFeishuIdentity({ userId: result.user.id, role: result.user.role,
-      tenant: profile.tenantKey, subject: profile.openId }, result.token);
-  } catch {
-    // Unavailable private storage must not block ordinary account login.
-  }
-  return { ...result, privateIdentityProof };
+  return { ...result, token: bindVerifiedFeishuSession(result.token, { tenant: profile.tenantKey, subject: profile.openId }) };
 }
