@@ -122,9 +122,9 @@ curl -sS "$BASE_URL/api/codex/config" \
   },
   "supported_settings": {
     "seedance_draft": {
-      "create_enabled": false,
-      "upgrade_enabled": false,
-      "status": "provider_contract_pending"
+      "create_enabled": true,
+      "upgrade_enabled": true,
+      "status": "enabled"
     },
     "model": [
       {
@@ -455,6 +455,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 | `generate_audio` | boolean | 是否生成音频 |
 | `return_last_frame` | boolean | 是否返回尾帧 |
 | `watermark` | boolean | 是否带水印 |
+| `draft` | boolean | Seedance 2.5 样片模式；`true` 时必须显式传 `resolution: "480p"`，否则创建接口返回 400，不冻结点数或发起生成 |
 | `idempotency_key` | string | 幂等键，强烈建议每次外部请求都传 |
 | `source_request_id` | string | 外部请求 ID，也可用 `x-codex-request-id` |
 | `client_name` | string | 外部系统名称 |
@@ -512,7 +513,9 @@ curl -sS "$BASE_URL/api/codex/video/create" \
 
 ## 9. Seedance 2.5 Draft 直出 1080p
 
-Draft 流程是“先确认样片，再生成正式片”：先在站内生成并完成一个 Seedance 2.5 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
+Draft 流程是“先确认样片，再生成正式片”。按 [Seedance 2.5 官方协议](https://docs.byteplus.com/en/docs/ModelArk/seedance-2-5)，创建时 `draft: true` 仅支持 `resolution: "480p"`；站内勾选“480p样片”会明确把本次分辨率切换为 480p。历史恢复或引用出的非 480p 参数保留，须手动改为 480p 或取消样片后才能提交，不改写历史任务或已受理请求。
+
+先完成一个 Seedance 2.5 的 480p 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
 
 ```http
 POST /api/codex/video/draft-upgrade
@@ -528,11 +531,22 @@ POST /api/codex/video/draft-upgrade
 }
 ```
 
-接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送嵌套的 `draft_task: { id }` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
+接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求的 `content` 必须仅为 `[{"type":"draft_task","draft_task":{"id":"<provider_draft_task_id>"}}]`，分辨率为 `1080p`；保留现有请求追踪封装，不接收或重复发送 prompt、素材、比例、时长、seed、音频、水印、尾帧等生成参数。
 
 `draft_task_id` 必须是 SD2 本地任务 ID，不能填写 Seedance 官方任务 ID，也不能填写 `provider_task_id`。Draft 和正式任务分别记录点数冻结、Provider 请求、轮询和成本台账；重复的 `idempotency_key` 会返回原正式任务。
 
-当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到嵌套 `draft_task: { id }` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。计费复用现有按模型的 `calculateEstimatedCost` 规则，不新增 Draft 专属价格；2.0 旧规则保持不变。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
+官方协议和当前 `etc.seedance-api.net/server/api/call` 网关已核实上述嵌套字段。无收费探针使用不存在的 Draft ID，网关返回 HTTP 200，业务错误为 `InvalidParameter`，定位 `content[0].draft_task.id` 并要求成功完成的 Draft；这证明字段被识别，不代表真实升级已完成或供应商成本已核实。
+
+`SEEDANCE_DRAFT_CREATE_ENABLED` 和 `SEEDANCE_DRAFT_UPGRADE_ENABLED` 缺省启用；显式设置 `false` 仍可分别关闭，值会去除首尾空白并忽略大小写。`GET /api/config` 和 `GET /api/codex/config` 的能力字段反映实际开关：两者均关闭时 `status` 为 `disabled`，否则为 `enabled`，具体可用步骤以 `create_enabled`、`upgrade_enabled` 和提示为准。升级关闭时接口仍返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起供应商升级请求。
+
+两步各自报价、冻结与结算，1080p 升级不是免费放大，也不抵扣已完成样片的费用。本次不调整计费规则：
+
+| 步骤 | 站内报价规格 | 本步价格依据 |
+|---|---|---|
+| 480p 样片 | Seedance 2.5、`resolution: "480p"`、用途 `draft` | 按该步时长、实际参考视频情况及生效费率独立报价；走既有旧规则回退时为 `ceil(3 × 1.5 × 秒数)` 点 |
+| 1080p 正式片 | Seedance 2.5、`resolution: "1080p"`、用途 `draft_upgrade` | 按继承的时长、参考视频上下文及生效费率另行报价；走既有旧规则回退时同为 `ceil(3 × 1.5 × 秒数)` 点 |
+
+例如仅在两步都使用旧规则回退、时长均为 5 秒时，480p 样片为 23 点，1080p 升级另为 23 点，合计 46 点；存在自定义费率时以每步提交前的实际报价及受理时冻结的 `pricing_snapshot` 为准，不把示例当作线上固定价格。以上均为站内点数，不是供应商实际美元成本；供应商成本仍以各步返回的实际扣费与成本台账为准，缺失时保持待核实，不按示例或官方公开价格填造。
 
 ## 10. 任务状态与结果
 

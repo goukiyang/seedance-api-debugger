@@ -1,7 +1,7 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '兼容飞书登录', outline: [
-  '保留现有飞书登录与私密身份读取',
+const notice = { title: '兼容恢复版本', outline: [
+  '保留现有飞书登录、私密身份与样片生成功能',
   '程序恢复不修改历史内容和业务数据',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
