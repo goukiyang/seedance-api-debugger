@@ -25,8 +25,8 @@ export async function activeStudioTaskPage(owner: string, module?: string, after
     AND t."created_at" <= ${ceiling}
     AND (${cursor ? Prisma.sql`(t."created_at" > ${cursor.at} OR t."created_at" = ${cursor.at} AND t."id" > ${cursor.id})` : Prisma.sql`1 = 1`})
     AND (t."status" IN (${Prisma.join(states)}) OR t."billing_next_check_at" IS NOT NULL
-      OR EXISTS (SELECT 1 FROM "Notification" n WHERE n."type" = ${IMAGE_FEISHU_TYPE} AND n."target_user_id" = ${owner}
-        AND n."status" = 'pending' AND json_extract(CASE WHEN json_valid(n."metadata_json") THEN n."metadata_json" ELSE '{}' END, '$.taskId') = t."id"))
+      OR t."id" IN (SELECT json_extract(CASE WHEN json_valid(n."metadata_json") THEN n."metadata_json" ELSE '{}' END, '$.taskId')
+        FROM "Notification" n WHERE n."type" = ${IMAGE_FEISHU_TYPE} AND n."target_user_id" = ${owner} AND n."status" = 'pending'))
     ORDER BY t."created_at" ASC, t."id" ASC LIMIT 25`);
   const page = rows.slice(0, 24), last = page.at(-1);
   const next: Cursor | null = rows.length > 24 && last ? { version: 1, owner, module: module || null,

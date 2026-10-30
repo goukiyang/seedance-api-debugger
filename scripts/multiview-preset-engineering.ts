@@ -40,6 +40,9 @@ async function main() {
   // Keep one real module graph, including route/service error constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
+  const businessSettingCount = () => prisma.platformSetting.count({ where: { key: { notIn: [
+    'catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets',
+  ] } } });
   const { createSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const contract = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
   const service = require('../src/lib/video/multiview-preset.server') as typeof import('../src/lib/video/multiview-preset.server');
@@ -52,7 +55,7 @@ async function main() {
   let completed = false;
   try {
     assert.equal(await prisma.user.count(), 0);
-    assert.equal(await prisma.platformSetting.count(), 0);
+    assert.equal(await businessSettingCount(), 0);
     const tokens: Record<string, string> = {};
     for (const [id, role, account_type, feature_profile_id] of [
       ['admin-a', 'admin', 'internal', null], ['admin-b', 'admin', 'internal', null],
@@ -81,7 +84,7 @@ async function main() {
     assert.equal((await invoke('admin', 'PUT', 'internal-user', { mutationId: randomUUID(), expectedRevision: 0, prompt: 'not allowed' })).status, 403);
     assert.equal((await invoke('public', 'GET', 'external-user')).status, 403);
     assert.equal((await invoke('public', 'GET', null)).status, 401);
-    assert.equal(await prisma.platformSetting.count(), 0);
+    assert.equal(await businessSettingCount(), 0);
     assert.equal(await prisma.operationLog.count(), 0);
     checks.push('real_session_admin_and_external_rejection_preserves_401_403_no_writes');
 
@@ -93,7 +96,7 @@ async function main() {
     assert.equal(unconfiguredAdmin.body.code, 'MULTIVIEW_PRESET_UNAVAILABLE');
     await assert.rejects(service.readMultiviewRotationPresetVersion('1.0.0'),
       (error: unknown) => error instanceof service.MultiviewPresetError && error.code === 'MULTIVIEW_PRESET_CHANGED');
-    assert.equal(await prisma.platformSetting.count(), 0);
+    assert.equal(await businessSettingCount(), 0);
     assert.equal(await prisma.operationLog.count(), 0);
     checks.push('unconfigured_authenticated_public_and_admin_get_fail_closed_without_virtual_recipe_or_writes');
 
@@ -123,7 +126,7 @@ async function main() {
       prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:current', value_json: initialPrivateRaw, updated_by: 'admin-a' } }),
       prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:version:1.0.0', value_json: initialPrivateRaw, updated_by: 'admin-a' } }),
     ]);
-    assert.equal(await prisma.platformSetting.count(), 2);
+    assert.equal(await businessSettingCount(), 2);
     assert.equal(await prisma.operationLog.count(), 0);
     assert.deepEqual(await service.readMultiviewRotationPreset(), initialPrivateState);
     assert.deepEqual(await service.readMultiviewRotationPresetVersion('1.0.0'), syntheticPreset);
@@ -145,7 +148,7 @@ async function main() {
     assertSafePublic(await invoke('public', 'GET', 'admin-a'), 0);
     const initialAdmin = await invoke('admin', 'GET', 'admin-a');
     assert.equal(initialAdmin.status, 200); assert.deepEqual(initialAdmin.body, initialPrivateState);
-    assert.equal(await prisma.platformSetting.count(), 2);
+    assert.equal(await businessSettingCount(), 2);
     assert.equal(await prisma.operationLog.count(), 0);
     checks.push('synthetic_current_and_immutable_private_recipe_real_png_binding_admin_full_read_public_safe_dto');
 
@@ -207,7 +210,7 @@ async function main() {
     const stale = await invoke('admin', 'PUT', 'admin-b', { mutationId: randomUUID(), expectedRevision: 0, prompt: 'stale input' });
     assert.equal(stale.status, 409);
     assert.equal(stale.body.code, 'MULTIVIEW_PRESET_REVISION_CONFLICT');
-    assert.equal(await prisma.platformSetting.count(), 3);
+    assert.equal(await businessSettingCount(), 3);
     assert.equal(await prisma.operationLog.count(), 1);
     checks.push('same_mutation_same_body_replays_different_body_conflicts_stale_cas_never_overwrites');
 
@@ -234,7 +237,7 @@ async function main() {
     assert.equal(tooLong.valid, false); assert.ok(tooLong.prompt.endsWith('x'.repeat(20000)), 'No silent truncation');
     const longSave = await invoke('admin', 'PUT', 'admin-a', { mutationId: randomUUID(), expectedRevision: 1, prompt: 'x'.repeat(20000) });
     assert.equal(longSave.status, 400); assert.equal(longSave.body.code, 'MULTIVIEW_PRESET_INVALID');
-    assert.equal(await prisma.platformSetting.count(), 3); assert.equal(await prisma.operationLog.count(), 1);
+    assert.equal(await businessSettingCount(), 3); assert.equal(await prisma.operationLog.count(), 1);
     checks.push('old_frozen_body_still_readable_current_gate_rejects_stale_inside_transaction_personal_input_and_limit_preserved');
 
     const raceBodies = [0, 1].map(index => ({ mutationId: randomUUID(), expectedRevision: 1, prompt: `并发隔离模板 ${index} @图片1` }));
@@ -253,7 +256,7 @@ async function main() {
     assertSafePublic(await invoke('public', 'GET', 'internal-user'), 2);
     assertSafePublic(await invoke('public', 'GET', 'admin-a'), 2);
     assert.equal(await prisma.operationLog.count(), 2);
-    assert.equal(await prisma.platformSetting.count(), 4);
+    assert.equal(await businessSettingCount(), 4);
     assert.deepEqual((await invoke('admin', 'PUT', 'admin-a', saveBody)).body, first.body, 'An old successful receipt does not roll back the newer current pointer');
     assert.equal((await service.readMultiviewRotationPreset()).revision, 2);
     concurrentOutcome = race.map(result => ({ status: result.status, code: result.body.code || 'saved' }));
@@ -261,7 +264,7 @@ async function main() {
 
     await assert.rejects(service.saveMultiviewRotationPreset({ mutationId: randomUUID(), expectedRevision: 2, prompt: 'audit failure fixture' }, 'missing-synthetic-actor'));
     assert.equal((await service.readMultiviewRotationPreset()).revision, 2);
-    assert.equal(await prisma.platformSetting.count(), 4);
+    assert.equal(await businessSettingCount(), 4);
     assert.equal(await prisma.operationLog.count(), 2);
     assert.deepEqual(await service.readMultiviewRotationPresetVersion('1.0.0'), syntheticPreset);
     assert.equal(await prisma.videoTask.count(), 0);

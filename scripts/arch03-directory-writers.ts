@@ -96,7 +96,12 @@ export async function verifyDirectoryWriterTransactions(db: PrismaClient) {
   const beforeRestart = await readCatalogRevision(db, 'templates');
   await db.$transaction(tx => initializeCatalogRevisions(tx));
   assert.notEqual(await readCatalogRevision(db, 'templates'), beforeRestart, 'Restoring the current worker invalidates any marker retained across old-writer recovery');
+  const capturedTransaction = db.$transaction.bind(db); let instrumentedCalls = 0;
+  Reflect.set(db, '$transaction', (...args: unknown[]) => { instrumentedCalls++; return Reflect.apply(capturedTransaction, db, args); });
+  try { assert.equal(await db.$transaction(tx => tx.user.count({ where: { id: owner } })), 1); }
+  finally { Reflect.set(db, '$transaction', capturedTransaction); }
+  assert.equal(instrumentedCalls, 1, 'A captured transaction can be instrumented without recursively reading its replacement');
   return { directWrite: true, assetWithoutUpdatedAt: true, transactionRollback: true, batchResultContract: true,
     userChange: true, styleDependencyChange: true, realReactionWriter: true, noOpCas: true, workerHeartbeatExcluded: true,
-    sqlPrivateAliasesEqualOriginal: true, sqlFreshDatabaseRole: true, unsupportedUrlUsesLegacyOnly: true, corruptPrivacyFailsClosed: true, restartInvalidatesRetainedMarker: true, unrelatedHeartbeatsExcluded: true };
+    sqlPrivateAliasesEqualOriginal: true, sqlFreshDatabaseRole: true, unsupportedUrlUsesLegacyOnly: true, corruptPrivacyFailsClosed: true, restartInvalidatesRetainedMarker: true, unrelatedHeartbeatsExcluded: true, capturedTransactionInstrumentation: true };
 }

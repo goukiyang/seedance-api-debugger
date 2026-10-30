@@ -50,11 +50,21 @@ async function main() {
     assert.ok(ts.isSpreadAssignment(spread) && identifier(spread.expression, name));
   }
   assert.ok(ts.isArrowFunction(createCall.arguments[1]), 'Preserve the diagnostic callback');
-  assert.ok(ts.isObjectLiteralExpression(createOptions)); assert.equal(createOptions.properties.length, 1);
+  assert.ok(ts.isObjectLiteralExpression(createOptions));
   const sensitiveRecipe = property(createOptions, 'sensitiveRecipe');
   assert.ok(ts.isCallExpression(sensitiveRecipe) && identifier(sensitiveRecipe.expression, 'Boolean')
-    && sensitiveRecipe.arguments.length === 1 && identifier(sensitiveRecipe.arguments[0], 'multiviewGeneration'),
+    && sensitiveRecipe.arguments.length === 1,
   'Private provider logging must follow the validated multiview state, not a browser field');
+  for (const variant of ['ordinary', 'rotation', 'groups', 'action']) {
+    const options = runInNewContext(`(${createOptions.getText(ast)})`, {
+      groupRefs: variant === 'groups' ? [{}] : [], multiviewGeneration: variant === 'rotation' ? {} : null,
+      multiviewAction: variant === 'action' ? { action: { origins: ['synthetic-action'] } } : null,
+      videoGroups: { origins: ['synthetic-group'] },
+    });
+    assert.equal(options.sensitiveRecipe, variant !== 'ordinary');
+    assert.deepEqual(Object.keys(options).sort(), ['sensitiveRecipe', ...(['groups', 'action'].includes(variant) ? ['privateOrigins'] : [])].sort());
+    if (variant === 'groups' || variant === 'action') assert.deepEqual(Array.from(options.privateOrigins), [`synthetic-${variant === 'groups' ? 'group' : 'action'}`]);
+  }
 
   const transportCalls = calls.filter(call => identifier(call.expression, 'seedanceLocalReferenceTransport'));
   assert.equal(transportCalls.length, 1);

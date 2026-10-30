@@ -14,7 +14,7 @@ export function originDirectorySql(user: SessionUser, assetIds?: string[]) {
     AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" archived WHERE archived."key" = 'studio_preset_archived_v1:' || p."id")`;
   return Prisma.sql`origin_task_links AS MATERIALIZED (
     SELECT a."id" AS asset_id, t."id" AS task_id FROM "ImageStudioTask" t CROSS JOIN "Asset" a
-      WHERE a."id" = t."asset_id" AND (${assetIds ? catalogIdsSql(Prisma.sql`a."id"`, assetIds) : Prisma.sql`1 = 1`}) AND t."owner_id" = a."owner_id" AND t."deleted_at" IS NULL AND ${studioViewableOutputSql('t')}
+      WHERE t."asset_id" IS NOT NULL AND a."id" = t."asset_id" AND (${assetIds ? catalogIdsSql(Prisma.sql`a."id"`, assetIds) : Prisma.sql`1 = 1`}) AND t."owner_id" = a."owner_id" AND t."deleted_at" IS NULL AND ${studioViewableOutputSql('t')}
     UNION SELECT a."id", t."id" FROM "Asset" a JOIN "ImageStudioTask" t ON t."id" = ${jsonField(metadata, '$.studioTaskId')}
       WHERE json_type(CASE WHEN json_valid(a."metadata_json") THEN a."metadata_json" ELSE '{}' END, '$.studioTaskId') = 'text'
         AND (${assetIds ? catalogIdsSql(Prisma.sql`a."id"`, assetIds) : Prisma.sql`1 = 1`})
@@ -22,7 +22,7 @@ export function originDirectorySql(user: SessionUser, assetIds?: string[]) {
   ), unique_origin_tasks AS MATERIALIZED (
     SELECT asset_id, min(task_id) AS task_id FROM origin_task_links GROUP BY asset_id HAVING count(DISTINCT task_id) = 1
   ), owned_generated_assets AS MATERIALIZED (
-    SELECT DISTINCT generated."asset_id" FROM "ImageStudioTask" generated WHERE generated."owner_id" = ${user.id} AND ${studioViewableOutputSql('generated')}
+    SELECT DISTINCT generated."asset_id" FROM "ImageStudioTask" generated WHERE generated."asset_id" IS NOT NULL AND generated."owner_id" = ${user.id} AND ${studioViewableOutputSql('generated')}
       AND (${assetIds ? catalogIdsSql(Prisma.sql`generated."asset_id"`, assetIds) : Prisma.sql`1 = 1`})
   ), asset_origins AS MATERIALIZED (
     SELECT a."id" AS asset_id,
@@ -40,10 +40,9 @@ export function originDirectorySql(user: SessionUser, assetIds?: string[]) {
           AND (json_type(t."snapshot_json", '$.avatar') IS NULL OR json_type(t."snapshot_json", '$.avatar') = 'object')
         OR json_type(CASE WHEN json_valid(a."metadata_json") THEN a."metadata_json" ELSE '{}' END, '$.studioTaskId') = 'text'
         OR ${jsonField(metadata, '$.source')} IN ('image_generation_api', 'workspace_generation')
-        OR owned_generated."asset_id" IS NOT NULL
+        OR a."id" IN (SELECT "asset_id" FROM owned_generated_assets)
         THEN 1 ELSE 0 END AS generated
     FROM "Asset" a LEFT JOIN unique_origin_tasks linked ON linked.asset_id = a."id" LEFT JOIN "ImageStudioTask" t ON t."id" = linked.task_id
-      LEFT JOIN owned_generated_assets owned_generated ON owned_generated."asset_id" = a."id"
       LEFT JOIN "ImageStudioModule" w ON w."id" = t."module_id" AND w."owner_id" = ${user.id} AND w."owner_id" = t."owner_id"
       LEFT JOIN "ImageStudioPreset" p ON p."id" = ${presetId}
     WHERE ${assetIds ? catalogIdsSql(Prisma.sql`a."id"`, assetIds) : Prisma.sql`1 = 1`}

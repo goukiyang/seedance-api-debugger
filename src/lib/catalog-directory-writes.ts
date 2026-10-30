@@ -84,20 +84,24 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   });
   const wrap = (client: object): T => new Proxy(client, { get(target, property) {
     if (property === marker) return true;
-    if (property === '$transaction') return (input: unknown, options?: unknown) => {
-      if (typeof input === 'function') return Reflect.apply(Reflect.get(target, '$transaction'), target, [
-        (tx: Prisma.TransactionClient) => context.run(tx, () => input(tx)), options,
-      ]);
-      if (!Array.isArray(input)) throw new Error('catalog_transaction_invalid');
-      const affected = Array.from(new Set(input.flatMap(value => promises.get(value) || [])));
-      const markers = affected.map(domain => {
-        const key = catalogRevisionKey(domain);
-        const value_json = JSON.stringify({ version: 1, revision: randomBytes(32).toString('hex') });
-        return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
-      });
-      const pending = Reflect.apply(Reflect.get(target, '$transaction'), target, [[...input, ...markers], options]) as Promise<unknown[]>;
-      return pending.then(values => values.slice(0, input.length));
-    };
+    if (property === '$transaction') {
+      // Instrumentation may replace the method after capturing this callable.
+      const targetTransaction = Reflect.get(target, '$transaction');
+      return (input: unknown, options?: unknown) => {
+        if (typeof input === 'function') return Reflect.apply(targetTransaction, target, [
+          (tx: Prisma.TransactionClient) => context.run(tx, () => input(tx)), options,
+        ]);
+        if (!Array.isArray(input)) throw new Error('catalog_transaction_invalid');
+        const affected = Array.from(new Set(input.flatMap(value => promises.get(value) || [])));
+        const markers = affected.map(domain => {
+          const key = catalogRevisionKey(domain);
+          const value_json = JSON.stringify({ version: 1, revision: randomBytes(32).toString('hex') });
+          return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
+        });
+        const pending = Reflect.apply(targetTransaction, target, [[...input, ...markers], options]) as Promise<unknown[]>;
+        return pending.then(values => values.slice(0, input.length));
+      };
+    }
     if (property === '$extends') return (...args: unknown[]) => wrap(Reflect.apply(Reflect.get(target, '$extends'), target, args));
     const delegate = Reflect.get(target, property);
     if (typeof property !== 'string' || property.startsWith('$') || !delegate || typeof delegate !== 'object') return typeof delegate === 'function' ? delegate.bind(target) : delegate;

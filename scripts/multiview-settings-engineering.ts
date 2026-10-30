@@ -42,6 +42,9 @@ async function main() {
   // dynamic ESM imports with alias-loaded CJS creates duplicate constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
+  const businessSettingCount = () => prisma.platformSetting.count({ where: { key: { notIn: [
+    'catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets',
+  ] } } });
   const { createSession, getSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const contract = require('../src/lib/video/multiview-settings-contract') as typeof import('../src/lib/video/multiview-settings-contract');
   const generation = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
@@ -97,10 +100,10 @@ async function main() {
     assert.equal((await invoke(null, 'GET', '?kind=generation')).status, 401);
     assert.equal((await invoke('settings-external', 'GET', '?kind=generation')).status, 403);
     assert.equal((await invoke('settings-owner', 'POST', '', {}, false)).status, 403);
-    assert.equal(await prisma.platformSetting.count(), 0);
+    assert.equal(await businessSettingCount(), 0);
     await assert.rejects(presets.readMultiviewRotationPreset());
     await assert.rejects(presets.readMultiviewRotationPresetVersion('1.0.0'));
-    assert.equal(await prisma.platformSetting.count(), 0);
+    assert.equal(await businessSettingCount(), 0);
     checks.push('real_session_company_boundary_and_origin_rejection_no_writes');
 
     const syntheticPrompt = '仅用于隔离设置测试：图1为本人主图，图2为合成构图参考，完成一周旋转。';
@@ -128,7 +131,7 @@ async function main() {
       prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:current', value_json: initialPresetState, updated_by: 'settings-admin' } }),
       prisma.platformSetting.create({ data: { key: 'multiview_rotation_preset_v1:version:1.0.0', value_json: initialPresetState, updated_by: 'settings-admin' } }),
     ]);
-    assert.equal(await prisma.platformSetting.count(), 2);
+    assert.equal(await businessSettingCount(), 2);
     const initialPrivatePreset = await presets.readMultiviewRotationPreset();
     assert.equal(initialPrivatePreset.revision, 0); assert.deepEqual(initialPrivatePreset.preset, syntheticPreset);
     checks.push('synthetic_private_current_and_immutable_recipe_with_real_png_binding_seeded_only_in_isolated_database');
@@ -158,7 +161,7 @@ async function main() {
     assert.deepEqual(recovered.body, first.body);
     assert.deepEqual((await invoke('settings-owner', 'POST', '', request)).body, first.body);
     assert.equal(await prisma.platformSetting.count({ where: { key: { startsWith: 'multiview_settings_v1:' } } }), 1);
-    assert.equal(await prisma.platformSetting.count(), 3);
+    assert.equal(await businessSettingCount(), 3);
     const reused = await invoke('settings-owner', 'POST', '', { ...request, name: 'changed-input' });
     assert.equal(reused.status, 409); assert.notEqual(reused.body.notCommitted, true);
     checks.push('shared_default_fresh_apply_owner_only_cas_durable_original_receipt_and_replay');

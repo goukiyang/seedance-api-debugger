@@ -132,6 +132,14 @@ async function main() {
       lateFound ||= result.ids.includes('eligible-tail'); cursor = result.nextCursor || undefined; if (!cursor) break; }
     assert.ok(lateFound); assert.deepEqual((await activeStudioTaskPage('another-owner', ARCH03_MODULE_ID)).ids, []);
     await database.imageStudioTask.updateMany({ data: { status: 'succeeded', snapshot_json: '{}', billing_next_check_at: null } });
+    const notificationIds = ['arch03-pending-notification', 'arch03-duplicate-notification', 'arch03-other-notification', 'arch03-malformed-notification'];
+    await database.notification.createMany({ data: notificationIds.map((id, index) => ({ id, type: 'image_feishu_v1',
+      target_user_id: index === 2 ? 'catalog-reader-fixture' : 'fixture-owner', title: 'Synthetic pending output',
+      metadata_json: index === 3 ? '{invalid' : JSON.stringify({ taskId: 'eligible-tail' }) })) });
+    assert.deepEqual((await activeStudioTaskPage('fixture-owner', ARCH03_MODULE_ID)).ids, ['eligible-tail']);
+    await database.notification.updateMany({ where: { id: { in: notificationIds.slice(0, 2) } }, data: { status: 'sent' } });
+    assert.deepEqual((await activeStudioTaskPage('fixture-owner', ARCH03_MODULE_ID)).ids, []);
+    await database.notification.deleteMany({ where: { id: { in: notificationIds } } });
     await database.imageStudioTask.create({ data: task('concurrent-claim', 500) });
     let concurrent: Awaited<ReturnType<typeof claimStudioTask>>[] = [];
     for (let round = 0; round < 3 && !concurrent.length; round++) concurrent = (await Promise.all([claimStudioTask(), claimStudioTask()])).filter(Boolean);

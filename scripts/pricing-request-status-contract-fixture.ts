@@ -146,7 +146,9 @@ export async function runPricingRequestStatusContractFixture(): Promise<FixtureR
     equal(seeded.User.rows, 2, 'Both fixture actors are real ordinary internal users');
     equal(seeded.VideoTask.rows, tasks.length, 'Only explicit original tasks exist before GET');
     equal(seeded.CreditLedger.rows, 2, 'Existing freezes have real ledger rows for the no-write comparison');
-    equal(seeded.PlatformSetting.rows, 1, 'No request receipt exists before GET');
+    equal((await db.platformSetting.findMany({ select: { key: true }, orderBy: { key: 'asc' } })).map(row => row.key),
+      [CODEX_VIDEO_API_SETTING_KEY, 'catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets'].sort(),
+      'Only API settings and the two directory markers exist before GET; no request receipt');
 
     const setMapping = async (userId: string, enabled = true) => {
       await db.platformSetting.update({ where: { key: CODEX_VIDEO_API_SETTING_KEY }, data: { value_json: JSON.stringify(settingsFor(userId, enabled)) } });

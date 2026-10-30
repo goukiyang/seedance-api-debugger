@@ -10,6 +10,7 @@ import ts from 'typescript';
 import * as restoredContract from '../src/lib/image-studio/restored-settings';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
+import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
 // It never imports the application database, provider, worker, or HTTP modules.
@@ -24,6 +25,7 @@ async function main() {
     'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
+  files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
@@ -119,7 +121,8 @@ async function main() {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
-    ...storageExports, ...privateFields, ...privatePrompts,
+    ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice,
+    freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',

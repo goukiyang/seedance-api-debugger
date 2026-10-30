@@ -168,6 +168,7 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       await tx.project.deleteMany({ where: { id: { in: ids.projects } } });
       await tx.platformSetting.deleteMany({ where: { key: ids.settings } });
       await tx.user.deleteMany({ where: { id: { in: ids.users } } });
+      await tx.platformSetting.deleteMany({ where: { key: { in: ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets'] } } });
     }, { maxWait: 10000, timeout: 30000 });
     seeded = false;
     ok(Object.values(await tableCounts(client)).every(count => count === 0), 'Owned fixture rows are removed and the supplied database is empty again');
