@@ -41,7 +41,8 @@ async function main() {
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
   const { hdReadonlyDb } = require('../src/lib/media/hd-readonly-db') as typeof import('../src/lib/media/hd-readonly-db');
   const core = require('../src/lib/media/hd-derivatives') as typeof import('../src/lib/media/hd-derivatives');
-  const { registerCommittedStudioHd } = require('../src/lib/media/hd-registration') as typeof import('../src/lib/media/hd-registration');
+  const { registerCommittedAssetHd, registerCommittedStudioHd } = require('../src/lib/media/hd-registration') as typeof import('../src/lib/media/hd-registration');
+  const { registerVerifiedUpload, uploadFileVersion } = require('../src/lib/assets/verified-upload') as typeof import('../src/lib/assets/verified-upload');
   const { finishStudioTask } = require('../src/lib/image-studio/tasks') as typeof import('../src/lib/image-studio/tasks');
   const { finishRejectedStudioDimensions } = require('../src/lib/image-studio/dimension-rejection') as typeof import('../src/lib/image-studio/dimension-rejection');
   const { prepareStudioOutput } = require('../src/lib/image-studio/output') as typeof import('../src/lib/image-studio/output');
@@ -54,6 +55,13 @@ async function main() {
   mock.method(https, 'request', blocked); mock.method(https, 'get', blocked);
   process.chdir(directory);
   try {
+    const waitFor = async (condition: () => Promise<boolean>, description: string) => {
+      const deadline = Date.now() + 5000;
+      while (!await condition()) {
+        assert.ok(Date.now() < deadline, description);
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    };
     await prisma.user.create({ data: { id: 'hd-owner', name: 'Synthetic HD owner', username: 'hd-owner',
       email: 'hd-owner@isolated.invalid', password_hash: 'synthetic-not-a-password' } });
     await prisma.creditAccount.create({ data: { user_id: 'hd-owner', balance: 100, frozen_credits: 5 } });
@@ -99,6 +107,9 @@ async function main() {
     await core.atomicHdJson(path.join(core.hdDirectory(), `${job.key}.json`), ready);
     assert.equal(await registerCommittedStudioHd(task.id), true);
     assert.deepEqual(await core.readHdJob(job.key), ready, 'Existing ready result is reused without another encode');
+    assert.equal(await registerCommittedAssetHd(prepared.id!, 'another-owner'), false);
+    assert.equal(await registerCommittedAssetHd(prepared.id!, task.owner_id), true);
+    assert.deepEqual(await core.readHdJob(job.key), ready, 'Shared asset registration preserves the text-safe ready result');
     assert.equal((await core.listHdJobs()).length, 1);
     assert.deepEqual(await fs.readFile(path.join(directory, 'public', prepared.original_url)), original);
     assert.equal(await snapshot(task.id), committed);
@@ -149,9 +160,60 @@ async function main() {
     assert.equal(await registerCommittedStudioHd(failedTask.id), false, 'A hidden task is not restored by registration');
     checks.push('real_dimension_retention_commits_before_registration_and_failed_uncertain_predicates_hold');
 
+    const uploadInput = async (name: string) => {
+      const bytes = await sharp(original).tint({ r: name.length * 7, g: 170, b: 43 }).png().toBuffer();
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const url = `/uploads/${name}.png`, file = path.join(directory, 'public', url);
+      await fs.writeFile(file, bytes, { mode: 0o600 });
+      return { ownerId: task.owner_id, fileName: `${name}.png`, originalUrl: url, thumbnailUrl: null,
+        requestId: name, proof: { file, hash: digest, bytes: bytes.length, mimeType: 'image/png', type: 'image' as const,
+          width: 16, height: 16, extension: 'png', version: await uploadFileVersion(file) } };
+    };
+    const upload = await uploadInput('eager-upload');
+    const beforeUpload = await snapshot(task.id);
+    const uploaded = await registerVerifiedUpload(upload);
+    await waitFor(async () => {
+      const jobs = await core.listHdJobs();
+      const queued = jobs.find(value => value.source === upload.originalUrl);
+      if (!queued) return false;
+      const { readHdScheduler } = require('../src/lib/media/hd-scheduler') as typeof import('../src/lib/media/hd-scheduler');
+      return Boolean((await readHdScheduler()).entries[queued.key]);
+    }, 'A committed upload must eagerly enter the existing queue and scheduler without discovery');
+    const uploadedJob = (await core.listHdJobs()).find(value => value.source === upload.originalUrl)!;
+    assert.equal(uploadedJob.status, 'queued'); assert.equal(uploadedJob.priority, 0);
+    assert.equal(await registerCommittedAssetHd(uploaded.asset.id, 'another-owner'), false);
+    assert.equal((await registerVerifiedUpload(upload)).reused, true);
+    assert.equal(await registerCommittedAssetHd(uploaded.asset.id, upload.ownerId), true);
+    assert.equal((await core.listHdJobs()).filter(value => value.source === upload.originalUrl).length, 1);
+    assert.equal(await snapshot(task.id), beforeUpload);
+    assert.equal(createHash('sha256').update(await fs.readFile(upload.proof.file)).digest('hex'), upload.proof.hash);
+    checks.push('shared_upload_commit_eagerly_registers_reuses_original_and_preserves_billing');
+
+    const rolledBack = await uploadInput('eager-upload-rollback');
+    rolledBack.requestId = upload.requestId;
+    await assert.rejects(registerVerifiedUpload(rolledBack), { code: 'UPLOAD_REQUEST_CONFLICT' });
+    assert.equal(await prisma.asset.findUnique({ where: { owner_id_hash: { owner_id: rolledBack.ownerId, hash: rolledBack.proof.hash } } }), null);
+    assert.equal((await core.listHdJobs()).some(value => value.source === rolledBack.originalUrl), false);
+    await prisma.asset.update({ where: { id: uploaded.asset.id }, data: { status: 'hidden' } });
+    const queueBeforeHidden = JSON.stringify(await core.listHdJobs());
+    assert.equal(await registerCommittedAssetHd(uploaded.asset.id, upload.ownerId), false);
+    assert.equal(JSON.stringify(await core.listHdJobs()), queueBeforeHidden);
+    const unavailable = await uploadInput('eager-upload-unavailable');
+    unavailable.originalUrl = '/uploads/not-published.png';
+    const failureLogs: string[] = [];
+    const failureLogMock = mock.method(console, 'error', (...args: unknown[]) => { failureLogs.push(args.join(' ')); });
+    try {
+      const saved = await registerVerifiedUpload(unavailable);
+      assert.ok(await prisma.asset.findUnique({ where: { id: saved.asset.id } }));
+      await waitFor(async () => failureLogs.some(line => line.includes(saved.asset.id)), 'Non-blocking HD registration must finish safely');
+      assert.ok(failureLogs.every(line => !line.includes(directory) && !line.includes(unavailable.originalUrl)));
+      assert.equal(await snapshot(task.id), beforeUpload);
+    } finally { failureLogMock.mock.restore(); }
+    checks.push('upload_rollback_hidden_asset_and_hd_failure_preserve_saved_state_and_private_sources');
+
     const worker = await fs.readFile(path.join(applicationRoot, 'src/lib/image-studio/worker.ts'), 'utf8');
     assert.equal((worker.match(/await registerCommittedStudioHd\(task\.id\)/g) || []).length, 2);
-    assert.equal(checks.length, 4);
+    assert.equal(checks.length, 6);
     assert.equal(forbiddenCalls, 0);
     const receipt = { schema: 'hd-registration-engineering.v1', runId, completed: true, checks, total: checks.length,
       passed: checks.length, productionWrites: 0, paidRequests: 0, browserRuns: 0, forbiddenCalls };

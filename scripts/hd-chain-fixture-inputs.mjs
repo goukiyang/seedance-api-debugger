@@ -31,4 +31,6 @@ export const HD_CHAIN_FIXTURE_SOURCES = [
   'src/app/api/admin/hd-derivatives/route.ts',
   'src/lib/image-studio/worker.ts', 'src/lib/image-studio/dimension-rejection.ts',
   'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/tasks.ts',
+  'src/lib/assets/verified-upload.ts', 'src/app/api/assets/upload/route.ts',
+  'src/lib/video/multiview-output-assets.server.ts',
 ];

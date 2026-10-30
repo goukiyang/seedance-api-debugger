@@ -125,6 +125,7 @@ async function main() {
   class MultiviewWorkError extends Error { constructor(message: string, public status: number, public code: string) { super(message); } }
   const outputAssets = await moduleUnderTest('src/lib/video/multiview-output-assets.server.ts', {
     '@/lib/prisma': { prisma: bindingDb }, '@/lib/assets/site-url': { siteUploadPathFromUrl }, '@/lib/image-studio/protected-assets': {},
+    '@/lib/media/hd-registration': { registerCommittedAssetHd: async () => { throw new Error('Read-only binding checks must not register HD'); } },
     './multiview-work-contract': workContract,
     './multiview-works': { currentMultiviewActor: async () => {}, MultiviewWorkError,
       assertMultiviewWorkReference: async () => { if (!sourcePermitted) throw new AuthError('Source access denied', 403); } },

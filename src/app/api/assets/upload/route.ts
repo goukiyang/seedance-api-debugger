@@ -18,7 +18,6 @@ import {
   validateSiteUploadMetadata,
 } from '@/lib/assets/site-upload';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
-import { requestHd } from '@/lib/media/hd-derivatives';
 import { uploadPreflightFailure } from '@/lib/assets/direct-upload-error';
 
 export const runtime = 'nodejs';
@@ -253,11 +252,6 @@ export async function POST(request: NextRequest) {
     receiving = null;
     const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId);
     await transitionRawUpload(identity, writing.nonce, 'writing', 'completed').catch(() => {});
-    if (mimeType.startsWith('image/')) void prisma.asset.findFirst({
-      where: { id: uploadResult.assetId, owner_id: user.id, status: 'active', type: 'image' },
-      select: { id: true, owner_id: true, original_url: true },
-    }).then(asset => asset && requestHd(asset.original_url, 0, undefined, undefined,
-      { owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } })).catch(() => {});
 
     await recordAssetUploadLog({
       operatorId: user.id,

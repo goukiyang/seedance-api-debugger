@@ -30,6 +30,11 @@ const waiting = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 're
 /** A consumer lease over the existing sessions, never a second cache or queue. */
 export function prepareImagePreview(options: ImagePreviewPreparationOptions): ImagePreviewPreparation {
   const { account, source } = options, sourceVersion = options.sourceVersion || '', previewOnly = Boolean(options.previewOnly), original = Boolean(options.original);
+  const descriptionSource = imageDisplaySource(source, 'hd-description');
+  const supported = !previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
+  // Unknown readiness is not absence: confirm it before starting original bytes.
+  const initialKind = (hint?: HdDescription): HdDisplayKind => previewOnly ? 'preview'
+    : original || !supported || hdDescriptionUsesOriginal(hint) ? 'original' : hint ? 'hd' : 'preview';
   const listeners = new Set<(state: PreparedImagePreviewState) => void>();
   let initialLease = true, disposed = false, readSequence = 0, readKey = '', recovering = false, recovered409 = false;
   let confirmed = options.intent !== 'prepare', originalRoute = false, retries = 0;
@@ -195,9 +200,8 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     confirmOpen: () => {
       if (!active() || confirmed) return;
       confirmed = true; releaseHd?.(); releaseHd = undefined;
-      const descriptionSource = imageDisplaySource(source, 'hd-description');
       const hint = !previewOnly && !original ? hdImageHint(account, descriptionSource, sourceVersion) : undefined;
-      load(previewOnly ? 'preview' : hint && !hdDescriptionUsesOriginal(hint) ? 'hd' : 'original', hint);
+      load(initialKind(hint), hint);
       if (!previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source))
         releaseHd = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, { intent: 'open', viewToken });
     },
@@ -208,13 +212,11 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   // including bodies held by another viewer. The preview then authorizes anew.
   if (previewOnly) invalidateImageReadSource(source, account);
   releasePriority = beginImageForegroundPreparation(account);
-  const descriptionSource = imageDisplaySource(source, 'hd-description');
-  const supported = !previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
   if (previewOnly || !supported) {
     load(previewOnly || !confirmed ? 'preview' : 'original', !previewOnly ? hdImageHint(account, descriptionSource, sourceVersion) : undefined);
   } else {
     const hint = hdImageHint(account, descriptionSource, sourceVersion);
-    load(!confirmed ? 'preview' : !original && hint && !hdDescriptionUsesOriginal(hint) ? 'hd' : 'original', hint);
+    load(!confirmed ? 'preview' : initialKind(hint), hint);
     const release = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, confirmed ? { intent: 'open', viewToken } : { intent: 'status' });
     releaseHd = release; if (disposed) release();
   }
