@@ -98,3 +98,14 @@
 - RISK-2：1080p 审批和项目预算是高风险业务，复用现有策略，不复制另一套扣费实现；发现需要改变审批语义时停止并回报。
 - RISK-3：画布生产工作树有未提交改动，本分支不复制、不重写、不部署；需要合并时交给主控线程按冲突边界处理。
 - STOP：出现 provider 需要新凭据、真实付费验证、生产数据覆盖、破坏性 Git 操作或现有画布改动冲突时暂停，保留已验证代码和证据。
+
+## 6. 2026-10-30 未能使用的原因核查
+
+用户反馈“未能使用，查明原因”。本次核查结论：代码已部署，但 Draft 创建和升级能力均未开放，原任务的“可供用户使用”目标仍未完成；前文 D1-D10 的实现勾选不能代表真实供应商或用户流程已验收。
+
+- 正式站 `https://sd2.youdooart.com/api/config` 返回 `seedance_draft.create_enabled=false`、`upgrade_enabled=false`、`status=provider_contract_pending`，提示“供应商升级接口尚未完成核验，样片 Draft 入口暂不可用”。服务器本机 `127.0.0.1:3302/api/config` 返回相同结果。
+- 实际 `sd2-gray.service` 为 active/running，工作目录是 `/data/video-api-debugger/managed-releases/ed76434ee1f18c2df27a57cf0972eddcaf63cb78`，包版本 `0.118.4`，BUILD_ID 为 `i0569MPSAvCeG0cjEnDIB`。该活动产物包含两个 Draft 升级路由，因此本次不是该功能代码漏部署。`/srv/video-api-debugger/app` 的部署标记与活动服务目录不同，不能用该旧目录代替运行实例取证。
+- 活动源码中 `seedance-draft.ts` 只有对应环境开关严格等于字符串 `true` 才启用；生成页会禁用 Draft 选择并阻止升级提交，创建接口在开关关闭时拒绝创建 Draft，升级服务返回 `503 DRAFT_UPGRADE_DISABLED`。
+- 重新读取供应商公开文档 `https://model.seedance-api.net/docs?menu=apiSeedance25`：入口脚本 `index-BbD1lDhJ.js` 以及 `ApiSeedance25-C_cqO2Mr.js`、`ApiSeedance25FullFeatured-BdtMVyHi.js` 均未找到 `draft_task`，两个 2.5 文档分片各只找到一处 `draft:false` 示例。此证据仅表明公开材料仍未说明升级契约，不能据此断言供应商实际不支持。
+- 上次交付完成的是代码、Mock 和 Git；真实供应商升级与完整用户流程没有通过证据。将整项标为“已完成”或称已可用不准确。
+- 本轮未改业务代码、生产配置或开关，未提交付费生成。后续需核实当前网关支持的 Draft 创建/升级请求、响应和费用，再安排真实链路验证与能力启用；不能只刷新页面或直接翻开关作为修复。
