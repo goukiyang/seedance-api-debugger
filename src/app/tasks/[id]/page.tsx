@@ -1168,7 +1168,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     if (task && ['failed', 'cancelled'].includes(task.local_status)) {
       setAutoPoll(false);
     }
-    if (task?.local_status === 'succeeded' && (task.public_video_url || (task.playable_available && task.play_url))) {
+    if (task?.local_status === 'succeeded' && (task.public_video_url || (task.protected_module && task.playable_available && task.play_url))) {
       setAutoPoll(false);
     }
   }, [task]);

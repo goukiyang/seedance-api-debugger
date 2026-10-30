@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## MV-VIEW01 已有动作成品播放与详情缺图（2026-10-29）
+
+来源：主控Ego37/p1本人账号实际操作，版本0.117.5；关键词：完整播放、101帧、动作作品回看、任务详情遗漏、受保护play_url。原件 [ego-playback-evidence.json](2026-10-29-multiview-action-fixes/implementation/mv-test01/ego-playback-evidence.json)、[ego-playback-complete.png](2026-10-29-multiview-action-fixes/implementation/mv-test01/ego-playback-complete.png)、[ego-task-detail-no-result.png](2026-10-29-multiview-action-fixes/implementation/mv-test01/ego-task-detail-no-result.png) 与原 [核账证据](2026-10-29-multiview-action-fixes/implementation/mv-test01/existing-success-reconciliation.json) 均存正式根私有目录，JSON可解析、截图由主控核实且详情截图已读取；保原名，不上传Git。详细原单§23.6.5，替代§23.6.4页面尚未播放的当时状态，不删历史。新修复工程和发布沿同主题implementation/mv-view01/，新任务详情实页仍交主控Ego确认。
+
 ## MV-TEST01 真实动作生成失败（2026-10-29）
 
 来源：主线程本轮独占xiaobo Chrome、杨波本人作品的一次真实确认，费用层未关闭、底部提示参考拼图素材不可用，未重试；原名mv-test01-first-failure.png已在正式根`docs/materials/2026-10-29-multiview-action-fixes/implementation/`，368796字节PNG可读。私有同目录mv-test01-chain-evidence.json核同一素材本地/公网地址身份冲突、原文件完整、最新相关旧closed准备与pending fence分立保留，无关联任务/上游/费用；不冒本次新run或手验通过。正式原单§23.6，关键词：动作素材、共享公网化、原源权限、确认关层、单条手验。候选0.116.4，最终真实Chrome及单条生成仍归主线程；本执行者无浏览器/生成API或服务号替验，完整资料不公开Git。
