@@ -130,6 +130,16 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
     checks.push('prepare_never_original_confirmed_open_pins_original_after_hd_ready');
 
+    reset(); descriptions.set('unknown-scheduler', { ...ready, status: 'queued', errorKind: 'scheduling_unconfirmed' });
+    const unknown = mount('unknown-scheduler'); await flush();
+    assert.equal(unknown.getSnapshot().displayKind, 'original');
+    assert.equal(unknown.getSnapshot().descriptorPending, false);
+    assert.equal(unknown.getSnapshot().result.decoded, true);
+    assert.equal(Math.min(...Array.from(timers.values(), timer => timer.at - now)), 60_000);
+    descriptions.set('unknown-scheduler', { ...ready, status: 'running' }); await advance();
+    assert.equal(unknown.getSnapshot().descriptorPending, true, 'confirmed scheduling resumes normal waiting');
+    checks.push('unknown_scheduling_keeps_original_and_quiet_recovery');
+
     reset(); descriptions.set('failed-image', { ...ready, status: 'running' }); bodies.set('failed-image:original', 503);
     const failed = mount('failed-image'); await flush(); await advance(); await advance();
     assert.equal(failed.getSnapshot().displayKind, 'original'); assert.equal(failed.getSnapshot().result.imageSrc, null);

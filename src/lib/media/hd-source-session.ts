@@ -4,6 +4,9 @@ export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' 
   encodingStrategy?: 'hd-legacy-e6-v1' | 'hd-avif-e4-v1'; representationVersion?: string;
   processingAvailability?: 'active' | 'resource_wait' | 'manual_pause' | 'hard_pause' | 'unknown' };
 export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean; httpStatus?: number };
+export function hdDescriptionPending(description?: HdDescription) {
+  return description?.errorKind !== 'scheduling_unconfirmed' && ['queued', 'running'].includes(description?.status || '');
+}
 type Listener = (state: HdSourceState) => void;
 type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; viewTokens: Map<Listener, string>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
 type ImageReadFamilyInvalidator = (source: string, account: string) => void;
@@ -73,14 +76,15 @@ function poll(entry: Descriptor) {
   if (!entry.listeners.size || document.hidden || entry.state.denied) return;
   const ready = entry.state.description?.status === 'ready';
   const pending = ['queued', 'running'].includes(entry.state.description?.status || '');
+  const schedulingUnknown = entry.state.description?.errorKind === 'scheduling_unconfirmed';
   if (!ready && !pending && !entry.state.error) return;
   // A temporary status-read failure must not permanently stop an open viewer.
   // Ready checks are read-only, while unchanged queue checks back off to 30s.
   const delay = entry.state.error ? Math.max(1000, entry.retryAfter - Date.now())
-    : ready ? Math.max(1000, READY_TTL - (Date.now() - entry.at))
+    : schedulingUnknown ? READY_TTL : ready ? Math.max(1000, READY_TTL - (Date.now() - entry.at))
       : Math.min(30_000, 5000 * 2 ** Math.min(entry.unchangedPolls, 3));
   entry.timer = setTimeout(() => { void read(entry, ready || !entry.viewTokens.size); },
-    pending && entry.viewTokens.size && !entry.state.error ? Math.min(15000, delay) : delay);
+    pending && entry.viewTokens.size && !entry.state.error && !schedulingUnknown ? Math.min(15000, delay) : delay);
 }
 async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState> {
   if (entry.pending) return entry.pending;
