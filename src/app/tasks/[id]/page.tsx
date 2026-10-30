@@ -82,6 +82,10 @@ interface VideoTask {
   draft_contract_version?: string | null;
   provider_status: string | null;
   result_video_url: string | null;
+  protected_module?: boolean;
+  playable_available?: boolean;
+  play_url?: string | null;
+  download_url?: string | null;
   result_last_frame_url: string | null;
   local_video_path: string | null;
   public_video_url: string | null;
@@ -956,9 +960,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       enhanced?.pause();
       single?.pause();
     };
-  }, [task?.id, task?.local_status, task?.public_video_url, task?.local_video_path, task?.result_video_url,
+  }, [task?.id, task?.local_status, task?.public_video_url, task?.local_video_path, task?.result_video_url, task?.play_url,
     task?.public_video_storage_provider, currentEnhanceSourceTaskId, enhanceSourceTask?.id,
-    enhanceSourceTask?.public_video_url, enhanceSourceTask?.local_video_path, enhanceSourceTask?.result_video_url]);
+    enhanceSourceTask?.public_video_url, enhanceSourceTask?.local_video_path, enhanceSourceTask?.result_video_url, enhanceSourceTask?.play_url]);
 
   const fetchTask = useCallback(async (forceProviderRefresh = false): Promise<VideoTask | null> => {
     if (!activePageRef.current) return null;
@@ -1164,7 +1168,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     if (task && ['failed', 'cancelled'].includes(task.local_status)) {
       setAutoPoll(false);
     }
-    if (task?.local_status === 'succeeded' && task.public_video_url) {
+    if (task?.local_status === 'succeeded' && (task.public_video_url || (task.playable_available && task.play_url))) {
       setAutoPoll(false);
     }
   }, [task]);
@@ -1407,12 +1411,17 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     await downloadVideoToLocal(task);
   };
 
-  const taskPlaybackUrl = (sourceTask: VideoTask) => (
-    sourceTask.public_video_url || new URL(`/api/video/play/${sourceTask.id}`, window.location.origin).toString()
-  );
+  const taskPlaybackUrl = (sourceTask: VideoTask) => {
+    if (sourceTask.protected_module) {
+      return sourceTask.playable_available && sourceTask.play_url
+        ? new URL(sourceTask.play_url, window.location.origin).toString() : '';
+    }
+    return sourceTask.public_video_url || new URL(`/api/video/play/${sourceTask.id}`, window.location.origin).toString();
+  };
 
   const taskVideoSource = (sourceTask: VideoTask | null) => {
     if (!sourceTask) return '';
+    if (sourceTask.protected_module) return sourceTask.playable_available ? sourceTask.play_url || '' : '';
     if (sourceTask.public_video_url) return sourceTask.public_video_url;
     if (sourceTask.local_video_path) return `/api/video/play/${sourceTask.id}`;
     return sourceTask.result_video_url || '';
@@ -1425,7 +1434,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     setOpenError(null);
 
     try {
-      let hasUsableLink = Boolean(task.public_video_url || task.local_video_path || task.result_video_url);
+      let hasUsableLink = Boolean(taskVideoSource(task));
       if (!hasUsableLink) {
         const localVideoPath = await downloadVideoToLocal(task);
         if (!localVideoPath) {
@@ -1456,7 +1465,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     setOpenError(null);
 
     try {
-      if (task.public_video_url || task.local_video_path || task.result_video_url) {
+      if (taskVideoSource(task)) {
         window.location.assign(taskPlaybackUrl(task));
         return;
       }
@@ -1466,7 +1475,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
         const refreshedTask = await fetchTask(true);
         if (!activePageRef.current) return;
         if (refreshedTask) {
-          if (refreshedTask.public_video_url || refreshedTask.local_video_path || refreshedTask.result_video_url) {
+          if (taskVideoSource(refreshedTask)) {
             window.location.assign(taskPlaybackUrl(refreshedTask));
             return;
           }
@@ -1485,8 +1494,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     setOpenError(null);
 
     try {
-      let downloadHref = task.public_video_url
-        || (task.local_video_path ? taskPlaybackUrl(task) : '');
+      let downloadHref = task.protected_module
+        ? (taskVideoSource(task) ? task.download_url || task.play_url || '' : '')
+        : task.public_video_url || (task.local_video_path ? taskPlaybackUrl(task) : '');
       if (!downloadHref) {
         const preparedVideoPath = await downloadVideoToLocal(task);
         if (!preparedVideoPath) {
@@ -1678,6 +1688,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const referenceAudios = parseJsonArray(task.reference_audio_urls);
   const frameImages = parseJsonArray(task.frame_image_urls);
   const videoSrc = getVideoSrc();
+  const hasProtectedPlayback = Boolean(task.protected_module && task.playable_available && task.play_url);
   const hasPublicVideo = !!task.public_video_url;
   const hasLocalVideo = !!task.local_video_path;
   const hasFallbackVideo = !!(task.local_video_path || task.result_video_url);
@@ -1772,7 +1783,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
         : hasResultVideo
           ? ''
           : '暂时没有可播放链接，可以重新查询结果。';
-  const resultStorageText = hasPublicVideo
+  const resultStorageText = hasProtectedPlayback ? '视频已就绪' : hasPublicVideo
     ? '对象存储已就绪'
     : isPublicVideoPreparing
       ? '视频准备中'
@@ -1784,7 +1795,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
           ? '远程备用链接'
           : '没有视频链接';
   const shouldShowRefresh = isSubmissionUnknown || isProcessing
-    || !task.result_video_url
+    || (!hasProtectedPlayback && !task.result_video_url)
     || isPublicVideoPreparing
     || task.local_status === 'failed';
 
@@ -2141,7 +2152,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 {canUseVideoActions && (
                   <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
                     <Copy size={16} aria-hidden="true" />
-                    {copyingLink ? '复制中...' : copied ? '已复制' : hasPublicVideo ? '复制播放链接' : '复制备用链接'}
+                    {copyingLink ? '复制中...' : copied ? '已复制' : hasPublicVideo || hasProtectedPlayback ? '复制播放链接' : '复制备用链接'}
                   </button>
                 )}
                   </div>
@@ -2159,7 +2170,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     className={`btn btn-primary ${resultStyles.download}`}
                     onClick={handleBrowserDownloadVideo}
                     disabled={browserDownloading || downloading}
-                    title={hasPublicVideo ? '从对象存储下载视频' : '下载备用视频文件'}
+                    title={hasProtectedPlayback ? '下载视频文件' : hasPublicVideo ? '从对象存储下载视频' : '下载备用视频文件'}
                   >
                     <Download size={16} aria-hidden="true" />
                     {browserDownloading || downloading ? '准备中...' : '下载视频'}
