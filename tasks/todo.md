@@ -1,5 +1,14 @@
 # V1.2 剩余模块落地 Todo
 
+## PG-UX01/02 Video prompt group management (2026-10-30)
+
+| ID | Task | Completion criteria | Status |
+|---|---|---|---|
+| PG-UX01 | Prompt group management UX | Direct selected-group editing, menu deletion, explicit save/use behavior, retained list position and prompt-first editing | Engineering delivered; user manual acceptance pending |
+| PG-UX02 | Build and protected deployment | Focused push, Linux build, live artifact checks and program recovery retained | Deployed v0.118.1; manual functional acceptance pending |
+
+Application source `359760ed31d3d5bef45d759a0777a5888ee69c13`, BUILD `37db3I5R0EPvrNvLnXnHh`, deployed 2026-10-30T09:13:44Z. Full Next build includes types and lint; six existing startup checks, seven services and public generate/prompt-group chunks match the candidate. Existing v0.118.0 program retained for recovery. No schema, authorization, billing or historical-data changes. No browser, paid generation, real business save/delete tests or independent review. Full private task and evidence remain in the formal project records.
+
 ## MV-RESULT01 当前页结果与历史视频（2026-10-30）
 
 | 编号 | 任务 | 完成标准 | 状态 |
