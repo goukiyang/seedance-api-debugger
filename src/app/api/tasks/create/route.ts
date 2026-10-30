@@ -74,6 +74,7 @@ import {
   canCreateSeedanceDraft,
   isSeedanceDraftCreateEnabled,
   SEEDANCE_DRAFT_CONTRACT_VERSION,
+  SEEDANCE_DRAFT_RESOLUTION,
 } from '@/lib/provider/seedance-draft';
 import {
   H3_VIDEO_PROVIDER,
@@ -1082,8 +1083,11 @@ export async function POST(request: NextRequest) {
     if (requestedProvider !== 'seedance' || !canCreateSeedanceDraft(selectedModel)) {
       return errorJson('样片 Draft 只支持 Seedance 2.5', 400);
     }
+    if (resolution !== SEEDANCE_DRAFT_RESOLUTION) {
+      return errorJson(`样片 Draft 仅支持 ${SEEDANCE_DRAFT_RESOLUTION}，请修改 resolution 或关闭 Draft 后提交`, 400);
+    }
     if (!isSeedanceDraftCreateEnabled()) {
-      return errorJson('供应商 Draft 能力尚未完成核验，暂不能创建样片 Draft', 503);
+      return errorJson('样片 Draft 创建已关闭，请联系管理员启用', 503);
     }
   }
 

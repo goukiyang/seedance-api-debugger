@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '复用飞书登录', outline: [
-  '飞书登录后直接复用本站身份，不再另外验证',
-  '未开通或身份不匹配时说明权限原因',
+const notice = { title: '样片可生成', outline: [
+  'Seedance 2.5 可先生成 480p 样片，确认后沿用内容生成 1080p',
+  '样片和正式片分别计费，提交前按当前参数确认费用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
