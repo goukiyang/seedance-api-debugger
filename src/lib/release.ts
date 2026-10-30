@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频结果直达', outline: [
-  '3D多视图当前页直接查看视频、生成状态和实际扣费',
-  '历史视频常显，点选即可播放，不改变正在编辑的内容',
+const notice = { title: '提示词组管理', outline: [
+  '已选提示词组可直接编辑，更多菜单可删除',
+  '保存与本次选用更清楚，编辑后保留列表位置',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

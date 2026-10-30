@@ -74,3 +74,6 @@
   .attachment { gap: 1px; }
   .attachment > button:first-child { max-width: 138px; }
 }
+
+.secondary summary { cursor: pointer; color: var(--text-secondary, inherit); font-size: 13px; }
+.secondary[open] > .form { padding-top: 12px; }

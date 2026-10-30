@@ -12,7 +12,7 @@ import { ResourceLibraryPicker, type ResourceLibraryPickerProps } from '@/compon
 import { VIDEO_GROUP_LIMIT, parseVideoPromptGroupRefs, type VideoPromptGroupRef, type VideoPromptGroupSummary } from '@/lib/video/prompt-groups';
 import styles from './PromptGroupSelection.module.css';
 
-type Group = VideoPromptGroupRef & Partial<VideoPromptGroupSummary> & { copyFrom?: VideoPromptGroupRef };
+type Group = VideoPromptGroupRef & Partial<VideoPromptGroupSummary> & { copyFrom?: VideoPromptGroupRef; intent?: 'delete' };
 const api = '/api/video/prompt-groups';
 const editorScope = (accountId: string) => `sd2:video-group-editor:v1:${accountId}`;
 function retainedEditor(accountId: string): Group | null {
@@ -21,7 +21,7 @@ function retainedEditor(accountId: string): Group | null {
     if (!value) return null;
     const [ref] = parseVideoPromptGroupRefs([{ groupId: value.groupId, versionId: value.versionId }]);
     return { groupId: ref.groupId, versionId: ref.versionId, ...(Number.isSafeInteger(value.revision) ? { revision: value.revision } : {}),
-      ...(value.copyFrom ? { copyFrom: parseVideoPromptGroupRefs([value.copyFrom])[0] } : {}) };
+      ...(value.copyFrom ? { copyFrom: parseVideoPromptGroupRefs([value.copyFrom])[0] } : {}), ...(value.intent === 'delete' ? { intent: 'delete' as const } : {}) };
   } catch { return null; }
 }
 function retainedRequests(key: string): { pending: string | null; draftPending: string | null; action?: 'save' | 'delete'; use?: boolean } {
@@ -115,8 +115,8 @@ function GroupDetail({ item, onClose, onUse, onEdit, onCopy }: { item: Group | n
 
 type EditorFields = { name: string; description: string; conditions: string; body: string; coverAssetId: string | null; shared: boolean; disabled: boolean; copyFrom?: VideoPromptGroupRef };
 const empty: EditorFields = { name: '', description: '', conditions: '', body: '', coverAssetId: null, shared: false, disabled: false };
-function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boolean; item: Group; onClose: () => void;
-  onSaved: (value: VideoPromptGroupRef, use: boolean, deleted?: boolean) => void; onUploadFile?: ResourceLibraryPickerProps['onUploadFile'] }) {
+function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '保存并加入待选' }: { open: boolean; item: Group; onClose: () => void;
+  onSaved: (value: VideoPromptGroupRef, use: boolean, deleted?: boolean) => void; onUploadFile?: ResourceLibraryPickerProps['onUploadFile']; useLabel?: string }) {
   const { confirm, productDialog } = useProductDialog();
   const { user } = useAppSession();
   const [editorId, setEditorId] = useState(item.groupId);
@@ -207,9 +207,9 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     }
     finally { if (generation === sequence.current) setBusy(false); }
   };
-  const remove = async () => {
+  const remove = async (confirmed = false) => {
     if (pending || draftPending || busy || readFailed || conflict || !item.revision) return;
-    if (!await confirm(`删除“${fields.name}”？它将退出可用目录，历史、原图和已受理任务保留；已有引用不会自动移除。`, { title: '删除提示词组', confirmLabel: '删除', danger: true })) return;
+    if (!confirmed && !await confirm(`删除“${fields.name}”？它将退出可用目录，历史、原图和已受理任务保留；已有引用不会自动移除。`, { title: '删除提示词组', confirmLabel: '删除', danger: true })) return;
     const generation = sequence.current, requestId = crypto.randomUUID(); requestIntent.current = { action: 'delete', use: false };
     if (!remember(requestId, draftPending)) return;
     setBusy(true); setPending(requestId); setNotice('');
@@ -238,6 +238,14 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     catch { setNotice('浏览器无法保留副本现场，当前修改保留'); return; }
     setEditorId(id); setRevision(0); setDraftRevision(0); setDurable(''); setFields(v => ({ ...v, shared: false, disabled: false, copyFrom: source })); setConflict(false); setDraftPaused(false); setNotice('已准备私人副本，请保存');
   };
+  if (item.intent === 'delete') return <Modal open={open} narrow title="删除提示词组" onClose={() => void close()} footer={<>
+    <button type="button" className={styles.button} onClick={() => void close()}>取消</button>
+    {pending || draftPending ? <button type="button" className={styles.button} disabled={busy} onClick={() => void query()}>核对原操作</button>
+      : <button type="button" className={`${styles.button} ${styles.danger}`} disabled={busy || loading || readFailed || conflict || revision === 0} onClick={() => void remove(true)}>删除</button>}
+  </>}>{loading ? <p role="status">正在核对当前提示词组…</p> : readFailed ? <p role="status">{notice}<button type="button" className={styles.button} onClick={() => setReload(v => v + 1)}>重新读取</button></p> : <>
+    <p>删除“{fields.name}”？它将退出可用目录，历史、原图和已受理任务保留；已有引用不会自动移除。</p>
+    {notice && <p className={styles.meta} role="status">{notice}</p>}
+  </>}</Modal>;
   return <><Modal open={open} narrow title={revision ? '编辑提示词组' : '新建提示词组'} onClose={() => void close()} footer={<>
     {notice && <p className={styles.meta} role="status">{notice}</p>}
     {draftPaused && !conflict && !pending && !draftPending && <button type="button" className={styles.button} disabled={busy} onClick={() => setDraftPaused(false)}><RefreshCw size={15} />重试草稿保存</button>}
@@ -247,13 +255,15 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile }: { open: boo
     <div className={styles.actions}><button type="button" className={styles.button} onClick={() => void close()}>取消</button>
       {pending || draftPending ? <button type="button" className={styles.button} disabled={busy} onClick={() => void query()}><RefreshCw size={15} />核对原保存</button>
         : <><button type="button" className={styles.button} disabled={busy || loading || readFailed || conflict || !fields.name.trim() || !fields.body.trim()} onClick={() => void save()}>保存</button>
-          <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || loading || readFailed || conflict || fields.disabled || !fields.name.trim() || !fields.body.trim()} onClick={() => void save(true)}>保存并选用</button></>}</div>
+          <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || loading || readFailed || conflict || fields.disabled || !fields.name.trim() || !fields.body.trim()} onClick={() => void save(true)}>{useLabel}</button></>}</div>
   </>}>{loading ? <p role="status">正在读取…</p> : readFailed ? <p role="status">完整内容读取失败，未开放空稿保存。<button type="button" className={styles.button} onClick={() => setReload(v => v + 1)}><RefreshCw size={16} />重新读取</button></p> : <fieldset className={styles.form} disabled={Boolean(pending)}>
     <label>名称<input maxLength={80} value={fields.name} onChange={e => setFields(v => ({ ...v, name: e.target.value }))} /></label>
+    <label>内部提示词<textarea className={styles.body} maxLength={8000} value={fields.body} onChange={e => setFields(v => ({ ...v, body: e.target.value }))} /></label>
+    <details className={styles.secondary}><summary>简介、条件与封面</summary><div className={styles.form}>
     <label>用途简介<textarea maxLength={800} value={fields.description} onChange={e => setFields(v => ({ ...v, description: e.target.value }))} /></label>
     <label>适用条件<textarea maxLength={800} value={fields.conditions} onChange={e => setFields(v => ({ ...v, conditions: e.target.value }))} /></label>
     {onUploadFile && <button type="button" className={styles.button} onClick={() => setCoverOpen(true)}><ImageIcon size={16} />{fields.coverAssetId ? '更换封面' : '选择封面'}</button>}
-    <label>内部提示词<textarea className={styles.body} maxLength={8000} value={fields.body} onChange={e => setFields(v => ({ ...v, body: e.target.value }))} /></label>
+    </div></details>
     <label className={styles.toggle}><input type="checkbox" role="switch" disabled={Boolean(fields.copyFrom)} checked={fields.shared} onChange={e => setFields(v => ({ ...v, shared: e.target.checked }))} />共享给同事</label>
     {revision > 0 && <details><summary>管理</summary><label className={styles.toggle}><input type="checkbox" checked={fields.disabled} onChange={e => setFields(v => ({ ...v, disabled: e.target.checked }))} />停用</label>
       <button type="button" className={styles.button} onClick={() => { void read(`${api}?mode=versions&groupId=${item.groupId}&versionId=${item.versionId}`).then(value => setVersions(value.versions)).catch(cause => setNotice(cause.message)); }}>版本记录</button>
@@ -307,9 +317,9 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
     }).catch(cause => { if (!controller.signal.aborted) setError(cause.message); });
     return () => controller.abort();
   }, [visibleOpen, refresh, user?.id, JSON.stringify(refs)]); // eslint-disable-line react-hooks/exhaustive-deps
-  const openEditor = (value: Group, copy = false) => {
-    const target: Group = copy ? (() => { const id = crypto.randomUUID(); return { groupId: id, versionId: id, copyFrom: { groupId: value.groupId, versionId: value.versionId } }; })() : value;
-    try { localStorage.setItem(editorScope(user?.id || 'anonymous'), JSON.stringify({ groupId: target.groupId, versionId: target.versionId, revision: target.revision, copyFrom: target.copyFrom })); setEditor(target); setDetail(null); }
+  const openEditor = (value: Group, copy = false, intent?: 'delete') => {
+    const target: Group = copy ? (() => { const id = crypto.randomUUID(); return { groupId: id, versionId: id, copyFrom: { groupId: value.groupId, versionId: value.versionId } }; })() : { ...value, intent };
+    try { localStorage.setItem(editorScope(user?.id || 'anonymous'), JSON.stringify({ groupId: target.groupId, versionId: target.versionId, revision: target.revision, copyFrom: target.copyFrom, intent: target.intent })); setEditor(target); setDetail(null); }
     catch { setError('浏览器无法保留编辑现场，尚未打开编辑。'); }
   };
   const closeEditor = () => { setEditor(null); };
@@ -333,12 +343,22 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
       setSelection(items => items.map(item => item.groupId === ref.groupId ? { ...item, unavailable: true, deleted: true, reason: '已删除，历史保留，请移除或替换' } : item));
       setLocated(null); return;
     }
-    setQuery(''); setScope('all'); setPages(['']); setSelectedOnly(false); scrollPosition.current = 0;
+    const created = !editor?.revision || ref.groupId !== editor.groupId || Boolean(editor.copyFrom);
+    if (created) { setSelectedOnly(false); scrollPosition.current = 0; }
     const sequence = ++savedSequence.current;
     void read(`${api}?refs=${encodeURIComponent(JSON.stringify([{ groupId: ref.groupId, versionId: ref.versionId }]))}`).then(data => {
       const group = data.groups[0] as Group;
       if (sequence !== savedSequence.current) return;
-      setLocated(group);
+      if (created) {
+        const matchesScope = scope === 'all' || scope === 'mine' && group.ownerId === user?.id || scope === 'shared' && group.shared;
+        const matchesQuery = !query.trim() || `${group.name || ''} ${group.author?.name || ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+        if (!matchesScope) setScope('all');
+        if (!matchesQuery) setQuery('');
+        setPages(['']); setLocated(group);
+      } else {
+        setGroups(items => items.map(item => item.groupId === group.groupId ? group : item));
+        setLocated(current => current?.groupId === group.groupId ? group : current);
+      }
       if (use && !selectionRef.current.some(item => item.groupId === group.groupId) && selectionRef.current.length >= VIDEO_GROUP_LIMIT) setError('已保存；本次已选满12个，请先移除一项后再选用');
       if (use && !group.unavailable) setSelection(items => items.some(item => item.groupId === group.groupId) ? items.map(item => item.groupId === group.groupId ? group : item) : items.length < VIDEO_GROUP_LIMIT ? [...items, group] : items);
     }).catch(cause => setError(`已保存，目录定位尚未完成：${cause.message}`));
@@ -364,6 +384,7 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
         {(item.canManage || item.canCopy) && <details className={styles.menu}><summary className={styles.icon} title="管理提示词组" aria-label={`管理${item.name || '提示词组'}`}><MoreHorizontal size={16} /></summary><div className={styles.menuItems}>
           {item.canManage && <button type="button" onClick={() => openEditor(item)}><Pencil size={15} />编辑当前原组</button>}
           {item.canCopy && <button type="button" onClick={() => openEditor(item, true)}><Copy size={15} />另存私人副本</button>}
+          {item.canManage && <button type="button" className={styles.danger} onClick={() => openEditor(item, false, 'delete')}><Trash2 size={15} />删除</button>}
         </div></details>}</div></article>; })}</div>
     {!loading && !error && !visible.length && <p className={styles.status}>{query || scope !== 'all' ? '没有匹配的提示词组' : '暂无提示词组'}{query || scope !== 'all' ? <button type="button" className={styles.plain} onClick={() => { setQuery(''); setScope('all'); setPages(['']); }}>清除筛选</button> : canCreate && <button type="button" className={styles.button} onClick={() => { const id = crypto.randomUUID(); openEditor({ groupId: id, versionId: id }); }}><Plus size={16} />新建提示词组</button>}</p>}
   </Modal><GroupDetail item={visibleOpen ? detail : null} onClose={() => setDetail(null)} onUse={() => { if (detail) { if (!selectionRef.current.some(item => item.groupId === detail.groupId)) toggle(detail); setDetail(null); } }} onEdit={() => { if (detail) openEditor(detail); }} onCopy={() => { if (detail) openEditor(detail, true); }} />
@@ -375,6 +396,8 @@ export function PromptGroupSelection({ refs, onChange, disabled = false, onUploa
   onChange: (refs: VideoPromptGroupRef[]) => void; disabled?: boolean; onUploadFile?: ResourceLibraryPickerProps['onUploadFile'] }) {
   const { user } = useAppSession(), summaries = useVideoPromptGroupSummaries(refs);
   const [open, setOpen] = useState(false), [expanded, setExpanded] = useState(false), [detail, setDetail] = useState<Group | null>(null), [undo, setUndo] = useState<VideoPromptGroupRef[] | null>(null);
+  const [editor, setEditor] = useState<Group | null>(null), [editorError, setEditorError] = useState('');
+  useEffect(() => { setEditor(null); setDetail(null); setEditorError(''); }, [user?.id]);
   const container = useRef<HTMLDivElement>(null), [visibleLimit, setVisibleLimit] = useState(2);
   useEffect(() => {
     const element = container.current; if (!element) return;
@@ -393,8 +416,25 @@ export function PromptGroupSelection({ refs, onChange, disabled = false, onUploa
     <button type="button" className={styles.add} title="添加提示词组" aria-label="添加提示词组" disabled={disabled} onClick={() => setOpen(true)}><Plus size={18} /><span>提示词组</span></button>
     {refs.length > visibleLimit && <button type="button" className={styles.plain} onClick={() => setExpanded(v => !v)}>{expanded ? '收起' : `全部 ${refs.length} 个`}</button>}
     {undo && <button type="button" className={styles.icon} title="撤销组选取修改" aria-label="撤销组选取修改" disabled={disabled} onClick={() => { onChange(undo); setUndo(null); }}><Undo2 size={16} /></button>}
+    {editorError && <span className={styles.meta} role="status">{editorError}</span>}
     {summaries.error && <span className={styles.meta} role="status">{summaries.error}<button type="button" className={styles.icon} title="重新核对提示词组" aria-label="重新核对提示词组" onClick={summaries.refresh}><RefreshCw size={14} /></button></span>}
-  </div><PromptGroupPicker key={user?.id || 'anonymous'} open={open} refs={refs} onApply={next => { change(next); summaries.refresh(); }} onClose={() => { setOpen(false); summaries.refresh(); }} onUploadFile={onUploadFile} /><GroupDetail item={detail} onClose={() => setDetail(null)} /></>;
+  </div><PromptGroupPicker key={user?.id || 'anonymous'} open={open} refs={refs} onApply={next => { change(next); summaries.refresh(); }} onClose={() => { setOpen(false); summaries.refresh(); }} onUploadFile={onUploadFile} /><GroupDetail item={editor ? null : detail} onClose={() => setDetail(null)} onEdit={() => {
+    if (!detail) return;
+    setEditorError('');
+    try { localStorage.setItem(editorScope(user?.id || 'anonymous'), JSON.stringify({ groupId: detail.groupId, versionId: detail.versionId, revision: detail.revision })); setEditor(detail); }
+    catch { setEditorError('浏览器无法保留编辑现场，尚未打开编辑。'); }
+  }} />
+    {editor && <GroupEditor key={`${user?.id}:${editor.groupId}`} open item={editor} useLabel="保存并用于本次" onUploadFile={onUploadFile}
+      onClose={() => setEditor(null)} onSaved={(ref, use, deleted) => {
+        try { localStorage.removeItem(editorScope(user?.id || 'anonymous')); sessionStorage.removeItem(editorScope(user?.id || 'anonymous')); } catch { /* Original server receipt remains authoritative. */ }
+        if (use && !deleted) {
+          if (refs.some(value => value.groupId === ref.groupId)) change(refs.map(value => value.groupId === ref.groupId ? ref : value));
+          else if (refs.length < VIDEO_GROUP_LIMIT) change([...refs, ref]);
+          else setEditorError('已保存；本次已选满12个，请先移除一项后再选用');
+        }
+        setDetail(null);
+        summaries.refresh();
+      }} />}</>;
 }
 export function PromptGroupHistory({ refs, label = '提示词组' }: { refs: VideoPromptGroupRef[]; label?: string }) {
   const { groups, error, refresh } = useVideoPromptGroupSummaries(refs), [detail, setDetail] = useState<Group | null>(null);
