@@ -36,6 +36,7 @@ import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { seedanceReferenceMediaCapabilities, validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
+import { SEEDANCE_DRAFT_RESOLUTION } from '@/lib/provider/seedance-draft';
 import type { GenerationDefaults } from '@/lib/preferences/generation';
 import { readImageResultVideoDraft, saveImageResultVideoDraft, type ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
 import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
@@ -585,7 +586,7 @@ export function GenerationComposer({
   onAuxiliaryChange,
   seedanceDraft = {
     createEnabled: false,
-    message: '供应商 Draft 能力尚未完成核验，暂不可用。',
+    message: '暂未读取到样片能力配置，请刷新页面后重试。',
   },
 }: Props) {
   const workspace = useWorkspace();
@@ -1064,6 +1065,9 @@ export function GenerationComposer({
     }
     if (durationBlocker) return durationBlocker;
     if (videoRedesign && draftMode && selectedModel !== SEEDANCE_2_5_MODEL_ID) return '样片与当前型号不兼容，请关闭样片或选择 Seedance 2.5';
+    if (draftMode && resolution !== SEEDANCE_DRAFT_RESOLUTION) {
+      return { message: `样片仅支持 ${SEEDANCE_DRAFT_RESOLUTION}，当前 ${resolution} 参数已保留。请将清晰度改为 ${SEEDANCE_DRAFT_RESOLUTION}，或取消“${SEEDANCE_DRAFT_RESOLUTION}样片”后生成正式片。`, tone: 'hint' as const };
+    }
     if (reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)) {
       return '原任务模型目前不可选，已保留原参数，请明确选择可用模型后再生成。';
     }
@@ -2535,12 +2539,17 @@ export function GenerationComposer({
               disabled={!draftMode && !seedanceDraft.createEnabled}
               onChange={(event) => {
                 markStudioParameterCorrected('draft');
-                setDraftMode(event.currentTarget.checked);
+                const checked = event.currentTarget.checked;
+                setDraftMode(checked);
+                if (checked) {
+                  markStudioParameterCorrected('resolution');
+                  setResolution(SEEDANCE_DRAFT_RESOLUTION);
+                }
               }}
             />
             <span>
-              样片 Draft
-              <small>{seedanceDraft.createEnabled ? '先确认内容，再生成正式 1080p' : seedanceDraft.message}</small>
+              {SEEDANCE_DRAFT_RESOLUTION}样片 Draft
+              <small>{seedanceDraft.createEnabled ? `勾选会将本次清晰度切换为 ${SEEDANCE_DRAFT_RESOLUTION}；${seedanceDraft.message}` : seedanceDraft.message}</small>
             </span>
           </label>
         )}

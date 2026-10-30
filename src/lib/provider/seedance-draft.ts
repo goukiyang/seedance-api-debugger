@@ -1,6 +1,20 @@
 import { SEEDANCE_2_5_MODEL_ID } from './seedance-models';
 
 export const SEEDANCE_DRAFT_CONTRACT_VERSION = 'seedance-draft-v1';
+export const SEEDANCE_DRAFT_RESOLUTION = '480p' as const;
+
+export class SeedanceDraftSubmissionError extends Error {
+  constructor(message: string, public readonly outcome: 'not_sent' | 'rejected' | 'unknown') {
+    super(message);
+  }
+}
+
+export function preserveSeedanceDraftSubmission(input: {
+  sendStarted: boolean; providerTaskId: string | null; error: unknown;
+}) {
+  return Boolean(input.providerTaskId) || (input.sendStarted
+    && !(input.error instanceof SeedanceDraftSubmissionError && input.error.outcome !== 'unknown'));
+}
 
 export type SeedanceDraftContentItem = {
   type: 'draft_task';
@@ -10,11 +24,11 @@ export type SeedanceDraftContentItem = {
 };
 
 export function isSeedanceDraftCreateEnabled() {
-  return process.env.SEEDANCE_DRAFT_CREATE_ENABLED === 'true';
+  return process.env.SEEDANCE_DRAFT_CREATE_ENABLED?.trim().toLowerCase() !== 'false';
 }
 
 export function isSeedanceDraftUpgradeEnabled() {
-  return process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED === 'true';
+  return process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED?.trim().toLowerCase() !== 'false';
 }
 
 export function canCreateSeedanceDraft(model: string) {
@@ -47,13 +61,18 @@ export function buildSeedanceDraftUpgradePayload(input: {
 export function seedanceDraftCapability() {
   const createEnabled = isSeedanceDraftCreateEnabled();
   const upgradeEnabled = isSeedanceDraftUpgradeEnabled();
+  const message = createEnabled
+    ? upgradeEnabled
+      ? '可生成 480p 样片，完成后可另行生成 1080p；两步分别计费。'
+      : '可生成 480p 样片；1080p 升级已关闭。'
+    : upgradeEnabled
+      ? '样片创建已关闭；已完成的样片仍可另行生成 1080p。'
+      : '样片创建和 1080p 升级已关闭，请联系管理员启用。';
   return {
     create_enabled: createEnabled,
     upgrade_enabled: upgradeEnabled,
     contract_version: SEEDANCE_DRAFT_CONTRACT_VERSION,
-    status: upgradeEnabled ? 'enabled' as const : 'provider_contract_pending' as const,
-    message: upgradeEnabled
-      ? '可以从已完成的 Draft 直接生成 1080p。'
-      : '供应商升级接口尚未完成核验，样片 Draft 入口暂不可用。',
+    status: createEnabled || upgradeEnabled ? 'enabled' as const : 'disabled' as const,
+    message,
   };
 }
