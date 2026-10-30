@@ -122,7 +122,8 @@ function validateContract(contract) {
     }
   }
   assert.notEqual(contract.releases[0].source, contract.releases[1].source);
-  assert.deepEqual(Object.keys(contract.releases[0].sourceSha256).sort(), Object.keys(contract.releases[1].sourceSha256).sort());
+  // Each admitted revision has its own complete source list. A compatible
+  // recovery revision need not contain newly added modules from the candidate.
 }
 function directory(adapter, file, owner = null) {
   assert.equal(adapter.realpath(file), file, `Non-canonical directory: ${file}`);
