@@ -73,6 +73,9 @@ async function main() {
       ['not-json', 200, 'unknown'], ['{}', 200, 'unknown'],
       [JSON.stringify({ error: { code: 'InvalidParameter', message: 'Draft is not ready' } }), 200, 'rejected'],
       [JSON.stringify({ error: { code: 'InternalError', message: 'temporary failure' } }), 500, 'unknown'],
+      [JSON.stringify({ error: { code: 'InvalidParameter' } }), 500, 'unknown'],
+      [JSON.stringify({ error: { code: 'Unauthorized' } }), 503, 'unknown'],
+      [JSON.stringify({ error: { code: 'InvalidParameter' } }), 408, 'unknown'],
     ] as const) {
       globalThis.fetch = (async () => new Response(body, { status })) as typeof fetch;
       await assert.rejects(submit, (error: unknown) => error instanceof SeedanceDraftSubmissionError && error.outcome === outcome);

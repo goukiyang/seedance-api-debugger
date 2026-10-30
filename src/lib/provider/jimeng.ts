@@ -615,7 +615,8 @@ export async function createSeedanceDraftUpgradeTask(input: {
     const providerError = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
       ? data.error as Record<string, unknown> : null;
     const errorCode = typeof providerError?.code === 'string' ? providerError.code : typeof data.code === 'string' ? data.code : '';
-    const explicitRejection = !providerTaskId && (Boolean(data.error) && [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status)
+    const rejectionStatus = response.ok || [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status);
+    const explicitRejection = !providerTaskId && rejectionStatus && (!response.ok && Boolean(data.error)
       || /^(InvalidParameter|InvalidApiKey|AuthenticationError|Unauthorized|AccessDenied|PermissionDenied|InsufficientBalance|QuotaExceeded|Forbidden|BadRequest)([._]|$)/i.test(errorCode));
     if (explicitRejection) {
       throw new SeedanceDraftSubmissionError(normalizeProviderErrorMessage(data.error ?? data.message ?? data)
