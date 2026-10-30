@@ -203,7 +203,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
       last_error: '成品已经就绪，可复制和下载；素材入口暂未同步，后台会核对这次原保存记录后继续同步。' }, data: { last_error: null } });
     return true;
   });
-  if (registered) for (const assetId of registeredAssetIds) void registerCommittedAssetHd(assetId, user.id);
+  if (registered) for (const assetId of Array.from(registeredAssetIds)) void registerCommittedAssetHd(assetId, user.id);
   return registered;
 }
 
