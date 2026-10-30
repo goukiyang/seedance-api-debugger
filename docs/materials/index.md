@@ -1,5 +1,13 @@
 # 项目资料索引
 
+## C2 Seedance 2.5 样片到1080p（2026-10-30）
+
+来源为用户“未能使用，查明原因”及“推进”。[固定工单](../../tasks/todo/2026-09-22-seedance-draft-1080p.md#7-交付记录2026-10-30)记录开关关闭、480p合同、提交结果未知保护及Codex准备协议兼容。正式站 `sd2.youdooart.com` 已发布R04 / v0.118.5 / `a8c6d4d7` / BUILD `oGORrogXd002IRkOek7pG`；真实样片854×480、正式片1920×1080，均4.041667秒，两步实扣18+18=36点，冻结0，文件与HTTP200已核对。
+
+[本轮统一diff](2026-10-30-seedance-draft-enable/implementation.patch)、[11项升级流程隔离结果](2026-10-30-seedance-draft-enable/upgrade-financial-fixture.json)及[14项接口准备隔离结果](2026-10-30-seedance-draft-enable/codex-preparation-fixture.json)均已读取；脚本同目录，原输入为本轮实际源码，来源提交和最终运行证据以固定工单为准。隔离结果不替代真实数据库、供应商费用或页面手验；这些材料不含凭据或签名视频URL。
+
+[脱敏生产证据](2026-10-30-seedance-draft-enable/deployment-proof.json)、[真实视频与账本证据](2026-10-30-seedance-draft-enable/live-proof.json)和[仅回程序的恢复入口](2026-10-30-seedance-draft-enable/recovery.txt)已归档，JSON/路径与本轮产物核对。页面依项目规则待用户手验，供应商现金成本未据内部点数推算。
+
 ## MV-RESULT01 当前页结果与历史视频（2026-10-30）
 
 工程交付：2026-10-30T08:26:40Z已部署v0.118.0，源码d58cd491/BUILD `5Kn3bDOS7VrfyjoCAH4wZ`已推送；27项隔离工程检查、完整Next/types/lint、原主/回退6项启动门和公网multiview产物校验通过。7服务加载新源，恢复点4db784f9/v0.117.7已核，只回程序不回数据。常显结果/实扣与24条分页历史已接旋转和动作区；历史点选不改输入，未知不重发。零新生成/收费/浏览器/独审，实际页面效果待用户手动验收。完整证据见正式根原单§23.7.4及implementation/mv-result01/deployment-result.json。

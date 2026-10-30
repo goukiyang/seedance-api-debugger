@@ -1,0 +1,16 @@
+C2 Draft 固定程序恢复，保留当前生产数据、账本、媒体、任务和既有配置值。
+
+ST=/data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04
+GUARD=2c8b45fa4acbde7909b531120511ff139b9c1195
+
+仅用于本批 prepared-pair.json 对应的候选及相容恢复版本，两个新版本均须完成构建和原启动门检查。核对本批 controller 已停止，实际运行状态及已安装三类 allowed.json 仍对应本批；其他发布后不得盲用。
+1. systemctl stop sd2-backup.timer sd2-credit-delivery.timer sd2-feedback-delivery.timer sd2-video-delivery.timer
+2. systemctl stop sd2-gray.service sd2-image-studio.service sd2-hd-derivatives.service sd2-multiview-works.service sd2-role-coordinator.service sd2-template-prompts.service sd2-periodic-credits.service sd2-backup.service sd2-credit-delivery.service sd2-feedback-delivery.service sd2-video-delivery.service
+3. 确认上述 MainPID=0、cgroup 已空，无强杀、无旧源进程；保留现场。
+4. python3 "$ST/repoint.py" "$GUARD"
+5. systemctl daemon-reload
+6. systemctl start sd2-gray.service sd2-image-studio.service sd2-hd-derivatives.service sd2-multiview-works.service sd2-role-coordinator.service sd2-template-prompts.service sd2-periodic-credits.service
+7. systemctl start sd2-backup.timer sd2-credit-delivery.timer sd2-feedback-delivery.timer sd2-video-delivery.timer
+8. 核实际进程 cwd、内网和公网 /api/release，确认 0.118.4+draft-disabled-guard.1；/api/config 的 Draft 创建和升级关闭，已受理任务及普通生成继续。sd2-finalize-pending.timer 保持原 inactive。
+
+恢复仅回程序，不恢复数据库、旧 allowed.json、媒体、扣费、回执或业务配置。恢复版本从本轮实际线上 ed76434 构建，保留当前身份协议及后台任务结构，仅强制关闭新 Draft 创建和升级；未在线演练。

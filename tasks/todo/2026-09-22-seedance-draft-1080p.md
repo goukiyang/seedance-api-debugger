@@ -101,12 +101,12 @@
 
 ## 6. 2026-10-30 恢复推进
 
-用户先反馈“未能使用，查明原因”，随后明确“推进”，本轮按现有账号及当前生产版本接通样片与正式片。C1 原因核查已完成，C2 可用性修复/必要发布/该链路验证进行中；原 D1-D10 的实现勾选不代表真实供应商链路已通过。
+用户先反馈“未能使用，查明原因”，随后明确“推进”，本轮按现有账号及当前生产版本接通样片与正式片。C1 原因核查、C2 修复发布及真实链路验证均已完成，最终证据见第7节。第1–5节保留原阶段计划；当前验收以C1/C2和最终证据为准，原D1-D10实现勾选不单独代表供应商链路可用。
 
 | 编号 | 任务内容 | 完成标准 | 当前状态 |
 |---|---|---|---|
 | C1 | 查明 Draft 转 1080p 未能使用的原因 | 核对代码、部署和接口证据，给出具体原因与下一步 | 已完成 |
-| C2 | 接通并启用 Draft 转 1080p | 正式站可创建样片、升级并取得独立的 1080p 结果，计费与任务关系正确 | 进行中 |
+| C2 | 接通并启用 Draft 转 1080p | 正式站可创建样片、升级并取得独立的 1080p 结果，计费与任务关系正确 | 已完成 |
 
 - 生产现状：`sd2-gray.service` 实际运行 `ed76434ee1f18c2df27a57cf0972eddcaf63cb78` / v0.118.4，BUILD_ID `i0569MPSAvCeG0cjEnDIB`，相关路由已存在；正式站与本机 `/api/config` 的 Draft 创建/升级均为 false。不能用 `/srv/video-api-debugger/app` 的旧部署标记冒充活动版本。
 - 原因：能力开关缺省关闭，实际两个变量均未设置；前端禁用入口，后端拒绝请求。先前代码/Mock 完成不能代表用户可用。
@@ -119,3 +119,79 @@
 - 复核再补 HTTP 状态与拒绝正文冲突的边界：仅成功网关包装或明确的拒绝型 4xx 可按拒绝码释放；5xx、408、409 均保留不确定状态。R02 `81db1d5e` 已完成构建但未切线上，后续以包含该修正的 R03 源码重新构建。另对真实 `createSeedanceDraftUpgrade` 函数执行 11 场景内存账本隔离测试，观察一次冻结、未知不退款、受理后登记失败保 ID、按原号恢复、明确拒绝/发送前失败可退款及同 key 不重发，全部通过；这不是生产账务或真实数据库集成验收。
 - R03 `e5c4af85` 完整构建、主/恢复6个原启动门及7服务切换通过，正式站 v0.118.5 / BUILD `IFKfQBM8Jqzc2fzlvs0J-` 的页面资源与能力开关已核实。首次真实验证在生成/冻结前被旧 Codex wrapper 的 `intent_id无效` 拦下；只读确认任务/账本均为0、冻结0，无供应商调用。新增兼容只在原 Codex 创建/升级入口，按已认证普通账号调用原 `prepareVideoCreationIntent`，再交原受理流程；不放开公共准备API认证、不伪造Cookie、不直接写业务数据或借无关项目视频卡。9项隔离编排验证通过，覆盖鉴权先行、费用上限/修订保留、准备阻断、原intent不替换、原号去重委托及本地Draft绑定；新增补丁仍须聚焦复核、完整构建及实际两步结果。
 - Codex 准备兼容按固定审核意见继续复用原 `recordPreparationRejection`：只围绕准备服务抛错处理，确定 pre-intent 4xx 留原号拒绝回执；409/5xx未知、已有 intent 后的 availability 阻断不伪造拒绝。两入口保留 AuthError/VideoPromptGroupError 原状态。扩充后的14项隔离编排检查通过，使用原回执模块和内存存储核对拒绝后同key换输入仍阻断，且升级输入保留真实合同的 source_draft、continuation、baseline、action/entry 和1080p；不是生产数据库或真实扣费验收。
+
+## 7. 交付记录（2026-10-30）
+
+已发布 v0.118.5，实际应用提交 `a8c6d4d78df80ddab2be261a57ba25e21189fe23`，BUILD_ID `oGORrogXd002IRkOek7pG`，正式入口为 https://sd2.youdooart.com/generate 。本轮同一修复交付内的候选重建保持版本号，最终生产以本节提交和构建为准。R04 为发布候选轮次；真实视频验证为 R01，只有一组4秒两步生成。
+
+原因已收口：缺省关闭的能力开关拦住入口；样片只允许480p；Codex旧入口缺少新版生成准备记录。启用时同时修正了旧升级链在结果未明时误退款的风险，沿用网页的准备、审批、报价与受理流程。
+
+| 真实步骤 | 本地任务 | 实际文件 | 实扣/遗留冻结 |
+|---|---|---|---|
+| 480p Draft | `3af4402b-2986-4764-ae4a-5a47ba2addba` | 854×480，4.041667秒，1,052,386字节 | 18 / 0点 |
+| 沿用该Draft的1080p正式片 | `cmvv9bq7a001atwtspsmch8sf` | 1920×1080，4.041667秒，1,997,971字节 | 18 / 0点 |
+
+供应商实际返回的 Draft 标记和升级来源ID、站内父任务关系均已核对；两步有独立的供应商任务ID。每步各一条冻结和一条成功实扣记录，共36点，没有重复扣费。视频由原保存流程落盘，ffprobe读取实际文件，两条站内视频URL均HTTP200。首次旧协议400被确认没有生成/扣费后，沿同一原请求号补齐协议继续；没有重生成第三条。上述36点为站内点数，不冒充供应商现金成本。
+
+### 7.1 改动文件及内容
+
+| 文件 | 本轮内容 |
+|---|---|
+| `src/lib/provider/seedance-draft.ts` | 已核验能力缺省开启、显式false可关闭；共享480p常量与结构化提交结果分类。 |
+| `src/app/api/tasks/create/route.ts` | Draft仅允许Seedance2.5和480p，冻结前拒绝不合法规格。 |
+| `src/components/GenerationComposer.tsx` | 勾选样片切480p，历史不兼容参数保留并阻止误提交，显示两步计费。 |
+| `src/lib/provider/jimeng.ts` | 升级调用区分明确拒绝与结果未知，5xx/408/409及坏响应不误当拒绝。 |
+| `src/lib/tasks/seedance-draft-upgrade.ts` | 按发送阶段与已受理ID保留原单和冻结，按原号恢复；纠正关闭提示。 |
+| `src/lib/integrations/codex.ts` | 新增复用原生成准备服务的编排，保留原号拒绝回执、价格修订及费用上限。 |
+| `src/app/api/codex/video/create/route.ts` | 认证后为缺少intent的v2请求准备原记录，再交普通生成处理器；保留已知错误状态。 |
+| `src/app/api/codex/video/draft-upgrade/route.ts` | 对本地Draft升级接同一准备协议，保留原ID限制和普通升级处理器。 |
+| `scripts/seedance-draft-upgrade-smoke.ts` | 更新默认启停/480p合同，补坏响应与冲突HTTP状态的隔离反例。 |
+| `package.json`、`package-lock.json` | 同步0.118.5；没有增删或升级依赖。 |
+| `src/lib/release.ts` | 复用已有项目升级提醒，简述样片与1080p两步和独立计费。 |
+| `docs/sd2-external-api-integration.md` | 修正480p、嵌套draft_task协议、动态计费和v2调用示例。 |
+| 本工单、`tasks/todo.md`、`docs/materials/index.md` | 同步C1/C2结果、验证边界、资料索引和回退位置。 |
+| `docs/materials/2026-10-30-seedance-draft-enable/` | 两份隔离脚本/结果、脱敏生产与媒体账本证据、统一diff、程序回退入口。 |
+
+### 7.2 验证命令与结果
+
+下列命令已实际执行；`E`为隔离源码目录，带假Key和拦截fetch，没有生产数据库。普通smoke及11项升级、14项准备编排检查均通过，隔离脚本与结果同存资料目录；不把替身检查称为数据库或真实账务集成。
+
+```sh
+E=/data/video-api-debugger-engineering/seedance-draft-safety-20261030-r02
+cd "$E"
+runuser -u gouki -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$E" NODE_ENV=test node --require ./scripts/server-runtime.cjs --import tsx scripts/seedance-draft-upgrade-smoke.ts
+runuser -u gouki -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$E" NODE_ENV=test node --require ./scripts/server-runtime.cjs --import tsx upgrade-financial-fixture.cjs
+runuser -u gouki -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$E" NODE_ENV=test node --require ./scripts/server-runtime.cjs --import tsx codex-preparation-fixture.cjs
+```
+
+R04构建通过完整Next/types/lint；构建脚本内部以隔离数据库和 `NEXT_DIST_DIR=.next-prod-candidate` 运行 `node_modules/.bin/next build`。主/恢复6项原启动门均通过，7个服务加载同一实际源码。公网生成页JS的SHA256与候选一致，内网/公网能力开关、登录页、持久目录可写及原私密身份策略已核对。
+
+```sh
+systemd-run --unit=sd2-seedance-draft-build-20261030-r04 --description="SD2 Draft Codex preparation compatibility build" /bin/bash /data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04/build-pair.sh
+python3 /data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04/public-proof.py
+python3 /data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04/health.py
+node /tmp/sd2-draft-enable-20261030-r04/verify-live.mjs create
+node /tmp/sd2-draft-enable-20261030-r04/verify-live.mjs upgrade
+node --env-file=.env /data/video-api-debugger/release-staging/seedance-draft-enable-20261030-r04/read-verification.mjs
+ffprobe -v error -select_streams v:0 -show_entries stream=width,height:format=duration,size -of json /data/video-api-debugger/var-lib/videos/3af4402b-2986-4764-ae4a-5a47ba2addba-mvv9ak4i-3781136.mp4
+ffprobe -v error -select_streams v:0 -show_entries stream=width,height:format=duration,size -of json /data/video-api-debugger/var-lib/videos/cmvv9bq7a001atwtspsmch8sf-mvv9clz8-3782825.mp4
+git diff --check
+git diff --cached --check -- . ':(exclude)docs/materials/2026-10-30-seedance-draft-enable/implementation.patch'
+git apply --reverse --check docs/materials/2026-10-30-seedance-draft-enable/implementation.patch
+git ls-remote --heads origin codex/seedance-draft-enable-20261030
+git ls-remote --tags origin refs/tags/rollback/sd2-before-codex-draft-prepare-20261030
+```
+
+最后一条Node命令在实际应用根运行；ffprobe由它分别调用，真实文件路径见脱敏实测证据的 `local_video_path`，未将签名URL放进命令或记录。[部署证据](../../docs/materials/2026-10-30-seedance-draft-enable/deployment-proof.json)与[真实视频/账本证据](../../docs/materials/2026-10-30-seedance-draft-enable/live-proof.json)已归档。应用提交和程序恢复分支已推送，额外保护tag分别保留原 `ed76434` 与R04切换前 `e5c4af85`。生成的统一diff保留Git原始上下文空行，最终暂存空白检查仅排除此补丁文件，并以反向 `git apply --check` 核对其与当前源码一致，不删改补丁的上下文空白。
+
+### 7.3 风险、边界及遗留
+
+固定审核线程对未知扣费保护和Codex准备兼容均已聚焦复核通过，原记录在 `tasks/audit-001-review.md`。源码、构建、部署、真实API、视频文件和实扣验证已完成；未代做浏览器或页面人工验收，依项目规则留用户手验，不冒称独立线上验收通过。
+
+修改限定本次Seedance Draft/Codex调用链和必要发布记录。未改变费率、权限、身份签发、数据库结构，未直接写业务数据或恢复/覆盖数据库；两条测试任务和36点账本均由正常API写入。运行数据保留切换前相同位置；其中storage历史上位于 `/data/video-api-debugger/releases/80d5cf6f1ec489ea93257d42e8dd5c7e4e782560/storage`，与规则中规范var-lib位置有差异，已核实同原路径、位于数据盘且备份目录可写。本轮不迁移或清理该目录，避免影响现有数据。上传和视频继续位于var-lib持久目录。
+
+程序恢复为 `2c8b45fa4acbde7909b531120511ff139b9c1195` / `0.118.4+draft-disabled-guard.1`，已完整构建且通过本批原启动门，只关闭新样片/升级，保留已受理任务和当前身份协议；恢复入口见[固定程序恢复](../../docs/materials/2026-10-30-seedance-draft-enable/recovery.txt)。恢复不回数据库、媒体、扣费或业务值，未在线演练。守门员等价核对已完成；分级/归类误判：无。
+
+### 7.4 统一diff
+
+[本轮统一diff：原生产ed76434到实际应用a8c6d4d7](../../docs/materials/2026-10-30-seedance-draft-enable/implementation.patch)。仅包含本轮应用代码、已有离线smoke、版本和接口文档，不混入其他工作树脏改；交付记录和资料文件随同一任务分支另行归档。

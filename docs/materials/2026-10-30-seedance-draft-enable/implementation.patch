@@ -1,0 +1,643 @@
+diff --git a/docs/sd2-external-api-integration.md b/docs/sd2-external-api-integration.md
+index bfa1e6a0..6562a1f8 100644
+--- a/docs/sd2-external-api-integration.md
++++ b/docs/sd2-external-api-integration.md
+@@ -122,9 +122,9 @@ curl -sS "$BASE_URL/api/codex/config" \
+   },
+   "supported_settings": {
+     "seedance_draft": {
+-      "create_enabled": false,
+-      "upgrade_enabled": false,
+-      "status": "provider_contract_pending"
++      "create_enabled": true,
++      "upgrade_enabled": true,
++      "status": "enabled"
+     },
+     "model": [
+       {
+@@ -455,6 +455,7 @@ curl -sS "$BASE_URL/api/codex/video/create" \
+ | `generate_audio` | boolean | 是否生成音频 |
+ | `return_last_frame` | boolean | 是否返回尾帧 |
+ | `watermark` | boolean | 是否带水印 |
++| `draft` | boolean | Seedance 2.5 样片模式；`true` 时必须显式传 `resolution: "480p"`，否则创建接口返回 400，不冻结点数或发起生成 |
+ | `idempotency_key` | string | 幂等键，强烈建议每次外部请求都传 |
+ | `source_request_id` | string | 外部请求 ID，也可用 `x-codex-request-id` |
+ | `client_name` | string | 外部系统名称 |
+@@ -512,27 +513,47 @@ curl -sS "$BASE_URL/api/codex/video/create" \
+ 
+ ## 9. Seedance 2.5 Draft 直出 1080p
+ 
+-Draft 流程是“先确认样片，再生成正式片”：先在站内生成并完成一个 Seedance 2.5 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
++Draft 流程是“先确认样片，再生成正式片”。按 [Seedance 2.5 官方协议](https://docs.byteplus.com/en/docs/ModelArk/seedance-2-5)，创建时 `draft: true` 仅支持 `resolution: "480p"`；站内勾选“480p样片”会明确把本次分辨率切换为 480p。历史恢复或引用出的非 480p 参数保留，须手动改为 480p 或取消样片后才能提交，不改写历史任务或已受理请求。
++
++先完成一个 Seedance 2.5 的 480p 样片 Draft，确认样片成功后，调用方只提交 SD2 的本地 Draft 任务 ID：
+ 
+ ```http
+ POST /api/codex/video/draft-upgrade
+ ```
+ 
+-请求示例：
++现行生成协议使用 `creation_contract_version: 2`。先用同一 Bearer token 请求 `GET /api/tasks/<本地DraftID>/draft-upgrade`，保留返回的 `creation_input` 和报价，再提交：
+ 
+-```json
+-{
+-  "draft_task_id": "sd2_local_draft_task_id",
+-  "resolution_approval_confirmed": true,
+-  "idempotency_key": "draft-upgrade-sd2_local_draft_task_id"
+-}
++```js
++const body = {
++  ...quote.creation_input,
++  creation_contract_version: 2,
++  draft_task_id: localDraftId,
++  resolution_approval_confirmed: true,
++  idempotency_key: `draft-upgrade:${localDraftId}`,
++  pricing_revision: quote.pricing_revision,
++  pricing_quote_token: quote.pricing_quote_token,
++  max_estimated_cost: quote.estimatedCost,
++};
+ ```
+ 
+-接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求只发送嵌套的 `draft_task: { id }` 引用和 `1080p`，不会从外部请求接收或重复发送 prompt、素材、seed、比例、时长等字段。
++Codex 创建和升级入口会在 v2 请求缺少 `intent_id` 时，使用已配置普通账号和原 `idempotency_key` 调用网页同一套生成准备服务，再交原受理流程；不需要网页 Cookie。价格修订、最高费用、审批和最终内容一致性校验均保留，准备未就绪不会调用供应商。已传入的准备记录不会被替换；旧协议仍沿原视频卡流程。创建480p样片同样先对完整参数报价，再携带 `creation_contract_version: 2`、保存项目、稳定请求号及该报价提交。
++
++接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求的 `content` 必须仅为 `[{"type":"draft_task","draft_task":{"id":"<provider_draft_task_id>"}}]`，分辨率为 `1080p`；保留现有请求追踪封装，不接收或重复发送 prompt、素材、比例、时长、seed、音频、水印、尾帧等生成参数。
+ 
+ `draft_task_id` 必须是 SD2 本地任务 ID，不能填写 Seedance 官方任务 ID，也不能填写 `provider_task_id`。Draft 和正式任务分别记录点数冻结、Provider 请求、轮询和成本台账；重复的 `idempotency_key` 会返回原正式任务。
+ 
+-当前公开供应商示例只核验到 `draft` 创建字段，尚未核验到嵌套 `draft_task: { id }` 升级请求和响应。因此 `GET /api/codex/config` 中 `seedance_draft.upgrade_enabled` 默认是 `false`，关闭时接口返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起真实供应商升级请求。计费复用现有按模型的 `calculateEstimatedCost` 规则，不新增 Draft 专属价格；2.0 旧规则保持不变。启用前必须由管理员完成供应商契约验证；本项目的 Mock 回归不等同于真实供应商可用。
++官方协议和当前 `etc.seedance-api.net/server/api/call` 网关已核实上述嵌套字段。无收费探针使用不存在的 Draft ID，网关返回 HTTP 200，业务错误为 `InvalidParameter`，定位 `content[0].draft_task.id` 并要求成功完成的 Draft；这证明字段被识别，不代表真实升级已完成或供应商成本已核实。
++
++`SEEDANCE_DRAFT_CREATE_ENABLED` 和 `SEEDANCE_DRAFT_UPGRADE_ENABLED` 缺省启用；显式设置 `false` 仍可分别关闭，值会去除首尾空白并忽略大小写。`GET /api/config` 和 `GET /api/codex/config` 的能力字段反映实际开关：两者均关闭时 `status` 为 `disabled`，否则为 `enabled`，具体可用步骤以 `create_enabled`、`upgrade_enabled` 和提示为准。升级关闭时接口仍返回 `503 DRAFT_UPGRADE_DISABLED`，不会发起供应商升级请求。
++
++两步各自报价、冻结与结算，1080p 升级不是免费放大，也不抵扣已完成样片的费用。本次不调整计费规则：
++
++| 步骤 | 站内报价规格 | 本步价格依据 |
++|---|---|---|
++| 480p 样片 | Seedance 2.5、`resolution: "480p"`、用途 `draft` | 按该步时长、实际参考视频情况及生效费率独立报价；走既有旧规则回退时为 `ceil(3 × 1.5 × 秒数)` 点 |
++| 1080p 正式片 | Seedance 2.5、`resolution: "1080p"`、用途 `draft_upgrade` | 按继承的时长、参考视频上下文及生效费率另行报价；走既有旧规则回退时同为 `ceil(3 × 1.5 × 秒数)` 点 |
++
++例如仅在两步都使用旧规则回退、时长均为 5 秒时，480p 样片为 23 点，1080p 升级另为 23 点，合计 46 点；存在自定义费率时以每步提交前的实际报价及受理时冻结的 `pricing_snapshot` 为准，不把示例当作线上固定价格。以上均为站内点数，不是供应商实际美元成本；供应商成本仍以各步返回的实际扣费与成本台账为准，缺失时保持待核实，不按示例或官方公开价格填造。
+ 
+ ## 10. 任务状态与结果
+ 
+diff --git a/package-lock.json b/package-lock.json
+index 6bc7cacd..c78dd2ef 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.118.4",
++  "version": "0.118.5",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "video-api-debugger",
+-      "version": "0.118.4",
++      "version": "0.118.5",
+       "dependencies": {
+         "@aws-sdk/client-s3": "^3.1041.0",
+         "@aws-sdk/s3-request-presigner": "^3.1041.0",
+diff --git a/package.json b/package.json
+index ede63358..5187f75b 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "video-api-debugger",
+-  "version": "0.118.4",
++  "version": "0.118.5",
+   "private": true,
+   "scripts": {
+     "dev": "NEXT_DIST_DIR=.next-dev next dev",
+diff --git a/scripts/seedance-draft-upgrade-smoke.ts b/scripts/seedance-draft-upgrade-smoke.ts
+index eb52a970..ad398c97 100644
+--- a/scripts/seedance-draft-upgrade-smoke.ts
++++ b/scripts/seedance-draft-upgrade-smoke.ts
+@@ -1,5 +1,6 @@
+ import assert from 'node:assert/strict';
+-import { buildSeedanceDraftContent, buildSeedanceDraftUpgradePayload, seedanceDraftCapability } from '@/lib/provider/seedance-draft';
++import { buildSeedanceDraftContent, buildSeedanceDraftUpgradePayload, seedanceDraftCapability,
++  preserveSeedanceDraftSubmission, SeedanceDraftSubmissionError } from '@/lib/provider/seedance-draft';
+ import { calculateEstimatedCost } from '@/lib/pricing';
+ import { SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
+ 
+@@ -8,7 +9,14 @@ async function main() {
+   const previousUpgradeGate = process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
+   delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
+   delete process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
+-  assert.equal(seedanceDraftCapability().upgrade_enabled, false, 'Draft 升级默认必须关闭');
++  assert.equal(seedanceDraftCapability().create_enabled, true);
++  assert.equal(seedanceDraftCapability().upgrade_enabled, true);
++  process.env.SEEDANCE_DRAFT_CREATE_ENABLED = 'false';
++  process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED = 'false';
++  assert.equal(seedanceDraftCapability().create_enabled, false);
++  assert.equal(seedanceDraftCapability().upgrade_enabled, false);
++  delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
++  delete process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
+   assert.deepEqual(buildSeedanceDraftContent('provider-draft-123'), [
+     { type: 'draft_task', draft_task: { id: 'provider-draft-123' } },
+   ]);
+@@ -50,7 +58,7 @@ async function main() {
+       model: 'dreamina-seedance-2-5-260628',
+       ratio: '16:9',
+       duration: 5,
+-      resolution: '720p',
++      resolution: '480p',
+       seed: 42,
+       draft: true,
+     });
+@@ -59,6 +67,26 @@ async function main() {
+       providerDraftTaskId: 'provider-draft-123',
+       clientRequestId: 'local-formal-task-123',
+     });
++    const submit = () => createSeedanceDraftUpgradeTask({ model: SEEDANCE_2_5_MODEL_ID,
++      providerDraftTaskId: 'provider-draft-123', clientRequestId: 'local-formal-task-123' });
++    for (const [body, status, outcome] of [
++      ['not-json', 200, 'unknown'], ['{}', 200, 'unknown'],
++      [JSON.stringify({ error: { code: 'InvalidParameter', message: 'Draft is not ready' } }), 200, 'rejected'],
++      [JSON.stringify({ error: { code: 'InternalError', message: 'temporary failure' } }), 500, 'unknown'],
++      [JSON.stringify({ error: { code: 'InvalidParameter' } }), 500, 'unknown'],
++      [JSON.stringify({ error: { code: 'Unauthorized' } }), 503, 'unknown'],
++      [JSON.stringify({ error: { code: 'InvalidParameter' } }), 408, 'unknown'],
++    ] as const) {
++      globalThis.fetch = (async () => new Response(body, { status })) as typeof fetch;
++      await assert.rejects(submit, (error: unknown) => error instanceof SeedanceDraftSubmissionError && error.outcome === outcome);
++    }
++    globalThis.fetch = (async () => { throw new DOMException('request aborted', 'AbortError'); }) as typeof fetch;
++    await assert.rejects(submit, (error: unknown) => error instanceof SeedanceDraftSubmissionError && error.outcome === 'unknown');
++    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: 'accepted-task', error: new Error('local registration failed') }), true);
++    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: null, error: new Error('unexpected error after send') }), true);
++    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: false, providerTaskId: null, error: new Error('before send failed') }), false);
++    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: null,
++      error: new SeedanceDraftSubmissionError('explicit refusal', 'rejected') }), false);
+   } finally {
+     globalThis.fetch = originalFetch;
+     if (previousCreateGate === undefined) delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
+diff --git a/src/app/api/codex/video/create/route.ts b/src/app/api/codex/video/create/route.ts
+index ae967789..58869659 100644
+--- a/src/app/api/codex/video/create/route.ts
++++ b/src/app/api/codex/video/create/route.ts
+@@ -1,8 +1,30 @@
+ import { NextRequest } from 'next/server';
+ import { POST as createVideoTask } from '@/app/api/tasks/create/route';
++import { authenticateCodexVideoApi, CodexApiAuthError, prepareCodexVideoCreation } from '@/lib/integrations/codex';
++import { CreationError } from '@/lib/creation/contract';
++import { videoPricingError } from '@/lib/pricing/video';
++import { AuthError } from '@/lib/auth/session';
++import { VideoPromptGroupError } from '@/lib/video/prompt-groups';
+ 
+ export const dynamic = 'force-dynamic';
+ 
+ export async function POST(request: NextRequest) {
++  const parsed: unknown = await request.clone().json().catch(() => null);
++  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)
++    && (parsed as Record<string, unknown>).creation_contract_version === 2) {
++    try {
++      const { user } = await authenticateCodexVideoApi(request);
++      const body = await prepareCodexVideoCreation(user, parsed as Record<string, unknown>);
++      return createVideoTask(new NextRequest(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(body) }));
++    } catch (error) {
++      const pricing = videoPricingError(error);
++      if (pricing) return Response.json({ error: pricing.code, code: pricing.code, message: pricing.message }, { status: pricing.status, headers: { 'Cache-Control': 'private, no-store' } });
++      if (error instanceof CreationError || error instanceof CodexApiAuthError || error instanceof AuthError || error instanceof VideoPromptGroupError) {
++        const code = error instanceof AuthError ? 'creation_result_unknown' : error.code;
++        return Response.json({ error: code, code, message: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
++      }
++      throw error;
++    }
++  }
+   return createVideoTask(request);
+ }
+diff --git a/src/app/api/codex/video/draft-upgrade/route.ts b/src/app/api/codex/video/draft-upgrade/route.ts
+index 331d2303..ff0de4f2 100644
+--- a/src/app/api/codex/video/draft-upgrade/route.ts
++++ b/src/app/api/codex/video/draft-upgrade/route.ts
+@@ -1,11 +1,16 @@
+ import { NextRequest } from 'next/server';
+ import { POST as upgradeDraft } from '@/app/api/tasks/[id]/draft-upgrade/route';
++import { authenticateCodexVideoApi, CodexApiAuthError, prepareCodexVideoCreation } from '@/lib/integrations/codex';
++import { CreationError } from '@/lib/creation/contract';
++import { videoPricingError } from '@/lib/pricing/video';
++import { AuthError } from '@/lib/auth/session';
++import { VideoPromptGroupError } from '@/lib/video/prompt-groups';
+ 
+ export const dynamic = 'force-dynamic';
+ 
+ export async function POST(request: NextRequest) {
+   const parsedBody = await request.clone().json().catch(() => ({}));
+-  const body = parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
++  let body = parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
+     ? parsedBody as Record<string, unknown>
+     : {};
+   const draftTaskId = typeof body.draft_task_id === 'string' ? body.draft_task_id.trim() : '';
+@@ -16,6 +21,21 @@ export async function POST(request: NextRequest) {
+     return Response.json({ error: 'LOCAL_DRAFT_ID_ONLY', message: 'Codex API 只允许传入本地 Draft 任务 ID' }, { status: 400 });
+   }
+ 
++  if (body.creation_contract_version === 2) {
++    try {
++      const { user } = await authenticateCodexVideoApi(request);
++      body = await prepareCodexVideoCreation(user, body);
++    } catch (error) {
++      const pricing = videoPricingError(error);
++      if (pricing) return Response.json({ error: pricing.code, code: pricing.code, message: pricing.message }, { status: pricing.status, headers: { 'Cache-Control': 'private, no-store' } });
++      if (error instanceof CreationError || error instanceof CodexApiAuthError || error instanceof AuthError || error instanceof VideoPromptGroupError) {
++        const code = error instanceof AuthError ? 'creation_result_unknown' : error.code;
++        return Response.json({ error: code, code, message: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
++      }
++      throw error;
++    }
++  }
++
+   const forwarded = new NextRequest(request.url, {
+     method: request.method,
+     headers: request.headers,
+diff --git a/src/app/api/tasks/create/route.ts b/src/app/api/tasks/create/route.ts
+index d25c5551..10748d4a 100644
+--- a/src/app/api/tasks/create/route.ts
++++ b/src/app/api/tasks/create/route.ts
+@@ -74,6 +74,7 @@ import {
+   canCreateSeedanceDraft,
+   isSeedanceDraftCreateEnabled,
+   SEEDANCE_DRAFT_CONTRACT_VERSION,
++  SEEDANCE_DRAFT_RESOLUTION,
+ } from '@/lib/provider/seedance-draft';
+ import {
+   H3_VIDEO_PROVIDER,
+@@ -1082,8 +1083,11 @@ export async function POST(request: NextRequest) {
+     if (requestedProvider !== 'seedance' || !canCreateSeedanceDraft(selectedModel)) {
+       return errorJson('样片 Draft 只支持 Seedance 2.5', 400);
+     }
++    if (resolution !== SEEDANCE_DRAFT_RESOLUTION) {
++      return errorJson(`样片 Draft 仅支持 ${SEEDANCE_DRAFT_RESOLUTION}，请修改 resolution 或关闭 Draft 后提交`, 400);
++    }
+     if (!isSeedanceDraftCreateEnabled()) {
+-      return errorJson('供应商 Draft 能力尚未完成核验，暂不能创建样片 Draft', 503);
++      return errorJson('样片 Draft 创建已关闭，请联系管理员启用', 503);
+     }
+   }
+ 
+diff --git a/src/components/GenerationComposer.tsx b/src/components/GenerationComposer.tsx
+index 03405b12..b12103a6 100644
+--- a/src/components/GenerationComposer.tsx
++++ b/src/components/GenerationComposer.tsx
+@@ -36,6 +36,7 @@ import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
+ import { taskDetailHref } from '@/lib/navigation/return-to';
+ import { seedanceReferenceMediaCapabilities, validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
+ import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
++import { SEEDANCE_DRAFT_RESOLUTION } from '@/lib/provider/seedance-draft';
+ import type { GenerationDefaults } from '@/lib/preferences/generation';
+ import { readImageResultVideoDraft, saveImageResultVideoDraft, type ImageResultVideoHandoff } from '@/lib/image-result-next/video-draft';
+ import { isVolcengineIpModelId, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
+@@ -585,7 +586,7 @@ export function GenerationComposer({
+   onAuxiliaryChange,
+   seedanceDraft = {
+     createEnabled: false,
+-    message: '供应商 Draft 能力尚未完成核验，暂不可用。',
++    message: '暂未读取到样片能力配置，请刷新页面后重试。',
+   },
+ }: Props) {
+   const workspace = useWorkspace();
+@@ -1064,6 +1065,9 @@ export function GenerationComposer({
+     }
+     if (durationBlocker) return durationBlocker;
+     if (videoRedesign && draftMode && selectedModel !== SEEDANCE_2_5_MODEL_ID) return '样片与当前型号不兼容，请关闭样片或选择 Seedance 2.5';
++    if (draftMode && resolution !== SEEDANCE_DRAFT_RESOLUTION) {
++      return { message: `样片仅支持 ${SEEDANCE_DRAFT_RESOLUTION}，当前 ${resolution} 参数已保留。请将清晰度改为 ${SEEDANCE_DRAFT_RESOLUTION}，或取消“${SEEDANCE_DRAFT_RESOLUTION}样片”后生成正式片。`, tone: 'hint' as const };
++    }
+     if (reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)) {
+       return '原任务模型目前不可选，已保留原参数，请明确选择可用模型后再生成。';
+     }
+@@ -2535,12 +2539,17 @@ export function GenerationComposer({
+               disabled={!draftMode && !seedanceDraft.createEnabled}
+               onChange={(event) => {
+                 markStudioParameterCorrected('draft');
+-                setDraftMode(event.currentTarget.checked);
++                const checked = event.currentTarget.checked;
++                setDraftMode(checked);
++                if (checked) {
++                  markStudioParameterCorrected('resolution');
++                  setResolution(SEEDANCE_DRAFT_RESOLUTION);
++                }
+               }}
+             />
+             <span>
+-              样片 Draft
+-              <small>{seedanceDraft.createEnabled ? '先确认内容，再生成正式 1080p' : seedanceDraft.message}</small>
++              {SEEDANCE_DRAFT_RESOLUTION}样片 Draft
++              <small>{seedanceDraft.createEnabled ? `勾选会将本次清晰度切换为 ${SEEDANCE_DRAFT_RESOLUTION}；${seedanceDraft.message}` : seedanceDraft.message}</small>
+             </span>
+           </label>
+         )}
+diff --git a/src/lib/integrations/codex.ts b/src/lib/integrations/codex.ts
+index e97c1ac1..b6c21faa 100644
+--- a/src/lib/integrations/codex.ts
++++ b/src/lib/integrations/codex.ts
+@@ -4,6 +4,7 @@ import type { Prisma, User } from '@prisma/client';
+ import { prisma } from '@/lib/prisma';
+ import type { SessionUser } from '@/lib/auth/session';
+ import { normalizeSeedanceEditPilot, type SeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
++import { CreationError } from '@/lib/creation/contract';
+ 
+ export const CODEX_VIDEO_SOURCE_TYPE = 'codex_api';
+ export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
+@@ -427,3 +428,30 @@ export async function codexVideoApiStatus() {
+     } : null,
+   };
+ }
++
++// The existing authenticated Codex create operation uses the same preparation
++// and acceptance contract as the website; it does not need a website cookie.
++export async function prepareCodexVideoCreation(user: SessionUser, body: Record<string, unknown>) {
++  if (body.creation_contract_version !== 2 || body.intent_id !== undefined) return body;
++  const input = { ...body, action: body.action || 'generate', entry: body.entry || 'ordinary' };
++  const { prepareVideoCreationIntent } = await import('@/lib/creation/intents');
++  const preparation = { ...input, request_id: body.idempotency_key };
++  let intent: Awaited<ReturnType<typeof prepareVideoCreationIntent>>;
++  try {
++    intent = await prepareVideoCreationIntent(user, preparation);
++  } catch (cause) {
++    const known = cause as { status?: number; code?: string };
++    if (Number.isInteger(known?.status)) {
++      const { recordPreparationRejection } = await import('@/lib/creation/preparation-receipts');
++      await recordPreparationRejection(user, preparation, Number(known.status), known.code);
++    }
++    throw cause;
++  }
++  if (!intent.accepted_task_id && !intent.availability?.canSubmit) {
++    const reason = intent.availability?.reasons[0];
++    throw new CreationError(reason?.message || '原生成准备尚不可提交，请核对原请求', 409,
++      reason?.code || 'creation_not_ready', reason?.field || 'creation', reason?.action || 'query_original');
++  }
++  return { ...input, intent_id: intent.id, intent_revision: intent.revision,
++    ...(intent.quote?.pricing_quote_token ? { pricing_quote_token: intent.quote.pricing_quote_token } : {}) };
++}
+diff --git a/src/lib/provider/jimeng.ts b/src/lib/provider/jimeng.ts
+index 2fd99bf1..a3dcfdbd 100644
+--- a/src/lib/provider/jimeng.ts
++++ b/src/lib/provider/jimeng.ts
+@@ -24,7 +24,7 @@ import {
+   seedanceVideoDurationError,
+   type SeedanceVideoModelOption,
+ } from './seedance-models';
+-import { buildSeedanceDraftContent } from './seedance-draft';
++import { buildSeedanceDraftContent, SeedanceDraftSubmissionError } from './seedance-draft';
+ import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
+ import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
+ import { privateMultiviewFailure } from '../video/multiview-task-privacy';
+@@ -579,7 +579,7 @@ export async function createSeedanceDraftUpgradeTask(input: {
+   clientRequestId: string;
+ }): Promise<ProviderCreateResponse> {
+   if (!isApiKeyConfigured()) {
+-    throw new Error('API key not configured');
++    throw new SeedanceDraftSubmissionError('API key not configured', 'not_sent');
+   }
+ 
+   const endpoint = `${SEEDANCE_BASE_URL}/call`;
+@@ -593,38 +593,44 @@ export async function createSeedanceDraftUpgradeTask(input: {
+ 
+   const controller = new AbortController();
+   const timeout = setTimeout(() => controller.abort(), 45_000);
+-  let response: Response;
+   try {
+-    response = await fetch(endpoint, {
++    const response = await fetch(endpoint, {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify(payload),
+       signal: controller.signal,
+     });
+-  } catch (error) {
+-    if (controller.signal.aborted) throw new Error('Seedance Draft 升级请求超时');
+-    throw error;
+-  } finally {
+-    clearTimeout(timeout);
+-  }
+-  const responseText = await response.text();
+-  let data: Record<string, unknown> = {};
+-  if (responseText.trim()) {
++    const responseText = await response.text();
++    let data: Record<string, unknown>;
+     try {
+-      data = JSON.parse(responseText);
++      const parsed: unknown = JSON.parse(responseText);
++      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid response object');
++      data = parsed as Record<string, unknown>;
+     } catch {
+-      throw createNonJsonProviderError(response, responseText);
++      throw new SeedanceDraftSubmissionError('Seedance Draft 升级响应无法确认，请查询原请求', 'unknown');
+     }
++    const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
++    if (response.ok && providerTaskId) return { provider_task_id: providerTaskId, raw: data };
++
++    const providerError = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
++      ? data.error as Record<string, unknown> : null;
++    const errorCode = typeof providerError?.code === 'string' ? providerError.code : typeof data.code === 'string' ? data.code : '';
++    const rejectionStatus = response.ok || [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status);
++    const explicitRejection = !providerTaskId && rejectionStatus && (!response.ok && Boolean(data.error)
++      || /^(InvalidParameter|InvalidApiKey|AuthenticationError|Unauthorized|AccessDenied|PermissionDenied|InsufficientBalance|QuotaExceeded|Forbidden|BadRequest)([._]|$)/i.test(errorCode));
++    if (explicitRejection) {
++      throw new SeedanceDraftSubmissionError(normalizeProviderErrorMessage(data.error ?? data.message ?? data)
++        || 'Seedance Draft 升级已被供应商拒绝', 'rejected');
++    }
++    throw new SeedanceDraftSubmissionError('Seedance Draft 升级受理结果待确认，请查询原请求', 'unknown');
++  } catch (error) {
++    if (error instanceof SeedanceDraftSubmissionError) throw error;
++    throw new SeedanceDraftSubmissionError(controller.signal.aborted
++      ? 'Seedance Draft 升级请求超时，请查询原请求'
++      : 'Seedance Draft 升级连接结果待确认，请查询原请求', 'unknown');
++  } finally {
++    clearTimeout(timeout);
+   }
+-  if (!response.ok) {
+-    const message = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
+-    throw new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`);
+-  }
+-  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
+-  if (!providerTaskId) {
+-    throw new Error('Seedance Draft 升级响应缺少任务 ID');
+-  }
+-  return { provider_task_id: providerTaskId, raw: data };
+ }
+ 
+ // ============================================================================
+diff --git a/src/lib/provider/seedance-draft.ts b/src/lib/provider/seedance-draft.ts
+index b53c8293..0c471acd 100644
+--- a/src/lib/provider/seedance-draft.ts
++++ b/src/lib/provider/seedance-draft.ts
+@@ -1,6 +1,20 @@
+ import { SEEDANCE_2_5_MODEL_ID } from './seedance-models';
+ 
+ export const SEEDANCE_DRAFT_CONTRACT_VERSION = 'seedance-draft-v1';
++export const SEEDANCE_DRAFT_RESOLUTION = '480p' as const;
++
++export class SeedanceDraftSubmissionError extends Error {
++  constructor(message: string, public readonly outcome: 'not_sent' | 'rejected' | 'unknown') {
++    super(message);
++  }
++}
++
++export function preserveSeedanceDraftSubmission(input: {
++  sendStarted: boolean; providerTaskId: string | null; error: unknown;
++}) {
++  return Boolean(input.providerTaskId) || (input.sendStarted
++    && !(input.error instanceof SeedanceDraftSubmissionError && input.error.outcome !== 'unknown'));
++}
+ 
+ export type SeedanceDraftContentItem = {
+   type: 'draft_task';
+@@ -10,11 +24,11 @@ export type SeedanceDraftContentItem = {
+ };
+ 
+ export function isSeedanceDraftCreateEnabled() {
+-  return process.env.SEEDANCE_DRAFT_CREATE_ENABLED === 'true';
++  return process.env.SEEDANCE_DRAFT_CREATE_ENABLED?.trim().toLowerCase() !== 'false';
+ }
+ 
+ export function isSeedanceDraftUpgradeEnabled() {
+-  return process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED === 'true';
++  return process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED?.trim().toLowerCase() !== 'false';
+ }
+ 
+ export function canCreateSeedanceDraft(model: string) {
+@@ -47,13 +61,18 @@ export function buildSeedanceDraftUpgradePayload(input: {
+ export function seedanceDraftCapability() {
+   const createEnabled = isSeedanceDraftCreateEnabled();
+   const upgradeEnabled = isSeedanceDraftUpgradeEnabled();
++  const message = createEnabled
++    ? upgradeEnabled
++      ? '可生成 480p 样片，完成后可另行生成 1080p；两步分别计费。'
++      : '可生成 480p 样片；1080p 升级已关闭。'
++    : upgradeEnabled
++      ? '样片创建已关闭；已完成的样片仍可另行生成 1080p。'
++      : '样片创建和 1080p 升级已关闭，请联系管理员启用。';
+   return {
+     create_enabled: createEnabled,
+     upgrade_enabled: upgradeEnabled,
+     contract_version: SEEDANCE_DRAFT_CONTRACT_VERSION,
+-    status: upgradeEnabled ? 'enabled' as const : 'provider_contract_pending' as const,
+-    message: upgradeEnabled
+-      ? '可以从已完成的 Draft 直接生成 1080p。'
+-      : '供应商升级接口尚未完成核验，样片 Draft 入口暂不可用。',
++    status: createEnabled || upgradeEnabled ? 'enabled' as const : 'disabled' as const,
++    message,
+   };
+ }
+diff --git a/src/lib/release.ts b/src/lib/release.ts
+index ac11189f..96b76752 100644
+--- a/src/lib/release.ts
++++ b/src/lib/release.ts
+@@ -1,8 +1,8 @@
+ import packageInfo from '../../package.json';
+ // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
+-const notice = { title: '复用飞书登录', outline: [
+-  '飞书登录后直接复用本站身份，不再另外验证',
+-  '未开通或身份不匹配时说明权限原因',
++const notice = { title: '样片可生成', outline: [
++  'Seedance 2.5 可先生成 480p 样片，确认后沿用内容生成 1080p',
++  '样片和正式片分别计费，提交前按当前参数确认费用',
+ ] };
+ export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
+   // Older open pages still read `summary`; it now carries only the title.
+diff --git a/src/lib/tasks/seedance-draft-upgrade.ts b/src/lib/tasks/seedance-draft-upgrade.ts
+index 4922d891..7d72177f 100644
+--- a/src/lib/tasks/seedance-draft-upgrade.ts
++++ b/src/lib/tasks/seedance-draft-upgrade.ts
+@@ -29,6 +29,7 @@ import {
+ import {
+   buildSeedanceDraftUpgradePayload,
+   isSeedanceDraftUpgradeEnabled,
++  preserveSeedanceDraftSubmission,
+   SEEDANCE_DRAFT_CONTRACT_VERSION,
+ } from '@/lib/provider/seedance-draft';
+ import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
+@@ -91,11 +92,6 @@ type DraftTaskForUpgrade = {
+   retention_status: string;
+ };
+ 
+-function isAmbiguousProviderError(error: unknown) {
+-  const message = error instanceof Error ? error.message : String(error);
+-  return /超时|timeout|timed out|fetch failed|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(message);
+-}
+-
+ function isValidApprovalBase(task: { id: string; video_card_id: string | null; version_role: string }, draft: DraftTaskForUpgrade, videoCardId: string) {
+   return task.video_card_id === videoCardId
+     && (['candidate', 'current_best', 'final'].includes(task.version_role) || task.id === draft.id);
+@@ -298,7 +294,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+     select: { id: true, provider_task_id: true, local_status: true, estimated_cost: true, source_draft_task_id: true },
+   });
+   if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
+-  if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('供应商 Draft 升级接口尚未完成核验，暂不能生成 1080p', 503, 'DRAFT_UPGRADE_DISABLED');
++  if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('样片 1080p 升级已关闭，请保留原样片并联系管理员', 503, 'DRAFT_UPGRADE_DISABLED');
+   if (!input.resolutionApprovalConfirmed) throw new DraftUpgradeError('1080p 生成需要先确认审批通过', 403, 'RESOLUTION_APPROVAL_REQUIRED');
+   if (draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || !draft.is_draft) {
+     throw new DraftUpgradeError('只有 Seedance 2.5 样片 Draft 才能升级到 1080p', 400, 'DRAFT_MODEL_INVALID');
+@@ -510,6 +506,8 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+     clientRequestId,
+   });
+   let providerRequest: Awaited<ReturnType<typeof createProviderApiRequest>> | null = null;
++  let sendStarted = false;
++  let acceptedProviderTaskId: string | null = null;
+   try {
+     providerRequest = await createProviderApiRequest({
+       task,
+@@ -522,11 +520,13 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+       where: { id: task.id },
+       data: { provider_client_request_id: clientRequestId },
+     });
++    sendStarted = true;
+     const providerResult = await createSeedanceDraftUpgradeTask({
+       model: draft.model,
+       providerDraftTaskId: draft.provider_draft_task_id,
+       clientRequestId,
+     });
++    acceptedProviderTaskId = providerResult.provider_task_id;
+     task = await prisma.videoTask.update({
+       where: { id: task.id },
+       data: {
+@@ -552,10 +552,12 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+       deduplicated: false,
+     };
+   } catch (error) {
+-    if (providerRequest && isAmbiguousProviderError(error)) {
++    if (preserveSeedanceDraftSubmission({ sendStarted, providerTaskId: acceptedProviderTaskId, error })) {
+       try {
+         const recovered = await getVideoTaskStatusByClientRequestId(clientRequestId);
+-        if (recovered.provider_task_id && recovered.provider_task_id !== clientRequestId) {
++        if (recovered.provider_task_id && recovered.provider_task_id !== clientRequestId
++          && (!acceptedProviderTaskId || recovered.provider_task_id === acceptedProviderTaskId)) {
++          acceptedProviderTaskId = recovered.provider_task_id;
+           task = await prisma.videoTask.update({
+             where: { id: task.id },
+             data: {
+@@ -565,7 +567,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+               error_message: null,
+             },
+           });
+-          await markProviderApiRequestAccepted({
++          if (providerRequest) await markProviderApiRequestAccepted({
+             requestId: providerRequest.id,
+             task,
+             providerTaskId: recovered.provider_task_id,
+@@ -589,12 +591,16 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
+ 
+       await prisma.videoTask.update({
+         where: { id: task.id },
+-        data: { error_message: '提交结果待确认，系统会按请求 ID 自动恢复，请勿重复提交。' },
++        data: {
++          ...(acceptedProviderTaskId ? { provider_task_id: acceptedProviderTaskId } : {}),
++          error_message: '提交结果待确认，系统会按原请求 ID 自动恢复，请勿重复提交。',
++        },
+       });
++      if (acceptedProviderTaskId) startTaskLocalization(task.id);
+       return {
+         id: task.id,
+         task_id: task.id,
+-        provider_task_id: null,
++        provider_task_id: acceptedProviderTaskId,
+         source_draft_task_id: draft.id,
+         status: 'pending_confirmation',
+         estimated_cost: estimatedCost,

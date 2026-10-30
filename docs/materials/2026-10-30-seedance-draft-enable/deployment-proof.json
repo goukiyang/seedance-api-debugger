@@ -1,0 +1,240 @@
+{
+  "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+  "version": "0.118.5",
+  "build": "oGORrogXd002IRkOek7pG",
+  "mainBuild": {
+    "kind": "main",
+    "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+    "version": "0.118.5",
+    "build": "oGORrogXd002IRkOek7pG",
+    "completedAt": "2026-10-30T17:31:24.146560+00:00",
+    "fullNextBuildPassed": true,
+    "fullTypeAndLintIncluded": true,
+    "allFinalGitSourceFilesMatch": true,
+    "isolatedBuildDatabase": true,
+    "productionRuntimeLinksAttached": false,
+    "productionServiceOperations": 0,
+    "functionalTests": 0,
+    "browserTests": 0,
+    "deployed": false
+  },
+  "recoveryBuild": {
+    "kind": "rollback",
+    "source": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+    "version": "0.118.4+draft-disabled-guard.1",
+    "build": "WzuHtCI8vd99yh8NLmNXC",
+    "completedAt": "2026-10-30T16:43:55.092399+00:00",
+    "fullNextBuildPassed": true,
+    "fullTypeAndLintIncluded": true,
+    "allFinalGitSourceFilesMatch": true,
+    "isolatedBuildDatabase": true,
+    "productionRuntimeLinksAttached": false,
+    "productionServiceOperations": 0,
+    "functionalTests": 0,
+    "browserTests": 0,
+    "deployed": false
+  },
+  "preparedPair": {
+    "run": "af1e77e5-8e1a-4047-a757-87579adc7ab8",
+    "preparedAt": "2026-10-30T17:31:27.877085+00:00",
+    "releases": [
+      {
+        "root": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "version": "0.118.5",
+        "build": "oGORrogXd002IRkOek7pG"
+      },
+      {
+        "root": "/data/video-api-debugger/managed-releases/2c8b45fa4acbde7909b531120511ff139b9c1195",
+        "source": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+        "version": "0.118.4+draft-disabled-guard.1",
+        "build": "WzuHtCI8vd99yh8NLmNXC"
+      }
+    ],
+    "sourceFiles": 1922
+  },
+  "startupChecks": [
+    {
+      "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+      "kind": "pricing",
+      "exitCode": 0
+    },
+    {
+      "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+      "kind": "role",
+      "exitCode": 0
+    },
+    {
+      "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+      "kind": "works",
+      "exitCode": 0
+    },
+    {
+      "source": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+      "kind": "pricing",
+      "exitCode": 0
+    },
+    {
+      "source": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+      "kind": "role",
+      "exitCode": 0
+    },
+    {
+      "source": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+      "kind": "works",
+      "exitCode": 0
+    }
+  ],
+  "isolatedSourceFilesMatch": [
+    "src/lib/provider/seedance-draft.ts",
+    "src/lib/provider/jimeng.ts",
+    "src/lib/tasks/seedance-draft-upgrade.ts",
+    "scripts/seedance-draft-upgrade-smoke.ts",
+    "src/lib/integrations/codex.ts",
+    "src/app/api/codex/video/create/route.ts",
+    "src/app/api/codex/video/draft-upgrade/route.ts",
+    "src/lib/creation/preparation-receipts.ts"
+  ],
+  "isolatedFinancialCases": 11,
+  "isolatedPreparationCases": 14,
+  "isolatedChecksPassed": true,
+  "publicationChecksBeforePaidVerification": {
+    "completedAt": "2026-10-30T17:34:40.489423+00:00",
+    "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+    "build": "oGORrogXd002IRkOek7pG",
+    "release": {
+      "version": "0.118.5",
+      "channel": "production",
+      "title": "",
+      "outline": [],
+      "summary": ""
+    },
+    "resources": [
+      {
+        "path": "/_next/static/chunks/app/generate/page-03a2e226188ce5fa.js",
+        "status": 200,
+        "sha256": "7d5777721527c601dd282685d14bbdba34e4c99bfb696c5558dc376dd0278633",
+        "matchesCandidate": true
+      }
+    ],
+    "timers": {
+      "sd2-backup": "active",
+      "sd2-credit-delivery": "active",
+      "sd2-feedback-delivery": "active",
+      "sd2-video-delivery": "active"
+    },
+    "functionalAcceptance": false,
+    "browserTests": 0,
+    "paidGenerationTests": 0,
+    "messageTests": 0,
+    "independentReviews": 0
+  },
+  "runtimeHealth": {
+    "at": "2026-10-30T17:36:05.753145+00:00",
+    "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+    "version": "0.118.5",
+    "build": "oGORrogXd002IRkOek7pG",
+    "services": {
+      "sd2-gray": {
+        "MainPID": "3774559",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-image-studio": {
+        "MainPID": "3774799",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-hd-derivatives": {
+        "MainPID": "3774476",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-multiview-works": {
+        "MainPID": "3774517",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-role-coordinator": {
+        "MainPID": "3774575",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-template-prompts": {
+        "MainPID": "3774695",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      },
+      "sd2-periodic-credits": {
+        "MainPID": "3774561",
+        "NRestarts": "0",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+        "ActiveState": "active"
+      }
+    },
+    "dataLinks": {
+      "storage": "/data/video-api-debugger/releases/80d5cf6f1ec489ea93257d42e8dd5c7e4e782560/storage",
+      "public/uploads": "/data/video-api-debugger/var-lib/uploads",
+      "public/videos": "/data/video-api-debugger/var-lib/videos"
+    },
+    "dataLinkTargetsMatchPreviousRuntime": true,
+    "legacyStorageLocationPreserved": true,
+    "runtimeDirectoriesWritable": [
+      "public/uploads/assets",
+      "public/uploads/thumbs",
+      "public/videos/thumbnails",
+      "storage/backups"
+    ],
+    "config": {
+      "local": {
+        "status": 200,
+        "origin": null,
+        "seedance_draft": {
+          "create_enabled": true,
+          "upgrade_enabled": true,
+          "contract_version": "seedance-draft-v1",
+          "status": "enabled",
+          "message": "可生成 480p 样片，完成后可另行生成 1080p；两步分别计费。"
+        }
+      },
+      "public": {
+        "status": 200,
+        "origin": "server-42-193",
+        "seedance_draft": {
+          "create_enabled": true,
+          "upgrade_enabled": true,
+          "contract_version": "seedance-draft-v1",
+          "status": "enabled",
+          "message": "可生成 480p 样片，完成后可另行生成 1080p；两步分别计费。"
+        }
+      }
+    },
+    "loginStatus": 200,
+    "privateIdentityPolicyUnchanged": true,
+    "privateConsumersMatchPreparedPair": true,
+    "databaseRestored": false
+  },
+  "finalReleaseWindow": {
+    "task": "C2 Seedance Draft to 1080p",
+    "owner": "seedance_draft_enable_release",
+    "target": "https://sd2.youdooart.com",
+    "candidate": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+    "recovery": "2c8b45fa4acbde7909b531120511ff139b9c1195",
+    "previous": "e5c4af85ac9ce7209f74582beef25d97ed42ceb2",
+    "status": "completed_pending_user_manual_acceptance",
+    "at": "2026-10-30T17:23:05.177046+00:00",
+    "productionMutationStarted": true,
+    "updatedAt": "2026-10-30T17:32:50.964004+00:00",
+    "run": "af1e77e5-8e1a-4047-a757-87579adc7ab8",
+    "completedAt": "2026-10-30T17:51:08.935025+00:00",
+    "apiFlowVerified": true,
+    "actualCredits": 36,
+    "manualPageAcceptance": false
+  }
+}

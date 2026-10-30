@@ -1,0 +1,134 @@
+{
+  "observedAt": "2026-10-30T17:50:13.791Z",
+  "source": "a8c6d4d78df80ddab2be261a57ba25e21189fe23",
+  "version": "0.118.5",
+  "requestKey": "seedance-draft-activate-20261030-r01",
+  "accountRole": "configured ordinary Codex service user",
+  "ownershipVerified": true,
+  "tasks": [
+    {
+      "id": "3af4402b-2986-4764-ae4a-5a47ba2addba",
+      "provider_task_id": "cgt-20261031013627-1kcvs",
+      "provider_draft_task_id": "cgt-20261031013627-1kcvs",
+      "is_draft": true,
+      "source_draft_task_id": null,
+      "local_status": "succeeded",
+      "provider_status": "succeeded",
+      "resolution": "480p",
+      "duration": 4,
+      "estimated_cost": 18,
+      "actual_cost": 18,
+      "frozen_cost": 0,
+      "refund_amount": null,
+      "local_video_path": "/videos/3af4402b-2986-4764-ae4a-5a47ba2addba-mvv9ak4i-3781136.mp4",
+      "error_code": null,
+      "error_message": null,
+      "created_at": "2026-10-30T17:36:23.417Z",
+      "completed_at": "2026-10-30T17:38:07.619Z",
+      "provider_reply": {
+        "resolution": "480p",
+        "draft": true
+      },
+      "has_provider_video": true,
+      "media": {
+        "programs": [],
+        "streams": [
+          {
+            "width": 854,
+            "height": 480
+          }
+        ],
+        "format": {
+          "duration": "4.041667",
+          "size": "1052386"
+        }
+      },
+      "public_media": {
+        "status": 200,
+        "contentType": "video/mp4",
+        "contentLength": "1052386"
+      }
+    },
+    {
+      "id": "cmvv9bq7a001atwtspsmch8sf",
+      "provider_task_id": "cgt-20261031013938-e84fj",
+      "provider_draft_task_id": "cgt-20261031013627-1kcvs",
+      "is_draft": false,
+      "source_draft_task_id": "3af4402b-2986-4764-ae4a-5a47ba2addba",
+      "local_status": "succeeded",
+      "provider_status": "succeeded",
+      "resolution": "1080p",
+      "duration": 4,
+      "estimated_cost": 18,
+      "actual_cost": 18,
+      "frozen_cost": 0,
+      "refund_amount": null,
+      "local_video_path": "/videos/cmvv9bq7a001atwtspsmch8sf-mvv9clz8-3782825.mp4",
+      "error_code": null,
+      "error_message": null,
+      "created_at": "2026-10-30T17:39:37.702Z",
+      "completed_at": "2026-10-30T17:40:18.351Z",
+      "provider_reply": {
+        "resolution": "1080p",
+        "draft": false,
+        "source_draft_task_id": "cgt-20261031013627-1kcvs"
+      },
+      "has_provider_video": true,
+      "media": {
+        "programs": [],
+        "streams": [
+          {
+            "width": 1920,
+            "height": 1080
+          }
+        ],
+        "format": {
+          "duration": "4.041667",
+          "size": "1997971"
+        }
+      },
+      "public_media": {
+        "status": 200,
+        "contentType": "video/mp4",
+        "contentLength": "1997971"
+      }
+    }
+  ],
+  "ledger": [
+    {
+      "related_task_id": "3af4402b-2986-4764-ae4a-5a47ba2addba",
+      "type": "task_freeze",
+      "amount": -18,
+      "frozen_before": 0,
+      "frozen_after": 18
+    },
+    {
+      "related_task_id": "3af4402b-2986-4764-ae4a-5a47ba2addba",
+      "type": "task_success_deduct",
+      "amount": -18,
+      "frozen_before": 18,
+      "frozen_after": 0
+    },
+    {
+      "related_task_id": "cmvv9bq7a001atwtspsmch8sf",
+      "type": "task_freeze",
+      "amount": -18,
+      "frozen_before": 0,
+      "frozen_after": 18
+    },
+    {
+      "related_task_id": "cmvv9bq7a001atwtspsmch8sf",
+      "type": "task_success_deduct",
+      "amount": -18,
+      "frozen_before": 18,
+      "frozen_after": 0
+    }
+  ],
+  "totalActualCredits": 36,
+  "remainingFrozenCredits": 0,
+  "independentProviderTaskIds": true,
+  "providerDraftLineageVerified": true,
+  "newVideoGenerations": 2,
+  "browserTests": 0,
+  "manualPageAcceptance": false
+}

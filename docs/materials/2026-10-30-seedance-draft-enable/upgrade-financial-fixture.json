@@ -1,0 +1,118 @@
+{
+  "passed": true,
+  "isolated": true,
+  "realProviderCalls": 0,
+  "realDatabaseCalls": 0,
+  "cases": [
+    {
+      "name": "200 invalid JSON",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "200 missing ID",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "accepted then local task registration fails",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "accepted then request ledger registration fails",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "timeout recovers original request",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "explicit provider rejection refunds",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 0,
+      "freezes": 1,
+      "refunds": 1,
+      "frozenCredits": 0,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "failure before send refunds",
+      "passed": true,
+      "providerPosts": 0,
+      "originalRequestQueries": 0,
+      "freezes": 1,
+      "refunds": 1,
+      "frozenCredits": 0,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "500 response remains unknown",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "500 InvalidParameter does not prove rejection",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "503 Unauthorized does not prove rejection",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    },
+    {
+      "name": "408 body does not prove rejection",
+      "passed": true,
+      "providerPosts": 1,
+      "originalRequestQueries": 1,
+      "freezes": 1,
+      "refunds": 0,
+      "frozenCredits": 18,
+      "repeatedRequestDeduplicated": true
+    }
+  ]
+}

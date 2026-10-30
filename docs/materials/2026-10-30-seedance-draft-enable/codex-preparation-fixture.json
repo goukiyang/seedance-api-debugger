@@ -1,0 +1,64 @@
+{
+  "passed": true,
+  "isolated": true,
+  "realDatabaseCalls": 0,
+  "realProviderCalls": 0,
+  "cases": [
+    {
+      "name": "legacy body delegates unchanged",
+      "passed": true
+    },
+    {
+      "name": "v2 authenticates first and prepares with configured ordinary actor",
+      "passed": true
+    },
+    {
+      "name": "invalid token cannot prepare or submit",
+      "passed": true
+    },
+    {
+      "name": "approval blocker cannot submit",
+      "passed": true
+    },
+    {
+      "name": "existing intent is not silently replaced",
+      "passed": true
+    },
+    {
+      "name": "accepted original is delegated for normal deduplication",
+      "passed": true
+    },
+    {
+      "name": "missing original request identity cannot submit",
+      "passed": true
+    },
+    {
+      "name": "upgrade retains bound local Draft and normal preparation contract",
+      "passed": true
+    },
+    {
+      "name": "upgrade rejects provider ID passthrough before preparing",
+      "passed": true
+    },
+    {
+      "name": "definite pre-intent rejection seals original key across changed input",
+      "passed": true
+    },
+    {
+      "name": "preparation 409 remains unsealed",
+      "passed": true
+    },
+    {
+      "name": "preparation 503 remains unsealed",
+      "passed": true
+    },
+    {
+      "name": "known project permission error retains 403 and no submission",
+      "passed": true
+    },
+    {
+      "name": "known prompt group error retains 422 and no submission",
+      "passed": true
+    }
+  ]
+}
