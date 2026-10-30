@@ -3,6 +3,8 @@ import { POST as upgradeDraft } from '@/app/api/tasks/[id]/draft-upgrade/route';
 import { authenticateCodexVideoApi, CodexApiAuthError, prepareCodexVideoCreation } from '@/lib/integrations/codex';
 import { CreationError } from '@/lib/creation/contract';
 import { videoPricingError } from '@/lib/pricing/video';
+import { AuthError } from '@/lib/auth/session';
+import { VideoPromptGroupError } from '@/lib/video/prompt-groups';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,8 +28,9 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       const pricing = videoPricingError(error);
       if (pricing) return Response.json({ error: pricing.code, code: pricing.code, message: pricing.message }, { status: pricing.status, headers: { 'Cache-Control': 'private, no-store' } });
-      if (error instanceof CreationError || error instanceof CodexApiAuthError) {
-        return Response.json({ error: error.code, code: error.code, message: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
+      if (error instanceof CreationError || error instanceof CodexApiAuthError || error instanceof AuthError || error instanceof VideoPromptGroupError) {
+        const code = error instanceof AuthError ? 'creation_result_unknown' : error.code;
+        return Response.json({ error: code, code, message: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
       }
       throw error;
     }

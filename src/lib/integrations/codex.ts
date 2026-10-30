@@ -435,7 +435,18 @@ export async function prepareCodexVideoCreation(user: SessionUser, body: Record<
   if (body.creation_contract_version !== 2 || body.intent_id !== undefined) return body;
   const input = { ...body, action: body.action || 'generate', entry: body.entry || 'ordinary' };
   const { prepareVideoCreationIntent } = await import('@/lib/creation/intents');
-  const intent = await prepareVideoCreationIntent(user, { ...input, request_id: body.idempotency_key });
+  const preparation = { ...input, request_id: body.idempotency_key };
+  let intent: Awaited<ReturnType<typeof prepareVideoCreationIntent>>;
+  try {
+    intent = await prepareVideoCreationIntent(user, preparation);
+  } catch (cause) {
+    const known = cause as { status?: number; code?: string };
+    if (Number.isInteger(known?.status)) {
+      const { recordPreparationRejection } = await import('@/lib/creation/preparation-receipts');
+      await recordPreparationRejection(user, preparation, Number(known.status), known.code);
+    }
+    throw cause;
+  }
   if (!intent.accepted_task_id && !intent.availability?.canSubmit) {
     const reason = intent.availability?.reasons[0];
     throw new CreationError(reason?.message || '原生成准备尚不可提交，请核对原请求', 409,
