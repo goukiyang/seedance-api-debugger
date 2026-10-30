@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '登录验证衔接', outline: [
-  '新飞书登录的私密编辑身份与站内登录保持同一期限',
-  '旧身份需确认时明确说明，退出同时清理身份凭据',
+const notice = { title: '兼容飞书登录', outline: [
+  '保留现有飞书登录与私密身份读取',
+  '程序恢复不修改历史内容和业务数据',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

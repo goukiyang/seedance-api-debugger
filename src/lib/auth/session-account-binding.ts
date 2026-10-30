@@ -5,6 +5,17 @@ import { hasSessionPasswordBinding } from './password';
 // One fixed lifetime for the site cookie and a fresh verified Feishu identity.
 export const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
+// Authentication provenance is signed with the site session, independently of
+// whether the private-prompt policy currently grants this identity any access.
+export type VerifiedFeishuSession = {
+  version: 1;
+  source: 'feishu-oauth';
+  tenant: string | null;
+  subject: string;
+  issuedAt: number;
+  expiresAt: number;
+};
+
 export type SessionAccount = AccountScopedUser & {
   id: string;
   password_hash: string;
