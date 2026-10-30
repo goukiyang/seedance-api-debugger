@@ -1,5 +1,13 @@
 # V1.2 剩余模块落地 Todo
 
+## CG02 CodeGraph 默认使用与开发分支索引（2026-10-29）
+
+| 编号 | 任务 | 完成标准 | 当前状态 |
+|---|---|---|---|
+| CG02 | 接通默认使用与分支索引 | 默认入口生效、分支内容对应、真实查询成功 | 已完成：默认连接已配置；两个工作区隔离及真实MCP新增/修改/删除、结构和调用查询通过 |
+
+沿项目AGENTS的CodeGraph入口：精确worktree（含未提交源码）优先，线上镜像仅用于明确线上查询。索引数据库位于本机 `/Users/Shared/codegraph-projects/worktree-indexes/`，源码位置与Git状态不改；已有旧索引保留备份。准备入口核对真实文件集合/指纹，避免空索引与干净切分支被Git增量检查漏掉。MCP适配器 `/Users/Shared/codegraph-projects/codegraph-mcp.cjs` 查询前自动准备，失败不返回旧结果；新连接使用配置，旧连接先运行guard。验证记录 `/Users/Shared/codegraph-projects/cg02-verification.json`，实际查询计数 `/Users/Shared/codegraph-projects/query-usage.jsonl`；不记录查询正文。仅本地工具和规则，不部署应用。 可维护源码在 `ops/codegraph/prepare-worktree.py` 与 `ops/codegraph/mcp.cjs`；原包不改，新连接自动加载，既有连接使用guard接续。查询文件指纹缓存复用已核对内容，发生变化才重读；本轮普通查询约0.3–0.5秒。
+
 ## FULL01 七组全量恢复（2026-10-23）
 
 用户最新授权“开始修改落地其他的全量”。当前恢复[联合单v1.3.0 §10](todo/2026-10-22-creation-experience-merged.md#10-full01-七组全量恢复实施2026-10-23)全部R01–R07及最终保护发布，保QUICK01 v0.103.2/129bf4fd、SIZE和旧差量；此前其余暂停状态转为历史。默认功能用户手验，不自动浏览器/收费生成/独审，整批实现后统一必要构建与发布保护，直接发布。effort4未确认仍默认6，pricing/canvas不盲开。
