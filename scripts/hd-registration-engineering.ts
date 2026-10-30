@@ -182,7 +182,12 @@ async function main() {
     const uploadedJob = (await core.listHdJobs()).find(value => value.source === upload.originalUrl)!;
     assert.equal(uploadedJob.status, 'queued'); assert.equal(uploadedJob.priority, 0);
     assert.equal(await registerCommittedAssetHd(uploaded.asset.id, 'another-owner'), false);
-    assert.equal((await registerVerifiedUpload(upload)).reused, true);
+    const replay = await registerVerifiedUpload(upload);
+    assert.equal(replay.asset.id, uploaded.asset.id);
+    assert.equal(replay.reused, uploaded.reused, 'The original request keeps its original receipt disposition');
+    const reuse = await registerVerifiedUpload({ ...upload, requestId: 'eager-upload-another-request' });
+    assert.equal(reuse.asset.id, uploaded.asset.id);
+    assert.equal(reuse.reused, true);
     assert.equal(await registerCommittedAssetHd(uploaded.asset.id, upload.ownerId), true);
     assert.equal((await core.listHdJobs()).filter(value => value.source === upload.originalUrl).length, 1);
     assert.equal(await snapshot(task.id), beforeUpload);

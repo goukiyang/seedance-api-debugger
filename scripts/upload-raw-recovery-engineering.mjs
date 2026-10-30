@@ -195,18 +195,19 @@ await check('completed_original_receipt_returns_without_directory_or_new_dispatc
   assert.equal(env.counters().writes, 0); assert.equal(env.counters().directoryChecks, 0);
   assert.equal(env.counters().hdAssetReads, 0); assert.equal(env.hdRequests.length, 0);
 });
-await check('successful_raw_image_hd_registration_requires_fresh_owned_committed_asset', async () => {
+await check('successful_raw_image_leaves_hd_registration_to_shared_committed_upload', async () => {
   const env = environment(), prepared = await env.state.prepareRawUpload(env.identity);
   const response = await env.post(prepared.rawUpload.nonce);
   await Promise.resolve();
   assert.equal(response.status, 200); assert.equal(env.counters().writes, 1);
-  assert.equal(env.counters().hdAssetReads, 1); assert.equal(env.hdRequests.length, 1);
-  assert.equal(env.hdRequests[0].context.owner.ownerId, env.identity.ownerId);
+  // The actual shared upload hook and fresh ownership checks are exercised by
+  // hd-registration-engineering; this route must not duplicate that work.
+  assert.equal(env.counters().hdAssetReads, 0); assert.equal(env.hdRequests.length, 0);
   const revoked = environment({ foreignCommittedAsset: true }), original = await revoked.state.prepareRawUpload(revoked.identity);
   const delivered = await revoked.post(original.rawUpload.nonce);
   await Promise.resolve();
   assert.equal(delivered.status, 200, 'Unavailable HD context cannot undo an accepted upload');
-  assert.equal(revoked.counters().writes, 1); assert.equal(revoked.counters().hdAssetReads, 1);
+  assert.equal(revoked.counters().writes, 1); assert.equal(revoked.counters().hdAssetReads, 0);
   assert.equal(revoked.hdRequests.length, 0, 'Never queue the response URL without a current owned asset');
 });
 await check('retired_writer_exact_proof_rotates_nonce_without_upload_and_stale_writer_is_rejected', async () => {
