@@ -1,13 +1,24 @@
 .selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px 14px; min-width: 0; }
-.attachment { display: flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--border-color, oklch(65% 0.02 240 / .28)); border-radius: 6px; padding: 4px; min-height: 46px; }
-.attachment > button:first-child { display: flex; align-items: center; gap: 8px; text-align: left; min-width: 0; max-width: 176px; font-weight: 650; }
+.chips { display: flex; flex: 1 1 320px; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.selectionActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.attachment { position: relative; display: flex; align-items: center; gap: 4px; width: 160px; max-width: 100%; height: 32px; border: 1px solid var(--border-color, oklch(65% 0.02 240 / .28)); border-radius: 6px; padding: 0 4px; }
+.attachment[data-unavailable] { border-style: dashed; }
+.chipIcon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; }
+.chipName { display: flex; align-items: center; gap: 3px; flex: 1; min-width: 0; height: 30px; padding: 0; text-align: left; border: 0; background: transparent; }
+.chipName > span { flex-shrink: 0; font-size: 11px; color: var(--text-secondary); }
+.attachment .remove { position: absolute; right: -5px; top: -6px; width: 22px; min-width: 22px; height: 22px; border-radius: 50%; background: var(--bg-secondary); border: 1px solid var(--border-color); }
+@media (hover: hover) and (pointer: fine) {
+  .attachment .remove { opacity: 0; pointer-events: none; }
+  .attachment:hover .remove, .attachment:focus-within .remove { opacity: 1; pointer-events: auto; }
+}
+.selection button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 1px; }
 .attachment strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.thumb { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 36px; object-fit: cover; border-radius: 4px; background: var(--bg-tertiary, oklch(55% .01 240 / .12)); }
+.thumb { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; object-fit: cover; border-radius: 4px; background: var(--bg-tertiary, oklch(55% .01 240 / .12)); }
 .selection button, .panel button { color: inherit; cursor: pointer; font: inherit; }
 .icon { display: inline-flex; justify-content: center; align-items: center; width: 30px; min-width: 30px; height: 30px; border: 0; border-radius: 4px; background: transparent; }
 .icon:hover, .icon:focus-visible { background: var(--bg-tertiary, oklch(55% .01 240 / .16)); }
 .icon:disabled { opacity: .35; cursor: default; }
-.add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 108px; height: 40px; padding: 0 10px; white-space: nowrap; border: 1px dashed var(--border-color, oklch(65% .02 240 / .45)); border-radius: 6px; background: transparent; }
+.add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 100px; height: 32px; padding: 0 8px; white-space: nowrap; border: 1px dashed var(--border-color, oklch(65% .02 240 / .45)); border-radius: 6px; background: transparent; }
 .plain { border: 0; background: transparent; color: var(--text-secondary, inherit); padding: 6px; }
 .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: oklch(8% .005 240 / .65); }
 .panel { display: flex; flex-direction: column; width: min(1060px, 100%); max-height: min(820px, calc(100dvh - 48px)); background: var(--bg-secondary, oklch(20% .01 240)); color: var(--text-primary, oklch(94% .005 240)); border: 1px solid var(--border-color, oklch(50% .01 240 / .35)); border-radius: 8px; box-shadow: 0 20px 60px oklch(4% .005 240 / .3); overflow: hidden; min-width: 0; }
@@ -71,8 +82,12 @@
   .filters input { width: 100%; flex-basis: 100%; }
   .footer .button { padding: 9px 12px; }
   .footer .actions { width: 100%; justify-content: flex-end; }
-  .attachment { gap: 1px; }
-  .attachment > button:first-child { max-width: 138px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .attachment, .add { height: 40px; }
+  .chipIcon { flex-basis: 32px; width: 32px; }
+  .chipName { height: 38px; padding-right: 22px; }
+  .attachment .remove { top: 0; right: 0; width: 32px; min-width: 32px; height: 40px; border: 0; border-radius: 4px; background: transparent; }
 }
 
 .secondary summary { cursor: pointer; color: var(--text-secondary, inherit); font-size: 13px; }

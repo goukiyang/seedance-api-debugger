@@ -154,8 +154,8 @@ export function ComposerActionBar({
     || null;
   const effectiveProviderLabel = selectedProviderOption?.label || providerLabel;
   const hasModelOptions = modelOptions.length > 0;
-  const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || modelOptions[0] || null;
-  const effectiveModelLabel = selectedModelOption?.label || modelLabel;
+  const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || (!selectedModel ? modelOptions[0] : null) || null;
+  const effectiveModelLabel = selectedModelOption?.label || (selectedModel ? '当前型号不可用' : modelLabel);
   const hasAuxiliaryOptions = auxiliaryOptions.length > 0;
   const selectedAuxiliaryOption = auxiliaryOptions.find((option) => option.id === selectedAuxiliary)
     || auxiliaryOptions.find((option) => !option.disabled)
@@ -165,10 +165,31 @@ export function ComposerActionBar({
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const modelAnchor = useRef<HTMLDivElement>(null), modelPanel = useRef<HTMLDivElement>(null);
+  const [modelPosition, setModelPosition] = useState<React.CSSProperties | null>(null);
+  const closeModelMenu = () => { setShowModelMenu(false); requestAnimationFrame(() => modelAnchor.current?.querySelector('button')?.focus()); };
+  useDialogDismiss({ open: showModelMenu, dialogRef: modelPanel, layerSurfaceRef: modelPanel, branchRefs: [modelAnchor], modal: false, onDismiss: closeModelMenu });
+  useEffect(() => {
+    if (!showModelMenu) { setModelPosition(null); return; }
+    const place = () => {
+      if (!modelAnchor.current || !modelPanel.current) return;
+      const anchor = modelAnchor.current.getBoundingClientRect(), viewport = window.visualViewport;
+      const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0, width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
+      const panelWidth = Math.min(360, width - 16), below = top + height - anchor.bottom - 14, above = anchor.top - top - 14;
+      const maxHeight = Math.min(420, Math.max(below, above)), panelHeight = Math.min(modelPanel.current.scrollHeight, maxHeight);
+      setModelPosition({ position: 'fixed', zIndex: 2147000000, width: panelWidth, maxHeight, overflowY: 'auto',
+        left: Math.max(left + 8, Math.min(anchor.left, left + width - panelWidth - 8)),
+        top: below >= panelHeight ? anchor.bottom + 6 : Math.max(top + 8, anchor.top - panelHeight - 6) });
+    };
+    place();
+    const frame = requestAnimationFrame(() => (modelPanel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)') || modelPanel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus());
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true); window.visualViewport?.addEventListener('resize', place);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); };
+  }, [showModelMenu]);
   const [showAuxiliaryMenu, setShowAuxiliaryMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
-  const followsFirstFrame = seedanceRatioFollowsFirstFrame(selectedModel, generationMode);
+  const followsFirstFrame = seedanceRatioFollowsFirstFrame(durationModel, generationMode);
   const durationOptions = seedanceVideoDurationOptions(durationModel);
   const durationValid = isSeedanceVideoDuration(duration, durationModel);
   const ratioLocked = lockedRatio || followsFirstFrame;
@@ -217,34 +238,43 @@ export function ComposerActionBar({
         )}
 
         {/* 模型标签 */}
-        <div className="composer-chip-wrap">
+        <div className="composer-chip-wrap" ref={modelAnchor} onKeyDown={event => {
+          if (event.target === modelAnchor.current?.querySelector('button') && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); setShowModelMenu(true); }
+        }}>
           <ParamChip
             label={effectiveModelLabel}
             dropdown={hasModelOptions}
             onClick={hasModelOptions ? () => setShowModelMenu(!showModelMenu) : undefined}
           />
-          {showModelMenu && hasModelOptions && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowModelMenu(false)} />
-              <div className="composer-chip-dropdown composer-model-options">
+          {showModelMenu && hasModelOptions && typeof document !== 'undefined' && createPortal(
+              <div ref={modelPanel} className="composer-chip-dropdown composer-model-options" role="menu" aria-label="生成型号" style={{ ...modelPosition, visibility: modelPosition ? 'visible' : 'hidden' }} onKeyDown={event => {
+                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const items = Array.from(modelPanel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+                const index = items.indexOf(document.activeElement as HTMLButtonElement);
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+                items[next]?.focus();
+              }}>
                 {modelOptions.map((option) => (
                   <button
                     key={option.id}
                     type="button"
                     className={`composer-chip-dropdown-item ${option.id === selectedModelOption?.id ? 'active' : ''}`}
+                    role="menuitemradio"
+                    aria-checked={option.id === selectedModel}
+                    disabled={option.disabled}
                     onClick={() => {
+                      if (option.disabled) return;
                       onModelChange?.(option.id);
-                      setShowModelMenu(false);
+                      closeModelMenu();
                     }}
-                    title={option.id}
+                    title={option.disabledReason || option.label}
                   >
                     <span>{option.label}</span>
-                    <small>{option.detail}</small>
+                    <small>{option.disabledReason || option.detail}</small>
                   </button>
                 ))}
-              </div>
-            </>
-          )}
+              </div>, document.body)}
         </div>
 
         {hasAuxiliaryOptions && (

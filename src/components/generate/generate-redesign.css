@@ -1,4 +1,4 @@
-.composer-page--video .composer-hero { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 20px; text-align: left; }
+.composer-page--video .composer-hero { display: flex; justify-content: space-between; align-items: center; padding: 24px 0 20px; text-align: left; }
 .composer-page--video .composer-hero-title { margin: 0; font-size: 25px; color: var(--text-primary); }
 .video-related-tools { position: relative; margin: 0; z-index: 45; }
 .video-related-tools > summary { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 8px; color: var(--text-secondary); font-size: 13px; list-style: none; }
@@ -16,13 +16,23 @@
 .generation-composer--video .ref-strip { padding: 0 14px 4px; margin: 0; }
 .generation-composer--video .ref-strip-count { display: none; }
 .generation-composer--video .ref-order-actions { display: flex; justify-content: space-between; }
+@media (hover: hover) and (pointer: fine) {
+  .generation-composer--video .ref-order-actions { opacity: 0; pointer-events: none; }
+  .generation-composer--video .ref-thumb-wrap:hover .ref-order-actions,
+  .generation-composer--video .ref-thumb-wrap:focus-within .ref-order-actions { opacity: 1; pointer-events: auto; }
+}
 .ref-order-actions button { width: 28px; height: 24px; display: grid; place-items: center; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .ref-order-actions button:disabled { opacity: .3; cursor: default; }
 .generation-composer--video .ref-thumb { width: 76px; height: 86px; }
 .generation-composer--video .ref-thumb-img, .generation-composer--video .ref-thumb-video { object-fit: contain; }
 .generation-composer--video .ref-add-card { width: 64px; min-width: 64px; height: 86px; border-radius: 6px; }
-.generation-composer--video .composer-prompt-editor { border: 0; border-radius: 0; background: transparent; margin: 0; }
-.generation-composer--video .composer-prompt-textarea { min-height: 140px; max-height: min(320px, 42dvh); font-size: 17px; line-height: 1.65; color: var(--text-primary); background: #0B0909; padding: 14px; resize: none; }
+.generation-composer--video .composer-prompt-editor { border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary); margin: 8px 14px; min-width: 0; }
+.generation-composer--video .composer-prompt-textarea { min-height: 140px; max-height: min(320px, 42dvh); font-size: 17px; line-height: 1.65; color: var(--text-primary); background: transparent; padding: 14px; resize: none; }
+.generation-composer--video .composer-prompt-footer { position: static; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 0 12px 10px; background: transparent; }
+.generation-composer--video .composer-prompt-tools { flex: 1 1 160px; min-width: 0; }
+.generation-composer--video .composer-reference-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.generation-composer--video .composer-prompt-actions { display: flex; flex-direction: row; align-items: center; flex-shrink: 0; gap: 10px; margin-left: auto; }
+.generation-composer--video .composer-prompt-counter { white-space: nowrap; }
 .generation-composer--video .composer-prompt-textarea::placeholder { color: var(--text-tertiary, var(--text-secondary)); }
 .generation-composer--video .composer-status-line { margin: 0; padding: 0 14px; }
 .video-composer-extra-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 10px; }

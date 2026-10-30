@@ -66,7 +66,7 @@ import {
   type TaskReuseContext,
   type TaskReuseIntent,
 } from '@/lib/navigation/task-reuse-intent';
-import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, taskReuseReplacedInput, type CompletedTaskReuse, type TaskReuseClientRecord, type TaskReuseInputBackup } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, taskReuseReplacedInput, type CompletedTaskReuse, type TaskReuseClientRecord, type TaskReuseInputBackup, type VideoModelChoice } from '@/lib/navigation/task-reuse-client';
 import { TaskReuseStatus, type ReuseUndoAction } from './TaskReuseStatus';
 import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 
@@ -613,6 +613,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   // ---- Credit Summary ----
   const [credits, setCredits] = useState<CreditSummary | null>(null);
   const [h3VideoConfig, setH3VideoConfig] = useState<H3VideoConfig | null>(null);
+  const [ipVideoStatus, setIpVideoStatus] = useState<'loading' | 'unknown' | 'disabled' | 'unready' | 'ready'>('loading');
   const [h3CapabilitiesReady, setH3CapabilitiesReady] = useState(isIpSurface);
   const [seedanceDraftCapability, setSeedanceDraftCapability] = useState<SeedanceDraftCapability>({
     create_enabled: false,
@@ -1137,8 +1138,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     });
   }, [hideExternalIpInternalControls, reuseUiLocked]);
 
-  const h3Ready = !isIpSurface
-    && h3VideoConfig?.ready === true
+  const h3Ready = h3VideoConfig?.ready === true
     && h3VideoConfig.preset_options.length > 0;
   const selectedH3Preset = h3VideoConfig?.preset_options.find((option) => option.id === h3VideoConfig.default_preset_id)
     || h3VideoConfig?.preset_options[0]
@@ -1150,9 +1150,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const activeH3LoraOptions = selectedProvider === 'h3' && h3Ready
     ? h3VideoConfig?.lora_options || []
     : [];
-  const activeModelOptions = useMemo<ComposerSelectOption[]>(() => {
-    if (isIpSurface) return VOLCENGINE_IP_MODEL_OPTIONS.map(option => ({ ...option,
-      detail: `4–${seedanceVideoMaxDuration(option.id)} 秒 · ${volcengineIpModelResolutions(option.id).join(' / ')}` }));
+  const normalModelOptions = useMemo<ComposerSelectOption[]>(() => {
     const options = SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => option.id === SEEDANCE_2_5_MODEL_ID
       ? {
           ...option,
@@ -1170,7 +1168,17 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       });
     }
     return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, isIpSurface, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
+  }, [currentUser?.role, h3Ready, h3VideoConfig, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
+  const ipDisabledReason = ipVideoStatus === 'ready' ? null : ipVideoStatus === 'loading' ? '正在确认IP线路'
+    : ipVideoStatus === 'unknown' ? '暂时无法确认IP线路' : ipVideoStatus === 'disabled' ? 'IP线路已停用' : 'IP线路暂不可用';
+  const ipModelOptions = VOLCENGINE_IP_MODEL_OPTIONS.map(option => ({ ...option,
+    detail: `4–${seedanceVideoMaxDuration(option.id)} 秒 · ${volcengineIpModelResolutions(option.id).join(' / ')}` }));
+  const activeModelOptions = isIpSurface ? ipModelOptions : normalModelOptions;
+  const videoModelChoices: VideoModelChoice[] = [
+    ...(!loadingUser && !isExternalUser(currentUser) ? normalModelOptions.map(option => ({ ...option, id: `normal:${option.id}`, model: option.id, surface: 'normal' as const })) : []),
+    ...ipModelOptions.map((option, index) => ({ ...option, id: `ip:${option.id}`, model: option.id, surface: 'ip' as const,
+      label: ['IP SD2.0', 'IP SD2.0 Fast', 'IP SD2.0 Mini', 'IP SD2.5'][index], disabled: Boolean(ipDisabledReason), disabledReason: ipDisabledReason || undefined })),
+  ];
   const activeModelLabel = surfaceConfig.modelLabel;
   const generationReturnTo = useMemo(() => {
     const params = new URLSearchParams();
@@ -1328,19 +1336,21 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   }, [currentUser?.id, isIpSurface]);
 
   useEffect(() => {
-    if (isIpSurface) return;
     let cancelled = false;
     fetch('/api/config', { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         if (cancelled) return;
         setH3VideoConfig(normalizeH3VideoConfig(data?.h3_video));
+        setIpVideoStatus(data?.ip_video?.status === 'known' && typeof data.ip_video.enabled === 'boolean' && typeof data.ip_video.ready === 'boolean'
+          ? !data.ip_video.enabled ? 'disabled' : data.ip_video.ready ? 'ready' : 'unready' : 'unknown');
         setH3CapabilitiesReady(true);
         if (data?.seedance_draft) setSeedanceDraftCapability(data.seedance_draft);
       })
       .catch(() => {
         if (!cancelled) {
           setH3VideoConfig(null);
+          setIpVideoStatus('unknown');
           setH3CapabilitiesReady(true);
         }
       });
@@ -3266,7 +3276,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       ? '直接保存到项目，视频卡可选'
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
-  const normalVideoRedesign = !isIpSurface && !studioHandoff && !imageResultHandoff;
+  const normalVideoRedesign = !studioHandoff && !imageResultHandoff;
+  const modeSwitchBlocker = unconfirmedGenerationRequest || generationOperation.current || creation.unconfirmedRequestId
+    || creation.intent && !isResolvedCreationIntent(creation.intent) ? '原提交结果尚未确认，请先核对原请求'
+    : reuseUiLocked ? '原复用尚未确认，请先完成原操作'
+    : reuseContextBusy || readReuseContext().reason ? '当前输入或素材正在准备，请稍候'
+    : videoFeishu.busy || videoFeishu.unsaved ? '飞书设置尚未确认，请先完成原操作' : null;
   const relatedToolLinks = surfaceConfig.heroLinks
     .filter(link => !link.adminOnly || currentUser?.role === 'admin')
     .filter(link => !link.externalHidden || !isExternalUser(currentUser))
@@ -3410,7 +3425,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   // ============================================================================
 
   return (
-    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : normalVideoRedesign ? ' composer-page--video' : ''}`}>
+    <div className={`composer-page${isIpSurface ? ' composer-page-ip' : ''}${normalVideoRedesign ? ' composer-page--video' : ''}`}>
       {productDialog}
       {/* ===== 顶部导航栏 ===== */}
       <ComposerTopbar user={currentUser} loadingUser={loadingUser} credits={credits} />
@@ -3644,6 +3659,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         </p>}
         {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
           videoRedesign={normalVideoRedesign}
+          videoSurface={normalVideoRedesign ? isIpSurface ? 'ip' : 'normal' : undefined}
+          videoModelChoices={normalVideoRedesign ? videoModelChoices : undefined}
+          modeSwitchBlocker={modeSwitchBlocker}
+          modeSwitchInitializing={parentReuseInitializing}
+          feishuEnabled={videoFeishu.enabled}
           settingsContent={normalVideoRedesign && !hideExternalIpInternalControls ? videoCardSettings : undefined}
           settingsOpen={videoCardPanelOpen}
           onSettingsOpenChange={setVideoCardPanelOpen}
@@ -3690,7 +3710,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           submitDisabledReasonExternal={normalVideoRedesign && Boolean(creation.loading || creation.error)}
           submitDisabledReason={creation.loading || creation.error ? creation.error || '正在确认保存位置' : studioRunId && (studioHandoffLoading || !studioHandoff)
             ? studioHandoffLoading ? '模板运行记录加载中，请稍候' : studioHandoffError || '模板运行记录尚未通过授权校验'
-            : surfaceConfig.submitDisabledReason}
+            : isIpSurface && ipDisabledReason ? ipDisabledReason : surfaceConfig.submitDisabledReason}
           providerLabel={activeProviderLabel}
           providerOptions={[]}
           selectedProvider={selectedProvider}

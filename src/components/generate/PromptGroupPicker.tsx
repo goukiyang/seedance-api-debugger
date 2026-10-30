@@ -2,14 +2,16 @@
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject, type UIEventHandler } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Copy, ImageIcon, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Undo2, UserRound, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, ImageIcon, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2, Undo2, UserRound, X } from 'lucide-react';
+import { rectSortingStrategy } from '@dnd-kit/sortable';
+import { SortableStudioList } from '@/app/image-studio/sortable-studio-list';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ResourceLibraryPicker, type ResourceLibraryPickerProps } from '@/components/ResourceLibraryPicker';
-import { VIDEO_GROUP_LIMIT, parseVideoPromptGroupRefs, type VideoPromptGroupRef, type VideoPromptGroupSummary } from '@/lib/video/prompt-groups';
+import { VIDEO_GROUP_LIMIT, parseVideoPromptGroupRefs, reorderVideoPromptGroupPrefix, type VideoPromptGroupRef, type VideoPromptGroupSummary } from '@/lib/video/prompt-groups';
 import styles from './PromptGroupSelection.module.css';
 
 type Group = VideoPromptGroupRef & Partial<VideoPromptGroupSummary> & { copyFrom?: VideoPromptGroupRef; intent?: 'delete' };
@@ -85,7 +87,7 @@ export function useVideoPromptGroupSummaries(refs: VideoPromptGroupRef[]) {
   return { groups,
     loading: refs.length > 0 && state.key !== key, error: state.key === key ? state.error : '', refresh: () => setRetry(v => v + 1) };
 }
-function GroupDetail({ item, onClose, onUse, onEdit, onCopy }: { item: Group | null; onClose: () => void; onUse?: () => void; onEdit?: () => void; onCopy?: () => void }) {
+function GroupDetail({ item, onClose, onUse, onEdit, onCopy, onLatest }: { item: Group | null; onClose: () => void; onUse?: () => void; onEdit?: () => void; onCopy?: () => void; onLatest?: () => void }) {
   const { user, sessionChanged } = useAppSession();
   const [profile, setProfile] = useState(false);
   const [loadedContent, setContent] = useState<(Group & { body?: string; actorId: string }) | null>(null), [error, setError] = useState(''), [loading, setLoading] = useState(false), [retry, setRetry] = useState(0);
@@ -103,6 +105,7 @@ function GroupDetail({ item, onClose, onUse, onEdit, onCopy }: { item: Group | n
   return <><Modal open={Boolean(item) && Boolean(user?.id) && !sessionChanged} narrow title="提示词组详情" onClose={onClose} footer={<>
     {content?.canManage && onEdit && <button type="button" className={styles.button} onClick={onEdit}><Pencil size={15} />编辑当前原组</button>}
     {content?.canCopy && onCopy && <button type="button" className={styles.button} onClick={onCopy}><Copy size={15} />另存私人副本</button>}
+    {onLatest && item?.latestVersionId && item.latestVersionId !== item.versionId && <button type="button" className={styles.button} onClick={onLatest}><RefreshCw size={15} />使用最新版本</button>}
     {onUse && <button type="button" className={`${styles.button} ${styles.primary}`} disabled={loading || Boolean(error || item?.unavailable || content?.unavailable)} onClick={onUse}>选用</button>}
   </>}>{item && <div className={styles.detail}><div className={styles.cover}><Cover item={item} /></div><h3>{item.name || '提示词组不可用'}</h3>
     <Author item={item} onClick={() => setProfile(true)} /><p>{item.description || item.reason || '暂无用途简介'}</p>{item.conditions && <p>{item.conditions}</p>}
@@ -408,24 +411,30 @@ export function PromptGroupSelection({ refs, onChange, disabled = false, onUploa
   const container = useRef<HTMLDivElement>(null), [visibleLimit, setVisibleLimit] = useState(2);
   useEffect(() => {
     const element = container.current; if (!element) return;
-    const observer = new ResizeObserver(entries => setVisibleLimit(Math.max(1, Math.floor((entries[0].contentRect.width - 72) / 280)) * 2));
+    const observer = new ResizeObserver(entries => setVisibleLimit(Math.max(1, Math.floor((entries[0].contentRect.width + 8) / 168)) * 2));
     observer.observe(element); return () => observer.disconnect();
   }, []);
   const change = (next: VideoPromptGroupRef[]) => { setUndo(refs); onChange(next); };
-  const move = (index: number, step: number) => { const next = [...refs]; [next[index], next[index + step]] = [next[index + step], next[index]]; change(next); };
-  return <><div ref={container} className={styles.selection} aria-label="本次提示词组">
-    {(expanded ? summaries.groups : summaries.groups.slice(0, visibleLimit)).map((item, index) => <div className={styles.attachment} key={item.groupId}>
-      <button type="button" className={styles.plain} title={item.reason || item.name || '查看详情'} onClick={() => setDetail(item)}><Cover item={item} small /><strong>{item.name || '提示词组不可用'}{item.unavailable ? ' · 不可用' : ''}</strong></button>
-      <button type="button" className={styles.icon} title="前移" aria-label="前移" disabled={disabled || index === 0} onClick={() => move(index, -1)}><ArrowLeft size={13} /></button>
-      <button type="button" className={styles.icon} title="后移" aria-label="后移" disabled={disabled || index === refs.length - 1} onClick={() => move(index, 1)}><ArrowRight size={13} /></button>
-      {item.latestVersionId && item.latestVersionId !== item.versionId && <button type="button" className={styles.icon} title="使用最新版本" aria-label="使用最新版本" disabled={disabled} onClick={() => change(refs.map(ref => ref.groupId === item.groupId ? { ...ref, versionId: item.latestVersionId! } : ref))}><RefreshCw size={14} /></button>}
-      <button type="button" className={styles.icon} title="移除本次引用" aria-label="移除本次引用" disabled={disabled} onClick={() => change(refs.filter(ref => ref.groupId !== item.groupId))}><X size={14} /></button></div>)}
+  const visible = refs.slice(0, expanded ? refs.length : visibleLimit);
+  const currentRefs = useRef(refs); currentRefs.current = refs;
+  return <><div className={styles.selection} aria-label="本次提示词组"><div ref={container} className={styles.chips}>
+    <SortableStudioList items={visible} identify={item => item.groupId} label={item => summaries.groups.find(group => group.groupId === item.groupId)?.name || '提示词组'}
+      disabled={disabled || refs.length < 2} strategy={rectSortingStrategy} revisionKey={JSON.stringify(refs)} keyboardInstructions="按空格开始，使用四个方向键调整，再按空格完成；按Esc取消。"
+      onReorder={ids => { const next = reorderVideoPromptGroupPrefix(currentRefs.current, visible, ids); if (next) change(next); }}
+      render={(ref, handle) => { const item: Group = summaries.groups.find(group => group.groupId === ref.groupId) || ref; return <div className={styles.attachment} data-unavailable={item.unavailable || undefined}>
+        <span className={styles.chipIcon}>{refs.length > 1 ? handle : <Cover item={item} small />}</span>
+        <button type="button" className={styles.chipName} title={item.reason || item.name || '查看详情'} onClick={() => setDetail(item)}><strong>{item.name || '提示词组不可用'}</strong>{item.unavailable ? <span aria-label="不可用">!</span> : item.latestVersionId && item.latestVersionId !== item.versionId ? <span title="当时版本">旧</span> : null}</button>
+        <button type="button" className={`${styles.icon} ${styles.remove}`} title="移除本次引用" aria-label={`移除本次引用：${item.name || '提示词组'}`} disabled={disabled} onClick={() => change(refs.filter(value => value.groupId !== item.groupId))}><X size={13} /></button></div>; }} />
+    </div><div className={styles.selectionActions}>
     <button type="button" className={styles.add} title="添加提示词组" aria-label="添加提示词组" disabled={disabled} onClick={() => setOpen(true)}><Plus size={18} /><span>提示词组</span></button>
     {refs.length > visibleLimit && <button type="button" className={styles.plain} onClick={() => setExpanded(v => !v)}>{expanded ? '收起' : `全部 ${refs.length} 个`}</button>}
     {undo && <button type="button" className={styles.icon} title="撤销组选取修改" aria-label="撤销组选取修改" disabled={disabled} onClick={() => { onChange(undo); setUndo(null); }}><Undo2 size={16} /></button>}
-    {editorError && <span className={styles.meta} role="status">{editorError}</span>}
+    </div>{editorError && <span className={styles.meta} role="status">{editorError}</span>}
     {summaries.error && <span className={styles.meta} role="status">{summaries.error}<button type="button" className={styles.icon} title="重新核对提示词组" aria-label="重新核对提示词组" onClick={summaries.refresh}><RefreshCw size={14} /></button></span>}
-  </div><PromptGroupPicker key={user?.id || 'anonymous'} open={open} refs={refs} onApply={next => { change(next); summaries.refresh(); }} onClose={() => { setOpen(false); summaries.refresh(); }} onUploadFile={onUploadFile} /><GroupDetail item={editor ? null : detail} onClose={() => setDetail(null)} onEdit={() => {
+  </div><PromptGroupPicker key={user?.id || 'anonymous'} open={open} refs={refs} onApply={next => { change(next); summaries.refresh(); }} onClose={() => { setOpen(false); summaries.refresh(); }} onUploadFile={onUploadFile} /><GroupDetail item={editor ? null : detail} onClose={() => setDetail(null)} onLatest={!disabled ? () => {
+    if (!detail?.latestVersionId) return;
+    change(refs.map(ref => ref.groupId === detail.groupId ? { ...ref, versionId: detail.latestVersionId! } : ref)); setDetail(null);
+  } : undefined} onEdit={() => {
     if (!detail) return;
     setEditorError('');
     try { localStorage.setItem(editorScope(user?.id || 'anonymous'), JSON.stringify({ groupId: detail.groupId, versionId: detail.versionId, revision: detail.revision })); setEditor(detail); }

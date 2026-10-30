@@ -5,6 +5,7 @@ import { getH3ApiSettings, safeH3ConfigDto } from '@/lib/integrations/h3';
 import { seedanceDraftCapability } from '@/lib/provider/seedance-draft';
 import { seedanceVideoDurationCapabilities } from '@/lib/provider/seedance-models';
 import { volcengineIpCapabilities } from '@/lib/integrations/volcengine-ip-models';
+import { getVolcengineIpApiSettings, isVolcengineIpApiReady } from '@/lib/integrations/volcengine-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +13,8 @@ export async function GET() {
   const config = getProviderConfig();
   const aiMediaKitConfig = safeAiMediaKitConfigDto(await getAiMediaKitApiSettings());
   const h3Config = safeH3ConfigDto(await getH3ApiSettings());
+  const ipStatus = await getVolcengineIpApiSettings().then(settings => ({ enabled: settings.enabled, ready: isVolcengineIpApiReady(settings), status: 'known' as const }))
+    .catch(() => ({ enabled: null, ready: null, status: 'unknown' as const }));
 
   return NextResponse.json({
     provider: 'seedance',
@@ -19,7 +22,7 @@ export async function GET() {
     model: config.model,
     model_options: config.model_options,
     duration_by_model: seedanceVideoDurationCapabilities(),
-    ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false },
+    ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false, ...ipStatus },
     api_key_configured: isApiKeyConfigured(),
     seedance_draft: seedanceDraftCapability(),
     aimediakit_enhance_video: {

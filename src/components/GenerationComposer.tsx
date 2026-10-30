@@ -13,7 +13,8 @@ import { checkPrompt } from '@/components/PromptChecker';
 import { useWorkspace, WorkspaceInputRecoveryError, type WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
 import { uploadSession } from '@/lib/http/upload-session';
 import type { CompletedTaskReuse, TaskReuseInputBackup, TaskReuseUndoScope } from '@/lib/navigation/task-reuse-client';
-import { readTaskReuseInputBackup, readCompletedTaskReuse, taskReuseUndoMatches, sameTaskReuseReceipt, taskReuseInputSignature, hasTaskReuseInput } from '@/lib/navigation/task-reuse-client';
+import { readTaskReuseInputBackup, readCompletedTaskReuse, taskReuseUndoMatches, sameTaskReuseReceipt, taskReuseInputSignature, hasTaskReuseInput,
+  prepareVideoModeSwitch, readVideoModeSwitch, finishVideoModeSwitch, writeVideoInputDraft, retainModeRecoveryDraft, type VideoInputSurface, type VideoModelChoice, type ModeInputDraft } from '@/lib/navigation/task-reuse-client';
 import type { ReuseUndoAction } from '@/components/generate/TaskReuseStatus';
 import recoveryStyles from '@/components/generate/reuse-feedback.module.css';
 import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
@@ -394,6 +395,11 @@ function createModuleBuilderDraft(params: {
 
 interface Props {
   videoRedesign?: boolean;
+  videoSurface?: VideoInputSurface;
+  videoModelChoices?: VideoModelChoice[];
+  modeSwitchBlocker?: string | null;
+  modeSwitchInitializing?: boolean;
+  feishuEnabled?: boolean;
   collections: AssetCollection[];
   creationContextKey?: string;
   initialSettings?: GenerationDefaults | null;
@@ -522,6 +528,11 @@ interface Props {
 
 export function GenerationComposer({
   videoRedesign = false,
+  videoSurface,
+  videoModelChoices,
+  modeSwitchBlocker = null,
+  modeSwitchInitializing = false,
+  feishuEnabled = false,
   collections,
   creationContextKey,
   initialSettings,
@@ -650,7 +661,8 @@ export function GenerationComposer({
   const [prompt, setPrompt] = useState('');
   const [promptAttempted, setPromptAttempted] = useState(false);
   const [videoPromptGroups, setVideoPromptGroups] = useState<VideoPromptGroupRef[]>([]);
-  const ordinaryPromptMissing = videoRedesign && !prompt.trim() && !videoPromptGroups.length;
+  const promptGroupsEnabled = videoRedesign && videoSurface !== 'ip';
+  const ordinaryPromptMissing = videoRedesign && !prompt.trim() && !(promptGroupsEnabled && videoPromptGroups.length);
   useEffect(() => { if (!ordinaryPromptMissing) setPromptAttempted(false); }, [ordinaryPromptMissing]);
   const [ratio, setRatio] = useState<VideoRatio>(DEFAULT_RATIO);
   const [duration, setDuration] = useState<VideoDuration>(DEFAULT_DURATION);
@@ -665,7 +677,11 @@ export function GenerationComposer({
   const [studioSettingsReady, setStudioSettingsReady] = useState(false);
   const [imageResultDraftReady, setImageResultDraftReady] = useState(false);
   const [imageResultDraftMessage, setImageResultDraftMessage] = useState('');
-  type InputRecovery = { workspace: WorkspaceInputRecovery; backup: TaskReuseInputBackup; restoreFields: () => void };
+  type InputRecovery = { workspace: WorkspaceInputRecovery; backup: TaskReuseInputBackup; restoreFields: () => void; source?: 'mode-switch'; materialsMissing?: boolean };
+  const [modeRecovery, setModeRecovery] = useState<InputRecovery | null>(null);
+  const [modeSwitchNonce] = useState(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mode_switch') || '' : '');
+  const [modeSwitchReady, setModeSwitchReady] = useState(!modeSwitchNonce);
+  const [unapplied, setUnapplied] = useState<TaskReuseInputBackup['fields']['unapplied']>();
   const [inputRecovery, setInputRecovery] = useState<InputRecovery | null>(null);
   const [inputRecoveryPair, setInputRecoveryPair] = useState<{ previous: InputRecovery; next: InputRecovery; pendingTarget: InputRecovery | null } | null>(null);
   const [inputRecoveryBusy, setInputRecoveryBusy] = useState(false);
@@ -741,17 +757,19 @@ export function GenerationComposer({
     () => runWorkspaceOperation(() => workspace.refresh(), false, true),
     [runWorkspaceOperation, workspace.refresh],
   );
-  const makeInputRecovery = useCallback(() => {
+  const makeInputRecovery = useCallback((): InputRecovery | null => {
     const snapshot = workspace.captureRecovery();
     if (!snapshot) return null;
     const restoreTarget = onCaptureInputRecoveryTarget?.();
     const backup: TaskReuseInputBackup = { version: 1, hadInput: Boolean(prompt.trim() || videoPromptGroups.length || snapshot.items.length || settingsTouchedRef.current), workspace: snapshot,
-      fields: { prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed,
-        model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, videoCardId: selectedVideoCardId || '' } };
+      fields: { prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, draftMode, unapplied,
+        model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, projectId: recoveryContextRef.current?.().projectId || '',
+        videoBranchId: recoveryContextRef.current?.().videoBranchId || '', videoCardId: selectedVideoCardId || '' } };
     return { workspace: snapshot, backup, restoreFields: () => {
       settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
       setPrompt(prompt); setVideoPromptGroups(videoPromptGroups); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
       setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
+      setUnapplied(unapplied);
       setResolutionApprovalConfirmed(resolutionApprovalConfirmed); setSelectedModel(selectedModel);
       setCurrentReferenceAlbumId(currentReferenceAlbumId); setCurrentReferenceAlbumName(currentReferenceAlbumName);
       if (selectedProvider) onProviderChange?.(selectedProvider);
@@ -760,7 +778,7 @@ export function GenerationComposer({
     } };
   }, [workspace.captureRecovery, selectedVideoCardId, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio,
     returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
-    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget]);
+    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget, unapplied]);
   const captureInputRecovery = useCallback(() => {
     const value = makeInputRecovery();
     if (!value) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
@@ -784,6 +802,7 @@ export function GenerationComposer({
         setPrompt(value.prompt); setVideoPromptGroups(parseVideoPromptGroupRefs(value.videoPromptGroups)); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
         setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
         setGenerateAudio(value.generateAudio === true); setReturnLastFrame(value.returnLastFrame === true); setWatermark(value.watermark === true); setResolutionApprovalConfirmed(false);
+        setDraftMode(videoSurface === 'ip' ? false : value.draftMode === true); setUnapplied(value.unapplied);
         if (value.model) { setSelectedModel(value.model); onModelChange?.(value.model); }
         if (value.provider) onProviderChange?.(value.provider);
         if (value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
@@ -793,7 +812,7 @@ export function GenerationComposer({
       if (completed?.applied.inputReplaced) setRecoveryBinding({ record: completed, side: 'undo', signature: '' });
       setInputRecoveryMessage('');
     } catch { /* Optional recovery never replaces current input during initialization. */ }
-  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget]);
+  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget, videoSurface]);
   useEffect(() => {
     if (!completedTaskReuse || !inputRecovery || !completedTaskReuse.applied.inputReplaced
       || inputRecovery.workspace.ownerId !== completedTaskReuse.accountId
@@ -806,8 +825,73 @@ export function GenerationComposer({
   }, [completedTaskReuse]);
   const ordinaryDraftKey = creationContextKey ? `sd2:video-input-draft:v2:${creationContextKey}` : '';
   const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
+  const applyModeFields = useCallback((value: TaskReuseInputBackup['fields']) => {
+    settingsTouchedRef.current = true; appliedInitialSettingsRef.current = true;
+    setPrompt(value.prompt); setVideoPromptGroups(videoSurface === 'ip' ? [] : parseVideoPromptGroupRefs(value.videoPromptGroups));
+    setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio); setDuration(value.duration as VideoDuration);
+    setResolution(value.resolution as VideoResolution); setSeed(value.seed); setGenerateAudio(value.generateAudio); setReturnLastFrame(value.returnLastFrame);
+    setWatermark(value.watermark); setDraftMode(videoSurface === 'ip' ? false : value.draftMode === true); setResolutionApprovalConfirmed(false);
+    setUnapplied(value.unapplied); setSelectedModel(value.model); onModelChange?.(value.model);
+    if (videoSurface !== 'ip' && value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
+  }, [videoSurface, onModelChange, onAuxiliaryChange]);
+  const makeModeRecovery = useCallback((draft: ModeInputDraft, current: WorkspaceInputRecovery): InputRecovery | null => {
+    if (draft.workspace && (draft.workspace.ownerId !== current.ownerId || draft.workspace.tabId !== current.tabId || draft.workspace.workspaceId !== current.workspaceId)) return null;
+    const snapshot = draft.workspace ? { ...draft.workspace, epoch: current.epoch } : current;
+    const restoreTarget = typeof draft.fields.projectId === 'string' ? onCaptureInputRecoveryTarget?.({ projectId: draft.fields.projectId,
+      videoCardId: draft.fields.videoCardId || '', videoBranchId: draft.fields.videoBranchId || '' }) : undefined;
+    return { workspace: snapshot, backup: { version: 1, workspace: snapshot, fields: draft.fields }, source: 'mode-switch', materialsMissing: !draft.workspace,
+      restoreFields: () => { applyModeFields(draft.fields); restoreTarget?.(); } };
+  }, [applyModeFields, onCaptureInputRecoveryTarget]);
+  const loadedModeRecovery = React.useRef('');
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!videoSurface || url.searchParams.get('mode_switch_error') !== '1') return;
+    setInputRecoveryIssue(true); setInputRecoveryMessage('输入交接未完成，已返回原线路。两份原稿仍保留，请核对当前素材后重试。');
+    url.searchParams.delete('mode_switch_error'); window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [videoSurface]);
   React.useLayoutEffect(() => {
-    if (!ordinaryDraftKey || ordinaryDraftLoaded === ordinaryDraftKey || !preferencesReady) return;
+    if (!videoSurface || !creationContextKey || !workspace.workspace || workspace.loading || modeSwitchInitializing || studioHandoff || imageResultHandoff) return;
+    const current = workspace.captureRecovery();
+    if (!current || creationContextKey !== `${current.ownerId}:${videoSurface === 'ip' ? 'ip:ip' : 'ordinary:standard'}:tab:${current.tabId}`) return;
+    if (modeSwitchNonce && !modeSwitchReady) {
+      // Explicit route handoff precedes ordinary drafts and late account preferences.
+      settingsTouchedRef.current = true;
+      let handoff: ReturnType<typeof readVideoModeSwitch> = null;
+      try {
+        handoff = readVideoModeSwitch(localStorage, current.ownerId, current.tabId, creationContextKey, modeSwitchNonce);
+        if (!handoff || handoff.targetSurface !== videoSurface || reuseDraft || reuseEditRevisionRef.current !== 0) throw new Error('输入交接已失效，原稿仍保留。');
+        const target = recoveryContextRef.current?.();
+        const fields = handoff.targetInput.fields;
+        if (!target || (['projectId', 'videoCardId', 'videoBranchId'] as const).some(key => (target[key] || '') !== (fields[key] || ''))) throw new Error('保存位置已变化，未覆盖当前输入。');
+        finishVideoModeSwitch(localStorage, handoff, current, reuseEditRevisionRef.current);
+        applyModeFields(handoff.targetInput.fields);
+        if (handoff.previousTarget) setModeRecovery(makeModeRecovery(handoff.previousTarget, current));
+        loadedModeRecovery.current = creationContextKey;
+        setOrdinaryDraftLoaded(ordinaryDraftKey); setModeSwitchReady(true);
+        const url = new URL(window.location.href); url.searchParams.delete('mode_switch'); url.searchParams.delete('mode_switch_from');
+        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      } catch (cause) {
+        setInputRecoveryIssue(true); setInputRecoveryMessage(cause instanceof Error ? cause.message : '输入尚未接续。');
+        const from = handoff?.sourceSurface || new URLSearchParams(window.location.search).get('mode_switch_from');
+        if (from === 'normal' || from === 'ip') {
+          const url = new URL(window.location.href); url.pathname = from === 'ip' ? '/generate/ip' : '/generate';
+          url.searchParams.delete('mode_switch'); url.searchParams.delete('mode_switch_from'); url.searchParams.set('mode_switch_error', '1');
+          window.location.replace(`${url.pathname}${url.search}`);
+        }
+      }
+      return;
+    }
+    if (loadedModeRecovery.current !== creationContextKey) {
+      loadedModeRecovery.current = creationContextKey;
+      try {
+        const saved = readVideoModeSwitch(localStorage, current.ownerId, current.tabId, creationContextKey);
+        if (saved?.previousTarget) setModeRecovery(makeModeRecovery(saved.previousTarget, current));
+      } catch { setInputRecoveryIssue(true); setInputRecoveryMessage('浏览器暂时无法读取换线前输入，请保留当前页面。'); }
+    }
+  }, [videoSurface, creationContextKey, workspace, modeSwitchNonce, modeSwitchReady, modeSwitchInitializing, studioHandoff, imageResultHandoff, reuseDraft,
+    applyModeFields, makeModeRecovery, ordinaryDraftKey]);
+  React.useLayoutEffect(() => {
+    if (!ordinaryDraftKey || ordinaryDraftLoaded === ordinaryDraftKey || !preferencesReady || !modeSwitchReady) return;
     try {
       if (!studioHandoff && !imageResultHandoff && !reuseDraft && !interactionLocked && !settingsTouchedRef.current) {
         const saved = JSON.parse(localStorage.getItem(ordinaryDraftKey) || 'null');
@@ -816,25 +900,30 @@ export function GenerationComposer({
           && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
           && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
           const restoredGroups = parseVideoPromptGroupRefs(saved.videoPromptGroups);
-          settingsTouchedRef.current = true; setPrompt(saved.prompt); setVideoPromptGroups(restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); setVideoPromptGroups(videoSurface === 'ip' ? [] : restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
           setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
           setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
-          setDraftMode(saved.draftMode === true);
+          setDraftMode(videoSurface === 'ip' ? false : saved.draftMode === true);
+          setUnapplied(saved.unapplied);
           if (saved.model) { setSelectedModel(saved.model); onModelChange?.(saved.model); }
         }
       }
     } catch { /* Invalid optional local data never blocks a new draft. */ }
     setOrdinaryDraftLoaded(ordinaryDraftKey);
-  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange]);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange, modeSwitchReady, videoSurface]);
   useEffect(() => {
-    if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || studioHandoff || imageResultHandoff || interactionLocked
+    if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || !modeSwitchReady || studioHandoff || imageResultHandoff || interactionLocked
       || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
     const timer = setTimeout(() => {
-      try { localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, model: selectedModel })); }
+      try {
+        const complete = makeInputRecovery();
+        if (complete && creationContextKey) writeVideoInputDraft(localStorage, creationContextKey, complete.backup);
+        else if (!videoSurface) localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, unapplied, model: selectedModel }));
+      }
       catch { setInputRecoveryIssue(true); setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
     }, 200);
     return () => clearTimeout(timer);
-  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel]);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel, unapplied, makeInputRecovery, creationContextKey, modeSwitchReady, videoSurface]);
   const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
   const readUndoScope = (): TaskReuseUndoScope | null => {
     const target = recoveryContextRef.current?.(), current = workspace.workspace;
@@ -852,12 +941,13 @@ export function GenerationComposer({
   };
   const restoreInputRecovery = async (target = inputRecovery) => {
     if (!target || inputRecoveryBusy || interactionLocked || workspace.loading || workspace.pendingWorkspaceAttach) return;
-    if (!recoveryReceiptCurrent()) { setInputRecoveryIssue(true); setInputRecoveryMessage('账号、保存位置或复用记录已变化，未覆盖当前输入。原备份仍保留。'); return; }
+    if (target.source !== 'mode-switch' && !recoveryReceiptCurrent()) { setInputRecoveryIssue(true); setInputRecoveryMessage('账号、保存位置或复用记录已变化，未覆盖当前输入。原备份仍保留。'); return; }
     if (inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== target) {
       setInputRecoveryIssue(true); setInputRecoveryMessage('原恢复的素材关联结果尚未确认，请先继续原恢复；两份输入仍保留在本页。'); return;
     }
     const pair = inputRecoveryPair || { previous: target, next: makeInputRecovery(), pendingTarget: null };
     if (!pair.next) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前素材尚未确认，未开始恢复；请先完成素材准备。'); return; }
+    if (target.source === 'mode-switch') pair.next.source = 'mode-switch';
     const previous = target, next = target === pair.previous ? pair.next : pair.previous;
     // Retain both sides before the first write, including when a later role/read step fails.
     setInputRecoveryPair({ previous: pair.previous, next: pair.next, pendingTarget: target });
@@ -865,13 +955,16 @@ export function GenerationComposer({
     setInputRecoveryBusy(true);
     let associationConfirmed = false;
     try {
-      await runWorkspaceOperation(() => workspace.restoreRecovery(previous.workspace), false);
+      if (previous.source === 'mode-switch' && creationContextKey) retainModeRecoveryDraft(localStorage, creationContextKey, next.backup);
+      if (!previous.materialsMissing) await runWorkspaceOperation(() => workspace.restoreRecovery(previous.workspace), false);
       associationConfirmed = true;
       const session = uploadSession();
       if (session.ownerId !== previous.workspace.ownerId || session.epoch !== previous.workspace.epoch
-        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit || !recoveryReceiptCurrent()) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
-      previous.restoreFields(); setInputRecovery(next); setInputRecoveryPair(null); setInputRecoveryIssue(false); setInputRecoveryMessage('已恢复所选输入，另一份输入也保留在本页。');
-      if (recoveryBinding && target === pair.previous) setRecoveryBinding(value => value ? { ...value, side: value.side === 'undo' ? 'redo' : 'undo' } : null);
+        || readRecoveryScope() !== scope || reuseEditRevisionRef.current !== edit || previous.source !== 'mode-switch' && !recoveryReceiptCurrent()) throw new Error('账号、保存位置或输入已变化，参数未覆盖；两份输入仍保留。');
+      previous.restoreFields();
+      if (previous.source === 'mode-switch') setModeRecovery({ ...next, source: 'mode-switch' }); else setInputRecovery(next);
+      setInputRecoveryPair(null); setInputRecoveryIssue(false); setInputRecoveryMessage(previous.materialsMissing ? '已恢复旧稿正文和参数；此旧稿未记录素材，当前素材保持不变。' : '已恢复所选输入，另一份输入也保留在本页。');
+      if (previous.source !== 'mode-switch' && recoveryBinding && target === pair.previous) setRecoveryBinding(value => value ? { ...value, side: value.side === 'undo' ? 'redo' : 'undo' } : null);
     } catch (cause) {
       setInputRecoveryIssue(true);
       if (cause instanceof WorkspaceInputRecoveryError) associationConfirmed = cause.associationConfirmed;
@@ -890,9 +983,9 @@ export function GenerationComposer({
   useEffect(() => {
     const element = generationComposerRef.current;
     if (!element) return;
-    if (interactionLocked || inputRecoveryBusy || inputRecoveryPair || imageResultHandoff && !imageResultDraftReady) element.setAttribute('inert', '');
+    if (!modeSwitchReady || interactionLocked || inputRecoveryBusy || inputRecoveryPair || imageResultHandoff && !imageResultDraftReady) element.setAttribute('inert', '');
     else element.removeAttribute('inert');
-  }, [interactionLocked, inputRecoveryBusy, inputRecoveryPair, imageResultHandoff, imageResultDraftReady]);
+  }, [modeSwitchReady, interactionLocked, inputRecoveryBusy, inputRecoveryPair, imageResultHandoff, imageResultDraftReady]);
 
   useEffect(() => {
     reportWorkspaceBusy();
@@ -1052,6 +1145,8 @@ export function GenerationComposer({
 
   const submitBlockerState = useMemo(() => {
     const reason = (() => {
+    if (!modeSwitchReady) return { message: '正在接续当前输入，请保留页面', tone: 'progress' as const };
+    if (videoSurface && !modelOptions.some(option => option.id === selectedModel)) return '当前型号不可用，原参数已保留，请明确选择可用型号。';
     if (imageResultHandoff) {
       if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
       if (generationMode !== 'first_last_frame') return '这张图已放在首帧。请选择首尾帧模式后生成；不会改放参考图。';
@@ -1064,7 +1159,7 @@ export function GenerationComposer({
       }
     }
     if (durationBlocker) return durationBlocker;
-    if (videoRedesign && draftMode && selectedModel !== SEEDANCE_2_5_MODEL_ID) return '样片与当前型号不兼容，请关闭样片或选择 Seedance 2.5';
+    if (promptGroupsEnabled && draftMode && selectedModel !== SEEDANCE_2_5_MODEL_ID) return '样片与当前型号不兼容，请关闭样片或选择 Seedance 2.5';
     if (draftMode && resolution !== SEEDANCE_DRAFT_RESOLUTION) {
       return { message: `样片仅支持 ${SEEDANCE_DRAFT_RESOLUTION}，当前 ${resolution} 参数已保留。请将清晰度改为 ${SEEDANCE_DRAFT_RESOLUTION}，或取消“${SEEDANCE_DRAFT_RESOLUTION}样片”后生成正式片。`, tone: 'hint' as const };
     }
@@ -1080,7 +1175,7 @@ export function GenerationComposer({
     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
     }
-    if (!videoRedesign && !prompt.trim()) return '请填写提示词';
+    if ((!videoRedesign || videoSurface === 'ip') && !prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
     }
@@ -1165,7 +1260,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [durationBlocker, prompt, videoRedesign, videoPromptGroups, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  }, [modeSwitchReady, videoSurface, promptGroupsEnabled, durationBlocker, prompt, videoRedesign, videoPromptGroups, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1196,7 +1291,7 @@ export function GenerationComposer({
   const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
     model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
       project_id: pricingProjectId, video_card_id: selectedVideoCardId, ratio,
-      ...(videoRedesign && videoPromptGroups.length ? { video_prompt_groups: videoPromptGroups, video_prompt_groups_contract: 1,
+      ...(promptGroupsEnabled && videoPromptGroups.length ? { video_prompt_groups: videoPromptGroups, video_prompt_groups_contract: 1,
         creation_contract_version: 2, entry: 'ordinary', prompt, generation_mode: generationMode, seed,
         generate_audio: generateAudio, return_last_frame: returnLastFrame, watermark, lora_id: selectedAuxiliary || undefined,
         reference_image_ids: workspace.assets.filter(a => a.type === 'image')
@@ -1453,7 +1548,7 @@ export function GenerationComposer({
 
   useEffect(() => {
     if (imageResultHandoff) return;
-    if (!initialSettings || appliedInitialSettingsRef.current || settingsTouchedRef.current || reuseDraft || studioHandoff) return;
+    if (!modeSwitchReady || !initialSettings || appliedInitialSettingsRef.current || settingsTouchedRef.current || reuseDraft || studioHandoff) return;
     appliedInitialSettingsRef.current = true;
     setGenerationMode(initialSettings.generationMode);
     setRatio(initialSettings.ratio);
@@ -1468,7 +1563,7 @@ export function GenerationComposer({
     setReturnLastFrame(initialSettings.returnLastFrame);
     setWatermark(initialSettings.watermark);
     setResolutionApprovalConfirmed(false);
-  }, [initialSettings, reuseDraft, studioHandoff, imageResultHandoff, modelOptions, onModelChange]);
+  }, [initialSettings, reuseDraft, studioHandoff, imageResultHandoff, modelOptions, onModelChange, modeSwitchReady]);
 
   useEffect(() => {
     if (!imageResultHandoff || !preferencesReady || imageResultDraftReady) return;
@@ -1514,6 +1609,7 @@ export function GenerationComposer({
   }, [need1080pApproval]);
 
   useEffect(() => {
+    if (videoSurface || !modeSwitchReady) return;
     if (studioHandoff && !studioSettingsReady && Object.hasOwn(studioHandoff.parameters, 'model')) return;
     const fallbackModel = modelOptions[0]?.id || '';
     if (!fallbackModel) {
@@ -1527,11 +1623,35 @@ export function GenerationComposer({
       setSelectedModel(fallbackModel);
       onModelChange?.(fallbackModel);
     }
-  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady, imageResultHandoff, reuseDraft?.model]);
+  }, [modelOptions, onModelChange, selectedModel, studioHandoff, studioSettingsReady, imageResultHandoff, reuseDraft?.model, videoSurface, modeSwitchReady]);
 
   // ============================================================================
   // Handlers
   // ============================================================================
+  const selectVideoModel = (id: string) => {
+    const choice = videoModelChoices?.find(option => option.id === id);
+    if (!choice || choice.disabled || !videoSurface) return;
+    if (interactionLocked || isSubmitting || inputRecoveryBusy || inputRecoveryPair) return;
+    if (choice.surface === videoSurface) {
+      markStudioParameterCorrected('model'); setSelectedModel(choice.model); onModelChange?.(choice.model); return;
+    }
+    const blocked = modeSwitchBlocker || (!modeSwitchReady || ordinaryDraftLoaded !== ordinaryDraftKey ? '输入恢复尚未完成，请稍候' : null);
+    if (blocked || interactionLocked || isSubmitting || inputRecoveryBusy || inputRecoveryPair) {
+      setInputRecoveryIssue(true); setInputRecoveryMessage(blocked || '当前操作尚未完成，请先核对原操作。'); return;
+    }
+    const before = makeInputRecovery(), revision = reuseEditRevisionRef.current;
+    if (!before || !creationContextKey) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前素材尚未确认，未切换线路。'); return; }
+    try {
+      const handoff = prepareVideoModeSwitch(localStorage, creationContextKey, videoSurface, before.backup, choice, revision, crypto.randomUUID(), feishuEnabled);
+      const now = uploadSession();
+      if (now.ownerId !== before.workspace.ownerId || now.epoch !== before.workspace.epoch || reuseEditRevisionRef.current !== revision) throw new Error('账号或当前输入已变化，未切换线路。');
+      const url = new URL(window.location.href); url.pathname = choice.surface === 'ip' ? '/generate/ip' : '/generate';
+      url.search = '';
+      url.searchParams.set('mode_switch', handoff.nonce); url.searchParams.set('mode_switch_from', videoSurface);
+      for (const [key, value] of [['project_id', before.backup.fields.projectId], ['video_card_id', before.backup.fields.videoCardId], ['video_branch_id', before.backup.fields.videoBranchId]] as const) if (value) url.searchParams.set(key, value);
+      window.location.assign(`${url.pathname}${url.search}`);
+    } catch (cause) { setInputRecoveryIssue(true); setInputRecoveryMessage(cause instanceof Error ? cause.message : '输入尚未可靠保留，未切换线路。'); }
+  };
 
   useEffect(() => {
     if (!preferencesReady || !onSettingsChange || studioHandoff || imageResultHandoff || isRestoringStudioSettings || interactionLocked
@@ -1558,7 +1678,7 @@ export function GenerationComposer({
     }
     await onSubmit({
       prompt,
-      ...(videoRedesign ? { videoPromptGroups } : {}),
+      ...(promptGroupsEnabled ? { videoPromptGroups } : {}),
       generationMode,
       ratio,
       duration,
@@ -1587,11 +1707,11 @@ export function GenerationComposer({
       promptUserEdited,
       provider: selectedProvider || null,
       model: selectedModel || null,
-      h3LoraId: selectedAuxiliary || null,
+      h3LoraId: videoSurface === 'ip' ? null : selectedAuxiliary || null,
       pricingRevision: videoPricing.quote?.pricing_revision ?? null,
       pricingQuoteToken: videoPricing.quote?.pricing_quote_token,
       quotedEstimatedCost: videoPricing.quote?.estimatedCost ?? videoPricing.lastKnownAmount,
-      draft: draftMode,
+      draft: videoSurface === 'ip' ? false : draftMode,
       templateStudioRunId: studioHandoff?.runId || null,
       imageResultReceiptId: imageResultHandoff?.receiptId || null,
       templateStudioAssets: studioHandoff ? workspace.assets.map((asset) => ({
@@ -1628,6 +1748,8 @@ export function GenerationComposer({
     imageResultHandoff,
     prompt,
     videoRedesign,
+    promptGroupsEnabled,
+    videoSurface,
     videoPromptGroups,
     generationMode,
     ratio,
@@ -2046,13 +2168,16 @@ export function GenerationComposer({
   return (
     <>
       {inputRecoveryMessage && (inputRecoveryIssue || !inputRecovery || inputRecoveryPair) && <p className={recoveryStyles.recovery} role="status">{inputRecoveryMessage}</p>}
-      {inputRecovery && <details className={recoveryStyles.recovery} open={inputRecoveryPair ? true : undefined}><summary>输入恢复</summary>
+      {(inputRecovery || modeRecovery) && <details className={recoveryStyles.recovery} open={inputRecoveryPair ? true : undefined}><summary>输入恢复</summary>
         {recoveryBinding && !undoAllowed && <p>保存位置或账号已变化，当前不能恢复这份输入。</p>}
         {recoveryBinding && undoAllowed && <p>{recoveryBinding.side === 'redo' ? '将返回刚才输入，当前内容也会保留。' : hasLaterEdits ? '将恢复复用前输入；当前修改会保留，可返回刚才输入。' : '将恢复复用前输入。'}</p>}
         {inputRecoveryMessage && !inputRecoveryIssue && !inputRecoveryPair && <p role="status">{inputRecoveryMessage}</p>}
-        <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(recoveryBinding && !undoAllowed) || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : recoveryBinding ? recoveryBinding.side === 'undo' ? '撤销上次复用' : '返回刚才输入' : '恢复替换前输入'}</button>
+        {inputRecovery && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(recoveryBinding && !undoAllowed) || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.previous)} onClick={() => void restoreInputRecovery(inputRecoveryPair?.previous || inputRecovery)}>{inputRecoveryBusy ? '正在恢复输入…' : inputRecoveryPair ? '继续原恢复' : recoveryBinding ? recoveryBinding.side === 'undo' ? '撤销上次复用' : '返回刚才输入' : '恢复替换前输入'}</button>}
+        {modeRecovery && <><button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair?.pendingTarget && inputRecoveryPair.pendingTarget !== modeRecovery)} onClick={() => void restoreInputRecovery(modeRecovery)}>恢复本线路换线前输入</button>
+          {modeRecovery.materialsMissing && <p>此旧稿未记录素材，恢复时保留当前素材。</p>}</>}
         {inputRecoveryPair && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.next)} onClick={() => void restoreInputRecovery(inputRecoveryPair.next)}>返回刚才输入</button>}
       </details>}
+      {videoSurface === 'ip' && unapplied && (unapplied.videoPromptGroups?.length || unapplied.draftMode || unapplied.auxiliary || unapplied.feishu || unapplied.h3) ? <p className={recoveryStyles.recovery} role="status">本线路未应用{[unapplied.videoPromptGroups?.length ? '提示词组' : '', unapplied.draftMode ? '样片' : '', unapplied.h3 ? 'H3选项' : '', unapplied.auxiliary ? 'LoRA' : '', unapplied.feishu ? '飞书发送' : ''].filter(Boolean).join('、')}，原线路输入已保留。</p> : null}
       <div
         ref={generationComposerRef}
         className={`generation-composer ${videoRedesign ? 'generation-composer--video' : ''}`}
@@ -2492,7 +2617,7 @@ export function GenerationComposer({
           />
         )}
 
-        {videoRedesign && <PromptGroupSelection refs={videoPromptGroups} disabled={interactionLocked || isSubmitting}
+        {promptGroupsEnabled && <PromptGroupSelection refs={videoPromptGroups} disabled={interactionLocked || isSubmitting}
           onChange={refs => { markReuseInputChanged(); setVideoPromptGroups(refs); }} onUploadFile={workspace.uploadAssetToHistory} />}
 
         {/* 状态行 */}
@@ -2531,7 +2656,7 @@ export function GenerationComposer({
           </label>
         )}
 
-        {(selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
+        {videoSurface !== 'ip' && (selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
           <label className="composer-resolution-approval" title={seedanceDraft.message}>
             <input
               type="checkbox"
@@ -2654,12 +2779,16 @@ export function GenerationComposer({
           }}
           providerStatus={providerStatus}
           modelLabel={modelLabel}
-          modelOptions={reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
+          modelOptions={videoModelChoices ? [...videoModelChoices.map(option => ({ ...option,
+            disabled: option.disabled || option.surface !== videoSurface && Boolean(modeSwitchBlocker),
+            disabledReason: option.disabledReason || (option.surface !== videoSurface ? modeSwitchBlocker || undefined : undefined) })),
+            ...(!videoModelChoices.some(option => option.surface === videoSurface && option.model === selectedModel) ? [{ id: `${videoSurface}:${selectedModel}`, label: `${videoSurface === 'ip' ? 'IP ' : ''}${selectedModel || '未选择型号'}`, detail: '当前型号不可用，原参数已保留', disabled: true }] : [])] : reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
             ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
             : modelOptions}
-          selectedModel={selectedModel}
+          selectedModel={videoModelChoices ? `${videoSurface}:${selectedModel}` : selectedModel}
           durationModel={durationModel}
           onModelChange={(model) => {
+            if (videoModelChoices) { selectVideoModel(model); return; }
             markStudioParameterCorrected('model');
             setSelectedModel(model);
             onModelChange?.(model);
