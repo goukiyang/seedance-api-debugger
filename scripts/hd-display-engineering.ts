@@ -117,6 +117,37 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   const hdSource = (id: string) => `/api/image-studio/assets/${id}?hd=1&hd-version=source-v1`;
   const proof = { sourceVersion: 'source-v1', bytes: 4, mime: 'image/avif', variant: 'hd' as const, policy: 'hd-f-v1' as const };
   try {
+    reset(); heldDescriptor = 'cold-ready';
+    const coldReady = mount('cold-ready'); await flush();
+    assert.equal(coldReady.getSnapshot().displayKind, 'preview'); noOriginal();
+    assert.ok(descriptorWait.resolve); descriptorWait.resolve(Response.json(ready)); heldDescriptor = ''; await flush();
+    assert.equal(coldReady.getSnapshot().displayKind, 'hd');
+    assert.equal(coldReady.getSnapshot().result.decoded, true); noOriginal();
+    checks.push('cold_open_confirms_ready_hd_without_original_request');
+
+    reset(); heldDescriptor = 'confirm-ready';
+    const confirmReady = mount('confirm-ready', { intent: 'prepare' }); await flush();
+    confirmReady.confirmOpen(); await flush(); noOriginal();
+    assert.ok(descriptorWait.resolve); descriptorWait.resolve(Response.json(ready)); heldDescriptor = ''; await flush();
+    assert.equal(confirmReady.getSnapshot().displayKind, 'hd'); noOriginal();
+    checks.push('confirm_open_during_descriptor_read_does_not_pin_original');
+
+    for (const status of ['queued', 'running', 'failed', 'skipped'] as const) {
+      reset(); heldDescriptor = `fallback-${status}`;
+      const fallback = mount(`fallback-${status}`); await flush(); noOriginal();
+      assert.ok(descriptorWait.resolve); descriptorWait.resolve(Response.json({ ...ready, status })); heldDescriptor = ''; await flush();
+      assert.equal(fallback.getSnapshot().displayKind, 'original');
+      assert.equal(fallback.getSnapshot().result.decoded, true);
+      assert.equal(requests.filter(request => request.variant === 'original').length, 1);
+    }
+    checks.push('confirmed_missing_or_unready_hd_falls_back_to_original');
+
+    reset(); descriptions.set('descriptor-unavailable', 503);
+    const unavailable = mount('descriptor-unavailable'); await flush();
+    assert.equal(unavailable.getSnapshot().displayKind, 'original');
+    assert.equal(unavailable.getSnapshot().result.decoded, true);
+    checks.push('descriptor_failure_preserves_original_fallback');
+
     reset(); descriptions.set('progressive', { ...ready, status: 'queued' });
     const progressive = mount('progressive', { intent: 'prepare' }); await flush();
     assert.equal(progressive.getSnapshot().displayKind, 'preview'); assert.equal(progressive.getSnapshot().result.decoded, true); noOriginal();

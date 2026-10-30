@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { registerCommittedAssetHd } from '@/lib/media/hd-registration';
 import sharp from 'sharp';
 import type { SessionUser } from '@/lib/auth/session';
 import { Prisma } from '@prisma/client';
@@ -150,7 +151,8 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
     checked.set(item.role, { ...item, originalUrl: asset.original_url, thumbnailUrl,
       thumbnailSha256: sha(thumbnail), thumbnailBytes: thumbnail.length });
   }
-  return prisma.$transaction(async db => {
+  const registeredAssetIds = new Set<string>();
+  const registered = await prisma.$transaction(async db => {
     const prior = await db.platformSetting.findUnique({ where: { key }, select: { id: true } });
     if (prior) return false;
     const fresh = await db.multiviewWork.findUnique({ where: { id: work.id } });
@@ -184,6 +186,7 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
         mime_type: 'image/png', file_size: item.bytes, width: item.width, height: item.height, hash: item.sha256,
         metadata_json: JSON.stringify({ source: 'multiview-output', multiviewOutput: { schema: 1 } }) } });
       outputs.push({ state: 'registered', ...bound, assetId: asset.id });
+      registeredAssetIds.add(asset.id);
     }
     await db.platformSetting.create({ data: { key, updated_by: user.id, value_json: JSON.stringify({ schema: 1,
       state: 'registered', ownerId: user.id, workId: work.id, readyRevision: work.ready_revision,
@@ -200,6 +203,8 @@ export async function registerSavedMultiviewOutputs(workId: string): Promise<boo
       last_error: '成品已经就绪，可复制和下载；素材入口暂未同步，后台会核对这次原保存记录后继续同步。' }, data: { last_error: null } });
     return true;
   });
+  if (registered) for (const assetId of registeredAssetIds) void registerCommittedAssetHd(assetId, user.id);
+  return registered;
 }
 
 /** Single consumer, exact durable receipt join; no bulk history backfill. */

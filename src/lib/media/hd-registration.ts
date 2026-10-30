@@ -9,6 +9,24 @@ const safeFailure = (error: unknown) => {
     ? code : 'registration_unavailable';
 };
 
+// Best effort only, after the producer's outer transaction has committed.
+export async function registerCommittedAssetHd(assetId: string, ownerId: string): Promise<boolean> {
+  try {
+    const asset = await prisma.asset.findFirst({
+      where: { id: assetId, owner_id: ownerId, type: 'image', status: 'active' },
+      select: { id: true, owner_id: true, original_url: true },
+    });
+    if (!asset) return false;
+    const job = await requestHd(asset.original_url, 0, undefined, undefined,
+      { owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
+    if (!job) console.error('[asset-hd-registration]', JSON.stringify({ assetId, code: 'source_version_unknown' }));
+    return Boolean(job);
+  } catch (error) {
+    console.error('[asset-hd-registration]', JSON.stringify({ assetId, code: safeFailure(error) }));
+    return false;
+  }
+}
+
 // Call only after the outer asset/task/settlement transaction has committed.
 // A fresh read prevents rolled-back or merely prepared files entering the queue.
 // Registration cannot change delivery or billing, and bounded discovery remains

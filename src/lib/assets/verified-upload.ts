@@ -11,6 +11,7 @@ import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from './site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { configuredUploadObjectKey } from './upload-object-key';
+import { registerCommittedAssetHd } from '@/lib/media/hd-registration';
 
 export class VerifiedUploadError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); }
@@ -537,6 +538,12 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
   const existingProof = existing ? await verifyExistingUpload(existing, input.ownerId) : null;
   if (existing && !existingProof) throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有远程原件无法安全核实，原记录保留');
   await releaseVerifiedUpload(existingProof);
+  const committed = (result: { asset: Asset; reused: boolean }) => {
+    // All upload transports share this post-commit exit, including a verified
+    // concurrent winner. HD failure cannot turn a saved upload into a failure.
+    if (result.asset.type === 'image') void registerCommittedAssetHd(result.asset.id, input.ownerId);
+    return result;
+  };
   const key = input.requestId ? receiptKey(input.ownerId, input.requestId) : null;
   const fingerprint = input.fingerprint || uploadDigest(JSON.stringify([input.proof.hash, input.proof.bytes, input.proof.mimeType]));
   const register = async (db: Prisma.TransactionClient) => {
@@ -563,7 +570,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     }
     return { asset, reused };
   };
-  try { return await prisma.$transaction(register); }
+  try { return committed(await prisma.$transaction(register)); }
   catch (error) {
     if ((error as { code?: string }).code !== 'P2002' && !(error instanceof VerifiedUploadError && error.code === 'UPLOAD_CONCURRENT_WINNER')) throw error;
     const winner = await findVerifiedOwnUpload(input.ownerId, input.proof.hash, input.proof.mimeType, input.proof.bytes);
@@ -571,7 +578,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     // Re-enter only after verifying the same-owner active winner; no blind retry/upsert.
     try {
     const receipt = key ? await readVerifiedUploadReceipt(input.ownerId, input.requestId!, fingerprint) : null;
-    if (receipt) { await releaseVerifiedUpload(receipt.proof); return { asset: receipt.asset, reused: receipt.reused }; }
+    if (receipt) { await releaseVerifiedUpload(receipt.proof); return committed({ asset: receipt.asset, reused: receipt.reused }); }
     if (key) await prisma.$transaction(async db => {
       const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
       const fresh = await db.asset.findUnique({ where: { id: winner.asset.id } });
@@ -584,7 +591,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
       if (!saved) throw failure;
       await releaseVerifiedUpload(saved.proof);
     });
-    return { asset: winner.asset, reused: true };
+    return committed({ asset: winner.asset, reused: true });
     } finally { await releaseVerifiedUpload(winner.proof); }
   }
 }
