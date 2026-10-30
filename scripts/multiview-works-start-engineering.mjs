@@ -63,6 +63,10 @@ function release(source, version, build, label) {
 
 const main = release(mainSource, '0.103.0', 'synthetic-main-build', 'main');
 const guard = release(guardSource, '0.102.1', 'synthetic-guard-build', 'guard');
+const candidateOnlySource = 'src/lib/candidate-only-reader.ts';
+const candidateOnlyBytes = Buffer.from('synthetic candidate-only source\n');
+write(main.root + '/' + candidateOnlySource, candidateOnlyBytes);
+main.sourceSha256[candidateOnlySource] = sha(candidateOnlyBytes);
 const contract = {
   schema: 'sd2-multiview-works-start.v1',
   runId: '00000000-0000-4000-8000-000000000731',
@@ -149,6 +153,9 @@ try {
   checks.push('stale_source_uid_and_unapproved_root_rejected');
 
   const selectedSource = requiredSources[1];
+  replace(main.root + '/' + candidateOnlySource, 'changed candidate-only source', () => {
+    assert.throws(() => observeMultiviewWorksStart(contract, adapter(main.root)));
+  });
   replace(main.root + '/' + selectedSource, 'changed source', () => {
     assert.throws(() => observeMultiviewWorksStart(contract, adapter(main.root)));
   });

@@ -20,12 +20,16 @@ export type GalleryItem = GalleryNavigationItem & {
   originalActions: { open: true; editCover: boolean; deletion: StudioDeletionCapability };
 };
 export type GalleryQuery = {
+  protocol?: 'catalog-paged-v2'; navigationPage?: number;
+  locate?: { moduleId?: string; presetId?: string };
   query?: string; scope?: GalleryScope; authorKey?: string | null; sort?: GallerySort;
   page?: number; pageSize?: number; catalogRevision?: string;
   recentHints?: Record<string, number>; directoryOrder?: { groups?: string[]; entries?: string[] };
   navigationOnly?: boolean;
 };
 export type GalleryQueryResult = {
+  protocol?: 'catalog-paged-v2'; navigationTotal?: number; navigationPage?: number; navigationPageSize?: number;
+  directoryGroups?: string[];
   items: GalleryItem[]; navigation: GalleryNavigationItem[]; matches: GalleryNavigationItem[];
   total: number; page: number; pageSize: number; catalogRevision: string;
   capabilities: { independentReactions: true };

@@ -12,6 +12,7 @@ import { parseUsageQuery } from '@/lib/usage/query';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { countDownloadableProjectTasks } from '@/lib/video/bulk-download';
+import { readAdminProjectPage } from '@/lib/projects/admin-directory';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,13 @@ export async function GET(request: NextRequest) {
     if (expectedActor && expectedActor !== user.id) return NextResponse.json({ error: '账号已变化，请回原账号核对原操作', code: 'PROJECT_ACTOR_CHANGED' }, { status: 409, headers: { 'Cache-Control': 'private, no-store' } });
     const managementAllowed = isFeatureAllowed(user, 'team_project_manage');
     const capabilities = { can_create_team_project: managementAllowed, create_operation_version: 1 };
+    if (request.nextUrl.searchParams.get('view') === 'admin-paged-v1') {
+      if (user.role !== 'admin') return NextResponse.json({ error: '权限不足' }, { status: 403 });
+      const result = await readAdminProjectPage(prisma, request.nextUrl.searchParams, managementAllowed);
+      return NextResponse.json({ ...result, viewerId: user.id, capabilities, projects: await Promise.all(result.projects.map(async project => ({
+        ...project, ...await readProjectOperationProjection(prisma, project, managementAllowed),
+      }))) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
 
     const home = request.nextUrl.searchParams.get('summary') === 'home';
     const lite = request.nextUrl.searchParams.get('lite') === 'true';

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
+import { catalogDirectoryWrites } from '../src/lib/catalog-directory-writes';
 
-const prisma = new PrismaClient();
+const prisma = catalogDirectoryWrites(new PrismaClient());
 
 async function ensurePersonalProject(userId: string) {
   const existing = await prisma.project.findFirst({

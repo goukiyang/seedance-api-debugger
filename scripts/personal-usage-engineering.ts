@@ -127,7 +127,7 @@ print(json.dumps(out))
     asOf: now.toISOString(), fingerprint: 'fixture', range: usageMonthRange(query), summary: summaries, coverage: [],
     records: { items: [record], total: 1, page: 1, pageSize: 20 }, projects: [], restricted: true },
     records: [{ ...record, model: '=HYPERLINK("unsafe")', ...({ ownerUserId: 'DO_NOT_EXPORT_OWNER', prompt: 'DO_NOT_EXPORT_PROMPT' } as object) }] };
-  const csv = Array.from(usageCsvChunks(snapshot)).join('');
+  let csv = ''; for await (const chunk of usageCsvChunks(snapshot)) csv += chunk;
   assert.ok(csv.includes("'=HYPERLINK"));
   assert.ok(!csv.includes('DO_NOT_EXPORT'));
   for (const prefix of ['=', '+', '-', '@', '\t=', '\r=', '  =']) assert.ok(usageCsvCell(prefix + 'unsafe').startsWith('"\''));

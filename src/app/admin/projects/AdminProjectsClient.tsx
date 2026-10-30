@@ -1,7 +1,7 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PageBanner from '@/components/PageBanner';
 import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
@@ -122,6 +122,7 @@ export default function AdminProjectsClient({ viewerId }: { viewerId: string }) 
 function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId: string | null; viewerId: string }) {
   const projectCreate = useProjectCreateOperation(viewerId, 'admin-projects-archive');
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [focusedAvailable, setFocusedAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [message, setMessage] = useState('');
@@ -129,6 +130,12 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
   const [keyword, setKeyword] = useState('');
   const [filter, setFilter] = useState<ProjectFilter>('active');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedRecords = useRef(new Map<string, ProjectItem>());
+  const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1 });
+  const projectRead = useRef(0);
+  const appliedProject = useRef<string | null>(null);
+  const [targetSearch, setTargetSearch] = useState('');
+  const [targetProjects, setTargetProjects] = useState<ProjectItem[]>([]);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [targetProjectId, setTargetProjectId] = useState('');
   const [mergeReason, setMergeReason] = useState('合并历史 smoke 测试项目');
@@ -152,75 +159,66 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
     isDismissTarget: (target) => target === mergeShellRef.current || target === mergeBackdropRef.current,
   });
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
+    const sequence = ++projectRead.current;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/projects?include_archived=true&include_all=true', { cache: 'no-store' });
+      const query = new URLSearchParams({ view: 'admin-paged-v1', page: String(page), search: keyword, filter });
+      if (selectedProjectId) { query.set('focus', selectedProjectId); if (appliedProject.current !== selectedProjectId) query.set('locate', '1'); }
+      const res = await fetch(`/api/projects?${query}`, { cache: 'no-store', headers: { 'x-app-session-user': viewerId } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '加载项目失败');
+      if (sequence !== projectRead.current || data.viewerId !== viewerId) return;
+      appliedProject.current = selectedProjectId;
       setProjects(data.projects || []);
+      setFocusedAvailable(data.focusedAvailable === true);
+      setPagination(data.pagination);
+      if (data.pagination.page !== page) setPage(data.pagination.page);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载项目失败');
+      if (sequence === projectRead.current) setError(err instanceof Error ? err.message : '加载项目失败');
     } finally {
-      setLoading(false);
+      if (sequence === projectRead.current) setLoading(false);
     }
-  };
+  }, [filter, keyword, page, selectedProjectId, viewerId]);
 
   useEffect(() => {
-    loadProjects();
-  }, []);
+    void loadProjects();
+    return () => { projectRead.current++; };
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (!mergeOpen) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ view: 'admin-paged-v1', filter: 'all', search: targetSearch });
+    void fetch(`/api/projects?${query}`, { cache: 'no-store', signal: controller.signal, headers: { 'x-app-session-user': viewerId } })
+      .then(async response => { const data = await response.json(); if (!response.ok || data.viewerId !== viewerId) throw new Error(data.error || '目标项目读取失败'); return data.projects as ProjectItem[]; })
+      .then(rows => { if (!controller.signal.aborted) setTargetProjects(previous => [...rows, ...previous.filter(row => row.id === targetProjectId && !rows.some(item => item.id === row.id))]); })
+      .catch(cause => { if (!controller.signal.aborted) setMergeError(cause instanceof Error ? cause.message : '目标项目读取失败'); });
+    return () => controller.abort();
+  }, [mergeOpen, targetSearch, targetProjectId, viewerId]);
 
   const selectedProjects = useMemo(
-    () => projects.filter((project) => selectedIds.has(project.id)),
+    () => Array.from(selectedRecords.current.values()).filter((project) => selectedIds.has(project.id)),
     [projects, selectedIds],
   );
-
-  const filteredProjects = useMemo(() => {
-    const normalizedKeyword = keyword.trim().toLowerCase();
-    return projects.filter((project) => {
-      if (project.id === selectedProjectId) return true;
-      const matchesKeyword = !normalizedKeyword
-        || project.name.toLowerCase().includes(normalizedKeyword)
-        || project.id.toLowerCase().includes(normalizedKeyword)
-        || ownerLabel(project).toLowerCase().includes(normalizedKeyword)
-        || (project.description || '').toLowerCase().includes(normalizedKeyword);
-      if (!matchesKeyword) return false;
-      if (filter === 'active') return project.status === 'active';
-      if (filter === 'archived') return project.status === 'archived';
-      if (filter === 'empty') return canDelete(project);
-      if (filter === 'smoke') return isSmokeProject(project);
-      return true;
-    });
-  }, [filter, keyword, projects, selectedProjectId]);
 
   const targetCandidates = useMemo(
-    () => projects.filter((project) => project.status !== 'deleted' && !selectedIds.has(project.id)),
-    [projects, selectedIds],
+    () => targetProjects.filter((project) => project.status !== 'deleted' && !selectedIds.has(project.id)),
+    [targetProjects, selectedIds],
   );
 
-  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / ADMIN_PROJECTS_PAGE_SIZE));
+  const totalPages = pagination.total_pages;
   const currentPage = Math.min(page, totalPages);
-  const pagedProjects = filteredProjects.slice(
-    (currentPage - 1) * ADMIN_PROJECTS_PAGE_SIZE,
-    currentPage * ADMIN_PROJECTS_PAGE_SIZE,
-  );
+  const pagedProjects = projects;
 
   useEffect(() => {
     setPage(1);
   }, [filter, keyword]);
 
-  const appliedProject = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selectedProjectId) { appliedProject.current = null; return; }
-    if (appliedProject.current === selectedProjectId) return;
-    const index = filteredProjects.findIndex(project => project.id === selectedProjectId);
-    if (index < 0) return;
-    appliedProject.current = selectedProjectId;
-    setPage(Math.floor(index / ADMIN_PROJECTS_PAGE_SIZE) + 1);
-  }, [selectedProjectId, filteredProjects]);
-
   const toggleProject = (projectId: string) => {
+    const record = projects.find(project => project.id === projectId);
+    if (record) selectedRecords.current.set(projectId, record);
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(projectId)) next.delete(projectId);
@@ -232,6 +230,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
   };
 
   const toggleCurrentPage = () => {
+    for (const project of pagedProjects) selectedRecords.current.set(project.id, project);
     setSelectedIds((current) => {
       const next = new Set(current);
       const allSelected = pagedProjects.every((project) => next.has(project.id));
@@ -300,9 +299,15 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
     setMergeError('');
     setMergeLoading(true);
     try {
+      const query = new URLSearchParams({ view: 'admin-paged-v1', filter: 'all', exact_name: SMOKE_ARCHIVE_PROJECT_NAME });
+      const existing = await fetch(`/api/projects?${query}`, { cache: 'no-store', headers: { 'x-app-session-user': viewerId } });
+      const known = await existing.json();
+      if (!existing.ok || known.viewerId !== viewerId) throw new Error(known.error || '原归档项目暂不能确认');
+      if (known.projects?.length) { setTargetProjects(known.projects); setTargetProjectId(known.projects[0].id); return; }
       const data = await projectCreate.create({ name: SMOKE_ARCHIVE_PROJECT_NAME, description: 'closure smoke reusable project' });
       if (data.operation.state !== 'accepted') return;
       await loadProjects();
+      if (data.project) setTargetProjects(previous => [...previous, data.project as ProjectItem]);
       setTargetProjectId(data.project?.id || '');
       setMessage('已创建 Smoke Project Archive');
     } catch (err) {
@@ -393,7 +398,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
         eyebrow="管理员后台"
         title="项目管理"
       />
-      {selectedProjectId && !loading && !projects.some(project => project.id === selectedProjectId) && <p className="au-management-context" role="status">该项目的历史使用记录仍保留；当前项目已不可管理或未能读取，可继续使用下方其他项目管理功能。</p>}
+      {selectedProjectId && !loading && !focusedAvailable && <p className="au-management-context" role="status">该项目的历史使用记录仍保留；当前项目已不可管理或未能读取，可继续使用下方其他项目管理功能。</p>}
 
       <div className="card admin-projects-shell">
         {message && <p className="text-green">{message}</p>}
@@ -524,7 +529,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
         <PaginationControls
           page={currentPage}
           totalPages={totalPages}
-          total={filteredProjects.length}
+          total={pagination.total}
           pageSize={ADMIN_PROJECTS_PAGE_SIZE}
           label="项目"
           onPageChange={setPage}
@@ -559,6 +564,7 @@ function ProjectManagement({ selectedProjectId, viewerId }: { selectedProjectId:
 
             <section>
               <h3>目标项目</h3>
+              <input className="input" type="search" value={targetSearch} onChange={event => setTargetSearch(event.target.value)} placeholder="搜索目标项目" aria-label="搜索目标项目" />
               <ProjectSelector onCatalogChange={() => void loadProjects()}  className="input" value={targetProjectId} onChange={(event) => {
                 setTargetProjectId(event.target.value);
                 setMergePreview(null);

@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
+import { observeOperation } from '@/lib/performance/server-operations';
 
 type ReadQueue = { tail: Promise<void>; pending: number; active?: {
   operation: string; requestedAt: number; startedAt: number; enteredAt: number | null;
@@ -37,6 +38,7 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
     let attempt = 0;
     return retrySqliteBusy(async () => {
       const trace = { operation, requestedAt, startedAt: Date.now(), enteredAt: null as number | null };
+      const observed = observeOperation(operation === 'gallery' ? 'studio.gallery' : 'studio.shared-read');
       queue.active = trace;
       let code: string | null = null;
       try {
@@ -46,6 +48,9 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
         code = typeof value === 'string' && /^P\d{4}$/.test(value) ? value : 'READ_FAILED';
         throw error;
       } finally {
+        observed({ queueMs: startedAt - requestedAt,
+          transactionWaitMs: (trace.enteredAt ?? Date.now()) - trace.startedAt,
+          bodyMs: trace.enteredAt === null ? 0 : Date.now() - trace.enteredAt });
         if (code || Date.now() - requestedAt >= 500) console.info('[StudioSharedRead]', JSON.stringify({
           pid: process.pid, role: process.env.PROCESS_ROLE || 'web', at: Date.now(), attempt: ++attempt,
           operation, elapsedMs: Date.now() - requestedAt, ...sharedStudioReadDiagnostics(), code,

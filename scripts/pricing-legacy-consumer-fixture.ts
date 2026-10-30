@@ -355,6 +355,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         const states = current.load<typeof StateModule>('src/lib/image-studio/pricing-state.ts');
         const isolation = current.load<typeof IsolationModule>('src/lib/pricing/isolation.ts');
         const runtime = current.load<typeof RuntimeModule>('src/lib/pricing/runtime.ts');
+        const catalogRuntime = current.load<typeof import('../src/lib/image-studio/catalog-revision')>('src/lib/image-studio/catalog-revision.ts');
         runtimeSourceFiles = runtime.pricingRuntimeSourceFiles;
         const snapshot = new Map(runtimeSourceFiles(candidateRoot).map(file => [file, fs.readFileSync(path.join(candidateRoot, file))]));
         snapshot.forEach((bytes, file) => {
@@ -563,9 +564,11 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         equal(captured.parent.pid, process.ppid, 'Capability includes the actual parent process');
         await runtime.renewPricingWorkerCapability(tx, captured);
         equal((await runtime.assertPricingImageConsumerReady(tx)).workerId, captured.workerId, 'Real process and real root input reach readiness');
+        equal(await catalogRuntime.catalogReaderReady(tx), true, 'Catalog opt-in uses the same real process/source and strict writer-isolation gate');
         const key = runtime.PRICING_IMAGE_CAPABILITY_KEY;
         await tx.platformSetting.update({ where: { key }, data: { value_json: JSON.stringify({ ...captured, expiresAt: new Date(Date.now() - 1).toISOString() }) } });
         await reject(() => runtime.assertPricingImageConsumerReady(tx), 'Expired capability must refuse new pricing admission');
+        equal(await catalogRuntime.catalogReaderReady(tx), false, 'Expired worker disables the lightweight catalog protocol');
         await tx.platformSetting.update({ where: { key }, data: { value_json: JSON.stringify({ ...captured, instance: { ...captured.instance, start: `${captured.instance.start}0` } }) } });
         await reject(() => runtime.assertPricingImageConsumerReady(tx), 'Wrong process instance must refuse new pricing admission');
         await tx.platformSetting.update({ where: { key }, data: { value_json: JSON.stringify({ ...captured, parent: { ...captured.parent, start: `${captured.parent.start}0` } }) } });
@@ -573,9 +576,11 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
         await tx.platformSetting.update({ where: { key }, data: { value_json: JSON.stringify({ ...captured,
           loadedModuleSha: { ...captured.loadedModuleSha, 'src/lib/image-studio/tasks.ts': '0'.repeat(64) } }) } });
         await reject(() => runtime.assertPricingImageConsumerReady(tx), 'Wrong loaded source hash must refuse new pricing admission');
+        equal(await catalogRuntime.catalogReaderReady(tx), false, 'An old writer source cannot keep a new catalog reader trusting its marker');
         await runtime.renewPricingWorkerCapability(tx, captured);
         await runtime.revokePricingWorkerCapability(tx, captured);
         await reject(() => runtime.assertPricingImageConsumerReady(tx), 'Revoked consumer must refuse new pricing admission');
+        equal(await catalogRuntime.catalogReaderReady(tx), false, 'Revoking the current worker also disables lightweight catalog readers');
         equal(await tx.creditLedger.count(), 0, 'No fixture consumer may settle, freeze or refund money');
         equal(forbiddenCalls, [], 'No external/Provider or non-allowlisted subprocess call is allowed; real lsattr is the only subprocess');
         evidence.push('Candidate real capacity predicate counts seven private tasks + one synchronous execution as eight; ordinary drain stays closed; unknown ended sync does not occupy execution');

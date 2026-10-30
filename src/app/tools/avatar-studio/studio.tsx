@@ -256,6 +256,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     if (!ready || !referenceIds.length) { setReferenceMetadata({ owner: ownerId, assets: [] }); return; }
     let active = true;
     const params = new URLSearchParams({ target: 'image-studio', scope: 'mine', types: 'image', keys: referenceIds.map(id => `asset:${id}`).join(',') });
+    params.set('protocol', 'catalog-paged-v2');
     void fetch(`/api/assets/picker?${params}`, { cache: 'no-store' }).then(async response => {
       const data = await readJsonResponse<PickerResponse>(response);
       if (!response.ok) throw new Error('参考图信息读取失败，可重新打开素材库或移除后添加');

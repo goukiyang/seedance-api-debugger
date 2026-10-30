@@ -14,6 +14,7 @@ import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
+import { catalogReaderReady, readCatalogRevision } from './catalog-revision';
 import { assertPresetCoverShareable, commitPreparedModuleCoverSnapshot, copyModuleCover, moduleCoverKey,
   prepareModuleCoverSnapshot, promoteModuleCover, studioFixedCoverDTO, type PreparedModuleCoverSnapshot } from './module-cover';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
@@ -249,7 +250,7 @@ async function readSharedStudioDependencies(actor: ImageStudioIdentity, source: 
   const ownedIds = [...templateReferenceIds, ...fixedReferences.map(ref => ref.assetId), ...(source.banner_asset_id ? [source.banner_asset_id] : [])];
   if (assets.length !== assetIds.length || assets.some(asset => asset.status !== 'active' || asset.type !== 'image')
     || ownedIds.some(id => byId.get(id)?.owner_id !== source.owner_id)) throw new StudioSharingError('模板引用的图片已不可用，请由创建者重新保存', 409);
-  const visible = await studioVisibleAssetWhere(actor, client);
+  const visible = await studioVisibleAssetWhere(actor, client, assetIds);
   const readable = await client.asset.findMany({ where: { id: { in: [...templateReferenceIds, ...(source.banner_asset_id ? [source.banner_asset_id] : [])] }, AND: [visible] }, select: { id: true } });
   const readableIds = new Set(readable.map(asset => asset.id));
   if (templateReferenceIds.some(id => !readableIds.has(id))) throw new StudioSharingError('模板参考图已变为受保护内容，请由创建者核对', 409);
@@ -1367,9 +1368,11 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
   }));
   return { items, nextCursor: remaining.length > 100 ? page[page.length - 1].id : null, catalogRevision };
 }
-export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string, activeModuleId?: string): Promise<SharedStudioRevision> {
-  return readSharedStudioSnapshot(async tx => {
-    const catalog = await sharedCatalogState(user, tx);
+export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string, activeModuleId?: string, lightweight = false): Promise<SharedStudioRevision> {
+  const useMarker = lightweight && (!activePresetId || !!activeModuleId) && await catalogReaderReady(prisma) && !!await readCatalogRevision(prisma, 'templates');
+  const read = async (tx: Prisma.TransactionClient) => {
+    const catalog = useMarker ? { actor: await assertStudioActor(user.id, tx), catalogRevision: (await readCatalogRevision(tx, 'templates'))! }
+      : await sharedCatalogState(user, tx);
     let activeDefinitionToken: string | null = null;
     let activeAvailable = false;
     let activeState: SharedStudioStateProjection | null = null;
@@ -1409,6 +1412,9 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
         }
       }
     }
+    if (useMarker && catalog.catalogRevision !== await readCatalogRevision(tx, 'templates')) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
+    if (useMarker && !await catalogReaderReady(tx)) throw new StudioSharingError('共享目录程序已切换，请重新读取', 409);
     return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable, activeState };
-  }, 'revision');
+  };
+  return useMarker ? read(prisma) : readSharedStudioSnapshot(read, 'revision');
 }

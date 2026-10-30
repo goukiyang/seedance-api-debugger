@@ -4,14 +4,17 @@ import { Prisma } from '@prisma/client';
 import type { UsageAttributionBasis, UsageCoverage, UsageFact, UsageKind, UsageSourceKind } from '@/lib/admin/usage-types';
 import { usageInteger, usageDecimalUnits, usageUnitsText, usageMoneyTotals, usageCnyMicros } from '@/lib/admin/usage-money';
 import { usageRecordHref } from '@/lib/admin/usage-record-link';
+import { usageWindowCondition, usageSqlTime, type UsageReadWindow } from './read-window';
 
 type Cell = string | number | bigint | Date | boolean | null;
 type Row = Record<string, Cell>;
 type Db = Prisma.TransactionClient;
+export type UsageFactSlice = { kind: UsageSourceKind; ids: string[] };
 export interface UsageFactReadOptions {
   scoped: true;
   conditions: Record<UsageSourceKind, Prisma.Sql>;
   projectNames: Map<string, string>;
+  projectWhere?: Prisma.ProjectWhereInput;
 }
 const ZERO = BigInt(0);
 const CHUNK = 500;
@@ -180,6 +183,18 @@ export interface UsageFactSnapshot {
   memberDirectory: Array<{ id: string; label: string }>;
   projectDirectory: Array<{ id: string; label: string }>;
   publicMetadata?: Map<string, { batchId?: string }>;
+  sourceDiagnostics?: UsageSourceDiagnostic[];
+}
+
+export type UsageSourceDiagnostic = { source: UsageSourceKind; total: number; frozen: number; invalid: number;
+  unavailableCash: number; pointMissing: number; pointConflicts: number };
+
+export function usageSourceCoverage(diagnostics: UsageSourceDiagnostic[], dataAsOf: string): UsageCoverage[] {
+  return diagnostics.map(({ source, total, frozen, invalid, unavailableCash, pointMissing, pointConflicts }) => ({
+    source, label: sourceLabels[source], status: invalid || frozen < total || unavailableCash || pointMissing || pointConflicts ? 'partial' : 'complete',
+    total, frozen, legacy: total - frozen,
+    detail: `${source === 'video_studio_run' ? '仅独立 LLM，direct 不计文字调用。' : source === 'agent_text_step' ? '仅 AgentRunStep.step_key=llm_generate 的已存独立文字叶子，按原 AgentRun.user_id 归人；不计父 Run、确定性计划或视频，不补造未存历史失败。无原费用证明则未接入；无历史项目证据则未归属。' : source === 'role_run' || source === 'toolflow_run' ? '父记录只计流程次数，金额与点数在原叶子，不加父镜像。' : ''}${source === 'cutout_receipt' ? '仅本站受理/提交未知回执，不含导入；冻结归属优先，其次不可变 submittedAt、原 Job 创建时间、原回执创建时间；后两项明确历史近似，不用可变 phaseAt。费用及结果文件留存未接入，不查询上游历史。' : ''}历史缺失不回填；费用截至 ${dataAsOf}。${invalid ? ` ${invalid} 条投影损坏/缺少有效时间，未冒充零使用。` : ''}${unavailableCash ? ` ${unavailableCash} 条叶子现金费用未确认或有冲突。` : ''}${pointMissing ? ` ${pointMissing} 条点数无完整原账本，只显示可证镜像/未知。` : ''}${pointConflicts ? ` ${pointConflicts} 条点数账本/镜像冲突待核。` : ''}`,
+  }));
 }
 
 interface InternalFact {
@@ -252,9 +267,14 @@ async function directories(db: Db, model: 'user' | 'project') {
 }
 
 /** Read-only whitelist projection. Caller owns the enclosing interactive snapshot. */
-export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFactReadOptions): Promise<UsageFactSnapshot> {
-  const condition = (kind: UsageSourceKind) => options
-    ? options.conditions[kind] || Prisma.sql`0 = 1` : Prisma.sql`1 = 1`;
+export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFactReadOptions, window?: UsageReadWindow, slice?: UsageFactSlice): Promise<UsageFactSnapshot> {
+  if (slice && (slice.ids.length > CHUNK || slice.ids.some(id => typeof id !== 'string' || !id || id.length > 200))) throw new Error('usage_slice_invalid');
+  const sourceId = (kind: UsageSourceKind) => kind === 'role_run' ? Prisma.sql`r."id"` : kind === 'role_attempt'
+    ? Prisma.sql`a."id"` : kind === 'agent_text_step' ? Prisma.sql`s."id"` : Prisma.sql`"id"`;
+  const attributionTable = window ? await db.$queryRaw<Array<{ name: string }>>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'UsageAttribution'` : [];
+  const condition = (kind: UsageSourceKind) => Prisma.sql`(${options ? options.conditions[kind] || Prisma.sql`0 = 1` : Prisma.sql`1 = 1`})
+    AND (${window ? usageWindowCondition(kind, window, attributionTable.length > 0) : Prisma.sql`1 = 1`})
+    AND (${slice ? kind === slice.kind && slice.ids.length ? Prisma.sql`${sourceId(kind)} IN (${Prisma.join(slice.ids)})` : Prisma.sql`0 = 1` : Prisma.sql`1 = 1`})`;
   const videos = await rows(db, Prisma.sql`"VideoTask"`, Prisma.sql`"id", "provider", "model", "local_status", "user_id", "owner_user_id", "project_id",
     "resolution", "created_at", "updated_at", "completed_at", "retention_status", "actual_cost", "frozen_cost", "refund_amount",
     "billing_scope", "billing_account_id", "provider_cost_status", "provider_task_id", "provider_client_request_id", "template_studio_run_id",
@@ -270,15 +290,34 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
     json_valid("snapshot_json") AS "valid_snapshot",
     json_extract(CASE WHEN json_valid("snapshot_json") THEN "snapshot_json" ELSE '{}' END, '$.schema') AS "snapshot_schema",
     json_extract(CASE WHEN json_valid("snapshot_json") THEN "snapshot_json" ELSE '{}' END, '$.project_id') AS "original_project"`, Prisma.sql`"id"`, condition('toolflow_run'));
-  const selected = options ? [
+  const receipts = await rows(db, Prisma.sql`"PlatformSetting"`, receiptFields, Prisma.sql`"id"`, Prisma.sql`substr("key", 1, 21) = 'image_result_next_v1:' AND ${condition('cutout_receipt')}`);
+  const selected = options || window || slice ? [
     ...videos.map(row => ({ kind: 'video_task' as const, id: String(row.id) })), ...images.map(row => ({ kind: 'image_task' as const, id: String(row.id) })),
     ...studio.map(row => ({ kind: 'video_studio_run' as const, id: String(row.id) })), ...roleRuns.map(row => ({ kind: 'role_run' as const, id: String(row.id) })),
     ...attempts.map(row => ({ kind: 'role_attempt' as const, id: String(row.id) })), ...flows.map(row => ({ kind: 'toolflow_run' as const, id: String(row.id) })),
+    ...agentText.map(row => ({ kind: 'agent_text_step' as const, id: String(row.id) })),
+    ...receipts.map(row => ({ kind: 'cutout_receipt' as const, id: String(row.receipt_id) })),
   ] : undefined;
   const attribution = await readAttributions(db, selected);
-  const bindings = options ? [] : await rows(db, Prisma.sql`"CanvasRoleMediaBinding"`, Prisma.sql`"id", "run_id", "source_kind", "source_task_id", "updated_at"`, Prisma.sql`"id"`);
-  const receipts = await rows(db, Prisma.sql`"PlatformSetting"`, receiptFields, Prisma.sql`"id"`, Prisma.sql`substr("key", 1, 21) = 'image_result_next_v1:' AND ${condition('cutout_receipt')}`);
+  const bindingFields = Prisma.sql`"id", "run_id", "source_kind", "source_task_id", "updated_at"`;
+  const bindings: Row[] = [];
+  if (!options) {
+    if (!window && !slice) bindings.push(...await rows(db, Prisma.sql`"CanvasRoleMediaBinding"`, bindingFields, Prisma.sql`"id"`));
+    else for (let offset = 0; offset < selected!.length; offset += 400) {
+      const clauses = selected!.slice(offset, offset + 400).map(item => Prisma.sql`("source_kind" = ${item.kind} AND "source_task_id" = ${item.id})`);
+      bindings.push(...await rows(db, Prisma.sql`"CanvasRoleMediaBinding"`, bindingFields, Prisma.sql`"id"`, Prisma.sql`${Prisma.join(clauses, ' OR ')}`));
+    }
+  }
   const flowsById = new Map(flows.map(row => [String(row.id), row]));
+  if (window || slice) {
+    const parentIds = Array.from(new Set(images.flatMap(row => str(row.tool_flow_run_id) && !flowsById.has(String(row.tool_flow_run_id)) ? [String(row.tool_flow_run_id)] : [])));
+    for (let offset = 0; offset < parentIds.length; offset += 400) {
+      const parents = await rows(db, Prisma.sql`"ToolFlowRun"`, Prisma.sql`"id",
+        json_extract(CASE WHEN json_valid("snapshot_json") THEN "snapshot_json" ELSE '{}' END, '$.schema') AS "snapshot_schema"`, Prisma.sql`"id"`,
+      Prisma.sql`"id" IN (${Prisma.join(parentIds.slice(offset, offset + 400))})`);
+      for (const parent of parents) flowsById.set(String(parent.id), parent);
+    }
+  }
   const mediaParents = new Map(bindings.map(row => [keyOf(row.source_kind === 'image_studio_task' ? 'image_task' : String(row.source_kind), String(row.source_task_id)), String(row.run_id)]));
   const internal: InternalFact[] = [];
   const invalidCounts = new Map<string, number>();
@@ -418,32 +457,40 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
       fact.attributionDetail += ' 原记录详情仅查看本站已存回执元数据；接续/媒体仍沿原本人权限，不查询供应商。';
     }
   }
-  const cashEvents = await attachCash(db, internal, !!options);
+  const cashEvents = await attachCash(db, internal, !!options || !!window || !!slice, options ? undefined : window, !!slice && !options);
   const pointVersions: string[] = [];
-  const pointDetail = await attachPoints(db, internal, pointVersions, !!options);
+  const pointProof = await attachPoints(db, internal, pointVersions, !!options);
   // Include present members/projects with no use as actual empty groups.
-  const memberNames = options ? new Map<string, string>() : await directories(db, 'user');
+  const memberNames = options || slice ? new Map<string, string>() : await directories(db, 'user');
   const usedProjectIds = new Set(internal.map(item => item.fact.projectId));
-  const projectNames = options ? new Map<string, string>() : await directories(db, 'project');
-  if (options) {
-    const ids = Array.from(usedProjectIds).filter((id): id is string => !!id && options.projectNames.has(id));
+  const projectNames = options || slice ? new Map<string, string>() : await directories(db, 'project');
+  if (options || slice) {
+    const ids = Array.from(usedProjectIds).filter((id): id is string => !!id && (!options || !!options.projectWhere || options.projectNames.has(id)));
     for (let offset = 0; offset < ids.length; offset += CHUNK) {
-      const page = await db.project.findMany({ where: { id: { in: ids.slice(offset, offset + CHUNK) } }, select: { id: true, name: true }, take: CHUNK });
+      const page = await db.project.findMany({ where: { AND: [{ id: { in: ids.slice(offset, offset + CHUNK) } }, options?.projectWhere || {}] }, select: { id: true, name: true }, take: CHUNK });
       for (const project of page) projectNames.set(project.id, project.name);
     }
+  }
+  if (slice && !options) {
+    const ids = Array.from(new Set(internal.flatMap(item => item.fact.ownerUserId ? [item.fact.ownerUserId] : [])));
+    for (let offset = 0; offset < ids.length; offset += CHUNK) {
+      const users = await db.user.findMany({ where: { id: { in: ids.slice(offset, offset + CHUNK) } }, select: { id: true, name: true } });
+      for (const user of users) memberNames.set(user.id, user.name && !user.name.includes('@') ? user.name : `成员 ${user.id.slice(0, 8)}`);
+    }
+    for (const [id, name] of Array.from(projectNames)) if (!name || name.includes('@')) projectNames.set(id, `项目 ${id.slice(0, 8)}`);
   }
   for (const { fact } of internal) {
     fact.ownerLabel = fact.ownerUserId ? memberNames.get(fact.ownerUserId) || `成员已不可用 (${fact.ownerUserId})` : '成员未归属';
     fact.projectLabel = fact.projectId ? projectNames.get(fact.projectId) || `项目已不可用 (${fact.projectId})` : '未归属项目';
   }
-  const coverage: UsageCoverage[] = (Object.keys(sourceLabels) as UsageSourceKind[]).map(source => {
+  const sourceDiagnostics: UsageSourceDiagnostic[] = (Object.keys(sourceLabels) as UsageSourceKind[]).map(source => {
     const items = internal.filter(item => item.fact.sourceKind === source), invalid = invalidCounts.get(source) || 0;
     const frozen = items.filter(item => item.fact.attribution === 'frozen' || item.fact.attribution === 'conflict').length;
     const unavailableCash = items.filter(item => item.fact.leaf && item.fact.costStatus !== 'confirmed').length;
-    return { source, label: sourceLabels[source], status: invalid || frozen < items.length || unavailableCash || pointDetail.get(source) ? 'partial' : 'complete',
-      total: items.length, frozen, legacy: items.length - frozen,
-      detail: `${source === 'video_studio_run' ? '仅独立 LLM，direct 不计文字调用。' : source === 'agent_text_step' ? '仅 AgentRunStep.step_key=llm_generate 的已存独立文字叶子，按原 AgentRun.user_id 归人；不计父 Run、确定性计划或视频，不补造未存历史失败。无原费用证明则未接入；无历史项目证据则未归属。' : source === 'role_run' || source === 'toolflow_run' ? '父记录只计流程次数，金额与点数在原叶子，不加父镜像。' : ''}${source === 'cutout_receipt' ? '仅本站受理/提交未知回执，不含导入；冻结归属优先，其次不可变 submittedAt、原 Job 创建时间、原回执创建时间；后两项明确历史近似，不用可变 phaseAt。费用及结果文件留存未接入，不查询上游历史。' : ''}历史缺失不回填；费用截至 ${dataAsOf}。${invalid ? ` ${invalid} 条投影损坏/缺少有效时间，未冒充零使用。` : ''}${unavailableCash ? ` ${unavailableCash} 条叶子现金费用未确认或有冲突。` : ''}${pointDetail.get(source) || ''}` };
+    return { source, total: items.length, frozen, invalid, unavailableCash,
+      pointMissing: pointProof.missing.get(source) || 0, pointConflicts: pointProof.conflicts.get(source) || 0 };
   });
+  const coverage = usageSourceCoverage(sourceDiagnostics, dataAsOf);
   const ledgerEvents = cashEvents.filter(event => !event.id.startsWith('role-bill:'));
   const invalidLedgerTimes = ledgerEvents.filter(event => !event.occurredAt).length;
   coverage.push({ source: 'cost_ledger', label: '原成本账本与未关联费用',
@@ -455,7 +502,7 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
     total: internal.length, frozen: internal.filter(item => ['frozen', 'conflict'].includes(item.fact.attribution)).length,
     legacy: internal.filter(item => !['frozen', 'conflict'].includes(item.fact.attribution)).length,
     detail: attribution.available ? '仅读取现存首建归属；缺行按已支持的历史依据，报表 GET 不补写。' : '兼容部署尚无 UsageAttribution 表；使用已支持的历史依据，不写入、不回填。' });
-  return { facts: internal.map(item => item.fact), coverage, cashEvents,
+  return { facts: internal.map(item => item.fact), coverage, cashEvents, sourceDiagnostics,
     sourceFingerprintParts: [...bindings.map(row => `binding:${row.id}:${row.run_id}:${row.source_kind}:${row.source_task_id}:${iso(row.updated_at)}`),
       ...cashEvents.map(event => JSON.stringify(event)), ...pointVersions],
     memberDirectory: Array.from(memberNames, ([id, label]) => ({ id, label })),
@@ -463,9 +510,65 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
     ...(options ? { publicMetadata: new Map(images.map(row => [keyOf('image_task', String(row.id)), { batchId: str(row.batch_id) || undefined }])) } : {}) };
 }
 
+/** Batches use the original projection and settlement readers, not a second billing formula. */
+export async function* iterateUsageFactBatches(db: Db, dataAsOf: string, window?: UsageReadWindow, parent?: { kind: UsageSourceKind; id: string }, options?: UsageFactReadOptions) {
+  const sources: Array<{ kind: UsageSourceKind; from: Prisma.Sql; id: Prisma.Sql; condition: Prisma.Sql }> = [
+    { kind: 'video_task', from: Prisma.sql`"VideoTask"`, id: Prisma.sql`"VideoTask"."id"`, condition: Prisma.sql`1 = 1` },
+    { kind: 'image_task', from: Prisma.sql`"ImageStudioTask"`, id: Prisma.sql`"ImageStudioTask"."id"`, condition: Prisma.sql`1 = 1` },
+    { kind: 'video_studio_run', from: Prisma.sql`"VideoStudioRun"`, id: Prisma.sql`"VideoStudioRun"."id"`, condition: Prisma.sql`"mode" = 'llm'` },
+    { kind: 'agent_text_step', from: Prisma.sql`"AgentRunStep" s JOIN "AgentRun" r ON r."id" = s."agent_run_id"`, id: Prisma.sql`s."id"`, condition: Prisma.sql`s."step_key" = 'llm_generate'` },
+    { kind: 'role_run', from: Prisma.sql`"CanvasRoleTaskRun" r`, id: Prisma.sql`r."id"`, condition: Prisma.sql`1 = 1` },
+    { kind: 'role_attempt', from: Prisma.sql`"CanvasRoleAttempt" a LEFT JOIN "CanvasRoleWork" w ON w."id" = a."work_id" LEFT JOIN "CanvasRoleTaskRun" r ON r."id" = w."role_task_run_id"`, id: Prisma.sql`a."id"`, condition: Prisma.sql`1 = 1` },
+    { kind: 'toolflow_run', from: Prisma.sql`"ToolFlowRun"`, id: Prisma.sql`"ToolFlowRun"."id"`, condition: Prisma.sql`1 = 1` },
+    { kind: 'cutout_receipt', from: Prisma.sql`"PlatformSetting"`, id: Prisma.sql`"PlatformSetting"."id"`, condition: Prisma.sql`substr("key", 1, 21) = 'image_result_next_v1:'` },
+  ];
+  const attribution = window || parent ? await db.$queryRaw<Array<{ name: string }>>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'UsageAttribution'` : [];
+  for (const source of sources) {
+    const parentCondition = parent ? Prisma.sql`(
+      ${attribution.length ? Prisma.sql`EXISTS (SELECT 1 FROM "UsageAttribution" ua WHERE ua."source_kind" = ${source.kind}
+        AND ua."source_id" = ${source.kind === 'cutout_receipt' ? Prisma.sql`json_extract(CASE WHEN json_valid("value_json") THEN "value_json" ELSE '{}' END, '$.receiptId')` : source.id}
+        AND ua."parent_source_kind" = ${parent.kind} AND ua."parent_source_id" = ${parent.id})` : Prisma.sql`0 = 1`}
+      OR ${source.kind === 'video_task' && parent.kind === 'video_studio_run' ? Prisma.sql`"template_studio_run_id" = ${parent.id}`
+        : source.kind === 'image_task' && parent.kind === 'toolflow_run' ? Prisma.sql`"tool_flow_run_id" = ${parent.id}`
+          : source.kind === 'role_attempt' && parent.kind === 'role_run' ? Prisma.sql`r."id" = ${parent.id}` : Prisma.sql`0 = 1`}
+      OR ${parent.kind === 'role_run' ? Prisma.sql`EXISTS (SELECT 1 FROM "CanvasRoleMediaBinding" b WHERE b."run_id" = ${parent.id}
+        AND b."source_kind" IN (${Prisma.join(source.kind === 'image_task' ? ['image_task', 'image_studio_task'] : [source.kind])}) AND b."source_task_id" = ${source.id})` : Prisma.sql`0 = 1`})` : Prisma.sql`1 = 1`;
+    let cursor = '';
+    for (;;) {
+      const ids = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT ${source.id} AS id FROM ${source.from}
+        WHERE ${source.condition} AND ${source.id} > ${cursor} AND ${parentCondition}
+          AND (${options?.conditions[source.kind] || Prisma.sql`1 = 1`})
+          AND (${window ? usageWindowCondition(source.kind, window, attribution.length > 0) : Prisma.sql`1 = 1`})
+        ORDER BY ${source.id} ASC LIMIT ${CHUNK}`);
+      yield await readUsageFacts(db, dataAsOf, options, undefined, { kind: source.kind, ids: ids.map(row => row.id) });
+      if (ids.length < CHUNK) break;
+      cursor = ids.at(-1)!.id;
+    }
+  }
+}
+
+export async function* iterateUsageCashBatches(db: Db, window?: UsageReadWindow) {
+  let cursor = '';
+  const time = usageSqlTime(Prisma.sql`"occurred_at"`);
+  for (;;) {
+    const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "CostLedger" WHERE "id" > ${cursor}
+      AND (${window ? Prisma.sql`${time} IS NULL OR (${window.startUtc ? Prisma.sql`${time} >= ${Date.parse(window.startUtc)}` : Prisma.sql`1 = 1`}
+        AND ${window.endUtc ? Prisma.sql`${time} < ${Date.parse(window.endUtc)}` : Prisma.sql`1 = 1`})` : Prisma.sql`1 = 1`})
+      ORDER BY "id" ASC LIMIT ${CHUNK}`);
+    if (!rows.length) break;
+    const ids = new Set(rows.map(row => row.id));
+    const events = await attachCash(db, [], true, undefined, true, Array.from(ids));
+    yield events.filter(event => ids.has(event.id));
+    if (rows.length < CHUNK) break;
+    cursor = rows.at(-1)!.id;
+  }
+}
+
+export const readUsageDirectories = async (db: Db) => ({ members: await directories(db, 'user'), projects: await directories(db, 'project') });
+
 // Cash and point ledgers are attached below. These readers never import an
 // execution/finalizer/provider module or read an unbounded JSON blob.
-async function attachCash(db: Db, items: InternalFact[], scoped = false): Promise<UsageCashEvent[]> {
+async function attachCash(db: Db, items: InternalFact[], scoped = false, window?: UsageReadWindow, adminSlice = false, ledgerIds?: string[]): Promise<UsageCashEvent[]> {
   const fields = Prisma.sql`"id", "source_type", "source_id", "task_id", "image_task_id", "user_id", "project_id",
     "provider_request_id", "provider_name", "provider_account_id", "provider_task_id", "event_type", "amount_micros", "amount_minor", "currency",
     "cost_source", "confidence", "official_charge_id", "occurred_at", "created_at"`;
@@ -473,23 +576,44 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
   if (!scoped) ledgers = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`);
   else {
     const selected = new Map<string, Row>();
+    if (ledgerIds?.length) for (const row of await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`"id" IN (${Prisma.join(ledgerIds)})`)) selected.set(String(row.id), row);
     const leaves = items.filter(item => item.fact.leaf);
     for (let offset = 0; offset < leaves.length; offset += CHUNK) {
       const batch = leaves.slice(offset, offset + CHUNK);
-      const links = batch.map(({ fact }) => {
+      const links = batch.map(({ fact, providerScope, providerReference }) => {
         const direct = fact.sourceKind === 'video_task' ? Prisma.sql`"task_id" = ${fact.sourceId}` : fact.sourceKind === 'image_task' ? Prisma.sql`"image_task_id" = ${fact.sourceId}` : Prisma.sql`0 = 1`;
         const aliases = fact.sourceKind === 'video_task' ? ['task', 'video_task'] : fact.sourceKind === 'image_task' ? ['image_task', 'image_studio_task'] : [fact.sourceKind];
         const request = fact.sourceKind === 'video_task' ? Prisma.sql`EXISTS (SELECT 1 FROM "ProviderApiRequest" p WHERE p."task_id" = ${fact.sourceId}
           AND (p."id" = "CostLedger"."provider_request_id" OR "CostLedger"."source_type" = 'provider_request' AND p."id" = "CostLedger"."source_id"))` : Prisma.sql`0 = 1`;
-        return Prisma.sql`(${direct} OR "source_type" IN (${Prisma.join(aliases)}) AND "source_id" = ${fact.sourceId} OR ${request})`;
+        const reference = providerScope && providerReference ? Prisma.sql`"provider_account_id" = ${providerScope} AND "provider_task_id" = ${providerReference}` : Prisma.sql`0 = 1`;
+        return Prisma.sql`(${direct} OR "source_type" IN (${Prisma.join(aliases)}) AND "source_id" = ${fact.sourceId} OR ${request} OR (${reference}))`;
       });
       const values = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`${Prisma.join(links, ' OR ')}`);
       for (const row of values) selected.set(String(row.id), row);
     }
+    if (window) {
+      const occurred = usageSqlTime(Prisma.sql`"occurred_at"`);
+      const unlinked = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`
+        (${window.startUtc ? Prisma.sql`${occurred} >= ${Date.parse(window.startUtc)}` : Prisma.sql`1 = 1`})
+        AND (${window.endUtc ? Prisma.sql`${occurred} < ${Date.parse(window.endUtc)}` : Prisma.sql`1 = 1`})`);
+      for (const row of unlinked) selected.set(String(row.id), row);
+    }
+    if (window || adminSlice) {
+      const seeds = Array.from(selected.values());
+      for (let offset = 0; offset < seeds.length; offset += 100) {
+        const peers = seeds.slice(offset, offset + 100).map(row => Prisma.sql`(
+          COALESCE("provider_account_id", '') = ${str(row.provider_account_id) || ''}
+          AND COALESCE("provider_name", '') = ${str(row.provider_name) || ''} AND "event_type" = ${row.event_type}
+          AND ((${str(row.official_charge_id)} IS NOT NULL AND "official_charge_id" = ${str(row.official_charge_id)})
+            OR (${str(row.provider_task_id) || str(row.provider_request_id)} IS NOT NULL
+              AND COALESCE(NULLIF("provider_task_id", ''), "provider_request_id") = ${str(row.provider_task_id) || str(row.provider_request_id)})))`);
+        for (const row of await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`${Prisma.join(peers, ' OR ')}`)) selected.set(String(row.id), row);
+      }
+    }
     ledgers = Array.from(selected.values());
     // A currency mirror is omitted only with the same original proof, account,
     // event and exact local source. A differently linked proof stays a conflict.
-    for (const row of ledgers) {
+    for (const row of window || adminSlice ? [] : ledgers) {
       if (!str(row.provider_account_id)) continue;
       const mirrors = await db.$queryRaw<Array<{ mirror: number; conflict: number }>>(Prisma.sql`SELECT
         EXISTS (SELECT 1 FROM "CostLedger" c WHERE c."id" <> ${row.id} AND c."official_charge_id" = ${row.official_charge_id}
@@ -539,6 +663,35 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
     if (!item.fact.leaf || !item.providerReference || !item.providerScope) continue;
     addReference(`${item.fact.provider || ''}\0${item.providerScope || ''}\0${item.providerReference}`, keyOf(item.fact.sourceKind, item.fact.sourceId));
   }
+  if (window || adminSlice) {
+    const checked = new Set<string>();
+    for (const row of ledgers) {
+      const scope = str(row.provider_account_id), reference = str(row.provider_task_id);
+      if (!scope || !reference || checked.has(`${scope}\0${reference}`)) continue;
+      checked.add(`${scope}\0${reference}`);
+      const peers = await db.$queryRaw<Array<{ kind: string; id: string }>>(Prisma.sql`
+        SELECT 'image_task' AS kind, "id" FROM "ImageStudioTask" WHERE "billing_scope" = ${scope} AND "gateway_request_id" = ${reference}
+        UNION ALL SELECT 'role_attempt' AS kind, "id" FROM "CanvasRoleAttempt" WHERE "provider_scope" = ${scope} AND "provider_reference" = ${reference} LIMIT 3`);
+      for (const peer of peers) addReference(`\0${scope}\0${reference}`, keyOf(peer.kind, peer.id));
+    }
+  }
+  const externalFacts = new Map<string, boolean>();
+  const externalFactExists = async (key: string) => {
+    if (!window && !adminSlice) return false;
+    if (externalFacts.has(key)) return externalFacts.get(key)!;
+    const separator = key.indexOf(':'), kind = key.slice(0, separator), id = key.slice(separator + 1);
+    const tables: Record<string, { table: string; time: string; extra?: Prisma.Sql }> = {
+      video_task: { table: 'VideoTask', time: 'created_at' }, image_task: { table: 'ImageStudioTask', time: 'created_at' },
+      video_studio_run: { table: 'VideoStudioRun', time: 'created_at', extra: Prisma.sql`"mode" = 'llm'` },
+      agent_text_step: { table: 'AgentRunStep', time: 'created_at', extra: Prisma.sql`"step_key" = 'llm_generate' AND EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "agent_run_id")` },
+      role_attempt: { table: 'CanvasRoleAttempt', time: 'started_at' },
+    };
+    const source = tables[kind];
+    const found = source ? await db.$queryRaw<Row[]>(Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${source.table}"`)}
+      WHERE "id" = ${id} AND ${usageSqlTime(Prisma.raw(`"${source.time}"`))} IS NOT NULL AND (${source.extra || Prisma.sql`1 = 1`}) LIMIT 1`) : [];
+    externalFacts.set(key, found.length > 0);
+    return found.length > 0;
+  };
   const events: UsageCashEvent[] = [], groups = new Map<string, UsageCashEvent[]>();
   const groupScopes = new Map<string, string>();
   const linked = new Map<string, UsageCashEvent[]>();
@@ -571,7 +724,8 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
       if (matched) for (const value of Array.from(matched)) candidates.add(value);
     }
     const existing = Array.from(candidates).filter(value => byKey.has(value));
-    const sourceKey = candidates.size === 1 && existing.length === 1 ? existing[0] : null;
+    const only = candidates.size === 1 ? Array.from(candidates)[0] : null;
+    const sourceKey = only && (existing.length === 1 || await externalFactExists(only)) ? only : null;
     const amount = usageInteger(row.amount_micros) ?? (() => { const minor = usageInteger(row.amount_minor); return minor === null ? null : minor * BigInt(10000); })();
     const currency = str(row.currency)?.toUpperCase() || null;
     const officialId = str(row.official_charge_id);
@@ -582,8 +736,8 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
       occurredAt: iso(row.occurred_at) || '', currency, amountMicros: signed?.toString() ?? null,
       status: bool(row.public_conflict) || existing.length > 1 || candidates.size > 1 || row.confidence === 'disputed' || row.event_type === 'official_charge' && amount !== null && amount < ZERO
         ? 'conflict' : supported ? 'confirmed' : 'pending', provider: str(row.provider_name), proofId: officialId,
-      ownerUserId: sourceKey ? byKey.get(sourceKey)!.fact.ownerUserId : null,
-      projectId: sourceKey ? byKey.get(sourceKey)!.fact.projectId : null,
+      ownerUserId: sourceKey ? byKey.get(sourceKey)?.fact.ownerUserId || null : null,
+      projectId: sourceKey ? byKey.get(sourceKey)?.fact.projectId || null : null,
       ledgerUserId: str(row.user_id), ledgerProjectId: str(row.project_id), cashEvidence,
       providerReference: str(row.provider_task_id) || str(row.provider_request_id),
       providerScopeFingerprint: str(row.provider_account_id) ? createHash('sha256').update(String(row.provider_account_id)).digest('hex') : null,
@@ -684,7 +838,8 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
   for (const keys of Array.from(referenceMap.values())) {
     if (keys.size < 2) continue;
     for (const key of Array.from(keys)) {
-      const fact = byKey.get(key)!.fact;
+      const fact = byKey.get(key)?.fact;
+      if (!fact) continue;
       fact.costStatus = 'conflict'; fact.attributionDetail += ' 同一供应商受理号关联多个本站任务，需核对，未按相似内容去重。';
       for (const event of linked.get(key) || []) event.status = 'conflict';
     }
@@ -709,7 +864,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false): Promis
   return events;
 }
 
-async function attachPoints(db: Db, items: InternalFact[], versions: string[], scoped = false): Promise<Map<string, string>> {
+async function attachPoints(db: Db, items: InternalFact[], versions: string[], scoped = false) {
   const byTask = new Map<string, Array<Row & { ledger_kind: string }>>();
   const keyCounts = new Map<string, number>();
   for (const item of items) if (item.pointsKey) keyCounts.set(item.pointsKey, (keyCounts.get(item.pointsKey) || 0) + 1);
@@ -791,8 +946,5 @@ async function attachPoints(db: Db, items: InternalFact[], versions: string[], s
       missing.set(fact.sourceKind, (missing.get(fact.sourceKind) || 0) + 1);
     }
   }
-  const detail = new Map<string, string>();
-  for (const source of Object.keys(sourceLabels)) detail.set(source,
-    `${missing.get(source) ? ` ${missing.get(source)} 条点数无完整原账本，只显示可证镜像/未知。` : ''}${conflicts.get(source) ? ` ${conflicts.get(source)} 条点数账本/镜像冲突待核。` : ''}`);
-  return detail;
+  return { missing, conflicts };
 }

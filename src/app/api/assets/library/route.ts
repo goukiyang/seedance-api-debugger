@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { getSession, type SessionUser } from '@/lib/auth/session';
+import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { getAccessibleProjectIds, getTaskWhereForUser } from '@/lib/projects/permissions';
 import { USER_VISIBLE_TASK_RETENTION_STATUSES } from '@/lib/tasks/retention';
 import { displayUserName, displayUserSubtitle } from '@/lib/users/display';
@@ -18,6 +18,11 @@ import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
 import { multiviewOutputGroups } from '@/lib/video/multiview-output-groups.server';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+import { catalogReaderReady, readCatalogRevision } from '@/lib/image-studio/catalog-revision';
+import { readLibraryDirectory, type LibraryDirectoryPage } from '@/lib/assets/library-directory';
+import { CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
+import { StudioSharingError } from '@/lib/image-studio/shared-contract';
+import { observeOperation } from '@/lib/performance/server-operations';
 
 export const dynamic = 'force-dynamic';
 
@@ -489,6 +494,7 @@ async function loadVideoItems(options: {
   includeForMerge: boolean;
   removedIds: string[];
   directory?: boolean;
+  directoryPage?: boolean;
   ids?: string[];
   multiviewOutputsOnly?: boolean;
 }) {
@@ -499,7 +505,7 @@ async function loadVideoItems(options: {
   }
 
   const includeDeleted = user.role === 'admin' && options.status === 'hidden';
-  const baseWhere = await getTaskWhereForUser(user, options.projectId, {
+  const baseWhere = options.directoryPage ? { id: { in: options.ids || [] } } : await getTaskWhereForUser(user, options.projectId, {
     includeAdminAll: user.role === 'admin',
     includeDeleted,
   });
@@ -645,6 +651,7 @@ async function loadAssetItems(options: {
   take: number;
   removedIds: string[];
   directory?: boolean;
+  directoryPage?: boolean;
   ids?: string[];
 }) {
   if (options.enhance !== 'none') {
@@ -664,7 +671,7 @@ async function loadAssetItems(options: {
   };
   const removedIds = options.removedIds;
   if (removedIds.length) where.NOT = { id: { in: removedIds }, owner_id: options.userId };
-  const hiddenUrls = await studioHiddenAssetUrls(options.user);
+  const hiddenUrls = await studioHiddenAssetUrls(options.user, prisma, options.directoryPage ? options.ids || [] : undefined);
   if (hiddenUrls.length) where.original_url = { notIn: hiddenUrls };
   if (options.type === 'image') where.type = 'image';
   else if (options.type === 'video') where.type = 'video';
@@ -712,15 +719,15 @@ async function loadAssetItems(options: {
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
     const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
     const outputFlag = Prisma.sql`json_extract(CASE WHEN json_valid(asset."metadata_json") THEN asset."metadata_json" ELSE '{}' END, '$.multiviewOutput.schema') = 1`;
-    const generatedFilter = options.multiviewOutputsOnly ? Prisma.sql`AND ${outputFlag}` : Prisma.sql`AND (${outputFlag} OR EXISTS (
-      SELECT 1 FROM "ImageStudioTask" generated_task
-      WHERE generated_task."asset_id" = asset."id" AND generated_task."status" = 'succeeded'
+    const generatedFilter = options.multiviewOutputsOnly ? Prisma.sql`AND ${outputFlag}` : Prisma.sql`AND (${outputFlag} OR asset."id" IN (
+      SELECT generated_task."asset_id" FROM "ImageStudioTask" generated_task
+      WHERE generated_task."asset_id" IS NOT NULL AND generated_task."status" = 'succeeded'
     ))`;
     const idFilter = options.ids ? (options.ids.length ? Prisma.sql`AND asset."id" IN (${Prisma.join(options.ids)})` : Prisma.sql`AND 0 = 1`) : Prisma.empty;
     if (options.directory) {
       const rows = await prisma.$queryRaw<Array<{ id: string; created_at: Date | string; owner_id: string }>>(Prisma.sql`
         SELECT asset."id", asset."created_at", asset."owner_id" FROM "Asset" asset
-        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter} ${options.directoryPage ? idFilter : Prisma.empty}
         LIMIT ${DIRECTORY_LIMIT + 1}
       `);
       return assetDirectory(rows);
@@ -737,7 +744,7 @@ async function loadAssetItems(options: {
       prisma.$queryRaw<Array<{ count: bigint | number }>>(Prisma.sql`
         SELECT COUNT(DISTINCT asset."id") AS count
         FROM "Asset" asset
-        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter}
+        WHERE ${statusFilter} AND ${typeFilter} ${ownerFilter} ${keywordFilter} ${generatedFilter} ${privacyFilter} ${options.directoryPage ? idFilter : Prisma.empty}
       `),
     ]);
     assets = generatedAssets;
@@ -779,7 +786,7 @@ async function loadAssetItems(options: {
       })
     : [];
   const ownerById = new Map(owners.map((owner) => [owner.id, owner]));
-  const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'));
+  const origins = await generationOrigins(options.user, assets.filter(asset => asset.type === 'image'), Boolean(options.directoryPage));
   const billingRows = await prisma.imageStudioTask.findMany({ where: { asset_id: { in: assets.filter(asset => asset.type === 'image'
     && (options.user.role === 'admin' || asset.owner_id === options.user.id)).map(asset => asset.id) },
     ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), AND: [studioOutputTaskWhere] },
@@ -826,6 +833,7 @@ async function loadReferenceItems(options: {
   removedAssetIds: string[];
   multiviewOutputsOnly?: boolean;
   directory?: boolean;
+  directoryPage?: boolean;
   ids?: string[];
 }) {
   if (options.enhance !== 'none') {
@@ -841,7 +849,7 @@ async function loadReferenceItems(options: {
   const where: Prisma.ReferenceImageWhereInput = {
     status: options.status === 'hidden' ? 'deleted' : 'active',
     ...(options.multiviewOutputsOnly ? { asset: { is: { metadata_json: { contains: '"multiviewOutput"' } } } } : {}),
-    AND: [await studioVisibleReferenceWhere(options.user), { NOT: {
+    AND: [await studioVisibleReferenceWhere(options.user, prisma, options.directoryPage ? options.ids || [] : undefined), { NOT: {
       owner_user_id: options.user.id,
       OR: [
         { id: { in: options.removedIds }, asset_id: null },
@@ -854,7 +862,7 @@ async function loadReferenceItems(options: {
   }
   if (options.user.role === 'admin') {
     if (options.scope === 'user' && options.ownerUserId) where.owner_user_id = options.ownerUserId;
-  } else {
+  } else if (!options.directoryPage) {
     const accessibleProjectIds = await getAccessibleProjectIds(options.user);
     where.OR = [
       { owner_user_id: options.user.id },
@@ -897,13 +905,14 @@ async function loadReferenceItems(options: {
     prisma.referenceImage.count({ where }),
   ]);
 
-  const origins = await generationOrigins(options.user, images.flatMap(image => image.asset ? [image.asset] : []));
+  const origins = await generationOrigins(options.user, images.flatMap(image => image.asset ? [image.asset] : []), Boolean(options.directoryPage));
   return { items: images.map(image => ({ ...serializeReferenceImage(image), generationOrigin: image.asset ? assetGenerationOrigin(image.asset, origins) : image.source_type === 'generated' ? { kind: 'unknown' as const, label: '来源待识别' } : undefined })), total };
 }
 
 export async function GET(request: NextRequest) {
+  const observed = observeOperation('assets.library');
   try {
-    const user = await getSession();
+    let user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
     const searchParams = request.nextUrl.searchParams;
@@ -921,28 +930,45 @@ export async function GET(request: NextRequest) {
     const includeUploads = searchParams.get('include_uploads') === 'true';
     const includeGenerated = searchParams.get('include_generated') === 'true';
     const multiviewOutputsOnly = searchParams.get('source') === 'multiview-output';
+    let directoryPage: LibraryDirectoryPage | undefined;
+    if (searchParams.get('protocol') === 'catalog-paged-v2' && await catalogReaderReady(prisma)) {
+      try { directoryPage = await readLibraryDirectory(prisma, user, { type, scope, status, sort, enhance, projectId, ownerUserId, keyword,
+        page, limit, includeUploads, includeGenerated, multiviewOutputsOnly, collapseMultiview: searchParams.get('collapse_multiview') === '1',
+        expectedRevision: searchParams.get('directory_version') }); user = directoryPage.user; }
+      catch (error) { if (!(error instanceof CatalogSqlCompatibilityError)) throw error; }
+    }
     // Private library preferences must not alter project/shared or admin audit views.
-    const removed = scope === 'history' && !projectId && status !== 'hidden'
-      ? await removedLibraryResources(user.id) : { asset: [], video_task: [], reference_image: [] };
+    const removed: { asset: string[]; video_task: string[]; reference_image: string[] } = { asset: [], video_task: [], reference_image: [] };
+    if (scope === 'history' && !projectId && status !== 'hidden') {
+      if (!directoryPage) Object.assign(removed, await removedLibraryResources(user.id));
+      else {
+        const keys = [...directoryPage.keys.filter(key => /^(asset|video_task|reference_image):/.test(key)), ...directoryPage.childAssetIds.map(id => `asset:${id}`)];
+        for (let offset = 0; offset < keys.length; offset += 80) {
+          const part = await removedLibraryResources(user.id, keys.slice(offset, offset + 80));
+          for (const kind of ['asset', 'video_task', 'reference_image'] as const) removed[kind].push(...part[kind]);
+        }
+      }
+    }
 
     if (scope === 'user' && user.role !== 'admin') {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
     }
 
     const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword, multiviewOutputsOnly,
-      page: 1, limit, includeForMerge: false, removedIds: removed.video_task };
+      page: 1, limit, includeForMerge: false, removedIds: removed.video_task, directoryPage: Boolean(directoryPage) };
     const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId,
-      keyword, includeUploads, includeGenerated, multiviewOutputsOnly, take: limit, removedIds: removed.asset };
+      keyword, includeUploads, includeGenerated, multiviewOutputsOnly, take: limit, removedIds: removed.asset, directoryPage: Boolean(directoryPage) };
     const referenceOptions = { user, type, enhance, scope, status, projectId, ownerUserId, keyword,
-      take: limit, multiviewOutputsOnly, removedIds: removed.reference_image, removedAssetIds: removed.asset };
-    const directoryResults = await Promise.all([
+      take: limit, multiviewOutputsOnly, removedIds: removed.reference_image, removedAssetIds: removed.asset, directoryPage: Boolean(directoryPage) };
+    const directoryResults = directoryPage ? [] : await Promise.all([
       loadVideoItems({ ...videoOptions, directory: true }),
       includeUploads || includeGenerated || multiviewOutputsOnly ? loadAssetItems({ ...assetOptions, directory: true }) : null,
       loadReferenceItems({ ...referenceOptions, directory: true }),
     ]);
     const groupProjection = searchParams.get('collapse_multiview') === '1' && user.account_type === 'internal' && enhance === 'none'
       && ['all', 'image'].includes(type) && ['all', 'succeeded'].includes(status) && (includeGenerated || multiviewOutputsOnly)
-      && (!ownerUserId || ownerUserId === user.id) ? await multiviewOutputGroups(user, removed.asset) : null;
+      && (!ownerUserId || ownerUserId === user.id) ? await multiviewOutputGroups(user, removed.asset, directoryPage ? {
+        workIds: directoryPage.keys.filter(key => key.startsWith('multiview_work:')).map(key => key.slice('multiview_work:'.length)), receiptKeys: directoryPage.receiptKeys } : undefined) : null;
     const groupItems: LibraryItem[] = (groupProjection?.groups || []).filter(group => (!projectId || group.work.project_id === projectId)
       && (!keyword || group.work.title.includes(keyword))).map(group => {
       const children = group.assets.map(serializeAsset);
@@ -954,11 +980,11 @@ export async function GET(request: NextRequest) {
         generationOrigin: { kind: 'multiview-output', label: '3D多视图' },
         multiviewGroup: { workId: group.work.id, revision: group.revision, children, roles: group.roles, frameCount: group.frameCount, missing: group.missing, syncing: group.syncing } };
     });
-    const directory = sortItems(Array.from(new Map([...directoryResults.flatMap(result =>
+    const directory = directoryPage ? directoryPage.keys.map(id => ({ id })) : sortItems(Array.from(new Map([...directoryResults.flatMap(result =>
       result && 'directory' in result ? result.directory : []).filter(item => !item.id.startsWith('asset:') || !groupProjection?.dedicatedIds.has(item.id.slice(6))),
       ...groupItems].map(item => [item.id, item])).values()), sort);
     const groupVersions = new Map(groupItems.map(item => [item.id, item.multiviewGroup]));
-    const directoryVersion = createHash('sha256').update(JSON.stringify(directory.map(item => {
+    const directoryVersion = directoryPage?.revision || createHash('sha256').update(JSON.stringify(directory.map(item => {
       const group = groupVersions.get(item.id);
       return group ? [item.id, group.revision, group.children.map(child => child.id), group.missing] : item.id;
     }))).digest('hex');
@@ -966,9 +992,9 @@ export async function GET(request: NextRequest) {
     if (expectedDirectory && expectedDirectory !== directoryVersion) {
       return NextResponse.json({ error: '素材目录已变化，请刷新后继续翻页；当前内容保留' }, { status: 409, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
-    const total = directory.length;
-    const actualPage = Math.min(page, Math.max(1, Math.ceil(total / limit)));
-    const selected = directory.slice((actualPage - 1) * limit, actualPage * limit);
+    const total = directoryPage?.total ?? directory.length;
+    const actualPage = directoryPage?.page ?? Math.min(page, Math.max(1, Math.ceil(total / limit)));
+    const selected = directoryPage ? directory : directory.slice((actualPage - 1) * limit, actualPage * limit);
     const ids = (source: LibraryItemSource) => selected.filter(item => item.id.startsWith(`${source}:`)).map(item => item.id.slice(source.length + 1));
     const [videoResult, assetResult, referenceResult] = await Promise.all([
       loadVideoItems({ ...videoOptions, ids: ids('video_task') }),
@@ -977,8 +1003,12 @@ export async function GET(request: NextRequest) {
     ]);
     const byId = new Map([...videoResult.items, ...(assetResult?.items || []), ...referenceResult.items, ...groupItems].map(item => [item.id, item]));
     const items = selected.flatMap(item => byId.has(item.id) ? [byId.get(item.id)!] : []);
+    if (directoryPage && (directoryPage.marker !== await readCatalogRevision(prisma, 'assets') || !await catalogReaderReady(prisma))) {
+      throw new StudioSharingError('素材目录已变化或程序已切换，请重新读取；当前内容保留', 409);
+    }
 
-    return NextResponse.json({
+    const result = {
+      ...(directoryPage ? { protocol: 'catalog-paged-v2' } : {}),
       items,
       summary: {
         total,
@@ -1008,8 +1038,12 @@ export async function GET(request: NextRequest) {
       },
       directoryChanged: items.length !== selected.length,
       directoryVersion,
-    }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    };
+    observed({ rows: items.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
+    return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
+    if (error instanceof StudioSharingError || error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status,
+      headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     if (error instanceof Error && error.message === 'missing_session') {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }

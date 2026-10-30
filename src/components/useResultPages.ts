@@ -20,13 +20,14 @@ export function gridPageCapacity(grid: HTMLElement) {
   return rows * rowSize;
 }
 
-export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false, positionKey }: {
+export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false, positionKey, serverPage = false }: {
   items: T[]; storageKey: string; visible: boolean; busy: boolean; error: boolean;
   hasMore: boolean; loadMore: () => Promise<unknown>; currentId: string | null;
   total?: number | null;
   navigationIntent?: ResultNavigationIntent | null;
   tabScoped?: boolean;
   positionKey?: (item: T) => string;
+  serverPage?: boolean;
 }) {
   const itemId = useCallback((item: T) => positionKey?.(item) || item.id, [positionKey]);
   const items = useMemo(() => Array.from(new Map(inputItems.map(item => [itemId(item), item])).values()), [inputItems, itemId]);
@@ -48,16 +49,18 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   const suppliedTotal = typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? total : null;
   const knownTotal = suppliedTotal ?? (!hasMore && !busy ? items.length : null);
   const anchorIndex = position.id ? items.findIndex(item => itemId(item) === position.id || item.id === position.id) : -1;
-  const index = anchorIndex >= 0 ? anchorIndex : Math.min(position.index, Math.max(0, items.length - 1));
+  const index = serverPage ? Math.min(position.index, Math.max(0, (knownTotal ?? position.index + 1) - 1))
+    : anchorIndex >= 0 ? anchorIndex : Math.min(position.index, Math.max(0, items.length - 1));
   const start = Math.floor(index / capacity) * capacity;
-  const pageItems = restoredKey === storageKey ? items.slice(start, start + capacity) : [];
+  const pageItems = restoredKey === storageKey ? serverPage ? items : items.slice(start, start + capacity) : [];
   const latest = useRef({ items, currentId, start, capacity, position });
   latest.current = { items, currentId, start, capacity, position };
 
   useEffect(() => {
     // Consuming a one-shot intent must not restore the older saved page again.
-    if (initializedStorageKey.current === storageKey && (!intentKey || consumedIntent.current === intentKey)) return;
-    initializedStorageKey.current = storageKey;
+    const initialization = `${storageKey}:${serverPage}`;
+    if (initializedStorageKey.current === initialization && (!intentKey || consumedIntent.current === intentKey)) return;
+    initializedStorageKey.current = initialization;
     generation.current++;
     reading.current = false;
     retryRequested.current = false;
@@ -75,10 +78,10 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const valid = saved?.version === 1 && typeof saved.index === 'number' && Number.isSafeInteger(saved.index) && saved.index >= 0
       && typeof saved.id === 'string' && saved.id.length <= 200;
     readsLeft.current = valid ? Math.min(20, Math.ceil((saved!.index as number) / 24) + 2) : 2;
-    setPosition({ id: null, index: 0 });
-    setRequested(valid ? { id: saved!.id as string, index: saved!.index as number, restore: true } : null);
+    setPosition({ id: null, index: serverPage && valid ? saved!.index as number : 0 });
+    setRequested(!serverPage && valid ? { id: saved!.id as string, index: saved!.index as number, restore: true } : null);
     setRestoredKey(storageKey);
-  }, [storageKey, intentKey]);
+  }, [storageKey, intentKey, serverPage]);
 
   useEffect(() => () => { generation.current++; }, []);
 
@@ -91,7 +94,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       const previous = latest.current;
       if (next === previous.capacity) return;
       const selectedIndex = previous.items.findIndex(item => item.id === previous.currentId);
-      const anchor = selectedIndex >= previous.start && selectedIndex < previous.start + previous.capacity ? selectedIndex : previous.start;
+      const anchor = serverPage ? previous.start : selectedIndex >= previous.start && selectedIndex < previous.start + previous.capacity ? selectedIndex : previous.start;
       // A resize re-pages around a visible image, never around a selection on another page.
       setPosition({ id: previous.items[anchor] ? itemId(previous.items[anchor]) : null, index: anchor });
       readsLeft.current = Math.max(readsLeft.current, 2);
@@ -101,10 +104,10 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const observer = new ResizeObserver(measure);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [visible, items.length, itemId]);
+  }, [visible, items.length, itemId, serverPage]);
 
   useEffect(() => {
-    if (restoredKey !== storageKey || busy || (error && !retryRequested.current) || navigationIssue || reading.current || !visible) return;
+    if (serverPage || restoredKey !== storageKey || busy || (error && !retryRequested.current) || navigationIssue || reading.current || !visible) return;
     const target = requested?.last && knownTotal !== null ? Math.floor(Math.max(0, knownTotal - 1) / capacity) * capacity
       : requested ? requested.id ? items.findIndex(item => itemId(item) === requested.id || item.id === requested.id) : requested.index : index;
     const pageEnd = (Math.floor(Math.max(0, target) / capacity) + 1) * capacity;
@@ -139,14 +142,14 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
       if (generation.current !== token) return;
       reading.current = false; setCompletedReads(value => value + 1);
     });
-  }, [busy, capacity, completedReads, error, hasMore, index, itemId, items, knownTotal, loadMore, navigationIssue, requested, restoredKey, storageKey, visible]);
+  }, [busy, capacity, completedReads, error, hasMore, index, itemId, items, knownTotal, loadMore, navigationIssue, requested, restoredKey, storageKey, visible, serverPage]);
 
   useEffect(() => {
     if (restoredKey !== storageKey || requested || !items.length) return;
-    const id = items[index] ? itemId(items[index]) : null;
-    if (id && id !== position.id) { setPosition({ id, index }); return; }
+    const id = items[serverPage ? 0 : index] ? itemId(items[serverPage ? 0 : index]) : null;
+    if (!serverPage && id && id !== position.id) { setPosition({ id, index }); return; }
     try { const record = JSON.stringify({ version: 1, id, index }); localStorage.setItem(storageKey, record); if (tabScoped) sessionStorage.setItem(storageKey, record); } catch { /* Optional preferences. */ }
-  }, [index, itemId, items, position, requested, restoredKey, storageKey, tabScoped]);
+  }, [index, itemId, items, position, requested, restoredKey, storageKey, tabScoped, serverPage]);
 
   function goToIndex(target: number, last = false) {
     generation.current++; reading.current = false;
@@ -154,6 +157,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     readsLeft.current = 20;
     setNavigationIssue('');
     retryRequested.current = false;
+    if (serverPage) { setRequested(null); setPosition({ id: null, index: next }); return; }
     const end = Math.min((Math.floor(next / capacity) + 1) * capacity, knownTotal ?? Infinity);
     if (hasMore && (last || next >= items.length || end > items.length) || next >= items.length && knownTotal !== null && knownTotal > 0) setRequested({ id: null, index: next, last });
     else { setRequested(null); setPosition({ id: items[next] ? itemId(items[next]) : null, index: next }); }
@@ -166,13 +170,13 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   }
   function goToId(id: string) {
     const target = items.findIndex(item => itemId(item) === id || item.id === id);
-    if (target >= 0) goToIndex(target);
+    if (target >= 0) goToIndex(target + (serverPage ? start : 0));
   }
   function resetPosition(waitForRead = false) {
     try { localStorage.removeItem(storageKey); if (tabScoped) sessionStorage.removeItem(storageKey); } catch {}
     goToIndex(0);
     // A new query must anchor its new first item, not the old first item at its new rank.
-    if (waitForRead) { setPosition({ id: null, index: 0 }); setRequested({ id: null, index: 0, restore: true }); }
+    if (waitForRead) { setPosition({ id: null, index: 0 }); setRequested(serverPage ? null : { id: null, index: 0, restore: true }); }
   }
   return { gridRef, pageItems, capacity, start, page: Math.floor(start / capacity) + 1,
     pages: knownTotal === null ? null : Math.max(1, Math.ceil(knownTotal / capacity)), total: knownTotal, restoring: Boolean(requested),

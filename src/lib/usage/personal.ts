@@ -2,16 +2,20 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
-import { readUsageFacts, type UsageFactSnapshot } from './facts';
+import { iterateUsageFactBatches, readUsageFacts, type UsageFactSnapshot } from './facts';
 import type { UsageFact } from '@/lib/admin/usage-types';
 import { usageExchangeRate, usageInteger } from '@/lib/admin/usage-money';
 import { usageLocalDate } from '@/lib/admin/usage-query';
 import type { PublicUsageScope, UsageCoverageDTO, UsageExportSnapshot, UsagePublicQuery, UsageRecordDTO, UsageReportDTO } from './dto';
 import { parseUsageQuery, shiftUsageMonth, usageMonthRange } from './query';
 import { resolveUsageReadOptions } from './source-scope';
+import { readUsageProjectDirectory } from './project-directory';
 import { usageScopeUser } from './access';
 import { publicUsageCash, publicUsagePoints, publicUsageProject, publicUsageSummaries, usagePublicType, usageSourceKey } from './aggregate';
 import { readUsageMedia, type UsageMediaProjection } from './media';
+import { PublicUsageSummaryFold } from './public-summary-fold';
+import { usageRowSpool } from './row-spool';
+import { observeOperation } from '@/lib/performance/server-operations';
 
 function canonicalQuery(scope: PublicUsageScope, query: UsagePublicQuery) {
   const params = new URLSearchParams();
@@ -70,14 +74,19 @@ function compareRecords(a: UsageRecordDTO, b: UsageRecordDTO, sort: UsagePublicQ
   return (sort === 'oldest' ? a.occurredAt.localeCompare(b.occurredAt) : b.occurredAt.localeCompare(a.occurredAt)) || a.id.localeCompare(b.id);
 }
 
-async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery): Promise<UsageExportSnapshot> {
+export async function getUsagePublicReferenceSnapshot(scope: PublicUsageScope, input: UsagePublicQuery): Promise<UsageExportSnapshot> {
   if (scope.kind !== 'self' && scope.kind !== 'project') throw new AuthError('此入口只接受本人或项目用量范围', 403);
   const user = usageScopeUser(scope);
   const query = canonicalQuery(scope, input);
   return prisma.$transaction(async db => {
     const options = await resolveUsageReadOptions(db, scope, query);
     const asOf = new Date().toISOString();
-    const source = await readUsageFacts(db, asOf, options);
+    const range = usageMonthRange(query);
+    const trendMonths = Array.from({ length: 6 }, (_, i) => shiftUsageMonth(query.month, i - 5));
+    const source = await readUsageFacts(db, asOf, options, {
+      startUtc: usageMonthRange({ ...query, month: trendMonths[0] }).startUtc, endUtc: range.endUtc,
+    });
+    const projectDirectory = await readUsageProjectDirectory(db, options, query.status, asOf);
     const directoryFacts = source.facts.filter(fact => fact.occurredAt <= asOf && (!query.status || fact.status === query.status));
     const allFacts = directoryFacts.filter(fact => !query.project_id || (query.project_id === 'unassigned'
       ? fact.projectId === null : fact.projectId === query.project_id));
@@ -91,7 +100,6 @@ async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery): Promi
       values.push(event); eventsBySource.set(event.sourceKey, values);
     }
     const recordById = new Map(allFacts.map(fact => [usageSourceKey(fact), projectRecord(fact, source, user.id, media, eventsBySource.get(usageSourceKey(fact)) || [])]));
-    const range = usageMonthRange(query);
     const monthFacts = allFacts.filter(fact => fact.occurredAt >= range.startUtc && fact.occurredAt < range.endUtc);
     const summary = (facts: UsageFact[]) => publicUsageSummaries(facts, recordById, source.cashEvents);
     const records = monthFacts.filter(fact => usagePublicType(fact) === query.type).map(fact => recordById.get(usageSourceKey(fact))!)
@@ -105,14 +113,13 @@ async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery): Promi
       const project = projectProjection(fact, source);
       if (project.available) projects.set(project.id || 'unassigned', { id: project.id, label: project.label });
     }
-    const trendMonths = Array.from({ length: 6 }, (_, i) => shiftUsageMonth(query.month, i - 5));
     const trend = { range: { startUtc: usageMonthRange({ ...query, month: trendMonths[0] }).startUtc,
       endUtc: range.endUtc, label: `${trendMonths[0]} 至 ${query.month}（近6月）` }, items: trendMonths.map(month => ({ month,
       ...summary(allFacts.filter(fact => usageLocalDate(new Date(fact.occurredAt), query.time_zone).slice(0, 7) === month)) })) };
     const safe = { schema: 1 as const, scope: scope.kind, query: actualQuery, asOf, range, summary: summary(monthFacts), coverage,
       records: { items: records.slice((page - 1) * query.limit, page * query.limit), total: records.length, page, pageSize: query.limit,
         ...(page !== query.page ? { updated: true } : {}) },
-      projects: Array.from(projects.values()).sort((a, b) => a.label.localeCompare(b.label) || (a.id || '').localeCompare(b.id || '')),
+      projects: projectDirectory,
       trend, restricted: true };
     const fingerprint = createHash('sha256').update('public-usage.v1\0').update(scope.kind).update('\0').update(user.id)
       .update(JSON.stringify(actualQuery)).update(JSON.stringify(usageExchangeRate)).update(JSON.stringify(records))
@@ -123,8 +130,73 @@ async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery): Promi
   }, { maxWait: 10000, timeout: 120000 });
 }
 
+export async function readUsagePublicSnapshot(db: Parameters<typeof resolveUsageReadOptions>[0], scope: PublicUsageScope, input: UsagePublicQuery, asOf: string): Promise<UsageExportSnapshot> {
+  const observed = observeOperation('usage.report');
+  if (scope.kind !== 'self' && scope.kind !== 'project') throw new AuthError('此入口只接受本人或项目用量范围', 403);
+  const user = usageScopeUser(scope), query = canonicalQuery(scope, input);
+  const options = await resolveUsageReadOptions(db, scope, query), range = usageMonthRange(query);
+  const trendMonths = Array.from({ length: 6 }, (_, index) => shiftUsageMonth(query.month, index - 5));
+  const trendStart = usageMonthRange({ ...query, month: trendMonths[0] }).startUtc;
+  const makeSummary = () => ({ video: new PublicUsageSummaryFold(), image: new PublicUsageSummaryFold(), other: new PublicUsageSummaryFold() });
+  const summary = makeSummary(), trends = new Map(trendMonths.map(month => [month, makeSummary()]));
+  const fingerprint = createHash('sha256').update('public-usage.v2\0').update(scope.kind).update(user.id).update(JSON.stringify(query)).update(JSON.stringify(usageExchangeRate));
+  const coverageBySource = new Map<string, UsageFactSnapshot['coverage'][number]>();
+  const spool = await usageRowSpool<UsageRecordDTO>((left, right) => compareRecords(left, right, query.sort));
+  let mediaUnavailable = false;
+  try {
+    for await (const source of iterateUsageFactBatches(db, asOf, { startUtc: trendStart, endUtc: range.endUtc }, undefined, options)) {
+      const facts = source.facts.filter(fact => fact.occurredAt <= asOf && (!query.status || fact.status === query.status)
+        && (!query.project_id || (query.project_id === 'unassigned' ? fact.projectId === null : fact.projectId === query.project_id)));
+      let media = new Map<string, UsageMediaProjection>();
+      try { media = await readUsageMedia(db, user, facts, scope); } catch { mediaUnavailable = true; }
+      const bySource = new Map<string, UsageFactSnapshot['cashEvents']>();
+      for (const event of source.cashEvents) if (event.sourceKey) {
+        const values = bySource.get(event.sourceKey) || []; values.push(event); bySource.set(event.sourceKey, values);
+      }
+      const records: UsageRecordDTO[] = [];
+      for (const fact of facts) {
+        const events = bySource.get(usageSourceKey(fact)) || [], record = projectRecord(fact, source, user.id, media, events);
+        const category = usagePublicType(fact), month = usageLocalDate(new Date(fact.occurredAt), query.time_zone).slice(0, 7);
+        trends.get(month)?.[category].add(fact, record, events);
+        if (fact.occurredAt >= range.startUtc && fact.occurredAt < range.endUtc) {
+          summary[category].add(fact, record, events);
+          if (category === query.type) records.push(record);
+        }
+        fingerprint.update(JSON.stringify([record, fact.updatedAt]));
+      }
+      await spool.add(records);
+      for (const part of source.sourceFingerprintParts) fingerprint.update(part);
+      for (const coverage of source.coverage) {
+        const previous = coverageBySource.get(coverage.source);
+        coverageBySource.set(coverage.source, { ...coverage,
+          status: previous && previous.status !== 'complete' ? previous.status : coverage.status });
+      }
+    }
+    const records = await spool.finish();
+    const page = Math.min(query.page, Math.max(1, Math.ceil(records.length / query.limit))), items: UsageRecordDTO[] = [];
+    for await (const record of records.values((page - 1) * query.limit, query.limit)) items.push(record);
+    const coverage = safeCoverage({ coverage: Array.from(coverageBySource.values()) } as UsageFactSnapshot, scope);
+    if (mediaUnavailable) coverage.push({ source: 'media', label: '结果媒体', status: 'partial', detail: '媒体读取权暂时无法确认，保留可读费用，未提供未经核实的媒体入口。' });
+    const projects = await readUsageProjectDirectory(db, options, query.status, asOf);
+    const value = (fold: ReturnType<typeof makeSummary>) => ({ video: fold.video.value(), image: fold.image.value(), other: fold.other.value() });
+    const report = { schema: 1 as const, scope: scope.kind, query: { ...query, page }, asOf, range, summary: value(summary), coverage,
+      records: { items, total: records.length, page, pageSize: query.limit, ...(page !== query.page ? { updated: true } : {}) }, projects,
+      trend: { range: { startUtc: trendStart, endUtc: range.endUtc, label: `${trendMonths[0]} 至 ${query.month}（近6月）` },
+        items: trendMonths.map(month => ({ month, ...value(trends.get(month)!) })) }, restricted: true };
+    fingerprint.update(JSON.stringify([report.query, report.summary, coverage, projects, report.trend]));
+    const result = { report: { ...report, fingerprint: fingerprint.digest('hex') }, records, dispose: records.dispose };
+    observed({ rows: records.length, bytes: Buffer.byteLength(JSON.stringify(result.report)) });
+    return result;
+  } catch (error) { await spool.dispose(); throw error; }
+}
+
+async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery) {
+  return prisma.$transaction(db => readUsagePublicSnapshot(db, scope, input, new Date().toISOString()), { maxWait: 10000, timeout: 120000 });
+}
+
 export async function getUsageReport(scope: PublicUsageScope, query: UsagePublicQuery): Promise<UsageReportDTO> {
-  return (await snapshot(scope, query)).report;
+  const result = await snapshot(scope, query);
+  try { return result.report; } finally { await result.dispose?.(); }
 }
 
 export async function getUsageExportSnapshot(scope: PublicUsageScope, query: UsagePublicQuery): Promise<UsageExportSnapshot> {

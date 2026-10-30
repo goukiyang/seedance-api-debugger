@@ -162,7 +162,7 @@ async function authorizedSources(actor: ImageStudioIdentity, state: TargetState,
   if (!ids.length || ids.length > 2 || ids.some(id => !validId(id))) throw new ModuleCoverError('请选择一张或两张合法图片');
   const assets = await client.asset.findMany({ where: { id: { in: Array.from(new Set(ids)) }, owner_id: state.ownerId, type: 'image', status: 'active' } });
   // Viewing an administrator's private/fixed picture is not permission to publish it.
-  const hidden = await studioHiddenAssetUrls(state.shared ? { id: 'module-cover-audience', role: 'user', account_type: 'internal' } : actor, client);
+  const hidden = await studioHiddenAssetUrls(state.shared ? { id: 'module-cover-audience', role: 'user', account_type: 'internal' } : actor, client, ids);
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(ids.map(async id => {
     const asset = byId.get(id);

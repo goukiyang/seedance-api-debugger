@@ -2,7 +2,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { readSharedStudioSnapshot } from './read-snapshot';
-import { createGalleryReadContext } from './gallery-context';
+import { createGalleryReadContext, type GalleryPageSelection } from './gallery-context';
 import { assertStudioActor, getStudioRemovedDefaultGroups, sharedStudioAvailability, studioSharedBinding, studioPublisherModule, StudioSharingError } from './shared-contract';
 import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { resolveStudioTemplateAuthor } from './template-author';
@@ -11,7 +11,7 @@ import { studioVisibleAssetWhere } from './protected-assets';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { studioPresetArchived } from './preset-lifecycle';
-import { listStudioDeletedSources, readStudioWorkspaceDeletion, studioSourceDeletionCapability, studioWorkspaceDeletionCapability } from './workspace-deletion';
+import { listStudioDeletedSources, readStudioDeletedSource, readStudioWorkspaceDeletion, studioSourceDeletionCapability, studioWorkspaceDeletionCapability } from './workspace-deletion';
 import type { GalleryAuthor, GalleryItem, GalleryNavigationItem, GalleryQuery, GalleryQueryResult, GalleryReactionKey } from './gallery-types';
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -21,7 +21,12 @@ const knownKey = (value: unknown): value is string => typeof value === 'string' 
 export function parseGalleryQuery(value: unknown): GalleryQuery {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioSharingError('封面查询格式无效', 400);
   const input = value as GalleryQuery;
-  if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 160)
+  if (input.protocol !== undefined && input.protocol !== 'catalog-paged-v2'
+    || input.navigationPage !== undefined && (!Number.isSafeInteger(input.navigationPage) || input.navigationPage < 1)
+    || input.locate !== undefined && (!input.locate || typeof input.locate !== 'object' || Array.isArray(input.locate)
+      || Object.keys(input.locate).some(key => !['moduleId', 'presetId'].includes(key))
+      || Object.values(input.locate).some(id => typeof id !== 'string' || id.length > 180 || !/^[a-zA-Z0-9:_-]+$/.test(id)))
+    || input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 160)
     || input.navigationOnly !== undefined && typeof input.navigationOnly !== 'boolean'
     || input.scope !== undefined && !['all', 'mine', 'shared', 'favorites'].includes(input.scope)
     || input.sort !== undefined && !['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(input.sort)
@@ -43,10 +48,12 @@ export function parseGalleryQuery(value: unknown): GalleryQuery {
   return input;
 }
 
-export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.TransactionClient) {
+export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.TransactionClient, selection?: GalleryPageSelection) {
   const actor = await assertStudioActor(user.id, tx);
-  const context = await createGalleryReadContext(tx, actor.id), client = context.client;
-  const deleted = new Set((await listStudioDeletedSources(actor.id, client)).filter(row => !row.reopenedModuleId).map(row => row.presetId));
+  const context = await createGalleryReadContext(tx, actor.id, selection), client = context.client;
+  const deletedRows = selection ? (await Promise.all(context.sources.map(row => readStudioDeletedSource(actor.id, row.id, client)))).filter(row => row !== null)
+    : await listStudioDeletedSources(actor.id, client);
+  const deleted = new Set(deletedRows.filter(row => !row.reopenedModuleId).map(row => row.presetId));
   const available = new Map<string, boolean>();
   for (const source of context.sources) available.set(source.id, await sharedStudioAvailability(actor, source, client));
   const author = async (target: { presetId?: string; moduleId?: string }): Promise<GalleryAuthor> => {
@@ -91,7 +98,7 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
   }
   for (const source of context.sources) {
     const key = `image_template:${source.id}`;
-    if (entries.has(key) || !source.is_shared || !available.get(source.id) || deleted.has(source.id)) continue;
+    if (entries.has(key) || selection && !selection.presetIds.includes(source.id) || !source.is_shared || !available.get(source.id) || deleted.has(source.id)) continue;
     entries.set(key, { key, id: `shared:${source.id}`, title: source.name, name: source.name, groupName: source.group_name || '未分组',
       mine: source.owner_id === actor.id, shared: true, presetId: source.id, navigationTarget: { presetId: source.id },
       author: await author({ presetId: source.id }), createdAt: source.created_at?.toISOString() || null, updatedAt: source.updated_at.toISOString(),
@@ -108,19 +115,19 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
       version: row?.version || 0, available: entry.available, likeCount: entry.available ? countByKey.get(entry.key) || 0 : null };
   }
   const defaultId = `default-${actor.id}`;
-  if (!context.modules.some(row => row.id === defaultId) && !await readStudioWorkspaceDeletion(actor.id, defaultId, client)) {
+  if ((!selection || selection.moduleIds.includes(defaultId)) && !context.modules.some(row => row.id === defaultId) && !await readStudioWorkspaceDeletion(actor.id, defaultId, client)) {
     entries.set(`image_module:${defaultId}`, { key: `image_module:${defaultId}`, id: defaultId, name: '默认模块', title: '默认模块',
       groupName: '常用', mine: true, shared: false, navigationTarget: { moduleId: defaultId },
       author: { known: false, key: null, displayName: '作者未知', avatarUrl: null }, createdAt: null, updatedAt: null,
       available: true, reaction: null, coverEditable: false, deletion: studioWorkspaceDeletionCapability(actor.id, defaultId, 0, false) });
   }
-  return { ...context, actor, entries: Array.from(entries.values()).sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId)), targets, sourceById };
+  return { ...context, actor, entries: Array.from(entries.values()).sort((a, b) => Number(b.id === defaultId) - Number(a.id === defaultId)), targets, sourceById, deletedRows };
 }
 
-export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown): Promise<GalleryQueryResult> {
+export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown, projection?: { tx: Prisma.TransactionClient; selection: GalleryPageSelection }): Promise<GalleryQueryResult> {
   const input = parseGalleryQuery(raw);
-  return readSharedStudioSnapshot(async tx => {
-    const catalog = await readGalleryCatalog(user, tx), entries = catalog.entries;
+  const read = async (tx: Prisma.TransactionClient): Promise<GalleryQueryResult> => {
+    const catalog = await readGalleryCatalog(user, tx, projection?.selection), entries = catalog.entries;
     const recent = input.recentHints || {}, directory = input.directoryOrder || {};
     const orderIndex = (entry: GalleryNavigationItem) => {
       const legacy = entry.presetId ? `preset:${entry.presetId}` : `module:${entry.id}`;
@@ -158,7 +165,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
         const row = target.kind === 'module' ? catalog.modules.find(row => row.id === target.id) : catalog.sourceById.get(target.id);
         if (!fixedCover && row?.banner_asset_id) {
           const asset = await tx.asset.findFirst({ where: { id: row.banner_asset_id, owner_id: row.owner_id, status: 'active', type: 'image',
-            AND: [await studioVisibleAssetWhere(catalog.actor, catalog.client)] }, select: { id: true, width: true, height: true } });
+            AND: [await studioVisibleAssetWhere(catalog.actor, catalog.client, [row.banner_asset_id])] }, select: { id: true, width: true, height: true } });
           if (asset) banner = { id: asset.id, thumbnailUrl: studioTemplateAssetUrl(asset.id, true), originalUrl: studioTemplateAssetUrl(asset.id), width: asset.width, height: asset.height };
         }
         if (!fixedCover && target.kind === 'module' && !target.id.startsWith('default-')) {
@@ -167,7 +174,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
             select: { asset_id: true, snapshot_json: true, status: true, usage_json: true } });
           if (task?.asset_id && studioTaskHasViewableOutput(task)) {
             const asset = await tx.asset.findFirst({ where: { id: task.asset_id, owner_id: catalog.actor.id, status: 'active', type: 'image',
-              AND: [await studioVisibleAssetWhere(catalog.actor, catalog.client)] }, select: { id: true } });
+              AND: [await studioVisibleAssetWhere(catalog.actor, catalog.client, [task.asset_id])] }, select: { id: true } });
             if (asset) cover = { resultUrl: studioAssetUrl(asset.id), thumbnailUrl: studioAssetUrl(asset.id, true) };
           }
         }
@@ -176,6 +183,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
     }
     return { items, navigation: entries, matches, total: matches.length, page, pageSize, catalogRevision: revision, capabilities: { independentReactions: true },
       removedDefaultGroups: await getStudioRemovedDefaultGroups(catalog.actor.id, catalog.client),
-      deletedSourcePresetIds: (await listStudioDeletedSources(catalog.actor.id, catalog.client)).filter(row => !row.reopenedModuleId).map(row => row.presetId) };
-  }, 'gallery');
+      deletedSourcePresetIds: catalog.deletedRows.filter(row => !row.reopenedModuleId).map(row => row.presetId) };
+  };
+  return projection ? read(projection.tx) : readSharedStudioSnapshot(read, 'gallery');
 }

@@ -23,27 +23,19 @@ export async function resolveUsageReadOptions(db: Prisma.TransactionClient, scop
   const projectWhere: Prisma.ProjectWhereInput = { status: { not: 'deleted' }, ...(user.role === 'admin' ? {} : {
     OR: [{ owner_user_id: user.id }, { type: { in: ['team', 'public'] }, members: { some: { user_id: user.id, status: 'active' } } }],
   }) };
-  const projects: Array<{ id: string; owner_user_id: string | null }> = [];
-  let after = '';
-  for (;;) {
-    const page = await db.project.findMany({ where: { AND: [projectWhere, { id: { gt: after } }] },
-      select: { id: true, owner_user_id: true }, orderBy: { id: 'asc' }, take: 500 });
-    projects.push(...page);
-    if (page.length < 500) break;
-    after = page[page.length - 1].id;
-  }
-  const projectIds = projects.map(project => project.id);
   const visibleProject = (column: Prisma.Sql) => Prisma.sql`(${column} IS NULL OR EXISTS (SELECT 1 FROM "Project" vp
     WHERE vp."id" = ${column} AND vp."status" <> 'deleted' AND ${user.role === 'admin' ? Prisma.sql`1 = 1`
       : Prisma.sql`(vp."owner_user_id" = ${user.id} OR vp."type" IN ('team', 'public') AND EXISTS
         (SELECT 1 FROM "ProjectMember" pm WHERE pm."project_id" = vp."id" AND pm."user_id" = ${user.id} AND pm."status" = 'active'))`}))`;
   const requestedProjectId = scope.kind === 'project' ? scope.projectId : query.project_id;
-  if (requestedProjectId && requestedProjectId !== 'unassigned' && !projectIds.includes(requestedProjectId)) throw new AuthError('项目不存在或已不可访问', 403);
+  const selectedProject = requestedProjectId && requestedProjectId !== 'unassigned'
+    ? await db.project.findFirst({ where: { AND: [projectWhere, { id: requestedProjectId }] }, select: { id: true, owner_user_id: true } }) : null;
+  if (requestedProjectId && requestedProjectId !== 'unassigned' && !selectedProject) throw new AuthError('项目不存在或已不可访问', 403);
   // A self selector is a report filter, not permission. Keep the owner's
   // readable directory available; the report applies the selected project.
   const projectId = scope.kind === 'project' ? scope.projectId : null;
   if (scope.kind === 'project' && scope.memberOwnerId) {
-    const project = projects.find(item => item.id === scope.projectId)!;
+    const project = selectedProject!;
     const member = project.owner_user_id === scope.memberOwnerId || await db.projectMember.findFirst({
       where: { project_id: scope.projectId, user_id: scope.memberOwnerId, status: 'active' }, select: { id: true },
     });
@@ -94,5 +86,5 @@ export async function resolveUsageReadOptions(db: Prisma.TransactionClient, scop
     conditions.role_attempt = Prisma.sql`${common('role_attempt', Prisma.sql`a."id"`, Prisma.sql`r."owner_user_id"`, Prisma.sql`NULL`)} AND r."owner_user_id" = ${user.id} AND ${documentGate}
       AND ${keyword(Prisma.sql`a."id"`, Prisma.sql`NULL`, Prisma.sql`(SELECT sw."snapshot_json" FROM "CanvasRoleWork" sw WHERE sw."id" = a."work_id")`)}`;
   }
-  return { conditions, projectNames: new Map(projects.map(project => [project.id, ''])), scoped: true };
+  return { conditions, projectNames: new Map(), projectWhere, scoped: true };
 }

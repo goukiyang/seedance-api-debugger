@@ -31,7 +31,7 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
       const revision = resultScope.current === scope ? previous?.catalogRevision : undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await fetch('/api/image-studio/gallery/query', { method: 'POST', cache: 'no-store',
-          signal: controller.signal, headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ ...query, ...page,
+          signal: controller.signal, headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ protocol: 'catalog-paged-v2', ...query, ...page,
             ...(attempt === 0 && revision ? { catalogRevision: revision } : {}) }) });
         const result = await response.json();
         if (!valid || current.current !== owner || isClientSessionBlocked()) return;

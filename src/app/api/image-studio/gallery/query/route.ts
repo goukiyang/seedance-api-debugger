@@ -1,4 +1,4 @@
-import { queryStudioGallery } from '@/lib/image-studio/gallery';
+import { queryGalleryDirectory } from '@/lib/image-studio/gallery-page';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { reactionUser, reactionJson, reactionError } from '@/lib/content-reactions/http';
 export const dynamic = 'force-dynamic';
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       if (bytes > 512 * 1024) { await reader.cancel(); return reactionJson({ error: '封面查询内容超限' }, 413); }
       chunks.push(result.value);
     }
-    return reactionJson(await queryStudioGallery(user, JSON.parse(Buffer.concat(chunks).toString('utf8'))));
+    return reactionJson(await queryGalleryDirectory(user, JSON.parse(Buffer.concat(chunks).toString('utf8'))));
   } catch (error) {
     if (error instanceof StudioSharingError) return reactionJson({ error: error.message, code: error.reasonCode }, error.status);
     return reactionError(error);

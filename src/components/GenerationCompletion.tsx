@@ -70,8 +70,9 @@ async function poll() {
   try {
     for (const job of Array.from(jobs.values()).slice(0, 32)) {
       if (owner !== expectedOwner || generation !== expectedGeneration) break;
+      jobs.delete(job.receipt); jobs.set(job.receipt, job);
       try {
-        const query = job.kind === 'batch' ? `/api/image-studio/batches?id=${job.id}` : job.kind === 'avatar' ? `/api/avatar-studio?plan=${job.id}` : `/api/image-studio/tasks?requestId=${job.id}`;
+        const query = job.kind === 'batch' ? `/api/image-studio/batches?id=${job.id}` : job.kind === 'avatar' ? `/api/avatar-studio?plan=${job.id}` : `/api/image-studio/tasks?requestId=${job.id}&projection=studio-task-summary-v1`;
         const response = await fetch(query, { cache: 'no-store', signal: AbortSignal.timeout(12000) });
         if (!response.ok) continue;
         const data = await response.json();

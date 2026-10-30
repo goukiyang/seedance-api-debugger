@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
+import { catalogDirectoryWrites } from '../src/lib/catalog-directory-writes';
 
-const prisma = new PrismaClient();
+const prisma = catalogDirectoryWrites(new PrismaClient());
 
 const APPLY = process.argv.includes('--apply');
 const FALLBACK_CARD_TITLE = '生成记录';

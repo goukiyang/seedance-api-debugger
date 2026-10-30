@@ -23,12 +23,14 @@ export async function handleUsageRequest(request: Request, projectId?: string, c
     const chunks = usageCsvChunks(snapshot);
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        const next = chunks.next();
-        if (next.done) controller.close();
-        else controller.enqueue(encoder.encode(next.value));
+      async pull(controller) {
+        try {
+          const next = await chunks.next();
+          if (next.done) controller.close();
+          else controller.enqueue(encoder.encode(next.value));
+        } catch (error) { await snapshot.dispose?.(); controller.error(error); }
       },
-      cancel() { chunks.return(undefined); },
+      async cancel() { await chunks.return(undefined); await snapshot.dispose?.(); },
     });
     return new Response(stream, { headers: { ...usagePrivateHeaders, 'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${scope.kind}-usage-${query.month}-${query.type}.csv"`,

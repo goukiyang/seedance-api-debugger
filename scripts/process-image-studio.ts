@@ -14,6 +14,7 @@ import { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES } from '../src/lib
 import { capturePricingWorkerCapability, renewPricingWorkerCapability, revokePricingWorkerCapability } from '../src/lib/pricing/runtime';
 import { isImageStudioDraining } from '../src/lib/pricing/isolation';
 import { STUDIO_TASK_SETTINGS_PROTOCOL } from '../src/lib/image-studio/task-settings';
+import { initializeCatalogRevisions } from '../src/lib/image-studio/catalog-revision';
 
 loadEnvConfig(process.cwd());
 let stopping = false;
@@ -40,6 +41,7 @@ async function main() {
   console.log('[image-studio-source]', JSON.stringify({ source: /^[a-f0-9]{40}$/.test(source) ? source : 'unknown',
     version: packageInfo.version, billingContract: IMAGE_BILLING_VERSION, sharedContract: 'shared-live-v1', loadedModuleSha }));
   const workerId = randomUUID();
+  await prisma.$transaction(tx => initializeCatalogRevisions(tx));
   const pricingCapability = /^[a-f0-9]{40}$/.test(source) ? capturePricingWorkerCapability(source) : null;
   let readinessWork: Promise<void> | null = null;
   const renewReadiness = async () => {

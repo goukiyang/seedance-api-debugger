@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { catalogDirectoryWrites } from './catalog-directory-writes';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -12,9 +13,9 @@ const globalForPrisma = globalThis as unknown as {
 
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
+  catalogDirectoryWrites(new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-  });
+  }));
 
 function configureSqlitePragmas(client: PrismaClient) {
   if (globalForPrisma.prismaSqlitePragmasStarted) return;

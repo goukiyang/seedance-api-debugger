@@ -210,7 +210,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions, onVisibleItemsChange }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
@@ -221,6 +221,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   onLatestPageRequestHandled?: (requestId: string) => void;
   selectedId?: string | null; onSelect?: (item: T) => void;
   onQuickUse?: (item: T) => void;
+  onVisibleItemsChange?: (items: T[]) => void;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
 }) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
@@ -269,6 +270,9 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const readBusy = busy || loading || readState.scope === scope && readState.busy;
   const readError = error || (readState.scope === scope ? readState.error : '');
   const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore, currentId: activePreview || currentSelection || null });
+  const visibleItemsCallback = useRef(onVisibleItemsChange); visibleItemsCallback.current = onVisibleItemsChange;
+  const visibleItemIds = pages.pageItems.map(item => item.id).join('\0');
+  useEffect(() => { if (visible) visibleItemsCallback.current?.(pages.pageItems); }, [scope, visible, visibleItemIds]);
   const handledLatestPageRequest = useRef<string | null>(null);
   useEffect(() => {
     if (!latestPageRequest || handledLatestPageRequest.current === latestPageRequest) return;

@@ -9,6 +9,7 @@ import { studioTaskDTOs } from './tasks';
 import { readableStudioPins, studioPinScope, studioPinState, StudioPinError } from './result-pins';
 import { STUDIO_RESULT_FEED, type SharedStudioPinnedImage } from './result-pin-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { likedStudioTaskPage } from './liked-task-page';
 
 type Cursor = { v: 1; user: string; module: string; liked: boolean; epoch: string; pin: number; task: string | null };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -27,12 +28,12 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
   if (!validStudioModuleId(moduleId, user.id)) throw new StudioPinError('模块编号无效');
   const scope = await studioPinScope(user, moduleId);
   const readable = scope ? await readableStudioPins(user, scope.presetId) : null;
-  const marks = liked ? await prisma.contentReaction.findMany({ where: { user_id: user.id, content_key: { startsWith: 'asset:' },
+  const allPins = readable?.pins || [];
+  const marks = liked && allPins.length ? await prisma.contentReaction.findMany({ where: { user_id: user.id, content_key: { in: allPins.map(pin => `asset:${pin.assetId}`) },
     OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : [];
   const likedAssets = liked ? await prisma.asset.findMany({ where: { id: { in: marks.map(m => m.content_key.slice(6)) },
     status: 'active' }, select: { id: true } }) : [];
   const likedIds = new Set(likedAssets.map(asset => asset.id));
-  const allPins = readable?.pins || [];
   const pins = allPins.filter(pin => !liked || likedIds.has(pin.assetId));
   const epoch = fingerprint([scope?.presetId || null, readable?.document.revision || 0,
     pins.map(p => [p.assetId, p.taskId, p.pinnedAt])]);
@@ -41,15 +42,16 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
   const ownPinIds = pins.filter(p => p.ownerId === user.id).map(p => p.taskId);
   const where: Prisma.ImageStudioTaskWhereInput = {
     AND: [studioTemplateTaskWhere(user.id, moduleId), ...(liked ? [studioOutputTaskWhere] : [])], id: { notIn: ownPinIds },
-    ...(liked ? { asset_id: { in: Array.from(likedIds) } } : {}),
   };
-  if (state.task && !await prisma.imageStudioTask.findFirst({ where: { ...where, id: state.task }, select: { id: true } })) {
+  if (!liked && state.task && !await prisma.imageStudioTask.findFirst({ where: { ...where, id: state.task }, select: { id: true } })) {
     throw new StudioPinError('结果目录已变化，请刷新目录', 409);
   }
   const pagePins = pins.slice(state.pin, state.pin + 24);
   const capacity = 24 - pagePins.length;
-  const ownTotal = await prisma.imageStudioTask.count({ where });
-  const ordinary = capacity > 0 ? await prisma.imageStudioTask.findMany({ where,
+  const likedPage = liked ? await likedStudioTaskPage(prisma, user.id, moduleId, state.task || undefined, capacity > 0 ? capacity + 1 : 0, ownPinIds) : null;
+  if (likedPage && !likedPage.valid) throw new StudioPinError('结果目录已变化，请刷新目录', 409);
+  const ownTotal = likedPage?.total ?? await prisma.imageStudioTask.count({ where });
+  const ordinary = likedPage ? likedPage.rows : capacity > 0 ? await prisma.imageStudioTask.findMany({ where,
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: capacity + 1,
     ...(state.task ? { cursor: { id: state.task }, skip: 1 } : {}) }) : [];
   const pageTasks = ordinary.slice(0, capacity);
@@ -75,6 +77,7 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
     || fingerprint(latest.pins.filter(p => !liked || likedIds.has(p.assetId)).map(p => [p.assetId, p.taskId, p.pinnedAt]))
       !== fingerprint(pins.map(p => [p.assetId, p.taskId, p.pinnedAt])))) throw new StudioPinError('置顶顺序已变化，请刷新目录', 409);
   return { protocol: STUDIO_RESULT_FEED, viewerId: user.id, tasks, sharedPins, resultOrder,
+    eligiblePinAssetIds: pins.map(pin => pin.assetId),
     total: ownTotal + pins.length, nextCursor: more ? Buffer.from(JSON.stringify(next)).toString('base64url') : null,
     pinState: studioPinState(scope?.presetId || null, readable?.document.revision, allPins.map(p => p.assetId)) };
 }

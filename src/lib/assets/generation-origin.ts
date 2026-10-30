@@ -1,4 +1,7 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { studioViewableOutputSql } from '@/lib/image-studio/output-task-sql';
+import { jsonField } from './directory-permissions-sql';
 import { canViewStudioPreset } from '@/lib/image-studio/access';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import type { SessionUser } from '@/lib/auth/session';
@@ -17,7 +20,7 @@ function readOriginTasks(condition: { asset_id: { in: string[] } } | { id: { in:
   return prisma.imageStudioTask.findMany({ where: { AND: [studioOutputTaskWhere], deleted_at: null, ...condition },
     select: { id: true, asset_id: true, owner_id: true, source_preset_id: true, module_id: true, snapshot_json: true, status: true, usage_json: true } });
 }
-export async function generationOrigins(user: SessionUser, assets: Array<{ id: string; owner_id: string; metadata_json: string | null }>) {
+export async function generationOrigins(user: SessionUser, assets: Array<{ id: string; owner_id: string; metadata_json: string | null }>, bounded = false) {
   const metadataTasks = new Map<string, string>();
   for (const asset of assets) {
     try { const meta = JSON.parse(asset.metadata_json || '{}'); if (typeof meta.studioTaskId === 'string') metadataTasks.set(asset.id, meta.studioTaskId); } catch { /* Invalid metadata stays unknown. */ }
@@ -25,7 +28,20 @@ export async function generationOrigins(user: SessionUser, assets: Array<{ id: s
   // Prisma cannot split an IN list combined with the negation inside studioOutputTaskWhere, so a library past
   // SQLite's 999-parameter limit failed with P2029. Query in bounded chunks and merge.
   const chunks = <T,>(values: T[]) => Array.from({ length: Math.ceil(values.length / 400) }, (_, index) => values.slice(index * 400, index * 400 + 400));
-  const conditions = [...chunks(assets.map(a => a.id)).map(ids => ({ asset_id: { in: ids } })), ...chunks(Array.from(metadataTasks.values())).map(ids => ({ id: { in: ids } }))];
+  const provenByAsset = new Map<string, string>();
+  if (bounded) for (const ids of chunks(assets.map(asset => asset.id))) {
+    const matches = await prisma.$queryRaw<Array<{ assetId: string; taskId: string }>>(Prisma.sql`WITH wanted AS MATERIALIZED
+      (SELECT "id", "owner_id", "metadata_json" FROM "Asset" WHERE "id" IN (${Prisma.join(ids)})), links AS (
+        SELECT a."id" AS assetId, t."id" AS taskId FROM "ImageStudioTask" t JOIN wanted a ON a."id" = t."asset_id"
+          WHERE t."owner_id" = a."owner_id" AND t."deleted_at" IS NULL AND ${studioViewableOutputSql('t')}
+        UNION SELECT a."id", t."id" FROM wanted a JOIN "ImageStudioTask" t ON t."id" = ${jsonField(Prisma.sql`a."metadata_json"`, '$.studioTaskId')}
+          WHERE json_type(CASE WHEN json_valid(a."metadata_json") THEN a."metadata_json" ELSE '{}' END, '$.studioTaskId') = 'text'
+            AND t."owner_id" = a."owner_id" AND t."deleted_at" IS NULL AND ${studioViewableOutputSql('t')})
+      SELECT assetId, min(taskId) AS taskId FROM links GROUP BY assetId HAVING count(*) = 1`);
+    for (const row of matches) provenByAsset.set(row.assetId, row.taskId);
+  }
+  const conditions = bounded ? chunks(Array.from(new Set(provenByAsset.values()))).map(ids => ({ id: { in: ids } }))
+    : [...chunks(assets.map(a => a.id)).map(ids => ({ asset_id: { in: ids } })), ...chunks(Array.from(metadataTasks.values())).map(ids => ({ id: { in: ids } }))];
   const found = new Map<string, Awaited<ReturnType<typeof readOriginTasks>>[number]>();
   for (const condition of conditions) for (const task of await readOriginTasks(condition)) found.set(task.id, task);
   const tasks = Array.from(found.values()).filter(studioTaskHasViewableOutput);
@@ -57,7 +73,8 @@ export async function generationOrigins(user: SessionUser, assets: Array<{ id: s
     const safeOrigin = assetGenerationOrigin(asset, new Map());
     if (safeOrigin?.kind === 'multiview-output') { result.set(asset.id, safeOrigin); continue; }
     const linked = taskById.get(metadataTasks.get(asset.id) || '');
-    const candidates = [...(tasksByAsset.get(asset.id) || []), ...(linked ? [linked] : [])];
+    const proven = taskById.get(provenByAsset.get(asset.id) || '');
+    const candidates = bounded ? proven ? [proven] : [] : [...(tasksByAsset.get(asset.id) || []), ...(linked ? [linked] : [])];
     const matches = Array.from(new Map(candidates.filter(task => task.owner_id === asset.owner_id).map(task => [task.id, task])).values());
     if (matches.length !== 1) continue;
     const task = matches[0];

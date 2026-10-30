@@ -28,8 +28,10 @@ export async function readOwnLibraryRemovalStates(owner: string, identities: str
   return unique.map<LibraryRemovalState>(identity => ({ identity, status: !available.has(identity) ? 'unavailable' : removed.has(markerKey(identity)) ? 'removed' : 'available' }));
 }
 
-export async function removedLibraryResources(owner: string): Promise<LibraryRemovals> {
-  const rows = await prisma.platformSetting.findMany({ where: { OR: [
+export async function removedLibraryResources(owner: string, identities?: string[]): Promise<LibraryRemovals> {
+  if (identities && (identities.length > 80 || identities.some(value => !identityPattern.test(value)))) throw new Error('素材编号无效');
+  const keys = identities?.map(identity => identity.startsWith('asset:') ? `${prefix(owner)}${identity.slice(6)}` : `${resourcePrefix(owner)}${identity}`);
+  const rows = await prisma.platformSetting.findMany({ where: keys ? { key: { in: keys } } : { OR: [
     { key: { startsWith: prefix(owner) } }, { key: { startsWith: resourcePrefix(owner) } },
   ] }, select: { key: true, value_json: true } });
   const result: LibraryRemovals = { asset: [], video_task: [], reference_image: [] };

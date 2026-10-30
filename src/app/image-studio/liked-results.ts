@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
 
-export function useLikedStudioResults<T extends { id: string; asset?: { id?: string } | null }>(userId: string, moduleId: string, visible: boolean, enabled: boolean) {
+export function useLikedStudioResults<T extends { id: string; asset?: { id?: string } | null }>(userId: string, moduleId: string, visible: boolean, enabled: boolean, visibleIds?: { current: string[] }) {
   const scope = `${userId}:${moduleId}`;
   const preference = `sd2-image-studio-result-filter:${scope}`;
   const [filter, setFilter] = useState({ scope: '', liked: false });
@@ -36,15 +36,14 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
     const valid = () => !controller.signal.aborted && request.current === controller && current.current.scope === scope && current.current.liked;
     setData(previous => ({ ...previous, scope, loading: true, error: '' }));
     try {
-      // Refresh already loaded pages with an explicit bound; later pages remain cursor-accessible.
-      const pages = cursor ? 1 : Math.min(20, pageReads.current);
+      const pages = 1;
       let next: string | null = cursor || null;
       const tasks: T[] = [];
       const sharedPins: SharedStudioPinnedImage[] = [], resultOrder: string[] = [];
       let feed: StudioResultFeedExtras | undefined;
       let total: number | null = null;
       for (let page = 0; page < pages; page++) {
-        const query = new URLSearchParams({ moduleId, liked: '1', feed: STUDIO_RESULT_FEED });
+        const query = new URLSearchParams({ moduleId, liked: '1', feed: STUDIO_RESULT_FEED, projection: 'studio-task-summary-v1' });
         if (next) query.set('cursor', next);
         const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
         const result = await response.json();
@@ -58,21 +57,34 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
         next = typeof result.nextCursor === 'string' ? result.nextCursor : null;
         if (!next) break;
       }
+      const checkedIds = !cursor ? (visibleIds?.current || []).slice(0, 24) : [];
+      let exactTasks: T[] = [];
+      if (checkedIds.length) {
+        const query = new URLSearchParams({ moduleId, liked: '1', projection: 'studio-task-summary-v1' });
+        checkedIds.forEach(id => query.append('id', id));
+        const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
+        const result = await response.json();
+        if (!response.ok || result.viewerId !== userId || result.projection !== 'studio-task-summary-v1') throw new Error(result.error || '喜欢结果读取失败，请重试');
+        exactTasks = result.tasks;
+      }
       if (!valid()) return;
       loaded.current = true;
       if (cursor) pageReads.current++;
       setData(previous => {
-        const combined = cursor ? [...previous.tasks, ...tasks] : tasks;
-        const combinedPins = cursor ? [...(previous.feed?.sharedPins || []), ...sharedPins] : sharedPins;
-        const combinedOrder = cursor ? [...(previous.feed?.resultOrder || []), ...resultOrder] : resultOrder;
+        const exact = new Map(exactTasks.map(task => [task.id, task]));
+        const retained = previous.tasks.filter(task => !checkedIds.includes(task.id) || exact.has(task.id)).map(task => exact.get(task.id) || task);
+        const combined = cursor ? [...previous.tasks, ...tasks] : [...tasks, ...retained.filter(task => !tasks.some(fresh => fresh.id === task.id))];
+        const combinedPins = cursor || pageReads.current > 1 ? [...(previous.feed?.sharedPins || []), ...sharedPins] : sharedPins;
+        const combinedOrder = cursor ? [...(previous.feed?.resultOrder || []), ...resultOrder] : [...resultOrder, ...(previous.feed?.resultOrder || [])];
         return { scope, tasks: Array.from(new Map(combined.filter(task => !removed.current.has(task.asset?.id || '')).map(task => [task.id, task])).values()),
-          feed: feed && { ...feed, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)).map(pin => [pin.id, pin])).values()), resultOrder: Array.from(new Set(combinedOrder)) },
-          nextCursor: next, total, error: '', loading: false };
+          feed: feed && { ...feed, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)
+            && (feed!.eligiblePinAssetIds || feed!.pinState.assetIds).includes(pin.assetId)).map(pin => [pin.id, pin])).values()), resultOrder: Array.from(new Set(combinedOrder)) },
+          nextCursor: !cursor && pageReads.current > 1 ? previous.nextCursor : next, total, error: '', loading: false };
       });
     } catch (error) {
       if (valid()) setData(previous => ({ ...previous, error: error instanceof Error ? error.message : '喜欢结果读取失败，请重试', loading: false }));
     } finally { if (request.current === controller) request.current = null; }
-  }, [moduleId, scope, userId]);
+  }, [moduleId, scope, userId, visibleIds]);
   useEffect(() => {
     if (liked && visible) void read();
     else { request.current?.abort(); request.current = null; setData(previous => ({ ...previous, loading: false })); }

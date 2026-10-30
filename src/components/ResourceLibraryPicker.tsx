@@ -278,16 +278,22 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   useEffect(() => { if (!sessionReady || !ready || sessionOwner !== prefsKey) return; const timer = setTimeout(() => setPrefs(p => p.query === query ? p : { ...p, query, pages: 1, scroll: 0 }), 250); return () => clearTimeout(timer); }, [query, ready, sessionOwner, prefsKey, sessionReady]);
   useEffect(() => { if (sessionReady && ready && prefsKey && sessionOwner === prefsKey) { try { localStorage.setItem(prefsKey, JSON.stringify({ ...prefs, scroll: 0, pages: 1 })); localStorage.setItem(`${positionScope}:position:v2:${filterKey}`, JSON.stringify({ scroll: prefs.scroll, pages: prefs.pages })); } catch { /* Storage failure never prevents selection. */ } } }, [prefs, ready, prefsKey, sessionOwner, sessionReady, positionScope, filterKey]);
   const readCursor = useRef<string | null>(null);
+  const directoryRevision = useRef({ scope: '', revision: '' });
   const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
-    const params = new URLSearchParams({ scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
+    const params = new URLSearchParams({ protocol: 'catalog-paged-v2', scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
     if (prefs.album) params.set('album', prefs.album); if (prefs.project) params.set('project', prefs.project);
     if (after) params.set('after', after);
     if (prefs.template && prefs.source === 'template-image') params.set('template', prefs.template);
     if (prefs.view === 'recent') params.set('keys', validKeys(stored(recentKey, [])).join(','));
+    const scopeParams = new URLSearchParams(params); scopeParams.delete('page'); scopeParams.delete('after');
+    const scope = `${sessionOwner}:${scopeParams}`;
+    if ((after || nextPage > 1) && directoryRevision.current.scope === scope && directoryRevision.current.revision) params.set('directory_revision', directoryRevision.current.revision);
     const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
     const data = await readJsonResponse<PickerResponse & { error?: string }>(response, { invalidJsonMessage: '素材库服务返回了无效内容，请刷新或重新登录' });
-    if (!response.ok) throw new Error(data.error || '素材库读取失败'); return data;
-  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey]);
+    if (!response.ok) throw new Error(data.error || '素材库读取失败');
+    directoryRevision.current = { scope, revision: data.protocol === 'catalog-paged-v2' ? data.directoryRevision || '' : '' };
+    return data;
+  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey, sessionOwner]);
   useEffect(() => {
     if (!open || !sessionReady || !ready || sessionOwner !== prefsKey) return;
     const token = ++sequence.current; setLoading(true); setDirectoryError(''); setItems([]); setLoadedFilter(''); setHasMore(false);

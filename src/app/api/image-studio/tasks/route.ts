@@ -13,6 +13,13 @@ import { requestStudioAsyncRecheck, StudioAsyncRecoveryError } from '@/lib/image
 import { VideoFeishuError } from '@/lib/video/feishu-contract';
 import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { submitStudioWithCurrentPricing, logImagePricingFailure } from '@/lib/image-studio/billing-quote-service';
+import { activeStudioTaskPage } from '@/lib/image-studio/active-tasks';
+import { studioTaskDTOs } from '@/lib/image-studio/tasks';
+import { prisma } from '@/lib/prisma';
+import { validStudioModuleId } from '@/lib/image-studio/modules';
+import { projectStudioTaskSummary, STUDIO_TASK_SUMMARY } from '@/lib/image-studio/task-summary';
+import { observeOperation } from '@/lib/performance/server-operations';
+import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -58,6 +65,34 @@ export async function GET(request: NextRequest) {
   try {
     const params = request.nextUrl.searchParams;
     const moduleId = params.get('moduleId') || undefined;
+    const summary = params.get('projection') === STUDIO_TASK_SUMMARY;
+    const observed = observeOperation(params.get('active') === '1' ? 'studio.active' : 'studio.tasks');
+    if (summary && params.has('id')) {
+      const ids = Array.from(new Set(params.getAll('id')));
+      if (ids.length > 24 || ids.some(id => !/^[a-zA-Z0-9-]{1,120}$/.test(id))
+        || moduleId && !validStudioModuleId(moduleId, user.id)) throw new StudioError('记录查询无效');
+      let rows = await prisma.imageStudioTask.findMany({ where: { AND: [studioTemplateTaskWhere(user.id, moduleId), { id: { in: ids } }] } });
+      if (params.get('liked') === '1') {
+        const marks = await prisma.contentReaction.findMany({ where: { user_id: user.id,
+          content_key: { in: rows.flatMap(row => row.asset_id ? [`asset:${row.asset_id}`] : []) },
+          OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } });
+        const liked = new Set(marks.map(mark => mark.content_key));
+        rows = rows.filter(row => row.asset_id && liked.has(`asset:${row.asset_id}`));
+      }
+      const tasks = (await studioTaskDTOs(user.id, user.role === 'admin', rows)).map(projectStudioTaskSummary);
+      observed({ rows: tasks.length });
+      return NextResponse.json({ projection: STUDIO_TASK_SUMMARY, viewerId: user.id, tasks, requestedIds: ids },
+        { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
+    if (summary && params.get('active') === '1') {
+      if (moduleId && !validStudioModuleId(moduleId, user.id)) throw new StudioError('模块编号无效');
+      const page = await activeStudioTaskPage(user.id, moduleId, params.get('cursor') || undefined);
+      const rows = await prisma.imageStudioTask.findMany({ where: { id: { in: page.ids }, owner_id: user.id, deleted_at: null } });
+      const tasks = (await studioTaskDTOs(user.id, user.role === 'admin', rows)).map(projectStudioTaskSummary);
+      const result = { projection: STUDIO_TASK_SUMMARY, viewerId: user.id, tasks, nextCursor: page.nextCursor };
+      observed({ rows: tasks.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
+      return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    }
     const likedOnly = params.get('liked') === '1';
     const entering = !likedOnly && params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
     const entrySnapshot = entering ? await studioTemplateEntrySnapshot(user.id, moduleId) : undefined;
@@ -65,7 +100,10 @@ export async function GET(request: NextRequest) {
     const result = pinnedFeed
       ? await listStudioResultFeed(user, moduleId, params.get('cursor') || undefined, likedOnly)
       : await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
-    return NextResponse.json({ ...result, ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    const response = { ...result, ...(summary ? { projection: STUDIO_TASK_SUMMARY, tasks: result.tasks.map(projectStudioTaskSummary) } : {}),
+      ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) };
+    observed({ rows: result.tasks.length, bytes: Buffer.byteLength(JSON.stringify(response)) });
+    return NextResponse.json(response, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
   catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
 }

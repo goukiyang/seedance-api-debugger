@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { sharedDependencyState, type SharedStudioClient } from './shared-contract';
+import { sharedCommandFingerprint } from './shared-command-storage';
+import { moduleCoverKey } from './module-cover';
 
 type Row = Record<string, unknown>;
 
@@ -26,17 +28,26 @@ function matches(row: Row, where: Row): boolean {
   });
 }
 
-export async function createGalleryReadContext(tx: Prisma.TransactionClient, ownerId: string) {
-  const modules = await tx.imageStudioModule.findMany({ where: { owner_id: ownerId }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }] });
-  const sources = await tx.imageStudioPreset.findMany({ where: { OR: [{ owner_id: ownerId }, { is_shared: true },
+export type GalleryPageSelection = { moduleIds: string[]; presetIds: string[] };
+export async function createGalleryReadContext(tx: Prisma.TransactionClient, ownerId: string, selection?: GalleryPageSelection) {
+  if (selection && selection.moduleIds.length + selection.presetIds.length > 24) throw new Error('gallery_page_exceeds_limit');
+  const modules = await tx.imageStudioModule.findMany({ where: { owner_id: ownerId, ...(selection ? { id: { in: selection.moduleIds } } : {}) }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }] });
+  const sources = await tx.imageStudioPreset.findMany({ where: selection ? { id: { in: [...selection.presetIds, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])] } } : { OR: [{ owner_id: ownerId }, { is_shared: true },
     { id: { in: modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : []) } }] }, orderBy: { id: 'asc' } });
   const settingPrefixes = ['studio_shared_binding_v1:', 'studio_shared_publisher_v1:', 'studio_fixed_references_v1:',
     'studio_reference_policy_v1:', 'studio_style_', 'studio_skill_selection_v1:', 'studio_shared_reproduction_v1:',
     'studio_preset_archived_v1:', 'studio_deleted_workspace', 'studio_module_cover_v1:', 'studio_removed_default_groups_v1:'];
-  const settings = await tx.platformSetting.findMany({ where: { OR: settingPrefixes.map(prefix => ({ key: { startsWith: prefix } })) } });
+  const dependency = await sharedDependencyState(sources, tx);
+  const pageKeys = [...dependency.dependencies.map(row => row.key), ...dependency.styles.map(row => row.key),
+    ...modules.flatMap(row => [`studio_shared_binding_v1:${row.id}`, moduleCoverKey({ kind: 'module', id: row.id }),
+      `studio_deleted_workspace_v1:${sharedCommandFingerprint(ownerId)}:${row.id}`]),
+    ...sources.flatMap(row => [`studio_shared_publisher_v1:${row.id}`, `studio_preset_archived_v1:${row.id}`,
+      `studio_deleted_workspace_source_v1:${sharedCommandFingerprint(ownerId)}:${sharedCommandFingerprint(row.id)}`]), `studio_removed_default_groups_v1:${ownerId}`];
+  const settings = await tx.platformSetting.findMany({ where: selection ? { key: { in: pageKeys } } : { OR: settingPrefixes.map(prefix => ({ key: { startsWith: prefix } })) } });
   const settingsCovered = (where: Row): boolean => {
     if (where.OR) return (where.OR as Row[]).every(settingsCovered);
     const key = where.key as string | { in?: string[]; startsWith?: string } | undefined;
+    if (selection) return typeof key === 'string' ? pageKeys.includes(key) : Boolean(key?.in?.every(value => pageKeys.includes(value)));
     return typeof key === 'string' ? settingPrefixes.some(prefix => key.startsWith(prefix))
       : Boolean(key && (key.in ? key.in.every(value => settingPrefixes.some(prefix => value.startsWith(prefix)))
         : key.startsWith && settingPrefixes.some(prefix => key.startsWith!.startsWith(prefix))));
@@ -46,7 +57,6 @@ export async function createGalleryReadContext(tx: Prisma.TransactionClient, own
   });
   const publishers = await tx.imageStudioModule.findMany({ where: { id: { in: publisherIds } } });
   const users = await tx.user.findMany({ where: { id: { in: Array.from(new Set([ownerId, ...sources.map(row => row.owner_id)])) } } });
-  const dependency = await sharedDependencyState(sources, tx);
   const assets = dependency.dependencyAssets;
   const tables: Record<string, Row[]> = { platformSetting: settings, imageStudioModule: Array.from(new Map([...modules, ...publishers].map(row => [row.id, row])).values()),
     imageStudioPreset: sources, user: users, asset: assets };

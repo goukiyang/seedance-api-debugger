@@ -7,7 +7,7 @@ export function usageCsvCell(value: unknown, numeric = false): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-export function* usageCsvChunks(snapshot: UsageExportSnapshot): Generator<string> {
+export async function* usageCsvChunks(snapshot: UsageExportSnapshot): AsyncGenerator<string> {
   const { report, records } = snapshot;
   const row = (values: unknown[]) => `${values.map(value => usageCsvCell(value)).join(',')}\r\n`;
   yield '\uFEFF';
@@ -20,9 +20,10 @@ export function* usageCsvChunks(snapshot: UsageExportSnapshot): Generator<string
     'charge_original_micros', 'refund_original_micros', 'net_original_micros', 'charge_cny_micros', 'refund_cny_micros', 'net_cny_micros',
     'points_charged', 'points_refunded', 'points_net', 'points_reserved', 'points_released',
     'personal_points', 'project_points', 'unclassified_points', 'original_href']);
-  for (let offset = 0; offset < records.length; offset += 500) {
+  const rows = Array.isArray(records) ? records : records.values();
+  try {
     let chunk = '';
-    for (const record of records.slice(offset, offset + 500)) {
+    for await (const record of rows) {
       const values = [record.id, record.sourceKind, record.type, record.occurredAt, record.status, record.model, record.project.label, record.project.available,
         record.taskCount, record.requestCount, record.successfulCount, record.outputCount, record.availableCount, record.cash.state, record.cash.basis,
         JSON.stringify(record.cash.chargeOriginal), JSON.stringify(record.cash.refundOriginal), JSON.stringify(record.cash.netOriginal),
@@ -30,7 +31,8 @@ export function* usageCsvChunks(snapshot: UsageExportSnapshot): Generator<string
         record.points.charged, record.points.refunded, record.points.net, record.points.reserved, record.points.released,
         JSON.stringify(record.points.personal), JSON.stringify(record.points.project), JSON.stringify(record.points.unclassified), record.originalHref];
       chunk += `${values.map((value, index) => usageCsvCell(value, index >= 8 && index <= 12 || index >= 18 && index <= 25)).join(',')}\r\n`;
+      if (chunk.length >= 16 * 1024) { yield chunk; chunk = ''; }
     }
-    yield chunk;
-  }
+    if (chunk) yield chunk;
+  } finally { await snapshot.dispose?.(); }
 }

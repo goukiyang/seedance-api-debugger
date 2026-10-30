@@ -9,6 +9,7 @@ import { HD_CHAIN_CHECKS, HD_CHAIN_CHILDREN, HD_CHAIN_FIXTURE_SOURCES } from './
 import { MULTIVIEW_PRIVATE_BATCH_SOURCES } from './multiview-private-batch-engineering.mjs';
 import { MULTIVIEW_FLOW_SOURCES } from './multiview-flow-fixture-inputs.mjs';
 import { PRIVATE_PROMPTS_CHECKS, PRIVATE_PROMPTS_SOURCES } from './private-prompts-fixture-inputs.mjs';
+import { ARCH03_CHECKS, ARCH03_SOURCES } from './arch03-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -51,6 +52,7 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
 const fixtures = [
+  { file: 'scripts/arch03-engineering.ts', schema: 'arch03-engineering.v1', marker: 'ARCH03 engineering receipt: ', checks: ARCH03_CHECKS, sources: ARCH03_SOURCES },
   { file: 'scripts/private-prompts-engineering.mjs', schema: 'private-prompts-engineering.v1',
     marker: 'Private prompts engineering receipt: ', checks: PRIVATE_PROMPTS_CHECKS, sources: PRIVATE_PROMPTS_SOURCES },
   { file: 'ops/video-creation-contract-check.mjs', schema: 'video-creation-contract-engineering.v1',

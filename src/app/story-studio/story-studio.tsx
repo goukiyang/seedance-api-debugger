@@ -557,7 +557,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     const scope = key, sequence = ++resultReadSequence.current;
     const handoff = current.current.images[shotId];
     if (!handoff || !imageAllowed) throw Error('此镜头还没有可用的生图工作区');
-    const query = new URLSearchParams({ moduleId: handoff.moduleId });
+    const query = new URLSearchParams({ moduleId: handoff.moduleId, projection: 'studio-task-summary-v1' });
     if (more && cursor) query.set('cursor', cursor);
     const data = await request<{ tasks: Array<{ id: string; status: string; resultDisposition?: string | null; error?: string; asset?: {
       id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number;
@@ -643,7 +643,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
     for (const [id, run] of Object.entries(images)) {
       if (!run.requestId && !run.taskId) continue;
       const lookup = run.requestId ? `requestId=${encodeURIComponent(run.requestId)}` : `taskId=${encodeURIComponent(run.taskId!)}`;
-      const data = await request<{ tasks: Array<{ id: string; status: string }> }>(`/api/image-studio/tasks?${lookup}`);
+      const data = await request<{ tasks: Array<{ id: string; status: string }> }>(`/api/image-studio/tasks?${lookup}&projection=studio-task-summary-v1`);
       if (data.tasks[0]) images[id] = { ...run, taskId: data.tasks[0].id, status: data.tasks[0].status };
     }
     for (const [id, run] of Object.entries(videos)) {
@@ -687,7 +687,7 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       const seen = new Set<string>();
       // A bounded scan fails closed if history is too large or pagination is inconsistent.
       for (let page = 0; page < 10; page++) {
-        const query = new URLSearchParams({ moduleId: handoff.moduleId });
+        const query = new URLSearchParams({ moduleId: handoff.moduleId, projection: 'studio-task-summary-v1' });
         if (cursor) query.set('cursor', cursor);
         const data = await request<{ tasks: Array<{ id: string; status: string }>; nextCursor?: string | null }>(`/api/image-studio/tasks?${query}`);
         protectedTask = data.tasks.find(task => !['failed', 'rejected', 'cancelled'].includes(task.status));

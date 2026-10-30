@@ -14,6 +14,12 @@ import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { generationOrigins } from '@/lib/assets/generation-origin';
 import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { observeOperation } from '@/lib/performance/server-operations';
+import { catalogReaderReady, readCatalogRevision } from '@/lib/image-studio/catalog-revision';
+import { readPickerDirectory, type PickerDirectorySelection } from '@/lib/assets/picker-directory';
+import { CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
+import { StudioSharingError } from '@/lib/image-studio/shared-contract';
+import { studioViewableOutputSql } from '@/lib/image-studio/output-task-sql';
 
 export const dynamic = 'force-dynamic';
 const scopes: PickerScope[] = ['mine', 'project', 'shared', 'public'];
@@ -29,9 +35,25 @@ function duration(json: string | null) {
 // Read-only selection projection. The workspace and studio remain authoritative at attachment time.
 export async function GET(request: NextRequest) {
   try {
-    const user = await getSession();
+    let user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
-    const p = request.nextUrl.searchParams;
+    let p = request.nextUrl.searchParams;
+    const observed = observeOperation('assets.picker');
+    let exactKeys = p.has('keys') ? Array.from(new Set(p.getAll('keys').flatMap(value => value.split(',')))).filter(Boolean) : null;
+    if (exactKeys && (exactKeys.length > 80 || exactKeys.some(key => !/^(asset|reference_image|video_task):[a-zA-Z0-9_-]{1,100}$/.test(key)))) {
+      return NextResponse.json({ error: '精确素材查询最多80项，编号必须有效' }, { status: 400 });
+    }
+    let directory: PickerDirectorySelection | undefined;
+    if ((p.get('protocol') === 'catalog-paged-v2' || exactKeys) && await catalogReaderReady(prisma)) {
+      try { directory = await readPickerDirectory(prisma, user, p, exactKeys); }
+      catch (error) { if (!(error instanceof CatalogSqlCompatibilityError)) throw error; }
+    }
+    if (directory) {
+      user = directory.user; exactKeys = directory.keys;
+      p = new URLSearchParams(p); for (const field of ['q', 'source', 'template', 'view', 'after']) p.delete(field);
+      p.set('page', '1'); p.set('keys', directory.keys.join(','));
+    }
+    const exactIds = (kind: string) => exactKeys?.filter(key => key.startsWith(`${kind}:`)).map(key => key.slice(kind.length + 1));
     const scope: PickerScope = scopes.includes(p.get('scope') as PickerScope) ? p.get('scope') as PickerScope : 'mine';
     const imageStudio = p.get('target') === 'image-studio';
     const assetOnly = p.get('target') !== 'workspace';
@@ -39,20 +61,22 @@ export async function GET(request: NextRequest) {
     const types = (p.get('types') || 'image,video,audio').split(',').filter(t => ['image', 'video', 'audio'].includes(t));
     const requestedPage = Number(p.get('page'));
     const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
-    const limit = 40;
-    const projects = await getAccessibleProjectIds(user);
-    const hidden = await studioHiddenAssetUrls(user);
-    const removals = await removedLibraryResources(user.id);
+    const limit = exactKeys ? 80 : 40;
+    const projects = directory ? [] : await getAccessibleProjectIds(user);
+    const hidden = await studioHiddenAssetUrls(user, prisma, directory?.keys.filter(key => key.startsWith('asset:')).map(key => key.slice(6)));
+    const removals = await removedLibraryResources(user.id, exactKeys || undefined);
     const removed = new Set(Object.entries(removals).flatMap(([kind, ids]) => ids.map(id => `${kind}:${id}`)));
-    const visibleRefs = await studioVisibleReferenceWhere(user);
+    const visibleRefs = await studioVisibleReferenceWhere(user, prisma, directory?.referenceIds);
     const now = new Date();
     const candidates = await prisma.referenceAlbum.findMany({
-      where: { status: 'active', OR: [
+      where: { status: 'active', ...(directory ? { images: { some: { id: { in: directory.referenceIds } } } } : exactKeys ? { images: { some: { OR: [
+        { id: { in: exactIds('reference_image')! } }, { asset_id: { in: exactIds('asset')! } },
+      ] } } } : {}), ...(!directory ? { OR: [
         { owner_user_id: user.id }, { project_id: { in: projects } },
         { visibility: 'public' }, { album_type: { in: ['public', 'system'] } },
         { shares: { some: { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: now } }],
           AND: [{ OR: [{ grantee_type: 'user', grantee_id: user.id }, { grantee_type: 'project', grantee_id: { in: projects } }] }] } } },
-      ] },
+      ] } : {}) },
       include: {
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         project: { select: { id: true, name: true, owner_user_id: true, status: true } },
@@ -74,6 +98,7 @@ export async function GET(request: NextRequest) {
       if (album.project_id && projects.includes(album.project_id) && album.album_type === 'project') memberships.push('project');
       if (album.shares.some(s => s.grantee_type === 'user' && s.grantee_id === user.id || s.grantee_type === 'project' && projects.includes(s.grantee_id))) memberships.push('shared');
       if (album.visibility === 'public' || ['public', 'system'].includes(album.album_type)) memberships.push('public');
+      if (directory) memberships.splice(0, memberships.length, ...directory.albums.filter(item => item.id === album.id).map(item => item.scope));
       for (const member of memberships) albums.push({ id: album.id, name: album.name, scope: member, project: album.project, count: album._count.images });
       if (memberships.includes(scope)) scopeAlbumIds.push(album.id);
     }
@@ -82,10 +107,11 @@ export async function GET(request: NextRequest) {
     const permittedAlbums = scopeAlbumIds.filter(id => (!albumId || id === albumId) && (!projectId || albums.some(a => a.id === id && a.project?.id === projectId)));
     const assetWhere: Prisma.AssetWhereInput = {
       owner_id: user.id, status: 'active', type: { in: imageStudio ? ['image'] : types },
+      ...(directory ? { id: { in: directory.directAssetIds } } : exactKeys ? { id: { in: exactIds('asset')! } } : {}),
       ...(hidden.length ? { original_url: { notIn: hidden } } : {}),
     };
     const refWhere: Prisma.ReferenceImageWhereInput = {
-      status: 'active', AND: [visibleRefs, { OR: [
+      status: 'active', AND: [visibleRefs, ...(directory ? [{ id: { in: directory.referenceIds } }] : exactKeys ? [{ OR: [{ id: { in: exactIds('reference_image')! } }, { asset_id: { in: exactIds('asset')! } }] }] : []), { OR: [
         { album_id: { in: permittedAlbums } },
         ...(scope === 'mine' && !albumId && !projectId
           ? [{ owner_user_id: user.id, asset_id: null, album_id: { in: usableAlbumIds } }] : []),
@@ -97,16 +123,23 @@ export async function GET(request: NextRequest) {
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
       scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, owner_id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
-      prisma.imageStudioTask.findMany({ where: { owner_id: user.id, AND: [studioOutputTaskWhere], asset_id: { not: null } }, select: { asset_id: true, status: true, usage_json: true } }),
+      exactKeys ? Promise.resolve([]) : prisma.imageStudioTask.findMany({ where: { owner_id: user.id, AND: [studioOutputTaskWhere], asset_id: { not: null } }, select: { asset_id: true, status: true, usage_json: true } }),
       p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
       !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
+        ...(exactKeys ? { id: { in: exactIds('video_task')! } } : {}),
         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
         OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
         AND: [ordinaryVideoTaskWhere(), ...(q ? [safeVideoTaskKeywordWhere(q)] : [])],
       }, select: { id: true, owner_user_id: true, user_id: true, project_id: true, retention_status: true, local_video_path: true, public_video_url: true, duration: true, created_at: true } }) : Promise.resolve([]),
     ]);
-    const generatedIds = new Set(generatedTasks.filter(studioTaskHasViewableOutput).map(t => t.asset_id));
-    const origins = await generationOrigins(user, [...assets, ...references.flatMap(ref => ref.asset ? [ref.asset] : [])]);
+    const selectedGenerationTasks = directory ? [] : exactKeys ? await prisma.imageStudioTask.findMany({ where: { owner_id: user.id,
+      AND: [studioOutputTaskWhere], asset_id: { in: Array.from(new Set([...assets.map(asset => asset.id), ...references.flatMap(ref => ref.asset ? [ref.asset.id] : [])])) } },
+      select: { asset_id: true, status: true, usage_json: true } }) : generatedTasks;
+    const candidateAssetIds = Array.from(new Set([...assets.map(asset => asset.id), ...references.flatMap(ref => ref.asset ? [ref.asset.id] : [])]));
+    const selectedGenerated = directory && candidateAssetIds.length ? await prisma.$queryRaw<Array<{ asset_id: string }>>(Prisma.sql`SELECT DISTINCT generated."asset_id" FROM "ImageStudioTask" generated
+      WHERE generated."asset_id" IN (${Prisma.join(candidateAssetIds)}) AND generated."owner_id" = ${user.id} AND ${studioViewableOutputSql('generated')}`) : [];
+    const generatedIds = new Set(directory ? selectedGenerated.map(row => row.asset_id) : selectedGenerationTasks.filter(studioTaskHasViewableOutput).map(t => t.asset_id));
+    const origins = await generationOrigins(user, [...assets, ...references.flatMap(ref => ref.asset ? [ref.asset] : [])], Boolean(directory));
     const assetSource = (asset: { id: string; metadata_json: string | null }): PickerItem['source'] => {
       if (origins.has(asset.id) || generatedIds.has(asset.id)) return 'generated';
       try {
@@ -153,7 +186,7 @@ export async function GET(request: NextRequest) {
         ...(ready ? { importUrl: `/api/video/download/${task.id}` } : { unavailableReason: '视频还没有可下载文件，暂不能添加；请在生成记录中完成保存后再选用' }) });
     }
     const favoriteKeys = new Set(favorites.map(f => f.content_key));
-    const keys = p.getAll('keys').flatMap(k => k.split(',')).filter(k => /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(k)).slice(0, 80);
+    const keys = exactKeys || [];
     const source = p.get('source');
     const templateOptions = new Map<string, PickerTemplate>();
     for (const item of items) {
@@ -225,11 +258,20 @@ export async function GET(request: NextRequest) {
     }
     const unavailable = sorted.filter(item => item.unavailableReason).length;
     const hasMore = start + limit < sorted.length;
-    return NextResponse.json({ items: projected, total: sorted.length, page, hasMore,
+    if (directory && directory.marker !== await readCatalogRevision(prisma, 'assets')) throw new StudioSharingError('素材目录已变化，请重新读取', 409);
+    if (directory && !await catalogReaderReady(prisma)) throw new StudioSharingError('素材目录程序已切换，请重新读取', 409);
+    const result = directory ? { protocol: 'catalog-paged-v2', directoryRevision: directory.revision,
+      items: directory.keys.flatMap(key => projected.filter(item => item.identity === key)), total: directory.total, page: directory.page, hasMore: directory.hasMore,
+      nextCursor: directory.nextCursor, albums: directory.albums, templates: directory.templates,
+      ...(unavailable ? { notice: `${unavailable} 个素材暂不能用于此处，原因显示在对应素材下方；其他素材可正常添加` } : {}) }
+      : { items: projected, total: sorted.length, page, hasMore,
       nextCursor: hasMore ? pageItems[pageItems.length - 1]?.identity || null : null, albums, templates: Array.from(templateOptions.values()),
       ...(unavailable ? { notice: `${unavailable} 个素材暂不能用于此处，原因显示在对应素材下方；其他素材可正常添加` } : {}),
-    }, { headers: { 'Cache-Control': 'private, no-store' } });
+    };
+    observed({ rows: projected.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
+    return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    if (error instanceof StudioSharingError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     console.error('[AssetPicker] Read failed', error);
     return NextResponse.json({ error: '素材库读取失败，请重试' }, { status: 500 });
   }

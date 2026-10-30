@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { observeOperation } from '@/lib/performance/server-operations';
+import { likedStudioTaskPage } from './liked-task-page';
+import { studioClaimScanPage } from './claim-scan';
 import { readPrivateStudioDefinition, transformPrivateImageTask } from './private-storage.server';
 import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
 import { readFileSync } from 'node:fs';
@@ -1291,12 +1294,12 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
 }
 
 export async function claimStudioTask() {
-  let cursor: string | undefined;
+  const observed = observeOperation('studio.claim');
+  const page = await studioClaimScanPage(prisma, { status: { in: studioTaskStates(['queued', 'channel_queued']) } });
   let candidate: ImageStudioTask | undefined;
-  for (;;) {
-    const candidates = await prisma.imageStudioTask.findMany({ where: { status: { in: studioTaskStates(['queued', 'channel_queued']) } },
-      orderBy: [{ created_at: 'asc' }, { id: 'asc' }], take: 32, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
-    for (const row of candidates) {
+  let last: ImageStudioTask | undefined;
+    for (const row of page.rows) {
+      last = row;
       if (isPricingImageTask(row)) {
         try { await assertPricingImageConsumerReady(prisma); } catch { continue; }
       }
@@ -1320,15 +1323,14 @@ export async function claimStudioTask() {
       }
       candidate = row; break;
     }
-    if (candidate || candidates.length < 32) break;
-    cursor = candidates[candidates.length - 1].id;
-  }
-  if (!candidate) return null;
+  if (!candidate) { await page.advance(last); observed({ scanned: page.rows.length }); return null; }
   const leaseToken = randomUUID();
   const channel = publicPricingTaskState(candidate.status) === 'channel_queued';
   const runningStatus = studioTaskState(candidate, channel ? 'channel_running' : 'running');
   const changed = await prisma.imageStudioTask.updateMany({ where: { id: candidate.id, status: candidate.status },
     data: { status: runningStatus, lease_token: leaseToken, lease_until: new Date(Date.now() + 10 * 60 * 1000) } });
+  await page.advance(last);
+  observed({ scanned: page.rows.length });
   return changed.count ? { ...candidate, status: runningStatus, lease_token: leaseToken } : null;
 }
 
@@ -1371,11 +1373,10 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
     ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}) };
   if (likedOnly) {
     if (!moduleId || taskId || requestId) throw new StudioError('请选择当前模板的喜欢结果');
-    // Match the shared heart's legacy private-favorite compatibility, never another viewer's marks.
-    const marks = await prisma.contentReaction.findMany({ where: { user_id: ownerId, content_key: { startsWith: 'asset:' }, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } });
-    const assets = await prisma.asset.findMany({ where: { id: { in: marks.map(mark => mark.content_key.slice(6)) }, owner_id: ownerId, status: 'active' }, select: { id: true } });
-    where.asset_id = { in: assets.map(asset => asset.id) };
-    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), studioOutputTaskWhere];
+    const page = await likedStudioTaskPage(prisma, ownerId, moduleId, cursor, 25, [], true);
+    if (!page.valid) throw new StudioError('结果目录已变化，请重新读取', 409);
+    const items = page.rows.slice(0, 24);
+    return { total: page.total, tasks: await studioTaskDTOs(ownerId, isAdmin, items), nextCursor: page.rows.length > 24 ? items.at(-1)!.id : null };
   }
   if (cursor && !(await prisma.imageStudioTask.findFirst({ where: { ...where, id: cursor }, select: { id: true } }))) {
     throw new StudioError('结果目录已变化，请重新读取', 409);

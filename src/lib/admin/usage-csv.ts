@@ -41,7 +41,7 @@ function recordCells(fact: UsageFact): CsvValue[] {
     numeric(fact.releasedPoints), numeric(fact.refundedPoints), JSON.stringify(fact.ledgerIds), fact.href];
 }
 
-function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records'): Generator<CsvRow> {
+async function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records'): AsyncGenerator<CsvRow> {
   const { report } = snapshot;
   yield ['metadata', 'key', 'value'];
   yield ['metadata', 'schema', 'usage-csv.v1'];
@@ -75,7 +75,7 @@ function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records')
       'current_owner_id', 'current_project_id', 'attribution_basis', 'attribution_detail', 'model', 'provider', 'resolution',
       'execution_status', 'retention_status', 'output_count', 'result_ready', 'cost_status', 'confirmed_cost_original_micros_json',
       'confirmed_cost_cny_micros', 'confirmed_cost_cny_display', 'charged_points', 'current_reserved_points', 'released_reserve_points', 'actual_refunded_points', 'ledger_ids_json', 'original_entry'];
-    for (const fact of snapshot.records) yield ['record', ...recordCells(fact)];
+    for await (const fact of Array.isArray(snapshot.records) ? snapshot.records : snapshot.records.values()) yield ['record', ...recordCells(fact)];
   }
   yield ['coverage', 'source', 'label', 'status', 'matched_records', 'frozen', 'legacy', 'detail'];
   for (const value of report.coverage) yield ['coverage', value.source, value.label, value.status, value.total, value.frozen, value.legacy, value.detail];
@@ -85,34 +85,35 @@ function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records')
   // including conflicts. No records page, TopN, or arbitrary row limit is used.
   yield ['cost_events', 'event_id', 'linked_source_key', 'event_type', 'bill_occurred_at_utc', 'currency', 'amount_micros',
     'proof_status', 'provider', 'proof_id', 'consumption_owner_id', 'original_project_id', 'cash_evidence', 'ledger_user_id', 'ledger_project_id', 'provider_reference', 'provider_scope_fingerprint', 'detail'];
-  for (const event of snapshot.cashEvents) yield ['cost_event', event.id, event.sourceKey, event.eventType, event.occurredAt,
+  for await (const event of Array.isArray(snapshot.cashEvents) ? snapshot.cashEvents : snapshot.cashEvents.values()) yield ['cost_event', event.id, event.sourceKey, event.eventType, event.occurredAt,
     event.currency, numeric(event.amountMicros), event.status, event.provider, event.proofId, event.ownerUserId, event.projectId,
     event.cashEvidence, event.ledgerUserId, event.ledgerProjectId, event.providerReference, event.providerScopeFingerprint, event.detail];
 }
 
-/** The transaction has materialized one immutable whitelist snapshot. Encoding
- * and delivery stream it in bounded chunks; no new DB reads occur during export.
+/** The transaction has sealed one immutable whitelist projection. Encoding and
+ * delivery stream it in bounded chunks; no new DB reads occur during export.
  */
 export function streamUsageCsv(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records', signal?: AbortSignal): ReadableStream<Uint8Array> {
   const iterator = csvRows(snapshot, type);
   const encoder = new TextEncoder();
   let first = true, ended = false;
+  const close = async () => { try { await iterator.return(undefined); } finally { await snapshot.dispose?.(); } };
   return new ReadableStream<Uint8Array>({
-    pull(controller) {
+    async pull(controller) {
       if (ended) return;
-      if (signal?.aborted) { ended = true; iterator.return(undefined); controller.error(new Error('Export interrupted')); return; }
+      if (signal?.aborted) { ended = true; await close(); controller.error(new Error('Export interrupted')); return; }
       let chunk = first ? '\uFEFF' : '';
       first = false;
       try {
         while (chunk.length < 32000) {
-          const row = iterator.next();
+          const row = await iterator.next();
           if (row.done) { ended = true; break; }
           chunk += `${row.value.map(usageCsvCell).join(',')}\r\n`;
         }
         if (chunk) controller.enqueue(encoder.encode(chunk));
-        if (ended) controller.close();
-      } catch (error) { ended = true; controller.error(error); }
+        if (ended) { await close(); controller.close(); }
+      } catch (error) { ended = true; await close(); controller.error(error); }
     },
-    cancel() { ended = true; iterator.return(undefined); },
+    async cancel() { ended = true; await close(); },
   });
 }

@@ -4,6 +4,7 @@ import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
 import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { hiddenMultiviewSystemReferenceUrls } from '@/lib/video/multiview-recipe-storage.server';
 import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
+import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
 
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
 type Protection = { assetId: string; ownerId: string; kind: 'template' | 'style' };
@@ -74,7 +75,18 @@ function hiddenStudioBindings<T extends Protection>(user: ImageStudioIdentity | 
 
 // Match underlying files as well as ids: older template application copied an
 // Asset row with the same URL, so checking just the source id leaves a bypass.
-export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, client: Client = prisma): Promise<string[]> {
+export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, client: Client = prisma, assetIds?: string[]): Promise<string[]> {
+  const sqlClient = client as Prisma.TransactionClient;
+  if (user && assetIds && assetIds.length <= 240 && typeof sqlClient.$queryRaw === 'function' && sqlClient.user) {
+    if (!assetIds.length) return [];
+    try {
+      const visibility = await catalogVisibilitySql(sqlClient, user, user.id === 'module-cover-audience');
+      const rows = await sqlClient.$queryRaw<Array<{ url: string }>>(Prisma.sql`WITH ${visibility.ctes}
+        SELECT DISTINCT hidden.url FROM hidden_urls hidden JOIN "Asset" a ON a."original_url" = hidden.url
+        WHERE a."id" IN (${Prisma.join(assetIds)})`);
+      return rows.map(row => row.url);
+    } catch (error) { if (!(error instanceof CatalogSqlCompatibilityError)) throw error; }
+  }
   const multiviewHidden = await hiddenMultiviewSystemReferenceUrls(user, client);
   if (user?.role === 'admin' && canUseCompanyTemplates(user)) return multiviewHidden;
   const rows = await client.platformSetting.findMany({ where: { OR: [
@@ -93,13 +105,13 @@ export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, cl
   })])).sort();
 }
 
-export async function studioVisibleAssetWhere(user: ImageStudioIdentity, client: Client = prisma): Promise<Prisma.AssetWhereInput> {
-  const hidden = await studioHiddenAssetUrls(user, client);
+export async function studioVisibleAssetWhere(user: ImageStudioIdentity, client: Client = prisma, assetIds?: string[]): Promise<Prisma.AssetWhereInput> {
+  const hidden = await studioHiddenAssetUrls(user, client, assetIds);
   return hidden.length ? { original_url: { notIn: hidden } } : {};
 }
 
-export async function canReadStudioAsset(user: ImageStudioIdentity, asset: { original_url: string }, client: Prisma.TransactionClient = prisma) {
-  if ((await studioHiddenAssetUrls(user, client)).includes(asset.original_url)) return false;
+export async function canReadStudioAsset(user: ImageStudioIdentity, asset: { id?: string; original_url: string }, client: Prisma.TransactionClient = prisma) {
+  if ((await studioHiddenAssetUrls(user, client, asset.id ? [asset.id] : undefined)).includes(asset.original_url)) return false;
   const output = await multiviewOutputFileAccess(user, asset.original_url, false, client);
   return !output.protected || output.allowed;
 }
@@ -147,7 +159,17 @@ export async function readableStudioCoverIds(user: ImageStudioIdentity,
   return new Set(assets.filter(asset => !hidden.has(asset.original_url)).map(asset => asset.id));
 }
 
-export async function studioVisibleReferenceWhere(user: ImageStudioIdentity): Promise<Prisma.ReferenceImageWhereInput> {
+export async function studioVisibleReferenceWhere(user: ImageStudioIdentity, client: Prisma.TransactionClient = prisma, referenceIds?: string[]): Promise<Prisma.ReferenceImageWhereInput> {
+  if (referenceIds && referenceIds.length <= 100) {
+    if (!referenceIds.length) return {};
+    try {
+      const visibility = await catalogVisibilitySql(client, user);
+      const denied = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`WITH ${visibility.ctes}
+        SELECT r."id" FROM "ReferenceImage" r LEFT JOIN "Asset" a ON a."id" = r."asset_id" WHERE r."id" IN (${Prisma.join(referenceIds)})
+          AND (NOT (${visibility.visible(Prisma.sql`r."url"`)}) OR a."id" IS NOT NULL AND NOT (${visibility.visible(Prisma.sql`a."original_url"`)})) LIMIT ${referenceIds.length}`);
+      return denied.length ? { id: { notIn: denied.map(row => row.id) } } : {};
+    } catch (error) { if (!(error instanceof CatalogSqlCompatibilityError)) throw error; }
+  }
   const hidden = await studioHiddenAssetUrls(user);
   return hidden.length ? { AND: [{ url: { notIn: hidden } }, { OR: [{ asset: null }, { asset: { original_url: { notIn: hidden } } }] }] } : {};
 }

@@ -94,7 +94,7 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
       if (!initial.ready || append || completeCatalog && initial.cursor) setFeedback({ owner: userId, error: '', loading: true, sync: initial.ready ? 'stale' : 'loading' });
       try {
         const revision = await readShared<{ catalogRevision: string; activeDefinitionToken: string | null; activeAvailable: boolean; activeState?: SharedStudioStateProjection | null }>(
-          `/api/image-studio/shared?mode=revision${presetId ? `&activePresetId=${encodeURIComponent(presetId)}` : ''}${moduleId ? `&activeModuleId=${encodeURIComponent(moduleId)}` : ''}`, controller.signal);
+          `/api/image-studio/shared?mode=revision${lightweightCatalog ? '&protocol=catalog-paged-v2' : ''}${presetId ? `&activePresetId=${encodeURIComponent(presetId)}` : ''}${moduleId ? `&activeModuleId=${encodeURIComponent(moduleId)}` : ''}`, controller.signal);
         if (!currentRead()) return;
         if (typeof revision.catalogRevision !== 'string') throw new Error('模板同步暂不可用');
         const changed = initial.revision !== revision.catalogRevision;

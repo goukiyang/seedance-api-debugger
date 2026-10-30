@@ -6,15 +6,17 @@ import { isMultiviewWorkFileRole } from './multiview-work-contract';
 
 /** Historical groups are proven only by existing registration receipts. No
  * production history is rewritten, and ordinary uploads sharing bytes survive. */
-export async function multiviewOutputGroups(user: SessionUser, removedIds: string[] = []) {
+export async function multiviewOutputGroups(user: SessionUser, removedIds: string[] = [], selection?: { workIds: string[]; receiptKeys: string[] }) {
+  if (selection && selection.workIds.length > 100) throw new Error('multiview_page_exceeds_limit');
   const owner = await prisma.user.findUnique({ where: { id: user.id }, select: { id: true, name: true, username: true, email: true } });
-  const works = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, save_state: { not: 'intent' } }, orderBy: { created_at: 'desc' } });
+  const works = await prisma.multiviewWork.findMany({ where: { owner_id: user.id, save_state: { not: 'intent' }, ...(selection ? { id: { in: selection.workIds } } : {}) }, orderBy: { created_at: 'desc' } });
   const groups = [], dedicatedIds = new Set<string>();
   const removed = new Set(removedIds);
   for (const work of works) {
     try { await assertMultiviewWorkReference(user, work); }
     catch (error) { if (error instanceof AuthError && [403, 404].includes(error.status)) continue; throw error; }
-    const receipts = await prisma.platformSetting.findMany({ where: { key: { startsWith: `multiview_output_registration_v1:receipt:${work.id}:` } }, select: { value_json: true } });
+    const receipts = await prisma.platformSetting.findMany({ where: { key: selection ? { in: selection.receiptKeys.filter(key => key.startsWith(`multiview_output_registration_v1:receipt:${work.id}:`)) }
+      : { startsWith: `multiview_output_registration_v1:receipt:${work.id}:` } }, select: { value_json: true } });
     const candidates = receipts.flatMap(row => {
       try {
         const value = JSON.parse(row.value_json);

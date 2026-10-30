@@ -102,5 +102,6 @@ export interface UsageReportDTO {
 
 export interface UsageExportSnapshot {
   report: UsageReportDTO;
-  records: UsageRecordDTO[];
+  records: UsageRecordDTO[] | import('./row-spool').UsageRows<UsageRecordDTO>;
+  dispose?: () => Promise<void>;
 }

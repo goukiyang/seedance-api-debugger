@@ -94,7 +94,9 @@ export function pricingRuntimeSourceFiles(root = process.cwd()) {
     'src/lib/credits/precision.ts', 'src/lib/projects/budget.ts', 'src/lib/tools/toolflow-runtime.ts',
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-channel.ts',
     'src/lib/integrations/image-generation-defaults.ts', 'src/lib/integrations/image-quality-routing.ts',
-    'src/lib/assets/site-url.ts', 'package.json', '.deployed-commit'].sort();
+    'src/lib/assets/site-url.ts', 'src/lib/prisma.ts', 'src/lib/db.ts', 'src/lib/catalog-directory-writes.ts',
+    'src/lib/assets/catalog-visibility-sql.ts',
+    'package.json', '.deployed-commit'].sort();
 }
 
 export function pricingRuntimeModuleHashes(root = process.cwd()) {

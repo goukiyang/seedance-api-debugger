@@ -1,5 +1,6 @@
 'use client';
 import { parseStudioTaskSettings, studioTaskSettings, sameStudioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
+import { STUDIO_TASK_SUMMARY, type StudioTaskSummary } from '@/lib/image-studio/task-summary';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import { sumCredits } from '@/lib/credits/precision';
@@ -270,12 +271,16 @@ function TemplateCoverVisual({ module, onReadError }: { module: StudioModule; on
 
 function singleReferenceComparison(task: StudioTask) {
   const references = task.snapshot?.primaryReferenceImages ?? task.snapshot?.transientReferenceImages ?? task.snapshot?.referenceImages ?? [];
-  const reference = references[0];
+  const primary = taskSummary(task)?.primaryReference;
+  const reference = references[0] || (primary ? { ...primary, fileName: null, fileSize: null } : null);
   const src = reference?.originalUrl || reference?.thumbnailUrl;
   return src ? { src, role: 'original' as const, thumbnailSrc: reference.thumbnailUrl || src, alt: '主图 1', fileName: reference.fileName || undefined, width: reference.width || undefined, height: reference.height || undefined, fileSize: reference.fileSize,
     ...(reference.id ? { contentKey: `asset:${reference.id}` as const,
       descriptor: { schema: 2 as const, kind: 'asset' as const, id: reference.id, originalVersion: null } } : {}) } : undefined;
 }
+
+function taskSummary(task: StudioTask) { return (task as StudioTask & { summary?: StudioTaskSummary }).summary; }
+function taskDisplay(task: StudioTask) { return task.snapshot || taskSummary(task); }
 
 function taskComparisonCandidates(task?: StudioTask): ImageComparisonSource[] {
   const snapshot = task?.snapshot;
@@ -286,7 +291,7 @@ function taskComparisonCandidates(task?: StudioTask): ImageComparisonSource[] {
 }
 
 function studioTaskPreviewState(task: StudioTask): ImagePreviewState {
-  const snapshot = task.snapshot;
+  const snapshot = task.snapshot || taskSummary(task);
   const model = studioModelShortLabel(task.model);
   const quality = IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动';
   return {
@@ -327,9 +332,17 @@ function copyStudioTaskText(task: StudioTask) {
   ].join('\n');
 }
 
-async function copyStudioText(value: string) {
+async function copyStudioText(value: string | Promise<string>) {
   if (!value) return false;
   try {
+    if (typeof value !== 'string' && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': value.then(text => {
+        if (!text) throw new Error('copy_unavailable');
+        return new Blob([text], { type: 'text/plain' });
+      }) })]);
+      return true;
+    }
+    value = await value;
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
       return true;
@@ -389,6 +402,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   }, []);
   useEffect(() => { resolutionDirty.current.clear(); setResolutionDeltas({}); }, [userId]);
   const [directory, setDirectory] = useState<StudioNavigationEntry[]>([]);
+  const [directoryPaging, setDirectoryPaging] = useState<{ paged: boolean; total: number; page: number; groups: string[] }>({ paged: false, total: 0, page: 1, groups: [] });
+  const [navigationPage, setNavigationPage] = useState(1);
+  const [locateNavigation, setLocateNavigation] = useState(true);
   const [removedDefaultGroups, setRemovedDefaultGroups] = useState<string[]>([]);
   const [directoryReady, setDirectoryReady] = useState(false);
   const studioOrder = useStudioOrder(userId);
@@ -644,8 +660,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     listLock.current = true; setLoading(true); setError('');
     const scope = moduleReadScope.current;
     try {
+      const location = new URLSearchParams(window.location.search);
+      let savedActive = '';
+      try { savedActive = JSON.parse((templateWorkbench ? localStorage : sessionStorage).getItem(viewStorageKey) || '{}').active || ''; } catch { /* Optional local position. */ }
+      const locate = location.get('moduleId') ? { moduleId: location.get('moduleId')! } : location.get('presetId') ? { presetId: location.get('presetId')! }
+        : savedActive ? { moduleId: savedActive } : undefined;
       const catalog = await readResponse(await fetch('/api/image-studio/gallery/query', { method: 'POST', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ page: 1, pageSize: 12, sort: 'directory', navigationOnly: true }) }));
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ protocol: 'catalog-paged-v2', page: 1, pageSize: 12, sort: 'directory', navigationOnly: true, locate }) }));
       const data = { directory: catalog.navigation.map((entry: GalleryNavigationItem) => ({ ...entry,
         sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null, sourcePresetShared: entry.sourcePresetShared ?? entry.shared,
         canManageGroup: entry.mine && entry.coverEditable })), modules: [] as StudioModule[], nextCursor: null };
@@ -653,9 +674,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       if (Array.isArray(data.directory)) {
         setDirectory(data.directory.filter((item: StudioNavigationEntry) => !removedModuleIds.current.has(item.id)));
         setDirectoryReady(true);
+        setDirectoryPaging({ paged: catalog.protocol === 'catalog-paged-v2', total: catalog.navigationTotal ?? catalog.navigation.length,
+          page: catalog.navigationPage || 1, groups: catalog.directoryGroups || [] });
       }
       if (Array.isArray(catalog.removedDefaultGroups)) setRemovedDefaultGroups(catalog.removedDefaultGroups);
-      if (Array.isArray(catalog.deletedSourcePresetIds)) setDeletedSourcePresetIds(catalog.deletedSourcePresetIds);
+      if (catalog.protocol !== 'catalog-paged-v2' && Array.isArray(catalog.deletedSourcePresetIds)) setDeletedSourcePresetIds(catalog.deletedSourcePresetIds);
       modulesOwner.current = userId;
       setModules(current => {
         const ids = new Set(current.map(item => item.id));
@@ -666,7 +689,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       setCursor(data.nextCursor); setActive(current => current || data.modules[0]?.id || '');
     } catch (e) { if (moduleReadScope.current === scope) setError(e instanceof Error ? e.message : '模块读取失败'); }
     finally { if (moduleReadScope.current === scope) { listLock.current = false; setLoading(false); } }
-  }, [userId]);
+  }, [userId, templateWorkbench, viewStorageKey]);
   useEffect(() => { void loadModules(); }, [loadModules]);
   const hydrateModules = useCallback(async (ids: string[]) => {
     const requested = ids.filter(id => !id.startsWith('shared:') && !hydratingIds.current.has(id)).slice(0, 12);
@@ -1046,19 +1069,19 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   };
   useEffect(() => {
     if (!viewRestored || !directoryReady || loading) return;
-    const available = new Set(Object.keys(groupedModules));
+    const available = new Set(directoryPaging.paged ? directoryPaging.groups : Object.keys(groupedModules));
     setExpandedGroups(current => {
       const valid = current.filter(group => available.has(group));
       return valid.length === current.length ? current : valid;
     });
-  }, [viewRestored, directoryReady, loading, groupedModules]);
+  }, [viewRestored, directoryReady, loading, groupedModules, directoryPaging]);
   const hasAnyUnread = useMemo(() => sidebarNavigation.some(item => attention.unread.has(item.id)), [sidebarNavigation, attention.unread]);
   const updateModuleMetadata = useCallback((id: string, name: string, groupName: string, followGroup = false) => {
     setModules(current => current.map(item => item.id === id && !item.sharedLive && (item.name !== name || item.groupName !== groupName)
       ? { ...item, name, groupName } : item));
     if (followGroup) setSelectedGroup(groupName);
   }, []);
-  const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS.filter(group => !removedDefaultGroups.includes(group)), ...navigation.map(item => item.groupName).filter(Boolean)])), [navigation, removedDefaultGroups]);
+  const groups = useMemo(() => Array.from(new Set([...DEFAULT_GROUPS.filter(group => !removedDefaultGroups.includes(group)), ...directoryPaging.groups, ...navigation.map(item => item.groupName).filter(Boolean)])), [navigation, removedDefaultGroups, directoryPaging.groups]);
   async function selectFavorite(item: ReactionListItem) {
     if (!item.content || !item.state.available || favoriteSelecting || loading) return;
     setSelectedFavorite(item.key); setError(''); setFavoriteSelecting(true);
@@ -1178,7 +1201,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
   [gallery.lastOpened, serverRecentUse, userId]);
   const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
-    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView }, gallery.ready);
+    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView,
+    navigationPage, ...(locateNavigation && active && !coverView ? { locate: { moduleId: active } } : {}) }, gallery.ready);
   useEffect(() => { if (coverView) pool.refresh(); }, [coverView, shared.catalogRevision, pool.refresh]);
   useEffect(() => {
     if (pool.denied) { setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
@@ -1186,14 +1210,16 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     setDirectory(pool.data.navigation.map(entry => ({ ...entry, sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null,
       sourcePresetShared: entry.sourcePresetShared ?? entry.shared, canManageGroup: entry.mine && entry.coverEditable })));
     setDirectoryReady(true);
+    setDirectoryPaging({ paged: pool.data.protocol === 'catalog-paged-v2', total: pool.data.navigationTotal ?? pool.data.navigation.length,
+      page: pool.data.navigationPage || 1, groups: pool.data.directoryGroups || [] });
     setRemovedDefaultGroups(pool.data.removedDefaultGroups);
-    setDeletedSourcePresetIds(pool.data.deletedSourcePresetIds);
+    if (pool.data.protocol !== 'catalog-paged-v2') setDeletedSourcePresetIds(pool.data.deletedSourcePresetIds);
   }, [pool.data, pool.denied, invalidateSharedDefinition]);
   const galleryDirectoryReady = Boolean(pool.data && !pool.error);
-  const galleryDerived = { total: pool.data?.navigation.length || 0, filteredTotal: pool.data?.total || 0 };
+  const galleryDerived = { total: pool.data?.navigationTotal ?? pool.data?.navigation.length ?? 0, filteredTotal: pool.data?.total || 0 };
   const coverPages = useResultPages({ items: gallery.ready ? pool.data?.matches || [] : [], storageKey: `sd2:module-covers:v1:${userId}`,
     visible: coverView, busy: pool.loading || !gallery.ready, error: Boolean(pool.error), hasMore: false, tabScoped: true, positionKey: galleryPositionKey,
-    total: pool.data?.total ?? null, loadMore: async () => undefined, currentId: null });
+    total: pool.data?.total ?? null, loadMore: async () => undefined, currentId: null, serverPage: pool.data?.protocol === 'catalog-paged-v2' });
   useEffect(() => { if (coverView && !coverPages.restoring) pool.setPage(coverPages.page, coverPages.capacity); }, [coverView, coverPages.page, coverPages.capacity, coverPages.restoring, pool.setPage]);
   const resetCoverScroll = useRememberedScroll(`image-studio:${userId}${coverView ? ':covers' : ''}`,
     viewRestored && directoryReady && (!coverView || gallery.ready && galleryDirectoryReady && !coverPages.restoring && !hydrating) && !loading,
@@ -1210,6 +1236,15 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     <button type="button" aria-label="下一页封面" title="下一页封面" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.canNext} onClick={coverPages.next}><ChevronRight size={17} /></button>
     <button type="button" aria-label="最后一页封面" title="最后一页" disabled={loading || hydrating || !galleryDirectoryReady || !coverPages.canLast || coverPages.restoring} onClick={coverPages.last}><ChevronLast size={17} /></button>
   </nav>;
+  const navigationPages = Math.max(1, Math.ceil(directoryPaging.total / 24));
+  const changeNavigationPage = (page: number) => { setLocateNavigation(false); setNavigationPage(page); };
+  const directoryPagination = directoryPaging.paged && navigationPages > 1 ? <nav className={styles.pagination} aria-label="模板导航分页">
+    <button type="button" title="第一页模板" aria-label="第一页模板" disabled={pool.loading || directoryPaging.page <= 1} onClick={() => changeNavigationPage(1)}><ChevronFirst size={15} /></button>
+    <button type="button" title="上一页模板" aria-label="上一页模板" disabled={pool.loading || directoryPaging.page <= 1} onClick={() => changeNavigationPage(directoryPaging.page - 1)}><ChevronLeft size={15} /></button>
+    <span>{directoryPaging.page} / {navigationPages}</span>
+    <button type="button" title="下一页模板" aria-label="下一页模板" disabled={pool.loading || directoryPaging.page >= navigationPages} onClick={() => changeNavigationPage(directoryPaging.page + 1)}><ChevronRight size={15} /></button>
+    <button type="button" title="最后一页模板" aria-label="最后一页模板" disabled={pool.loading || directoryPaging.page >= navigationPages} onClick={() => changeNavigationPage(navigationPages)}><ChevronLast size={15} /></button>
+  </nav> : null;
   const galleryCoverModule = modules.find(item => item.id === galleryCoverModuleId && item.coverEditable === true);
   useEffect(() => {
     if (!galleryCoverModuleId || loading || hydrating) return;
@@ -1225,13 +1260,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   };
   useEffect(() => {
     if (!navigation.length) return;
-    const availableGroups = Object.keys(groupedModules);
+    const availableGroups = directoryPaging.paged ? directoryPaging.groups : Object.keys(groupedModules);
     const activeModule = orderedModules.find(item => item.id === active);
     if (!coverView && activeModule?.sharedLive) { setSelectedGroup(activeModule.groupName || '未分组'); return; }
     // Until personal and shared directories are both read, a restored group may simply not be listed yet; keep it.
     const complete = directoryReady && shared.catalogReady;
     setSelectedGroup(current => current && (availableGroups.includes(current) || !complete) ? current : availableGroups[0] || groups[0]);
-  }, [groups, groupedModules, navigation.length, active, orderedModules, coverView, directoryReady, shared.catalogReady]);
+  }, [groups, groupedModules, navigation.length, active, orderedModules, coverView, directoryReady, shared.catalogReady, directoryPaging]);
   const [groupDeleting, setGroupDeleting] = useState(false);
   const groupDeleteLock = useRef(false);
   const groupDeleteRequests = useRef(new Map<string, { requestId: string; expectedMembers: Array<{ id: string; revision: number }> }>());
@@ -1242,14 +1277,24 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     finally { groupDeleteLock.current = false; setGroupDeleting(false); }
   }
   async function deleteGroupMembers(group: string) {
+    const groupScope = moduleReadScope.current;
     const manageable = (item: StudioModule) => !item.sharedLive || item.sharedLive.mode === 'publisher' && item.sourcePresetCanManageSharing === true;
     const blocked = () => modules.filter(item => item.groupName === group && manageable(item))
       .some(item => presetSources.current.get(item.id)?.().groupDeleteBlocked);
     if (blocked()) { setError('分组中有模块正在保存或处理其他操作，请完成后再删除分组'); return; }
     // Read unloaded members too; deleting a group must not omit later pages.
     const targets = [...modules.filter(item => item.groupName === group && manageable(item))];
-    const unloaded = directory.filter(item => item.groupName === group && canManageStudioGroupEntry(item) && !modules.some(module => module.id === item.id));
     try {
+      // Explicit group mutation needs every member, not only the visible directory page.
+      const catalog = directoryPaging.paged ? await readResponse(await fetch('/api/image-studio/gallery/query', {
+        method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId },
+        body: JSON.stringify({ navigationOnly: true, sort: 'directory' }),
+      })) : null;
+      if (moduleReadScope.current !== groupScope || isClientSessionBlocked()) return;
+      const fullDirectory: StudioNavigationEntry[] = catalog ? catalog.navigation.map((entry: GalleryNavigationItem) => ({ ...entry,
+        sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null, sourcePresetShared: entry.sourcePresetShared ?? entry.shared,
+        canManageGroup: entry.mine && entry.coverEditable })) : directory;
+      const unloaded = fullDirectory.filter(item => item.groupName === group && canManageStudioGroupEntry(item) && !modules.some(module => module.id === item.id));
       for (let offset = 0; offset < unloaded.length; offset += 12) {
         const ids = unloaded.slice(offset, offset + 12).map(item => item.id);
         const data = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(ids.join(','))}`, { cache: 'no-store' }));
@@ -1258,6 +1303,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     } catch { setError('分组内容未能完整读取，请重试'); return; }
     if (!targets.length && !DEFAULT_GROUPS.includes(group) && !groupDeleteRequests.current.has(group)) { setError('此分组只有他人的共享模板，不能修改原件分组'); return; }
     if (!(await confirm(`删除分组“${group}”？本人可管理模板会移到“未分组”，图片、生成结果和他人的共享原件不变。`, { title: '删除分组', confirmLabel: '删除分组', danger: true }))) return;
+    if (moduleReadScope.current !== groupScope || isClientSessionBlocked()) return;
     if (blocked()) { setError('分组内容已变化，请完成保存后再删除分组'); return; }
     const request = groupDeleteRequests.current.get(group) || { requestId: crypto.randomUUID(), expectedMembers: targets.map(item => ({ id: item.id, revision: item.revision })).sort((a, b) => a.id.localeCompare(b.id)) };
     groupDeleteRequests.current.set(group, request);
@@ -1314,7 +1360,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
-        <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{navigation.length}项</small></button>
+        <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{directoryPaging.total}项</small></button>
         <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
         <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
@@ -1351,6 +1397,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
                 </div>
               </div>;
             }} />
+            {directoryPagination}
           </div>
           <div className={styles.moduleRailFooter}><button type="button" title="重置侧栏展开状态" aria-label="重置侧栏展开状态" onClick={resetSidebarExpansion}><RotateCcw size={15} /><span>重置展开状态</span></button>
             <button type="button" disabled={!navigationVisibility.ready || !directoryReady || loading} onClick={() => orderDialog.current?.showModal()}>调整顺序</button>
@@ -1372,7 +1419,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         </div>)}
       </>}
       {shared.hasMore && <button type="button" disabled={shared.loading} onClick={shared.loadMore}>{shared.loading ? '读取中' : '更多共享模板'}</button>}
-      {!templateWorkbench && <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{navigation.length}项</small></button>}
+      {!templateWorkbench && <>{directoryPagination}<button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{directoryPaging.total}项</small></button></>}
     </aside>
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
@@ -1381,11 +1428,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面 <small>{navigation.length}项</small></button>
+      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面 <small>{directoryPaging.total}项</small></button>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={sidebarGroupedModules[selectedGroup] ? selectedGroup : ''} onChange={event => setSelectedGroup(event.target.value)}>
         {!sidebarGroupedModules[selectedGroup] && <option value="">{navigationVisibility.ready ? '选择分组' : '正在读取侧栏…'}</option>}
         {Object.entries(sidebarGroupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
       </select></label>
+      {directoryPagination}
       <label className={styles.mobileModulePicker}><span>模块</span><select aria-label="选择图片模块" value={!coverView && sidebarGroupedModules[selectedGroup]?.some(item => item.id === active) ? active : ''} onChange={event => {
         const entry = navigation.find(item => item.id === event.target.value);
         if (entry) navigateToEntry(entry, { explicitSelection: true });
@@ -1741,6 +1789,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [taskTotal, setTaskTotal] = useState<number | null>(null);
   const loadedTaskPages = useRef(1);
+  const visibleTaskIds = useRef<string[]>([]);
+  const activeTaskCursor = useRef<string | null>(null);
+  const trackedTaskIds = useRef(new Set<string>());
+  const [hasActiveTasks, setHasActiveTasks] = useState(false);
+  const detailReadSequence = useRef(0);
+  const taskDetailCache = useRef(new Map<string, StudioTask>());
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [tasksError, setTasksError] = useState('');
   const [taskReadAction, setTaskReadAction] = useState<'idle' | 'initial' | 'refresh' | 'more'>('initial');
@@ -3044,14 +3098,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const loadTasks = useCallback(async (cursor?: string, action: 'initial' | 'refresh' | 'silent' | 'view' = 'refresh') => {
     if (isClientSessionBlocked()) return;
     const readPages = async (signal?: AbortSignal, entry = false) => {
-      const count = cursor ? 1 : Math.min(20, loadedTaskPages.current);
+      const expectedScope = `${userId}:${module.id}`;
+      const assertScope = () => { if (signal?.aborted || taskReadScopeRef.current !== expectedScope || isClientSessionBlocked()) throw new DOMException('Read superseded', 'AbortError'); };
+      const count = 1;
       let next: string | undefined = cursor;
       let result: { tasks: StudioTask[]; nextCursor: string | null; total: number; entrySnapshot?: string } & Partial<StudioResultFeedExtras> | null = null;
       let entrySnapshot: string | undefined;
       const rows: StudioTask[] = [];
       const sharedPins: SharedStudioPinnedImage[] = [], resultOrder: string[] = [];
       for (let read = 0; read < count; read++) {
-        const query = new URLSearchParams({ moduleId: module.id });
+        const query = new URLSearchParams({ moduleId: module.id, projection: STUDIO_TASK_SUMMARY });
         if (templateWorkbench) query.set('feed', STUDIO_RESULT_FEED);
         if (next) query.set('cursor', next);
         if (entry && read === 0 && !cursor) query.set('attention', 'entry');
@@ -3065,7 +3121,38 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         next = page.nextCursor || undefined;
         if (!next) break;
       }
-      return { ...result!, sharedPins, resultOrder, tasks: Array.from(new Map(rows.map(task => [task.id, task])).values()) };
+      const refreshed = new Map(rows.map(task => [task.id, task]));
+      const checkedIds: string[] = [];
+      if (!cursor) {
+        const query = new URLSearchParams({ moduleId: module.id, projection: STUDIO_TASK_SUMMARY, active: '1' });
+        if (activeTaskCursor.current) query.set('cursor', activeTaskCursor.current);
+        const read = async (params: URLSearchParams) => readResponse(await fetch(`/api/image-studio/tasks?${params}`,
+          { cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) }));
+        const activePage = await read(query);
+        assertScope();
+        if (activePage.projection !== STUDIO_TASK_SUMMARY || activePage.viewerId !== userId) throw new Error('活跃记录协议不可用');
+        activeTaskCursor.current = activePage.nextCursor || null;
+        for (const task of activePage.tasks as StudioTask[]) { trackedTaskIds.current.add(task.id); refreshed.set(task.id, task); }
+        const observedIds = Array.from(trackedTaskIds.current).slice(0, 24);
+        for (const id of observedIds) { trackedTaskIds.current.delete(id); trackedTaskIds.current.add(id); }
+        const visibleIds = visibleTaskIds.current.slice(0, 24);
+        const visibleSet = new Set(visibleIds);
+        for (const ids of [visibleIds, observedIds.filter(id => !visibleSet.has(id))]) if (ids.length) {
+          const exact = new URLSearchParams({ moduleId: module.id, projection: STUDIO_TASK_SUMMARY });
+          ids.forEach(id => exact.append('id', id));
+          const current = await read(exact);
+          assertScope();
+          if (current.projection !== STUDIO_TASK_SUMMARY || current.viewerId !== userId) throw new Error('记录查询协议不可用');
+          checkedIds.push(...ids);
+          for (const id of ids) trackedTaskIds.current.delete(id);
+          for (const task of current.tasks as StudioTask[]) {
+            refreshed.set(task.id, task);
+            if (['queued', 'running'].includes(task.status) || task.billing?.pollUntil && task.billing.chargedCredits === null || task.feishu?.state === 'pending') trackedTaskIds.current.add(task.id);
+          }
+        }
+        setHasActiveTasks(Boolean(activeTaskCursor.current || trackedTaskIds.current.size));
+      }
+      return { ...result!, sharedPins, resultOrder, checkedIds, pageIds: rows.map(task => task.id), tasks: Array.from(refreshed.values()) };
     };
     if (templateWorkbench) {
       const scope = `${userId}:${module.id}`;
@@ -3090,12 +3177,22 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
           const ids = new Set(fresh.map(task => task.id));
           const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
-          return cursor ? [...previous, ...fresh] : fresh;
+          if (cursor) return [...previous, ...fresh];
+          if (action !== 'silent' || !loadedMore.current) return fresh.filter(task => result.pageIds.includes(task.id));
+          const checked = new Set(result.checkedIds), updates = new Map(fresh.map(task => [task.id, task]));
+          const retained = current.filter(task => !deletedIds.current.has(task.id) && (!checked.has(task.id) || updates.has(task.id)))
+            .map(task => updates.get(task.id) || task);
+          const existing = new Set(retained.map(task => task.id));
+          return [...fresh.filter(task => result.pageIds.includes(task.id) && !existing.has(task.id)), ...retained];
         });
-        setNextCursor(result.nextCursor); setTaskTotal(result.total);
+        if (cursor || action !== 'silent' || !loadedMore.current) setNextCursor(result.nextCursor);
+        setTaskTotal(result.total);
         setResultFeed(previous => ({ protocol: STUDIO_RESULT_FEED, viewerId: userId, pinState: result.pinState!,
-          sharedPins: Array.from(new Map([...(cursor ? previous?.sharedPins || [] : []), ...result.sharedPins].map(pin => [pin.id, pin])).values()),
-          resultOrder: Array.from(new Set([...(cursor ? previous?.resultOrder || [] : []), ...result.resultOrder])) }));
+          eligiblePinAssetIds: result.eligiblePinAssetIds,
+          sharedPins: Array.from(new Map([...(cursor || action === 'silent' ? previous?.sharedPins || [] : []), ...result.sharedPins]
+            .filter(pin => (result.eligiblePinAssetIds || result.pinState?.assetIds || []).includes(pin.assetId)).map(pin => [pin.id, pin])).values()),
+          resultOrder: Array.from(new Set(cursor ? [...(previous?.resultOrder || []), ...result.resultOrder]
+            : [...result.resultOrder, ...(action === 'silent' ? previous?.resultOrder || [] : [])])) }));
         if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
         setTasksError('');
         void onResultsAvailable();
@@ -3122,9 +3219,16 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         const fresh: StudioTask[] = result.tasks.filter((task: StudioTask) => !deletedIds.current.has(task.id));
         const ids = new Set(fresh.map(task => task.id));
         const previous = current.filter(task => !ids.has(task.id) && !deletedIds.current.has(task.id));
-        return cursor ? [...previous, ...fresh] : fresh;
+        if (cursor) return [...previous, ...fresh];
+        if (action !== 'silent' || !loadedMore.current) return fresh.filter(task => result.pageIds.includes(task.id));
+        const checked = new Set(result.checkedIds), updates = new Map(fresh.map(task => [task.id, task]));
+        const retained = current.filter(task => !deletedIds.current.has(task.id) && (!checked.has(task.id) || updates.has(task.id)))
+          .map(task => updates.get(task.id) || task);
+        const existing = new Set(retained.map(task => task.id));
+        return [...fresh.filter(task => result.pageIds.includes(task.id) && !existing.has(task.id)), ...retained];
       });
-      setNextCursor(result.nextCursor); setTaskTotal(result.total);
+      if (cursor || action !== 'silent' || !loadedMore.current) setNextCursor(result.nextCursor);
+      setTaskTotal(result.total);
       if (cursor) { loadedMore.current = true; loadedTaskPages.current++; }
       setTasksError('');
     } catch (e) { if (taskReadScopeRef.current === scope) setTasksError(e instanceof Error ? e.message : '读取记录失败'); }
@@ -3132,6 +3236,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, [module.id, userId, templateWorkbench, onResultsAvailable, onTemplateEntered]);
   useEffect(() => {
     setTasks([]); setResultFeed(null); setSelected([]); setPreview(null); setNextCursor(null); setTaskTotal(null); loadedTaskPages.current = 1; setTasksError('');
+    activeTaskCursor.current = null; trackedTaskIds.current.clear(); visibleTaskIds.current = []; setHasActiveTasks(false);
+    taskDetailCache.current.clear(); detailReadSequence.current++;
     listLock.current = false;
     setViewedResults(null); requestedReadToken.current = 0; readAttemptToken.current = 0;
     setLoadingTasks(true); setTaskReadAction('initial'); loadedMore.current = false; taskReadLoaded.current = false;
@@ -3151,7 +3257,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (request?.action === 'view') { request.controller.abort(); taskReadRequest.current = null; setTaskReadAction('idle'); setLoadingTasks(false); }
     };
   }, [templateWorkbench, active, viewToken, loadTasks]);
-  const hasPending = tasks.some(task => task.status === 'queued' || task.status === 'running');
+  const hasPending = hasActiveTasks || tasks.some(task => task.status === 'queued' || task.status === 'running');
   useImageBillingRefresh(tasks, () => loadTasks(undefined, 'silent'), visible);
   useEffect(() => {
     if (!visible) return;
@@ -3328,8 +3434,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   function restoreDisabledReason(task: StudioTask) {
     if (!studioTaskHasViewableImage(task)) return '图片尚未就绪，不能恢复设置。';
-    if (!task.snapshot) return '这条记录没有完整设置，不能套用。';
-    if (task.snapshot.contextAvailable === false) return '这条旧记录没有保存完整上下文，无法完整恢复。';
+    if (!task.snapshot && !taskSummary(task)) return '这条记录没有完整设置，不能套用。';
+    if ((task.snapshot || taskSummary(task))?.contextAvailable === false) return '这条旧记录没有保存完整上下文，无法完整恢复。';
     if (!active) return '请先打开此模板，再套用设置。';
     if (!draftLoaded || draftRestoring) return '草稿正在恢复，请稍后套用。';
     if (quickPresetLock.current || presetSaveLock.current) return '快捷模板正在保存或套用，请稍后。';
@@ -3527,12 +3633,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     finally { deleteLock.current = false; setDeleting(false); }
   }
   async function copyTaskContext(task: StudioTask, trigger?: HTMLElement) {
-    if (!isAdmin || !task.snapshot?.sourceAvailable) return;
+    if (!isAdmin || !(task.snapshot || taskSummary(task))?.sourceAvailable) return;
     const sequence = ++copyOperationSequence.current, scope = taskReadScope, view = currentView.current.token;
     const operation = { operationId: crypto.randomUUID(), scope, itemId: task.id, id: task.id, action: '复制' };
     copyFeedbackAnchor.current = trigger || Array.from(section.current?.querySelectorAll<HTMLElement>('[data-result-id]') || []).find(item => item.dataset.resultId === task.id) || null;
     setCopyFeedback({ ...operation, text: '复制中…', phase: 'busy', message: '正在复制' });
-    const copied = await copyStudioText(copyStudioTaskText(task));
+    const cached = task.snapshot ? task : taskDetailCache.current.get(task.id);
+    const text = cached ? copyStudioTaskText(cached) : readTaskDetail(task).then(detail => {
+      if (sequence !== copyOperationSequence.current || taskReadScopeRef.current !== scope || currentView.current.token !== view) throw new Error('copy_scope_changed');
+      return copyStudioTaskText(detail);
+    });
+    const copied = await copyStudioText(text);
     if (sequence !== copyOperationSequence.current || taskReadScopeRef.current !== scope || currentView.current.token !== view || !currentView.current.active) return;
     setCopyFeedback({ ...operation, text: copied ? '已复制' : '复制失败，请重试', phase: copied ? 'success' : 'error', message: copied ? '已复制文字上下文' : '复制失败，请重试' });
   }
@@ -3551,7 +3662,30 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       && (!item.task.owner || item.task.owner.id === userId));
   }
   async function restoreResultSettings(task: StudioTask, mode: StudioTaskSettings['mode'] = 'current') {
-    const reason = restoreTask(task, mode); if (reason) setError(reason);
+    const scope = taskReadScope, view = currentView.current.token, signature = liveGenerationSignature.current;
+    const inputRevision = currentInputRevision.current;
+    const sequence = ++detailReadSequence.current;
+    try {
+      const detail = await readTaskDetail(task);
+      if (isClientSessionBlocked() || taskReadScopeRef.current !== scope || !currentView.current.active
+        || currentView.current.token !== view || currentInputRevision.current !== inputRevision
+        || liveGenerationSignature.current !== signature || sequence !== detailReadSequence.current) return;
+      const reason = restoreTask(detail, mode); if (reason) setError(reason);
+    } catch (cause) { if (taskReadScopeRef.current === scope && sequence === detailReadSequence.current) setError(cause instanceof Error ? cause.message : '设置未能读取，当前输入保留'); }
+  }
+  async function readTaskDetail(task: StudioTask): Promise<StudioTask> {
+    if (task.snapshot) return task;
+    const cached = taskDetailCache.current.get(task.id);
+    if (cached) return cached;
+    const scope = taskReadScope;
+    const query = new URLSearchParams({ moduleId: module.id, taskId: task.id });
+    const result = await readResponse(await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+    if (isClientSessionBlocked() || taskReadScopeRef.current !== scope) throw new Error('账号或模板已变化，当前输入保留');
+    const detail = result.tasks?.find((row: StudioTask) => row.id === task.id) as StudioTask | undefined;
+    if (!detail?.snapshot) throw new Error('这条记录的设置暂不可读，当前输入保留，请重试读取');
+    taskDetailCache.current.set(detail.id, detail);
+    if (taskDetailCache.current.size > 24) taskDetailCache.current.delete(taskDetailCache.current.keys().next().value!);
+    return detail;
   }
   function useCurrentGlobalSettings() {
     if (submitting || pendingSubmission || batch.pending || moduleSaving || draftRestoring) return;
@@ -3650,7 +3784,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : !prompt.trim() && !generationReferenceCount && !hasContext && !(batch.mode === 'batch' && batch.source === 'folder') ? { message: '请填写画面要求，或添加主图。', tone: 'info' }
     : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
-  const likedResults = useLikedStudioResults<StudioTask>(userId, module.id, visible && !hidden && resultView === 'images', templateWorkbench);
+  const likedResults = useLikedStudioResults<StudioTask>(userId, module.id, visible && !hidden && resultView === 'images', templateWorkbench, visibleTaskIds);
   showLatestResults.current = requestId => {
     likedResults.choose(false);
     setResultView('images');
@@ -3741,7 +3875,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         connectionIssue: Boolean(resultError), connectionDetail: resultError,
         detail: asyncRecovery || image && studioOutputMismatchDisposition(task.resultDisposition) ? undefined : task.error,
         generationDetailSuperseded: task.delivery?.generationDetailSuperseded, recoveryAvailable: task.delivery?.recoveryAvailable },
-      waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || task.snapshot?.primaryReferenceImages?.[0]?.originalUrl || undefined,
+      waitingThumbnail: task.snapshot?.primaryReferenceImages?.[0]?.thumbnailUrl || taskSummary(task)?.primaryReference?.thumbnailUrl || undefined,
       applied: sourceApplied && appliedSource?.taskId === task.id,
       outputIssue: task.outputIssue, inputMainPreview: task.inputMainPreview,
       notice: image && studioOutputMismatchDisposition(task.resultDisposition) && !templateWorkbench ? task.error : undefined,
@@ -4185,6 +4319,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} onInputMainSource={source => void replaceMainFromResult(source)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
         <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench}
+          onVisibleItemsChange={items => { visibleTaskIds.current = items.flatMap(item => item.task ? [item.task.id] : []); }}
           onPreviewInputMain={item => { if (item.task?.inputMainPreview) setInputPreviewSource(item.task.inputMainPreview.source); }}
           contextActionsEnabled={templateWorkbench}
           contextActions={item => {
@@ -4197,7 +4332,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             if (studioTaskHasViewableImage(task)) actions.push({ id: 'reproduce', label: '按原设置复现', group: 'continue', icon: <RotateCcw size={15} />,
               disabled: Boolean(restoreDisabledReason(task)), description: restoreDisabledReason(task) || undefined,
               transferFocus: true, onSelect: () => void restoreResultSettings(task, 'historical') });
-            if (isAdmin && task.snapshot?.sourceAvailable) actions.push({ id: 'context', label: '复制文字上下文', group: 'manage', icon: <ClipboardList size={15} />,
+            if (isAdmin && taskDisplay(task)?.sourceAvailable) actions.push({ id: 'context', label: '复制文字上下文', group: 'manage', icon: <ClipboardList size={15} />,
               disabled: copyFeedback?.id === task.id && copyFeedback.text === '复制中…',
               description: copyFeedback?.id === task.id && copyFeedback.text === '复制中…' ? '正在复制，请稍后' : undefined,
               onSelect: () => void copyTaskContext(task) });
@@ -4220,7 +4355,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           onRetry={() => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(taskRetryCursor); }}
           selectedId={selectedResultId} onSelect={item => setSelectedResultId(item.id)}
           previewId={preview?.taskId || null} onPreviewChange={item => {
-            if (item?.task) setPreview(studioTaskPreviewState(item.task));
+            if (item?.task) {
+              const task = item.task, scope = taskReadScope;
+              setPreview(studioTaskPreviewState(task));
+              if (!task.snapshot) void readTaskDetail(task).then(detail => {
+                if (taskReadScopeRef.current !== scope) return;
+                setTasks(current => current.map(row => row.id === detail.id ? detail : row));
+                setPreview(current => current?.taskId === detail.id ? studioTaskPreviewState(detail) : current);
+              }).catch(() => {});
+            }
             else if (item?.sharedPin && item.media) setPreview({ taskId: item.id, src: item.media.src, thumbnailSrc: item.media.thumbnailSrc, alt: item.label });
             else { setPreview(null); if (resumeModulePreview.current) { resumeModulePreview.current = false; moduleDialog.current?.showModal(); } }
           }}
@@ -4242,15 +4385,15 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             {studioOutputMismatchDisposition(task.resultDisposition) && <><ImageResultIssueDetails issue={task.outputIssue} notice={task.error} /><span>·</span></>}
             <span title={IMAGE_STUDIO_MODEL_LABELS[task.model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || task.model}>{studioModelShortLabel(task.model)}</span>
             {!templateWorkbench && <>
-              {(() => { const source = [task.snapshot?.imageSupplierName, task.snapshot?.imageChannelLabel].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · '); return source ? <><span>·</span><span title="生成时供应商">{source}</span></> : null; })()}
+              {(() => { const source = [taskDisplay(task)?.imageSupplierName, taskDisplay(task)?.imageChannelLabel].filter((value): value is string => typeof value === 'string' && Boolean(value.trim())).join(' · '); return source ? <><span>·</span><span title="生成时供应商">{source}</span></> : null; })()}
               <span>·</span>
               <span title={`画质：${IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}`}>{IMAGE_STUDIO_QUALITY_LABELS[normalizeImageStudioQuality(task.model, task.quality) as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || task.quality || '自动'}</span>
             </>}
             <span>·</span><span className={styles.resolutionHint} tabIndex={0} aria-describedby={`studio-size-${task.id}`}>
-              {task.snapshot?.resolution && /^[124]K$/i.test(task.snapshot.resolution) ? task.snapshot.resolution : '自动'}
+              {taskDisplay(task)?.resolution && /^[124]K$/i.test(taskDisplay(task)!.resolution!) ? taskDisplay(task)!.resolution : '自动'}
               <span id={`studio-size-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>{task.asset?.width && task.asset.height ? `${task.asset.width} × ${task.asset.height} px` : '实际尺寸暂不可用'}</span>
             </span>
-            <span>·</span><span className={styles.resultContextVersion} title={task.snapshot?.moduleContextVersion ? `模块上下文版本：${task.snapshot.moduleContextVersion}` : '模块上下文版本状态'}><ContextVersionLabel code={task.snapshot?.moduleContextVersion} state={task.snapshot?.moduleContextVersionState || 'missing'} onRetry={() => void loadTasks()} /></span>
+            <span>·</span><span className={styles.resultContextVersion} title={taskDisplay(task)?.moduleContextVersion ? `模块上下文版本：${taskDisplay(task)!.moduleContextVersion}` : '模块上下文版本状态'}><ContextVersionLabel code={taskDisplay(task)?.moduleContextVersion} state={taskDisplay(task)?.moduleContextVersionState || 'missing'} onRetry={() => void loadTasks()} /></span>
             </div>
             <RelativeTime className={styles.resultTime} value={task.createdAt} />
           </div>
@@ -4264,7 +4407,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               onClick={() => void recheckOriginalTask(task)}>{feedback?.busy ? '正在申请核对' : '核对原任务'}</button>;
             // Local file recovery remains a separate capability; old native tasks get no new PATCH action.
             if (recovery && !task.delivery?.recoveryAvailable) return null;
-            return task.status === 'queued' && task.snapshot?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
+            return task.status === 'queued' && taskDisplay(task)?.imageChannelLabel ? <button type="button" disabled={submitting} onClick={() => void (async () => {
             if (!await confirm('只取消尚未向供应商请求的排队任务并释放原预留；已受理或结果未知的任务不会取消。', { title: '取消排队', confirmLabel: '取消排队' })) return;
             try {
               const response = await fetch('/api/image-studio/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', id: task.id }) });
@@ -4274,7 +4417,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             } catch (cause) { setError(cause instanceof Error ? cause.message : '取消未确认，请刷新原任务'); }
           })()}>取消未受理排队</button> : (waitDisplay?.showRecovery ?? task.delivery?.recoveryAvailable) ? <button type="button" disabled={templateWorkbench && taskReadAction !== 'idle'} onClick={() => void loadTasks()}>{templateWorkbench ? '刷新恢复状态' : '查看原图恢复'}</button> : null;
           }}
-          renderActions={({task}) => task && (isAdmin && task.snapshot?.sourceAvailable || studioTaskHasViewableImage(task)) ? <>{isAdmin && task.snapshot?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={event => { event.stopPropagation(); void copyTaskContext(task, event.currentTarget); }}><ClipboardList size={15} /></button>}
+          renderActions={({task}) => task && (isAdmin && taskDisplay(task)?.sourceAvailable || studioTaskHasViewableImage(task)) ? <>{isAdmin && taskDisplay(task)?.sourceAvailable && <button type="button" className="sd2-loading-surface" data-busy={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} disabled={copyFeedback?.id === task.id && copyFeedback.text === '复制中…'} title="复制文字上下文" aria-label="复制文字上下文" onClick={event => { event.stopPropagation(); void copyTaskContext(task, event.currentTarget); }}><ClipboardList size={15} /></button>}
             {studioTaskHasViewableImage(task) && <button type="button" className={styles.restoreResult} disabled={Boolean(restoreDisabledReason(task))} title={restoreDisabledReason(task) || '恢复设置和风格组，保留当前主图，不生成图片'} aria-label="恢复设置，保留主图" aria-describedby={`studio-restore-${task.id}`} onClick={event => {
               event.stopPropagation();
               void restoreResultSettings(task);

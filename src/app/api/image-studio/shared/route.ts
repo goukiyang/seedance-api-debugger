@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const catalogRevision = params.get('catalogRevision') || undefined;
     if (mode !== null && mode !== 'revision' || [activePresetId, activeModuleId, cursor].some(id => id && id.length > 160)
       || catalogRevision && !/^[a-f0-9]{64}$/.test(catalogRevision)) return NextResponse.json({ error: '共享目录读取参数无效' }, { status: 400, headers });
-    const result = mode === 'revision' ? await sharedStudioRevision(user, activePresetId, activeModuleId) : await listSharedStudioCatalog(user, { cursor, catalogRevision });
+    const result = mode === 'revision' ? await sharedStudioRevision(user, activePresetId, activeModuleId, params.get('protocol') === 'catalog-paged-v2') : await listSharedStudioCatalog(user, { cursor, catalogRevision });
     return NextResponse.json(result, { headers });
   } catch (error) {
     if (error instanceof StudioSharingError) return NextResponse.json({ error: error.message, reasonCode: error.reasonCode }, { status: error.status, headers });

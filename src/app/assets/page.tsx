@@ -1216,6 +1216,7 @@ function AssetsPageContent() {
     setSyncingAssets(true);
     setLoading(true);
     const params = new URLSearchParams({
+      protocol: 'catalog-paged-v2',
       scope,
       type: requestType,
       status,
@@ -1988,6 +1989,7 @@ function AssetsPageContent() {
         setPreviewNavigationMessage('正在读取后续内容…');
         const normalizedKeyword = keyword.trim();
         const pageParams = new URLSearchParams({
+          protocol: 'catalog-paged-v2',
           scope,
           type: requestType,
           status,

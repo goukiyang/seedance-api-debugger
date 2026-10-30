@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/lib/auth/password';
+import { catalogDirectoryWrites } from '../src/lib/catalog-directory-writes';
 
-const prisma = new PrismaClient();
+const prisma = catalogDirectoryWrites(new PrismaClient());
 
 function required(name: string): string {
   const value = process.env[name]?.trim();

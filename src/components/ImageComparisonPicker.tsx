@@ -31,6 +31,7 @@ export function ImageComparisonPicker({ side, candidates, container, anchorRef, 
   const [loading, setLoading] = useState(false), [choosing, setChoosing] = useState(false), [error, setError] = useState(''), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), localInput = useRef<HTMLInputElement>(null);
   const querySequence = useRef(0), selectionSequence = useRef(0);
+  const directoryRevision = useRef({ scope: '', revision: '' });
   const close = useImagePreviewHistoryDismiss(true, dialog, onClose);
   useDialogDismiss({ open: true, dialogRef: dialog, dismissSurfaceRef: backdrop, onDismiss: close });
   useEffect(() => {
@@ -56,7 +57,7 @@ export function ImageComparisonPicker({ side, candidates, container, anchorRef, 
     const sequence = ++querySequence.current, controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLoading(true); setError('');
-      const params = new URLSearchParams({ target: 'workspace', types: 'image', view: prefs.view, scope: prefs.scope, source: prefs.source,
+      const params = new URLSearchParams({ protocol: 'catalog-paged-v2', target: 'workspace', types: 'image', view: prefs.view, scope: prefs.scope, source: prefs.source,
         q: prefs.query, sort: prefs.sort, page: String(page) });
       if (prefs.album) params.set('album', prefs.album);
       if (prefs.project) params.set('project', prefs.project);
@@ -66,10 +67,13 @@ export function ImageComparisonPicker({ side, candidates, container, anchorRef, 
           if (Array.isArray(saved)) keys = saved.filter(key => typeof key === 'string' && /^(asset|reference_image):[a-zA-Z0-9_-]+$/.test(key)).slice(0, 60); } catch { /* Empty recents are safe. */ }
         params.set('keys', keys.join(','));
       }
+      const scopeKey = JSON.stringify([owner, prefs]);
+      if (page > 1 && directoryRevision.current.scope === scopeKey && directoryRevision.current.revision) params.set('directory_revision', directoryRevision.current.revision);
       void fetch(`/api/assets/picker?${params}`, { cache: 'no-store', signal: controller.signal }).then(async response => {
         const data = await readJsonResponse<PickerResponse>(response);
         if (!response.ok) throw new Error('素材读取失败，请重试或重新登录');
         if (sequence !== querySequence.current) return;
+        directoryRevision.current = { scope: scopeKey, revision: data.protocol === 'catalog-paged-v2' ? data.directoryRevision || '' : '' };
         setItems(previous => page === 1 ? data.items : [...previous, ...data.items.filter(item => !previous.some(old => old.identity === item.identity))]);
         setAlbums(data.albums); setHasMore(data.hasMore);
         if (prefs.project && !data.albums.some(album => album.scope === prefs.scope && album.project?.id === prefs.project)) setError('所选项目暂不可用，原筛选已保留。');
