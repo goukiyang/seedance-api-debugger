@@ -24,7 +24,7 @@ import {
   seedanceVideoDurationError,
   type SeedanceVideoModelOption,
 } from './seedance-models';
-import { buildSeedanceDraftContent } from './seedance-draft';
+import { buildSeedanceDraftContent, SeedanceDraftSubmissionError } from './seedance-draft';
 import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
 import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
 import { privateMultiviewFailure } from '../video/multiview-task-privacy';
@@ -579,7 +579,7 @@ export async function createSeedanceDraftUpgradeTask(input: {
   clientRequestId: string;
 }): Promise<ProviderCreateResponse> {
   if (!isApiKeyConfigured()) {
-    throw new Error('API key not configured');
+    throw new SeedanceDraftSubmissionError('API key not configured', 'not_sent');
   }
 
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
@@ -593,38 +593,43 @@ export async function createSeedanceDraftUpgradeTask(input: {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45_000);
-  let response: Response;
   try {
-    response = await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
+    const responseText = await response.text();
+    let data: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(responseText);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid response object');
+      data = parsed as Record<string, unknown>;
+    } catch {
+      throw new SeedanceDraftSubmissionError('Seedance Draft 升级响应无法确认，请查询原请求', 'unknown');
+    }
+    const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
+    if (response.ok && providerTaskId) return { provider_task_id: providerTaskId, raw: data };
+
+    const providerError = data.error && typeof data.error === 'object' && !Array.isArray(data.error)
+      ? data.error as Record<string, unknown> : null;
+    const errorCode = typeof providerError?.code === 'string' ? providerError.code : typeof data.code === 'string' ? data.code : '';
+    const explicitRejection = !providerTaskId && (Boolean(data.error) && [400, 401, 403, 404, 405, 413, 415, 422, 429].includes(response.status)
+      || /^(InvalidParameter|InvalidApiKey|AuthenticationError|Unauthorized|AccessDenied|PermissionDenied|InsufficientBalance|QuotaExceeded|Forbidden|BadRequest)([._]|$)/i.test(errorCode));
+    if (explicitRejection) {
+      throw new SeedanceDraftSubmissionError(normalizeProviderErrorMessage(data.error ?? data.message ?? data)
+        || 'Seedance Draft 升级已被供应商拒绝', 'rejected');
+    }
+    throw new SeedanceDraftSubmissionError('Seedance Draft 升级受理结果待确认，请查询原请求', 'unknown');
   } catch (error) {
-    if (controller.signal.aborted) throw new Error('Seedance Draft 升级请求超时');
-    throw error;
+    if (error instanceof SeedanceDraftSubmissionError) throw error;
+    throw new SeedanceDraftSubmissionError(controller.signal.aborted
+      ? 'Seedance Draft 升级请求超时，请查询原请求'
+      : 'Seedance Draft 升级连接结果待确认，请查询原请求', 'unknown');
   } finally {
     clearTimeout(timeout);
   }
-  const responseText = await response.text();
-  let data: Record<string, unknown> = {};
-  if (responseText.trim()) {
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      throw createNonJsonProviderError(response, responseText);
-    }
-  }
-  if (!response.ok) {
-    const message = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
-    throw new Error(message || `Seedance Draft 升级失败（HTTP ${response.status}）`);
-  }
-  const providerTaskId = pickString(data, ['id', 'provider_task_id', 'providerTaskId', 'task_id']);
-  if (!providerTaskId) {
-    throw new Error('Seedance Draft 升级响应缺少任务 ID');
-  }
-  return { provider_task_id: providerTaskId, raw: data };
 }
 
 // ============================================================================

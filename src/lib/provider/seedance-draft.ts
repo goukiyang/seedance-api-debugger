@@ -3,6 +3,19 @@ import { SEEDANCE_2_5_MODEL_ID } from './seedance-models';
 export const SEEDANCE_DRAFT_CONTRACT_VERSION = 'seedance-draft-v1';
 export const SEEDANCE_DRAFT_RESOLUTION = '480p' as const;
 
+export class SeedanceDraftSubmissionError extends Error {
+  constructor(message: string, public readonly outcome: 'not_sent' | 'rejected' | 'unknown') {
+    super(message);
+  }
+}
+
+export function preserveSeedanceDraftSubmission(input: {
+  sendStarted: boolean; providerTaskId: string | null; error: unknown;
+}) {
+  return Boolean(input.providerTaskId) || (input.sendStarted
+    && !(input.error instanceof SeedanceDraftSubmissionError && input.error.outcome !== 'unknown'));
+}
+
 export type SeedanceDraftContentItem = {
   type: 'draft_task';
   draft_task: {

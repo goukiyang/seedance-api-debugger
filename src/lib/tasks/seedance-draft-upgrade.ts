@@ -29,6 +29,7 @@ import {
 import {
   buildSeedanceDraftUpgradePayload,
   isSeedanceDraftUpgradeEnabled,
+  preserveSeedanceDraftSubmission,
   SEEDANCE_DRAFT_CONTRACT_VERSION,
 } from '@/lib/provider/seedance-draft';
 import { SEEDANCE_2_5_MODEL_ID, isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
@@ -90,11 +91,6 @@ type DraftTaskForUpgrade = {
   provider_draft_task_id: string | null;
   retention_status: string;
 };
-
-function isAmbiguousProviderError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /超时|timeout|timed out|fetch failed|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(message);
-}
 
 function isValidApprovalBase(task: { id: string; video_card_id: string | null; version_role: string }, draft: DraftTaskForUpgrade, videoCardId: string) {
   return task.video_card_id === videoCardId
@@ -298,7 +294,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     select: { id: true, provider_task_id: true, local_status: true, estimated_cost: true, source_draft_task_id: true },
   });
   if (existing) return { ...existing, deduplicated: true, pending_confirmation: existing.local_status === 'submitted' && !existing.provider_task_id };
-  if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('供应商 Draft 升级接口尚未完成核验，暂不能生成 1080p', 503, 'DRAFT_UPGRADE_DISABLED');
+  if (!isSeedanceDraftUpgradeEnabled()) throw new DraftUpgradeError('样片 1080p 升级已关闭，请保留原样片并联系管理员', 503, 'DRAFT_UPGRADE_DISABLED');
   if (!input.resolutionApprovalConfirmed) throw new DraftUpgradeError('1080p 生成需要先确认审批通过', 403, 'RESOLUTION_APPROVAL_REQUIRED');
   if (draft.provider !== 'seedance' || draft.model !== SEEDANCE_2_5_MODEL_ID || !draft.is_draft) {
     throw new DraftUpgradeError('只有 Seedance 2.5 样片 Draft 才能升级到 1080p', 400, 'DRAFT_MODEL_INVALID');
@@ -510,6 +506,8 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
     clientRequestId,
   });
   let providerRequest: Awaited<ReturnType<typeof createProviderApiRequest>> | null = null;
+  let sendStarted = false;
+  let acceptedProviderTaskId: string | null = null;
   try {
     providerRequest = await createProviderApiRequest({
       task,
@@ -522,11 +520,13 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       where: { id: task.id },
       data: { provider_client_request_id: clientRequestId },
     });
+    sendStarted = true;
     const providerResult = await createSeedanceDraftUpgradeTask({
       model: draft.model,
       providerDraftTaskId: draft.provider_draft_task_id,
       clientRequestId,
     });
+    acceptedProviderTaskId = providerResult.provider_task_id;
     task = await prisma.videoTask.update({
       where: { id: task.id },
       data: {
@@ -552,10 +552,12 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
       deduplicated: false,
     };
   } catch (error) {
-    if (providerRequest && isAmbiguousProviderError(error)) {
+    if (preserveSeedanceDraftSubmission({ sendStarted, providerTaskId: acceptedProviderTaskId, error })) {
       try {
         const recovered = await getVideoTaskStatusByClientRequestId(clientRequestId);
-        if (recovered.provider_task_id && recovered.provider_task_id !== clientRequestId) {
+        if (recovered.provider_task_id && recovered.provider_task_id !== clientRequestId
+          && (!acceptedProviderTaskId || recovered.provider_task_id === acceptedProviderTaskId)) {
+          acceptedProviderTaskId = recovered.provider_task_id;
           task = await prisma.videoTask.update({
             where: { id: task.id },
             data: {
@@ -565,7 +567,7 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
               error_message: null,
             },
           });
-          await markProviderApiRequestAccepted({
+          if (providerRequest) await markProviderApiRequestAccepted({
             requestId: providerRequest.id,
             task,
             providerTaskId: recovered.provider_task_id,
@@ -589,12 +591,16 @@ export async function createSeedanceDraftUpgrade(input: DraftUpgradeInput) {
 
       await prisma.videoTask.update({
         where: { id: task.id },
-        data: { error_message: '提交结果待确认，系统会按请求 ID 自动恢复，请勿重复提交。' },
+        data: {
+          ...(acceptedProviderTaskId ? { provider_task_id: acceptedProviderTaskId } : {}),
+          error_message: '提交结果待确认，系统会按原请求 ID 自动恢复，请勿重复提交。',
+        },
       });
+      if (acceptedProviderTaskId) startTaskLocalization(task.id);
       return {
         id: task.id,
         task_id: task.id,
-        provider_task_id: null,
+        provider_task_id: acceptedProviderTaskId,
         source_draft_task_id: draft.id,
         status: 'pending_confirmation',
         estimated_cost: estimatedCost,

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { buildSeedanceDraftContent, buildSeedanceDraftUpgradePayload, seedanceDraftCapability } from '@/lib/provider/seedance-draft';
+import { buildSeedanceDraftContent, buildSeedanceDraftUpgradePayload, seedanceDraftCapability,
+  preserveSeedanceDraftSubmission, SeedanceDraftSubmissionError } from '@/lib/provider/seedance-draft';
 import { calculateEstimatedCost } from '@/lib/pricing';
 import { SEEDANCE_2_0_MODEL_ID, SEEDANCE_2_5_MODEL_ID } from '@/lib/provider/seedance-models';
 
@@ -8,7 +9,14 @@ async function main() {
   const previousUpgradeGate = process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
   delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
   delete process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
-  assert.equal(seedanceDraftCapability().upgrade_enabled, false, 'Draft 升级默认必须关闭');
+  assert.equal(seedanceDraftCapability().create_enabled, true);
+  assert.equal(seedanceDraftCapability().upgrade_enabled, true);
+  process.env.SEEDANCE_DRAFT_CREATE_ENABLED = 'false';
+  process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED = 'false';
+  assert.equal(seedanceDraftCapability().create_enabled, false);
+  assert.equal(seedanceDraftCapability().upgrade_enabled, false);
+  delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
+  delete process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED;
   assert.deepEqual(buildSeedanceDraftContent('provider-draft-123'), [
     { type: 'draft_task', draft_task: { id: 'provider-draft-123' } },
   ]);
@@ -50,7 +58,7 @@ async function main() {
       model: 'dreamina-seedance-2-5-260628',
       ratio: '16:9',
       duration: 5,
-      resolution: '720p',
+      resolution: '480p',
       seed: 42,
       draft: true,
     });
@@ -59,6 +67,23 @@ async function main() {
       providerDraftTaskId: 'provider-draft-123',
       clientRequestId: 'local-formal-task-123',
     });
+    const submit = () => createSeedanceDraftUpgradeTask({ model: SEEDANCE_2_5_MODEL_ID,
+      providerDraftTaskId: 'provider-draft-123', clientRequestId: 'local-formal-task-123' });
+    for (const [body, status, outcome] of [
+      ['not-json', 200, 'unknown'], ['{}', 200, 'unknown'],
+      [JSON.stringify({ error: { code: 'InvalidParameter', message: 'Draft is not ready' } }), 200, 'rejected'],
+      [JSON.stringify({ error: { code: 'InternalError', message: 'temporary failure' } }), 500, 'unknown'],
+    ] as const) {
+      globalThis.fetch = (async () => new Response(body, { status })) as typeof fetch;
+      await assert.rejects(submit, (error: unknown) => error instanceof SeedanceDraftSubmissionError && error.outcome === outcome);
+    }
+    globalThis.fetch = (async () => { throw new DOMException('request aborted', 'AbortError'); }) as typeof fetch;
+    await assert.rejects(submit, (error: unknown) => error instanceof SeedanceDraftSubmissionError && error.outcome === 'unknown');
+    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: 'accepted-task', error: new Error('local registration failed') }), true);
+    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: null, error: new Error('unexpected error after send') }), true);
+    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: false, providerTaskId: null, error: new Error('before send failed') }), false);
+    assert.equal(preserveSeedanceDraftSubmission({ sendStarted: true, providerTaskId: null,
+      error: new SeedanceDraftSubmissionError('explicit refusal', 'rejected') }), false);
   } finally {
     globalThis.fetch = originalFetch;
     if (previousCreateGate === undefined) delete process.env.SEEDANCE_DRAFT_CREATE_ENABLED;
