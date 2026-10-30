@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## MV-RESULT01 当前页结果与历史视频（2026-10-30）
+
+来源为用户本轮明确实施授权，关键词：/multiview、同页播放器、当前真实状态、实扣与报价分离、本人历史视频分页、编辑输入保留。正式根[原单§23.7](../../tasks/todo/2026-10-25-multiview-page-ux.md#237-mv-result01-当前页结果与历史视频2026-10-30)记录本批方案与进展；不把上轮Ego证据用于本批效果验收。旧资料原件保持不变，本轮不新生成、收费或浏览器取证；必要工程和发布记录沿同主题implementation/mv-result01/，当前待完成。
+
 ## MV-VIEW01 已有动作成品播放与详情缺图（2026-10-29）
 
 工程发布补充：0.117.7/4db784f9已于2026-10-30T06:23:42Z上线，[总回执](2026-10-29-multiview-action-fixes/implementation/mv-view01/r02/deployment-result.json)、[完整构建](2026-10-29-multiview-action-fixes/implementation/mv-view01/r02/main-build-success.json)、[公网任务详情资源](2026-10-29-multiview-action-fixes/implementation/mv-view01/r02/public-deployed.json)、[本人Review](2026-10-29-multiview-action-fixes/implementation/mv-view01/self-review.json)及[固定程序恢复](2026-10-29-multiview-action-fixes/implementation/mv-view01/r02/FIXED-RECOVERY.txt)保正式根私有，JSON可解析且主版本/源码/构建一致。恢复6481163b/0.117.6，不回数据。主控Ego37/p1最终结果已回传并写入ego-playback-evidence.json的postDeployment：v0.117.7任务详情视频就绪，canonical play_url可用，无“暂无结果”，显示28.90点；原生全屏预览以Space播放，从running/time0.01765/9帧至ended/time4.064/101帧，error=null。ego-task-detail-playback-fixed.png已由主控查看，Ego finish({keep:[p1]})已完成。费用沿原账本一次28.9点，本轮零新生成、零新增扣费。仅任务详情结果显示与完整播放专项通过；小窗口自动scroll干扰仅为验收范围限制，不定性新Bug，不新增工程，也不冒全部控件/视口已验。最终截图：[ego-task-detail-playback-fixed.png](2026-10-29-multiview-action-fixes/implementation/mv-test01/ego-task-detail-playback-fixed.png)。

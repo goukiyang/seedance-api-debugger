@@ -32,6 +32,7 @@ import { encodeMultiviewPreviewFrame } from './multiview-preview-image';
 import { MultiviewFrameImage } from './MultiviewFrameImage';
 import { MultiviewFrameControls } from './MultiviewFrameControls';
 import { MultiviewGenerationProgress } from './MultiviewGenerationProgress';
+import { MultiviewVideoResults } from './MultiviewVideoResults';
 import type { MultiviewScrubSession } from './multiview-frame-scrub';
 import { createMultiviewOriginalQueue } from './multiview-original-queue';
 import { appliedWorkRecipe, useMultiviewWork } from './useMultiviewWork';
@@ -1252,12 +1253,15 @@ function MultiviewPageContent() {
     {!shareId && <MultiviewGenerationProgress state={generation.progress} taskId={generation.taskId}
       preparing={generation.taskId === taskId && (loading || previewState.loading)}
       previewReady={Boolean(generation.taskId === taskId && visible && validSlots.length > 0)} />}
+    {!shareId && !referenceActive && <MultiviewVideoResults key={`${owner}:${authority}`} owner={owner} authority={authority}
+      active={pageView === 'editor' && sessionReady} currentTaskId={generation.taskId}
+      pendingLabel={generation.phase === 'unknown' ? '提交结果待确认' : generation.phase === 'submitting' ? '正在提交视频任务…' : undefined} />}
     {!shareId && pendingResult && pendingResult.ownerId === owner && pendingResult.taskId !== taskId && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void selectTask(pendingResult.taskId)}>打开新结果</button></div>}
     {!shareId && previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void selectTask(previousTask)}>返回上次结果</button>}
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
     {editingWorkId && !workState.work && <div className={styles.notice} role="status">{workState.loading ? '正在读取指定作品…' : workState.message || '指定作品尚未读取，当前生成设置保留。'}{!workState.loading && <button type="button" onClick={workState.retry}>重新读取作品</button>}</div>}
-    {referenceActive && referenceEditor && referenceInfo && <MultiviewReferenceComposer key={`${referenceScope}:${referenceEditor.workId || referenceEditor.slots.map(slot=>slot.id).join(',')}`} ownerId={owner} authority={authority} taskId={taskId} info={referenceInfo} slots={referenceEditor.slots} mediaBase={referenceEditor.workId ? `/api/video/multiview/works/${referenceEditor.workId}/source` : mediaBase} initialWorkId={referenceEditor.workId} videoDefaults={actionDefaults?.owner === owner ? actionDefaults : undefined} access={shareId ? { kind: 'share', id: shareId } : editingWorkId ? { kind: 'work', id: editingWorkId } : undefined} onWorkBound={id => {currentReferenceWork.current=id;}} onBack={() => {currentReferenceWork.current='';setReferenceEditor(null);const url=new URL(window.location.href);url.searchParams.delete('referenceWorkId');window.history.replaceState(window.history.state,'',url.pathname+url.search);}} />}
+    {referenceActive && referenceEditor && referenceInfo && <MultiviewReferenceComposer active={pageView === 'editor' && sessionReady} key={`${referenceScope}:${referenceEditor.workId || referenceEditor.slots.map(slot=>slot.id).join(',')}`} ownerId={owner} authority={authority} taskId={taskId} info={referenceInfo} slots={referenceEditor.slots} mediaBase={referenceEditor.workId ? `/api/video/multiview/works/${referenceEditor.workId}/source` : mediaBase} initialWorkId={referenceEditor.workId} videoDefaults={actionDefaults?.owner === owner ? actionDefaults : undefined} access={shareId ? { kind: 'share', id: shareId } : editingWorkId ? { kind: 'work', id: editingWorkId } : undefined} onWorkBound={id => {currentReferenceWork.current=id;}} onBack={() => {currentReferenceWork.current='';setReferenceEditor(null);const url=new URL(window.location.href);url.searchParams.delete('referenceWorkId');window.history.replaceState(window.history.state,'',url.pathname+url.search);}} />}
     {!referenceActive && visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={bindResultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><h2>{shared?.title || (workState.work ? workState.title || '未命名作品' : '3D多视图作品')}</h2>
         {workState.work && <button type="button" title="修改作品名称" aria-label="修改作品名称" disabled={workState.busy || workState.pending || Boolean(quickFrame)} onClick={event => {

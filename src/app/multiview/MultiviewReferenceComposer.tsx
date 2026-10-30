@@ -14,7 +14,7 @@ import type { MultiviewInfo, MultiviewSlot } from '@/lib/video/multiview-contrac
 import { MultiviewActionPanel } from './MultiviewActionPanel';
 import styles from './multiview-action.module.css';
 
-type Props = { ownerId: string; authority: string; taskId: string; info: MultiviewInfo; slots: MultiviewSlot[];
+type Props = { active?: boolean; ownerId: string; authority: string; taskId: string; info: MultiviewInfo; slots: MultiviewSlot[];
   mediaBase: string; initialWorkId?: string; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; access?: MultiviewSourceAccess; onWorkBound(id:string):void; onBack(): void };
 type BackgroundState = { stage: string; message: string; priceMessage?: string; resultUrl?: string | null; foreground?: MultiviewReferenceRecipe['foregrounds'][number] | null };
 type Pending = { mutationId: string; workId: string | null; signature: string };
@@ -301,7 +301,7 @@ export function MultiviewReferenceComposer(props: Props) {
         <div className={styles.compact}><button disabled={!work || busy} onClick={()=>void output(true)}><Copy size={14}/>复制图片</button><button disabled={!work || busy} onClick={()=>void output(false)}><Download size={14}/>下载PNG</button><button disabled={!hydrated || busy || blocked || Boolean(pending)} onClick={async()=>{try{const next=await prepareForVideo();const response=await fetch(`/api/video/multiview/works/${next.id}/files/collage/asset`,{headers:headers(),cache:'no-store'});const value=await response.json();if(!response.ok)throw new Error(value.error);setMessage('已保存到我的素材。');}catch(cause){setMessage(cause instanceof Error?cause.message:'素材登记尚未完成。');}}}>保存素材</button></div>
         <div role="status" className={styles.notice}>{pending ? <>保存结果待确认 <button onClick={()=>void queryOriginal()}>查询原保存</button></> : busy || work && ['queued','rendering','waiting_source'].includes(work.status) ? '正在准备拼图…' : work?.status === 'failed' ? <>{work.lastError || '拼图准备失败'}<button onClick={()=>void prepare()}>重新准备</button></> : ''}{message}{blocked && <button onClick={async()=>{try{if(work){const latest=await readWork(work.id);if(!valid())return;setWork(latest);}setBlocked(false);setMessage('已核对最新版本，当前排版保留。');}catch(cause){setMessage(cause instanceof Error?cause.message:'最新版本暂不可读取。');}}}>核对最新并保留排版</button>}</div>
       </div>
-      <MultiviewActionPanel ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} snapshotKey={signature} onPrepare={prepareForVideo} ratio={ratio} activeView={activeView} onView={setActiveView} />
+      <MultiviewActionPanel active={props.active} ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} snapshotKey={signature} onPrepare={prepareForVideo} ratio={ratio} activeView={activeView} onView={setActiveView} />
     </div>
   </section>;
 }

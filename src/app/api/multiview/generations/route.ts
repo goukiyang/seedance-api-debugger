@@ -47,6 +47,8 @@ export async function GET(request: NextRequest) {
     assertInternalOnly(user, '外部账号无权使用3D多视图生成。');
     const expectedOwner = request.headers.get('x-app-session-user');
     if (expectedOwner !== null && expectedOwner !== user.id) return json({ error: '账号已变化，请重新打开本人生成记录。' }, 409);
+    const taskId = request.nextUrl.searchParams.get('taskId');
+    if (taskId !== null && !/^[A-Za-z0-9_-]{1,160}$/.test(taskId)) return json({ error: '视频编号无效，请重新选择。' }, 400);
     const after = cursor(request.nextUrl.searchParams.get('cursor'));
     if (request.nextUrl.searchParams.has('cursor') && !after) return json({ error: '分页位置无效，请刷新生成记录。' }, 400);
     const pageWhere: Prisma.VideoTaskWhereInput = after ? { OR: [
@@ -58,6 +60,7 @@ export async function GET(request: NextRequest) {
         { OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }] },
         privateMultiviewTaskWhere(),
         { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } },
+        ...(taskId ? [{ id: taskId }] : []),
         pageWhere,
       ] },
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
@@ -98,6 +101,7 @@ export async function GET(request: NextRequest) {
         ? delivery.key as keyof typeof deliveryLabels : null;
       return {
         id: task.id,
+        title: safe.source_label === '同步动作视频' ? '动作视频' : '旋转视频',
         status: phase(safe.local_status),
         deliveryStage: deliveryKey ? { key: deliveryKey, label: deliveryLabels[deliveryKey] } : null,
         provider: typeof safe.provider === 'string' ? safe.provider : null,

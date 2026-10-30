@@ -1,4 +1,6 @@
 .referenceWorkspace { margin: 24px 0; padding-top: 20px; border-top: 1px solid var(--border-color); }
+.resultRow { grid-column: 1 / -1; grid-row: 1; min-width: 0; }
+.videoDetails { grid-column: 1 / -1; }
 .topbar,.compact { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px; }
 .topbar { justify-content:space-between; }
 .continuous { display:grid;grid-template-columns:minmax(0,2.2fr) minmax(300px,1fr);align-items:start;gap:28px; }
