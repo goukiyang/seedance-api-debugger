@@ -177,7 +177,7 @@ export function ComposerActionBar({
       const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0, width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
       const panelWidth = Math.min(360, width - 16), below = top + height - anchor.bottom - 14, above = anchor.top - top - 14;
       const maxHeight = Math.min(420, Math.max(below, above)), panelHeight = Math.min(modelPanel.current.scrollHeight, maxHeight);
-      setModelPosition({ position: 'fixed', zIndex: 2147000000, width: panelWidth, maxHeight, overflowY: 'auto',
+      setModelPosition({ position: 'fixed', bottom: 'auto', zIndex: 2147000000, width: panelWidth, maxHeight, overflowY: 'auto',
         left: Math.max(left + 8, Math.min(anchor.left, left + width - panelWidth - 8)),
         top: below >= panelHeight ? anchor.bottom + 6 : Math.max(top + 8, anchor.top - panelHeight - 6) });
     };
