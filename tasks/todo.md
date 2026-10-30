@@ -5,7 +5,9 @@
 | ID | Task | Completion criteria | Status |
 |---|---|---|---|
 | PG-UX01 | Prompt group management UX | Direct selected-group editing, menu deletion, explicit save/use behavior, retained list position and prompt-first editing | Engineering delivered; user manual acceptance pending |
-| PG-UX02 | Build and protected deployment | Focused push, Linux build, live artifact checks and program recovery retained | Followup deployed v0.118.2; manual functional acceptance pending |
+| PG-UX02 | Build and protected deployment | Focused push, Linux build, live artifact checks and program recovery retained | Login continuity followup deployed v0.118.3; manual functional acceptance pending |
+
+Login continuity followup: v0.118.3 / `f7607bfd851179d072b13e668a4d9d1034f22120`, BUILD `VowiMWSGOMJW71E3YWmnm`, deployed 2026-10-30T10:41:43Z. Fresh verified Feishu proofs share the existing seven-day site cookie lifetime. Existing signed expiry is never renewed or backfilled; ordinary password/CLI sessions still require one real identity verification. Logout clears both cookies. Nine real-function synthetic authentication checks, full Next/types/lint, six startup checks, seven services and public artifact proof passed. No real credentials, browser login, generation or business save/delete tests. Recovery retains v0.118.2 program only and its original eight-hour verification behavior. The reporting account's exact missing/expired proof condition remains unknown. Earlier creation-entry and first-batch records follow.
 
 Creation-entry followup: v0.118.2 / `8d3689550278551b15263464f57b022120ef37b9`, BUILD `7An3u29yFMN2eCtICkRsM`, deployed 2026-10-30T09:39:27Z. The new-group action stays in the fixed dialog header across permission states. Actual component checks cover five synthetic states; full Linux Next, six startup checks, seven services and public changed-chunk proof passed. Existing authorization and identity verification remain enforced. The reporting user's exact capability reason is not yet observed. Recovery retains v0.118.1 program only. No browser, generation or real business write tests. The earlier first-batch record follows.
 
