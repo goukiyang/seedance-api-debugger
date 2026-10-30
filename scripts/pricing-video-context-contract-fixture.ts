@@ -414,7 +414,19 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       });
     } finally { await db.videoStudioTemplate.update({ where: { id: ids.template }, data: { owner_user_id: actorA.id, updated_at: seed.template.updated_at } }); }
     evidence.push('Real project membership, card ownership/status, private template and saved asset checks reject revoked access, missing slots and forged roles instead of returning none.');
-    equal(await protectedProjection(db), baseline, 'After controlled negative-case seed changes are restored, every protected row and all business counts match the committed baseline');
+    const finalProjection = await protectedProjection(db);
+    // Fixture-owned revocation/restoration writes rotate these markers. Every resolver call above still compares all rows unchanged.
+    for (const key of ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets']) {
+      const before = baseline.settings.find(row => row.key === key)!;
+      const after = finalProjection.settings.find(row => row.key === key)!;
+      ok(Boolean(before && after), 'Catalog marker identity remains present');
+      const value = JSON.parse(after.value_json);
+      equal(value.version, 1, 'Catalog revision retains its version');
+      ok(/^[a-f0-9]{64}$/.test(value.revision) && after.value_json !== before.value_json,
+        'Controlled membership and asset changes rotate the catalog revision');
+      after.updated_at = before.updated_at; after.value_json = before.value_json;
+    }
+    equal(finalProjection, baseline, 'After controlled negative-case seed changes are restored, every business row and count match; only the two verified directory revisions rotate');
     equal(fileProjection(runtime), mediaBaseline, 'Resolver and credentials never upload, rewrite or generate fixture media');
     evidence.push('All business-table counts plus existing settings/tasks/wallets/buckets/ledgers/budgets/workspaces/approvals/drafts/runs/assets/projects/card/template projections are compared before and after each read-only group.');
     evidence.push('Media evidence is private synthetic readable bytes only, not decoding, generation, supplier acceptance or fee evidence.');

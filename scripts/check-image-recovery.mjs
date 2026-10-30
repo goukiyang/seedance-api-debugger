@@ -223,6 +223,7 @@ const publicUsageFixtures = [
       'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
       'src/lib/image-studio/batches.ts', 'scripts/studio-restored-settings-engineering.ts',
       'src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts',
+      'src/lib/image-studio/style-history.ts',
     ] },
   { file: 'scripts/studio-definition-rebase-engineering.ts', schema: 'studio-definition-rebase-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [

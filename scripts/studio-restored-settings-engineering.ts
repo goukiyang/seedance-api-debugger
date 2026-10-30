@@ -11,6 +11,7 @@ import * as restoredContract from '../src/lib/image-studio/restored-settings';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
+import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
 // It never imports the application database, provider, worker, or HTTP modules.
@@ -25,14 +26,15 @@ async function main() {
     'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
-  files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts');
+  files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts', 'src/lib/image-studio/style-history.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     return names.map(name => {
       const node = source.statements.find(statement => (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
-        && statement.name?.text === name);
+        ? statement.name?.text === name : ts.isVariableStatement(statement)
+          && statement.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === name));
       assert.ok(node, `Missing production declaration ${file}:${name}`);
       return node.getText(source);
     }).join('\n');
@@ -121,8 +123,9 @@ async function main() {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
-    ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice,
+    ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
+    enqueueFrozenImageFeishuNotification: async (_tx: unknown, _task: unknown, choice: unknown) => { assert.equal(choice, null); },
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
@@ -176,7 +179,8 @@ async function main() {
       'studioSharedGenerationSource', 'normalizeSharedAuthorDraftForUse', 'safeImageChannelSnapshot', 'parseHistoricalStyleGroups',
       'parseStudioTaskDraft', 'parseStudioRequest', 'parseHistoricalFixedReferences', 'submitStudioBatch', 'publicStudioSnapshot']),
     declarations('src/lib/image-studio/billing-quote-service.ts', ['isManagedChannelId', 'isPinnedChannelId', 'imageChannelFromPreparedTask',
-      'publicImageChannel', 'assertImageChannelPairMatches', 'resolveQuoteSettings', 'prepareImageBillingQuote']),
+      'publicImageChannel', 'assertImageChannelPairMatches', 'resolveQuoteSettings', 'quoteFailureStages',
+      'prepareImageBillingQuoteOnce', 'prepareImageBillingQuote']),
     declarations('src/lib/image-studio/batch-billing-quote.ts', ['sameImageChannel', 'canonicalImageChannel', 'batchQuoteFingerprint', 'quoteStudioBatch']),
   ].join('\n');
   vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });

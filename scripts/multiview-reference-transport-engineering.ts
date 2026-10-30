@@ -71,7 +71,15 @@ async function main() {
   const transportCall = transportCalls[0];
   assert.ok(transportCall.pos > branch.pos && transportCall.end < branch.end);
   assert.equal(transportCall.arguments.length, 4);
-  assert.ok(identifier(transportCall.arguments[1], 'generationReferenceImages'));
+  const authorizedReferences = transportCall.arguments[1];
+  assert.ok(ts.isArrayLiteralExpression(authorizedReferences));
+  const personalReference = {}, actionReference = {};
+  for (const actionImageForTransport of [null, actionReference]) {
+    const references = runInNewContext(`(${authorizedReferences.getText(ast)})`, {
+      generationReferenceImages: [personalReference], actionImageForTransport,
+    });
+    assert.deepEqual(Array.from(references), actionImageForTransport ? [personalReference, actionReference] : [personalReference]);
+  }
   assert.ok(identifier(transportCall.arguments[2], 'undefined'));
   const privateReferences = transportCall.arguments[3];
   assert.ok(ts.isConditionalExpression(privateReferences) && identifier(privateReferences.condition, 'multiviewSystemReference'));
@@ -136,12 +144,13 @@ async function main() {
   globalThis.fetch = async () => { networkCalls++; throw new Error('Network prohibited in original-transport fixture'); };
   const context: Record<string, any> = {
     requestedProvider: 'seedance', multiviewGeneration: { presetId: 'multiview-360' }, body: {},
-    multiviewSystemReference: null,
+    multiviewSystemReference: null, multiviewAction: null, actionImageForTransport: null,
     cleanSourceMetadata: (value: unknown) => value || {}, requestSource: { source_metadata: {} },
     providerInput: input, requestCallbackUrl: undefined, generationReferenceImages: [{ url, asset }],
     seedanceLocalReferenceTransport: async (...args: Parameters<typeof seedanceLocalReferenceTransport>) => {
       transportCount++;
-      assert.equal(args[1], context.generationReferenceImages);
+      assert.deepEqual(Array.from(args[1]), context.actionImageForTransport
+        ? [...context.generationReferenceImages, context.actionImageForTransport] : context.generationReferenceImages);
       assert.equal(args[2], undefined);
       assert.equal(args[3]?.length, context.multiviewSystemReference ? 1 : 0);
       if (context.multiviewSystemReference) {

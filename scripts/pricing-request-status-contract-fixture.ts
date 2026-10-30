@@ -224,7 +224,7 @@ export async function runPricingRequestStatusContractFixture(): Promise<FixtureR
     for (const name of ['VideoTask', 'CreditAccount', 'CreditBucket', 'CreditLedger', 'ProjectBudgetAccount', 'ProjectBudgetLedger']) {
       equal(final[name], seeded[name], `${name}: all original task and financial values, including cent-level freezes, remain unchanged across GET cases`);
     }
-    equal(final.PlatformSetting.rows, 1, 'No GET creates a durable request receipt or an extra setting');
+    equal(final.PlatformSetting.rows, seeded.PlatformSetting.rows, 'No GET creates a durable request receipt or an extra setting');
     evidence.push('G30/6: every response is private,no-store and varies on Authorization; each GET compares hashes of every real business-table row before/after, including settings/receipts and pre-existing wallet/ledger freezes.');
     evidence.push('Boundary: direct real GET only, no HTTP listener, identity/Prisma/GET mocks, POST invocation, web-session acceptance, provider request or generation.');
     ok(assertions > 0, 'The awaited fixture completed actual assertions');
