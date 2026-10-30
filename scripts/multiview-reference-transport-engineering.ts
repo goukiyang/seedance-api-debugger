@@ -1,3 +1,4 @@
+import './server-runtime.cjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -50,18 +51,41 @@ async function main() {
     assert.ok(ts.isSpreadAssignment(spread) && identifier(spread.expression, name));
   }
   assert.ok(ts.isArrowFunction(createCall.arguments[1]), 'Preserve the diagnostic callback');
-  assert.ok(ts.isObjectLiteralExpression(createOptions)); assert.equal(createOptions.properties.length, 1);
+  assert.ok(ts.isObjectLiteralExpression(createOptions));
   const sensitiveRecipe = property(createOptions, 'sensitiveRecipe');
   assert.ok(ts.isCallExpression(sensitiveRecipe) && identifier(sensitiveRecipe.expression, 'Boolean')
-    && sensitiveRecipe.arguments.length === 1 && identifier(sensitiveRecipe.arguments[0], 'multiviewGeneration'),
+    && sensitiveRecipe.arguments.length === 1,
   'Private provider logging must follow the validated multiview state, not a browser field');
+  for (const scenario of [
+    { groupRefs: [], multiviewGeneration: null, multiviewAction: null, sensitive: false },
+    { groupRefs: [], multiviewGeneration: {}, multiviewAction: null, sensitive: true },
+    { groupRefs: ['group'], multiviewGeneration: null, multiviewAction: null, sensitive: true, origins: ['group-origin'] },
+    { groupRefs: [], multiviewGeneration: null, multiviewAction: { action: { origins: ['action-origin'] } }, sensitive: true, origins: ['action-origin'] },
+    { groupRefs: ['group'], multiviewGeneration: null, multiviewAction: { action: { origins: ['action-origin'] } }, sensitive: true, origins: ['group-origin'] },
+  ]) {
+    const options = runInNewContext(`(${createOptions.getText(ast)})`, {
+      ...scenario, videoGroups: { origins: ['group-origin'] },
+      body: { sensitiveRecipe: true, privateOrigins: ['forged'] },
+    });
+    assert.equal(options.sensitiveRecipe, scenario.sensitive);
+    assert.deepEqual(options.privateOrigins ? Array.from(options.privateOrigins) : undefined, scenario.origins);
+  }
 
   const transportCalls = calls.filter(call => identifier(call.expression, 'seedanceLocalReferenceTransport'));
   assert.equal(transportCalls.length, 1);
   const transportCall = transportCalls[0];
   assert.ok(transportCall.pos > branch.pos && transportCall.end < branch.end);
   assert.equal(transportCall.arguments.length, 4);
-  assert.ok(identifier(transportCall.arguments[1], 'generationReferenceImages'));
+  const transportReferences = transportCall.arguments[1];
+  assert.ok(ts.isArrayLiteralExpression(transportReferences) && transportReferences.elements.length === 2);
+  const personalSpread = transportReferences.elements[0], actionSpread = transportReferences.elements[1];
+  assert.ok(ts.isSpreadElement(personalSpread) && identifier(personalSpread.expression, 'generationReferenceImages'));
+  assert.ok(ts.isSpreadElement(actionSpread) && ts.isParenthesizedExpression(actionSpread.expression));
+  const actionReferences = actionSpread.expression.expression;
+  assert.ok(ts.isConditionalExpression(actionReferences) && identifier(actionReferences.condition, 'actionImageForTransport'));
+  assert.ok(ts.isArrayLiteralExpression(actionReferences.whenTrue) && actionReferences.whenTrue.elements.length === 1
+    && identifier(actionReferences.whenTrue.elements[0], 'actionImageForTransport'));
+  assert.ok(ts.isArrayLiteralExpression(actionReferences.whenFalse) && actionReferences.whenFalse.elements.length === 0);
   assert.ok(identifier(transportCall.arguments[2], 'undefined'));
   const privateReferences = transportCall.arguments[3];
   assert.ok(ts.isConditionalExpression(privateReferences) && identifier(privateReferences.condition, 'multiviewSystemReference'));
@@ -126,12 +150,13 @@ async function main() {
   globalThis.fetch = async () => { networkCalls++; throw new Error('Network prohibited in original-transport fixture'); };
   const context: Record<string, any> = {
     requestedProvider: 'seedance', multiviewGeneration: { presetId: 'multiview-360' }, body: {},
-    multiviewSystemReference: null,
+    multiviewSystemReference: null, multiviewAction: null, actionImageForTransport: null,
     cleanSourceMetadata: (value: unknown) => value || {}, requestSource: { source_metadata: {} },
     providerInput: input, requestCallbackUrl: undefined, generationReferenceImages: [{ url, asset }],
     seedanceLocalReferenceTransport: async (...args: Parameters<typeof seedanceLocalReferenceTransport>) => {
       transportCount++;
-      assert.equal(args[1], context.generationReferenceImages);
+      assert.deepEqual(Array.from(args[1] || []), [...context.generationReferenceImages,
+        ...(context.actionImageForTransport ? [context.actionImageForTransport] : [])]);
       assert.equal(args[2], undefined);
       assert.equal(args[3]?.length, context.multiviewSystemReference ? 1 : 0);
       if (context.multiviewSystemReference) {

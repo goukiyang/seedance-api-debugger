@@ -9,6 +9,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as restoredContract from '../src/lib/image-studio/restored-settings';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
+import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
+import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
@@ -20,6 +22,8 @@ async function main() {
   assert.ok(destination.startsWith(path.join(root, '.role-tests') + path.sep));
   const files = ['src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
     'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts', 'src/lib/image-studio/skills.ts',
+    'src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts',
+    'src/lib/image-studio/style-history.ts',
     'src/lib/image-studio/private-storage.server.ts', 'src/lib/security/private-prompts.server.ts',
     'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
@@ -119,14 +123,21 @@ async function main() {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
-    ...storageExports, ...privateFields, ...privatePrompts,
+    ...storageExports, ...privateFields, ...privatePrompts, historicalStudioStyles,
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
     prisma, parseUsageProjectId: (value: unknown) => value, creditCents: (value: number) => Math.round(value * 100),
     addCredits: (left: number, right: number) => left + right, sumCredits: (values: number[]) => values.reduce((a, b) => a + b, 0),
     parseSharedStudioPersonalOverrides: (value: unknown) => plain(value), parseEvolution: () => undefined,
-    normalizeStudioRatio: (value: string) => value, parseImageQualityRouteSnapshot: () => null,
+    normalizeStudioRatio: (value: string) => value, parseImageQualityRouteSnapshot: () => null, normalizeImageFeishuChoice,
+    freezeImageFeishuChoice: async (client: unknown, actor: string, choice: unknown) => {
+      assert.equal(client, tx); assert.equal(actor, owner); assert.equal(choice, undefined); return null;
+    },
+    enqueueFrozenImageFeishuNotification: async (client: unknown, _task: unknown, choice: unknown) => {
+      assert.equal(client, tx); assert.equal(choice, null);
+    },
+    quoteFailureStages: new WeakMap<object, string>(),
     defaultStudioModuleId: () => 'synthetic-default-module', validStudioModuleId: (id: string) => id === moduleId,
     getImageStudioSettings: async () => settings, withContextVersionRetry: (run: () => unknown) => run(),
     assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {}, canUseCompanyTemplates: () => true,
@@ -173,7 +184,7 @@ async function main() {
       'studioSharedGenerationSource', 'normalizeSharedAuthorDraftForUse', 'safeImageChannelSnapshot', 'parseHistoricalStyleGroups',
       'parseStudioTaskDraft', 'parseStudioRequest', 'parseHistoricalFixedReferences', 'submitStudioBatch', 'publicStudioSnapshot']),
     declarations('src/lib/image-studio/billing-quote-service.ts', ['isManagedChannelId', 'isPinnedChannelId', 'imageChannelFromPreparedTask',
-      'publicImageChannel', 'assertImageChannelPairMatches', 'resolveQuoteSettings', 'prepareImageBillingQuote']),
+      'publicImageChannel', 'assertImageChannelPairMatches', 'resolveQuoteSettings', 'prepareImageBillingQuote', 'prepareImageBillingQuoteOnce']),
     declarations('src/lib/image-studio/batch-billing-quote.ts', ['sameImageChannel', 'canonicalImageChannel', 'batchQuoteFingerprint', 'quoteStudioBatch']),
   ].join('\n');
   vm.createContext(sandbox, { codeGeneration: { strings: false, wasm: false } });
