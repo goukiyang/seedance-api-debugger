@@ -5,7 +5,9 @@
 | ID | Task | Completion criteria | Status |
 |---|---|---|---|
 | PG-UX01 | Prompt group management UX | Direct selected-group editing, menu deletion, explicit save/use behavior, retained list position and prompt-first editing | Engineering delivered; user manual acceptance pending |
-| PG-UX02 | Build and protected deployment | Focused push, Linux build, live artifact checks and program recovery retained | Deployed v0.118.1; manual functional acceptance pending |
+| PG-UX02 | Build and protected deployment | Focused push, Linux build, live artifact checks and program recovery retained | Followup deployed v0.118.2; manual functional acceptance pending |
+
+Creation-entry followup: v0.118.2 / `8d3689550278551b15263464f57b022120ef37b9`, BUILD `7An3u29yFMN2eCtICkRsM`, deployed 2026-10-30T09:39:27Z. The new-group action stays in the fixed dialog header across permission states. Actual component checks cover five synthetic states; full Linux Next, six startup checks, seven services and public changed-chunk proof passed. Existing authorization and identity verification remain enforced. The reporting user's exact capability reason is not yet observed. Recovery retains v0.118.1 program only. No browser, generation or real business write tests. The earlier first-batch record follows.
 
 Application source `359760ed31d3d5bef45d759a0777a5888ee69c13`, BUILD `37db3I5R0EPvrNvLnXnHh`, deployed 2026-10-30T09:13:44Z. Full Next build includes types and lint; six existing startup checks, seven services and public generate/prompt-group chunks match the candidate. Existing v0.118.0 program retained for recovery. No schema, authorization, billing or historical-data changes. No browser, paid generation, real business save/delete tests or independent review. Full private task and evidence remain in the formal project records.
 
