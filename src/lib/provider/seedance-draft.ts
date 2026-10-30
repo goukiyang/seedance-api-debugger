@@ -10,11 +10,11 @@ export type SeedanceDraftContentItem = {
 };
 
 export function isSeedanceDraftCreateEnabled() {
-  return process.env.SEEDANCE_DRAFT_CREATE_ENABLED === 'true';
+  return false;
 }
 
 export function isSeedanceDraftUpgradeEnabled() {
-  return process.env.SEEDANCE_DRAFT_UPGRADE_ENABLED === 'true';
+  return false;
 }
 
 export function canCreateSeedanceDraft(model: string) {
