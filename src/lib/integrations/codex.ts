@@ -4,6 +4,7 @@ import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { normalizeSeedanceEditPilot, type SeedanceEditPilot } from '@/lib/provider/seedance-video-edit';
+import { CreationError } from '@/lib/creation/contract';
 
 export const CODEX_VIDEO_SOURCE_TYPE = 'codex_api';
 export const CODEX_VIDEO_API_SETTING_KEY = 'codex_video_api_v1';
@@ -426,4 +427,20 @@ export async function codexVideoApiStatus() {
       status: linkedUser.status,
     } : null,
   };
+}
+
+// The existing authenticated Codex create operation uses the same preparation
+// and acceptance contract as the website; it does not need a website cookie.
+export async function prepareCodexVideoCreation(user: SessionUser, body: Record<string, unknown>) {
+  if (body.creation_contract_version !== 2 || body.intent_id !== undefined) return body;
+  const input = { ...body, action: body.action || 'generate', entry: body.entry || 'ordinary' };
+  const { prepareVideoCreationIntent } = await import('@/lib/creation/intents');
+  const intent = await prepareVideoCreationIntent(user, { ...input, request_id: body.idempotency_key });
+  if (!intent.accepted_task_id && !intent.availability?.canSubmit) {
+    const reason = intent.availability?.reasons[0];
+    throw new CreationError(reason?.message || '原生成准备尚不可提交，请核对原请求', 409,
+      reason?.code || 'creation_not_ready', reason?.field || 'creation', reason?.action || 'query_original');
+  }
+  return { ...input, intent_id: intent.id, intent_revision: intent.revision,
+    ...(intent.quote?.pricing_quote_token ? { pricing_quote_token: intent.quote.pricing_quote_token } : {}) };
 }

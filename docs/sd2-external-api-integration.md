@@ -521,15 +521,22 @@ Draft 流程是“先确认样片，再生成正式片”。按 [Seedance 2.5 �
 POST /api/codex/video/draft-upgrade
 ```
 
-请求示例：
+现行生成协议使用 `creation_contract_version: 2`。先用同一 Bearer token 请求 `GET /api/tasks/<本地DraftID>/draft-upgrade`，保留返回的 `creation_input` 和报价，再提交：
 
-```json
-{
-  "draft_task_id": "sd2_local_draft_task_id",
-  "resolution_approval_confirmed": true,
-  "idempotency_key": "draft-upgrade-sd2_local_draft_task_id"
-}
+```js
+const body = {
+  ...quote.creation_input,
+  creation_contract_version: 2,
+  draft_task_id: localDraftId,
+  resolution_approval_confirmed: true,
+  idempotency_key: `draft-upgrade:${localDraftId}`,
+  pricing_revision: quote.pricing_revision,
+  pricing_quote_token: quote.pricing_quote_token,
+  max_estimated_cost: quote.estimatedCost,
+};
 ```
+
+Codex 创建和升级入口会在 v2 请求缺少 `intent_id` 时，使用已配置普通账号和原 `idempotency_key` 调用网页同一套生成准备服务，再交原受理流程；不需要网页 Cookie。价格修订、最高费用、审批和最终内容一致性校验均保留，准备未就绪不会调用供应商。已传入的准备记录不会被替换；旧协议仍沿原视频卡流程。创建480p样片同样先对完整参数报价，再携带 `creation_contract_version: 2`、保存项目、稳定请求号及该报价提交。
 
 接口会校验 Draft 所属项目、视频卡、Seedance 2.5 模型、完成状态和 1080p 审批，并让正式任务继承样片内容。Provider 第二次请求的 `content` 必须仅为 `[{"type":"draft_task","draft_task":{"id":"<provider_draft_task_id>"}}]`，分辨率为 `1080p`；保留现有请求追踪封装，不接收或重复发送 prompt、素材、比例、时长、seed、音频、水印、尾帧等生成参数。
 
