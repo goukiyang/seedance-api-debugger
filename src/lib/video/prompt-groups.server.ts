@@ -52,7 +52,7 @@ export function videoPromptGroupCreateState(user: SessionUser) {
   try {
     const capability = privatePromptCapabilities(user, origins({ id: 'new', ownerId: user.id }));
     return { canCreate: capability.canEditPrivatePrompt,
-      createReason: capability.canEditPrivatePrompt ? '' : '请先通过飞书验证创作者身份，再新建提示词组',
+      createReason: capability.canEditPrivatePrompt ? '' : '本站已登录；新建需确认一次飞书创作者身份',
       requiresIdentityVerification: capability.requiresIdentityVerification };
   } catch { return { canCreate: false, createReason: '暂时无法确认新建权限，请刷新重试或联系管理员' }; }
 }

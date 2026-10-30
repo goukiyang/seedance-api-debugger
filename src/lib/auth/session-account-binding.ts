@@ -2,6 +2,9 @@ import crypto from 'crypto';
 import { hasInternalEmailAuthorization, type AccountScopedUser } from '@/lib/access/external-role';
 import { hasSessionPasswordBinding } from './password';
 
+// One fixed lifetime for the site cookie and a fresh verified Feishu identity.
+export const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+
 export type SessionAccount = AccountScopedUser & {
   id: string;
   password_hash: string;

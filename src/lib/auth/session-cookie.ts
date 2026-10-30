@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { SESSION_COOKIE } from './session';
 
-export const SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+import { SESSION_COOKIE_MAX_AGE } from './session-account-binding';
+export { SESSION_COOKIE_MAX_AGE } from './session-account-binding';
 
 export function setSessionCookie(response: NextResponse, token: string) {
   response.cookies.set(SESSION_COOKIE, token, {

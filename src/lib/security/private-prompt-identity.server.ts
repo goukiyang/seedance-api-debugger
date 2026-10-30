@@ -1,9 +1,11 @@
 import 'server-only';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { SESSION_COOKIE_MAX_AGE } from '@/lib/auth/session-account-binding';
 import { assertPrivateOrigins, privatePromptPolicy, type PrivateOrigin } from './private-prompts.server';
 
 export const PRIVATE_IDENTITY_COOKIE = 'private_prompt_identity';
-export const PRIVATE_IDENTITY_SECONDS = 8 * 60 * 60;
+// Only a fresh verified callback uses this lifetime; old proofs keep their signed expiry.
+export const PRIVATE_IDENTITY_SECONDS = SESSION_COOKIE_MAX_AGE;
 type IdentityProof = { version: 1; authority: 'author' | 'administrator'; userId: string; tenant: string; subject: string; session: string; issuedAt: number; expiresAt: number };
 type Principal = { id: string; role?: string };
 const verified = new WeakMap<object, IdentityProof>();
