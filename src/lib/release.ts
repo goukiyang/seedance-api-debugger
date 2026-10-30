@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '提示词组管理', outline: [
-  '已选提示词组可直接编辑，更多菜单可删除',
-  '保存与本次选用更清楚，编辑后保留列表位置',
+const notice = { title: '新建入口常显', outline: [
+  '提示词组新建入口固定显示，不随列表滚动消失',
+  '需要身份验证或暂不可新建时，就近显示原因和处理入口',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

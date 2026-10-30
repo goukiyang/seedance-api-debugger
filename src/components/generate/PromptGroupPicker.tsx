@@ -37,8 +37,8 @@ async function read(url: string, options?: RequestInit) {
   if (!response.ok) throw Object.assign(new Error(data.error || '读取尚未完成，请重试'), { status: response.status });
   return data;
 }
-function Modal({ open, title, children, footer, onClose, narrow = false, scrollRef, onScroll }: {
-  open: boolean; title: string; children: ReactNode; footer?: ReactNode; onClose: () => void; narrow?: boolean;
+function Modal({ open, title, children, footer, headerActions, onClose, narrow = false, scrollRef, onScroll }: {
+  open: boolean; title: string; children: ReactNode; footer?: ReactNode; headerActions?: ReactNode; onClose: () => void; narrow?: boolean;
   scrollRef?: RefObject<HTMLDivElement>; onScroll?: UIEventHandler<HTMLDivElement>;
 }) {
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null);
@@ -46,7 +46,7 @@ function Modal({ open, title, children, footer, onClose, narrow = false, scrollR
   if (!open || typeof document === 'undefined') return null;
   return createPortal(<div ref={backdrop} className={styles.overlay}><div ref={dialog} className={`${styles.panel} ${narrow ? styles.narrow : ''}`}
     role="dialog" aria-modal="true" aria-label={title}>
-    <header className={styles.header}><h2>{title}</h2><button type="button" className={styles.icon} title="关闭" aria-label="关闭" onClick={onClose}><X size={20} /></button></header>
+    <header className={styles.header}><h2>{title}</h2>{headerActions}<button type="button" className={styles.icon} title="关闭" aria-label="关闭" onClick={onClose}><X size={20} /></button></header>
     <div ref={scrollRef} onScroll={onScroll} className={styles.scroll}>{children}</div>{footer && <footer className={styles.footer}>{footer}</footer>}
   </div></div>, document.body);
 }
@@ -281,6 +281,7 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
   const visibleOpen = open && !sessionChanged && Boolean(user?.id);
   const [query, setQuery] = useState(''), [scope, setScope] = useState('all'), [pages, setPages] = useState<string[]>(['']), [next, setNext] = useState<string | null>(null);
   const [selectedOnly, setSelectedOnly] = useState(false), [canCreate, setCanCreate] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState('');
+  const [capabilityReady, setCapabilityReady] = useState(false);
   const [createReason, setCreateReason] = useState(''), [needsIdentity, setNeedsIdentity] = useState(false), [located, setLocated] = useState<Group | null>(null);
   const [refresh, setRefresh] = useState(0), [detail, setDetail] = useState<Group | null>(null), [profile, setProfile] = useState<Group | null>(null), [editor, setEditor] = useState<Group | null>(null);
   const preferencesKey = `sd2:video-group-picker:v1:${user?.id || 'anonymous'}`;
@@ -325,11 +326,11 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
   const closeEditor = () => { setEditor(null); };
   useEffect(() => {
     if (!open || !user?.id || sessionChanged || preferencesReady !== preferencesKey) return;
-    const controller = new AbortController(); setLoading(true); setError('');
+    const controller = new AbortController(); setLoading(true); setCapabilityReady(false); setError('');
     const search = new URLSearchParams({ query, scope, cursor: pages[pages.length - 1] });
     void read(`${api}?${search}`, { signal: controller.signal }).then(data => {
       if (controller.signal.aborted) return;
-      setGroups(data.groups); setNext(data.nextCursor); setCanCreate(data.canCreate); setCreateReason(data.createReason || ''); setNeedsIdentity(data.requiresIdentityVerification === true);
+      setGroups(data.groups); setNext(data.nextCursor); setCanCreate(data.canCreate === true); setCapabilityReady(true); setCreateReason(data.createReason || ''); setNeedsIdentity(data.requiresIdentityVerification === true);
       setSelection(current => current.map(item => data.groups.find((g: Group) => g.groupId === item.groupId && g.versionId === item.versionId) || item));
     }).catch(cause => { if (!controller.signal.aborted) setError(cause.message); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -365,7 +366,14 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
   };
   const visible = selectedOnly ? selection : located ? [located, ...groups.filter(item => item.groupId !== located.groupId)] : groups;
   const closePicker = () => { savedSequence.current++; rememberPosition(); onClose(); };
-  return <><Modal open={visibleOpen && !editor && !detail && !profile} title="选择提示词组" onClose={closePicker} scrollRef={listBody} onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; rememberPosition(); }} footer={<>
+  return <><Modal open={visibleOpen && !editor && !detail && !profile} title="选择提示词组" onClose={closePicker} headerActions={<div className={styles.createActions}>
+    <button type="button" className={styles.button} disabled={loading || !capabilityReady || !canCreate}
+      title={loading ? '正在读取新建权限' : !capabilityReady ? '新建权限尚未确认，请重试' : canCreate ? '新建提示词组' : createReason}
+      onClick={() => { const id = crypto.randomUUID(); openEditor({ groupId: id, versionId: id }); }}><Plus size={16} />新建</button>
+    {loading ? <span className={styles.meta} role="status">正在读取权限…</span>
+      : !capabilityReady ? <button type="button" className={styles.plain} onClick={() => setRefresh(v => v + 1)}>重新读取权限</button>
+      : !canCreate && createReason && <span className={styles.meta} role="status">{createReason}{needsIdentity && <button type="button" className={styles.plain} onClick={() => window.location.assign(`/api/auth/feishu/authorize?next=${encodeURIComponent(window.location.pathname + window.location.search)}`)}>验证身份</button>}</span>}
+  </div>} scrollRef={listBody} onScroll={event => { scrollPosition.current = event.currentTarget.scrollTop; rememberPosition(); }} footer={<>
     <button type="button" className={styles.plain} onClick={() => setSelectedOnly(v => !v)}>已选 {selection.length} 个{selectedOnly ? ' · 返回目录' : ' · 查看已选'}</button>
     {!selectedOnly && <div className={styles.actions}><button type="button" className={styles.icon} title="上一页" aria-label="上一页" disabled={pages.length === 1 || loading} onClick={() => setPages(v => v.slice(0, -1))}><ChevronLeft size={18} /></button>
       <span className={styles.meta}>第 {pages.length} 页</span><button type="button" className={styles.icon} title="下一页" aria-label="下一页" disabled={!next || loading} onClick={() => next && setPages(v => [...v, next])}><ChevronRight size={18} /></button></div>}
@@ -373,9 +381,8 @@ export function PromptGroupPicker({ open, refs, onApply, onClose, onUploadFile }
   </>}><div className={styles.filters}><div className={styles.tabs} role="tablist" aria-label="提示词组来源">
     {[['all', '全部'], ['mine', '我的'], ['shared', '共享']].map(([id, label]) => <button type="button" key={id} role="tab" aria-selected={scope === id} onClick={() => { setScope(id); setPages(['']); setLocated(null); }}>{label}</button>)}</div>
     <input type="search" aria-label="搜索标题或作者" placeholder="搜索标题或作者" value={query} onChange={e => { setQuery(e.target.value); setPages(['']); setLocated(null); }} />
-    {canCreate && <button type="button" className={styles.button} onClick={() => { const id = crypto.randomUUID(); openEditor({ groupId: id, versionId: id }); }}><Plus size={16} />新建</button>}</div>
+    </div>
     {error && <p className={styles.status} role="status">{error}<button type="button" className={styles.icon} title="重试" aria-label="重试" onClick={() => setRefresh(v => v + 1)}><RefreshCw size={16} /></button></p>}
-    {!loading && !canCreate && createReason && <p className={styles.meta} role="status">{createReason}{needsIdentity && <button type="button" className={styles.plain} onClick={() => window.location.assign(`/api/auth/feishu/authorize?next=${encodeURIComponent(window.location.pathname + window.location.search)}`)}>验证身份</button>}</p>}
     {loading && <p className={styles.status} role="status">正在读取…</p>}
     <div className={styles.grid}>{visible.map(item => { const selected = selection.some(v => v.groupId === item.groupId); return <article key={item.groupId} className={styles.card} data-selected={selected}>
       <button type="button" className={styles.choose} aria-pressed={selected} disabled={Boolean(item.unavailable && !selected)} onClick={() => toggle(item)}><span className={styles.cover}><Cover item={item} /></span>
