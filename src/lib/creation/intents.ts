@@ -1,4 +1,5 @@
-import { assertNoPreparationRejection } from './preparation-receipts';
+import { assertNoPreparationRejection, originalPreparationRejection } from './preparation-receipts';
+import { writeCreationOperation } from './receipts';
 import type { Prisma, VideoCreationIntent } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
@@ -111,7 +112,11 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   const provider = spec.action === 'enhance' ? 'volcengine_mediakit' : spec.input.provider || (spec.entry === 'ip' ? 'volcengine_ip' : 'seedance');
   const quote = await quoteVideoPricing({ ...spec.input, provider, model: spec.input.model, duration: spec.input.duration,
     resolution: spec.input.resolution, toolVersion: spec.input.tool_version, context: pricingContext } as VideoPricingInput);
-  requireVideoPricingRevision(quote, body.pricing_revision);
+  // Interactive single submissions can obtain their authoritative price here without a preview receipt.
+  // Acceptance still checks this intent's frozen amount/revision and the caller's spending ceiling.
+  const currentPricing = body.pricing_preparation === 'current' && spec.action === 'generate' && spec.count === 1
+    && ['ordinary', 'multiview'].includes(spec.entry);
+  if (!currentPricing) requireVideoPricingRevision(quote, body.pricing_revision);
   const businessHash = pricingFingerprint({ spec, payer: context.payer, pricing_revision: quote.revision,
     per_child_cost_cents: creditCents(quote.pricing.estimatedCost), count: spec.count });
   const row = await prisma.$transaction(async tx => {
@@ -139,6 +144,37 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   return { ...await projectIntent(user, row, prisma, quote.pricing.estimatedCost), quote: { estimated_cost: quote.pricing.estimatedCost, pricing_revision: quote.revision,
     ...(pricingContext ? { pricing_quote_token: issueVideoPricingCredential(pricingContext, quote.revision, quote.pricing.estimatedCost) } : {}) } };
 }
+/** Explicit recovery only; the preparation guard fences this same owner/request inside its write transaction. */
+export async function closeUnpreparedVideoCreationRequest(user: SessionUser, rawRequestId: unknown) {
+  const requestId = creationIdentity(rawRequestId, 'request_id')!;
+  await assertVideoCreationReady();
+  return prisma.$transaction(async tx => {
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { status: true } });
+    if (actor?.status !== 'active') throw new CreationError('当前账号不可用，原准备未结束', 403);
+    const intent = await tx.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
+    if (intent) return { request_id: requestId, state: intent.state, intent: await projectIntent(user, intent, tx) };
+    const identity = { user_id: user.id, idempotency_key: requestId };
+    const task = await tx.videoTask.findUnique({ where: { user_id_idempotency_key: identity }, select: { id: true } });
+    if (task) return { request_id: requestId, state: 'accepted', intent: null, task_id: task.id };
+    const receipt = await originalPreparationRejection(tx, user.id, requestId);
+    const evidence = receipt?.state === 'accepted'
+      || await tx.providerApiRequest.findFirst({ where: identity, select: { id: true } })
+      || await tx.creditLedger.findFirst({ where: { user_id: user.id,
+        OR: [{ idempotency_key: requestId }, { metadata_json: { contains: requestId } }] }, select: { id: true } })
+      || await tx.projectBudgetLedger.findFirst({ where: { operator_id: user.id,
+        OR: [{ idempotency_key: requestId }, { metadata_json: { contains: requestId } }] }, select: { id: true } })
+      || await tx.costLedger.findFirst({ where: { user_id: user.id,
+        OR: [{ idempotency_key: requestId }, { source_id: requestId }] }, select: { id: true } })
+      || await tx.operationLog.findFirst({ where: { operator_id: user.id,
+        action: { in: ['generation_create', 'generation_create_codex_api', 'enhance_video_create'] },
+        detail: { contains: requestId } }, select: { id: true } });
+    if (evidence) return { request_id: requestId, state: 'unconfirmed', intent: null };
+    if (!receipt) await writeCreationOperation(tx, user.id, 'video-intent-prepare', requestId,
+      { closeBeforeIntent: true, requestId }, 'closed', { code: 'creation_preparation_closed', submitted: false, acceptedCount: 0 });
+    return { request_id: requestId, state: 'closed', closed: true, submitted: false, acceptedCount: 0, intent: null };
+  });
+}
+
 export async function closeVideoCreationIntent(user: SessionUser, id: string, expectedRevision: number) {
   await assertVideoCreationReady();
   return prisma.$transaction(async tx => {

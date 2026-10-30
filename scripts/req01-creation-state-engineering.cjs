@@ -62,7 +62,8 @@ const Availability = load('src/components/creation/CreationAvailability.tsx', { 
 const options = { ownerId: 'fixture-owner', entry: 'ordinary', draftId: 'fixture-draft', projectId: 'fixture-project' };
 const context = { project: { id: options.projectId, name: 'Fixture', type: 'personal' }, payer: { kind: 'user', id: options.ownerId, label: 'Fixture' }, v2Available: true, legacyCard: null };
 const ready = key => ({ id: `intent:${key}`, request_id: key, revision: 1, state: 'ready', contract_version: 2,
-  accepted_task_id: null, batch_id: null, availability: { canSubmit: true, reasons: [] } });
+  accepted_task_id: null, batch_id: null, availability: { canSubmit: true, reasons: [] },
+  quote: { estimated_cost: 1, pricing_revision: 'current-price', pricing_quote_token: 'current-token' } });
 const accepted = key => ({ ...ready(key), state: 'accepted', accepted_task_id: `task:${key}`,
   availability: { canSubmit: false, reasons: [{ code: 'creation_original_required', action: 'query_original', field: 'intent_id', message: '此请求已有处理结果，请核对原任务' }] } });
 function receiptKey(value = options, tab = 'fixture-tab') {
@@ -90,6 +91,68 @@ async function mountHook(value = options, ui = false) {
 async function check(name, callback) { await callback(); checks.push(name); }
 
 async function hookChecks() {
+  await check('PREP02 empty original keeps identity; only explicit matching zero-admission closure releases it', async () => {
+    reset(); const retained = JSON.stringify({ request_id: 'unprepared' }); session.setItem(receiptKey(), retained);
+    const base = answer;
+    answer = request => request.url.startsWith('/api/video/creation-intents?') ? response({ intent: null, state: 'unconfirmed' })
+      : request.url === '/api/video/creation-intents/close' ? response({ request_id: 'unprepared', state: 'closed', closed: true, submitted: false, acceptedCount: 0, intent: null }) : base(request);
+    const mounted = await mountHook(options, true);
+    assert.equal(mounted.current.unconfirmedRequestId, 'unprepared');
+    assert.ok(mounted.current.error); assert.equal(session.getItem(receiptKey()), retained);
+    assert.ok(mounted.renderer.root.findAllByType('button').some(node => node.props.children === '核对并结束本次准备'));
+    await assert.rejects(() => mounted.current.queryOriginal());
+    assert.equal(session.getItem(receiptKey()), retained); assert.equal(requests.some(row => row.method === 'POST'), false);
+    await act(async () => { assert.equal((await mounted.current.closeUnconfirmedPreparation()).kind, 'closed'); });
+    assert.equal(session.getItem(receiptKey()), null); assert.equal(mounted.current.error, '');
+    assert.equal(requests.filter(row => row.method === 'POST').length, 1);
+    await act(async () => { await mounted.current.prepare({ prompt: 'same preserved input' }, 'next-explicit'); });
+    assert.equal(mounted.current.intent.request_id, 'next-explicit');
+    assert.equal(requests.at(-1).body.prompt, 'same preserved input'); await mounted.close();
+  });
+  for (const change of [{ request_id: 'other' }, { submitted: true }, { acceptedCount: 1 }, { acceptedCount: undefined },
+    { state: 'unconfirmed', closed: false }, { task_id: 'hidden-task' }, { intent: {} }]) {
+    await check(`PREP02 malformed closure preserves original ${JSON.stringify(change)}`, async () => {
+      reset(); const retained = JSON.stringify({ request_id: 'unprepared' }); session.setItem(receiptKey(), retained); const base = answer;
+      answer = request => request.url.startsWith('/api/video/creation-intents?') ? response({ intent: null, state: 'unconfirmed' })
+        : request.url === '/api/video/creation-intents/close' ? response({ request_id: 'unprepared', state: 'closed', closed: true, submitted: false, acceptedCount: 0, intent: null, ...change }) : base(request);
+      const mounted = await mountHook();
+      await act(async () => { await assert.rejects(() => mounted.current.closeUnconfirmedPreparation()); });
+      assert.equal(session.getItem(receiptKey()), retained); await mounted.close();
+    });
+  }
+  await check('PREP02 lost close response retains original until durable rejection is read, never resubmits automatically', async () => {
+    reset(); const retained = JSON.stringify({ request_id: 'unprepared' }); session.setItem(receiptKey(), retained); const base = answer;
+    let sealed = false;
+    answer = request => request.url.startsWith('/api/video/creation-intents?') ? response({ intent: null, state: sealed ? 'rejected' : 'unconfirmed' })
+      : request.url === '/api/video/creation-intents/close' ? (sealed = true, response({ error: 'lost close response' }, 503)) : base(request);
+    const mounted = await mountHook();
+    await act(async () => { await assert.rejects(() => mounted.current.closeUnconfirmedPreparation()); });
+    assert.equal(session.getItem(receiptKey()), retained);
+    await act(async () => { assert.equal(await mounted.current.queryOriginal(), null); });
+    assert.equal(session.getItem(receiptKey()), null); assert.equal(mounted.current.error, '');
+    assert.equal(requests.filter(row => row.method === 'POST').length, 1); await mounted.close();
+  });
+  await check('PREP02 intent discovered by close takes precedence and does not clear original', async () => {
+    reset(); const retained = JSON.stringify({ request_id: 'unprepared' }); session.setItem(receiptKey(), retained); const base = answer;
+    answer = request => request.url.startsWith('/api/video/creation-intents?') ? response({ intent: null, state: 'unconfirmed' })
+      : request.url === '/api/video/creation-intents/close' ? response({ request_id: 'unprepared', state: 'accepted', intent: accepted('unprepared') }) : base(request);
+    const mounted = await mountHook();
+    await act(async () => { assert.equal((await mounted.current.closeUnconfirmedPreparation()).kind, 'intent'); });
+    assert.equal(mounted.current.intent.accepted_task_id, 'task:unprepared');
+    assert.equal(session.getItem(receiptKey()), retained); await mounted.close();
+  });
+  await check('PREP02 account/project change ignores a late close response and retains the original scope', async () => {
+    reset(); const retained = JSON.stringify({ request_id: 'unprepared' }); session.setItem(receiptKey(), retained); const base = answer;
+    let release;
+    answer = request => request.url.startsWith('/api/video/creation-intents?') ? response({ intent: null, state: 'unconfirmed' })
+      : request.url === '/api/video/creation-intents/close' ? new Promise(resolve => { release = resolve; }) : base(request);
+    const mounted = await mountHook(); let pending;
+    await act(async () => { pending = mounted.current.closeUnconfirmedPreparation().then(() => null, cause => cause); await tick(); });
+    await mounted.update({ ...options, ownerId: 'other-owner', projectId: 'other-project' });
+    await act(async () => { release(response({ request_id: 'unprepared', state: 'closed', closed: true, submitted: false, acceptedCount: 0, intent: null })); await pending; });
+    assert.ok((await pending) instanceof Error); assert.equal(session.getItem(receiptKey()), retained);
+    assert.equal(mounted.current.unconfirmedRequestId, null); await mounted.close();
+  });
   await check('stale ready snapshot must GET the retained original before any POST', async () => {
     reset(); const old = ready('old');
     session.setItem(receiptKey(), JSON.stringify({ id: old.id, request_id: old.request_id }));
@@ -214,6 +277,8 @@ async function pageChecks() {
       videoFeishu: { choice: null }, h3Ready: false, h3VideoConfig: null, selectedH3Preset: null, selectedH3Lora: null,
       saveGenerationDefaults: () => {}, loadRecentTasksPage: () => {}, H3_INLINE_MODEL_ID: 'fixture-h3', SEEDANCE_2_5_MODEL_ID: 'fixture-draft',
       stableGenerationPayloadJson: JSON.stringify, videoPricingBusinessInput: value => value, isSeedanceVideoDuration: () => true,
+      validVideoPricingAmount: value => typeof value === 'number' && Number.isFinite(value) && value >= 0,
+      notifyVideoPricingChanged: () => {},
       readJsonResponse: reply => reply.json(), MAX_ACTIVE_POLLING_TASKS: 5,
       activeGenerationRequestStorageKey: `sd2-generation-request-v1:${options.ownerId}:standard:standard` };
     const Harness = new Function('React', 'useCreationContext', 'isResolvedCreationIntent', 'env', `with(env) { ${body} }`)(React, hook.useCreationContext, hook.isResolvedCreationIntent, env);
@@ -264,6 +329,28 @@ async function pageChecks() {
     assert.equal(mounted.current.unconfirmedGenerationRequest, true); assert.equal(JSON.parse(session.getItem(mounted.env.activeGenerationRequestStorageKey)).key, 'unknown');
     assert.equal(requests.some(row => row.method === 'POST'), false); await mounted.close();
   });
+  for (const preview of [undefined, 1, 0.5]) await check(`QUOTE01 actual submit uses current preparation and preserves preview ceiling ${preview}`, async () => {
+    const mounted = await setup(), base = answer;
+    answer = request => {
+      if (request.url === '/api/video/creation-intents' && request.method === 'POST') {
+        assert.equal(request.body.pricing_preparation, 'current');
+        return response({ intent: ready(request.body.request_id) });
+      }
+      if (request.url === '/api/tasks/create') {
+        assert.equal(request.body.pricing_revision, 'current-price');
+        assert.equal(request.body.pricing_quote_token, 'current-token');
+        assert.equal(request.body.max_estimated_cost, preview ?? 1);
+        return response({ id: 'accepted-current-price' });
+      }
+      if (request.url === '/api/me/credits') return response({ available: 10 });
+      return base(request);
+    };
+    await act(async () => { await mounted.current.handleSubmit({ ...params, quotedEstimatedCost: preview, pricingRevision: 'expired-preview' }); });
+    assert.equal(requests.filter(row => row.url === '/api/tasks/create').length, preview === 0.5 ? 0 : 1);
+    if (preview === 0.5) assert.match(mounted.current.error, /费用已提高/);
+    else assert.equal(mounted.current.error, null);
+    await mounted.close();
+  });
   await check('actual React page callback: late status after edited/project-changed scope cannot replace result or clear original key', async () => {
     const mounted = await setup(); let release;
     session.setItem(mounted.env.activeGenerationRequestStorageKey, JSON.stringify({ key: 'late' }));
@@ -275,9 +362,45 @@ async function pageChecks() {
   });
 }
 
+async function quoteChecks() {
+  await check('QUOTE01 preview failure retains only the same actor/input spending ceiling and ignores late responses', async () => {
+    const timers = new Map(); let nextTimer = 0, pending = [], user = { id: 'actor-a' };
+    Object.assign(window, { setTimeout: callback => { const id = ++nextTimer; timers.set(id, callback); return id; },
+      clearTimeout: id => timers.delete(id), addEventListener: () => {}, removeEventListener: () => {} });
+    const pricing = load('src/lib/pricing/use-video-pricing.ts', { react: React,
+      '@/lib/context/AppSessionContext': { useAppSession: () => ({ user, hasLoadedUser: true, loadingUser: false, sessionChanged: false }) },
+      '@/lib/pricing-client': { videoPricingRequestKey: (input, owner) => JSON.stringify([owner, input]),
+        requestVideoPricing: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) } });
+    let current, renderer;
+    function Harness({ input }) { current = pricing.useVideoPricing(input); return null; }
+    const input = { provider: 'seedance', model: 'fixture', duration: 4, resolution: '480p' };
+    const update = async value => { await act(async () => { renderer.update(React.createElement(Harness, { input: value })); }); };
+    const send = async () => { await act(async () => { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(callback => callback()); await tick(); }); };
+    await act(async () => { renderer = Renderer.create(React.createElement(Harness, { input })); }); await send();
+    await act(async () => { pending.shift().resolve({ estimatedCost: 2, pricing_revision: 'old' }); await tick(); });
+    assert.equal(current.lastKnownAmount, 2);
+    await act(async () => current.refresh()); await send();
+    await act(async () => { pending.shift().reject(new Error('synthetic preview unavailable')); await tick(); });
+    assert.equal(current.quote, null); assert.equal(current.lastKnownAmount, 2);
+    await update({ ...input, duration: 5 }); assert.equal(current.lastKnownAmount, undefined); await send();
+    const late = pending.shift(); user = { id: 'actor-b' }; await update(input); await send();
+    await act(async () => { late.resolve({ estimatedCost: 99, pricing_revision: 'late' }); await tick(); });
+    assert.equal(current.quote, null); assert.equal(current.lastKnownAmount, undefined);
+    await act(async () => renderer.unmount());
+  });
+  await check('QUOTE01 actual composer availability does not require preview for ordinary generate', async () => {
+    const value = declaration('src/components/GenerationComposer.tsx', 'canValidatePrompt').expression;
+    const evaluate = new Function('env', `with(env) { return ${value}; }`);
+    const input = { isSubmitting: false, submitBlocker: '', submitDisabledReason: '', videoRedesign: true,
+      videoPricing: { quote: null }, need1080pApproval: false, resolutionApprovalConfirmed: false };
+    assert.equal(evaluate(input), true);
+    for (const changed of [{ isSubmitting: true }, { submitBlocker: 'source denied' }, { submitDisabledReason: 'unknown original' }, { need1080pApproval: true }, { videoRedesign: false }]) assert.equal(evaluate({ ...input, ...changed }), false);
+  });
+}
+
 async function main() {
   try {
-    await hookChecks(); await pageChecks();
+    await hookChecks(); await pageChecks(); await quoteChecks();
     console.log(JSON.stringify({ mode: 'offline real React renderer + actual hook/page callbacks; not browser or functional acceptance',
       react: React.version, productionNetworkCalls: 0, databaseCalls: 0, providerCalls: 0, checks, hashes }, null, 2));
   } finally {

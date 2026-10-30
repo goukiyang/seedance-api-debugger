@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '动作生成修复', outline: [
-  '动作视频准备遇到短暂繁忙时继续核对原请求',
-  '保留当前拼图、动作内容和原任务记录',
+const notice = { title: '生成恢复修复', outline: [
+  '图片报价预览失败时，仍可按当前费用确认生成',
+  '未受理的准备请求可主动核对并结束，保留当前输入',
+  '视频生成保留费用上限和原任务，避免重复提交',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

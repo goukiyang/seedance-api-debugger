@@ -12,6 +12,7 @@ import { STUDIO_RESULT_FEED } from '@/lib/image-studio/result-pin-types';
 import { requestStudioAsyncRecheck, StudioAsyncRecoveryError } from '@/lib/image-studio/async-recovery';
 import { VideoFeishuError } from '@/lib/video/feishu-contract';
 import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
+import { submitStudioWithCurrentPricing, logImagePricingFailure } from '@/lib/image-studio/billing-quote-service';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -69,13 +70,21 @@ export async function GET(request: NextRequest) {
   catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
 }
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
   try {
-    const batchId = await submitStudioBatch(user.id, await request.json());
+    const body = await request.json();
+    if (body.currentFixedPricing !== undefined) {
+      const result = await submitStudioWithCurrentPricing(user.id, body);
+      return NextResponse.json(result, { status: 'batchId' in result ? 202 : 200,
+        headers: { 'Cache-Control': 'private, no-store' } });
+    }
+    const batchId = await submitStudioBatch(user.id, body);
     return NextResponse.json({ batchId }, { status: 202 });
   } catch (error) {
+    logImagePricingFailure('acceptance', error, startedAt);
     if (error instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(error.code), code: error.code, submitted: false }, { status: error.status });
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
     if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });

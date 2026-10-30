@@ -2,6 +2,7 @@
 import { parseStudioTaskSettings, studioTaskSettings, sameStudioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
+import { sumCredits } from '@/lib/credits/precision';
 
 import { useProductDialog } from '@/components/useProductDialog';
 import { saveMainImageReminder, skipMainImageReminder } from './main-image-reminder';
@@ -102,7 +103,7 @@ import { StudioStyleSkillSelector, type StudioStyleSkillSelectorHandle } from '.
 import type { SettingsValue } from './settings-controller';
 import { parseStudioTemplateDefaults } from '@/lib/image-studio/template-defaults';
 import { normalizeStudioRatio, resolveStudioAspectRatio } from '@/lib/image-studio/ratios';
-import { useStudioBatch, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, type ImageUiQuote } from './use-studio-batch';
+import { useStudioBatch, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, imageUiQuoteAction, imageUiPriceConfirmation, type ImageUiQuote } from './use-studio-batch';
 import { ImageUsageProjectSelect, useImageUsageProject } from '@/components/ImageUsageProjectSelect';
 import { useVideoFeishu } from '@/lib/hooks/use-video-feishu';
 import { VideoFeishuToggle } from '@/components/generate/VideoFeishuToggle';
@@ -1789,6 +1790,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [billingQuote, setBillingQuote] = useState<CachedStudioImageQuote | null>(null);
+  const lastDisplayedQuote = useRef<CachedStudioImageQuote | null>(null);
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const previousEstimateSignature = useRef('');
@@ -3174,6 +3176,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         setError('暂未查到这次提交，仍不能确认是否受理。请稍后查询或联系管理员，不会自动再生成。'); return;
       }
       showLatestResults.current(String(pendingSubmission.requestId));
+      lastDisplayedQuote.current = null;
       setPendingSubmission(null); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey);
       await loadTasks();
     } catch (cause) { setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
@@ -3238,11 +3241,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const expectedFormSignature = liveGenerationSignature.current;
     const signature = effectiveSignature(currentPayload, requestChannelId);
     const reusableQuote = imageUiQuoteAction(null, signature, billingQuote?.signature, billingQuote?.quote) === 'submit' ? billingQuote : null;
-    const payload = reusableQuote ? generationPayload(retryTask, reusableQuote.requestId) : currentPayload;
+    const displayedQuote = reusableQuote || (lastDisplayedQuote.current?.signature === signature ? lastDisplayedQuote.current : null);
+    const payload = displayedQuote ? generationPayload(retryTask, displayedQuote.requestId) : currentPayload;
     submitLock.current = true; setSubmitting(true); setError('');
     const confirmedQuote = reusableQuote?.quote || null;
     try {
-      if (!confirmedQuote) {
+      if (!confirmedQuote && !templateWorkbench) {
         const quote = await readResponse(await fetch('/api/image-studio/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) })) as StudioImageQuote;
         if (liveGenerationSignature.current !== expectedFormSignature) throw new Error('本次参数已变化，报价未用于生成，请重新确认。');
         if (!validImageUiQuote(quote)) {
@@ -3264,13 +3268,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       return;
     }
     if (isClientSessionBlocked()) { submitLock.current = false; setSubmitting(false); return; }
-    if (!confirmedQuote) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
-    if (!requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
+    if (!confirmedQuote && !templateWorkbench) { setError('本次报价未确认，尚未提交图片。'); submitLock.current = false; setSubmitting(false); return; }
+    if (confirmedQuote && !requestLegacyRoute && (confirmedQuote.imageChannel?.channelId !== requestChannelId
       || typeof confirmedQuote.imageChannel.configRevision !== 'string' || !confirmedQuote.imageChannel.configRevision)) {
       setBillingQuote(null); setError('生图通道配置已变化，当前报价未用于生成；请重新获取报价。');
       submitLock.current = false; setSubmitting(false); return;
     }
-    if (confirmedQuote.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
+    if (confirmedQuote?.expiresAt && Date.parse(confirmedQuote.expiresAt) <= Date.now()) {
       setBillingQuote(null); setError('本次报价已过期，尚未提交图片；请再次点击获取新报价。');
       submitLock.current = false; setSubmitting(false); return;
     }
@@ -3281,13 +3285,35 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     } catch { setError('提交编号未能保存，尚未提交生成。请允许浏览器保存数据后再试。'); submitLock.current = false; setSubmitting(false); return; }
     let ambiguous = true;
     try {
-      const submission = { ...payload, ...imageUiQuoteFields(confirmedQuote) };
+      const maximum = displayedQuote?.quote.billingMode === 'fixed' ? displayedQuote.quote.estimatedCredits
+        : !retryTask && !actualQuoteRequired && !pricingBySpecification && moduleUnitCredits !== null
+          ? sumCredits(Array.from({ length: payload.count }, () => moduleUnitCredits)) : undefined;
+      const submission = templateWorkbench && confirmedQuote?.billingMode !== 'actual'
+        ? { ...payload, currentFixedPricing: true, expectedChannelId: requestChannelId,
+          ...(maximum !== undefined ? { maxEstimatedCost: maximum } : {}) }
+        : { ...payload, ...imageUiQuoteFields(confirmedQuote!) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
       if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) { onReloadSettings(); if (sharedLive) onSharedRefresh(); } await readResponse(response); }
       else {
         const value = await readResponse(response);
+        if (value.confirmationRequired === true) {
+          const quote = imageUiPriceConfirmation(value, payload.requestId, payload.count, requestChannelId) as StudioImageQuote | null;
+          if (!quote || isClientSessionBlocked() || liveGenerationSignature.current !== expectedFormSignature) {
+            throw new Error('本次价格确认未能匹配当前提交，请查询原请求；不会自动再生成。');
+          }
+          const confirmed = { signature, requestId: payload.requestId, quote };
+          // Only the server's matching zero-admission receipt can release the saved pending request.
+          ambiguous = false;
+          lastDisplayedQuote.current = confirmed;
+          setBillingQuote(confirmed);
+          setPendingSubmission(null);
+          try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {}
+          setError(`${imageUiQuotePriceText(quote)}，尚未生成；请核对后再次点击。`);
+          return;
+        }
         if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
+        lastDisplayedQuote.current = null;
         onGenerationAccepted();
         showLatestResults.current(payload.requestId);
         watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
@@ -3544,7 +3570,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const abort = new AbortController();
     const timer = window.setTimeout(() => {
       if (isClientSessionBlocked()) return;
-      const requestId = crypto.randomUUID();
+      const requestId = lastDisplayedQuote.current?.signature === estimateSignature ? lastDisplayedQuote.current.requestId : crypto.randomUUID();
       const payload = { ...JSON.parse(estimateSignature)[1], requestId };
       void onReloadSettings().then(fresh => {
         if (!fresh || abort.signal.aborted || isClientSessionBlocked() || fresh.revision !== payload.revision
@@ -3563,8 +3589,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, [sessionChanged, sourceSharingBlocked, restoredSettingsError, actualQuoteRequired, pricingBySpecification, estimateSignature, hidden, active, quoteVisible, draftLoaded, draftRestoring, submitting, pendingSubmission, batch.mode, count, billingQuote, onSharedRefresh]);
   const visibleQuote = billingQuote?.signature === estimateSignature
     && (!billingQuote.quote.expiresAt || Date.parse(billingQuote.quote.expiresAt) > Date.now()) ? billingQuote.quote : null;
+  const displayedFixedCredits = !actualQuoteRequired && !pricingBySpecification && moduleUnitCredits !== null
+    && Number.isInteger(count) && count >= 1 && count <= 8 ? sumCredits(Array.from({ length: count }, () => moduleUnitCredits)) : null;
+  useEffect(() => {
+    if (billingQuote?.signature === estimateSignature) lastDisplayedQuote.current = billingQuote;
+  }, [billingQuote, estimateSignature]);
   useEffect(() => {
     if (previousEstimateSignature.current && previousEstimateSignature.current !== estimateSignature) setBillingQuote(null);
+    if (lastDisplayedQuote.current?.signature !== estimateSignature) lastDisplayedQuote.current = null;
     previousEstimateSignature.current = estimateSignature;
   }, [estimateSignature]);
   useEffect(() => {
@@ -4075,6 +4107,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           {batch.mode === 'single' && <p className={styles.generationEstimate}>
             {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
               ? imageUiQuotePriceText(visibleQuote)
+              : templateWorkbench && displayedFixedCredits !== null ? imageUiQuotePriceText({ billingMode: 'fixed', estimatedCredits: displayedFixedCredits })
               : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置'
                 : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}
           </p>}

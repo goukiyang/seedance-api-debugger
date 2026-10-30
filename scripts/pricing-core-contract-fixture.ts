@@ -46,7 +46,7 @@ async function main() {
   const { settleImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing') as typeof import('@/lib/image-studio/billing');
   const { matchImageSupplierCharge } = fixtureRequire('@/lib/image-studio/billing-provider') as typeof import('@/lib/image-studio/billing-provider');
   const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = fixtureRequire('@/lib/pricing/policy') as typeof import('@/lib/pricing/policy');
-  const { PRICING_REVISION_PREFIX } = fixtureRequire('@/lib/pricing/admin-contract') as typeof import('@/lib/pricing/admin-contract');
+  const { PRICING_REVISION_PREFIX, PRICING_POLICY_KEY } = fixtureRequire('@/lib/pricing/admin-contract') as typeof import('@/lib/pricing/admin-contract');
   const runtime = fixtureRequire('@/lib/pricing/runtime') as typeof import('@/lib/pricing/runtime');
   const isolation = fixtureRequire('@/lib/pricing/isolation') as typeof import('@/lib/pricing/isolation');
   const { IMAGE_GENERATION_API_SETTING_KEY } = fixtureRequire('@/lib/integrations/image-generation') as typeof import('@/lib/integrations/image-generation');
@@ -54,7 +54,7 @@ async function main() {
   const { quoteStudioBatch, batchQuoteFingerprint, consumeBatchQuote } = fixtureRequire('@/lib/image-studio/batch-billing-quote') as typeof import('@/lib/image-studio/batch-billing-quote');
   const { createStudioBatch, dispatchStudioBatches, continuationInput } = fixtureRequire('@/lib/image-studio/batches') as typeof import('@/lib/image-studio/batches');
   const { studioBatchBudgetPrecision } = fixtureRequire('@/lib/image-studio/batch-contract') as typeof import('@/lib/image-studio/batch-contract');
-  const { prepareImageBillingQuote } = fixtureRequire('@/lib/image-studio/billing-quote-service') as typeof import('@/lib/image-studio/billing-quote-service');
+  const { prepareImageBillingQuote, submitStudioWithCurrentPricing } = fixtureRequire('@/lib/image-studio/billing-quote-service') as typeof import('@/lib/image-studio/billing-quote-service');
   const { imageQuoteKey } = fixtureRequire('@/lib/image-studio/billing-quote-store') as typeof import('@/lib/image-studio/billing-quote-store');
   const { PricingChargeError } = fixtureRequire('@/lib/pricing/charge') as typeof import('@/lib/pricing/charge');
   const { getCanvasImageQuote } = fixtureRequire('@/lib/canvas-quote') as typeof import('@/lib/canvas-quote');
@@ -397,6 +397,69 @@ async function main() {
   equal(lateChildren.map(item => item.status), ['rate_queued', 'rate_queued']);
   equal(precision.sumCredits(lateChildren.map(item => item.unit_credits)), 0.4);
   equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.pricing?.revision, acceptedRevision);
+
+  group('G11', 'QUOTE01: template fixed pricing uses the accepting transaction without storing a preview quote.');
+  const currentUser = await db.user.create({ data: { name: 'Current-price fixture', username: randomUUID(),
+    email: `${randomUUID()}@fixture.invalid`, password_hash: 'fixture-not-a-login', role: 'admin', status: 'active' } });
+  await db.creditAccount.create({ data: { user_id: currentUser.id, balance: 10 } });
+  const currentModule = await db.imageStudioModule.create({ data: { id: randomUUID(), owner_id: currentUser.id,
+    name: 'Current-price fixture', model: 'gpt-image-2', quality: 'auto', resolution: '1K' } });
+  const currentBody = { ...imageBody, moduleId: currentModule.id, count: 2, requestId: randomUUID(),
+    currentFixedPricing: true, expectedChannelId: 'original' };
+  const accountBeforeCurrent = await db.creditAccount.findUniqueOrThrow({ where: { user_id: currentUser.id } });
+  const previewRowsBefore = await db.platformSetting.count({ where: { key: { startsWith: 'image_billing_quote_v1:' } } });
+  const current = await submitStudioWithCurrentPricing(currentUser.id, currentBody);
+  ok('confirmationRequired' in current && current.confirmationRequired);
+  if (!('quote' in current) || !current.quote) throw new Error('Current price confirmation missing');
+  equal(current.submitted, false); equal(current.acceptedCount, 0); equal(current.requestId, currentBody.requestId);
+  equal(current.quote.unitCredits, 0.3); equal(current.quote.estimatedCredits, 0.6);
+  equal(current.quote.billingQuoteId, null); equal(current.quote.billingMode, 'fixed');
+  equal(await db.imageStudioTask.count({ where: { owner_id: currentUser.id } }), 0);
+  equal(await db.creditLedger.count({ where: { user_id: currentUser.id } }), 0);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: currentUser.id } }), accountBeforeCurrent);
+  const underpaid = await submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, maxEstimatedCost: 0,
+    unitCredits: 0, pricingRevision: 'forged', count: 3 });
+  ok('quote' in underpaid);
+  if (!('quote' in underpaid) || !underpaid.quote) throw new Error('Authoritative changed-count price missing');
+  equal(underpaid.quote.estimatedCredits, 0.9); equal(underpaid.acceptedCount, 0);
+  await rejects(() => submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, moduleId }));
+  await rejects(() => submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, referenceIds: ['unowned-fixture-asset'] }));
+  await rejects(() => submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, expectedChannelId: 'banana' }));
+  await rejects(() => submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, billingQuoteId: randomUUID() }));
+  const currentAccepted = await submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, maxEstimatedCost: 0.6 });
+  ok('batchId' in currentAccepted);
+  if (!('batchId' in currentAccepted)) throw new Error('Current-price acceptance missing');
+  const currentTasks = await db.imageStudioTask.findMany({ where: { owner_id: currentUser.id, batch_id: currentAccepted.batchId } });
+  equal(currentTasks.length, 2); equal(currentTasks.map(item => item.unit_credits), [0.3, 0.3]);
+  equal(currentTasks.map(item => parseImageBillingContract(item.billing_contract_json)?.pricing?.revision), [snapshot.revision, snapshot.revision]);
+  equal(await submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, maxEstimatedCost: 0.6 }), currentAccepted);
+  equal(await db.imageStudioTask.count({ where: { owner_id: currentUser.id } }), 2);
+  equal(await db.creditLedger.count({ where: { user_id: currentUser.id, type: 'task_freeze' } }), 2);
+  equal((await db.creditAccount.findUniqueOrThrow({ where: { user_id: currentUser.id } })).frozen_credits, 0.6);
+  equal(await db.platformSetting.count({ where: { key: { startsWith: 'image_billing_quote_v1:' } } }), previewRowsBefore);
+
+  await db.creditAccount.update({ where: { user_id: currentUser.id }, data: { balance: 0 } });
+  await rejects(() => submitStudioWithCurrentPricing(currentUser.id, { ...currentBody, requestId: randomUUID(), maxEstimatedCost: 0.6 }));
+  equal(await db.imageStudioTask.count({ where: { owner_id: currentUser.id } }), 2);
+  equal((await db.creditAccount.findUniqueOrThrow({ where: { user_id: currentUser.id } })).frozen_credits, 0.6);
+  await db.creditAccount.update({ where: { user_id: currentUser.id }, data: { balance: 9.4 } });
+  const readiness = fixtureRequire('@/lib/image-studio/billing-readiness') as typeof import('@/lib/image-studio/billing-readiness');
+  const { imageBillingScope } = fixtureRequire('@/lib/image-studio/billing-scope') as typeof import('@/lib/image-studio/billing-scope');
+  const { getImageGenerationSettingsForModel } = fixtureRequire('@/lib/integrations/image-generation') as typeof import('@/lib/integrations/image-generation');
+  const { StudioActualQuoteRequired } = fixtureRequire('@/lib/image-studio/tasks') as typeof import('@/lib/image-studio/tasks');
+  const billingScope = imageBillingScope(await getImageGenerationSettingsForModel('gpt-image-2'));
+  await readiness.recordImageBillingProof(db, { scope: billingScope, model: 'gpt-image-2', taskId: 'synthetic-proof', ledgerId: 'synthetic-proof' });
+  const policyBeforeActual = await db.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } });
+  await db.platformSetting.delete({ where: { key: PRICING_POLICY_KEY } });
+  await readiness.saveImageBillingIntent(true, 0, currentUser.id, ['gpt-image-2']);
+  await assert.rejects(() => submitStudioBatch(currentUser.id, { ...currentBody, requestId: randomUUID(), maxEstimatedCost: 0.6 },
+    undefined, undefined, undefined, undefined, undefined, { expectedChannelId: 'original', onPriceConfirmation: () => {} }), StudioActualQuoteRequired);
+  active.assertions++;
+  equal(await db.imageStudioTask.count({ where: { owner_id: currentUser.id } }), 2);
+  equal(await db.creditLedger.count({ where: { user_id: currentUser.id, type: 'task_freeze' } }), 2);
+  await readiness.saveImageBillingIntent(false, 1, currentUser.id, []);
+  await db.platformSetting.create({ data: policyBeforeActual });
+  snapshot = await getAdminPricingSnapshot(actor);
 
   group('G07', 'Two real SQLite admin saves race from the same revision; only one immutable policy revision commits.');
   const second = await db.user.create({ data: { name: 'Second fixture admin', username: randomUUID(), email: `${randomUUID()}@fixture.invalid`, password_hash: 'fixture-not-a-login', role: 'admin' } });

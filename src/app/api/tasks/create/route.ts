@@ -42,7 +42,7 @@ import { promisify } from 'util';
 import { prisma } from '@/lib/prisma';
 import { inheritUsageAttribution, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
-import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, type VideoPricingQuote } from '@/lib/pricing/video';
+import { quoteVideoPricing, requireVideoPricingRevision, assertVideoPricingAcceptance, publicVideoPricing, videoPricingError, logVideoPricingFailure, type VideoPricingQuote } from '@/lib/pricing/video';
 import { resolveVideoPricingContext, verifyVideoPricingCredential, videoPricingRequiresContext, videoPricingBusinessFingerprint, assertVideoPricingFinalReferences, normalizedVideoPricingReferenceScope, type VideoPricingContext } from '@/lib/pricing/video-context';
 import { addAssetToWorkspace, getOrCreateWorkspace } from '@/lib/assets/workspace';
 import { validatePromptReferences, renderPromptWithAssets } from '@/lib/assets/collection';
@@ -1510,6 +1510,7 @@ export async function POST(request: NextRequest) {
     requireScopeCredential = Boolean(groupRefs.length || multiviewAction || multiviewGeneration?.settingsBinding) || Boolean(body.pricing_quote_token) || await videoPricingRequiresContext(selectedModel, priceQuote.identity.channelId);
     if (requireScopeCredential) verifyVideoPricingCredential(body.pricing_quote_token, pricingContext, priceQuote.revision, priceQuote.pricing.estimatedCost);
   } catch (error) {
+    logVideoPricingFailure('acceptance', error);
     if (error instanceof VideoPromptGroupError) throw error;
     const failure = videoPricingError(error);
     return NextResponse.json({ error: failure?.message || '报价暂不可用，原参数和素材已保留', code: failure?.code || 'pricing_unavailable' }, { status: failure?.status || 503 });

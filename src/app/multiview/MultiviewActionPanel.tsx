@@ -18,7 +18,7 @@ import type { VideoCreationIntentDTO } from '@/lib/creation/contract';
 import styles from './multiview-action.module.css';
 
 type Props = { ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
-type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number; pricingRevision: string; token: string };
+type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
@@ -32,7 +32,7 @@ function ConfirmDialog({ quote, parameters, busy, onClose, onConfirm }: { quote:
   const dialog=useRef<HTMLDialogElement>(null);
   useDialogDismiss({open:true,dialogRef:dialog,nativeDialog:true,onDismiss:()=>{if(!busy)onClose();}});
   useEffect(()=>{dialog.current?.showModal();return()=>dialog.current?.close();},[]);
-  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={onClose}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>本次预计 <strong>{quote.points} 点</strong></p><footer><button disabled={busy} onClick={onClose}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备并提交…':'确认生成'}</button></footer></dialog>,document.body);
+  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={onClose}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>{quote.points===null?'费用待确认':<>本次预计 <strong>{quote.points} 点</strong></>}</p><footer><button disabled={busy} onClick={onClose}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备…':quote.points===null?'继续':'确认生成'}</button></footer></dialog>,document.body);
 }
 export function MultiviewActionPanel(props: Props) {
   const [state,setState]=useState<MultiviewActionState|null>(null),[draft,setDraft]=useState<MultiviewActionDraft|null>(null);
@@ -65,6 +65,7 @@ export function MultiviewActionPanel(props: Props) {
   const content=JSON.stringify([text,parameters,props.work?.draftRevision]);
   const quoteKey=JSON.stringify([scope,content,props.snapshotKey,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
   const currentQuote=quote?.key===quoteKey?quote:null;
+  const confirmationQuote:Quote=currentQuote||{key:quoteKey,text:text.trim(),parameters:{...parameters},points:null,pricingRevision:null};
   const currentQuoteKey=useRef(quoteKey);currentQuoteKey.current=quoteKey;
   const selectedRun=state?.runs.find(run=>run.id===selectedRunId)||null;
   const selectedTask=selectedRun?.tasks[0]||null;
@@ -141,8 +142,8 @@ export function MultiviewActionPanel(props: Props) {
   async function queryOriginal(manual=true){if(!original)return;if(manual)videoPoll.current={key:original.key,count:0};const captured=scope;try{const value=await api<{task:{id:string}|null;new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}>(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(original.key)}`);if(!active(captured))return;if(value.task){const next={...original,taskId:value.task.id};setOriginal(next);localStorage.setItem(requestKey,JSON.stringify(next));await refresh();}else if(value.new_request_allowed===true&&value.request_receipt?.state==='rejected'&&value.request_receipt.accepted===false&&value.request_receipt.key===original.key){setOriginal(null);setNewAttemptRequired(true);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));localStorage.removeItem(requestKey);setMessage(value.request_receipt.message||'本次未受理，请调整后重新确认费用。');}else setMessage('提交结果待确认，原请求尚未查到，不会重新提交。');}catch(cause){if(active(captured))setMessage('原请求暂不可查询，保留最后已知状态。');}}
   useEffect(()=>{if(!hydrated||!props.work)return;const waiting=original&&!original.taskId||state?.runs.some(run=>['queued','running'].includes(run.status)||run.tasks.some(task=>!finished.has(task.status)));if(!waiting)return;if(original&&!original.taskId){if(videoPoll.current.key!==original.key)videoPoll.current={key:original.key,count:0};if(videoPoll.current.count>=12)return;}const timer=setTimeout(()=>{if(original&&!original.taskId){videoPoll.current.count++;void queryOriginal(false);}else void refresh().catch(()=>undefined);},5000);return()=>clearTimeout(timer);});
   async function submit(){
-    if(submitLock.current||saveLock.current||!currentQuote)return;
-    const frozen=currentQuote,captured=scope;submitLock.current=true;setSubmitting(true);setMessage('正在准备本次拼图…');
+    if(submitLock.current||saveLock.current||!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||draftBlocked||newAttemptRequired||original&&!original.taskId)return;
+    const frozen=confirmationQuote,captured=scope,frozenEdit=editRevision.current;submitLock.current=true;setSubmitting(true);setMessage('正在准备本次拼图…');
     let retained=false;
     let binding: MultiviewActionBinding | null = null;
     try{
@@ -155,7 +156,7 @@ export function MultiviewActionPanel(props: Props) {
       binding=final.binding;
       if(!active(captured))return;
       const requestId=`multiview-action:${binding.runId}`;
-      const body:Record<string,unknown>={...frozen.parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:final.run.text,multiview_action:binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,max_estimated_cost:frozen.points,pricing_revision:frozen.pricingRevision,pricing_fingerprint_version:2};
+      const body:Record<string,unknown>={...frozen.parameters,provider:'seedance',generation_mode:'first_last_frame',prompt:final.run.text,multiview_action:binding,idempotency_key:requestId,creation_contract_version:2,entry:'multiview',action:'generate',continuation:{mode:'new'},count:1,video_branch_id:null,baseline_task_id:baseline,...(frozen.points===null?{}:{max_estimated_cost:frozen.points}),pricing_revision:frozen.pricingRevision,pricing_fingerprint_version:2};
       setMessage('正在核对本次费用并提交…');
       if(creation.intent && !isResolvedCreationIntent(creation.intent) && creation.intent.request_id!==requestId){
         const prior=await creation.queryOriginal();
@@ -174,7 +175,7 @@ export function MultiviewActionPanel(props: Props) {
         }
       }
       const previous=!isResolvedCreationIntent(creation.intent)?creation.intent:null;
-      const prepared=await creation.prepare(body,requestId,previous);
+      const prepared=await creation.prepare({...body,pricing_preparation:'current'},requestId,previous);
       if(!active(captured))return;
       if(prepared.request_id!==requestId){setConfirming(false);setMessage('原动作准备尚未结束，请先核对下方原请求；本次未重新提交。');return;}
       if(isResolvedCreationIntent(prepared)){
@@ -183,8 +184,13 @@ export function MultiviewActionPanel(props: Props) {
         setConfirming(false);setMessage(prepared.accepted_task_id?'已找到原任务，不会重复生成。':'原动作请求已结束，当前输入保留，请主动重新准备生成。');return;
       }
       if(!prepared.availability?.canSubmit){setConfirming(false);setMessage(prepared.availability?.reasons.map(reason=>reason.message).join('；')||'本次尚未提交，请完成下方创作条件。');return;}
-      if(!prepared.quote||prepared.quote.estimated_cost!==frozen.points||prepared.quote.pricing_revision!==frozen.pricingRevision){setConfirming(false);setQuoteRetry(value=>value+1);throw new Error('费用已变化，请核对新报价后生成。');}
-      Object.assign(body,{intent_id:prepared.id,intent_revision:prepared.revision,resolution_approval_id:prepared.approval_id||null,pricing_quote_token:prepared.quote.pricing_quote_token||frozen.token});
+      if(editRevision.current!==frozenEdit)throw new Error('当前输入已修改，请核对后再生成。');
+      if(!prepared.quote||!Number.isFinite(prepared.quote.estimated_cost)||prepared.quote.estimated_cost<0)throw new Error('本次费用暂未确认，尚未生成。');
+      if(prepared.quote.estimated_cost!==frozen.points){
+        setQuote({...frozen,key:currentQuoteKey.current,points:prepared.quote.estimated_cost,pricingRevision:prepared.quote.pricing_revision,token:prepared.quote.pricing_quote_token});
+        setMessage('本次费用已更新，请核对后确认生成。');return;
+      }
+      Object.assign(body,{intent_id:prepared.id,intent_revision:prepared.revision,resolution_approval_id:prepared.approval_id||null,pricing_revision:prepared.quote.pricing_revision,pricing_quote_token:prepared.quote.pricing_quote_token||frozen.token});
       const pending:Original={key:requestId,runId:binding.runId,taskId:null};localStorage.setItem(requestKey,JSON.stringify(pending));setOriginal(pending);retained=true;setConfirming(false);setSelectedRunId(binding.runId);
       const result=await api<{id?:string;task_id?:string;existing_task_id?:string}>('/api/tasks/create',body);if(!active(captured))return;
       const taskId=result.id||result.task_id||result.existing_task_id;
@@ -222,9 +228,9 @@ export function MultiviewActionPanel(props: Props) {
       {saving&&<p className={styles.notice}>正在保存动作…</p>}
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
-      {!showVideo&&<button type="button" className={styles.primary} disabled={!currentQuote||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>}
+      {!showVideo&&<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||newAttemptRequired||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>}
     </aside>
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
-    {confirming&&currentQuote&&<ConfirmDialog quote={currentQuote} parameters={currentQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
+    {confirming&&<ConfirmDialog quote={confirmationQuote} parameters={confirmationQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
   </>;
 }

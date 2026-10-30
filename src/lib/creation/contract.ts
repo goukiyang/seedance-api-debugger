@@ -20,7 +20,7 @@ export type VideoCreationIntentDTO = {
   accepted_task_id: string | null; batch_id: string | null; pricing_revision?: string | null;
   quote_business_hash?: string; approval_id?: string | null;
   approval?: { id: string; status: string; reason: string | null; expires_at: string | null; remaining_count: number; authorization_round?: number; batch_revision?: number | null };
-  quote?: { estimated_cost: number; pricing_revision: string; pricing_quote_token?: string }; created_at: string; updated_at: string;
+  quote?: { estimated_cost: number; pricing_revision: string | null; pricing_quote_token?: string }; created_at: string; updated_at: string;
 };
 export class CreationError extends Error {
   constructor(message: string, public readonly status = 409, public readonly code = 'creation_conflict',

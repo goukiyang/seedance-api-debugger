@@ -9,7 +9,7 @@ import {
   type ImageGenerationResolvedSettings,
 } from '@/lib/integrations/image-generation';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
-import { submitStudioBatch, safeImageChannelSnapshot, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, StudioError } from './tasks';
+import { submitStudioBatch, safeImageChannelSnapshot, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse, StudioError, StudioActualQuoteRequired, type StudioCurrentFixedQuote } from './tasks';
 import type { SharedStudioIntent } from './shared-types';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
@@ -46,6 +46,40 @@ type PreparedImageQuoteResult = {
   authorizedMaximumCredits?: number;
   pricingRevision?: string;
 };
+
+const quoteFailureStages = new WeakMap<object, string>();
+export function logImagePricingFailure(stage: 'preview' | 'acceptance', error: unknown, startedAt: number) {
+  const value = error as { name?: unknown; code?: unknown; status?: unknown } | null;
+  const safe = (input: unknown) => typeof input === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(input) ? input : null;
+  console.warn('[ImagePricing]', JSON.stringify({ at: Date.now(), stage,
+    phase: error && typeof error === 'object' ? quoteFailureStages.get(error) ?? stage : stage,
+    elapsedMs: Date.now() - startedAt, type: safe(value?.name), code: safe(value?.code),
+    status: typeof value?.status === 'number' && Number.isInteger(value.status) ? value.status : null }));
+}
+
+/** Only the template single-submit route enables transaction-local fixed pricing. */
+export async function submitStudioWithCurrentPricing(owner: string, body: Record<string, unknown>) {
+  if (body.currentFixedPricing !== true || typeof body.moduleId !== 'string' || body.billingQuoteId !== undefined
+    || body.expectedChannelId !== undefined && (typeof body.expectedChannelId !== 'string' || body.expectedChannelId.length > 80)) {
+    throw new StudioError('当前价格确认参数无效', 400);
+  }
+  let fixedQuote: StudioCurrentFixedQuote | null = null;
+  try {
+    const batchId = await submitStudioBatch(owner, body, undefined, undefined, undefined, undefined, undefined, {
+      expectedChannelId: typeof body.expectedChannelId === 'string' ? body.expectedChannelId : undefined,
+      onPriceConfirmation: quote => { fixedQuote = quote; },
+    });
+    if (!fixedQuote) return { batchId };
+    return { submitted: false as const, acceptedCount: 0 as const, confirmationRequired: true as const,
+      requestId: body.requestId, quote: fixedQuote };
+  } catch (error) {
+    if (!(error instanceof StudioActualQuoteRequired)) throw error;
+    // Actual billing still needs its original stored maximum-reservation contract.
+    const quote = await prepareImageBillingQuote(owner, body);
+    return { submitted: false as const, acceptedCount: 0 as const, confirmationRequired: true as const,
+      requestId: body.requestId, quote: { ...quote, count: Number(body.count) } };
+  }
+}
 
 function isManagedChannelId(value: unknown): value is string {
   return value === 'fluxport' || typeof value === 'string' && /^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -102,11 +136,25 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
 
 export async function prepareImageBillingQuote(owner: string, body: Record<string, unknown>, avatar?: Parameters<typeof submitStudioBatch>[2],
   canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0): Promise<PreparedImageQuoteResult> {
+  let phase = 'prepare_tasks';
+  try {
+    return await prepareImageBillingQuoteOnce(owner, body, avatar, canvasUse, canvasPrompt, additionalInputCharacters,
+      next => { phase = next; });
+  } catch (error) {
+    if (error && typeof error === 'object') quoteFailureStages.set(error, phase);
+    throw error;
+  }
+}
+
+async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, unknown>, avatar: Parameters<typeof submitStudioBatch>[2],
+  canvasUse: Parameters<typeof submitStudioBatch>[4], canvasPrompt: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters: number,
+  phase: (value: string) => void): Promise<PreparedImageQuoteResult> {
   const prepared: Prisma.ImageStudioTaskUncheckedCreateInput[] = [];
   await submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
     { batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt);
   if (!prepared.length) throw new StudioError('本次提交已存在，请直接查询生成记录', 409);
 
+  phase('prepared_snapshot');
   const task = prepared[0];
   const base = parseImageBillingContract(String(task.billing_contract_json));
   if (!base) throw new Error('Billing snapshot missing');
@@ -119,10 +167,12 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   }
   const sharedResult = sharedLive ? { sharedLive } : {};
   const confirmDefinition = async () => {
+    phase('confirm_definition');
     if (sharedLive || taskSnapshot.restoredSettings !== undefined) await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner,
       typeof body.moduleId === 'string' ? body.moduleId : undefined, sharedLive, tx,
       taskSnapshot.restoredSettings !== undefined ? parseStudioRequest(body) : undefined));
   };
+  phase('resolve_channel');
   const imageChannel = imageChannelFromPreparedTask(task)
     || await captureImageGenerationChannel(base.model, 'original');
   const requestedChannelId = imageChannel?.channelId
@@ -132,6 +182,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     resolution: typeof taskSnapshot.resolution === 'string' ? taskSnapshot.resolution : undefined,
     ratio: typeof taskSnapshot.aspectRatio === 'string' ? taskSnapshot.aspectRatio : undefined };
   const confirmPricing = async () => {
+    phase('confirm_pricing');
     const fresh = await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId),
       base.model, prisma, undefined, quoteSpecifications);
     if (!samePricingImageCharge(fresh.quote?.charge, base.pricing)) {
@@ -152,6 +203,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     await confirmPricing();
     let billingQuoteId: string | null = null;
     if (base.pricing) {
+      phase('store_fixed_preview');
       billingQuoteId = randomUUID();
       const quote: StoredImageQuote = { owner, count: prepared.length, fingerprint: base.specification,
         sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION,
@@ -191,6 +243,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     return fixedResult();
   }
 
+  phase('actual_readiness');
   const state = await imageBillingReady(base.scope, base.model);
   if (pinnedChannel && capability?.billingMode === 'actual') {
     if (!isMuskImageGenerationChannel(settings) || !imageChannel
@@ -213,6 +266,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
   // allowance, not as a claim about the source image's actual dimensions.
   const referencePixels = references.reduce((sum, reference) => sum + (reference.width && reference.height
     ? reference.width * reference.height : 40_000_000), 0);
+  phase('supplier_bill_read');
   const rows = await readImageSupplierBills(settings, base.scope);
   const historicalEstimate = supplierHistoryEstimate(rows, base.model,
     { inputCharacters: Math.max(...prepared.map(item => String(item.context).length + String(item.prompt).length)) + additionalInputCharacters, referencePixels });
@@ -229,6 +283,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
       : '当前模型价格依据不足或已过期，本次尚未报价或生成；请更新价格依据，或由管理员关闭实际计费后继续使用原固定合同', 409);
   }
 
+  phase('confirm_actual_readiness');
   const finalState = await imageBillingReady(base.scope, base.model);
   if (!finalState.ready || finalState.intentRevision !== state.intentRevision) {
     throw new StudioError('实际计费证明或设置在报价期间发生变化，请重新获取报价', 409);
@@ -255,6 +310,7 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
     owner, count: prepared.length, fingerprint: base.specification,
     intentRevision: state.intentRevision, contract, ...sharedResult, ...(imageChannel ? { imageChannel } : {}),
   };
+  phase('store_actual_quote');
   await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_billing_quote_v1:${owner}:` },
     created_at: { lt: new Date(now - 120000) } } });
   await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } });

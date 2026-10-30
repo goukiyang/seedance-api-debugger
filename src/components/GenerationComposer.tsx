@@ -470,7 +470,7 @@ interface Props {
     h3LoraId: string | null;
     pricingRevision: string | null;
     pricingQuoteToken?: string;
-    quotedEstimatedCost: number;
+    quotedEstimatedCost?: number;
     draft: boolean;
     templateStudioRunId: string | null;
     imageResultReceiptId?: string | null;
@@ -1207,7 +1207,7 @@ export function GenerationComposer({
         role: studioRoleForAsset(asset.assetId, asset.role, studioHandoff), type: asset.type,
         ...(studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey ? { slotKey: studioHandoff.assets.find(source => source.assetId === asset.assetId)?.slotKey } : {}) })) } : {}),
     } }, !durationBlocker && preferencesReady);
-  const canValidatePrompt = !isSubmitting && !submitBlocker && !submitDisabledReason && !!videoPricing.quote && !(need1080pApproval && !resolutionApprovalConfirmed);
+  const canValidatePrompt = !isSubmitting && !submitBlocker && !submitDisabledReason && (videoRedesign || !!videoPricing.quote) && !(need1080pApproval && !resolutionApprovalConfirmed);
   const canPressSubmit = canValidatePrompt && !ordinaryPromptMissing;
   const estimatedPoints = videoPricing.quote?.estimatedCost ?? null;
 
@@ -1546,7 +1546,7 @@ export function GenerationComposer({
   }, [preferencesReady, onSettingsChange, studioHandoff, imageResultHandoff, isRestoringStudioSettings, interactionLocked, ordinaryDraftKey, ordinaryDraftLoaded, reuseDraft, selectedModel, generationMode, ratio, duration, resolution, generateAudio, returnLastFrame, watermark]);
 
   const handleSubmit = useCallback(async () => {
-    if (submitBlocker || submitDisabledReason || isSubmitting || !videoPricing.quote) return;
+    if (submitBlocker || submitDisabledReason || isSubmitting || !videoRedesign && !videoPricing.quote) return;
     if (ordinaryPromptMissing) {
       setPromptAttempted(true);
       generationComposerRef.current?.querySelector<HTMLTextAreaElement>('.composer-prompt-textarea')?.focus();
@@ -1584,9 +1584,9 @@ export function GenerationComposer({
       provider: selectedProvider || null,
       model: selectedModel || null,
       h3LoraId: selectedAuxiliary || null,
-      pricingRevision: videoPricing.quote.pricing_revision,
-      pricingQuoteToken: videoPricing.quote.pricing_quote_token,
-      quotedEstimatedCost: videoPricing.quote.estimatedCost,
+      pricingRevision: videoPricing.quote?.pricing_revision ?? null,
+      pricingQuoteToken: videoPricing.quote?.pricing_quote_token,
+      quotedEstimatedCost: videoPricing.quote?.estimatedCost ?? videoPricing.lastKnownAmount,
       draft: draftMode,
       templateStudioRunId: studioHandoff?.runId || null,
       imageResultReceiptId: imageResultHandoff?.receiptId || null,
@@ -1618,6 +1618,7 @@ export function GenerationComposer({
     submitDisabledReason,
     isSubmitting,
     videoPricing.quote,
+    videoPricing.lastKnownAmount,
     ordinaryPromptMissing,
     onSubmit,
     imageResultHandoff,

@@ -58,7 +58,7 @@ export function MultiviewGenerationConfirmDialog(props: Props) {
         <p className={styles.price}>{props.points === null ? '报价待确认' : <>预计 <strong>{props.points}</strong> 点</>}</p>
         <div className={styles.actions}>
           <button type="button" disabled={props.busy} onClick={props.onClose}>返回修改</button>
-          <button type="button" className={styles.primary} disabled={props.busy || props.blocked} onClick={props.onConfirm}>{props.busy ? '正在提交…' : '确认生成'}</button>
+          <button type="button" className={styles.primary} disabled={props.busy || props.blocked} onClick={props.onConfirm}>{props.busy ? '正在准备…' : props.points === null ? '继续' : '确认生成'}</button>
         </div>
       </footer>
     </div>

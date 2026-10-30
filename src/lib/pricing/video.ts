@@ -78,3 +78,10 @@ export function videoPricingError(error: unknown): { message: string; status: nu
   return { message: error instanceof Error ? error.message : '报价暂时无法确认，参数和素材已保留',
     status: 'status' in error && typeof error.status === 'number' ? error.status : 409, code: error.code };
 }
+
+export function logVideoPricingFailure(stage: 'preview' | 'preparation' | 'acceptance', error: unknown) {
+  const value = error as { name?: unknown; code?: unknown; status?: unknown } | null;
+  const safe = (input: unknown) => typeof input === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(input) ? input : null;
+  console.warn('[VideoPricing]', JSON.stringify({ at: Date.now(), stage, type: safe(value?.name),
+    code: safe(value?.code), status: typeof value?.status === 'number' ? value.status : null }));
+}

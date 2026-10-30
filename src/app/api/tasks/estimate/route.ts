@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
-import { quoteVideoPricing, publicVideoPricing, videoPricingError, type VideoPricingInput } from '@/lib/pricing/video';
+import { quoteVideoPricing, publicVideoPricing, videoPricingError, logVideoPricingFailure, type VideoPricingInput } from '@/lib/pricing/video';
 import { parseSeedanceVideoModel, isSeedanceVideoDuration, seedanceVideoDurationError } from '@/lib/provider/seedance-models';
 import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } from '@/lib/integrations/codex';
 import type { VideoResolution } from '@/types';
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
     }
     return estimate(new NextRequest(url, { headers: request.headers }), body);
   } catch (error) {
+    logVideoPricingFailure('preview', error);
     if (error instanceof AuthError) return errorJson(error.message, error.status);
     return errorJson('报价输入无法读取，原参数未改变', 400);
   }
@@ -153,6 +154,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
     ...(actionInput ? { multiviewAction: actionInput.body.multiview_action } : {}),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
+    logVideoPricingFailure('preview', error);
     if (error instanceof VideoPromptGroupError || error instanceof StudioError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code },
       { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     if (error instanceof MultiviewSettingsError || error instanceof MultiviewPresetError) return NextResponse.json({ error: error.message, code: error.code },

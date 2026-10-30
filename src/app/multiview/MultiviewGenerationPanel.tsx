@@ -361,12 +361,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [confirmationNotice, setConfirmationNotice] = useState('');
   // Bind consent to the complete input and displayed price, never to a mutable form alone.
-  const confirmationKey = JSON.stringify([owner, authorityKey, draft, presetState?.revision, creationBaselineId,
-    creation.context?.contextRevision, currentQuote?.points, currentQuote?.pricingRevision]);
+  const confirmationKeyForQuote = (value: Quote | null) => JSON.stringify([owner, authorityKey, draft, presetState?.revision, creationBaselineId,
+    creation.context?.contextRevision, value?.points, value?.pricingRevision]);
+  const confirmationKey = confirmationKeyForQuote(currentQuote);
   const liveConfirmation = useRef(confirmationKey); liveConfirmation.current = confirmationKey;
   const liveGenerationReady = useRef(false);
   liveGenerationReady.current = Boolean(ready && allowed && imageReady && currentProject && !cardSelectionInvalid && !approvalBlocked
-    && currentQuote && presetReady && !working && !association && !settingsRisk.busy && !recoveryBlocked
+    && presetReady && !working && !association && !settingsRisk.busy && !recoveryBlocked
     && (draft?.resolution !== '1080p' || hd?.state === 'approved'));
   useEffect(() => { setConfirmation(null); setConfirmationNotice(''); }, [owner, authorityKey, sessionTab]);
   const accountRequestBlocked = requestScan.invalid || requestScan.incomplete || requestScan.records.some(blocksNewRequest);
@@ -960,7 +961,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     if (confirmation !== confirmationKey || liveConfirmation.current !== confirmationKey) {
       setConfirmation(confirmationKey); setConfirmationNotice('设置或报价已更新，请核对后再次确认生成。'); return;
     }
-    if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !currentQuote || !presetReady || !presetState
+    if (!draft || !ready || !allowed || !imageReady || !currentProject || cardSelectionInvalid || approvalBlocked || !presetReady || !presetState
       || !seedValid || !current(capture()) || working || settingsRisk.busy || uploadLock.current || createLock.current || closeLock.current || association || submitLock.current || pendingActive(receiptRef.current) || recoveryBlocked) return;
     const scanned = refreshRequests();
     if (scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) { setStatus('本账号仍有未确认的原请求，或本机记录尚未查全。请先查询下面的原请求，不会新建编号。'); return; }
@@ -976,12 +977,12 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       if (!creation.context?.v2Available) throw new Error('当前创作流程尚未开放，输入已保留');
       const previousIntent = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       let key = previousIntent?.request_id || crypto.randomUUID();
-      const body: Record<string, unknown> = { ...buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: currentQuote.points,
-        pricingRevision: currentQuote.pricingRevision, pricingQuoteToken: currentQuote.pricingQuoteToken, preset: presetState.preset }),
+      const body: Record<string, unknown> = { ...buildMultiviewGenerationRequest(frozen, { idempotencyKey: key, maxEstimatedCost: confirmedQuote?.points,
+        prepareCurrentPricing: true, pricingRevision: confirmedQuote?.pricingRevision, pricingQuoteToken: confirmedQuote?.pricingQuoteToken, preset: presetState.preset }),
         creation_contract_version: 2, entry: 'multiview', action: 'generate', continuation: { mode: 'new' },
         video_branch_id: null, count: 1, baseline_task_id: creationBaselineId };
       creationDraftBody.current = body;
-      const prepared = await creation.prepare(body, key, previousIntent);
+      const prepared = await creation.prepare({ ...body, pricing_preparation: 'current' }, key, previousIntent);
       key = prepared.request_id; body.idempotency_key = key;
       if (!current(scope)) return;
       if (isResolvedCreationIntent(prepared)) { setStatus('原请求已有处理结果，当前输入保留，请核对下方原任务。'); setConfirmation(null); return; }
@@ -989,12 +990,14 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
       if (!prepared.quote || !validVideoPricingAmount(prepared.quote.estimated_cost)) {
         setConfirmationNotice('报价暂时无法确认，请返回修改后重新报价。'); setQuote(null); setRevision(value => value + 1); return;
       }
-      if (prepared.quote.estimated_cost !== confirmedQuote.points || prepared.quote.pricing_revision !== confirmedQuote.pricingRevision) {
-        setQuote({ key: quoteKey, points: prepared.quote.estimated_cost, pricingRevision: prepared.quote.pricing_revision,
-          pricingQuoteToken: prepared.quote.pricing_quote_token });
+      if (!confirmedQuote || prepared.quote.estimated_cost !== confirmedQuote.points) {
+        const nextQuote = { key: quoteKey, points: prepared.quote.estimated_cost, pricingRevision: prepared.quote.pricing_revision,
+          pricingQuoteToken: prepared.quote.pricing_quote_token };
+        setQuote(nextQuote); setConfirmation(confirmationKeyForQuote(nextQuote));
         setConfirmationNotice('报价已更新，请核对后再次确认生成。'); return;
       }
       Object.assign(body, { intent_id: prepared.id, intent_revision: prepared.revision, resolution_approval_id: prepared.approval_id || null,
+        pricing_revision: prepared.quote.pricing_revision, max_estimated_cost: confirmedQuote.points,
         ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) });
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(videoPricingBusinessInput(body))));
       if (!current(scope)) return;
@@ -1169,13 +1172,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const formDisabled = submitting || closing || working || Boolean(creating) || settingsRisk.busy;
   const hdBlocked = draft.resolution === '1080p' && hd?.state !== 'approved';
   const blocked = formDisabled || active || accountRequestBlocked || recoveryBlocked || Boolean(association) || !imageReady || !currentProject
-    || cardSelectionInvalid || approvalBlocked || hdBlocked || !currentQuote || !presetReady || !seedValid;
+    || cardSelectionInvalid || approvalBlocked || hdBlocked || !presetReady || !seedValid;
   // Every disabled state says what is missing (no silent grey button).
   const blockedReason = submitting || active ? '' : recoveryBlocked ? '本机记录读取异常，请刷新页面后再试'
     : accountRequestBlocked ? '还有一单的提交结果未确认，请先在下方“详情”里处理'
       : association || working ? '主图正在准备…' : !imageReady ? '请先选择主图' : !currentProject ? '请选择保存到的项目'
         : cardSelectionInvalid ? '所选视频卡不可用，请重新选择或取消关联' : approvalBlocked || hdBlocked ? '1080p 需要先经管理员同意'
-          : !presetReady ? presetError || '模板正在读取…' : !currentQuote ? quoteError || '正在计算点数…'
+          : !presetReady ? presetError || '模板正在读取…'
             : !seedValid ? '随机种子无效，请在高级设置里调整' : formDisabled ? '设置正在保存…' : '';
   const sameReady = Boolean(receipt?.phase === 'ready' && receipt.taskId && receipt.taskId === props.currentTaskId);
   const quietReady = sameReady && !props.expanded && !error && !status && saved && !requestStorageFailed && !accountRequestBlocked && !recoveryBlocked;

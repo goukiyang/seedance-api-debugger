@@ -1,6 +1,6 @@
 'use client';
 import { validVideoPricingAmount } from '@/lib/pricing-client';
-import { creditCents, normalizeCredits } from '@/lib/credits/precision';
+import { creditCents, normalizeCredits, sumCredits } from '@/lib/credits/precision';
 import { useEffect, useRef, useState } from 'react';
 import { FolderOpen, RefreshCw, RotateCcw } from 'lucide-react';
 import { createUploadBatch, uploadFileAsAsset } from '@/lib/http/file-upload';
@@ -18,7 +18,7 @@ import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
-export type ImageUiQuote = { billingMode: 'fixed' | 'actual'; billingQuoteId?: string | null; batchQuoteId?: string | null; pricingRevision?: string | null; creditPrecision?: number; estimatedCredits: number; unitCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
+export type ImageUiQuote = { billingMode: 'fixed' | 'actual'; currentFixedPricing?: true; billingQuoteId?: string | null; batchQuoteId?: string | null; pricingRevision?: string | null; creditPrecision?: number; estimatedCredits: number; unitCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 export function formatImageUiCredits(value: number): string {
   return validVideoPricingAmount(value) ? String(normalizeCredits(value)) : '待确认';
 }
@@ -30,13 +30,27 @@ export function imageUiQuotePriceText(quote: Pick<ImageUiQuote, 'billingMode' | 
 export function validImageUiQuote(quote: ImageUiQuote, now = Date.now(), batch = false): boolean {
   const token = batch ? quote.batchQuoteId : quote.billingQuoteId;
   return ['fixed', 'actual'].includes(quote.billingMode)
+    && (quote.currentFixedPricing === undefined || quote.currentFixedPricing === true && !batch
+      && quote.billingMode === 'fixed' && token == null && quote.batchQuoteId == null)
     && validVideoPricingAmount(quote.unitCredits) && validVideoPricingAmount(quote.estimatedCredits)
     && typeof quote.expiresAt === 'string' && Date.parse(quote.expiresAt) > now
     && (quote.pricingRevision == null || typeof quote.pricingRevision === 'string' && quote.pricingRevision.length > 0)
     && (quote.creditPrecision === undefined || quote.creditPrecision === 0.01 || quote.creditPrecision === 0.1)
     && (quote.creditPrecision !== 0.1 || creditCents(quote.unitCredits) % 10 === 0 && creditCents(quote.estimatedCredits) % 10 === 0)
     && (token == null || typeof token === 'string' && token.length > 0)
-    && (!(quote.billingMode === 'actual' || quote.pricingRevision != null) || typeof token === 'string' && token.length > 0);
+    && (!(quote.billingMode === 'actual' || quote.pricingRevision != null && !quote.currentFixedPricing) || typeof token === 'string' && token.length > 0);
+}
+export function imageUiPriceConfirmation(value: unknown, requestId: string, count: number, channelId: string, now = Date.now()): ImageUiQuote | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const receipt = value as Record<string, unknown>;
+  if (receipt.confirmationRequired !== true || receipt.submitted !== false || receipt.acceptedCount !== 0
+    || receipt.requestId !== requestId || receipt.batchId !== undefined || !receipt.quote || typeof receipt.quote !== 'object') return null;
+  const quote = receipt.quote as ImageUiQuote & { count?: unknown };
+  if (!Number.isInteger(count) || count < 1 || count > 8 || quote.count !== count || !validImageUiQuote(quote, now)
+    || quote.estimatedCredits !== sumCredits(Array.from({ length: count }, () => quote.unitCredits))
+    || quote.imageChannel?.channelId !== channelId || typeof quote.imageChannel.configRevision !== 'string'
+    || !quote.imageChannel.configRevision) return null;
+  return quote;
 }
 export function imageUiQuoteChanged(previous: ImageUiQuote | null, next: ImageUiQuote): boolean {
   return !previous || previous.billingMode !== next.billingMode || previous.pricingRevision !== next.pricingRevision
@@ -52,6 +66,8 @@ export function imageUiQuoteAction(pendingRequestId: string | null, signature: s
 }
 export function imageUiQuoteFields(quote: ImageUiQuote, batch = false) {
   if (!validImageUiQuote(quote, Date.now(), batch)) throw new Error('报价已过期或不完整，尚未提交生成');
+  if (quote.currentFixedPricing) return { currentFixedPricing: true, expectedChannelId: quote.imageChannel?.channelId,
+    maxEstimatedCost: quote.estimatedCredits };
   return { ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}),
     ...(batch ? quote.batchQuoteId ? { batchQuoteId: quote.batchQuoteId } : {} : quote.billingQuoteId ? { billingQuoteId: quote.billingQuoteId } : {}),
     ...(quote.pricingRevision ? { pricingRevision: quote.pricingRevision } : {}),

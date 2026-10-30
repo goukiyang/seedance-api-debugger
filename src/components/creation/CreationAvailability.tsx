@@ -63,7 +63,20 @@ export default function CreationAvailability({ controller, onBaselineChange, hid
     } catch (cause) { if (active()) setMessage(cause instanceof Error ? cause.message : '暂时无法确认'); }
     finally { if (active()) setBusy(false); }
   };
-  if (!loading && !error && !intent) return context && !hideSummary ? <p className={styles.summary}>保存到 {context.project.name} · {context.payer.label}{context.legacyCard ? ` · 原视频卡：${context.legacyCard.title}` : ''}</p> : null;
+  const closeUnconfirmed = async () => {
+    const captured = currentView.current;
+    const active = () => mounted.current && currentView.current === captured;
+    setBusy(true); setMessage(''); setOriginalTask('');
+    try {
+      const result = await controller.closeUnconfirmedPreparation();
+      if (!active()) return;
+      if (result.kind === 'closed') setMessage('本次准备已结束，输入保留；可主动开始下一次生成。');
+      else if (result.kind === 'task') { setOriginalTask(result.taskId); setMessage('已找到原任务，未结束原请求。'); }
+      else setMessage('已找到原准备，请查看当前状态；未重新生成。');
+    } catch (cause) { if (active()) setMessage(cause instanceof Error ? cause.message : '原准备暂时无法确认'); }
+    finally { if (active()) setBusy(false); }
+  };
+  if (!loading && !error && !intent && !controller.unconfirmedRequestId && !message) return context && !hideSummary ? <p className={styles.summary}>保存到 {context.project.name} · {context.payer.label}{context.legacyCard ? ` · 原视频卡：${context.legacyCard.title}` : ''}</p> : null;
   return <div className={styles.status} aria-live="polite">
     {loading && <p>正在确认保存位置</p>}
     {error && <p>{error} <button className="btn btn-secondary" type="button" onClick={controller.refresh}>重新读取</button><button className={styles.textAction} type="button" disabled={busy} onClick={() => void queryOriginal()}>核对原请求</button></p>}
@@ -82,6 +95,7 @@ export default function CreationAvailability({ controller, onBaselineChange, hid
       <div className={styles.actions}><button type="button" className="btn btn-primary" disabled={busy || !reason.trim() || !intent.spec?.baseline_task_id} onClick={() => void action('approval')}>申请高清</button><a href="/approvals">查看审批</a><button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void controller.queryIntent(intent.id)}>重新读取批准</button></div>
     </details>}
     {intent && !resolved && !intent.accepted_task_id && !intent.batch_id && <button className={styles.textAction} type="button" disabled={busy} onClick={() => void action('close')}>核对并结束本次准备</button>}
+    {!intent && controller.unconfirmedRequestId && <button className={styles.textAction} type="button" disabled={busy || loading} onClick={() => void closeUnconfirmed()}>核对并结束本次准备</button>}
     {message && <p role="status">{message}</p>}
   </div>;
 }

@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { creditCents, normalizeCredits } from '../src/lib/credits/precision';
+import { creditCents, normalizeCredits, sumCredits } from '../src/lib/credits/precision';
 import { validVideoPricingAmount } from '../src/lib/pricing-client';
 import type { ImageUiQuote } from '../src/app/image-studio/use-studio-batch';
 import type { CanvasImageModelOption } from '../src/lib/pricing/image-option-contract';
 
 type ImageUiHelpers = Pick<typeof import('../src/app/image-studio/use-studio-batch'),
-  'formatImageUiCredits' | 'validImageUiQuote' | 'imageUiQuoteChanged' | 'imageUiQuoteFields' | 'parseImageUiBudget' | 'imageUiQuoteAction' | 'imageUiBudgetPrecision'>;
+  'formatImageUiCredits' | 'validImageUiQuote' | 'imageUiQuoteChanged' | 'imageUiQuoteFields' | 'parseImageUiBudget' | 'imageUiQuoteAction' | 'imageUiBudgetPrecision' | 'imageUiPriceConfirmation'>;
 type CanvasMenuOption = { value: string; label: string; disabled?: boolean };
 type CanvasMenuState = { valid: boolean; selectedModel: string; rows: Array<{
   model: string; label: string; selected: boolean; disabled: boolean; status: string; detail: string;
@@ -20,7 +20,7 @@ type CanvasMenuState = { valid: boolean; selectedModel: string; rows: Array<{
 function loadUiHelpers(): ImageUiHelpers {
   const filename = resolve('src/app/image-studio/use-studio-batch.tsx');
   const source = ts.createSourceFile(filename, readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const names = new Set(['formatImageUiCredits', 'validImageUiQuote', 'imageUiQuoteChanged', 'imageUiQuoteFields', 'parseImageUiBudget', 'imageUiQuoteAction', 'imageUiBudgetPrecision']);
+  const names = new Set(['formatImageUiCredits', 'validImageUiQuote', 'imageUiQuoteChanged', 'imageUiQuoteFields', 'parseImageUiBudget', 'imageUiQuoteAction', 'imageUiBudgetPrecision', 'imageUiPriceConfirmation']);
   const functions = source.statements.filter(statement => ts.isFunctionDeclaration(statement)
     && statement.name && names.has(statement.name.text) && statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword));
   assert.equal(functions.length, names.size, 'Fixture requires the real exported UI helpers');
@@ -28,7 +28,7 @@ function loadUiHelpers(): ImageUiHelpers {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS },
   }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, creditCents, normalizeCredits, validVideoPricingAmount, Date }, { filename, timeout: 1000 });
+  vm.runInNewContext(compiled, { exports, creditCents, normalizeCredits, sumCredits, validVideoPricingAmount, Date }, { filename, timeout: 1000 });
   return exports as ImageUiHelpers;
 }
 
@@ -109,6 +109,28 @@ export function runPricingImageUiContractFixture() {
   assert.equal(batchFields.budget, 0.6);
   assert.equal(ui.validImageUiQuote({ ...batch, batchQuoteId: null }, now, true), false);
   assert.throws(() => ui.imageUiQuoteFields({ ...fixed, expiresAt: new Date(now - 1).toISOString() }));
+
+  const currentFixed = { ...fixed, currentFixedPricing: true as const, billingQuoteId: null, count: 3 };
+  assert.equal(ui.validImageUiQuote(currentFixed, now), true);
+  assert.equal(ui.validImageUiQuote(currentFixed, now, true), false, 'Batch never accepts the single-template protocol');
+  assert.equal(ui.validImageUiQuote({ ...currentFixed, billingMode: 'actual' }, now), false);
+  assert.equal(ui.validImageUiQuote({ ...currentFixed, billingQuoteId: 'old-quote' }, now), false);
+  const currentFields = ui.imageUiQuoteFields(currentFixed);
+  assert.equal(currentFields.currentFixedPricing, true);
+  assert.equal(currentFields.maxEstimatedCost, 0.6);
+  assert.equal('billingQuoteId' in currentFields, false);
+  assert.equal('pricingRevision' in currentFields, false);
+  assert.equal('currentFixedPricing' in actualFields, false, 'Actual confirmation keeps only the original stored contract');
+  const zeroReceipt = { confirmationRequired: true, submitted: false, acceptedCount: 0, requestId: 'original-request', quote: currentFixed };
+  assert.equal(ui.imageUiPriceConfirmation(zeroReceipt, 'original-request', 3, 'shared', now), currentFixed);
+  for (const change of [{ requestId: 'other' }, { submitted: true }, { submitted: undefined }, { acceptedCount: 1 },
+    { acceptedCount: undefined }, { batchId: 'already-accepted' }, { quote: { ...currentFixed, count: 2 } },
+    { quote: { ...currentFixed, estimatedCredits: 0.2 } }, { quote: { ...currentFixed, expiresAt: new Date(now - 1).toISOString() } },
+    { quote: { ...currentFixed, imageChannel: { channelId: 'banana', configRevision: 'other' } } }]) {
+    assert.equal(ui.imageUiPriceConfirmation({ ...zeroReceipt, ...change }, 'original-request', 3, 'shared', now), null);
+  }
+  assert.equal(ui.imageUiPriceConfirmation({ error: 'temporary failure' }, 'original-request', 3, 'shared', now), null);
+  assert.equal(ui.imageUiPriceConfirmation({ ...zeroReceipt, quote: { ...actual, count: 3 } }, 'original-request', 3, 'shared', now)?.billingMode, 'actual');
 
   const signature = JSON.stringify(['actor-a', 'document-a', 'module-a', { prompt: 'Keep original', assetIds: ['asset-a'] }]);
   assert.equal(ui.imageUiQuoteAction('original-request', signature, signature, fixed, now), 'query');
@@ -273,7 +295,8 @@ export function runPricingImageUiContractFixture() {
   expectMenu(pricing.validImageProjection({ ...unavailableProjection, unitCredits: 0.2 }, { ...payload, model: unavailable.model }, 'original', now), false,
     'Unavailable selected projection cannot retain an old price');
   return { completed: true as const, checks: [
-    { id: 'G11' as const, assertions: 17 + menuAssertions, evidence: ['Executed real image UI quote/request helpers and canvas quote fields; server totals and pricing revision/proof retained for fixed, actual and legacy contracts.',
+    { id: 'G11' as const, assertions: 39 + menuAssertions, evidence: ['Executed real image UI quote/request helpers and canvas quote fields; server totals and pricing revision/proof retained for fixed, actual and legacy contracts.',
+      'QUOTE01: transaction-local fixed confirmation accepts only matching original request, zero admission, count, total, route and valid quote; malformed/unknown responses retain pending. Fixed and actual authorization fields are mutually exclusive; batch rejects the new single-template protocol.',
       'Executed actual canvas validModelOption/modelMenuState/validImageProjection exports: nullable unavailable and actual prices, legal fixed zero, reason text, native option range and selection preservation, malformed/duplicate/missing candidates, literal malicious text and original/concrete channel semantics.'] },
     { id: 'G13' as const, assertions: 12, evidence: ['Executed real scoped quote action gate and canvas full-quote validator: changed actor/document/input, missing proof, expiration and revision mismatch cannot submit.'] },
     { id: 'G17' as const, assertions: 10, evidence: ['Executed real pending-request query action and quote-change comparison; lower/same-total revised quotes require re-quote, request identity and original inputs remain unchanged. No worker or settlement claim.'] },

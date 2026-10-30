@@ -72,6 +72,28 @@ export class SharedStudioDefinitionError extends StudioError {
   constructor(message = '模板已更新，请确认本次生成', status = 409) { super(message, status); }
 }
 
+export class StudioActualQuoteRequired extends StudioError {
+  constructor() { super('本次按实际账单计费，需先确认最高预留点数', 409); }
+}
+
+export type StudioCurrentFixedQuote = {
+  billingMode: 'fixed';
+  currentFixedPricing: true;
+  billingQuoteId: null;
+  unitCredits: number;
+  estimatedCredits: number;
+  count: number;
+  expiresAt: string;
+  imageChannel?: ImageGenerationChannelSnapshot;
+  pricingRevision?: string;
+  creditPrecision?: number;
+};
+
+type StudioCurrentPricingSubmission = {
+  expectedChannelId?: string;
+  onPriceConfirmation: (quote: StudioCurrentFixedQuote | null) => void;
+};
+
 export function studioBusinessErrorStatus(error: unknown): number | null {
   if (error instanceof StudioError) return error.status;
   const status = error instanceof Error ? (error as Error & { status?: unknown }).status : undefined;
@@ -406,7 +428,11 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission) {
+  if (currentPricing && (body.currentFixedPricing !== true || typeof body.moduleId !== 'string'
+    || body.billingQuoteId !== undefined || avatar || preparation || canvasUse || canvasPrompt || roleMedia)) {
+    throw new StudioError('当前价格确认仅用于模板单次图片生成', 400);
+  }
   // This version comes only from persisted server preparation, never from body.
   const sizePolicyVersion = preparation?.sizePolicyVersion ?? CURRENT_STUDIO_SIZE_POLICY_VERSION;
   if (sizePolicyVersion !== 1 && sizePolicyVersion !== 2) throw new StudioError('图片尺寸策略版本无效', 409);
@@ -491,6 +517,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
+    currentPricing?.onPriceConfirmation(null);
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
       if (input.taskSettings) {
@@ -611,7 +638,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw new StudioError('当前型号默认供应商已变化，原报价尚未生成；请重新报价', 409);
       }
     }
-    if (effectiveRequestedChannelId !== 'original' && explicitChannelId !== effectiveRequestedChannelId
+    if (currentPricing?.expectedChannelId && currentPricing.expectedChannelId !== effectiveRequestedChannelId) {
+      throw new StudioError('当前型号的供应商已变化，请重新读取设置后生成；尚未受理', 409);
+    }
+    if (!currentPricing && effectiveRequestedChannelId !== 'original' && explicitChannelId !== effectiveRequestedChannelId
       && (input.maxEstimatedCost !== undefined || billingQuoteId) && !input.imageChannel) {
       throw new StudioError('当前型号默认供应商已变化或旧报价缺少通道版本，请重新获取报价并确认；未派发生成', 409);
     }
@@ -669,6 +699,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       && new URL(imageApi.base_url).origin === 'https://api.muskapis.com'
       && (!imageChannel || channelCapability?.billingMode === 'actual' && channelCapability.actualQuoteRequired === true)
       && (await imageBillingReady(billingScope, generation.model, tx)).ready;
+    if (currentPricing && (actualBillingEligible || requestedBillingMode === 'actual'
+      || pricingQuote?.charge.identity.billingMode === 'actual')) throw new StudioActualQuoteRequired();
     if (imageChannel && requestedBillingMode === 'actual'
       && (!isMuskImageGenerationChannel(imageApi) || new URL(imageApi.base_url).origin !== 'https://api.muskapis.com')) {
       throw new StudioError('此图片通道没有已验证的实际账单来源，请选择固定点数或原图片通道', 409);
@@ -680,14 +712,14 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     // Actual preparation has no charge yet; acceptance requires the stored authorization below.
     if (pricingQuote) price = pricingQuote.charge.identity.billingMode === 'actual' ? 0 : pricingQuote.credits;
     if (acceptedContract) price = acceptedContract.authorizedCredits;
-    if (pricingQuote && !billingQuoteId && !preparation) throw new StudioError('当前收费规则需要确认有效报价，请重新报价；尚未生成', 409);
+    if (pricingQuote && !billingQuoteId && !preparation && !currentPricing) throw new StudioError('当前收费规则需要确认有效报价，请重新报价；尚未生成', 409);
     if (imageChannel && requestedBillingMode === 'actual' && !billingQuoteId && !preparation) {
       throw new StudioError('实际计费需先获取并确认同一通道的有效报价', 409);
     }
     if (price === null || !Number.isFinite(price) || (!pricingQuote && !acceptedContract && !Number.isInteger(price)) || price < 0 || price > 100000) throw new StudioError('管理员尚未设置当前模块的有效生成积分', 409);
     creditCents(price);
     const quotedUnitCredits = price;
-    if (!billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => quotedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
+    if (!currentPricing && !billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => quotedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
     let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
     let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
@@ -1015,7 +1047,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     // Freeze the channel before hashing the quote; its returned snapshot must
     // describe the same input when the user later accepts that quote.
     const contractImageChannel = imageChannel || originalSharedChannel || input.imageChannel
-      || (preparation && !acceptedContract && (pricingQuote || actualBillingEligible) && effectiveRequestedChannelId === 'original'
+      || ((currentPricing || preparation && !acceptedContract && (pricingQuote || actualBillingEligible)) && effectiveRequestedChannelId === 'original'
         ? await captureImageGenerationChannel(generation.model, 'original', tx)
         : undefined);
     let billingContract = fixedImageBillingContract({ scope: billingScope, model: generation.model, credits: price,
@@ -1120,6 +1152,21 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       settingsRevision: settings.revision,
         moduleRevision: workspace?.revision ?? null,
     });
+    if (currentPricing) {
+      // Price is recomputed with this exact input and permissions in the accepting transaction.
+      // No task, reservation or ledger entry exists when returning a confirmation instead.
+      if (billingContract.mode !== 'fixed') throw new StudioActualQuoteRequired();
+      const total = sumCredits(Array.from({ length: input.count }, () => price));
+      if (input.maxEstimatedCost === undefined || total > input.maxEstimatedCost) {
+        currentPricing.onPriceConfirmation({ billingMode: 'fixed', currentFixedPricing: true, billingQuoteId: null,
+          unitCredits: price, estimatedCredits: total, count: input.count, expiresAt: billingContract.expiresAt,
+          ...(quoteImageChannel ? { imageChannel: quoteImageChannel } : {}),
+          ...(billingContract.pricing ? { pricingRevision: billingContract.pricing.revision,
+            creditPrecision: billingContract.pricing.mode === 'legacy_fixed' ? 0.01 : 0.1 } : {}) });
+        return;
+      }
+      if (billingContract.pricing) await assertNewPricingCharge(billingContract.pricing, billingContract.pricing.revision, tx);
+    }
     for (let i = 0; i < input.count; i++) {
       const id = `${billingContract.pricing ? 'rate-' : ''}${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];

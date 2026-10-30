@@ -2926,7 +2926,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const previous = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       let idempotencyKey = previous?.request_id || window.crypto.randomUUID();
       creationDraftBodyRef.current = requestBody;
-      const prepared = await creation.prepare(requestBody, idempotencyKey, previous);
+      const currentPricing = !isIpSurface && !params.templateStudioRunId;
+      const prepared = await creation.prepare({ ...requestBody, ...(currentPricing ? { pricing_preparation: 'current' } : {}) }, idempotencyKey, previous);
       if (!isCurrent()) return;
       idempotencyKey = prepared.request_id;
       if (isResolvedCreationIntent(prepared)) {
@@ -2938,7 +2939,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         return;
       }
       if (!prepared.availability?.canSubmit) { setGenerationNotice('请完成下方本次创作条件，输入已保留'); return; }
+      if (currentPricing && (!prepared.quote || !validVideoPricingAmount(prepared.quote.estimated_cost))) throw new Error('本次费用暂未确认，尚未生成；输入已保留');
+      if (currentPricing && typeof params.quotedEstimatedCost === 'number' && prepared.quote!.estimated_cost > params.quotedEstimatedCost) {
+        notifyVideoPricingChanged();
+        throw new Error('本次费用已提高，请核对更新后的点数再生成；尚未扣点');
+      }
       const acceptedBody = { ...requestBody, idempotency_key: idempotencyKey, intent_id: prepared.id, intent_revision: prepared.revision,
+        ...(currentPricing ? { pricing_revision: prepared.quote!.pricing_revision,
+          max_estimated_cost: params.quotedEstimatedCost ?? prepared.quote!.estimated_cost } : {}),
         resolution_approval_id: prepared.approval_id || null, ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
       sessionStorage.setItem(requestStorageKey, JSON.stringify({ key: idempotencyKey, fingerprint: requestFingerprint, fingerprintVersion: 2 }));
 

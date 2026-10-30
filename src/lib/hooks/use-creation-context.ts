@@ -8,6 +8,12 @@ export function isResolvedCreationIntent(intent: VideoCreationIntentDTO | null |
   return Boolean(intent && ['accepted', 'closed', 'batch_active', 'batch_settled', 'rejected'].includes(intent.state));
 }
 type PreparationReceipt = { id?: string; request_id?: string };
+export function isClosedPreparationReceipt(value: unknown, requestId: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  return result.request_id === requestId && result.state === 'closed' && result.closed === true
+    && result.submitted === false && result.acceptedCount === 0 && result.intent === null && result.task_id === undefined;
+}
 async function readOriginal(saved: PreparationReceipt, signal?: AbortSignal) {
   if (!saved.id && !saved.request_id) throw new Error('原准备请求记录无法读取，请保留当前输入');
   return read<{ intent: VideoCreationIntentDTO | null; state?: string }>(saved.id
@@ -45,15 +51,21 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
   const [intentRecord, storeIntent] = useState<{ scope: typeof scopeToken; value: VideoCreationIntentDTO | null }>({ scope: scopeToken, value: null });
   const intentRef = useRef(intentRecord); intentRef.current = intentRecord;
   const intent = intentRecord.scope === scopeToken ? intentRecord.value : null;
+  const [unconfirmedRecord, storeUnconfirmed] = useState<{ scope: typeof scopeToken; requestId: string | null }>({ scope: scopeToken, requestId: null });
+  const unconfirmedRequestId = unconfirmedRecord.scope === scopeToken ? unconfirmedRecord.requestId : null;
+  const setUnconfirmed = useCallback((requestId: string | null) => {
+    if (mounted.current && current.current === scopeToken) storeUnconfirmed({ scope: scopeToken, requestId });
+  }, [scopeToken]);
   const setIntent = useCallback((value: VideoCreationIntentDTO | null) => {
     if (!mounted.current || current.current !== scopeToken) return;
     const record = { scope: scopeToken, value };
     intentRef.current = record; storeIntent(record);
-  }, [scopeToken]);
+    if (value) setUnconfirmed(null);
+  }, [scopeToken, setUnconfirmed]);
   useEffect(() => {
     const revision = ++sequence.current, captured = scopeToken, controller = new AbortController();
     setLoadedScope(captured);
-    setContext(null); setIntent(null); setError('');
+    setContext(null); setIntent(null); setUnconfirmed(null); setError('');
     if (!ownerId || !enabled || !tabId) { setLoading(false); return; }
     setLoading(true);
     const active = () => mounted.current && sequence.current === revision && current.current === captured;
@@ -87,10 +99,11 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
       if (receipt) {
         const readRevision = intentSequence.current;
         const saved = JSON.parse(receipt) as PreparationReceipt;
+        setUnconfirmed(saved.request_id || null);
         const original = await readOriginal(saved, controller.signal);
         if (!active() || intentSequence.current !== readRevision || sessionStorage.getItem(receiptKey) !== receipt) return;
         if (original.intent) setIntent(original.intent);
-        else if (original.state === 'rejected') sessionStorage.removeItem(receiptKey);
+        else if (original.state === 'rejected') { sessionStorage.removeItem(receiptKey); setUnconfirmed(null); }
         else setError('原准备请求结果待确认，请保留原号后重新读取');
       }
       localStorage.setItem(`sd2-creation-destination-v2:${ownerId}:${entry}:${effectiveDraftId}`, destination);
@@ -98,7 +111,7 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
     })().catch(cause => { if (active() && cause.name !== 'AbortError') setError(cause.message); })
       .finally(() => { if (active()) setLoading(false); });
     return () => { controller.abort(); sequence.current++; };
-  }, [scopeToken, ownerId, enabled, entry, effectiveDraftId, tabId, projectId, legacyCardId, refreshRevision, receiptKey, setIntent]);
+  }, [scopeToken, ownerId, enabled, entry, effectiveDraftId, tabId, projectId, legacyCardId, refreshRevision, receiptKey, setIntent, setUnconfirmed]);
   const prepare = useCallback(async (body: Record<string, unknown>, requestId: string, previous?: VideoCreationIntentDTO | null) => {
     const captured = scopeToken;
     const operation = ++intentSequence.current;
@@ -113,7 +126,7 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
     if (saved) {
       const original = await readOriginal(saved);
       assertCurrent();
-      if (!original.intent && original.state === 'rejected') sessionStorage.removeItem(receiptKey);
+      if (!original.intent && original.state === 'rejected') { sessionStorage.removeItem(receiptKey); setUnconfirmed(null); }
       else if (!original.intent) throw new Error('原准备请求仍待确认，只能查询原号');
       if (original.intent) {
         setIntent(original.intent);
@@ -124,6 +137,7 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
     }
     assertCurrent();
     sessionStorage.setItem(receiptKey, JSON.stringify({ request_id: requestId, ...(previous ? { id: previous.id } : {}) }));
+    setUnconfirmed(previous ? null : requestId);
     const data = await read<{ intent: VideoCreationIntentDTO }>('/api/video/creation-intents', { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(ownerId ? { 'x-app-session-user': ownerId } : {}) },
       body: JSON.stringify({ ...body, entry: body.entry || entry, project_id: body.project_id || projectId,
@@ -132,7 +146,7 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
     assertCurrent();
     sessionStorage.setItem(receiptKey, JSON.stringify({ id: data.intent.id, request_id: data.intent.request_id }));
     setIntent(data.intent); return data.intent;
-  }, [scopeToken, ownerId, tabId, entry, projectId, legacyCardId, receiptKey, setIntent]);
+  }, [scopeToken, ownerId, tabId, entry, projectId, legacyCardId, receiptKey, setIntent, setUnconfirmed]);
   const queryIntent = useCallback(async (id: string) => {
     if (!mounted.current || current.current !== scopeToken) throw new Error('工作现场已变化，请回原位置核对');
     const operation = ++intentSequence.current;
@@ -149,9 +163,34 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
     const original = await readOriginal(retained ? JSON.parse(retained) : { id: value?.id, request_id: value?.request_id });
     if (!mounted.current || current.current !== scopeToken || intentSequence.current !== operation) throw new Error('工作现场已变化，原请求保留');
     if (original.intent) { setIntent(original.intent); setError(''); return original.intent; }
-    if (original.state === 'rejected') { sessionStorage.removeItem(receiptKey); setIntent(null); setError(''); return null; }
+    if (original.state === 'rejected') { sessionStorage.removeItem(receiptKey); setIntent(null); setUnconfirmed(null); setError(''); return null; }
     throw new Error('原准备请求仍待确认，只能查询原号');
-  }, [scopeToken, receiptKey, setIntent]);
+  }, [scopeToken, receiptKey, setIntent, setUnconfirmed]);
+  const closeUnconfirmedPreparation = useCallback(async () => {
+    if (!mounted.current || current.current !== scopeToken || !ownerId) throw new Error('工作现场已变化，请回原位置核对');
+    const retained = sessionStorage.getItem(receiptKey);
+    const saved = retained ? JSON.parse(retained) as PreparationReceipt : null;
+    if (!saved?.request_id) throw new Error('原准备请求号无法确认，当前输入保留');
+    const operation = ++intentSequence.current;
+    const result = await read<{ request_id: string; intent: VideoCreationIntentDTO | null; state: string; task_id?: string }>(
+      '/api/video/creation-intents/close', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': ownerId },
+        body: JSON.stringify({ request_id: saved.request_id }) });
+    if (!mounted.current || current.current !== scopeToken || intentSequence.current !== operation
+      || sessionStorage.getItem(receiptKey) !== retained) throw new Error('工作现场已变化，原请求仍保留');
+    if (result.request_id !== saved.request_id) throw new Error('原准备回执不匹配，请继续核对原号');
+    if (result.intent) {
+      if (result.intent.request_id !== saved.request_id) throw new Error('原准备回执不匹配，请继续核对原号');
+      setIntent(result.intent); setError(''); return { kind: 'intent' as const, intent: result.intent };
+    }
+    if (result.state === 'accepted' && typeof result.task_id === 'string' && result.task_id) {
+      setError('原请求已有任务，未结束准备，请查看原任务');
+      return { kind: 'task' as const, taskId: result.task_id };
+    }
+    if (!isClosedPreparationReceipt(result, saved.request_id)) throw new Error('原请求存在待核对证据，尚未结束；请保留原号');
+    sessionStorage.removeItem(receiptKey);
+    setIntent(null); setUnconfirmed(null); setError('');
+    return { kind: 'closed' as const };
+  }, [scopeToken, ownerId, receiptKey, setIntent, setUnconfirmed]);
   const acceptTask = useCallback(async (requestId: string, taskId: string) => {
     if (!mounted.current || current.current !== scopeToken) return;
     const retained = sessionStorage.getItem(receiptKey);
@@ -169,7 +208,7 @@ export function useCreationContext(options: { ownerId?: string | null; entry: Cr
   const isCurrent = useCallback(() => mounted.current && current.current === scopeToken, [scopeToken]);
   return { context: loadedScope === scopeToken ? context : null, projects: loadedScope === scopeToken ? projects : [],
     loading: loadedScope !== scopeToken || loading, error: loadedScope === scopeToken ? error : '', intent,
-    prepare, queryIntent, queryOriginal, acceptTask, setIntent, isCurrent, entry,
+    prepare, queryIntent, queryOriginal, closeUnconfirmedPreparation, unconfirmedRequestId, acceptTask, setIntent, isCurrent, entry,
     refresh: () => refresh(value => value + 1), contextKey: `${ownerId || 'session'}:${entry}:${effectiveDraftId}` };
 }
 export type CreationContextController = ReturnType<typeof useCreationContext>;
