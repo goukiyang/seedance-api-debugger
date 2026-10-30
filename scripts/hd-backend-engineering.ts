@@ -98,6 +98,32 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     await assert.rejects(storage.assertHdStorageRoot(), /hd_storage_owner/);
     await fs.chmod(fixedRoot, 0o700);
   });
+  await check('HD01 library upgrade reuses ready output and preserves source/recipe boundaries', async () => {
+    await fixture(); const original = await image('library-upgrade');
+    const currentLibrary = sharp.versions.sharp;
+    let job: Awaited<ReturnType<typeof core.requestHd>>;
+    try {
+      sharp.versions.sharp = 'fixture-previous-library';
+      job = await core.requestHd(original.source, 0, false);
+    } finally { sharp.versions.sharp = currentLibrary; }
+    assert.ok(job);
+    assert.notEqual((await core.hdRequestIdentity(original.source, false))!.key, job.key);
+    assert.equal((await core.requestHd(original.source, 1, false))!.key, job.key, 'in-flight old key is not duplicated');
+    await processJob(job.key);
+    const ready = (await core.lookupHd(original.source))!;
+    assert.equal(ready.status, 'ready'); assert.equal(ready.key, job.key);
+    const before = await fs.readFile(path.join(core.hdDirectory(), ready.file!));
+    assert.equal((await core.requestHd(original.source, 1, false))!.attempts, ready.attempts);
+    assert.deepEqual(await fs.readFile(path.join(core.hdDirectory(), ready.file!)), before);
+    assert.equal((await core.listHdJobs()).length, 1);
+    assert.notEqual((await core.requestHd(original.source, 0, true))!.key, job.key, 'text preservation is a separate recipe');
+    const other = await image('other-source');
+    assert.equal(await core.lookupHd(other.source), null, 'same dimensions do not authorize another source');
+    await fs.truncate(path.join(core.hdDirectory(), ready.file!), 1);
+    assert.equal((await core.lookupHd(original.source))!.reason, 'published_integrity');
+    await sharp({ create: { width: 64, height: 64, channels: 3, background: 'red' } }).png().toFile(original.file);
+    assert.equal(await core.lookupHd(original.source), null, 'changed original cannot reuse an old-version output');
+  });
   await check('E04 temporary viewing preserves the job role and durable scheduler identity', async () => {
     await fixture(); const original = await image('priority');
     const initial = (await core.requestHd(original.source, 0, false))!;

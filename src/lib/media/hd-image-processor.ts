@@ -2,14 +2,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fork, ChildProcess } from 'node:child_process';
-import { hdEncoderParameters, type HdIntegrity, type HdEncoderParameters, type HdEncoderStrategy } from './hd-encoder';
+import { HD_ENCODING_TIMEOUT_SECONDS, hdEncoderParameters, type HdIntegrity, type HdEncoderParameters, type HdEncoderStrategy } from './hd-encoder';
 
 export const HD_IMAGE_PROTOCOL = 'hd-image-process-v1';
-// Each existing Sharp operation retains its 120 second limit. The parent also
-// bounds metadata, the whole validation phase (two complete decodes), and wall
-// time. These are server constants, never request/HTTP parameters.
+// Full-size effort6 encoding needs more than three minutes for some valid
+// images. Decode limits remain unchanged; the parent still bounds every phase
+// and the whole child lifetime. These are never request/HTTP parameters.
 export type HdImageLimits = { wallMs: number; readingMs: number; encodingMs: number; validatingMs: number; terminateMs: number };
-export const HD_IMAGE_LIMITS: Readonly<HdImageLimits> = Object.freeze({ wallMs: 660_000, readingMs: 150_000, encodingMs: 180_000, validatingMs: 300_000, terminateMs: 5_000 });
+export const HD_IMAGE_LIMITS: Readonly<HdImageLimits> = Object.freeze({ wallMs: 1_080_000, readingMs: 150_000,
+  encodingMs: (HD_ENCODING_TIMEOUT_SECONDS + 30) * 1000, validatingMs: 300_000, terminateMs: 5_000 });
 export type HdImageStage = 'reading' | 'encoding' | 'validating';
 export type HdProcessorIdentity = { pid: number; groupId: number; host: string; startTicks: string; executionId: string };
 export type HdChildClose = { executionId: string; code: number | null; signal: NodeJS.Signals | null; observedAt: string };

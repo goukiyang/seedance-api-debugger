@@ -1,7 +1,7 @@
 'use client';
 
 import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult, type LocalFrameContext } from './image-read-session';
-import { acquireHdImageSource, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
+import { acquireHdImageSource, hdDescriptionPending, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
 import { hdDescriptionUsesOriginal, type HdDisplayKind } from './hd-display-policy';
 import { imageDisplaySource } from './image-comparison';
 import { versionedHdSource } from '@/lib/hooks/use-hd-image-source';
@@ -84,7 +84,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     const key = JSON.stringify([kind, readSource, version]);
     const previous = state, previousKey = readKey, previousSequence = readSequence;
     state = { ...state, readSource, version, displayKind: kind, fullSize: kind !== 'preview', description,
-      descriptorPending: !descriptorError && ['queued', 'running'].includes(description?.status || ''), error: descriptorError, fallback };
+      descriptorPending: !descriptorError && hdDescriptionPending(description), error: descriptorError, fallback };
     if (retainedRead && (!description?.sourceVersion || description.sourceVersion !== retainedRead.descriptorVersion)) dropRetained();
     if (key === readKey) { notify(); return; }
     // A later authorized version/representation change becomes foreground
@@ -163,7 +163,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     if (value.denied) { deny(); return; }
     const description = value.description;
     if (!confirmed || originalRoute) {
-      state = { ...state, description, descriptorPending: ['queued', 'running'].includes(description?.status || ''), error: Boolean(value.error) };
+      state = { ...state, description, descriptorPending: !value.error && hdDescriptionPending(description), error: Boolean(value.error) };
       notify(); return;
     }
     if (description) {

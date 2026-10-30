@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import sharp from 'sharp';
 
 export const HD_MAX_PIXELS = 40_000_000;
+export const HD_ENCODING_TIMEOUT_SECONDS = 600;
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
 export type HdEncoderStrategy = 'hd-legacy-e6-v1' | 'hd-avif-e4-v1';
 export const HD_LEGACY_ENCODER_STRATEGY: HdEncoderStrategy = 'hd-legacy-e6-v1';
@@ -39,7 +40,7 @@ export function hdEncoderParameters(format: 'avif' | 'webp', strategy?: HdEncode
 // integrity rules, extracted without changing quality, alpha or colour policy.
 export async function encodeHdOutput(input: string, output: string, format: 'avif' | 'webp', strategy?: HdEncoderStrategy) {
   const parameters = hdEncoderParameters(format, strategy);
-  const image = sharp(input, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: 120 });
+  const image = sharp(input, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: HD_ENCODING_TIMEOUT_SECONDS });
   await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
   await fs.chmod(output, 0o600);
 }

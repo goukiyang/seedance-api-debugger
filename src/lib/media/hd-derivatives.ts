@@ -208,6 +208,25 @@ export async function hdRequestIdentity(source: string, preserveText?: boolean, 
     library: sharp.versions, preserveText, ...(encoderStrategy === 'hd-avif-e4-v1' ? { encoderStrategy } : {}) })).digest('hex');
   return { current, key, preserveText: Boolean(preserveText), encoderStrategy };
 }
+const compatibleHdKeys = new Map<string, string[]>();
+async function compatibleHdRecords(source: string, identity: NonNullable<Awaited<ReturnType<typeof hdRequestIdentity>>>) {
+  const local = siteUploadPathFromUrl(source);
+  const cacheKey = JSON.stringify([hdDirectory(), local, identity.current.version, identity.preserveText]);
+  const matches = (job: HdJob | null): job is HdJob => Boolean(job && siteUploadPathFromUrl(job.source) === local
+    && job.version === identity.current.version && job.preserveText === identity.preserveText);
+  const cached = compatibleHdKeys.get(cacheKey);
+  let jobs = cached ? (await Promise.all(cached.map(readHdJob))).filter(matches) : [];
+  if (!jobs.length) {
+    // Library versions are part of old keys, not the source/quality contract.
+    // Retain the original manifest and receipt instead of creating a second job.
+    jobs = (await listHdJobs()).filter(matches);
+    if (jobs.length) {
+      if (compatibleHdKeys.size >= 128) compatibleHdKeys.delete(compatibleHdKeys.keys().next().value!);
+      compatibleHdKeys.set(cacheKey, jobs.map(job => job.key));
+    } else compatibleHdKeys.delete(cacheKey);
+  }
+  return jobs.map(job => ({ job, identity: { ...identity, key: job.key, encoderStrategy: hdEncoderStrategy(job.encoderStrategy) } }));
+}
 async function registeredHd(source: string, preserveText?: boolean) {
   const legacy = await hdRequestIdentity(source, preserveText);
   if (!legacy) return null;
@@ -216,6 +235,7 @@ async function registeredHd(source: string, preserveText?: boolean) {
   const records = await Promise.all(identities.map(async identity => ({ identity, job: await readHdJob(identity.key) })));
   for (const row of records) if (row.job && (row.job.version !== row.identity.current.version
     || row.job.preserveText !== row.identity.preserveText || hdEncoderStrategy(row.job.encoderStrategy) !== row.identity.encoderStrategy)) throw new Error('invalid_hd_manifest');
+  if (!records.some(row => row.job)) records.push(...await compatibleHdRecords(source, legacy));
   return records.find(row => row.job?.status === 'ready') || records.find(row => row.job && ['queued', 'running'].includes(row.job.status))
     || records.find(row => row.job) || { identity: defaultHdEncoderStrategy() === 'hd-avif-e4-v1' ? candidate! : legacy, job: null };
 }
