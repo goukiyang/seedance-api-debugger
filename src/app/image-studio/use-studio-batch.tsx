@@ -381,7 +381,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (!sameScope()) return false;
       releasePendingRequest(requestId); submittedRequest = null;
       if (!sameScope()) return false;
-      watchGenerationCompletion(userId, result.batch.id, 'batch', total);
+      watchGenerationCompletion(userId, result.batch.id, 'batch', total, undefined, 0, { moduleId });
       setId(result.batch.id); setPending(null); return true;
     } catch (error) { if (sameScope()) { setError(error instanceof Error ? error.message : '批次提交结果未确认'); if (submittedRequest) setPending(submittedRequest); } return false; }
     finally { lock.current = false; if (live.current.mounted && live.current.scope === scope) { setBusy(false); setProgress(''); } }

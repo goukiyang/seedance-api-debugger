@@ -110,7 +110,8 @@ import { useVideoFeishu } from '@/lib/hooks/use-video-feishu';
 import { VideoFeishuToggle } from '@/components/generate/VideoFeishuToggle';
 import { ImageFeishuStatus, type ImageFeishuView } from '@/components/image-studio/ImageFeishuStatus';
 import { BatchResults } from './batch-results';
-import { watchGenerationCompletion } from '@/components/GenerationCompletion';
+import { useGenerationCompletionTarget, watchGenerationCompletion } from '@/components/GenerationCompletion';
+import type { ResultNavigationIntent } from '@/components/useResultPages';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { describedEvolutionDirection, type EvolutionCapability, type EvolutionInput } from '@/lib/image-studio/evolution';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -3499,7 +3500,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
       ambiguous = false; lastDisplayedQuote.current = null;
       onGenerationAccepted(); showLatestResults.current(payload.requestId);
-      watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
+      watchGenerationCompletion(userId, payload.requestId, 'images', payload.count, undefined, 0, { moduleId: module.id });
       releasePendingSubmission(payload.requestId); await loadTasks();
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交结果未确认');
@@ -3862,6 +3863,25 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     : batch.mode === 'single' && (!Number.isInteger(count) || count < 1 || count > 8) ? { message: '生成张数应为1到8的整数，请修改张数。', tone: 'warning' }
     : !ready ? { message: '生成条件尚未就绪，请检查模型和上下文设置。', tone: 'warning' } : null;
   const likedResults = useLikedStudioResults<StudioTask>(userId, module.id, visible && !hidden && resultView === 'images', templateWorkbench, visibleTaskIds);
+  const completionTarget = useGenerationCompletionTarget(userId);
+  const [completionNavigation, setCompletionNavigation] = useState<ResultNavigationIntent | null>(null);
+  const completionReader = useRef({ loadTasks, choose: likedResults.choose });
+  completionReader.current = { loadTasks, choose: likedResults.choose };
+  useEffect(() => {
+    if (!completionTarget || completionTarget.kind === 'avatar' || completionTarget.moduleId !== module.id) { setCompletionNavigation(null); return; }
+    if (!active || !visible || hidden) return;
+    let current = true;
+    const expectedScope = taskReadScope;
+    completionReader.current.choose(false); setResultView('images'); setLatestResultsRequestId(null);
+    void completionReader.current.loadTasks(undefined, 'refresh').then(() => {
+      if (!current || taskReadScopeRef.current !== expectedScope) return;
+      setSelectedResultId(completionTarget.taskId);
+      setCompletionNavigation({ id: `completion:${completionTarget.requestId}`, revision: completionTarget.requestId,
+        scopeKey: `sd2-image-studio-result-page:${expectedScope}`, targetId: completionTarget.taskId });
+    });
+    return () => { current = false; };
+  }, [completionTarget?.requestId, module.id, taskReadScope, active, visible, hidden]);
+
   showLatestResults.current = requestId => {
     likedResults.choose(false);
     setResultView('images');
@@ -4422,6 +4442,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
             : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
+          navigationIntent={completionNavigation}
           latestPageRequest={latestResultsRequestId}
           onLatestPageRequestHandled={requestId => setLatestResultsRequestId(current => current === requestId ? null : current)}
           scope={`sd2-image-studio-${likedResults.liked ? 'liked-' : ''}result-page:${taskReadScope}`}
@@ -4451,6 +4472,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </> : null}
           coverDeleteWithContextActions={templateWorkbench}
           renderDelete={item => item.task && canDeleteResult(item) ? <button type="button" disabled={deleting || downloadBusy} title="删除生成记录" aria-label={`删除第 ${item.task.ordinal} 张生成记录`} onClick={event => { event.stopPropagation(); requestResultDelete(item.task!, event.currentTarget); }}><Trash2 size={17} /></button> : null}
+          renderDeliveryAction={({task, viewOnly}) => templateWorkbench && task && !viewOnly && (!task.owner || task.owner.id === userId)
+            ? <ImageFeishuStatus owner={userId} taskId={task.id} initial={task.feishu} onChanged={() => void loadTasks(undefined, 'silent')} /> : null}
           renderMetadata={({task, sharedPin}) => task ? <>          <div className={styles.resultHeading}>
             <p className={styles.prompt} title={templateWorkbench ? name : `${name} · ${task.ordinal}`}>{templateWorkbench ? name : `${name} · ${task.ordinal}`}</p>
             {templateWorkbench && task.asset?.id && visibleFeed?.pinState.assetIds.includes(task.asset.id) && <span className={styles.muted}>已置顶</span>}
@@ -4500,7 +4523,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
-            {templateWorkbench && <ImageFeishuStatus owner={userId} taskId={task.id} initial={task.feishu} onChanged={() => void loadTasks(undefined, 'silent')} />}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {studioTaskAsyncRecovery(task) && <>
               {taskRecheckFeedback(task)?.message && <p className={styles.muted} role="status">{taskRecheckFeedback(task)!.message}</p>}

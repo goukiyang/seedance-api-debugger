@@ -8,7 +8,7 @@ import { ZoomableImagePreview, type ZoomableImagePreviewProps } from './Zoomable
 import ContentReactions from './content-reactions/ContentReactions';
 import { LoadingSkeleton, LoadingStatus } from './LoadingState';
 import { copyImage } from '@/lib/media/copy-image';
-import { useResultPages } from './useResultPages';
+import { useResultPages, type ResultNavigationIntent } from './useResultPages';
 import styles from './GeneratedImageResults.module.css';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
@@ -29,6 +29,7 @@ import { ImageResultStatusDetails } from './ImageResultStatusDetails';
 
 export type GeneratedImageResult = {
   id: string;
+  completionTaskId?: string;
   label: string;
   status: string;
   pending?: boolean;
@@ -67,6 +68,7 @@ function preparationMatches(handle: ImagePreviewPreparation, options: ImagePrevi
 type ResultRenderers<T> = {
   renderMetadata?: (item: T) => ReactNode; renderActions?: (item: T) => ReactNode;
   renderPrimaryActions?: (item: T, waitDisplay?: ImageGenerationWaitDisplay) => ReactNode; renderDelete?: (item: T) => ReactNode;
+  renderDeliveryAction?: (item: T) => ReactNode;
   renderOverlay?: (item: T, controls: { openPreview: () => void }) => ReactNode; renderSupplement?: (item: T) => ReactNode;
   renderReactionAction?: (item: T) => ReactNode;
   /** Opt in only for image-studio and its batch result cards. */
@@ -87,7 +89,7 @@ function WaitingImage({ src, inputCover = false }: { src?: string; inputCover?: 
     alt={inputCover ? '' : '本次输入图片'} aria-hidden={inputCover || undefined} onError={() => setFailed(src)} /> : <ImagePlus size={24} aria-hidden="true" />;
 }
 
-function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, dismissFeedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
+function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope, visible, previewAccount, currentSelection, supportsNextActions, nextSourceSet, select, changePreview, operate, feedback, dismissFeedback, onSelect, onQuickUse, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderDeliveryAction, renderOverlay, renderSupplement, renderReactionAction, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions }: ResultRenderers<T> & {
   item: T; scope: string; visible: boolean; currentSelection: string | null | undefined; supportsNextActions: boolean; nextSourceSet: Set<ContentKey>;
   previewAccount: string;
   select: (item: T) => void; changePreview: (item: T | null, alreadySelected?: boolean, prepared?: ImagePreviewPreparation) => void;
@@ -151,6 +153,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     ? resultError && compactNotice && compactNotice !== resultError ? `${resultError}\n\n${compactNotice}` : resultError || compactNotice
     : null;
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
+  const deliveryAction = renderDeliveryAction?.(item);
   const primaryActions = renderPrimaryActions?.(item, waitDisplay);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
   const hasCommonActions = Boolean(groupedDelete || item.media && (!coverDeleteWithContextActions || item.download && (!contextActionsEnabled || !readOnly)));
@@ -167,7 +170,8 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         inputCover={Boolean(compactInformation && input?.state === 'ready' && input.thumbnailUrl)} />
       {!compactInformation && (waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} /> : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>)}
     </div>;
-  return <article ref={cardRef} id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id} data-result-controls-parent>
+  return <article ref={cardRef} id={supportsNextActions ? `image-result-${item.id}` : undefined} className={styles.card} data-result-id={item.id}
+    data-result-task-id={item.completionTaskId || item.id} data-result-ready={item.media?.src ? '' : undefined} data-result-controls-parent>
     <div className={styles.media} data-transparent={item.transparent || undefined} data-reaction-surface>
       {resultMenuEnabled ? <ResultImageContextMenu identity={identity} active={menuActive} items={menuItems} onOpenChange={open => {
         if (open) cancelPreviewRef.current?.();
@@ -175,14 +179,18 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
       }}>{cover}</ResultImageContextMenu> : cover}
       {waitDisplay?.finishing && <ImageGenerationWaiting display={waitDisplay} visible={visible} />}
       {compactInformation && !item.media && <div className={styles.pendingStatus}>
-        {waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} inline />
-          : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
-        {statusDetail && <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />}
+        <div className={styles.pendingStatusMain}>
+          {waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} inline />
+            : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
+          {statusDetail && <div className={styles.pendingStatusIssue}>
+            <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />
+          </div>}
+        </div>
       </div>}
       {coverReactions ? <div className={styles.coverReactions}>{reactions}<div className={styles.coverPin}>{renderReactionAction?.(item)}</div></div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
-      {(hasCommonActions || secondaryActions || item.media && statusDetail) && <div className={styles.mediaActions}
+      {(hasCommonActions || secondaryActions || deliveryAction || item.media && statusDetail) && <div className={styles.mediaActions}
         data-cover-context-delete={coverDeleteWithContextActions || undefined} data-has-status-detail={Boolean(item.media && statusDetail) || undefined}
         data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
         {item.media && statusDetail && <div className={styles.mediaDetailAction}>
@@ -197,6 +205,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
           {groupedDelete}
         </div>}
         {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
+        {deliveryAction && <div className={styles.deliveryAction}>{deliveryAction}</div>}
       </div>}
     </div>
     {contextActionsEnabled ? <ImageResultNextActionFeedback controller={controller} className={`${styles.feedback} ${styles.nextFeedback}`} /> : item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
@@ -210,7 +219,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions, onVisibleItemsChange }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderDeliveryAction, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions, onVisibleItemsChange, navigationIntent }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
@@ -222,6 +231,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   selectedId?: string | null; onSelect?: (item: T) => void;
   onQuickUse?: (item: T) => void;
   onVisibleItemsChange?: (items: T[]) => void;
+  navigationIntent?: ResultNavigationIntent | null;
   previewId?: string | null; onPreviewChange?: (item: T | null) => void;
 }) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
@@ -269,7 +279,8 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   }, [loadMore, scope]);
   const readBusy = busy || loading || readState.scope === scope && readState.busy;
   const readError = error || (readState.scope === scope ? readState.error : '');
-  const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore, currentId: activePreview || currentSelection || null });
+  const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore,
+    currentId: activePreview || currentSelection || null, navigationIntent });
   const visibleItemsCallback = useRef(onVisibleItemsChange); visibleItemsCallback.current = onVisibleItemsChange;
   const visibleItemIds = pages.pageItems.map(item => item.id).join('\0');
   useEffect(() => { if (visible) visibleItemsCallback.current?.(pages.pageItems); }, [scope, visible, visibleItemIds]);
@@ -417,7 +428,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       {pages.pageItems.map(item => <GeneratedImageResultCard key={`${scope}:${item.id}`} item={item} scope={scope} visible={visible} previewAccount={previewSessionAllowed ? previewAccount : ''} currentSelection={currentSelection}
         supportsNextActions={supportsNextActions} nextSourceSet={nextSourceSet} select={select} changePreview={changePreview} operate={operate} feedback={feedback} dismissFeedback={dismissFeedback}
         onSelect={onSelect} onQuickUse={onQuickUse} renderMetadata={renderMetadata} renderActions={renderActions} renderPrimaryActions={renderPrimaryActions}
-        renderDelete={renderDelete} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
+        renderDelete={renderDelete} renderDeliveryAction={renderDeliveryAction} renderOverlay={renderOverlay} renderSupplement={renderSupplement} renderReactionAction={renderReactionAction}
         contextActionsEnabled={contextActionsEnabled} coverDeleteWithContextActions={coverDeleteWithContextActions} compactInformation={compactInformation} onPreviewInputMain={onPreviewInputMain} contextActions={contextActions} />)}
     </div>
     {pagination('bottom')}

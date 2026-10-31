@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import { VideoFeishuError } from '@/lib/video/feishu-contract';
 import { studioTaskHasViewableOutput, studioOutputFormatForMime } from './dimension-mismatch';
 import { IMAGE_FEISHU_MAX_BYTES, type ImageFeishuPresentation } from './feishu-contract';
+import { IMAGE_FEISHU_ORIGINAL_MAX_BYTES } from './feishu-original-contract';
 import type { authorizedImageFeishuTask } from './feishu-notification';
 
 type Current = Awaited<ReturnType<typeof authorizedImageFeishuTask>>;
@@ -23,7 +24,7 @@ export function imageFeishuMode(format: string, size: number, width: number, hei
   }
   return { mode: 'image' as const, reason: null };
 }
-export async function prepareImageFeishuSource(current: Current, eventVersion: 1 | 2 = 1) {
+export async function prepareImageFeishuSource(current: Current, eventVersion: 1 | 2 | 'original' = 1) {
   const { task, asset } = current;
   if (!studioTaskHasViewableOutput(task) || !asset || !asset.hash || !/^[a-f0-9]{64}$/.test(asset.hash)
     || !Number.isSafeInteger(asset.file_size) || !asset.file_size || asset.file_size > 96 * 1024 * 1024) throw unavailable();
@@ -46,6 +47,7 @@ export async function prepareImageFeishuSource(current: Current, eventVersion: 1
     if (!metadata.width || !metadata.height || metadata.width !== asset.width || metadata.height !== asset.height
       || metadata.format !== (format.mimeType === 'image/jpeg' ? 'jpeg' : format.extension)) throw unavailable();
     const policy = imageFeishuMode(metadata.format, bytes.length, metadata.width, metadata.height);
+    if (eventVersion === 'original' && bytes.length > IMAGE_FEISHU_ORIGINAL_MAX_BYTES) throw new VideoFeishuError('image_original_too_large', 409);
     let uploadBytes: Buffer = bytes;
     let uploadMimeType = format.mimeType;
     let uploadExtension = format.extension;
@@ -71,10 +73,10 @@ export async function prepareImageFeishuSource(current: Current, eventVersion: 1
         originalWidth: metadata.width, originalHeight: metadata.height, mimeType: uploadMimeType, extension: uploadExtension };
     }
     const stamp = imageFeishuSourceStamp(current);
-    return { ...(eventVersion === 2 ? { mode: 'image' as const, reason: null } : policy), assetId: asset.id, contentHash: asset.hash,
+    return { ...(eventVersion === 'original' ? { mode: policy.mode === 'image' ? 'image' as const : 'file' as const, reason: null } : eventVersion === 2 ? { mode: 'image' as const, reason: null } : policy), assetId: asset.id, contentHash: asset.hash,
       version: hash([stamp, before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs]),
-      file: eventVersion === 2 || policy.mode === 'image' ? new Blob([Uint8Array.from(uploadBytes)], { type: uploadMimeType }) : null,
-      extension: uploadExtension, ...(presentation ? { presentation } : {}),
+      file: eventVersion === 'original' || eventVersion === 2 || policy.mode === 'image' ? new Blob([Uint8Array.from(uploadBytes)], { type: uploadMimeType }) : null,
+      extension: uploadExtension, size: bytes.length, width: metadata.width, height: metadata.height, mimeType: format.mimeType, ...(presentation ? { presentation } : {}),
       current: async () => { try { return await realpath(file) === file && same(await lstat(file)); } catch { return false; } } };
   } catch (error) {
     if (error instanceof VideoFeishuError) throw error;

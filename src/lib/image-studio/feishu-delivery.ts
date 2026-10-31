@@ -1,3 +1,5 @@
+import { IMAGE_FEISHU_ORIGINAL_TYPE } from './feishu-original-contract';
+import { deliverOriginalImageFeishuNotification } from './feishu-original-delivery';
 import { randomUUID } from 'node:crypto';
 import type { Notification, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -166,12 +168,12 @@ export async function processImageFeishuDeliveries(limit = 1) {
   };
   try {
     if (!await heartbeat()) return { scanned: 0, processed: 0 };
-    const rows = await prisma.notification.findMany({ where: { type: IMAGE_FEISHU_TYPE, channel: 'feishu', status: 'pending' },
+    const rows = await prisma.notification.findMany({ where: { type: { in: [IMAGE_FEISHU_TYPE, IMAGE_FEISHU_ORIGINAL_TYPE] }, channel: 'feishu', status: 'pending' },
       orderBy: [{ updated_at: 'asc' }, { id: 'asc' }], take: 50,
       select: { id: true, type: true, channel: true, status: true, target_user_id: true, metadata_json: true } });
     let processed = 0; const bound = Number.isSafeInteger(limit) ? Math.max(1, Math.min(50, limit)) : 1;
     for (const row of rows) {
-      const result = await deliverImageFeishuNotification(prisma, row, heartbeat);
+      const result = row.type === IMAGE_FEISHU_ORIGINAL_TYPE ? await deliverOriginalImageFeishuNotification(prisma, row, heartbeat) : await deliverImageFeishuNotification(prisma, row, heartbeat);
       if (!['ignored', 'waiting'].includes(result)) processed++;
       if (processed >= bound || result === 'lease_lost') break;
     }

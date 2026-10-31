@@ -4,3 +4,8 @@
 .settings input[type='checkbox'] { width: 16px; height: 16px; margin: 0; }
 .settings small { display: block; color: var(--text-secondary); overflow-wrap: anywhere; }
 .settings button { display: inline-flex; align-items: center; gap: 6px; }
+.completionNotice { position: fixed; inset-inline-end: 20px; inset-block-end: 20px; z-index: 90; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; max-width: min(360px, calc(100vw - 32px)); padding: 10px 12px; border: 1px solid #45695d; border-radius: 7px; background: #15271f; color: #dfede5; box-shadow: 0 5px 18px #08120d55; font-size: 14px; }
+.completionNotice button { border: 0; padding: 3px 0; background: transparent; color: #99e4cc; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.completionNotice button:focus-visible { outline: 2px solid #79daca; outline-offset: 3px; }
+.completionNotice button:disabled { text-decoration: none; cursor: default; }
+.completionNotice small { flex-basis: 100%; color: #bdcec4; font-size: 12px; }

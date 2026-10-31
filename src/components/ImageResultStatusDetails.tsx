@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
+import { CircleAlert } from 'lucide-react';
 import { useDialogDismiss } from './useDialogDismiss';
 import styles from './GeneratedImageResults.module.css';
 
@@ -60,10 +61,11 @@ export function ImageResultStatusDetails({ detail, reason = false, active, scope
     <Popper.Anchor asChild>
       <button ref={trigger} type="button" className={styles.issueTrigger} aria-expanded={open}
         aria-controls={open ? id : undefined} aria-haspopup="dialog" disabled={!active}
+        aria-label={label} data-reason={reason || undefined}
         onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
         onKeyDown={event => event.stopPropagation()}
         onClick={event => { event.preventDefault(); event.stopPropagation(); if (open) close(); else { setCopyState('idle'); setOpenScope(scopeKey); } }}>
-        {label}
+        {reason ? <CircleAlert size={18} aria-hidden="true" /> : label}
       </button>
     </Popper.Anchor>
     {open && createPortal(<Popper.Content side="bottom" align="end" sideOffset={6} collisionPadding={12}

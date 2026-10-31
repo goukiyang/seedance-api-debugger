@@ -64,18 +64,23 @@
 @media (prefers-reduced-motion: reduce) { .waitExperience[data-sweeping=true] .waitSweep, .waitExperience[data-sweeping=true] .waitTrack > span { animation: none; } .waitTrack > span { transform: translateX(80%); } }
 @media (prefers-reduced-motion: reduce) { .waitTrack[data-progress=true] > span { transform: scaleX(var(--image-wait-ratio, 0)); transition: none; } }
 .phase { position: absolute; top: 50%; right: 8px; left: 8px; z-index: 2; transform: translateY(-50%); padding: 5px 8px; border-radius: 4px; background: #151a1de6; font-size: 13px; text-align: center; }
-.pendingStatus { position: absolute; inset: 8px 8px 48px; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; pointer-events: none; overflow-wrap: anywhere; text-align: center; }
-.pendingStatus .phase { position: static; transform: none; max-width: 100%; }
-.pendingStatus .issueTrigger { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 2px 7px; border-radius: 4px; background: #151a1de6; pointer-events: auto; }
+.pendingStatus { position: absolute; inset: 8px 8px 48px; z-index: 2; pointer-events: none; overflow-wrap: anywhere; text-align: center; }
+.pendingStatusMain { position: absolute; top: 50%; left: 50%; width: 100%; transform: translate(-50%, -50%); }
+.pendingStatus .phase { position: static; display: block; max-width: 100%; transform: none; }
+.pendingStatusIssue { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); pointer-events: auto; }
+.pendingStatus .issueTrigger { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 2px 7px; pointer-events: auto; }
+.pendingStatus .issueTrigger[data-reason] { width: 32px; padding: 0; }
 .waitInline { position: relative; inset: auto; width: 100%; background: transparent; }
 .waitInline .waitCopy { position: relative; inset: auto; padding: 0; }
 .waitInline .waitCopy strong { max-width: 100%; line-height: 1.4; overflow-wrap: anywhere; }
 .waitInline .waitSweep { display: none; }
 @media (hover: none), (any-pointer: coarse) {
   .pendingStatus .issueTrigger { min-height: 40px; padding-inline: 4px; }
+  .pendingStatus .issueTrigger[data-reason] { width: 40px; padding-inline: 0; }
 }
 @container (max-width: 160px) {
-  .pendingStatus { inset: 6px 6px 44px; gap: 4px; }
+  .pendingStatus { inset: 6px 6px 44px; }
+  .pendingStatusIssue { top: calc(100% + 4px); }
   .pendingStatus .waitCopy { gap: 4px; }
   .pendingStatus .waitCopy strong { font-size: 14px; line-height: 18px; }
   .pendingStatus .waitTrack, .pendingStatus .waitPercent { display: none; }
@@ -86,7 +91,7 @@
 .card > :not(.media) strong { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .actions, .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .actions { min-width: 0; }
-.mediaActions { position: absolute; inset-inline-start: 8px; inset-block-end: 8px; z-index: 6; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: calc(100% - 56px); max-block-size: calc(100% - 64px); overflow-y: auto; padding: 4px; border: 1px solid #414b48; border-radius: 5px; background: rgb(17 22 20 / 92%); box-shadow: 0 2px 8px #0008; }
+.mediaActions { position: absolute; inset-inline-start: 8px; inset-block-end: 8px; z-index: 6; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-inline-size: calc(100% - 56px); max-block-size: calc(100% - 64px); overflow-x: hidden; overflow-y: auto; padding: 4px; border: 1px solid #414b48; border-radius: 5px; background: rgb(17 22 20 / 92%); box-shadow: 0 2px 8px #0008; }
 .media:has(input[data-result-secondary]) .mediaActions { inset-block-end: 48px; max-inline-size: calc(100% - 16px); }
 .deleteSlot { position: absolute; right: 8px; bottom: 8px; z-index: 4; }
 .deleteSlot:empty { display: none; }
@@ -97,12 +102,14 @@
 .commonActions, .specialtyActions, .mediaDetailAction { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 32px; }
 .commonActions { flex-shrink: 0; }
 .specialtyActions { min-width: 0; }
+.deliveryAction { display: contents; }
 .commonActions button { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
 @media (hover: hover) and (pointer: fine) {
   .card [data-result-secondary] { opacity: 0; pointer-events: none; }
   .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
   .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary],
-  .card [data-result-secondary][data-has-status-detail] { opacity: 1; pointer-events: auto; }
+  .card [data-result-secondary][data-has-status-detail],
+  .card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"]) { opacity: 1; pointer-events: auto; }
 }
 .actions button, .mediaActions button, .pagination button, .notice button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
 .actions button:hover, .mediaActions button:hover, .pagination button:hover { background: #303c37; }
@@ -132,6 +139,7 @@
 .notice { font-size: 13px; overflow-wrap: anywhere; }
 .feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }
 .issueTrigger { display: inline; padding: 0; border: 0; background: transparent; color: #bdc9c5; font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
+.issueTrigger[data-reason] { display: inline-flex; align-items: center; justify-content: center; color: #ff6b6b; text-decoration: none; }
 .issueTrigger:focus-visible, .issueClose:focus-visible, .operationFeedback button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .issueLayer, .operationFeedback { z-index: 2147000200; max-width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 24px)); overflow: auto; padding: 12px; border: 1px solid #414b48; border-radius: 6px; background: #202725; color: #e0e9e5; box-shadow: 0 6px 24px #10171570; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .issueLayer strong { font-size: 14px; }

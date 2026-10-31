@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { privateStoredValue } from '@/lib/security/private-prompt-fields.server';
 import { finishStudioTask, safeImageChannelSnapshot } from './tasks';
 import { readStudioRequestReceipt, readStudioAsyncReceipt } from './delivery';
 import { validateGeneratedStudioImage, StudioImageDeliveryError, StudioImageDownloadError } from './media';
@@ -15,7 +16,8 @@ import { registerCommittedStudioHd } from '@/lib/media/hd-registration';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 export function studioTaskBeforeHash(task: ImageStudioTask) {
-  return hash(JSON.stringify(task, Object.keys(task).sort()));
+  const stored = privateStoredValue(task);
+  return hash(JSON.stringify(stored, Object.keys(stored).sort()));
 }
 
 export type StudioDimensionRepairExpectation = {
@@ -85,7 +87,7 @@ async function preserveOriginal(task: ImageStudioTask, original: Buffer, digest:
 }
 
 const retainedIdentity = (task: ImageStudioTask) => hash(JSON.stringify([task.id, task.owner_id, task.batch_id,
-  task.fingerprint, task.snapshot_json, task.output_size, task.reference_ids, task.billing_contract_json, task.freeze_snapshot]));
+  task.fingerprint, privateStoredValue(task).snapshot_json, task.output_size, task.reference_ids, task.billing_contract_json, task.freeze_snapshot]));
 async function preserveLocalResume(task: ImageStudioTask, digest: string, bytes: number, extension = 'png') {
   const file = path.join(process.cwd(), 'storage', 'studio-billing', task.id, 'dimension-retention.json');
   const content = JSON.stringify({ schema: 1, identity: retainedIdentity(task), digest, bytes, extension });
@@ -168,7 +170,7 @@ export async function finishRejectedStudioDimensions(task: ImageStudioTask, orig
   const finished = await prisma.$transaction(async tx => {
     let current = await tx.imageStudioTask.findUnique({ where: { id: task.id } });
     if (!current || current.status !== task.status || current.owner_id !== task.owner_id
-      || current.fingerprint !== task.fingerprint || current.snapshot_json !== task.snapshot_json
+      || current.fingerprint !== task.fingerprint || current.snapshot_json !== privateStoredValue(task).snapshot_json
       || current.billing_contract_json !== task.billing_contract_json || current.freeze_snapshot !== task.freeze_snapshot
       || current.unit_credits !== task.unit_credits || current.output_size !== task.output_size || current.asset_id
       || publicPricingTaskState(current.status) !== 'uncertain' && current.finished_at) {
