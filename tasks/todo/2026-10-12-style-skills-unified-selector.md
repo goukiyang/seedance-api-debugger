@@ -21,3 +21,11 @@ CodeGraph：实际checkout已prepare，真实context查询命中GenerationCompos
 工程结果：服务器隔离源码7组换线/有序引用合同检查、原`test-task-reuse-intent.ts`、最终TypeScript及局部lint通过；lint为非阻断既有提示。类型检查2轮失败均已定向修正，最终通过；本机低资源的两进程已停止并由服务器接续。旧`test-task-reuse-intent-integration.ts`在候选与未改f4ccc79e均于同一203行断言失败，相关callbacks及夹具无本批差异，不冒通过、不扩修旧夹具；本批独立恢复来源和原未知门由新合同检查与源码复核覆盖。完整Next构建、Git/部署仍待收口，页面效果仍用户手验。
 
 本批证据沿正式根`docs/materials/2026-10-12-studio-ui-clarity/prompt-group-ux-20261030/ui03-implementation/`保存；原五图仍在相邻ui03-preflight目录，仅私有本地，不上传Git/公网。
+
+### 13.12 PG-COVER01 提示词组封面区落地（安全摘录，2026-10-31）
+
+用户明确本单落地，本次仅完成PG-COVER01剩余项。新旧编辑器共用封面区，放在名称后、正文前；保原上传/素材选择、受保护封面与原媒体URL、完整预览、上传忙保护、字段更新和显式保存合同。无schema/API/权限/原号/费用/依赖语义变化。其它既有交付和历史状态保留。
+
+已部署v0.121.2 / `3a3d7986e4cd6ad10a27a85334dbdb0494e070d0` / BUILD`6joyg6KOI0MavlHikurxk`。主控语法/定向lint/diff与本人源码Review完成；新候选Linux完整Next含类型/lint通过，未变13/15工程复用原证，pricing仅补现有时间校验要求的fresh工程。7服务、6启动检查、4timer及实际共用封面JS/CSS公网字节相符；复用原9b/v0.121.1完整程序回退点，不回数据或媒体。
+
+已部署，待用户手动验收。无浏览器、收费生成、真实业务保存删除验收或独立审核。完整原单、用户原图和私有失败/工程/发布证据保正式根原目录，本处仅安全交付摘录，不公开附件。
