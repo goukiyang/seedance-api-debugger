@@ -61,7 +61,7 @@ export function transformPrivateVideoRun(snapshot: StudioRunSnapshot, id: string
     if (snapshot.privateProvider.kind !== 'musk') throw new Error('受保护发送配置无法读取');
     const settings = snapshot.privateProvider.settings;
     result.privateProvider = { kind: 'musk', settings: { enabled: settings.enabled, base_url: settings.base_url,
-      default_model: settings.default_model, api_key: write
+      default_model: settings.default_model, allowed_models: Array.isArray(settings.allowed_models) ? settings.allowed_models : [], api_key: write
         ? writePrivateCredential(settings.api_key, `video-run:${id}:musk`, 'api_key')
         : readPrivateCredential(settings.api_key, `video-run:${id}:musk`, 'api_key') } };
   }

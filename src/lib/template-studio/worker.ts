@@ -155,7 +155,8 @@ export async function processStudioPromptOnce() {
     await authorizeStudioAssets(user, snapshot.assets);
 
     const setting = await prisma.platformSetting.findUnique({ where: { key: TEMPLATE_STUDIO_TEXT_ENABLED_KEY }, select: { value_json: true } });
-    const settings = snapshot.privateProvider?.settings || await getMuskApiSettings();
+    const rawSettings = snapshot.privateProvider?.settings || await getMuskApiSettings();
+    const settings = { ...rawSettings, allowed_models: Array.isArray(rawSettings.allowed_models) ? rawSettings.allowed_models : [] };
     if (!textFeatureEnabled(setting?.value_json) || !isMuskApiReady(settings)) {
       await markTerminal(run.id, token, 'failed', 'AI 整理当前未启用或服务未就绪，未提交上游。', 'not_sent');
       return true;
