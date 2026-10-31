@@ -38,6 +38,7 @@ import { addCredits, creditCents, sumCredits } from '@/lib/credits/precision';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
 import { normalizeImageFeishuChoice, type FrozenImageFeishuChoice } from './feishu-contract';
 import { freezeImageFeishuChoice, enqueueFrozenImageFeishuNotification, imageFeishuTaskStatuses } from './feishu-notification';
+import { assertStudioRequestWritable, markStudioSubmitFailure } from './submit-receipts.server';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
@@ -256,15 +257,18 @@ export async function quoteStudioBatchContinuation(owner: string, body: Record<s
 }
 
 export async function createStudioBatch(ownerId: string, body: Record<string, unknown>) {
+  let submissionStage = 'batch-accepted-lookup';
+  try {
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
     const acceptedId = idFor(ownerId, body.requestId);
     const saved = await prisma.platformSetting.findFirst({ where: { key: { in: batchKeys(ownerId, acceptedId) } } });
-    if (saved && (parse(saved.value_json).input.sharedLive !== undefined || body.sharedLive !== undefined
-      || parse(saved.value_json).input.restoredSettings !== undefined || body.restoredSettings !== undefined)) {
-      if (body.moduleId !== undefined && body.moduleId !== parse(saved.value_json).moduleId) throw new StudioError('提交编号已用于其他批次，请查询原批次', 409);
+    if (saved) {
+      if (body.moduleId !== undefined && body.moduleId !== parse(saved.value_json).moduleId) throw new StudioError('提交编号已用于其他批次目标，请查询原批次', 409);
       return acceptedId;
     }
+    await assertStudioRequestWritable(prisma, ownerId, body.requestId);
   }
+  submissionStage = 'batch-input';
   const input = parseStudioRequest({ ...body, count: 1 });
   if (typeof body.moduleId !== 'string' || !boundedBudget(body.budget)) throw new StudioError('请选择模板并填写最高预算');
   const sources = body.sources;
@@ -280,6 +284,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
   const requestFingerprint = createHash('sha256').update(JSON.stringify({ shared, items, budget: body.budget })).digest('hex');
   let created = false;
   await prisma.$transaction(async tx => {
+    submissionStage = 'batch-admission';
     const existing = await tx.platformSetting.findFirst({ where: { key: { in: batchKeys(ownerId, id) } } });
     if (existing) {
       const saved = parse(existing.value_json);
@@ -291,6 +296,7 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
         || savedSnapshot.configRevision !== suppliedSnapshot.configRevision)) throw new StudioError('提交编号已用于其他批次', 409);
       return;
     }
+    await assertStudioRequestWritable(tx, ownerId, input.requestId);
     const active = await tx.platformSetting.count({ where: { OR: [
       { key: { startsWith: `${PREFIX}${ownerId}:` } }, { key: { startsWith: `${CHANNEL_PREFIX}${ownerId}:` } },
       { key: { startsWith: `${PRICING_BATCH_PREFIX}${ownerId}:` } },
@@ -369,6 +375,10 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
   }, { timeout: 15000 });
   if (created) await prepareBatch(ownerId, id);
   return id;
+  } catch (error) {
+    markStudioSubmitFailure(error, submissionStage);
+    throw error;
+  }
 }
 
 async function prepareBatch(owner: string, id: string) {
@@ -418,6 +428,7 @@ async function prepareBatch(owner: string, id: string) {
         task.id = childId(batch, item); task.batch_id = id; task.ordinal = item.ordinal;
         task.context += `\n\n本批条目 ${item.ordinal}/${batch.total}。严格保留原正文中的明确条件；仅对正文未指定且允许随机的细节作不同选择，不照抄本批其他条目、不改变演化档数或组合图排版。`;
         task.snapshot_json = JSON.stringify({ ...JSON.parse(task.snapshot_json as string), effectiveContext: task.context, batchId: id, requestId: batch.requestId, persistentBatchId: id, batchOrdinal: item.ordinal });
+        await assertStudioRequestWritable(tx, owner, batch.requestId);
         await tx.platformSetting.create({ data: { key: itemKey(batch, item.ordinal), value_json: JSON.stringify(task), updated_by: owner } });
         current.prepared = true; batch.prepared += 1;
         await writeBatch(tx, row, batch);
@@ -631,6 +642,7 @@ export async function dispatchStudioBatches() {
       await prisma.$transaction(async tx => {
         const { row, batch } = await readOwned(original.ownerId, original.id, tx);
         if (batch.state !== 'ready') return;
+        await assertStudioRequestWritable(tx, batch.ownerId, batch.requestId);
         if (batch.pricing) await assertPricingImageConsumerReady(tx);
         if (batch.definitionConfirmationRequired) { batch.state = 'needs-confirmation'; await writeBatch(tx, row, batch); return; }
         await recoverAcceptedBatchItems(tx, batch);

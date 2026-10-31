@@ -17,6 +17,8 @@ import { imageStudioChannelUnitCredits, imageStudioEffectiveChannelId, normalize
 import type { SharedStudioIntent } from '@/lib/image-studio/shared-types';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { readJsonResponse } from '@/lib/http/json-response';
+import { matchingStudioRequestReceipt, isStudioRequestEnded, studioRequestOutcomeMessage } from './submit-recovery';
 
 export type ImageUiQuote = { billingMode: 'fixed' | 'actual'; currentFixedPricing?: true; billingQuoteId?: string | null; batchQuoteId?: string | null; pricingRevision?: string | null; creditPrecision?: number; estimatedCredits: number; unitCredits: number; expiresAt?: string; imageChannel?: ImageGenerationChannelSnapshot };
 export function formatImageUiCredits(value: number): string {
@@ -98,6 +100,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   const [files, setFiles] = useState<BatchLocalFile[]>([]), [skipped, setSkipped] = useState<string[]>([]);
   const [previewing, setPreviewing] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [progress, setProgress] = useState('');
   const [id, setId] = useState<string | null>(null), [pending, setPending] = useState<string | null>(null);
+  const [pendingAccepted, setPendingAccepted] = useState(false);
   const [billingQuote, setBillingQuote] = useState<CachedStudioBatchQuote | null>(null);
   const [quoteVisible, setQuoteVisible] = useState(true);
   useEffect(() => { const update = () => setQuoteVisible(!document.hidden); update(); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
@@ -166,7 +169,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
   useUnsavedNavigation(busy || previewing || files.some(file => !file.assetId), confirm, { unsaved: files.some(file => !file.assetId) ? ['尚未上传的本机批量素材，离开后需重新选择'] : [], busy: busy ? ['批次素材或提交正在处理'] : previewing ? ['本机图片正在读取'] : [], revision: signature, onBlocked: setError });
   useEffect(() => {
     setRecoveryKnownScope('');
-    fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null); setBillingQuote(null);
+    fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); setError(''); setId(null); setPending(null); setPendingAccepted(false); setBillingQuote(null);
     setMode('single'); setSource('folder'); setQuantity(8); setPerFile(1); setPack(false); setBusy(false); setPreviewing(false); setProgress('');
     try {
       const saved = JSON.parse(localStorage.getItem(scopedKey) || 'null');
@@ -217,17 +220,43 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope) await previewFiles(selected.files, directory.name, selected.skipped);
     } catch (error) { if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope && !(error instanceof DOMException && error.name === 'AbortError')) setError(error instanceof Error ? error.message : '素材目录权限失效或无法读取，请重新选择'); }
   }
-  async function query() {
+  function releasePendingRequest(requestId: string) {
+    setPendingAccepted(false);
+    setPending(current => current === requestId ? null : current);
+    try { if (localStorage.getItem(pendingKey) === requestId) localStorage.removeItem(pendingKey); }
+    catch { /* A retained local identity can be queried against the same server receipt again. */ }
+  }
+  async function query(close = false) {
     if (isClientSessionBlocked() || !pending || lock.current) return;
-    const scope = scopedKey;
+    const scope = scopedKey, requestId = pending;
+    const current = () => !isClientSessionBlocked() && live.current.mounted && live.current.scope === scope;
     lock.current = true; setBusy(true); setError('');
     try {
-      const result = await readBatchResponse(await fetch(`/api/image-studio/batches?requestId=${encodeURIComponent(pending)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
-      if (isClientSessionBlocked() || !live.current.mounted || live.current.scope !== scope) return;
-      setId(result.batch.id); setPending(null); localStorage.removeItem(pendingKey);
-    } catch { if (!isClientSessionBlocked() && live.current.mounted && live.current.scope === scope) setError('原提交尚未核对，不会自动再生成；请稍后查询或联系管理员'); }
-    finally { lock.current = false; if (live.current.mounted && live.current.scope === scope) setBusy(false); }
+      const response = await fetch(`/api/image-studio/requests${close ? '' : `?requestId=${encodeURIComponent(requestId)}`}`, {
+        cache: 'no-store', ...(close ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, action: 'close' }) } : {}), signal: AbortSignal.timeout(15000),
+      });
+      const value = await readJsonResponse<Record<string, unknown>>(response);
+      if (!current()) return;
+      const receipt = matchingStudioRequestReceipt(value, requestId);
+      if (isStudioRequestEnded(receipt)) {
+        releasePendingRequest(requestId); setBillingQuote(null);
+        setError(studioRequestOutcomeMessage(receipt, receipt?.state === 'closed' ? '原批次提交已确认未受理并结束，素材保留。' : '原批次明确未被受理，请调整后重新生成。', value.error));
+        return;
+      }
+      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : '原批次提交暂不可核对，原号保留。');
+      if (receipt?.state !== 'accepted') {
+        setError(receipt?.message || '原批次提交结果待确认，原号与素材保留，不会重新生成。'); return;
+      }
+      setPendingAccepted(true);
+      // The parent may already exist while no child task has been dispatched.
+      const result = await readBatchResponse(await fetch(`/api/image-studio/batches?requestId=${encodeURIComponent(requestId)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }), true);
+      if (!current()) return;
+      if (result.batch.moduleId !== moduleId) throw new Error('原批次与当前模板不匹配，请保留原号核对。');
+      setId(result.batch.id); releasePendingRequest(requestId);
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '原批次提交尚未核对，原号保留；请稍后查询或联系管理员'); }
+    finally { lock.current = false; if (current()) setBusy(false); }
   }
+
   async function submit(payload: Record<string, unknown>) {
     if (isClientSessionBlocked()) return false;
     if (imageUiQuoteAction(pending, quoteSignature, billingQuote?.signature, billingQuote?.quote, Date.now(), true) === 'query') { await query(); return false; }
@@ -342,10 +371,15 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
       const response = await fetch('/api/image-studio/batches', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...snapshot, requestId, count: 1, sources, ...imageUiQuoteFields(quote, true), budget: confirmedTotal }), signal: AbortSignal.timeout(120000) });
       if (!sameScope()) return false;
       if (response.status === 409) sourceChanged.current?.();
-      if (response.status >= 400 && response.status < 500) { localStorage.removeItem(pendingKey); submittedRequest = null; if (sameScope()) setPending(null); }
+      const responseValue = await response.clone().json().catch(() => null);
+      const receipt = matchingStudioRequestReceipt(responseValue, requestId);
+      if (isStudioRequestEnded(receipt)) {
+        releasePendingRequest(requestId); submittedRequest = null;
+        throw new Error(studioRequestOutcomeMessage(receipt, '本批明确未被受理，素材保留。', responseValue?.error));
+      }
       const result = await readBatchResponse(response, true);
       if (!sameScope()) return false;
-      localStorage.removeItem(pendingKey);
+      releasePendingRequest(requestId); submittedRequest = null;
       if (!sameScope()) return false;
       watchGenerationCompletion(userId, result.batch.id, 'batch', total);
       setId(result.batch.id); setPending(null); return true;
@@ -366,7 +400,7 @@ export function useStudioBatch({ userId, moduleId, unitCredits, draftSignature, 
     {advanced && <div className={styles.fields}><label>批量来源<select value={source} disabled={busy || Boolean(pending)} onChange={event => setSource(event.target.value as 'current' | 'folder')}><option value="folder">素材逐图</option><option value="current">当前正文</option></select></label><label>{source === 'current' ? '本批结果数' : '每张素材结果数'}<input type="number" min={1} max={source === 'current' ? 100 : 8} step={1} value={source === 'current' ? quantity : perFile} disabled={busy || Boolean(pending)} onChange={event => source === 'current' ? setQuantity(Number(event.target.value)) : setPerFile(Number(event.target.value))} /></label>{source === 'folder' && <button type="button" disabled={busy || previewing || Boolean(pending)} onClick={() => fileInput.current?.click()}>选择多张图片</button>}<button type="button" title="重置本批设置" aria-label="重置本批设置" disabled={busy || Boolean(pending)} onClick={() => { setSource('folder'); setQuantity(8); setPerFile(1); setPack(false); fileRef.current.forEach(file => URL.revokeObjectURL(file.preview)); fileRef.current = []; setFiles([]); setSkipped([]); setFolderName(''); }}><RotateCcw size={16} /></button></div>}
     {!!skipped.length && <details><summary>跳过{skipped.length}项</summary>{skipped.map((reason, index) => <p key={index}>{reason}</p>)}</details>}
     {progress && <p role="status">{progress}</p>}{error && <p role="alert" className={styles.error}>{error}</p>}
-    {pending && <p>原提交待核对，不会重新生成。<button type="button" disabled={busy} onClick={() => void query()}><RefreshCw size={16} />查询原批次</button></p>}
+    {pending && <p>{pendingAccepted ? '原批次已受理，正在恢复原批号；保留原号，只查询原批次。' : '批次提交结果待确认，保留原号，不会重新生成。'}<button type="button" disabled={busy} onClick={() => void query()}><RefreshCw size={16} />查询原批次</button><button type="button" disabled={busy} onClick={() => void query(true)}>核对并结束本次提交</button></p>}
     {productDialog}
   </div>;
   return { mode, setMode, source, busy, previewing, pending, recoveryKnown: recoveryKnownScope === scopedKey, blocker, submit, query, controls, id, pack, localPreviews: files.slice(0, 24).map(file => file.preview) };

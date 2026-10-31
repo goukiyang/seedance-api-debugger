@@ -22,6 +22,9 @@ import { imageBillingScope } from './billing-scope';
 import { fixedImageBillingContract, imageSpecification, withPricingImageContract } from './billing-quote';
 import { quotePricingCharge, assertNewPricingCharge } from '@/lib/pricing/charge';
 import { assertNoSynchronousImageAdmission, SynchronousImageAdmissionError } from './synchronous-admission';
+import { assertStudioRequestWritable, markStudioSubmitFailure } from './submit-receipts.server';
+import { isEncryptedStudioPersonalPrompt } from './personal-prompt';
+import { serverStudioPersonalPromptProjection } from './personal-prompt.server';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
 import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
@@ -60,7 +63,7 @@ import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from '.
 import { studioPresetArchived } from './preset-lifecycle';
 import type { SharedStudioIntent } from './shared-types';
 import { assertRestoredStudioDraft, assertRestoredStudioSourceRelation, assertRestoredStudioStyleVersions,
-  hasSharedStudioPrompt, historicalStudioTemplateReferences, parseRestoredStudioSettings, restoredStudioTemplatePrompt, studioPersonalPromptProjection,
+  hasSharedStudioPrompt, historicalStudioTemplateReferences, parseRestoredStudioSettings, restoredStudioTemplatePrompt,
   RestoredStudioSettingsError } from './restored-settings';
 import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputIssue, studioTaskHasViewableOutput, studioOutputTaskWhere } from './dimension-mismatch';
 import { studioInputMainPreview } from './input-main';
@@ -361,6 +364,11 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
 export function parseStudioRequest(body: Record<string, unknown>) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new StudioError('提交内容无效');
   if (typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) throw new StudioError('提交编号无效');
+  if (isEncryptedStudioPersonalPrompt(body.prompt) || isEncryptedStudioPersonalPrompt(body.personalPrompt)) {
+    const error = Object.assign(new StudioError('本次个人补充包含受保护的存储内容，请重新读取或重新输入；尚未受理', 400), { code: 'PERSONAL_PROMPT_ENCRYPTED' });
+    markStudioSubmitFailure(error, 'input', error.code);
+    throw error;
+  }
   if (typeof body.prompt !== 'string' || body.prompt.length > 20000) throw new StudioError('画面描述不能超过 20000 字');
   if (body.personalPrompt !== undefined && (typeof body.personalPrompt !== 'string' || body.personalPrompt.length > 20000)) throw new StudioError('本次画面描述不能超过 20000 字');
   const sharedLive = parseSharedStudioIntent(body.sharedLive);
@@ -432,6 +440,18 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
 }
 
 export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission) {
+  let submissionStage = 'accepted-lookup';
+  try {
+  if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
+    const acceptedBatchId = createHash('sha256').update(`${ownerId}:${body.requestId}`).digest('hex');
+    const accepted = await prisma.imageStudioTask.findFirst({ where: { batch_id: acceptedBatchId, owner_id: ownerId }, select: { id: true, module_id: true } });
+    if (accepted && !avatar && !canvasUse && !canvasPrompt && !roleMedia) {
+      if (body.moduleId !== undefined && body.moduleId !== accepted.module_id) throw new StudioError('提交编号已用于其他目标，请查询原任务', 409);
+      return acceptedBatchId;
+    }
+    if (!accepted) await assertStudioRequestWritable(prisma, ownerId, body.requestId);
+  }
+  submissionStage = 'input';
   if (currentPricing && (body.currentFixedPricing !== true || typeof body.moduleId !== 'string'
     || body.billingQuoteId !== undefined || avatar || preparation || canvasUse || canvasPrompt || roleMedia)) {
     throw new StudioError('当前价格确认仅用于模板单次图片生成', 400);
@@ -517,9 +537,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!matchesRequest(previous)) throw new StudioError('提交编号已用于其他请求，请重新提交', 409);
     return batchId;
   }
+  submissionStage = 'settings';
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
   await withContextVersionRetry(() => prisma.$transaction(async tx => {
+    submissionStage = 'admission';
     currentPricing?.onPriceConfirmation(null);
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
     if (duplicate) {
@@ -560,6 +582,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       const asset = await tx.asset.findUniqueOrThrow({ where: { id: item.assetId }, select: { owner_id: true } });
       canvasReferenceOwners.set(item.assetId, asset.owner_id);
     }
+    submissionStage = 'private-definition';
     const storedWorkspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     const workspace = storedWorkspace ? readPrivateStudioDefinition('image-module', storedWorkspace) : null;
     const canvasExpectedIds = new Set(canvasReferenceOwners.keys());
@@ -1043,6 +1066,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (ratioIssue) throw new StudioError(ratioIssue);
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
     const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio, sizePolicyVersion);
+    submissionStage = 'context-version';
     const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
@@ -1096,8 +1120,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       || (preparation && effectiveRequestedChannelId === 'original'
         ? await captureImageGenerationChannel(generation.model, 'original', tx)
         : undefined);
+    submissionStage = 'snapshot';
     const snapshot = JSON.stringify({
       version: 1,
+      personalPrompt,
       ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
@@ -1188,10 +1214,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       };
+      submissionStage = 'private-snapshot';
       const protectedTaskData = transformPrivateImageTask({ ...taskData, id, owner_id: ownerId,
         prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true);
       if (preparation) await preparation.save(tx, protectedTaskData);
       else {
+        submissionStage = 'task-insert';
+        await assertStudioRequestWritable(tx, ownerId, input.requestId);
         const created = await tx.imageStudioTask.create({ data: protectedTaskData });
         await enqueueFrozenImageFeishuNotification(tx, created, imageFeishu);
         if (roleMedia && roleMedia.context && typeof roleMedia.context === 'object' && 'runId' in roleMedia.context) {
@@ -1216,6 +1245,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!preparation && avatar?.onQueued) await avatar.onQueued(tx, batchId);
   }, { timeout: 15000 }));
   return batchId;
+  } catch (error) {
+    markStudioSubmitFailure(error, submissionStage);
+    throw error;
+  }
 }
 
 export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded' | 'failed' | 'uncertain', data: { assetId?: string; preparedAsset?: Prisma.AssetUncheckedCreateInput; retainedAsset?: Prisma.AssetUncheckedCreateInput; error?: string; usage?: unknown } = {}, transaction?: Prisma.TransactionClient) {
@@ -1475,7 +1508,7 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string) {
+export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'> & Partial<Pick<ImageStudioTask, 'owner_id'>>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string) {
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const protectedModule = Boolean(typeof parsed.sourcePresetId === 'string' && privateOrigin('image-preset', parsed.sourcePresetId)
@@ -1560,7 +1593,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
   try { restoredSettings = parseRestoredStudioSettings(parsed.restoredSettings); } catch {}
   let taskSettings;
   try { taskSettings = parseStudioTaskSettings(parsed.taskSettings); } catch {}
-  const personalPromptProjection = studioPersonalPromptProjection(parsed);
+  const personalPromptProjection = serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
   return {
     ...(sharedLive ? { sharedLive } : {}),
     ...(taskSettings ? { taskSettings } : {}),
@@ -1570,7 +1603,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),
-    prompt: personalPromptProjection.personalPrompt ?? (hasSharedStudioPrompt(parsed) ? '' : publicText(typeof parsed.prompt === 'string' ? parsed.prompt : task.prompt, protectedModule)),
+    prompt: personalPromptProjection.personalPrompt ?? '',
     skills: Array.isArray(parsed.skills) ? parsed.skills.flatMap((skill, index) => skill && typeof skill === 'object'
       && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string'
       ? [publicSkillSnapshot(skill, task.id, index)] : []) : [],

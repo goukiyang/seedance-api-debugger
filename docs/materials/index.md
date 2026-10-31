@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## IMG-RESTORE01 / IMG-REQ01 图片补充与提交恢复（2026-10-31）
+
+[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)记录实施、原号未知边界及主/相容guard要求。用户原图和完整私有工程/发布证据保正式根 `docs/materials/2026-10-31-studio-personal-prompt-receipts/`，不随源码外发。实现与专项工程检查已完成，待主/guard完整构建与保护部署；功能由用户手动验收。
+
 ## CHAR01 角色参考图工作台（2026-10-30）
 
 已部署 **v0.121.0**，应用源 `3b19c1d438e2ddf876c594b4fc22184f69268fcd`、BUILD `dtT-BETLiEPv83lK9Daq6`；2026-10-31T05:50:35Z切换，05:50:58Z公网收口。[工具入口](https://sd2.youdooart.com/tools/character-lab)，管理员在同页“提示词管理”编辑上下文并保存版本。按定稿完成原图与4/9差异人脸、主辅方案选择、2:3成品预览及直接保存/PNG或ZIP导出；滑杆只影响下一次主动生成，保存导出不生成。本人草稿/历史、管理员规则与原请求/费用快照分别保留。

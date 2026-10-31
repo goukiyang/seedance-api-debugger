@@ -1,5 +1,8 @@
+import { isEncryptedStudioPersonalPrompt } from './personal-prompt';
+
 export type RestoredStudioSettings = { protocol: 'task-settings-v1'; sourceTaskId: string };
-export type StudioPersonalPromptState = 'recorded' | 'legacy-personal' | 'unknown';
+export { isEncryptedStudioPersonalPrompt, studioPersonalPromptProjection } from './personal-prompt';
+export type { StudioPersonalPromptProjection, StudioPersonalPromptState } from './personal-prompt';
 
 export class RestoredStudioSettingsError extends Error {
   constructor(message: string, public status = 409) { super(message); }
@@ -48,18 +51,11 @@ export function hasSharedStudioPrompt(snapshot: Record<string, unknown>) {
     || typeof snapshot.templatePrompt === 'string' && snapshot.templatePrompt.length > 0;
 }
 
-export function studioPersonalPromptProjection(snapshot: Record<string, unknown>): {
-  personalPromptState: StudioPersonalPromptState; personalPrompt?: string;
-} {
-  if (typeof snapshot.personalPrompt === 'string') return { personalPromptState: 'recorded', personalPrompt: snapshot.personalPrompt };
-  if (!hasSharedStudioPrompt(snapshot) && typeof snapshot.prompt === 'string') {
-    return { personalPromptState: 'legacy-personal', personalPrompt: snapshot.prompt };
-  }
-  return { personalPromptState: 'unknown' };
-}
-
 export function restoredStudioTemplatePrompt(snapshot: Record<string, unknown>) {
-  if (typeof snapshot.templatePrompt === 'string') return snapshot.templatePrompt;
+  if (typeof snapshot.templatePrompt === 'string' && !isEncryptedStudioPersonalPrompt(snapshot.templatePrompt)) return snapshot.templatePrompt;
+  if (isEncryptedStudioPersonalPrompt(snapshot.templatePrompt)) {
+    throw new RestoredStudioSettingsError('这条旧记录的模板提示词无法安全读取，未显示原密文；请使用当前模板并填写本次描述');
+  }
   if (hasSharedStudioPrompt(snapshot)) throw new RestoredStudioSettingsError('这条旧共享记录没有分开保存模板与个人描述，无法安全恢复；请使用当前模板并填写本次描述');
   return '';
 }

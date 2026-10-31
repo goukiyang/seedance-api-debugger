@@ -123,7 +123,12 @@ import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChanne
 import { fetchReadWithRetry } from '@/lib/http/read-retry';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
-type StudioSnapshot = { taskSettings?: StudioTaskSettings; imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
+import { readJsonResponse } from '@/lib/http/json-response';
+import { isEncryptedStudioPersonalPrompt } from '@/lib/image-studio/personal-prompt';
+import { recoverStudioPersonalPrompt, type PersonalPromptSource } from './personal-prompt-recovery';
+import { matchingStudioRequestReceipt, isStudioRequestEnded, studioRequestOutcomeMessage } from './submit-recovery';
+
+type StudioSnapshot = { personalPrompt?: string; personalPromptState?: string; personalPromptReason?: string; taskSettings?: StudioTaskSettings; imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
 type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
 type StudioRecheckScope = { key: string; active: boolean };
 type RestoredTaskSettings = { sourceTaskId: string; snapshot: StudioSnapshot & {
@@ -145,10 +150,10 @@ function studioTaskPhase(task: StudioTask) {
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasViewableImage(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-type StudioModule = { privateDefinition?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
+type StudioModule = { personalPromptState?: string; personalPromptReason?: string; privateDefinition?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
   taskSettings?: StudioTaskSettings; settingsSourceTaskId?: string | null; templateRead?: StudioTemplateRead; sharingPreference?: { enabled: boolean; revision: number; requestId?: string } | null; canChooseSharing?: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { templateRead?: StudioTemplateRead; id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
-type QuickStudioPreset = StudioPreset & { taskSettings?: StudioTaskSettings; prompt: string; context: string; personalOverrides?: PersonalStudioOverrides; personalImages?: UploadedAssetPayload[]; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[]; skillIds?: string[] };
+type QuickStudioPreset = StudioPreset & { personalPrompt?: string; personalPromptState?: string; personalPromptReason?: string; sourceTaskId?: string; taskSettings?: StudioTaskSettings; prompt: string; context: string; personalOverrides?: PersonalStudioOverrides; personalImages?: UploadedAssetPayload[]; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[]; skillIds?: string[] };
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean; moduleDeletionBlocked?: string | null };
 type PresetSourceReader = () => PresetSource;
 type StudioFeedback = { message: string; tone: 'progress' | 'info' | 'success' | 'warning' | 'error' };
@@ -209,6 +214,7 @@ function storedPersonalOverrides(value: unknown): PersonalStudioOverrides {
   const source = value as Record<string, unknown>;
   return Object.fromEntries(PERSONAL_OVERRIDE_FIELDS.flatMap<[keyof PersonalStudioOverrides, string | number]>(field => {
     const candidate = source[field];
+    if (field === 'prompt' && isEncryptedStudioPersonalPrompt(candidate)) return [];
     if (field === 'count') return Number.isInteger(candidate) && Number(candidate) >= 1 && Number(candidate) <= 8 ? [[field, Number(candidate)]] : [];
     return typeof candidate === 'string' && candidate.length <= (field === 'prompt' ? 20000 : 120) ? [[field, candidate]] : [];
   })) as PersonalStudioOverrides;
@@ -1653,7 +1659,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const presetCreateRequest = useRef<{ requestId: string; payload: Record<string, unknown> & { name: string; isShared: boolean }; generationSignature: string; result?: { id: string; publisherModuleId?: string } } | null>(null);
   const [recoverableDraft, setRecoverableDraft] = useState<Record<string, any> | null>(null);
   const [savedAsSignature, setSavedAsSignature] = useState('');
-  const [prompt, setPromptValue] = useState(module.personalPrompt ?? (sharedLive ? personalOverrides.prompt || '' : module.prompt));
+  const initialPersonalPrompt = module.personalPromptState === 'unknown' ? undefined : module.personalPrompt ?? (sharedLive ? (sharedLive.overriddenFields || []).includes('prompt') ? module.prompt : '' : module.prompt);
+  const initialPersonalRecovery = recoverStudioPersonalPrompt(initialPersonalPrompt, '');
+  const [prompt, setPromptValue] = useState(initialPersonalRecovery.prompt);
+  const [personalPromptNotice, setPersonalPromptNotice] = useState(initialPersonalRecovery.notice);
   const usageProject = useImageUsageProject(userId, module.id);
   function setPrompt(value: string) { setPromptValue(value); markPersonalOverride('prompt', value); }
   const evolution = (module as StudioModule & { evolution?: EvolutionCapability | null }).evolution || null;
@@ -2568,6 +2577,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     } finally { moduleSaveLock.current = false; setSharingPreferenceSaving(false); }
   }
 
+  async function recoverPersonalPromptInput(candidate: unknown, sourceTaskId: unknown, current: string, source?: PersonalPromptSource) {
+    let projection = source;
+    if ((typeof candidate !== 'string' || isEncryptedStudioPersonalPrompt(candidate))
+      && typeof sourceTaskId === 'string' && /^[a-zA-Z0-9-]{1,120}$/.test(sourceTaskId)
+      && !(projection && projection.personalPromptState !== 'unknown' && typeof projection.personalPrompt === 'string' && !isEncryptedStudioPersonalPrompt(projection.personalPrompt))) {
+      try {
+        const history = await readResponse(await fetch(`/api/image-studio/tasks?moduleId=${encodeURIComponent(module.id)}&taskId=${encodeURIComponent(sourceTaskId)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+        const original: StudioTask | undefined = history.tasks?.find((task: StudioTask) => task.id === sourceTaskId && (!task.owner || task.owner.id === userId));
+        projection = original?.snapshot;
+      } catch { /* Personal input can still be edited when its original projection is unavailable. */ }
+    }
+    return recoverStudioPersonalPrompt(candidate, current, projection);
+  }
   async function restoreDefaults() {
     if (!draftLoaded || quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission || moduleSaving || uploading || bannerUploading || draftRestoring) return;
     if (sharedLive && (!sharedLive.available || !hasSharedDefaults(sharedLive.defaults))) { setError('模板暂不可用，本人草稿和历史保留'); return; }
@@ -2576,6 +2598,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     try { const raw = JSON.stringify(module.privateDefinition ? retainLegacyPrivateDraft(defaultsRecoveryKey, snapshot) : snapshot); localStorage.setItem(defaultsRecoveryKey, raw); retained = localStorage.getItem(defaultsRecoveryKey) === raw; } catch { /* The visible snapshot can still be restored until this page closes. */ }
     if (!retained && (generationChanged || authorDefinitionDirty)
       && !(await confirm('本机未能保存当前草稿。恢复默认后只能在本页找回，刷新或离开后可能丢失本次修改。是否继续？', { title: '恢复默认', confirmLabel: '继续恢复默认' }))) return;
+    let defaultPersonalRecovery: ReturnType<typeof recoverStudioPersonalPrompt> | null = null;
+    if (!sharedLive) {
+      const sequence = ++draftRestoreSequence.current;
+      setDraftRestoring(true);
+      defaultPersonalRecovery = await recoverPersonalPromptInput(baseline.prompt, module.reproduceFromTaskId, prompt);
+      if (sequence !== draftRestoreSequence.current || isClientSessionBlocked()) return;
+      setDraftRestoring(false);
+    }
     setRecoverableDraft(snapshot);
     blockedDraftSignature.current = null;
     setRestoredTaskSettings(null); setRestoredSettingsError('');
@@ -2586,7 +2616,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       const defaults = sharedLive.defaults;
       personalOverridesRef.current = {}; setPersonalOverrides({});
       resetFieldsRef.current = [...PERSONAL_OVERRIDE_FIELDS]; setResetFields(resetFieldsRef.current);
-      setPromptValue(''); setModuleModelValue(defaults.model || module.model); setCountValue(defaults.count ?? module.count);
+      setPromptValue(''); setPersonalPromptNotice(''); setModuleModelValue(defaults.model || module.model); setCountValue(defaults.count ?? module.count);
       setQualityValue(defaults.quality || module.quality); setResolutionValue(defaults.resolution || module.resolution);
       setAspectRatioValue(defaults.aspectRatio || module.aspectRatio);
       const policy = defaults.referencePolicy || moduleReferencePolicy(module);
@@ -2612,7 +2642,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       setSaveStatus(retained ? '已恢复当前模板默认参数，主图保留；可点“恢复上一次”找回刚才的草稿。' : '已恢复默认，主图保留；刚才的草稿仅本页可恢复，刷新后可能丢失。');
       return;
     }
-    setPrompt(baseline.prompt); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
+    if (defaultPersonalRecovery?.restored) setPrompt(defaultPersonalRecovery.prompt);
+    setPersonalPromptNotice(defaultPersonalRecovery?.notice || ''); setCount(baseline.count); setReferenceLimit(baseline.referenceLimit); setAspectRatio(baseline.aspectRatio); setModuleModel(baseline.model);
     setEvolutionInput({ direction: evolution?.defaultDirection || 'increase', manual: false });
     setQuality(baseline.quality); setResolution(baseline.resolution);
     setAuxiliaryImages(module.images.filter(image => !baseline.referencePolicy.primaryIds.includes(image.id || '')));
@@ -2896,6 +2927,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           return false;
         }
         if (sequence !== draftRestoreSequence.current) return false;
+        const structuredPrompt = saved.personalOverrides && typeof saved.personalOverrides === 'object' && Object.hasOwn(saved.personalOverrides, 'prompt') ? saved.personalOverrides.prompt : undefined;
+        const selectedPersonalCandidate = Object.hasOwn(saved, 'personalPrompt') ? saved.personalPrompt : structuredPrompt !== undefined ? structuredPrompt : saved.prompt;
+        const savedPersonalCandidate = saved.schemaVersion === 4 && isEncryptedStudioPersonalPrompt(selectedPersonalCandidate) && typeof saved.prompt === 'string' && !isEncryptedStudioPersonalPrompt(saved.prompt) ? saved.prompt : selectedPersonalCandidate;
+        const personalSourceTaskId = saved.personalPromptSourceTaskId || saved.restoredSettings?.sourceTaskId || saved.reproduceSourceTaskId;
+        const personalRecovery = savedPersonalCandidate !== undefined || saved.personalPromptState === 'unknown'
+          ? await recoverPersonalPromptInput(savedPersonalCandidate, personalSourceTaskId, prompt, recoveredRestoredSettings?.snapshot || restoredTask?.snapshot)
+          : null;
+        if (sequence !== draftRestoreSequence.current || isClientSessionBlocked()) return false;
         const recoveredMode = parseStudioTaskSettings(saved.taskSettings);
         setGlobalSettingsSourceTaskId(recoveredMode?.sourceTaskId || null);
         setGlobalContextMode(recoveredMode?.mode ?? (saved.restoredSettings || saved.reproduceSourceTaskId ? 'historical'
@@ -2903,8 +2942,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         const restoredOverrides = sharedLive ? storedPersonalOverrides(saved.personalOverrides && typeof saved.personalOverrides === 'object'
           ? saved.personalOverrides : saved) : null;
         const structuredPersonalDraft = Boolean(sharedLive && saved.personalOverrides && typeof saved.personalOverrides === 'object');
-        const restores = (field: keyof PersonalStudioOverrides) => !sharedLive || !automatic && !structuredPersonalDraft || Object.prototype.hasOwnProperty.call(restoredOverrides, field);
-        if (typeof saved.prompt === 'string' && restores('prompt')) setPrompt(saved.prompt.slice(0, 20000));
+        const restores = (field: keyof PersonalStudioOverrides) => !sharedLive || !automatic && !structuredPersonalDraft || Object.prototype.hasOwnProperty.call(restoredOverrides, field)
+          || field === 'prompt' && (saved.personalPromptState === 'unknown' || Boolean(saved.personalOverrides && Object.hasOwn(saved.personalOverrides, 'prompt')));
+        if (personalRecovery && restores('prompt')) {
+          if (personalRecovery.restored) setPrompt(personalRecovery.prompt);
+          setPersonalPromptNotice(personalRecovery.notice);
+          if (restoredOverrides) restoredOverrides.prompt = personalRecovery.prompt;
+        }
         if (evolution && saved.evolution && ['increase', 'decrease'].includes(saved.evolution.direction) && typeof saved.evolution.manual === 'boolean') setEvolutionInput({ direction: saved.evolution.direction, manual: saved.evolution.manual });
         if (saved.resultView === 'images' || saved.resultView === 'batch') setResultView(saved.resultView);
         if (Number.isInteger(saved.count) && saved.count >= 1 && saved.count <= 8 && restores('count')) setCount(saved.count);
@@ -2936,7 +2980,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           setResetFields(resetFieldsRef.current);
           if (sharedLive.available && hasSharedDefaults(sharedLive.defaults)) {
             const defaults = sharedLive.defaults;
-            if (resetFieldsRef.current.includes('prompt')) setPromptValue('');
+            if (resetFieldsRef.current.includes('prompt')) { setPromptValue(''); setPersonalPromptNotice(''); }
             if (resetFieldsRef.current.includes('model')) setModuleModelValue(defaults.model);
             if (resetFieldsRef.current.includes('quality')) setQualityValue(defaults.quality);
             if (resetFieldsRef.current.includes('resolution')) setResolutionValue(defaults.resolution);
@@ -3004,8 +3048,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       const rawLocalDraft = JSON.parse(localStorage.getItem(draftKey) || 'null');
       const localDraft = module.privateDefinition && rawLocalDraft && typeof rawLocalDraft === 'object'
         ? withoutLegacyPrivateFields(rawLocalDraft) : rawLocalDraft;
-      const saved = localDraft || (sharedLive && module.settingsSourceTaskId ? { ...temporaryDraftPayload(),
-        restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: module.settingsSourceTaskId } } : null);
+      const initialSourceTaskId = module.reproduceFromTaskId;
+      const saved = localDraft || (initialPersonalRecovery.notice
+        ? { ...temporaryDraftPayload(), prompt: initialPersonalPrompt, personalPromptState: 'unknown', personalPromptSourceTaskId: initialSourceTaskId }
+        : sharedLive && module.settingsSourceTaskId ? { ...temporaryDraftPayload(),
+          restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: module.settingsSourceTaskId } } : null);
       if (saved && typeof saved === 'object') {
         blockedDraftSignature.current = generationDraft;
         setRecoverableDraft(saved);
@@ -3059,6 +3106,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         expectedIntent: definitionBaseline.current.sharedLive?.intent, baseFields: module.privateDefinition
           ? Object.fromEntries(Object.entries(definitionBaselineFields.current || {}).filter(([key]) => !['context', 'templatePrompt'].includes(key)))
           : definitionBaselineFields.current, revision: revisionRef.current } } : {}),
+      personalPromptSourceTaskId: restoredTaskSettings?.sourceTaskId || reproduceSourceTaskId || undefined,
       resultView, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, referencePolicy: nextPolicy, aspectRatio, resolution,
       images: [...nextImages, ...nextAuxiliary].map(image => ({ id: image.id })), context: !sharedLive && contextEditable ? moduleContext : undefined,
       fixedReferences: !sharedLive && fixedEditable ? fixedReferences.map(image => ({ id: image.id, note: image.note })) : undefined,
@@ -3273,20 +3321,47 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, [loadTasks, visible]);
   useEffect(() => () => { taskReadScopeRef.current = ''; }, []);
 
-  async function querySubmission() {
+  function releasePendingSubmission(requestId: string) {
+    setPendingSubmission(current => current?.requestId === requestId ? null : current);
+    try {
+      for (const storage of [localStorage, sessionStorage]) {
+        const stored = JSON.parse(storage.getItem(pendingKey) || 'null');
+        if (stored?.requestId === requestId) storage.removeItem(pendingKey);
+      }
+    } catch { /* The durable server outcome is shown; a retained local record is safe to query again. */ }
+  }
+  async function querySubmission(close = false) {
     if (isClientSessionBlocked() || !pendingSubmission || submitLock.current || moduleDeleteLock.current) return;
+    const requestId = String(pendingSubmission.requestId), scope = taskReadScope;
+    const current = () => !isClientSessionBlocked() && taskReadScopeRef.current === scope;
     submitLock.current = true; setQueryingSubmission(true); setSubmitting(true); setError('');
     try {
-      const value = await readResponse(await fetch(`/api/image-studio/tasks?requestId=${encodeURIComponent(String(pendingSubmission.requestId))}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
-      if (!Array.isArray(value.tasks) || !value.tasks.length) {
-        setError('暂未查到这次提交，仍不能确认是否受理。请稍后查询或联系管理员，不会自动再生成。'); return;
+      const response = await fetch(`/api/image-studio/requests${close ? '' : `?requestId=${encodeURIComponent(requestId)}`}`, {
+        cache: 'no-store', ...(close ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, action: 'close' }) } : {}), signal: AbortSignal.timeout(15000),
+      });
+      const value = await readJsonResponse<Record<string, unknown>>(response);
+      if (!current()) return;
+      const receipt = matchingStudioRequestReceipt(value, requestId);
+      if (isStudioRequestEnded(receipt)) {
+        releasePendingSubmission(requestId); lastDisplayedQuote.current = null; setBillingQuote(null);
+        setError(studioRequestOutcomeMessage(receipt, receipt?.state === 'closed' ? '已确认原提交未被受理并结束，输入保留，可主动开始下一次生成。' : '原提交明确未被受理，输入保留，请调整后重新生成。', value.error));
+        return;
       }
-      showLatestResults.current(String(pendingSubmission.requestId));
-      lastDisplayedQuote.current = null;
-      setPendingSubmission(null); localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey);
-      await loadTasks();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
-    finally { submitLock.current = false; setSubmitting(false); setQueryingSubmission(false); }
+      if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : '原请求暂时无法核对，提交编号保留。');
+      if (receipt?.state !== 'accepted') {
+        setError(receipt?.message || '提交结果待确认，原号和输入保留；只核对原请求，不会再次生成。'); return;
+      }
+      const original = await readResponse(await fetch(`/api/image-studio/tasks?requestId=${encodeURIComponent(requestId)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      if (!current()) return;
+      if (!Array.isArray(original.tasks) || !original.tasks.length) {
+        setPendingSubmission(previous => previous?.requestId === requestId ? { requestId, accepted: true } : previous);
+        setError(receipt.message || '原请求已有受理证据，结果仍待核对；保留原号，继续查询原结果。'); return;
+      }
+      showLatestResults.current(requestId); lastDisplayedQuote.current = null; setBillingQuote(null);
+      releasePendingSubmission(requestId);
+      onGenerationAccepted(); await loadTasks();
+    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '查询暂不可用，原提交编号仍保留。'); }
+    finally { submitLock.current = false; if (current()) { setSubmitting(false); setQueryingSubmission(false); } }
   }
 
   function generationPayload(retryTask?: StudioTask, requestId = crypto.randomUUID()) {
@@ -3314,7 +3389,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }
   async function submit(retryTask?: StudioTask) {
     if (batch.mode === 'batch' && batch.pending && !retryTask) { await batch.query(); return; }
-    if (pendingSubmission) { await querySubmission(); return; }
+    const confirmingOriginalPrice = pendingSubmission?.confirmationRequired === true && billingQuote?.requestId === pendingSubmission.requestId;
+    if (pendingSubmission && !confirmingOriginalPrice) { await querySubmission(); return; }
     if (restoredSettingsError && !retryTask) { setError(restoredSettingsError); return; }
     if (sourceSharingBlocked) { setError('模板已不可用，不能新建任务；本人输入和历史保留。'); return; }
     if (isClientSessionBlocked() || !settings || submitLock.current || moduleDeleteLock.current || moduleSaveLock.current || globalSettingsSaving || uploadLock.current || uploading || bannerUploading || quickPresetLock.current || presetSaveLock.current || ratioEditing || draftRestoring) return;
@@ -3341,7 +3417,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       || generationFixedReferences.some(item => item.available === false) || generationStyles.some(group => group.unavailable) || generationSkills.some(group => group.unavailable))) {
       setError('请检查主图数量、辅助参考数量和图片可用性。'); return;
     }
-    const currentPayload = generationPayload(retryTask);
+    const currentPayload = generationPayload(retryTask, confirmingOriginalPrice ? String(pendingSubmission!.requestId) : undefined);
     const requestLegacyRoute = imageStudioUsesLegacyRoute(imageChannels, currentPayload.model, imageChannelId);
     const requestChannelId = imageStudioEffectiveChannelId(imageChannels, currentPayload.model, imageChannelId, currentPayload.quality);
     const expectedFormSignature = liveGenerationSignature.current;
@@ -3400,31 +3476,31 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         : { ...payload, ...imageUiQuoteFields(confirmedQuote!) };
       setBillingQuote(null);
       const response = await fetch('/api/image-studio/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submission), signal: AbortSignal.timeout(20000) });
-      if (response.status >= 400 && response.status < 500) { ambiguous = false; setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} if (response.status === 409) { onReloadSettings(); if (sharedLive) onSharedRefresh(); } await readResponse(response); }
-      else {
-        const value = await readResponse(response);
-        if (value.confirmationRequired === true) {
-          const quote = imageUiPriceConfirmation(value, payload.requestId, payload.count, requestChannelId) as StudioImageQuote | null;
-          if (!quote || isClientSessionBlocked() || liveGenerationSignature.current !== expectedFormSignature) {
-            throw new Error('本次价格确认未能匹配当前提交，请查询原请求；不会自动再生成。');
-          }
-          const confirmed = { signature, requestId: payload.requestId, quote };
-          // Only the server's matching zero-admission receipt can release the saved pending request.
-          ambiguous = false;
-          lastDisplayedQuote.current = confirmed;
-          setBillingQuote(confirmed);
-          setPendingSubmission(null);
-          try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {}
-          setError(`${imageUiQuotePriceText(quote)}，尚未生成；请核对后再次点击。`);
-          return;
-        }
-        if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
-        lastDisplayedQuote.current = null;
-        onGenerationAccepted();
-        showLatestResults.current(payload.requestId);
-        watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
-        setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} await loadTasks();
+      const value = await readJsonResponse<Record<string, any>>(response);
+      if (isClientSessionBlocked()) return;
+      const receipt = matchingStudioRequestReceipt(value, payload.requestId);
+      if (isStudioRequestEnded(receipt)) {
+        ambiguous = false; releasePendingSubmission(payload.requestId); lastDisplayedQuote.current = null;
+        if (response.status === 409) { void onReloadSettings(); if (sharedLive) onSharedRefresh(); }
+        throw new Error(studioRequestOutcomeMessage(receipt, '原提交明确未被受理，输入已保留。', value.error));
       }
+      if (!response.ok) throw new Error(`${value.error || '服务回复未能确认受理状态'}。提交结果待确认，请核对原请求。`);
+      if (value.confirmationRequired === true) {
+        const quote = imageUiPriceConfirmation(value, payload.requestId, payload.count, requestChannelId) as StudioImageQuote | null;
+        if (!quote || liveGenerationSignature.current !== expectedFormSignature) throw new Error('本次价格确认未能匹配当前提交，请查询原请求；不会自动再生成。');
+        const confirmed = { signature, requestId: payload.requestId, quote };
+        lastDisplayedQuote.current = confirmed; setBillingQuote(confirmed);
+        // A price confirmation is an intermediate state. Keep the original ID
+        // locked and allow only an explicit continuation with the same inputs.
+        setPendingSubmission({ requestId: payload.requestId, confirmationRequired: true });
+        setError(`${imageUiQuotePriceText(quote)}，请确认价格后沿本次原号继续生成。`);
+        return;
+      }
+      if (typeof value.batchId !== 'string' || !/^[a-f0-9]{64}$/.test(value.batchId)) throw new Error('提交结果待确认，请查询这次提交。');
+      ambiguous = false; lastDisplayedQuote.current = null;
+      onGenerationAccepted(); showLatestResults.current(payload.requestId);
+      watchGenerationCompletion(userId, payload.requestId, 'images', payload.count);
+      releasePendingSubmission(payload.requestId); await loadTasks();
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交结果未确认');
       // Reuse the exact request ID after ambiguous transport failures.
@@ -3460,9 +3536,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     try { nextRatio = normalizeStudioRatio(snapshot.aspectRatio || 'auto'); } catch { nextRatio = 'auto'; }
     const nextResolution = normalizeImageResolution(nextModel, snapshot.resolution || defaultImageResolution(nextModel));
     const nextQuality = normalizeImageStudioQuality(nextModel, typeof snapshot.quality === 'string' ? snapshot.quality : quality);
-    const sharedPersonalPrompt = (snapshot as StudioSnapshot & { personalPrompt?: string }).personalPrompt;
-    if (!sharedLive) setPrompt(snapshot.prompt || '');
-    else if (typeof sharedPersonalPrompt === 'string') setPrompt(sharedPersonalPrompt);
+    const personalRecovery = recoverStudioPersonalPrompt(snapshot.personalPrompt, prompt, snapshot);
+    if (personalRecovery.restored) setPrompt(personalRecovery.prompt);
+    setPersonalPromptNotice(personalRecovery.notice);
     const restoredEvolution = (snapshot as StudioSnapshot & { evolution?: EvolutionInput }).evolution;
     const nextEvolution = evolution ? restoredEvolution && ['increase', 'decrease'].includes(restoredEvolution.direction) ? { direction: restoredEvolution.direction, manual: restoredEvolution.manual === true } : { direction: evolution.defaultDirection, manual: false } : undefined;
     if (nextEvolution) setEvolutionInput(nextEvolution);
@@ -3491,7 +3567,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             - (snapshot.styleGroups || []).reduce((total, group) => total + group.referenceCount, 0))));
       }
       setSaveStatus('已恢复本次设置，主图保留，共享模板不变'
-        + (typeof sharedPersonalPrompt !== 'string' ? '；旧记录的个人描述无法确认，当前描述保留' : ''));
+        + (personalRecovery.notice ? '；旧记录的个人描述无法确认，当前描述保留，可继续编辑' : ''));
       return null;
     }
     setRestoredTaskSettings({ sourceTaskId: task.id, snapshot }); setRestoredSettingsError('');
@@ -3523,7 +3599,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
     setReproductionReferencePolicy(snapshot.sourceAvailable ? nextPolicy : null);
     const nextImages = [...images, ...nextAuxiliary];
-    const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: snapshot.prompt || '', count: nextCount, referenceLimit: nextPolicy.primaryMax,
+    const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: personalRecovery.prompt, count: nextCount, referenceLimit: nextPolicy.primaryMax,
       aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext,
       fixedReferences: fixedReferencePayload(nextFixed), skillIds: nextSkills.map(group => group.id),
       skillVersions: Object.fromEntries(nextSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: nextStyles.map(group => group.id) },
@@ -3752,6 +3828,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     || effectiveGenerationDefinition.contextConfigured || effectiveGenerationDefinition.context?.trim()
     || effectiveGenerationDefinition.templatePrompt?.trim() || generationSkills.length);
   const ready = Boolean(usageProject.ready && selectedProviderReady && (actualQuoteRequired || pricingBySpecification || moduleUnitCredits !== null) && settings && !settingsError);
+  const pendingPriceContinuation = pendingSubmission?.confirmationRequired === true && billingQuote?.requestId === pendingSubmission.requestId;
   const generationFeedback: StudioFeedback | null = batch.mode === 'batch' && batch.pending ? batch.busy ? { message: '正在核对原批次，不会重新提交生成', tone: 'progress' } : null
     : evolutionConflict ? { message: evolutionConflict, tone: 'warning' }
     : batch.mode === 'batch' && batch.blocker ? { message: batch.blocker, tone: 'info' }
@@ -4230,7 +4307,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <div className={styles.generationToolbar}>
           <div className={styles.generationActions}>
             <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
-            <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
+            <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission && !pendingPriceContinuation ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingPriceContinuation ? '确认价格并生成' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
           </div>
           {batch.mode === 'single' && <div className={`${styles.counts} ${styles.generationQuantity}`} role="group" aria-label="单次生成张数">
             <label htmlFor={`studio-count-${module.id}`}>张数</label>
@@ -4249,14 +4326,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           {settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}
           {sourceSharingBlocked && <TaskNotice kind="recoverable">{sharedLive?.unavailableReason || '模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。'} <button type="button" onClick={() => { setResultView('images'); document.getElementById(`studio-results-${module.id}`)?.scrollIntoView({ block: 'start' }); }}>查看本人历史</button>{definitionReady && repairDefinition && <button type="button" onClick={() => openModuleDialog()}>修复模板</button>}</TaskNotice>}
           {sharingPending && <p role="status" className={styles.muted}>{sharingMessage || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}
-          {pendingSubmission && <p className={styles.muted}>提交结果待确认，只查询原请求，不会再次生成。<button type="button" disabled={submitting} onClick={async () => {
-            if ((await confirm('上次提交可能已受理。放弃核对后，再次生成会新建任务，可能再次产生上游费用。确定放弃核对吗？', { title: '放弃核对', confirmLabel: '放弃核对' }))) { setPendingSubmission(null); try { localStorage.removeItem(pendingKey); sessionStorage.removeItem(pendingKey); } catch {} }
-          }}>放弃核对</button></p>}
+          {pendingSubmission && <p className={styles.muted}>{pendingSubmission.confirmationRequired === true ? '价格待确认，保留原提交编号；确认后仅沿原号继续。' : pendingSubmission.accepted === true ? '原请求已受理，结果待核对；保留原号，只查询原结果。' : '提交结果待确认，只查询原请求，不会再次生成。'}<button type="button" disabled={submitting || queryingSubmission} onClick={() => void querySubmission(true)}>核对并结束本次提交</button></p>}
           {!ready && !settingsError && !channelIssue && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
         </div>
         {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
-        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => setPrompt(event.target.value)} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
+        <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => { setPrompt(event.target.value); setPersonalPromptNotice(''); }} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
+        {personalPromptNotice && <TaskNotice kind="recoverable">{personalPromptNotice}</TaskNotice>}
         {evolutionConflict && <TaskNotice kind="recoverable">{evolutionConflict}</TaskNotice>}
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>

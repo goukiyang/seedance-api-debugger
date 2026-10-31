@@ -48,11 +48,14 @@ type PreparedImageQuoteResult = {
 };
 
 const quoteFailureStages = new WeakMap<object, string>();
-export function logImagePricingFailure(stage: 'preview' | 'acceptance', error: unknown, startedAt: number) {
+export function logImagePricingFailure(stage: 'preview' | 'acceptance', error: unknown, startedAt: number,
+  requestId?: string, submissionStage?: string) {
   const value = error as { name?: unknown; code?: unknown; status?: unknown } | null;
   const safe = (input: unknown) => typeof input === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(input) ? input : null;
   console.warn('[ImagePricing]', JSON.stringify({ at: Date.now(), stage,
-    phase: error && typeof error === 'object' ? quoteFailureStages.get(error) ?? stage : stage,
+    ...(typeof requestId === 'string' && /^[a-zA-Z0-9-]{16,100}$/.test(requestId) ? { requestId } : {}),
+    phase: typeof submissionStage === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(submissionStage) ? submissionStage
+      : error && typeof error === 'object' ? quoteFailureStages.get(error) ?? stage : stage,
     elapsedMs: Date.now() - startedAt, type: safe(value?.name), code: safe(value?.code),
     status: typeof value?.status === 'number' && Number.isInteger(value.status) ? value.status : null }));
 }

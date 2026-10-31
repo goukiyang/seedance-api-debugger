@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色参考图工作台', outline: [
-  '从原始设定图生成不同脸型的真人候选，自由调节面部差异',
-  '选择主面部与辅助参考，制作竖版四宫格角色参考图',
-  '成品直接保存导出，管理员可维护头像生成规则',
+const notice = { title: '图片描述与提交恢复修复', outline: [
+  '个人补充与模板提示分别保存，恢复历史设置时保持可编辑',
+  '提交失败显示原请求的真实原因，未知请求可核对后安全结束',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

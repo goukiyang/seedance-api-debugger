@@ -217,6 +217,7 @@ const publicUsageFixtures = [
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts',
       'src/lib/image-studio/skills.ts', 'src/lib/image-studio/private-storage.server.ts',
       'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
       'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',

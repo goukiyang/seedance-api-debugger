@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { assertStudioRequestWritable } from './submit-receipts.server';
 
 const PREFIX = 'image_sync_request_v1:';
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
@@ -52,6 +53,7 @@ export async function createSynchronousImageAdmission(tx: Client & Pick<Prisma.T
 }) {
   const requestId = input.requestId || `sync-${randomUUID()}`;
   if (!/^[a-zA-Z0-9-]{16,100}$/.test(requestId)) throw new SynchronousImageAdmissionError('图片请求编号无效，未派发生成', 400);
+  await assertStudioRequestWritable(tx, input.ownerId, requestId);
   const key = `${PREFIX}${input.ownerId}:${requestId}`;
   const queued = await tx.imageStudioTask.findFirst({ where: { owner_id: input.ownerId,
     batch_id: createHash('sha256').update(`${input.ownerId}:${requestId}`).digest('hex') }, select: { id: true } });

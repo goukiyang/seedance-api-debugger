@@ -20,6 +20,8 @@ import { validStudioModuleId } from '@/lib/image-studio/modules';
 import { projectStudioTaskSummary, STUDIO_TASK_SUMMARY } from '@/lib/image-studio/task-summary';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
+import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -112,8 +114,11 @@ export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
+  let body: Record<string, unknown> | undefined;
   try {
-    const body = await request.json();
+    const input: unknown = await request.json();
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new StudioError('提交内容无效');
+    body = input as Record<string, unknown>;
     if (body.currentFixedPricing !== undefined) {
       const result = await submitStudioWithCurrentPricing(user.id, body);
       return NextResponse.json(result, { status: 'batchId' in result ? 202 : 200,
@@ -122,15 +127,24 @@ export async function POST(request: NextRequest) {
     const batchId = await submitStudioBatch(user.id, body);
     return NextResponse.json({ batchId }, { status: 202 });
   } catch (error) {
-    logImagePricingFailure('acceptance', error, startedAt);
-    if (error instanceof VideoFeishuError) return NextResponse.json({ error: videoFeishuErrorText(error.code), code: error.code, submitted: false }, { status: error.status });
-    if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
-    if (error instanceof QueueCapacityError || error instanceof QueueMaintenanceError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });
-    if (error instanceof SyntaxError) return NextResponse.json({ error: '提交内容无效' }, { status: 400 });
-    if (error instanceof StudioError || error instanceof ContextVersionError) return NextResponse.json({ error: error.message }, { status: error.status });
-    const status = studioBusinessErrorStatus(error);
-    if (status && error instanceof Error) return NextResponse.json({ error: error.message, submitted: false }, { status });
-    if (error instanceof Error && error.message.startsWith('点数不足')) return NextResponse.json({ error: error.message }, { status: 409 });
-    return NextResponse.json({ error: '提交结果待确认，请查询这次提交，不要重复新建任务' }, { status: 503 });
+    const expected = error instanceof VideoFeishuError || error instanceof ImageGenerationChannelError
+      || error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError
+      || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error);
+    const insufficientCredits = error instanceof Error && error.message.startsWith('点数不足');
+    const detail = studioSubmitFailureDetail(error);
+    const requestId = validStudioSubmitRequestId(body?.requestId) ? body.requestId : undefined;
+    logImagePricingFailure('acceptance', error, startedAt, requestId, detail.stage);
+    // A failed database/transport or an HTTP code never proves that nothing was accepted.
+    const receipt = requestId && (expected || insufficientCredits)
+      ? await rejectStudioSubmission(user.id, requestId, detail).catch(() => null) : null;
+    const status = expected ? error.status : error instanceof SyntaxError ? 400
+      : insufficientCredits ? 409 : studioBusinessErrorStatus(error) || 503;
+    const message = error instanceof VideoFeishuError ? videoFeishuErrorText(error.code)
+      : expected || insufficientCredits ? (error as Error).message
+        : error instanceof SyntaxError ? '提交内容无效'
+          : '提交结果待确认，请查询这次提交，不要重复新建任务';
+    return NextResponse.json({ error: message, code: receipt?.code || detail.code,
+      ...(requestId ? { requestId } : {}), ...(receipt ? { receipt, submitted: false } : {}) },
+    { status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
 }

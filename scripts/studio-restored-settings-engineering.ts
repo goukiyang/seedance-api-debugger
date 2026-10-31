@@ -8,6 +8,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as restoredContract from '../src/lib/image-studio/restored-settings';
+import { isEncryptedStudioPersonalPrompt } from '../src/lib/image-studio/personal-prompt';
+import { serverStudioPersonalPromptProjection } from '../src/lib/image-studio/personal-prompt.server';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
@@ -27,6 +29,7 @@ async function main() {
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/batch-billing-quote.ts',
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
   files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts', 'src/lib/image-studio/style-history.ts');
+  files.push('src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
@@ -123,6 +126,8 @@ async function main() {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
+    isEncryptedStudioPersonalPrompt, serverStudioPersonalPromptProjection,
+    assertStudioRequestWritable: async () => {}, markStudioSubmitFailure: () => {},
     ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
     enqueueFrozenImageFeishuNotification: async (_tx: unknown, _task: unknown, choice: unknown) => { assert.equal(choice, null); },
@@ -270,7 +275,7 @@ async function main() {
   assert.equal(adminProjection.templateReferenceImages[0].originalUrl, '/protected/historical-template-reference');
   historical = { ...historical, templatePrompt: undefined, personalPrompt: undefined };
   const unknownProjection = engine.publicStudioSnapshot({ ...publicTask, snapshot_json: JSON.stringify(historical) }, assets, false, owner);
-  assert.equal(unknownProjection.personalPromptState, 'unknown'); assert.equal(Object.hasOwn(unknownProjection, 'personalPrompt'), false);
+  assert.equal(unknownProjection.personalPromptState, 'unavailable'); assert.equal(Object.hasOwn(unknownProjection, 'personalPrompt'), false);
   await assert.rejects(() => prepare(body));
   checks.push('shared_template_and_personal_parts_never_guessed', 'historical_template_references_remain_separate', 'public_projection_preserves_read_boundaries');
 
