@@ -355,7 +355,7 @@ async function main() {
         requirements_revision: 1, purpose: 'work', quote_id: 'fake', max_output_tokens: 100 }), (e: any) => /provider_unavailable|billing_contract_pending/.test(e.code));
       assert.equal(await prisma.canvasRoleAttempt.count({ where: { work_id: run.works[0].id } }), 0);
     });
-    const testSettings = { enabled: true, base_url: 'https://api.muskapis.com/', default_model: 'gpt-5.5', api_key: 'SYNTHETIC-NOT-A-REAL-KEY' };
+    const testSettings = { enabled: true, base_url: 'https://api.muskapis.com/', default_model: 'gpt-5.5', api_key: 'SYNTHETIC-NOT-A-REAL-KEY', allowed_models: [] as string[] };
     const contract = { version: 'role-text.v1', scope: provider.textScope(testSettings), model: 'gpt-5.5', source: 'https://api.muskapis.com/synthetic-test-only',
       expiresAt: new Date(Date.now() + 3600000).toISOString(), reserveUsdMicros: 50000, reservePointCents: 500, pointsPerUsd: 100,
       maxInputBytes: 100000, maxOutputTokens: 500, receiptSource: 'header_request_id', quoteProof: '0'.repeat(64), receiptProof: '0'.repeat(64) };

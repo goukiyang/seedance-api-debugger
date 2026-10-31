@@ -28,7 +28,7 @@ function actual(file: string, names: string[]) {
 async function textTransport() {
   const c: any = { exports: {}, URL, Buffer, AbortController, Date, setTimeout, clearTimeout };
   runInNewContext(actual('src/lib/integrations/musk.ts', ['MuskApiError', 'isMuskApiReady', 'buildChatCompletionsUrl', 'safeMuskRequestId', 'createMuskChatCompletion']), c);
-  const settings = { enabled: true, base_url: 'https://example.invalid', default_model: 'gpt-5.5', api_key: 'fixture-secret-not-real' };
+  const settings = { enabled: true, base_url: 'https://example.invalid', default_model: 'gpt-5.5', api_key: 'fixture-secret-not-real', allowed_models: [] as string[] };
   const base = { settings, messages: [{ role: 'user', content: '完整剧本' }] };
   let sent: any;
   const completion = await c.exports.createMuskChatCompletion({ ...base, timeoutMs: 1000,
@@ -154,7 +154,7 @@ async function storyRoute() {
       getSession: async () => ({ id: 'owner', role: 'member' }), assertInternalOnly() {},
       assertCanEditCanvasDocument: async () => doc, getProjectForGeneration: async () => ({ id: 'project' }),
       prisma: { canvasDocument: { findUnique: async () => doc }, operationLog: { create: async (value: any) => logs.push(JSON.parse(value.data.detail)) } },
-      getMuskApiSettings: async () => ({ default_model: 'gpt-5.5', enabled: true }), isMuskApiReady: () => true,
+      getMuskApiSettings: async () => ({ default_model: 'gpt-5.5', enabled: true, allowed_models: [] as string[] }), isMuskApiReady: () => true,
       isStudioTextModel, canvasTextWaitMs, getCanvasTextSettings: async () => ({ revision: 1 }),
       canvasRulePurpose: (_kind: string, _mode: string, purpose: string) => purpose || 'storyboard',
       compileCanvasTextRules: () => ({ basicRules: [], purposeRules: [], nodeRules: [], trace: { rules: [], libraryRevision: 1 } }),
