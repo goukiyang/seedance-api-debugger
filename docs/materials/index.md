@@ -2,7 +2,7 @@
 
 ## PG-UI03/04、PG-IP01 视频输入实施（2026-10-30）
 
-来源：用户明确授权正式根原单§13落地。关键词：输入footer、素材箭头、紧凑chip、可选网格拖排、普通/IP同下拉、mode-switch完整草稿、旧v2素材未知。原[工单§13.11](../../tasks/todo/2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)登记执行与证据；原五图及附件来源仍保正式根`docs/materials/2026-10-12-studio-ui-clarity/prompt-group-ux-20261030/ui03-preflight/`私有目录，主控已核可读，不上传。实施证据沿同主题`ui03-implementation/`，实现、7组合同/任务复用基础/最终类型/局部lint与自复核完成，完整构建和发布待执行；旧集成夹具基线同败不冒通过。实际效果用户手验。ARCH03正式成果为本批基础，旧前置不替代新授权。
+来源：用户明确授权正式根原单§13落地。关键词：输入footer、素材箭头、紧凑chip、可选网格拖排、普通/IP同下拉、mode-switch完整草稿、旧v2素材未知。已于2026-10-31T02:17:19Z部署v0.120.0/e6c46122，BUILD `lKaGPYfNr9KqTNHAXqOz1`；7组合同/复用基础、最终Next/types/lint、自复核、6启动检查/7服务/4timer及公网两路资源有证。原[工单§13.11](../../tasks/todo/2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)登记交付，正式根同主题`ui03-implementation/r02/deployment-result.json`、原构建/启动/公网JSON及顶层`FIXED-RECOVERY.txt`可读；恢复6c3d4bb1，不回数据。旧集成检查基线同败不冒通过，准备目录重名1次已接续解决。五张原图仍ui03-preflight私有，不上传；ARCH03和同期成果保留，已部署，待用户手动验收。
 
 ## MV-RESULT01 当前页结果与历史视频（2026-10-30）
 
