@@ -109,15 +109,16 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
   let previousResultPlanId: string | null = null;
   if (kind === 'result') {
     if (!draft.mainFace) throw new StudioError('请先选择主面部');
+    const hasAdjustment = Boolean(draft.adjustment.trim()) || draft.adjustmentCell !== null;
     const choices = [draft.mainFace, ...draft.auxiliaryFaces];
     if (new Set(choices.map(choice => `${choice.planId}:${choice.cell}`)).size !== choices.length) throw new StudioError('主面部与辅助参考不能重复');
-    if (choices.length + 1 + (draft.resultPlanId && draft.adjustment.trim() ? 1 : 0) > MAX_REFERENCE_IMAGES) throw new StudioError('原素材、已选面部与调整前成品合计超出参考图上限，请减少辅助参考');
+    if (choices.length + 1 + (draft.resultPlanId && hasAdjustment ? 1 : 0) > MAX_REFERENCE_IMAGES) throw new StudioError('原素材、已选面部与调整前成品合计超出参考图上限，请减少辅助参考');
     for (const choice of choices) {
       const source = await readLabPlan(user.id, choice.planId);
       if (source.workspaceId !== workspaceId || source.sourceAssetId !== draft.sourceAssetId) throw new StudioError('面部参考来自其他角色或原素材，请重新选择', 409);
       references.push(await persistLabFace(user, choice));
     }
-    if (draft.resultPlanId && draft.adjustment.trim()) {
+    if (draft.resultPlanId && hasAdjustment) {
       const previous = await readLabPlan(user.id, draft.resultPlanId);
       if (previous.kind !== 'result' || previous.workspaceId !== workspaceId) throw new StudioError('原成品归属无效');
       const { asset } = await labOutput(user, previous);
