@@ -92,6 +92,7 @@ function safeConfigDto(settings: Awaited<ReturnType<typeof getMuskApiSettings>>)
     ready: isMuskApiReady(settings),
     base_url: settings.base_url,
     default_model: settings.default_model,
+    allowed_models: settings.allowed_models,
     api_key_configured: Boolean(settings.api_key),
   };
 }
@@ -153,6 +154,7 @@ export async function PUT(request: NextRequest) {
           enabled: saved.enabled,
           base_url: saved.base_url,
           default_model: saved.default_model,
+          allowed_models: saved.allowed_models,
           api_key_configured: Boolean(saved.api_key),
           api_key_changed: typeof body.api_key === 'string' && Boolean(body.api_key.trim()),
           api_key_cleared: body.clear_api_key === true,

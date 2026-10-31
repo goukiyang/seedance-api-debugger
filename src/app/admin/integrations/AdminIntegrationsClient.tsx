@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import PageBanner from '@/components/PageBanner';
 import Link from 'next/link';
 import { useProductDialog } from '@/components/useProductDialog';
+import ModelOptionsField, { type ModelOption } from '@/components/ModelOptionsField';
 import { useSettingsPageSubmit } from '@/lib/hooks/use-settings-page-submit';
 import { RelativeTime } from '@/components/RelativeTime';
 import { LoadingSkeleton } from '@/components/LoadingState';
@@ -54,6 +55,7 @@ type MuskConfig = {
   ready: boolean;
   base_url: string;
   default_model: string;
+  allowed_models: string[];
   api_key_configured: boolean;
 };
 
@@ -157,6 +159,7 @@ const EMPTY_MUSK_CONFIG: MuskConfig = {
   ready: false,
   base_url: 'https://api.muskapis.com/',
   default_model: 'gpt-5.5',
+  allowed_models: [],
   api_key_configured: false,
 };
 
@@ -423,6 +426,9 @@ export default function AdminIntegrationsClient() {
   const [clearH3AdminToken, setClearH3AdminToken] = useState(false);
   const [submitState, setSubmitState] = useState<SubmitState>(null);
   const [muskTestState, setMuskTestState] = useState<MuskTestState>(null);
+  const [muskModelOptions, setMuskModelOptions] = useState<ModelOption[]>([]);
+  const [muskModelsLoading, setMuskModelsLoading] = useState(false);
+  const [muskModelsRefreshing, setMuskModelsRefreshing] = useState(false);
   const [h3TestState, setH3TestState] = useState<H3TestState>(null);
   const [h3QueueOpen, setH3QueueOpen] = useState(false);
   const [h3QueueLoading, setH3QueueLoading] = useState(false);
@@ -566,7 +572,15 @@ export default function AdminIntegrationsClient() {
         return;
       }
       setConfig(codexData.config || EMPTY_CONFIG);
-      setMuskConfig(muskData.config || EMPTY_MUSK_CONFIG);
+      const nextMusk = {
+        ...(muskData.config || EMPTY_MUSK_CONFIG),
+        allowed_models: Array.isArray(muskData.config?.allowed_models) ? muskData.config.allowed_models : [],
+      };
+      setMuskConfig(nextMusk);
+      setMuskModelOptions((prev) => {
+        const ids = new Set([...nextMusk.allowed_models, nextMusk.default_model, ...prev.map((m) => m.id)].filter(Boolean));
+        return Array.from(ids).map((id) => ({ id, label: id, available: true }));
+      });
       setVolcengineConfig(volcengineData.config || EMPTY_VOLCENGINE_IP_CONFIG);
       setAiMediaKitConfig(aiMediaKitData.config || EMPTY_AIMEDIAKIT_CONFIG);
       setH3Config(normalizeH3Config(h3Data.config));
@@ -574,6 +588,26 @@ export default function AdminIntegrationsClient() {
       setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '读取配置失败' });
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const refreshMuskModels = async () => {
+    setMuskModelsRefreshing(true);
+    try {
+      const res = await fetch('/api/admin/integrations/musk/refresh-models', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setSubmitState({ type: 'error', message: data.error || '刷新上游模型失败' });
+        return;
+      }
+      const models = Array.isArray(data.models) ? data.models as ModelOption[] : [];
+      setMuskModelOptions(models);
+      setSubmitState({ type: 'success', message: `已刷新上游模型 ${models.length} 个` });
+    } catch (error) {
+      setSubmitState({ type: 'error', message: error instanceof Error ? error.message : '刷新上游模型失败' });
+    } finally {
+      setMuskModelsRefreshing(false);
     }
   };
 
@@ -593,6 +627,7 @@ export default function AdminIntegrationsClient() {
           enabled: muskConfig.enabled,
           base_url: muskConfig.base_url,
           default_model: muskConfig.default_model,
+          allowed_models: muskConfig.allowed_models,
           api_key: muskApiKey,
           clear_api_key: clearMuskApiKey,
         }),
@@ -1511,6 +1546,18 @@ export default function AdminIntegrationsClient() {
               required
             />
           </div>
+
+          <ModelOptionsField
+            id="musk-allowed-models"
+            label="对话可选模型"
+            options={muskModelOptions}
+            value={muskConfig.allowed_models || []}
+            onChange={(next) => setMuskConfig((prev) => ({ ...prev, allowed_models: next }))}
+            loading={muskModelsLoading}
+            onRefresh={refreshMuskModels}
+            refreshing={muskModelsRefreshing}
+            hint="白名单为空时只开放默认模型；刷新会从上游 /models 拉取最新列表"
+          />
 
           <div className="form-group">
             <label className="form-label" htmlFor="musk-api-key">API Key</label>
