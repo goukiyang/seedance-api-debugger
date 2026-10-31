@@ -2,4 +2,4 @@
 export const IMAGE_FEISHU_NEW_REQUESTS_ENABLED: boolean = true;
 
 // Guard keeps accepted original deliveries readable and consumable.
-export const IMAGE_FEISHU_ORIGINAL_REQUESTS_ENABLED: boolean = true;
+export const IMAGE_FEISHU_ORIGINAL_REQUESTS_ENABLED: boolean = false;
