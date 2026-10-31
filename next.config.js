@@ -26,6 +26,14 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // SD2 生产桥浮窗工作台：只允许被插件页面嵌入
+        source: '/bridge/panel',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self' chrome-extension:" },
+          { key: 'Cache-Control', value: 'no-store' },
+        ],
+      },
+      {
         source: '/uploads/:path*',
         headers: [
           {
