@@ -1,9 +1,10 @@
 # 项目资料索引
 
-## CHAR01 Character reference workbench (2026-10-30)
+## CHAR01 角色参考图工作台（2026-10-30）
 
-Approved implementation from two final references: original image and varied 4/9 faces, main/auxiliary selection, portrait 2:3 final preview with direct save/export. Administrator-editable prompt context has independent revisions; owner drafts and historical generation plans persist. Existing image quote/task chain is reused. Implementation and source review complete; Linux types/build and protected deployment pending. Final function acceptance is manual. Private references and scoped records: formal project docs/materials/2026-10-30-character-reference-workbench/.
+已部署 **v0.121.0**，应用源 `3b19c1d438e2ddf876c594b4fc22184f69268fcd`、BUILD `dtT-BETLiEPv83lK9Daq6`；2026-10-31T05:50:35Z切换，05:50:58Z公网收口。[工具入口](https://sd2.youdooart.com/tools/character-lab)，管理员在同页“提示词管理”编辑上下文并保存版本。按定稿完成原图与4/9差异人脸、主辅方案选择、2:3成品预览及直接保存/PNG或ZIP导出；滑杆只影响下一次主动生成，保存导出不生成。本人草稿/历史、管理员规则与原请求/费用快照分别保留。
 
+最终Linux完整类型与Next构建（含类型/lint）、主/回退6项启动检查、7服务同源和4timer、新页及首页公网产物同字节均有实际证据。原内置prebuild中独立runtime夹具漏生产bootstrap的失败原证保留，已复用其它通过项并仅补该组6场景，不冒原整套通过。无schema、依赖语义或现有worker逻辑变更；无浏览器、收费生成、生产业务写验收或独立审核。功能待用户手动验收。原v0.120.1/6eccfa5f完整程序回退点保留，只回程序，不回DB/媒体/账本/回执。定稿与[交付证据](2026-10-30-character-reference-workbench/implementation/deployment-result.json)保正式根私有目录。
 
 ## PG-UI03/04、PG-IP01 视频输入实施（2026-10-30）
 
