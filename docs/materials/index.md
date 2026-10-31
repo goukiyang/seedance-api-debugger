@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## IF-CARD01 图片飞书卡片与四键125%（2026-10-31）
+
+已部署v0.121.3 / `ced3525ddd6d8b20c78e71aa59d0e44c8ac6ca18` / BUILD`XeYx2LGSpDy03g80GHarx`，2026-10-31T10:55:57.707047+00:00收口，待用户手验。关键词：图片卡、无文件名/长任务号、大图明确预览、受保护原图、逐输出UUID/冻结payload、旧v1回执、四键125%。[原单安全摘录](../../tasks/todo/2026-10-28-video-feishu-delivery-repair.md#14-if-card01-图片飞书卡片与结果四键2026-10-31)；完整原单、两张用户原图与证据保正式根`docs/materials/2026-10-31-image-feishu-preview/implementation/`，不公开上传。相容guard与一致数据保护已备，无真实试发、历史补发或浏览器验收。
+
 ## PG-COVER01 提示词组封面区落地（2026-10-31）
 
 已部署v0.121.2 / `3a3d7986e4cd6ad10a27a85334dbdb0494e070d0` / BUILD`6joyg6KOI0MavlHikurxk`，2026-10-31T09:20:42Z实际共用封面JS/CSS公网字节收口，待用户手验。完整原单§13.12、用户原图及私有工程/失败/发布证据保正式根原目录；交付回执`docs/materials/2026-10-31-prompt-group-cover/implementation/deployment-result.json`。本次仅封面UI及版本元数据，保原权限/上传/保存/原号，原9b完整产物作回退，无浏览器或收费测试。
