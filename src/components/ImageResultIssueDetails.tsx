@@ -13,7 +13,9 @@ export function ImageResultIssueDetails({ issue, notice }: { issue?: StudioOutpu
   useDialogDismiss({ open, dialogRef: dialog, branchRefs: [trigger], onDismiss: () => setOpen(false), modal: false });
   if (!issue && !notice) return null;
   // A usable image whose size or format differs is not an error (2026-10-24): details stay on demand, worded neutrally.
-  const label = '实际规格';
+  const label = issue?.actual.width && issue.actual.height && issue.requested.width && issue.requested.height
+    && (issue.actual.width !== issue.requested.width || issue.actual.height !== issue.requested.height)
+    ? `实际 ${issue.actual.width}×${issue.actual.height}，尺寸不符` : '实际规格';
   const format = (value: StudioOutputIssue['actual']) => `${value.format?.toUpperCase() || '格式未知'} · ${value.width && value.height ? `${value.width} × ${value.height}` : '尺寸未知'}`;
   return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" className={styles.issueTrigger}
     aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="dialog"

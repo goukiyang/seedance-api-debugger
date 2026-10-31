@@ -135,6 +135,8 @@ async function main() {
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
     prisma, parseUsageProjectId: (value: unknown) => value, creditCents: (value: number) => Math.round(value * 100),
+    // Retry policy is outside this restoration fixture; durable execution has its own SQLite fixture.
+    retryConfig: async () => ({ enabledIds: [] }), RETRY_RULES: [],
     addCredits: (left: number, right: number) => left + right, sumCredits: (values: number[]) => values.reduce((a, b) => a + b, 0),
     parseSharedStudioPersonalOverrides: (value: unknown) => plain(value), parseEvolution: () => undefined,
     normalizeStudioRatio: (value: string) => value, parseImageQualityRouteSnapshot: () => null,

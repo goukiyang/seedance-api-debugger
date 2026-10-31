@@ -5,7 +5,7 @@ import path from 'node:path';
 export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task }) {
   function actualFunction(file, name, dependencies) {
     const ast = ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true);
-    const node = ast.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === name);
+    const node = ast.statements.find(item => (ts.isFunctionDeclaration(item) || ts.isClassDeclaration(item)) && item.name?.text === name);
     assert.ok(node, `Actual worker function missing: ${name}`);
     const output = ts.transpileModule(node.getText(ast), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -30,6 +30,11 @@ export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task })
       assert.equal(value.id, task.id); assert.equal(preserve, true); assert.equal(code, new crypto.PrivatePromptError().code); deferred++;
     },
   };
+  Object.assign(dependencies, {
+    imageRetryGenerator: actualFunction('src/lib/generation-retry/image.ts', 'imageRetryGenerator', {}),
+    RetryScheduled: actualFunction('src/lib/generation-retry/image.ts', 'RetryScheduled', {}),
+    RetryExhausted: actualFunction('src/lib/generation-retry/image.ts', 'RetryExhausted', {}),
+  });
   const native = actualFunction('src/lib/image-studio/worker.ts', 'executeStudioTask', dependencies);
   const before = await db.imageStudioTask.update({ where: { id: task.id }, data: {
     status: 'running', lease_token: 'private-failure-lease', lease_until: new Date(Date.now() + 60000),

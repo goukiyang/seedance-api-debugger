@@ -300,7 +300,7 @@ async function main() {
   const acceptedImages = await db.imageStudioTask.findMany({ where: { batch_id: accepted, owner_id: user.id } });
   equal(acceptedImages.length, 3); equal(precision.sumCredits(acceptedImages.map(task => task.unit_credits)), 0.6);
   const acceptedImage = await db.imageStudioTask.findFirstOrThrow({ where: { batch_id: accepted, owner_id: user.id } });
-  equal(acceptedImage.status, 'rate_queued'); equal(acceptedImage.unit_credits, 0.2);
+  equal(acceptedImage.status, 'sr_rate_queued'); equal(acceptedImage.unit_credits, 0.2);
   equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.pricing?.revision, snapshot.revision);
   equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.specification,
     parseImageBillingContract(JSON.stringify(JSON.parse(storedQuote.value_json).contract))?.specification);

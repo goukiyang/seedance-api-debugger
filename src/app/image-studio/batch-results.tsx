@@ -9,6 +9,7 @@ import { StudioInputMainViewer } from '@/components/StudioInputMainViewer';
 import type { StudioInputMainSource } from '@/lib/image-studio/input-main';
 import { ImageResultIssueDetails } from '@/components/ImageResultIssueDetails';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { ImageFeishuStatus, type ImageFeishuView } from '@/components/image-studio/ImageFeishuStatus';
 import { RelativeTime } from '@/components/RelativeTime';
 import { TaskNotice } from '@/components/TaskNotice';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -24,7 +25,7 @@ import { canSelectBatchDirectory, selectBatchDirectory, newBatchOutputDirectory,
 import styles from './batch.module.css';
 import { hasSharedDefaults } from './use-shared-studio';
 type Delivery = { saved: Record<number, string>; child: BatchDirectoryHandle | null; lock: boolean; directory: BatchDirectoryHandle | null };
-type SharedBatchView = StudioBatchView & { sharedLive?: SharedStudioIntent; definitionConfirmationRequired?: boolean };
+type SharedBatchView = Omit<StudioBatchView, 'items'> & { items?: Array<NonNullable<StudioBatchView['items']>[number] & { feishu?: ImageFeishuView | null }>; sharedLive?: SharedStudioIntent; definitionConfirmationRequired?: boolean };
 type SavedPersonalInput = Partial<{ prompt: string; model: string; quality: string; resolution: string; count: number; aspectRatio: string }>;
 type CurrentSharedModule = { id: string; name: string; revision: number; templatePrompt?: string; personalPrompt?: string;
   model: string; quality: string; resolution: string; count: number; aspectRatio: string;
@@ -184,7 +185,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
             || !sameDefinition(result.batch.sharedLive, continuation.sharedLive)) throw Object.assign(new Error('模板或剩余项再次变化，原批次仍待确认；请关闭确认框重新核对'), { status: 409 });
           setSelected([]);
           setContinuationMessage('已确认当前模板与整批最高点数，只重新准备未受理项；原任务和结果保留');
-          watchGenerationCompletion(userId, id, 'batch', fresh.total, crypto.randomUUID(), fresh.generated);
+          watchGenerationCompletion(userId, id, 'batch', fresh.total, crypto.randomUUID(), fresh.generated, { moduleId: fresh.moduleId, baselineTaskIds: (fresh.items || []).filter(item => item.image && item.taskId).map(item => item.taskId!) });
         } catch (cause) {
           if (valid()) {
             const status = Number((cause as { status?: number })?.status);
@@ -219,7 +220,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       if (scope.current !== expected) return;
       const data = await readBatchResponse(await fetch('/api/image-studio/batches', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action, ...(action === 'retry' ? { ordinals, budget: retryBudget } : {}) }), signal: AbortSignal.timeout(20000) }), true);
       if (scope.current !== expected) return;
-      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID(), batch.generated);
+      if (action === 'retry') watchGenerationCompletion(userId, id, 'batch', batch.total, crypto.randomUUID(), batch.generated, { moduleId: batch.moduleId, baselineTaskIds: (batch.items || []).filter(item => item.image && item.taskId).map(item => item.taskId!) });
       setBatch(data.batch); setSelected([]);
     } catch (error) { if (scope.current === expected) { setError(error instanceof Error ? error.message : '操作结果待确认，请刷新原批次'); if (action === 'resume') onSourceChanged?.(); } }
     finally { actionLock.current = false; if (scope.current === expected) setBusy(false); }
@@ -295,7 +296,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
   const statusLabel = (state: string, phase?: string, disposition?: string | null) => studioOutputMismatchDisposition(disposition) ? '图片已返回 · 规格不符' : state === 'running' && phase && ({ download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中' } as Record<string, string>)[phase]
     || ({ pending: '等待派发', 'needs-confirmation': '模板已更新，待确认后继续', queued: '已受理，排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', uncertain: '结果待确认', cancelled: '未派发，已取消' } as Record<string, string>)[state] || '状态待确认';
   const resultItems = useMemo(() => (batch?.items || []).map(item => ({
-    ...item, id: String(item.ordinal), label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
+    ...item, id: String(item.ordinal), completionTaskId: item.taskId || undefined, label: `${item.ordinal}. ${item.sourceName}`, generationStatus: item.status,
     status: statusLabel(item.status, undefined, item.resultDisposition), pending: ['pending', 'queued', 'running'].includes(item.status),
     generationWait: {
       taskKey: item.taskId || undefined, acceptedAt: item.delivery?.acceptedAt, status: item.status, phase: item.delivery?.phase, waitingStatus: item.delivery?.waitingStatus,
@@ -344,6 +345,7 @@ function BatchResultsWorkspace({ id, userId, outputDirectory, deliveryOnly = fal
       {!deliveryOnly && <GeneratedImageResults compactInformation items={resultItems} scope={`sd2-image-studio-batch-page:${userId}:${id}`}
         visible={visible} onPreviewInputMain={item => { if (item.inputMainPreview) setInputPreviewSource(item.inputMainPreview.source); }}
         onQuickUse={onQuickUse || onInputMainSource ? item => { if (item.taskId) onQuickUse?.(item.taskId); else if (item.inputMainPreview) onInputMainSource?.(item.inputMainPreview.source); } : undefined}
+        renderDeliveryAction={item => item.taskId ? <ImageFeishuStatus owner={userId} taskId={item.taskId} initial={item.feishu} onChanged={() => void load()} /> : null}
         renderPrimaryActions={(item, waitDisplay) => item.taskId && waitDisplay?.showRecovery ? <button type="button" disabled={reading} onClick={() => void load()}>刷新原任务状态</button> : null}
         busy={reading} emptyLabel="暂无本批图片" renderSupplement={item => <>
           {(item.outputIssue || item.outputNotice) && <ImageResultIssueDetails issue={item.outputIssue} notice={item.outputNotice} />}
