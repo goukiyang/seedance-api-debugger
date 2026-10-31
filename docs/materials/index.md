@@ -2,7 +2,7 @@
 
 ## IMG-RESTORE01 / IMG-REQ01 图片补充与提交恢复（2026-10-31）
 
-[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)记录实施、原号未知边界及主/相容guard要求。用户原图和完整私有工程/发布证据保正式根 `docs/materials/2026-10-31-studio-personal-prompt-receipts/`，不随源码外发。实现与专项工程检查已完成，待主/guard完整构建与保护部署；功能由用户手动验收。
+已部署 **v0.121.1** / `9b55cf22c5a9b76df09ccb71870fb980dcac51b8` / BUILD `i8f8NqmDpzIPlFtgvCO2B`，2026-10-31T08:46:45Z公网收口，待用户手验。范围与原号未知边界见[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)。原图、工程/失败原证、主/guard完整构建、证据复用、数据备份与部署回执保正式根私有 `docs/materials/2026-10-31-studio-personal-prompt-receipts/implementation/deployment-result.json`，不随源码外发；没有工程代清pending、重发或收费测试。
 
 ## CHAR01 角色参考图工作台（2026-10-30）
 
