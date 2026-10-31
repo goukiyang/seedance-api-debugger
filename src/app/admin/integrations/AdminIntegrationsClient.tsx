@@ -1,4 +1,5 @@
 'use client';
+import RetryRules from '@/components/generation-retry/RetryRules';
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -966,6 +967,7 @@ export default function AdminIntegrationsClient() {
   return (
     <fieldset disabled={settingsSubmit.busy} className={`admin-integrations-page ${workbenchStyles.surface}`} style={{ border: 0, margin: 0, minWidth: 0 }}>
       {productDialog}
+      <RetryRules />
       {settingsSubmit.notice && <p role="status">{settingsSubmit.notice}</p>}
       <PageBanner
         eyebrow="管理后台"

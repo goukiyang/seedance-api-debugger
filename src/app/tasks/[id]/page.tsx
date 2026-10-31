@@ -1,4 +1,5 @@
 'use client';
+import SafeRetryStatus from '@/components/generation-retry/SafeRetryStatus';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
@@ -1914,6 +1915,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
 
   return (
     <div className={`task-detail-page ${resultStyles.page}`}>
+      <SafeRetryStatus kind="video" id={task.id} />
       {taskLoadError && <div className="alert alert-warning" role="alert">最新状态读取失败：{taskLoadError}。可以重新刷新状态，现有结果仍保留。</div>}
       {openError && <div className="alert alert-warning" role="alert">{openError}</div>}
       <div className="task-result-topbar">

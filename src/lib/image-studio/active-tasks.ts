@@ -19,7 +19,7 @@ export async function activeStudioTaskPage(owner: string, module?: string, after
   const scope = module ? module === `default-${owner}`
     ? Prisma.sql`(t."module_id" = ${module} OR t."module_id" IS NULL) AND (t."snapshot_json" IS NULL OR
       instr(t."snapshot_json", '"avatar":') = 0 AND instr(t."snapshot_json", '"avatarLayout":') = 0)` : Prisma.sql`t."module_id" = ${module}` : Prisma.sql`1 = 1`;
-  const states = studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']);
+  const states = [...studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']), 'sr_retry_wait'];
   const rows = await prisma.$queryRaw<Array<{ id: string; created_at: bigint | number }>>(Prisma.sql`SELECT t."id", t."created_at"
     FROM "ImageStudioTask" t WHERE t."owner_id" = ${owner} AND t."deleted_at" IS NULL AND ${scope}
     AND t."created_at" <= ${ceiling}

@@ -115,6 +115,7 @@ async function main() {
   const startedAt = Date.now();
   const { prisma } = await import('../src/lib/prisma');
   const { finalizeVideoTaskStatus, settleTask } = await import('../src/lib/video/task-finalizer');
+  if (!dryRun) await (await import('../src/lib/generation-retry/video')).processVideoRetries();
 
   const select = {
     id: true,

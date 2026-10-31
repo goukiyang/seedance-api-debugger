@@ -12,6 +12,8 @@ import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
 import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { prisma } from '@/lib/prisma';
+import { readRetry, writeRetry, publicRetry, retryConfig } from '@/lib/generation-retry/store';
+import { RETRY_RULES } from '@/lib/generation-retry/contracts';
 import { historicalStudioStyles } from './style-history';
 import { assertUsageProject, inheritUsageAttribution, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits, settleTaskCredits } from '@/lib/credits/policy';
@@ -1209,12 +1211,15 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         prompt: taskPrompt, context, revision: settings.revision, model: generation.model,
         quality: generation.quality,
         provider_cost_usd: imageChannel ? null : IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD],
-        status: studioTaskState({ billing_contract_json: JSON.stringify(billingContract) }, imageChannel ? 'channel_queued' : 'queued'),
+        status: studioTaskState({ billing_contract_json: JSON.stringify(billingContract), status: 'sr_queued' }, imageChannel ? 'channel_queued' : 'queued'),
         snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: avatar!.layout, avatar: { layout: avatar!.layout, cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       };
       submissionStage = 'private-snapshot';
+      const retryPolicy = await retryConfig(tx);
+      taskData.snapshot_json = JSON.stringify({ ...JSON.parse(taskData.snapshot_json || '{}'),
+        safeRetryRuleIds: RETRY_RULES.filter(rule => retryPolicy.enabledIds.includes(rule.id)).map(rule => `${rule.id}@${rule.version}`) });
       const protectedTaskData = transformPrivateImageTask({ ...taskData, id, owner_id: ownerId,
         prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true);
       if (preparation) await preparation.save(tx, protectedTaskData);
@@ -1270,6 +1275,13 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
         lease_until: null, lease_token: null, finished_at: new Date() },
     });
     if (!changed.count) { if (recovery) throw new Error('async_recovery_finish_lease_lost'); return false; }
+    const retry = await readRetry('image', task.id, tx);
+    if (retry) {
+      const value = structuredClone(retry.value);
+      value.state = status === 'uncertain' ? 'unknown' : status;
+      if (value.attempts.at(-1)!.state !== 'free_failed' || status !== 'failed') value.attempts.at(-1)!.state = status === 'uncertain' ? 'unknown' : status;
+      await writeRetry(tx, retry, value);
+    }
     const prepared = status === 'succeeded' ? data.preparedAsset : data.retainedAsset;
     if (prepared) {
       if (prepared.owner_id !== task.owner_id || !prepared.hash || prepared.type !== 'image') throw new Error('Output ownership mismatch');
@@ -1282,7 +1294,7 @@ export async function finishStudioTask(task: ImageStudioTask, status: 'succeeded
     }
     // A channel request with an unknown result must remain visible and retain
     // its original reservation. It is not permission to refund or re-submit.
-    if ((channel || isPricingImageTask(task)) && status === 'uncertain') return true;
+    if ((channel || isPricingImageTask(task) || retry) && status === 'uncertain') return true;
     const billing = parseImageBillingContract(task.billing_contract_json);
     if (isPricingImageTask(task) && !billing?.pricing) throw new Error('新版图片原收费合同无法确认，已停止结算');
     if (task.billing_mode === 'actual') {
@@ -1439,6 +1451,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     select: { id: true, name: true, username: true, avatar_url: true } }) : null;
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
+  const retries = new Map(await Promise.all(items.map(async task => [task.id, publicRetry((await readRetry('image', task.id))?.value)] as const)));
   const feishu = await imageFeishuTaskStatuses(prisma, ownerId, items.map(task => task.id));
   const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
   return items.map(task => {
@@ -1448,6 +1461,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
+      safeRetry: retries.get(task.id),
       feishu: feishu.get(task.id),
       prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status),
       error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation) : task.error, unitCredits: task.unit_credits,

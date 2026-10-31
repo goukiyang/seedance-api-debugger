@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { imageRetryGenerator, promoteImageRetry, RetryScheduled, RetryExhausted } from '@/lib/generation-retry/image';
 import { privateImageTaskOrigins, transformPrivateImageTask } from './private-storage.server';
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
@@ -64,6 +65,7 @@ export async function assertStudioPostAuthorization(task: ImageStudioTask) {
 }
 
 export async function processStudioTask(generate: typeof requestStudioImages = requestStudioImages) {
+  await promoteImageRetry();
   const task = await claimStudioTask();
   if (!task) return false;
   if (publicPricingTaskState(task.status) === 'channel_running') await executeChannelStudioTask(task, generate);
@@ -72,6 +74,7 @@ export async function processStudioTask(generate: typeof requestStudioImages = r
 }
 
 async function executeStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages, recovery?: StudioDelivery) {
+  generate = imageRetryGenerator(task, generate);
   const providerDiagnostics = workerProviderErrorRecorder(task);
   let observedValidation: { width: number; height: number } | undefined;
   let providerStarted = Boolean(recovery);
@@ -170,6 +173,11 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       await completeToolFlowTask(task.id);
     }
   } catch (error) {
+    if (error instanceof RetryScheduled) return;
+    if (error instanceof RetryExhausted) {
+      if (await finishStudioTask(task, 'failed', { error: '安全重试已结束，未交付图片；按原合同释放一次预留。' })) await completeToolFlowTask(task.id);
+      return;
+    }
     if (error instanceof PrivatePromptError && (providerStarted || recovery)) {
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, error: error.message } });
@@ -245,6 +253,7 @@ async function retainDimensionMismatchOutput(task: ImageStudioTask, original: Bu
 
 async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof requestStudioImages,
   recovery?: StudioDelivery, resumeReceipt?: StudioAsyncReceipt, recoveryDeadlineAt?: number, manualRecovery = false, localOnly = false) {
+  generate = imageRetryGenerator(task, generate);
   const providerDiagnostics = workerProviderErrorRecorder(task);
   let observedValidation: { width: number; height: number } | undefined;
   const recovering = publicPricingTaskState(task.status) === 'uncertain';
@@ -464,6 +473,11 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       await completeToolFlowTask(task.id);
     }
   } catch (error) {
+    if (error instanceof RetryScheduled) return;
+    if (error instanceof RetryExhausted) {
+      if (await finishStudioTask(task, 'failed', { error: '安全重试已结束，未交付图片；按原合同释放一次预留。' })) await completeToolFlowTask(task.id);
+      return;
+    }
     if (error instanceof PrivatePromptError && recovering) {
       await deferStudioAsyncRecovery(task, error.code, true);
       return;

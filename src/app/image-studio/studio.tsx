@@ -1,4 +1,5 @@
 'use client';
+import SafeRetryStatus from '@/components/generation-retry/SafeRetryStatus';
 import { parseStudioTaskSettings, studioTaskSettings, sameStudioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
 import { STUDIO_TASK_SUMMARY, type StudioTaskSummary } from '@/lib/image-studio/task-summary';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
@@ -4500,6 +4501,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             }}><RotateCcw size={15} /><span id={`studio-restore-${task.id}`} role="tooltip" className={styles.resolutionTooltip}>恢复设置</span></button>}
 </> : null}
           renderSupplement={({task}) => task ? <>
+            {'safeRetry' in task && Boolean(task.safeRetry) && <SafeRetryStatus kind="image" id={task.id} onChanged={() => void loadTasks()} />}
             {templateWorkbench && <ImageFeishuStatus owner={userId} taskId={task.id} initial={task.feishu} onChanged={() => void loadTasks(undefined, 'silent')} />}
             {['download', 'recover'].includes(task.delivery?.phase || '') && Number(task.delivery?.expectedBytes) > 0 && task.delivery?.receivedBytes != null && <p role="status">{Math.min(100, Math.floor(task.delivery.receivedBytes / task.delivery.expectedBytes! * 100))}% 字节已接收</p>}
             {studioTaskAsyncRecovery(task) && <>

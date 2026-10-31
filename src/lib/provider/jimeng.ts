@@ -10,6 +10,7 @@
  */
 
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
+import { retryFailure } from '@/lib/generation-retry/contracts';
 import { assertPrivateSend, privatePromptFetch } from '@/lib/security/private-prompt-send.server';
 import { PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
@@ -90,6 +91,7 @@ function sensitiveCreateFailureState(diagnostic: ProviderCreateDiagnostic): 'fai
 type SeedanceStatusConsole = Pick<Console, 'log' | 'warn' | 'error'>;
 export type SeedanceStatusQueryOptions = {
   sensitiveRecipe?: boolean;
+  signal?: AbortSignal;
   fetch?: typeof fetch;
   console?: SeedanceStatusConsole;
 };
@@ -455,7 +457,7 @@ export function assertPrivateSeedanceDestination(model: string, origins = privat
 export async function createVideoTask(
   input: SeedanceProviderInput & { generation_mode: GenerationMode },
   onDiagnostic?: (diagnostic: ProviderCreateDiagnostic) => void,
-  options: { sensitiveRecipe?: boolean; privateOrigins?: PrivateOrigin[] } = {},
+  options: { sensitiveRecipe?: boolean; privateOrigins?: PrivateOrigin[]; signal?: AbortSignal } = {},
 ): Promise<ProviderCreateResponse> {
   const sensitiveRecipe = Boolean(options.sensitiveRecipe || options.privateOrigins?.length);
   if (!isApiKeyConfigured()) throw new Error('API key not configured');
@@ -498,6 +500,7 @@ export async function createVideoTask(
   try {
     const init: RequestInit = {
       method: 'POST',
+      signal: options.signal,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -532,7 +535,8 @@ export async function createVideoTask(
     phase = 'response_validation';
     if (!response.ok) {
       const providerErrorMessage = normalizeProviderErrorMessage(data.error ?? data.message ?? data);
-      throw new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`);
+      throw Object.assign(new Error(providerErrorMessage || `Seedance 创建任务失败（HTTP ${response.status}）`),
+        { retryFailure: retryFailure(data, response.status, 'create', response.headers.get('retry-after')) });
     }
 
     // 关键：只解析 id
@@ -569,6 +573,9 @@ export async function createVideoTask(
       ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败')))
       : error;
     console.error('\n❌ Step1 Create failed:', safeError instanceof Error ? safeError.message : 'Seedance 创建任务失败', diagnostic);
+    if (safeError && typeof safeError === 'object' && error && typeof error === 'object' && 'retryFailure' in error) {
+      Object.assign(safeError, { retryFailure: error.retryFailure });
+    }
     throw safeError;
   }
 }
@@ -664,6 +671,7 @@ export async function getVideoTaskStatus(
   try {
     const response = await request(endpoint, {
       method: 'POST',
+      signal: options.signal,
       headers: {
         'Content-Type': 'application/json',
       },

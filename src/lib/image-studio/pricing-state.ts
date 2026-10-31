@@ -15,15 +15,19 @@ export function isPricingImageTask(task: { id?: string; billing_contract_json?: 
 }
 
 export function studioTaskState(task: { id?: string; billing_contract_json?: string | null; status?: string }, status: string) {
-  return pricingTaskState(status, isPricingImageTask(task) || Boolean(task.status?.startsWith(PREFIX)));
+  const result = pricingTaskState(status, isPricingImageTask(task) || Boolean(task.status?.replace(/^sr_/, '').startsWith(PREFIX)));
+  return task.status?.startsWith('sr_') && PRIVATE_STATES.has(publicPricingTaskState(result)) ? `sr_${result}` : result;
 }
 
 export function publicPricingTaskState(status: string) {
+  if (status === 'sr_retry_wait') return 'queued';
+  status = status.replace(/^sr_/, '');
   return status.startsWith(PREFIX) && PRIVATE_STATES.has(status.slice(PREFIX.length)) ? status.slice(PREFIX.length) : status;
 }
 
 export function studioTaskStates(statuses: readonly string[]) {
-  return Array.from(new Set(statuses.flatMap(status => [status, pricingTaskState(status, true)])));
+  return Array.from(new Set(statuses.flatMap(status => [status, pricingTaskState(status, true),
+    ...(PRIVATE_STATES.has(status) ? [`sr_${status}`, `sr_${pricingTaskState(status, true)}`] : [])])));
 }
 
 export function studioBillingState(task: { id?: string; billing_contract_json?: string | null }, status: string) {

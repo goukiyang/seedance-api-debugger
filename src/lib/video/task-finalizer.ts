@@ -1,4 +1,7 @@
 import { settleVideoCreationBatch } from '@/lib/creation/settlement';
+import { handleVideoRetryFailure } from '@/lib/generation-retry/video';
+import { retryFailure } from '@/lib/generation-retry/contracts';
+import { readRetry, finishRetry } from '@/lib/generation-retry/store';
 import type { Prisma, VideoTask } from '@prisma/client';
 import { prisma } from '../prisma';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from '../provider/error-message';
@@ -63,6 +66,7 @@ type ProviderBillingStatus = {
 };
 
 export type FinalizeVideoTaskOptions = {
+  providerSignal?: AbortSignal;
   forceProviderRefresh?: boolean;
   cacheOnSuccess?: boolean;
   generateThumbnail?: boolean;
@@ -257,10 +261,13 @@ export async function settleTask(
   userId: string,
   frozenAmount: number,
   terminalStatus: string,
+  transaction?: Prisma.TransactionClient,
 ) {
-  await prisma.$transaction(async (tx) => {
+  const settle = async (tx: Prisma.TransactionClient) => {
     const freshTask = await tx.videoTask.findUnique({ where: { id: taskId } });
     if (!freshTask) return;
+    if (await readRetry('video', taskId, tx) && (freshTask.local_status !== terminalStatus || !isTerminalLocalStatus(terminalStatus)
+      || freshTask.actual_cost !== null || freshTask.refund_amount !== null)) return;
     if (freshTask.provider === 'volcengine_ark'
       && (freshTask.local_status !== terminalStatus || (freshTask.frozen_cost ?? 0) <= 0)) return;
 
@@ -371,7 +378,9 @@ export async function settleTask(
 
       await recordTaskCostSettlement(tx, settledTask, terminalStatus, userId);
     }
-  });
+  };
+  if (transaction) await settle(transaction);
+  else await prisma.$transaction(settle);
 }
 
 async function withLocalCacheSlot<T>(callback: () => Promise<T>) {
@@ -603,6 +612,10 @@ export async function finalizeVideoTaskStatus(
     };
   }
 
+  if (['retry_wait', 'retry_submitting', 'submission_unknown'].includes(task.local_status)) {
+    return { task, statusRefreshed: false, terminal: false, skippedReason: 'safe_retry_background_owned' };
+  }
+
   if (!task.provider_task_id) {
     return {
       task,
@@ -626,8 +639,15 @@ export async function finalizeVideoTaskStatus(
   }
 
   try {
-    const statusResult = await getProviderTaskStatus(task);
-    if (task.provider === 'volcengine_ark' && isTerminalLocalStatus(task.local_status)
+    const statusResult = await getProviderTaskStatus(task, options.providerSignal ? { signal: options.providerSignal } : {});
+    const retry = await readRetry('video', task.id);
+    if (retry && statusResult.local_status === 'failed') {
+      const failure = { ...retryFailure(statusResult.raw, 200, 'status'), providerTaskId: task.provider_task_id! };
+      if (await handleVideoRetryFailure(task, failure)) {
+        return { task: await prisma.videoTask.findUnique({ where: { id: task.id } }), statusRefreshed: true, terminal: false };
+      }
+    }
+    if ((task.provider === 'volcengine_ark' || retry) && isTerminalLocalStatus(task.local_status)
       && statusResult.local_status !== task.local_status) {
       return { task, statusRefreshed: false, terminal: true, skippedReason: 'terminal_status_preserved' };
     }
@@ -647,19 +667,19 @@ export async function finalizeVideoTaskStatus(
     if (statusResult.result_last_frame_url) {
       updateData.result_last_frame_url = statusResult.result_last_frame_url;
     }
-    if (statusResult.provider_model) {
+    if (statusResult.provider_model && !retry) {
       updateData.model = statusResult.provider_model;
     }
-    if (statusResult.seed !== undefined) {
+    if (statusResult.seed !== undefined && !retry) {
       updateData.seed = statusResult.seed;
     }
-    if (statusResult.resolution) {
+    if (statusResult.resolution && !retry) {
       updateData.resolution = statusResult.resolution;
     }
-    if (statusResult.ratio) {
+    if (statusResult.ratio && !retry) {
       updateData.ratio = statusResult.ratio;
     }
-    if (statusResult.duration !== undefined) {
+    if (statusResult.duration !== undefined && !retry) {
       updateData.duration = statusResult.duration;
     }
     const errorMessage = normalizeProviderErrorMessage(statusResult.error_message);
@@ -687,6 +707,10 @@ export async function finalizeVideoTaskStatus(
 
     if (!hasVideoTaskUpdateChanges(task, updateData)) {
       if (isTerminal && !shouldDeferH3Settlement) await prisma.$transaction(tx => settleVideoCreationBatch(tx, taskId));
+      if (retry && isTerminal && !shouldDeferH3Settlement) {
+        if (shouldSettleTerminalCosts(task)) await settleTask(taskId, task.user_id!, task.frozen_cost || 0, task.local_status);
+        await finishRetry('video', taskId, task.local_status === 'succeeded' ? 'succeeded' : 'failed');
+      }
       if (task.provider === 'volcengine_ark' && isTerminalLocalStatus(task.local_status)) {
         if (shouldSettleTerminalCosts(task)) {
           await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, task.local_status);
@@ -731,9 +755,9 @@ export async function finalizeVideoTaskStatus(
       };
     }
 
-    if (task.provider === 'volcengine_ark') {
+    if (task.provider === 'volcengine_ark' || retry) {
       const changed = await prisma.$transaction(async tx => {
-        const result = await tx.videoTask.updateMany({ where: { id: taskId, local_status: task.local_status, updated_at: task.updated_at }, data: updateData });
+        const result = await tx.videoTask.updateMany({ where: { id: taskId, local_status: task.local_status, provider_task_id: task.provider_task_id, updated_at: task.updated_at }, data: updateData });
         if (result.count && isTerminal && !shouldDeferH3Settlement) await settleVideoCreationBatch(tx, taskId);
         return result;
       });
@@ -749,6 +773,7 @@ export async function finalizeVideoTaskStatus(
     if (isTerminal && !shouldDeferH3Settlement && shouldSettleTerminalCosts(task)) {
       await settleTask(taskId, task.user_id as string, task.frozen_cost ?? 0, statusResult.local_status);
     }
+    if (retry && isTerminal) await finishRetry('video', task.id, statusResult.local_status === 'succeeded' ? 'succeeded' : 'failed');
 
     const createdBy = options.createdBy || task.user_id || task.owner_user_id || null;
     if (!shouldDeferH3Settlement) {

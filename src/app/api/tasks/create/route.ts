@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending } from '@/lib/generation-retry/video';
+import { readRetry, finishRetry } from '@/lib/generation-retry/store';
+import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { assertLegacyCreationSourceLocks } from '@/lib/creation/lineage';
@@ -2729,7 +2732,7 @@ export async function POST(request: NextRequest) {
       task: createdTask,
       endpoint: requestedProvider === H3_VIDEO_PROVIDER ? 'h3.generate' : 'seedance.createVideoTask',
       method: 'POST',
-      idempotencyKey: providerIdempotencyKey,
+      idempotencyKey: taskId,
       requestPayload: groupRefs.length ? { video_prompt_groups: { schema: 1, refs: groupRefs }, provider: requestedProvider,
         model: selectedModel, generation_mode: generationMode, ratio, duration, resolution }
         : requestedProvider === H3_VIDEO_PROVIDER
@@ -2763,19 +2766,15 @@ export async function POST(request: NextRequest) {
     });
     providerRequestId = providerRequest.id;
 
-    const providerResult = requestedProvider === H3_VIDEO_PROVIDER && h3GeneratePayload && h3Settings
-      ? await createH3VideoJob(h3GeneratePayload, {
-          baseUrl: h3Settings.base_url,
-          apiToken: h3Settings.api_token || undefined,
-          idempotencyKey: providerIdempotencyKey,
-          ...(groupRefs.length ? { privateOrigins: videoGroups.origins } : {}),
-        })
-      : await createVideoTask(
-          { ...providerInput, ...seedanceReferenceTransport },
-          diagnostic => { seedanceDiagnostic.value = diagnostic; },
-          { sensitiveRecipe: Boolean(groupRefs.length || multiviewGeneration || multiviewAction),
-            ...(groupRefs.length ? { privateOrigins: videoGroups.origins } : multiviewAction ? { privateOrigins: multiviewAction.action.origins } : {}) },
-        );
+    const retryTask = await prisma.videoTask.findUniqueOrThrow({ where: { id: taskId } });
+    const frozenRetry = await freezeVideoRetry(retryTask, {
+      provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance',
+      input: requestedProvider === H3_VIDEO_PROVIDER && h3GeneratePayload ? h3GeneratePayload : { ...providerInput, ...seedanceReferenceTransport },
+      sensitiveRecipe: Boolean(groupRefs.length || multiviewGeneration || multiviewAction),
+      privateOrigins: groupRefs.length ? videoGroups.origins : multiviewAction ? multiviewAction.action.origins : multiviewGeneration ? privateMultiviewOrigins() : [],
+    });
+    const providerResult = await dispatchFrozenVideoRetry(retryTask, frozenRetry,
+      diagnostic => { seedanceDiagnostic.value = diagnostic; });
 
     await prisma.videoTask.update({
       where: { id: taskId },
@@ -2890,6 +2889,18 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof SafeVideoPending) {
+      if (providerRequestId) await prisma.providerApiRequest.update({ where: { id: providerRequestId }, data: {
+        status: err.state === 'retry_wait' ? 'failed' : 'unknown', response_summary_json: JSON.stringify({ safe_retry_state: err.state }) } });
+      return NextResponse.json({ id: taskId, status: err.state, local_status: err.state,
+        message: err.state === 'retry_wait' ? '后台等待安全自动重试，保留原预留。' : '原提交结果或费用待核对，未重新发送。' },
+      { status: 202, headers: privateNoStore() });
+    }
+    const retryReceipt = await readRetry('video', taskId);
+    if (retryReceipt?.value.attempts.at(-1)?.providerTaskId) {
+      return NextResponse.json({ id: taskId, status: 'submitted', message: '已受理，继续查询原任务。' },
+        { status: 202, headers: privateNoStore() });
+    }
     if (err instanceof PrivatePromptError) {
       await prisma.videoTask.updateMany({ where: { id: taskId, provider_task_id: null, local_status: 'submitted' },
         data: { error_code: 'PRIVATE_PROMPT_UNCONFIRMED', error_message: '内部模板安全配置待核对，原请求及预留保留，请管理员核对；不会重新提交。' } });
@@ -2944,6 +2955,7 @@ export async function POST(request: NextRequest) {
       userFacingFailure.message,
       userFacingFailure.code,
     );
+    if (retryReceipt) await finishRetry('video', taskId, 'failed');
     if (agentRun) {
       await prisma.$transaction(async (tx) => {
         await tx.agentRun.update({

@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '提示词组封面设置', outline: [
-  '新建和编辑提示词组时直接预览、选择或更换封面',
-  '支持拖入和粘贴图片，移除封面保留原素材',
+const notice = { title: '安全生成重试机制', outline: [
+  '生成尝试由后台保存，可停止后续重试',
+  '原提交和费用未知时保留原号核对，不重复生成',
+  '供应商规则核实后按具体合同启用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

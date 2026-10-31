@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { observeRetryCallback } from '@/lib/generation-retry/video';
 import { prisma } from '@/lib/prisma';
 import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
@@ -150,6 +151,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (await observeRetryCallback(task, providerTaskId)) return NextResponse.json({ ok: true, task_id: task.id, original_attempt_retained: true });
   const finalizeResult = await finalizeVideoTaskStatus(task.id, {
     forceProviderRefresh: true,
     cacheOnSuccess: false,

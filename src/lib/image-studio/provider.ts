@@ -1,4 +1,5 @@
 import { IMAGE_STUDIO_MODELS } from './settings';
+import { retryFailure, type RetryFailure } from '@/lib/generation-retry/contracts';
 import { PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { assertPrivateSend, privatePromptFetch, privateCredentialSendOrigins } from '@/lib/security/private-prompt-send.server';
 import { readStudioImage, StudioImageDownloadError, type StudioDownloadDiagnostics } from './media';
@@ -231,6 +232,7 @@ const POLL_STATUSES = new Set<StudioPollStatus>(['pending', 'queued', 'dispatchi
   'uncertain', 'client_disconnected', 'paused', 'canceled']);
 
 export class StudioProviderError extends Error {
+  retryFailure?: RetryFailure;
   constructor(public stage: 'request' | 'response' | 'download', public code: string, public status?: number, public diagnostics?: StudioDownloadDiagnostics, public retryable = false, public poll?: StudioPollDiagnostics) {
     super(`图片服务处理失败（${code}）`);
     this.name = 'StudioProviderError';
@@ -364,7 +366,9 @@ async function requestStudioImagesImplementation(params: {
     await params.recordResponse?.(response);
     diagnostics.phase('initial_request', response.status);
     if (!response.ok) { const observed = await readProviderErrorBody(response, params.signal);
-      diagnostics.body(observed.value, observed.bodyRead); throw new StudioProviderError('request', 'http_error', response.status); }
+      diagnostics.body(observed.value, observed.bodyRead);
+      throw Object.assign(new StudioProviderError('request', 'http_error', response.status),
+        { retryFailure: retryFailure(observed.value, response.status, 'create', response.headers.get('retry-after')) }); }
     value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
       async (body, observation) => { diagnostics.body(body, observation.parseOutcome); });
     if (response.status === 202) {
@@ -419,7 +423,8 @@ async function requestStudioImagesImplementation(params: {
           diagnostics.body(undefined, 'valid_json', 'conflict'); throw new StudioProviderError('response', 'async_task_identity_conflict');
         }
         diagnostics.body(task, 'valid_json', (task.task_id || task.id) === asyncTask.taskId ? 'verified' : 'not_independently_verified');
-        if (task.status === 'failed') throw new StudioProviderError('response', 'async_failed', polled.status);
+        if (task.status === 'failed') throw Object.assign(new StudioProviderError('response', 'async_failed', polled.status),
+          { retryFailure: { ...retryFailure(task, polled.status, 'status', polled.headers.get('retry-after')), providerTaskId: asyncTask.taskId } });
         if (['uncertain', 'client_disconnected', 'paused', 'canceled'].includes(task.status)) throw new StudioProviderError('response', 'async_unconfirmed', polled.status);
         if (task.status !== 'success') {
           lastObservation = ['pending', 'queued', 'dispatching', 'running', 'processing'].includes(task.status) ? 'pending' : 'unconfirmed';
@@ -567,7 +572,8 @@ async function requestGeminiStudioImages(params: {
     // Preserve native parsing errors for empty/malformed replies while the HTTP status remains observable.
     if (observed.bodyRead === 'empty_body') throw new StudioProviderError('response', observed.hadBody ? 'invalid_or_oversize_response' : 'empty_response', response.status);
     if (observed.bodyRead === 'invalid_json' || observed.bodyRead === 'read_error') throw new StudioProviderError('response', 'invalid_or_oversize_response', response.status);
-    throw new StudioProviderError('request', 'http_error', response.status);
+    throw Object.assign(new StudioProviderError('request', 'http_error', response.status),
+      { retryFailure: retryFailure(observed.value, response.status, 'create', response.headers.get('retry-after')) });
   }
   try {
     value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,

@@ -22,7 +22,7 @@ export type RefreshProviderResultTask = ProviderStatusTask & {
   result_last_frame_url?: string | null;
 };
 
-export type ProviderStatusQueryContext = { sensitiveRecipe?: boolean };
+export type ProviderStatusQueryContext = { sensitiveRecipe?: boolean; signal?: AbortSignal };
 export type ProviderStatusFetcher = (providerTaskId: string) => Promise<ProviderStatusResponse>;
 export type SeedanceProviderStatusFetcher = (
   providerTaskId: string,
@@ -38,6 +38,7 @@ export type ProviderStatusFetchers = {
 
 export type ProviderStatusRouterOptions = {
   fetchers?: ProviderStatusFetchers;
+  signal?: AbortSignal;
 };
 
 export type RefreshedProviderResultUrl = {
@@ -97,7 +98,8 @@ export async function getProviderTaskStatus(
   const protectGroupStatus = task.source_metadata_json === undefined || hasVideoPromptGroups(task);
   let result: ProviderStatusResponse;
   try { result = await (provider === VIDEO_TASK_PROVIDER_SEEDANCE
-    ? fetchers.seedance(providerTaskId, seedanceQueryContext(task))
+    ? fetchers.seedance(providerTaskId, { ...seedanceQueryContext(task), ...(options.signal ? { signal: options.signal } : {}) })
+    : provider === H3_VIDEO_PROVIDER && options.signal && !options.fetchers ? getH3TaskStatus(providerTaskId, { signal: options.signal })
     : fetcherForProvider(provider, fetchers)(providerTaskId)); }
   catch (error) { if (protectGroupStatus) throw new Error('原任务状态暂时无法核对，请稍后查询同一任务'); throw error; }
   if (!protectGroupStatus) return result;

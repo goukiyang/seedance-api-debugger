@@ -19,6 +19,7 @@ import { initializeCatalogRevisions } from '../src/lib/image-studio/catalog-revi
 loadEnvConfig(process.cwd());
 let stopping = false;
 let billingWork: Promise<void> | null = null;
+let retryWork: Promise<void> | null = null;
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 async function main() {
@@ -57,6 +58,12 @@ async function main() {
       console.error('[image-studio-shared] readiness unavailable; new shared requests must remain blocked');
     }).finally(() => { readinessWork = null; });
   }, 30_000);
+  const retryTimer = setInterval(() => {
+    if (stopping || isImageStudioDraining() || retryWork) return;
+    retryWork = import('../src/lib/generation-retry/video').then(module => module.processVideoRetries(() => stopping || isImageStudioDraining())).catch(() => {
+      console.error('[safe-generation-retry] background pass deferred; original receipts retained');
+    }).finally(() => { retryWork = null; });
+  }, 5000);
   try {
     do {
       if (isImageStudioDraining()) break;
@@ -75,6 +82,8 @@ async function main() {
     } while (!stopping);
     await billingWork;
   } finally {
+    clearInterval(retryTimer);
+    await retryWork;
     clearInterval(readinessTimer);
     await readinessWork;
     if (pricingCapability) await revokePricingWorkerCapability(prisma, pricingCapability);
