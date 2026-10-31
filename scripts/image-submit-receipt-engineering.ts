@@ -72,7 +72,7 @@ async function main() {
       reference_ids: '[]', unit_credits: 0, snapshot_json: JSON.stringify({ sourcePresetId: null, moduleId, prompt: 'synthetic-personal' }), status: 'queued',
     });
     let activeUser: SessionUser | null = user;
-    function apiSource<T>(relative: string, overrides: Record<string, unknown> = {}): T {
+    const apiSource = <T>(relative: string, overrides: Record<string, unknown> = {}): T => {
       const file = path.join(root, relative), code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
       } }).outputText;
@@ -85,7 +85,7 @@ async function main() {
       const run = vm.runInThisContext(`(function(require,module,exports,__filename,__dirname){${code}\n})`, { filename: file });
       run(load, module, module.exports, file, path.dirname(file));
       return module.exports as T;
-    }
+    };
     const taskApi = apiSource<typeof import('@/app/api/image-studio/tasks/route')>('src/app/api/image-studio/tasks/route.ts');
     const batchApi = apiSource<typeof import('@/app/api/image-studio/batches/route')>('src/app/api/image-studio/batches/route.ts');
     const requestApi = apiSource<typeof import('@/app/api/image-studio/requests/route')>('src/app/api/image-studio/requests/route.ts');
@@ -96,7 +96,9 @@ async function main() {
     assert.equal(await db.platformSetting.count({ where: { key: key(owner, unknown) } }), 0);
     check('empty_query_stays_unknown_without_writing_receipt');
 
-    for (const [index, prompt] of ['ppenc:v1:synthetic-not-a-secret', JSON.stringify({ format: 'private-prompt.v1', ciphertext: 'synthetic' }), { format: 'private-prompt.v1', ciphertext: 'synthetic-object' }].entries()) {
+    const encryptedInputs = ['ppenc:v1:synthetic-not-a-secret', JSON.stringify({ format: 'private-prompt.v1', ciphertext: 'synthetic' }), { format: 'private-prompt.v1', ciphertext: 'synthetic-object' }];
+    for (let index = 0; index < encryptedInputs.length; index++) {
+      const prompt = encryptedInputs[index];
       const id = request(`encrypted-${index}`);
       const response = await taskApi.POST(post('/api/image-studio/tasks', { requestId: id, prompt, personalPrompt: prompt }));
       const payload = await response.json();
