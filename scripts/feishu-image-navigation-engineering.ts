@@ -37,7 +37,7 @@ async function main() {
     const moduleId = randomUUID(), foreignId = randomUUID(); await prisma.imageStudioModule.create({ data: { id: moduleId, owner_id: 'fixture-owner', name: '动作模块' } });
     await prisma.imageStudioModule.create({ data: { id: foreignId, owner_id: 'fixture-other', name: '不可外发的其他模块' } });
     const png = await sharp({ create: { width: 24, height: 32, channels: 4, background: { r: 20, g: 40, b: 80, alpha: .5 } } }).png().toBuffer(), tiff = await sharp(png).tiff().toBuffer();
-    const makeTask = async (id: string, file = false, module = moduleId, batch = `batch-${id}`) => {
+    const makeTask = async (id: string, file = false, module: string = moduleId, batch = `batch-${id}`) => {
       const task = await prisma.imageStudioTask.create({ data: { id, owner_id: 'fixture-owner', module_id: module, batch_id: batch, ordinal: 1, fingerprint: id, prompt: 'PRIVATE_PROMPT', context: 'PRIVATE_CONTEXT', revision: 1, model: 'fixture-image', reference_ids: '[]', unit_credits: 0, status: 'succeeded' } });
       const prepared = await output.prepareStudioOutput(file ? tiff : png, task, { width: 24, height: 32 }, async () => {}, file ? 'tiff' : 'png');
       const asset = await prisma.asset.upsert({ where: { owner_id_hash: { owner_id: 'fixture-owner', hash: prepared.hash! } }, create: prepared, update: {} });
