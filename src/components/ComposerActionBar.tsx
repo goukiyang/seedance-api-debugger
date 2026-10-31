@@ -71,6 +71,7 @@ interface Props {
   modelOptions?: ComposerSelectOption[];
   selectedModel?: string | null;
   durationModel?: string | null;
+  parameterModel?: string | null;
   onModelChange?: (model: string) => void;
   auxiliaryLabel?: string;
   auxiliaryOptions?: ComposerSelectOption[];
@@ -112,6 +113,7 @@ export function ComposerActionBar({
   modelOptions = [],
   selectedModel = null,
   durationModel = selectedModel,
+  parameterModel = selectedModel,
   onModelChange,
   auxiliaryLabel = '',
   auxiliaryOptions = [],
@@ -189,7 +191,7 @@ export function ComposerActionBar({
   const [showAuxiliaryMenu, setShowAuxiliaryMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
-  const followsFirstFrame = seedanceRatioFollowsFirstFrame(durationModel, generationMode);
+  const followsFirstFrame = seedanceRatioFollowsFirstFrame(parameterModel, generationMode);
   const durationOptions = seedanceVideoDurationOptions(durationModel);
   const durationValid = isSeedanceVideoDuration(duration, durationModel);
   const ratioLocked = lockedRatio || followsFirstFrame;

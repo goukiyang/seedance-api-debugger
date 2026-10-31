@@ -2786,6 +2786,7 @@ export function GenerationComposer({
             ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
             : modelOptions}
           selectedModel={videoModelChoices ? `${videoSurface}:${selectedModel}` : selectedModel}
+          parameterModel={selectedModel}
           durationModel={durationModel}
           onModelChange={(model) => {
             if (videoModelChoices) { selectVideoModel(model); return; }
