@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## FS-UX01 / FS-EXT01 两项飞书前置（2026-10-31）
+
+来源：用户两张原始反馈截图与“两个问题，把前置处理完”。[工单](../../tasks/todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)已完成根因、交互、真实格式/文件名合同、历史兼容、修改地图与相容回退设计，待实施。截图与隔离元数据复现/官方SDK引用保正式根`docs/materials/2026-10-31-image-feishu-send-ux-preflight/`，两原PNG可读且复制字节一致，不公开附件。不含业务代码/生产修改、真实外发或收费测试；设计完成不冒手验达标。
+
 ## IMG-COMP01 当前交付与标签追补（2026-10-31）
 
 v0.121.5已部署，运行源`6a0d74f2b5782a52b797cdf99434bb48e15e7bf4` / BUILD`KKbtPluYPhxXmeN8BjQKp`，页面与真实收件待用户手验。七项范围分别记录：等待固定图标、favicon完成定位、完整原图飞书/五键、状态标签、raw冻结核对、四图恢复均已交付；**供应商medium/4K返2048原因未解决，待核**。完整原单/截图/工程/两次发布/原四请求证据保正式根`docs/materials/2026-10-31-image-completion-original-feishu/implementation/`；入口见[最终范围](../../tasks/todo/2026-10-28-video-feishu-delivery-repair.md#153-原图发送标签遗漏追补与最终范围v01215)。回退复用v0.121.4完整运行版，无新增guard/回退构建，不回业务数据。
