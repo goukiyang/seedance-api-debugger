@@ -1,0 +1,138 @@
+{
+  "task": "SAFE-RETRY01 / SR-IMPL01",
+  "status": "deployed_pending_user_manual_acceptance",
+  "deployed": true,
+  "runId": "70e1b6e8-4db4-480a-b370-fb441fc6023a",
+  "sourceWorktree": "/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/safe-generation-retry/video-api-debugger",
+  "evidenceRoot": "/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-31-safe-generation-retry/implementation",
+  "main": {
+    "source": "2dc01e20d7c0aadf8e6bbf65bb43dba0b90c9928",
+    "branch": "codex/safe-generation-retry-20261031",
+    "version": "0.122.0",
+    "build": "cYdgstc2qqw9Dsd35yEGj",
+    "fullBuildCompletedAt": "2026-10-31T19:25:10.677200+00:00",
+    "fullNextTypesLintPassed": true,
+    "allFinalGitApplicationFilesMatch": true,
+    "pushed": true
+  },
+  "guard": {
+    "source": "88f57e096c02a649b60b9788d469e5a0dadde68c",
+    "branch": "codex/safe-generation-retry-guard-20261031",
+    "version": "0.122.0+safe-retry-guard.1",
+    "build": "bg-8r9i2u70uwEA2qJvwF",
+    "fullBuildCompletedAt": "2026-10-31T19:27:24.996488+00:00",
+    "fullNextTypesLintPassed": true,
+    "allFinalGitApplicationFilesMatch": true,
+    "pushed": true,
+    "newRetryGenerationDisabled": true,
+    "originalQueryStopAndSettlementReadersRetained": true,
+    "onlineRollbackDrill": false
+  },
+  "preservedProductionSuccessor": {
+    "source": "849c895d53afba3b1dcf8ff6961d48cea66ce941",
+    "version": "0.121.6",
+    "isAncestorOfMainAndGuard": true,
+    "char02ImplementationAddedByThisBatch": false
+  },
+  "mechanism": {
+    "persistence": "Existing PlatformSetting per-task transactional CAS journal; private frozen execution input and attempt receipt archives",
+    "maximumNewGenerations": 4,
+    "maximumAdditionalRetries": 3,
+    "oneOriginalTaskReserveAndFinalSettlement": true,
+    "durableBackgroundDispatch": true,
+    "inputModelProviderCredentialAndQuoteFrozen": true,
+    "unknownAcceptanceOrFeeNeverAuthorizesNewGeneration": true,
+    "ownerCanStopUnsentRetries": true,
+    "lateOriginalSuccessOrFeeContradictionFencesFutureSends": true,
+    "schemaChanges": 0,
+    "historicalBackfillOrBulkAdoption": 0
+  },
+  "currentEngineering": {
+    "source": "2dc01e20d7c0aadf8e6bbf65bb43dba0b90c9928",
+    "retryFixture": {
+      "completed": true,
+      "checks": 10,
+      "realSqliteTaskAndAccountingPaths": true,
+      "syntheticSupplierResponsesOnly": true,
+      "includesLateOriginalSuccessAndStaleStopReserveCase": true,
+      "evidence": "release/main-targeted-result.json"
+    },
+    "existingNativeMainGate": {
+      "completed": true,
+      "imageFixtureGroups": 13,
+      "publicContractGroups": 15,
+      "pricingGatePassed": true,
+      "receipt": "release/image-recovery-gate-LkaYIn/receipt.json",
+      "startedAtEpochMs": 1793473803186,
+      "finishedAtEpochMs": 1793474123127
+    },
+    "guard": {
+      "disabledSwitchFixturePassed": true,
+      "unchangedFinalMainNativeEvidenceReused": true,
+      "originalTimesPreserved": true,
+      "affectedMultiviewContractRerunPassed": true,
+      "freshCurrentSourcePricingVerified": true,
+      "evidence": "release/rollback-pricing-prepared.json"
+    },
+    "codeGraph": { "source": "2dc01e20d7c0aadf8e6bbf65bb43dba0b90c9928", "files": 1741, "pendingChanges": 0, "parseErrors": 0, "evidence": "codegraph-final.log" },
+    "selfReview": "self-review.md",
+    "nonblockingWarnings": "Existing unrelated lint ref warnings, CSS autoprefixer warning and Browserslist age; no gate disabled or unrelated fix added",
+    "earlyLocalTypesAndHarnessFailuresRetained": true,
+    "earlyFailuresAreNotCurrentSourcePasses": true,
+    "failureEvidence": ["preparation-incidents.md", "attempt04-failure-summary.md", "release/public-proof.log", "release/public-proof-attempt01.py"]
+  },
+  "production": {
+    "loadedAt": "2026-10-31T19:29:57.798357+00:00",
+    "naturalStoppedServices": 11,
+    "oldSourceProcessesRemaining": 0,
+    "actualMainAndGuardStartupSourceChecksPassed": 6,
+    "activeSameSourceServices": 7,
+    "allSevenActualCwdMatch": true,
+    "allSevenRestartCounts": 0,
+    "activePreservedTimers": 4,
+    "finalizerTimerRemainsInactive": true,
+    "webServiceStateDowntimeSeconds": 13.445389,
+    "downtimeMeasurement": "systemd inactive-enter to active-enter monotonic timestamps; all local preparation excluded",
+    "serviceHealthEvidence": "release/service-health.json",
+    "publicationAttempts": 1,
+    "publicationFailures": 0,
+    "publicEvidenceProbeFailures": 1,
+    "probeFailureResolution": "Owner route deliberately returns private generic404. Initial probe incorrectly required401/403/307; corrected to exact source contract plus JSON body, without application change or another switch. Original failure retained."
+  },
+  "dataProtection": {
+    "prestopConsistentReadOnlyBackup": "release/database-prestop-protected.json",
+    "prestopSha256": "0c6310264228a863aacb5688a2fa5f90210b7c0be26c97919634cc97c424607c",
+    "drainedWriterConsistentBackup": "release/database-protected.json",
+    "drainedBackupSha256": "a620a7877d18b04a52923796f359d38e7eb0044a686a57610ed9de839c7dcef7",
+    "configurationBackup": "/data/video-api-debugger/release-staging/safe-generation-retry-20261031/release/configuration-before",
+    "programOnlyRecovery": "release/FIXED-RECOVERY.txt",
+    "databaseMediaLedgerOrReceiptsRestored": false,
+    "priceRulesInitializedOrChangedByDeployment": false,
+    "privatePolicyDestinationsChanged": false
+  },
+  "publicProof": {
+    "verifiedAt": "2026-10-31T19:32:30.266587+00:00",
+    "version": "0.122.0",
+    "matchedStatus200StaticArtifacts": 4,
+    "includesImageStudioTaskDetailAdminAndSharedRetryModule": true,
+    "anonymousOwnerTaskStatus": 404,
+    "anonymousAdminStatus": 401,
+    "evidence": "release/public-deployed.json",
+    "entries": ["https://sd2.youdooart.com/image-studio", "https://sd2.youdooart.com/admin/integrations"]
+  },
+  "rules": {
+    "reviewedProductionCatalogEntries": 0,
+    "enabledProductionRules": 0,
+    "unverifiedRulesRemainDisabled": true,
+    "syntheticContractsWereNeverEnabledInProduction": true,
+    "supplierExactExecutionAndFeeContractsStillRequiredForEnablingEachRule": true
+  },
+  "paidGenerationTests": 0,
+  "realSupplierRetryVerification": false,
+  "browserTests": 0,
+  "productionBusinessTestWrites": 0,
+  "independentReviews": 0,
+  "functionalAcceptance": false,
+  "manualAcceptancePending": true,
+  "remainingBoundary": "User manual acceptance of task status/details/stop/refresh/result experience; real supplier execution and fee behavior is not proven by synthetic checks or deployment health."
+}
