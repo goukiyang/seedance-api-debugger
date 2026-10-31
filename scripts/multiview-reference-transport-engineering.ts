@@ -38,19 +38,25 @@ async function main() {
   assert.ok(branch.end < source.indexOf('const task = await tx.videoTask.create('), 'prepare before accepting/freezing a new task');
   const ledger = source.slice(source.indexOf('const providerRequest = await createProviderApiRequest('), source.indexOf('providerRequestId = providerRequest.id;'));
   assert.ok(ledger.length > 0 && !ledger.includes('seedanceReferenceTransport'), 'durable identity must remain URL-based');
-  const createCalls = calls.filter(call => identifier(call.expression, 'createVideoTask'));
+  const createCalls = calls.filter(call => identifier(call.expression, 'freezeVideoRetry'));
   assert.equal(createCalls.length, 1);
   const createCall = createCalls[0];
-  assert.equal(createCall.arguments.length, 3, 'Keep provider input, diagnostics and private recipe options');
-  const createInput = createCall.arguments[0], createOptions = createCall.arguments[2];
+  assert.equal(createCall.arguments.length, 2, 'Freeze the exact provider input before background dispatch');
+  const createOptions = createCall.arguments[1];
+  assert.ok(ts.isObjectLiteralExpression(createOptions));
+  const frozenInput = property(createOptions, 'input');
+  assert.ok(ts.isConditionalExpression(frozenInput));
+  const createInput = frozenInput.whenFalse;
   assert.ok(ts.isObjectLiteralExpression(createInput));
   assert.equal(createInput.properties.length, 2);
   for (const [index, name] of Array.from(['providerInput', 'seedanceReferenceTransport'].entries())) {
     const spread = createInput.properties[index];
     assert.ok(ts.isSpreadAssignment(spread) && identifier(spread.expression, name));
   }
-  assert.ok(ts.isArrowFunction(createCall.arguments[1]), 'Preserve the diagnostic callback');
-  assert.ok(ts.isObjectLiteralExpression(createOptions));
+  const dispatchCalls = calls.filter(call => identifier(call.expression, 'dispatchFrozenVideoRetry'));
+  assert.equal(dispatchCalls.length, 1);
+  assert.ok(dispatchCalls[0].pos > createCall.end);
+  assert.ok(ts.isArrowFunction(dispatchCalls[0].arguments[2]), 'Preserve the diagnostic callback');
   const sensitiveRecipe = property(createOptions, 'sensitiveRecipe');
   assert.ok(ts.isCallExpression(sensitiveRecipe) && identifier(sensitiveRecipe.expression, 'Boolean')
     && sensitiveRecipe.arguments.length === 1,
@@ -60,11 +66,31 @@ async function main() {
       groupRefs: variant === 'groups' ? [{}] : [], multiviewGeneration: variant === 'rotation' ? {} : null,
       multiviewAction: variant === 'action' ? { action: { origins: ['synthetic-action'] } } : null,
       videoGroups: { origins: ['synthetic-group'] },
+      requestedProvider: 'seedance', H3_VIDEO_PROVIDER: 'h3', h3GeneratePayload: null,
+      providerInput: {}, seedanceReferenceTransport: {}, privateMultiviewOrigins: () => ['synthetic-rotation'],
     });
     assert.equal(options.sensitiveRecipe, variant !== 'ordinary');
-    assert.deepEqual(Object.keys(options).sort(), ['sensitiveRecipe', ...(['groups', 'action'].includes(variant) ? ['privateOrigins'] : [])].sort());
-    if (variant === 'groups' || variant === 'action') assert.deepEqual(Array.from(options.privateOrigins), [`synthetic-${variant === 'groups' ? 'group' : 'action'}`]);
+    assert.deepEqual(Object.keys(options).sort(), ['provider', 'input', 'sensitiveRecipe', 'privateOrigins'].sort());
+    assert.deepEqual(Array.from(options.privateOrigins), variant === 'ordinary' ? [] : [`synthetic-${variant === 'groups' ? 'group' : variant}`]);
   }
+  const retryFile = readFileSync('src/lib/generation-retry/video.ts', 'utf8');
+  const retryAst = ts.createSourceFile('retry.ts', retryFile, ts.ScriptTarget.Latest, true);
+  const sends: ts.CallExpression[] = [];
+  const visitRetry = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) sends.push(node);
+    ts.forEachChild(node, visitRetry);
+  };
+  visitRetry(retryAst);
+  const send = sends.filter(call => identifier(call.expression, 'createVideoTask'));
+  assert.equal(send.length, 1);
+  assert.equal(send[0].arguments.length, 3);
+  const sendOptions = send[0].arguments[2];
+  assert.ok(ts.isObjectLiteralExpression(sendOptions));
+  for (const key of ['sensitiveRecipe', 'privateOrigins']) {
+    const value = property(sendOptions, key);
+    assert.ok(ts.isPropertyAccessExpression(value) && identifier(value.expression, 'frozen') && value.name.text === key);
+  }
+  assert.ok(sends.some(call => identifier(call.expression, 'markRetrySent') && call.end < send[0].pos));
 
   const transportCalls = calls.filter(call => identifier(call.expression, 'seedanceLocalReferenceTransport'));
   assert.equal(transportCalls.length, 1);

@@ -21,6 +21,7 @@ export const PRIVATE_PROMPTS_CHECKS = [
 export const PRIVATE_PROMPTS_SOURCES = [
   'scripts/private-prompts-engineering.mjs', 'scripts/private-prompts-fixture-inputs.mjs',
   'scripts/private-prompts-worker-fixture.mjs', 'src/lib/template-studio/worker.ts',
+  'src/lib/generation-retry/image.ts',
   'scripts/server-runtime.cjs',
   'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-identity.server.ts',
   'src/lib/security/private-prompt-send.server.ts', 'src/lib/security/private-prompt-fields.server.ts',

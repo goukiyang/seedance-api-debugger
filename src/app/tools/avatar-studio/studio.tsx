@@ -9,7 +9,8 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ImageUsageProjectSelect, useImageUsageProject } from '@/components/ImageUsageProjectSelect';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
-import { GenerationCompletionSettings, watchGenerationCompletion } from '@/components/GenerationCompletion';
+import { GenerationCompletionSettings, useGenerationCompletionTarget, watchGenerationCompletion } from '@/components/GenerationCompletion';
+import type { ResultNavigationIntent } from '@/components/useResultPages';
 
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { StudioReferenceGrid } from '@/app/image-studio/reference-grid';
@@ -336,6 +337,25 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     download: hasReturnedImage(output) ? () => handImageDownloadToBrowser(`/api/image-studio/download?id=${encodeURIComponent(output.id)}`, output.asset.file_name || 'avatar.png') : undefined,
   } satisfies GeneratedImageResult & { candidateIndex: number; output: Task | null | undefined }));
   const blocked = referenceUploading || pending || tasks.some(t => t.status === 'uncertain');
+
+  const completionTarget = useGenerationCompletionTarget(ownerId);
+  const completionResultScope = `sd2:avatar-results:v1:${ownerId}:${plan?.id || 'retained'}:${avatarLayout(plan || rules)}`;
+  const [completionNavigation, setCompletionNavigation] = useState<ResultNavigationIntent | null>(null);
+  useEffect(() => {
+    if (!completionTarget || completionTarget.kind !== 'avatar') { setCompletionNavigation(null); return; }
+    if (!ready || initializedOwner.current !== ownerId) return;
+    let current = true;
+    const expectedOwner = liveDraft.current.ownerRevision;
+    void api<{ sourceTask: Task | null; resultRecords: AvatarRecord[] }>(undefined, `?imageTask=${encodeURIComponent(completionTarget.taskId)}`).then(data => {
+      if (!current || !alive.current || expectedOwner !== liveDraft.current.ownerRevision || ownerId !== liveDraft.current.ownerId) return;
+      if (data.sourceTask?.id !== completionTarget.taskId || !hasReturnedImage(data.sourceTask)) return;
+      setPreviousImageTask(data.sourceTask); mergeResultRecords(data.resultRecords || []);
+      setCompletionNavigation({ id: `completion:${completionTarget.requestId}`, revision: completionTarget.requestId,
+        scopeKey: completionResultScope, targetId: completionTarget.taskId });
+    }).catch(() => { /* Keep the pending reminder when this owner-only result cannot be read. */ });
+    return () => { current = false; };
+  }, [completionTarget?.requestId, ownerId, ready, completionResultScope, mergeResultRecords]);
+
   function assertDraft(draft: DraftSnapshot) {
     if(!alive.current||liveDraft.current.revision!==draft.revision||liveDraft.current.ownerRevision!==draft.ownerRevision)throw new Error('当前草稿或账号已变化，旧请求不会继续出图；请按当前内容重新生成。');
   }
@@ -467,7 +487,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     setStage('提交图片任务');
     setBillingQuote(null);
     try {
-      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,channelId:original.channelId,...imageUiQuoteFields(quote) });watchGenerationCompletion(ownerId, next.id, 'avatar', count); }
+      try { await api({ action: 'submit', id: next.id, layout:avatarLayout(next),rules:next.candidates[0].rules,model:next.model,quality:next.quality,resolution:next.resolution,channelId:original.channelId,...imageUiQuoteFields(quote) });watchGenerationCompletion(ownerId, next.id, 'avatar', count, crypto.randomUUID(), 0, { baselineTaskIds: tasks.filter(hasReturnedImage).map(task => task.id) }); }
       finally { if (alive.current && liveDraft.current.ownerRevision===original.ownerRevision && planRef.current===next.id) await refreshCredits({ force: true }); }
       if(!alive.current||liveDraft.current.ownerRevision!==original.ownerRevision||planRef.current!==next.id)return true;
       setPending(false);setNotice('图片任务已提交，正在查询结果；尚未代表已出图。'); await queryPlan(next.id); await load();
@@ -576,7 +596,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     {(!management || editing.current) && <fieldset className={styles.layout} disabled={busy||referenceUploading||!ready}>
       <div className={styles.mainColumn}>
       <section aria-label="人物结果" data-avatar-results>
-        <GeneratedImageResults items={sharedResults} scope={`sd2:avatar-results:v1:${ownerId}:${plan?.id || 'retained'}:${avatarLayout(plan || rules)}`}
+        <GeneratedImageResults items={sharedResults} scope={completionResultScope} navigationIntent={completionNavigation}
           loading={!ready} emptyLabel="暂无人物图片" selectedId={task?.id || (plan ? `draft:${sheet ? plan.id + ':sheet' : plan.candidates[index]?.characterId + ':' + index}` : imageTask?.id)}
           onSelect={item => { if (item.candidateIndex >= 0 && !sheet) setIndex(item.candidateIndex); }}
           renderOverlay={(item, controls) => sheet && item.candidateIndex >= 0 && item.media && plan

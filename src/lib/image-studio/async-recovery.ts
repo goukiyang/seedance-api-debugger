@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { privateStoredValue } from '@/lib/security/private-prompt-fields.server';
 import { canUseCompanyTemplates } from './access';
 import { readStudioAsyncReceipt, readStudioRequestReceipt, type StudioAsyncReceipt } from './delivery';
 import { PRICING_ASYNC_PREFIX, publicPricingTaskState, studioTaskState } from './pricing-state';
@@ -38,8 +39,9 @@ function channel(task: ImageStudioTask): { channelId: string; configRevision: st
   } catch { return null; }
 }
 function binding(task: ImageStudioTask, record: Pick<RecoveryRecord, 'providerTaskId' | 'acceptedAt' | 'expiresAt' | 'requestId'>) {
-  return digest([task.id, task.owner_id, task.batch_id, task.fingerprint, task.model, task.prompt, task.context,
-    task.snapshot_json, task.reference_ids, task.quality, task.aspect_ratio, task.output_size, task.billing_scope,
+  const frozen = privateStoredValue(task);
+  return digest([task.id, task.owner_id, task.batch_id, task.fingerprint, task.model, frozen.prompt, frozen.context,
+    frozen.snapshot_json, task.reference_ids, task.quality, task.aspect_ratio, task.output_size, task.billing_scope,
     task.billing_mode, task.billing_contract_json, task.unit_credits, task.freeze_snapshot,
     record.providerTaskId, record.acceptedAt, record.expiresAt || null, record.requestId]);
 }

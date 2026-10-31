@@ -1,9 +1,12 @@
+import { studioTaskHasViewableOutput, studioOutputFormatForMime } from './dimension-mismatch';
+import { imageFeishuMode } from './feishu-source';
+import { IMAGE_FEISHU_ORIGINAL_TYPE, IMAGE_FEISHU_ORIGINAL_MAX_BYTES, originalImageFeishuUuid, newOriginalImageFeishuEvent, parseOriginalImageFeishuEvent, originalImageFeishuStatus, originalImageFeishuCanCancel, originalImageFeishuCanRetry } from './feishu-original-contract';
 import type { Prisma } from '@prisma/client';
 import { videoFeishuActor, videoFeishuBinding } from '@/lib/video/feishu-notification';
 import { VideoFeishuError, videoFeishuId } from '@/lib/video/feishu-contract';
 import { canUseCompanyTemplates } from './access';
 import { canReadStudioAsset } from './protected-assets';
-import { IMAGE_FEISHU_NEW_REQUESTS_ENABLED } from './feishu-capability';
+import { IMAGE_FEISHU_NEW_REQUESTS_ENABLED, IMAGE_FEISHU_ORIGINAL_REQUESTS_ENABLED } from './feishu-capability';
 import { IMAGE_FEISHU_TYPE, IMAGE_FEISHU_PREFERENCE, normalizeImageFeishuChoice, parseFrozenImageFeishuChoice,
   imageFeishuUuid, newImageFeishuEvent, parseImageFeishuEvent, imageFeishuCanCancel, imageFeishuCanRetry, imageFeishuStatus,
   type ImageFeishuChoice, type ImageFeishuPreference, type FrozenImageFeishuChoice } from './feishu-contract';
@@ -106,12 +109,16 @@ export async function wakeImageFeishuAfterOutputReady(db: Db, task: { id: string
 }
 /** Batched, owner-only projection. It never exposes metadata, recipients, upload keys or prompts. */
 export async function imageFeishuTaskStatuses(db: Db, ownerId: string, ids: string[]) {
-  const rows = ids.length ? await db.notification.findMany({ where: { type: IMAGE_FEISHU_TYPE, channel: 'feishu', target_user_id: ownerId,
-    id: { in: ids.map(id => imageFeishuUuid(id, 'event')) } }, select: { id: true, metadata_json: true } }) : [];
+  const rows = ids.length ? await db.notification.findMany({ where: { type: { in: [IMAGE_FEISHU_TYPE, IMAGE_FEISHU_ORIGINAL_TYPE] }, channel: 'feishu', target_user_id: ownerId,
+    id: { in: ids.flatMap(id => [imageFeishuUuid(id, 'event'), originalImageFeishuUuid(id, 'event')]) } }, select: { id: true, metadata_json: true } }) : [];
   return new Map(ids.map(id => {
     const raw = rows.find(row => row.id === imageFeishuUuid(id, 'event')); const meta = raw && parseImageFeishuEvent(raw.metadata_json);
     const status = imageFeishuStatus(meta && meta.actorId === ownerId && meta.taskId === id ? meta : null);
-    return [id, raw && !meta ? { ...status, state: 'unknown', reason: 'notification_unavailable' } : status] as const;
+    const originalRow = rows.find(row => row.id === originalImageFeishuUuid(id, 'event'));
+    const original = originalRow && parseOriginalImageFeishuEvent(originalRow.metadata_json);
+    const originalView = original && original.actorId === ownerId && original.taskId === id ? originalImageFeishuStatus(original) : originalRow
+      ? { ...originalImageFeishuStatus(null), state: 'unknown', canSend: false, reason: 'notification_unavailable' } : null;
+    return [id, { ...(raw && !meta ? { ...status, state: 'unknown', reason: 'notification_unavailable' } : status), ...(originalView ? { original: originalView } : {}) }] as const;
   }));
 }
 export async function changeImageFeishuNotification(db: Db, actorId: string, taskId: string, action: 'cancel' | 'retry') {
@@ -131,4 +138,63 @@ export async function changeImageFeishuNotification(db: Db, actorId: string, tas
   if ((await db.notification.updateMany({ where: { id: row.id, type: IMAGE_FEISHU_TYPE, channel: 'feishu', status: row.status, metadata_json: row.metadata_json },
     data: { status: action === 'cancel' ? 'failed' : 'pending', error_message: action === 'cancel' ? 'image_feishu_cancelled' : null, metadata_json: JSON.stringify(meta) } })).count !== 1) throw new VideoFeishuError('notification_changed', 409);
   return imageFeishuStatus(meta);
+}
+
+/** Explicit original delivery has its own immutable per-output operation and never reopens an auto notice. */
+export async function readOriginalImageFeishuStatus(db: Db, actorId: string, taskId: string) {
+  const current = await authorizedImageFeishuTask(db, actorId, taskId), identity = videoFeishuBinding(current.actor);
+  const row = await db.notification.findUnique({ where: { id: originalImageFeishuUuid(taskId, 'event') } });
+  if (row) {
+    const meta = parseOriginalImageFeishuEvent(row.metadata_json);
+    if (!meta || row.type !== IMAGE_FEISHU_ORIGINAL_TYPE || row.channel !== 'feishu' || row.target_user_id !== actorId || meta.actorId !== actorId) throw new VideoFeishuError('notification_unavailable', 503);
+    return { ...originalImageFeishuStatus(meta), fileSize: meta.source?.size ?? current.asset?.file_size ?? null };
+  }
+  const automatic = await db.notification.findUnique({ where: { id: imageFeishuUuid(taskId, 'event') } });
+  if (automatic) {
+    const meta = parseImageFeishuEvent(automatic.metadata_json);
+    if (!meta || automatic.type !== IMAGE_FEISHU_TYPE || automatic.channel !== 'feishu' || automatic.target_user_id !== actorId || meta.actorId !== actorId) throw new VideoFeishuError('notification_unavailable', 503);
+    const sameOriginal = meta.identity === identity && meta.assetId === current.asset?.id && meta.contentHash === current.asset?.hash
+      && meta.mode === 'image' && (meta.version === 1 || meta.presentation?.kind === 'original' && meta.presentation.contentHash === current.asset?.hash);
+    if (sameOriginal && meta.image.receiptId) return { ...originalImageFeishuStatus(null), state: 'sent', canSend: false, originalSent: true,
+      mode: 'image' as const, fileSize: current.asset?.file_size ?? null, source: 'automatic' as const };
+    const format = studioOutputFormatForMime(current.asset?.mime_type);
+    const automaticOriginal = meta.identity === identity && meta.mode === 'image' && (sameOriginal || meta.sourceVersion === null && format && current.asset
+      && imageFeishuMode(format.extension === 'jpg' ? 'jpeg' : format.extension, current.asset.file_size || 0, current.asset.width || 0, current.asset.height || 0).mode === 'image');
+    if (automaticOriginal && (['pending','unknown'].includes(meta.state) || ['uploading','unknown'].includes(meta.upload.state) || meta.image.ambiguous)) return { ...originalImageFeishuStatus(null), state: meta.state === 'unknown' ? 'unknown' : 'pending',
+      canSend: false, mode: 'image' as const, fileSize: current.asset?.file_size ?? null, source: 'automatic' as const, reason: 'automatic_original_pending' };
+  }
+  const base = { ...originalImageFeishuStatus(null), fileSize: current.asset?.file_size ?? null };
+  const reason = !identity ? 'binding_unavailable' : !studioTaskHasViewableOutput(current.task) || !current.asset ? 'generation_not_completed'
+    : (current.asset.file_size || 0) > IMAGE_FEISHU_ORIGINAL_MAX_BYTES ? 'image_original_too_large'
+      : !IMAGE_FEISHU_ORIGINAL_REQUESTS_ENABLED ? 'notification_accepting_disabled' : null;
+  return { ...base, canSend: !reason, reason };
+}
+export async function requestOriginalImageFeishu(db: Db, actorId: string, taskId: string) {
+  const view = await readOriginalImageFeishuStatus(db, actorId, taskId);
+  if (view.state !== 'not_requested') return view;
+  if (!view.canSend) throw new VideoFeishuError(view.reason || 'notification_unavailable', 409);
+  const current = await authorizedImageFeishuTask(db, actorId, taskId), identity = videoFeishuBinding(current.actor);
+  if (!identity) throw new VideoFeishuError('binding_unavailable', 409);
+  const meta = newOriginalImageFeishuEvent(taskId, actorId, identity);
+  try { await db.notification.create({ data: { id: meta.eventId, type: IMAGE_FEISHU_ORIGINAL_TYPE, channel: 'feishu', status: 'pending',
+    target_user_id: actorId, actor_user_id: actorId, title: '原图', body: null, metadata_json: JSON.stringify(meta) } }); }
+  catch (error) { if ((error as { code?: string }).code !== 'P2002') throw error; }
+  return readOriginalImageFeishuStatus(db, actorId, taskId);
+}
+export async function changeOriginalImageFeishu(db: Db, actorId: string, taskId: string, action: 'cancel' | 'retry') {
+  const current = await authorizedImageFeishuTask(db, actorId, taskId);
+  const row = await db.notification.findUnique({ where: { id: originalImageFeishuUuid(taskId, 'event') } });
+  const meta = row && parseOriginalImageFeishuEvent(row.metadata_json);
+  if (!row || !meta || row.type !== IMAGE_FEISHU_ORIGINAL_TYPE || row.channel !== 'feishu' || row.target_user_id !== actorId || meta.actorId !== actorId) throw new VideoFeishuError('notification_unavailable', 404);
+  if (action === 'cancel') {
+    if (!originalImageFeishuCanCancel(meta)) throw new VideoFeishuError('notification_cannot_cancel', 409);
+    meta.state = 'cancelled'; meta.reason = 'cancelled';
+  } else {
+    if (!originalImageFeishuCanRetry(meta)) throw new VideoFeishuError('notification_cannot_retry', 409);
+    if (videoFeishuBinding(current.actor) !== meta.identity) throw new VideoFeishuError('binding_changed', 409);
+    meta.state = 'pending'; meta.reason = null; meta.preparations = 0; meta.nextAttemptAt = Date.now(); meta.message.state = 'pending';
+  }
+  if ((await db.notification.updateMany({ where: { id: row.id, type: IMAGE_FEISHU_ORIGINAL_TYPE, status: row.status, metadata_json: row.metadata_json },
+    data: { status: action === 'cancel' ? 'failed' : 'pending', error_message: action === 'cancel' ? 'image_feishu_cancelled' : null, metadata_json: JSON.stringify(meta) } })).count !== 1) throw new VideoFeishuError('notification_changed', 409);
+  return readOriginalImageFeishuStatus(db, actorId, taskId);
 }
