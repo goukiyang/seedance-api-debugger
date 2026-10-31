@@ -1,10 +1,20 @@
 # V1.2 剩余模块落地 Todo
 
+## FS/GCTX/CHAR-SOURCE 联合修复当前回执（2026-10-31）
+
+已部署 **v0.121.6**，运行源`849c895d53afba3b1dcf8ff6961d48cea66ce941`，BUILD`f1dkMKWqw0791lMH8lbS-`；相容guard`d0708bd1ee0e4a64b038a344212ae2ad210ad98c`，BUILD`KSIDStgsHKXwxox5kSTlA`。飞书轻反馈/真实后缀/模块名链接、global编辑双pending/按需历史/发布布局、Lab工具归属及分页统计/新报价上下文隔离同批交付。完整类型/双Next/匹配工程、11writer自然排空/一致备份/6启动门/7服务4timer/公网字节有证；**实际功能待用户手验**。无收费生成、工程试发、历史补发或独审。
+
+[飞书原单](todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)｜[global原单](todo/2026-10-31-global-context-release-dialog.md)｜[Lab来源](todo/2026-10-31-character-lab-source-isolation.md)。私有回执沿正式根联合主题attempt02/deployment-result.json；原四图恢复保持，**medium/4K供应商返2048原因仍待核**。文档HEAD不当运行源；回退只用本批相容guard、不回业务数据。原前置和v0.121.5发布记录保留为历史。
+
+
+## GCTX-EDIT01 / GCTX-PERF01 / REL-LAYOUT01 上下文与发布弹窗（2026-10-31）
+
+已部署v0.121.6，待用户手验。[工单R02](todo/2026-10-31-global-context-release-dialog.md)§10–11：后台草稿不锁编辑/关闭，草稿未知不阻独立保存原文，旧草稿不抢新正文；按需历史、复现写锁错误恢复和发布弹窗专属布局已交付。17组件/13真实加密SQLite路由、完整类型/双Next有证，A01–A12仍手验；历史两500唯一内部原因未证实。
+
+
 ## FS-UX01 / FS-EXT01 飞书发送体验与附件后缀前置（2026-10-31）
 
-两个问题必要前置已完成，**待实施，未修改业务代码或部署**。[正式前置工单v1.0.0/R01](todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)已核v0.121.5源码/运行基线：点击自动展开管理及旧通知、错误主题变量白底、上传两个名称硬编码“原图”导致无后缀。现有transport隔离复现与官方SDK字段有证，原两图已归档。
-
-已定：一键发送/真实短反馈，详情与旧通知按需；真实MIME对应“原图.png/jpg/…”；v1/v2原事件与带后缀冻结名称兼容，只在全无外部起点时原号接续，未知及已发不重传，实施须有新reader相容回退。现有五键、原图/权限/费用不改。中画质4K供应商待核继续原单，不冒本轮已修。阶段授权仅前置，执行交接及手验/回退标准已入原单。
+原R01前置后用户明确一起落地，现已部署v0.121.6，待用户手验。[工单R02](todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)§10–11记录轻反馈/按需详情、真实原图后缀、自动/主动模块名链接和旧新读者兼容。明确拒绝上传后可沿原号显式重试并保attempts加正确后缀；已受理/未知不重传。原前置历史与私有附件保持，当前完整回执沿联合主题attempt02。
 
 ## IMG-COMP01 当前交付与标签追补（2026-10-31）
 

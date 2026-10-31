@@ -1,8 +1,15 @@
 # 项目资料索引
 
+## FS/GCTX/CHAR-SOURCE 联合修复当前回执（2026-10-31）
+
+已部署 **v0.121.6**，运行源`849c895d53afba3b1dcf8ff6961d48cea66ce941`，BUILD`f1dkMKWqw0791lMH8lbS-`；相容guard`d0708bd1ee0e4a64b038a344212ae2ad210ad98c`，BUILD`KSIDStgsHKXwxox5kSTlA`。飞书轻反馈/真实后缀/模块名链接、global编辑双pending/按需历史/发布布局、Lab工具归属及分页统计/新报价上下文隔离同批交付。完整类型/双Next/匹配工程、11writer自然排空/一致备份/6启动门/7服务4timer/公网字节有证；**实际功能待用户手验**。无收费生成、工程试发、历史补发或独审。
+
+[飞书原单](../../tasks/todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)｜[global原单](../../tasks/todo/2026-10-31-global-context-release-dialog.md)｜[Lab来源](../../tasks/todo/2026-10-31-character-lab-source-isolation.md)。私有回执沿正式根联合主题attempt02/deployment-result.json；原四图恢复保持，**medium/4K供应商返2048原因仍待核**。文档HEAD不当运行源；回退只用本批相容guard、不回业务数据。原前置和v0.121.5发布记录保留为历史。
+
+
 ## FS-UX01 / FS-EXT01 两项飞书前置（2026-10-31）
 
-来源：用户两张原始反馈截图与“两个问题，把前置处理完”。[工单](../../tasks/todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)已完成根因、交互、真实格式/文件名合同、历史兼容、修改地图与相容回退设计，待实施。截图与隔离元数据复现/官方SDK引用保正式根`docs/materials/2026-10-31-image-feishu-send-ux-preflight/`，两原PNG可读且复制字节一致，不公开附件。不含业务代码/生产修改、真实外发或收费测试；设计完成不冒手验达标。
+原R01前置后用户明确一起落地，现已部署v0.121.6，待用户手验。[工单R02](../../tasks/todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)§10–11记录轻反馈/按需详情、真实原图后缀、自动/主动模块名链接和旧新读者兼容。明确拒绝上传后可沿原号显式重试并保attempts加正确后缀；已受理/未知不重传。原前置历史与私有附件保持，当前完整回执沿联合主题attempt02。
 
 ## IMG-COMP01 当前交付与标签追补（2026-10-31）
 

@@ -1,8 +1,8 @@
 # 飞书原图发送体验与附件后缀修复前置工单
 
-- 版本：v1.0.0 / R01
+- 版本：v1.1.0 / R02
 - 日期：2026-10-31（America/Los_Angeles）
-- 状态：**两个问题的必要前置已完成，待后续实施指令；未修改业务代码、未部署。**
+- 当前状态：用户后续明确一起落地，v0.121.6已部署，待用户手验；当前授权与实现见§10，发布见§11。
 - 项目：video-api-debugger
 - 正式根：`/Volumes/Data/Projects/video-api-debugger`
 - 当前工作区：`/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/result-card-layout/video-api-debugger`
@@ -15,7 +15,7 @@
 1. **FS-UX01**：点击发送自动展开大块说明、旧通知和多组核对按钮，白底又与暗色工作台不一致。
 2. **FS-EXT01**：14MB原图以没有后缀的“原图”文件发送，飞书显示未知类型。
 
-用户最新要求为“两个问题，把前置处理完”。本轮交付调查、已定方案、修改地图、兼容与验收计划；不进入实施、生产写入或消息发送。
+R01前置时用户要求为“两个问题，把前置处理完”，当时仅交调查、方案和实施计划；后续用户已明确一起落地并追加真实模块名链接，当前按§10实施。原前置不进入实施的阶段保留为历史。
 
 实查运行源为`6a0d74f2b5782a52b797cdf99434bb48e15e7bf4` / v0.121.5，BUILD `KKbtPluYPhxXmeN8BjQKp`，代码记录HEAD为`07a5e6f6ebbdd5a7a4c3d4ec3343c909162f34f6`。实施时重新核对实际运行源和工作区差异，不将本次历史commit硬编码为未来起点。
 
@@ -170,3 +170,25 @@
 附件：正式根docs/materials/2026-10-31-image-feishu-send-ux-preflight/内两原PNG及三份前置证据；用途见工单§8。
 当前仅获前置阶段授权；接到后续实施指令后执行。
 ```
+
+
+## 10. 本轮一起落地授权与实施（2026-10-31）
+
+用户后续明确要求与通用上下文、发布弹窗及角色参考图隔离一起实施，替代§9当时的仅前置阶段，历史原文保留。FS-UX01/FS-EXT01沿本单实现；用户追加自动图片通知与主动原图发送下方显示可点击真实模块名，角色输出显示“角色参考图工作台”回独立工具。名称/目标按服务器原task归属与可信来源冻结，缺失模块不冒可访问，旧sent/unknown不重开或改消息。
+
+新自动producer使用metadata V3，保旧V1/V2严格读者；新主动metadata V2冻结真实后缀/导航/模板/hash。图片card复用底部模块名链接；大原图完整附件使用通用“原图.png/jpg/webp/avif/tiff”，紧随仅模块名post链接，file与post有独立UUID/回执，file已发只能接续入口，部分完成如实显示，未知只查原记录。无原文件名、长任务号或裸链接；无压缩或重新生成。
+
+历史兼容实证修正：零外部起点旧pending仍仅同lease/CAS/原号升级。旧V1明确上传被拒绝且无key/无message起点/无ambiguous，用户沿原号显式retry的特例也可按已证明未受理升级V2，保原attempts再以真实后缀上传；不是宽泛自动迁移failed/sent/unknown，也不重传已接受文件。原“必须外部attempts=0”是前置保守方案，本次以真实状态机和用户修后缀目标收敛此特例。
+
+本批无schema/历史批改，程序guard须保auto1/2/3、manual1/2读者及已受理消费，并同时关闭新自动选择/新手动受理。旧v0.121.5不能独立充当新格式回退。状态：v0.121.6已部署，待用户手验；实际回执见§11及正式资料`docs/materials/2026-10-31-feishu-global-character/implementation/`。功能待用户手验，无真实工程试发或历史补发。
+
+
+## 11. v0.121.6实际交付与待手验
+
+已部署，待用户手动验收。main `849c895d53afba3b1dcf8ff6961d48cea66ce941` / BUILD `f1dkMKWqw0791lMH8lbS-`；相容guard `d0708bd1ee0e4a64b038a344212ae2ad210ad98c` / v0.121.6+feishu-global-character-guard.1 / BUILD `KSIDStgsHKXwxox5kSTlA`。run `51812274-20b3-46a2-9671-08ca234ecd92`，19:03:45Z开始、19:04:13.975907Z公网收口。
+
+本单与另外两包同批交付：飞书轻反馈/真实后缀/自动V3与手动V2模块名链接、global双pending/旧草稿不抢新正文/按需历史/发布专属布局、Lab历史3条可信来源在分页count前隔离/新报价创建无模板上下文继承/工具输出保共用发送。原件、旧费用、原号与未知保护保留。
+
+匹配工程与修后Linux完整tsc、main/guard两完整Next含类型lint通过；首构建仅工程夹具UUID类型推断失败，补一行:string后重绑当前源，原失败及工程原时间保留。179个原生依赖逐字未变复用原证；11writer自然排空、配置与SQLite一致备份、6启动门、7服务4timer及三公网JS字节一致。guard只关两个新飞书入口，保所有旧新已受理消费，程序回退不回业务数据。首发迁移专用fullRelease不适用本次无schema，未运行/未冒formal准入PASS，沿最近v0.121.5实际常规fixed pair链。
+
+完整私有回执：正式根`docs/materials/2026-10-31-feishu-global-character/implementation/attempt02/deployment-result.json`、`guard-restore.md`。无浏览器/收费生成/真实工程试发或历史补发/真实私密正文保存/独审。历史两次500缺唯一内部原号关联；已修复隔离复现的P1008错误与恢复提示，不称历史全部同因。原medium/4K供应商返2048原因继续待核，旧四请求证据保持。
