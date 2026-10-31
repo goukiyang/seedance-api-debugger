@@ -109,7 +109,7 @@
   .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
   .card:has([aria-busy="true"]) [data-result-secondary], .card:has([data-busy="true"]) [data-result-secondary],
   .card [data-result-secondary][data-has-status-detail],
-  .card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"]) { opacity: 1; pointer-events: auto; }
+  .card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"], button[data-state="sent_navigation_unknown"], button[data-state="sent_navigation_failed"]) { opacity: 1; pointer-events: auto; }
 }
 .actions button, .mediaActions button, .pagination button, .notice button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
 .actions button:hover, .mediaActions button:hover, .pagination button:hover { background: #303c37; }

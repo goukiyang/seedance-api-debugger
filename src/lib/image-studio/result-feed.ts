@@ -10,6 +10,7 @@ import { readableStudioPins, studioPinScope, studioPinState, StudioPinError } fr
 import { STUDIO_RESULT_FEED, type SharedStudioPinnedImage } from './result-pin-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { likedStudioTaskPage } from './liked-task-page';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 type Cursor = { v: 1; user: string; module: string; liked: boolean; epoch: string; pin: number; task: string | null };
 const fingerprint = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -26,6 +27,7 @@ function readCursor(value: string | undefined, scope: Omit<Cursor, 'v' | 'pin' |
 /** Explicit v1 opt-in only; legacy task clients never receive another owner's task or output DTO. */
 export async function listStudioResultFeed(user: SessionUser, moduleId: string, cursor?: string, liked = false) {
   if (!validStudioModuleId(moduleId, user.id)) throw new StudioPinError('模块编号无效');
+  const excludedToolBatches = await characterLabTaskBatchIds(user.id, prisma);
   const scope = await studioPinScope(user, moduleId);
   const readable = scope ? await readableStudioPins(user, scope.presetId) : null;
   const allPins = readable?.pins || [];
@@ -41,14 +43,15 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
   if (state.pin > pins.length || state.task && state.pin < pins.length) throw new StudioPinError('结果目录已变化，请刷新目录', 409);
   const ownPinIds = pins.filter(p => p.ownerId === user.id).map(p => p.taskId);
   const where: Prisma.ImageStudioTaskWhereInput = {
-    AND: [studioTemplateTaskWhere(user.id, moduleId), ...(liked ? [studioOutputTaskWhere] : [])], id: { notIn: ownPinIds },
+    AND: [studioTemplateTaskWhere(user.id, moduleId, false, excludedToolBatches), ...(liked ? [studioOutputTaskWhere] : [])], id: { notIn: ownPinIds },
   };
   if (!liked && state.task && !await prisma.imageStudioTask.findFirst({ where: { ...where, id: state.task }, select: { id: true } })) {
     throw new StudioPinError('结果目录已变化，请刷新目录', 409);
   }
   const pagePins = pins.slice(state.pin, state.pin + 24);
   const capacity = 24 - pagePins.length;
-  const likedPage = liked ? await likedStudioTaskPage(prisma, user.id, moduleId, state.task || undefined, capacity > 0 ? capacity + 1 : 0, ownPinIds) : null;
+  const likedPage = liked ? await likedStudioTaskPage(prisma, user.id, moduleId, state.task || undefined,
+    capacity > 0 ? capacity + 1 : 0, ownPinIds, false, excludedToolBatches) : null;
   if (likedPage && !likedPage.valid) throw new StudioPinError('结果目录已变化，请刷新目录', 409);
   const ownTotal = likedPage?.total ?? await prisma.imageStudioTask.count({ where });
   const ordinary = likedPage ? likedPage.rows : capacity > 0 ? await prisma.imageStudioTask.findMany({ where,

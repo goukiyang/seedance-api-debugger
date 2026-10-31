@@ -84,33 +84,36 @@ assert.equal(issueLabel({ width: 2048, height: 2048, format: 'png' }, { width: 2
 assert.equal(issueLabel({ width: 2048, height: 2048, format: 'jpeg' }, { width: 2048, height: 2048, format: 'png' }), '实际规格');
 assert.equal(issueLabel({ width: 2048, height: 2048 }, { width: null, height: null }), '实际规格');
 
-const Send = Symbol('send');
+const Send = Symbol('send'), Check = Symbol('check'), Alert = Symbol('alert');
 const Feishu = load(read('src/components/image-studio/ImageFeishuStatus.tsx'), {
   'react-dom': { createPortal: (value: unknown) => value },
   '@radix-ui/react-popper': { Root: Symbol('root'), Anchor: Symbol('anchor'), Content: Symbol('content') },
-  'lucide-react': { Send, X: Symbol('close') },
+  'lucide-react': { Send, Check, CircleAlert: Alert, LoaderCircle: Symbol('loader'), X: Symbol('close') },
   '@/components/useDialogDismiss': { useDialogDismiss() {} },
   '@/lib/context/AppSessionContext': { useAppSession: () => ({ user: { id: 'fixture-user' }, hasLoadedUser: true, sessionChanged: false }) },
   '@/lib/auth/client-session-boundary': { isClientSessionBlocked: () => false },
   '@/lib/video/feishu-errors': { videoFeishuErrorText: () => 'fixture error' },
 }).ImageFeishuStatus;
-function deliveryLabel(originalState: string, automaticState: string, expected: string) {
+function deliveryLabel(originalState: string, automaticState: string, expected: string, presentationLabel?: string) {
   const initial = { version: 1, state: automaticState, canCancel: false, canRetry: false, imageSent: false, explanationSent: false, mode: 'link',
     original: { version: 2, state: originalState, canSend: originalState === 'not_requested', canCancel: false, canRetry: false,
       originalSent: originalState === 'sent', mode: originalState === 'sent' ? 'file' : null, fileSize: null, maxBytes: 30000000,
       source: originalState === 'not_requested' ? null : 'manual', reason: null } };
-  const dom = render(Feishu, { owner: 'fixture-user', taskId: 'fixture-task', initial });
+  const dom = render(Feishu, { owner: 'fixture-user', taskId: 'fixture-task', initial, presentationLabel });
   const button = nodes(dom).find(node => node.type === 'button')!;
   assert.equal(button.props['aria-label'], expected);
   assert.equal(button.props.title, expected);
-  assert.equal(button.props['data-state'], 'failed', 'the automatic warning remains discoverable without replacing the original action label');
-  assert.ok(nodes(button).some(node => node.type === Send));
+  assert.equal(button.props['data-state'], originalState, 'the trigger only expresses the original operation');
+  assert.ok(nodes(button).some(node => node.type === (originalState === 'sent' ? Check : originalState === 'unknown' ? Alert : Send)));
+  assert.ok(!nodes(dom).some(node => node.props.role === 'dialog'), 'old notification warnings never open management on initial render');
   const hiddenLabel = byClass(button, 'label'); assert.equal(hiddenLabel.props['aria-hidden'], 'true');
   assert.ok(!String(hiddenLabel.props.children).includes('飞书通知未完成'));
 }
-deliveryLabel('sent', 'failed', '原图已发送；生成通知待核对');
-deliveryLabel('not_requested', 'failed', '原图发送到飞书；生成通知待核对');
-deliveryLabel('unknown', 'unknown', '原图发送待核对；生成通知待核对');
+deliveryLabel('sent', 'failed', '原图已发送');
+deliveryLabel('not_requested', 'failed', '发送原图到飞书');
+deliveryLabel('unknown', 'unknown', '原图发送待核对');
+deliveryLabel('not_requested', 'failed', '发送候选整图到飞书', '候选整图');
+deliveryLabel('sent', 'failed', '当前生成原图 · 原图已发送', '当前生成原图');
 const deliveryCss = postcss.parse(read('src/components/image-studio/ImageFeishuStatus.module.css'));
 let deliveryLabelHidden = false;
 deliveryCss.walkRules(rule => { if (rule.selectors.includes('.label')) rule.walkDecls('display', declaration => { deliveryLabelHidden ||= declaration.value === 'none'; }); });
@@ -197,7 +200,7 @@ const issueLayout = declarations('.pendingStatusIssue')[0];
 assert.equal(issueLayout.position, 'absolute'); assert.equal(issueLayout.top, 'calc(100% + 8px)');
 const mediaLayout = declarations('.mediaActions')[0];
 assert.equal(mediaLayout['flex-wrap'], 'wrap'); assert.equal(mediaLayout['overflow-x'], 'hidden');
-const visibleDeliveryFailure = declarations('.card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"])')[0];
+const visibleDeliveryFailure = declarations('.card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"], button[data-state="sent_navigation_unknown"], button[data-state="sent_navigation_failed"])')[0];
 assert.equal(visibleDeliveryFailure.opacity, '1'); assert.equal(visibleDeliveryFailure['pointer-events'], 'auto');
 const square = declarations('.mediaActions[data-cover-context-delete] button')[0];
 assert.equal(square.width, '35px'); assert.equal(square.flex, '0 0 35px');
@@ -207,4 +210,4 @@ assert.equal(icon.width, '17.5px'); assert.equal(icon.height, '17.5px');
 assert.ok(declarations('.mediaActions[data-cover-context-delete] button').some(rule => rule.width === '44px' && rule['flex-basis'] === '44px'),
   'touch actions, including delivery, keep the shared 44px target');
 
-process.stdout.write('generated image result layout engineering passed (DOM and parsed CSS contracts; original delivery label cases: 3)\n');
+process.stdout.write('generated image result layout engineering passed (DOM and parsed CSS contracts; original delivery label cases: 5)\n');

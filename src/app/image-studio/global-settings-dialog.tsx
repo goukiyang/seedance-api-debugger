@@ -38,24 +38,27 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     ? editor.settings?.modelReady?.[defaults.model] ?? editor.settings?.providerReady
     : undefined;
   usePageExitRisk({ unsaved: ratioEditing ? ['图片默认比例'] : [],
-    busy: open && (ratios.busy || batch.busy) ? ['图片设置正在保存或应用'] : [], revision: String(ratioEditing) });
+    busy: open && (ratios.busy || batch.writing) ? ['图片设置正在保存或应用'] : [], revision: String(ratioEditing) });
   useEffect(() => {
-    if (open) { dialog.current?.showModal(); void editor.controller.load(); }
+    if (open) {
+      dialog.current?.showModal();
+      if (!editor.controller.getSnapshot().settings) void editor.controller.load();
+    }
     else dialog.current?.close();
   }, [open, editor.controller]);
   const close = async () => {
-    if (canEdit && (editor.saving || ratios.busy || batch.busy)) return;
+    if (canEdit && (editor.saving || ratios.busy || batch.writing)) return;
     if (canEdit && ratioEditing && !(await confirm('比例编辑尚未完成，关闭会丢失这部分输入。确定关闭吗？', { title: '关闭编辑', confirmLabel: '关闭编辑' }))) return;
     if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
     onClose();
   };
   useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: close });
   const reload = async () => {
-    if (!canEdit || editor.loading || editor.saving || batch.busy) return;
+    if (!canEdit || editor.loading || editor.saving || batch.writing) return;
     if (!editor.dirty || (await confirm('重新读取会替换未保存的通用设置，是否继续？', { title: '重新读取', confirmLabel: '放弃修改并读取' }))) void editor.controller.load(true);
   };
   const save = async () => {
-    if (!canEdit || saveLock.current || editor.saving || editor.loading || editor.conflicts.length || ratios.busy || ratioEditing || batch.busy) return;
+    if (!canEdit || saveLock.current || editor.saving || editor.loading || editor.conflicts.length || ratios.busy || ratioEditing || batch.writing || batch.scope && batch.busy) return;
     saveLock.current = true;
     try {
       if (beforePrivateClose.current && !await beforePrivateClose.current()) return;
@@ -77,8 +80,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
     return <div key={item.field} role="status" className={styles.error}>
       <span>{label}已在其他页面更新，你的修改已保留。</span>
       <details><summary>查看已保存值</summary><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{String(item.saved ?? '未设置')}</p></details>
-      <button type="button" disabled={editor.saving || batch.busy} onClick={() => editor.controller.resolveConflict(item.field, 'draft')}>保留我的修改</button>
-      <button type="button" disabled={editor.saving || batch.busy} onClick={() => editor.controller.resolveConflict(item.field, 'saved')}>采用已保存值</button>
+      <button type="button" disabled={editor.saving || batch.writing} onClick={() => editor.controller.resolveConflict(item.field, 'draft')}>保留我的修改</button>
+      <button type="button" disabled={editor.saving || batch.writing} onClick={() => editor.controller.resolveConflict(item.field, 'saved')}>采用已保存值</button>
     </div>;
   });
   return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`}>
@@ -88,7 +91,10 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
       {editor.settings?.privateContext ? <PrivateDefinitionEditor key={ownerId} userId={ownerId} moduleId="gpt_image_studio_v1"
         dialog={dialog} beforeClose={beforePrivateClose} blocked={!open} contextOnly label="通用上下文"
         endpoint="/api/image-studio/settings" canRead={editor.settings.canReadPrivatePrompt === true}
-        needsIdentity={editor.settings.requiresIdentityVerification === true} onSaved={() => { void editor.controller.load(); }} /> : <>
+        needsIdentity={editor.settings.requiresIdentityVerification === true} onSaved={(_, keepEditing) => {
+          void editor.controller.load();
+          if (!keepEditing) onClose();
+        }} /> : <>
       <label className={styles.label} htmlFor="studio-context">通用上下文</label>
       <ContextClipboardActions value={editor.draft.context} textareaRef={contextInput} onPaste={value => { if (canEdit) editor.controller.editContext(value); }} maxLength={20000} disabled={!canEdit || editor.loading || editor.saving || !open} />
       <textarea ref={contextInput} id="studio-context" rows={12} maxLength={20000} disabled={!canEdit || editor.loading}
@@ -154,6 +160,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           <label><input type="radio" name="studio-resolution-scope" checked={!batch.scope} disabled={batch.busy} onChange={() => batch.setScope(false)} />仅新建模板</label>
           <label><input type="radio" name="studio-resolution-scope" checked={batch.scope} disabled={batch.busy} onChange={() => batch.setScope(true)} />新建模板 + 我的已有模板</label>
         </fieldset>
+        <button type="button" disabled={batch.busy} onClick={() => void batch.loadHistory()}>{batch.historyRequested ? '重新读取分辨率操作记录' : '查看分辨率操作记录'}</button>
         <ResolutionApplyPanel batch={batch} onContinue={() => { void (async () => { if (await batch.continue()) onClose(); })(); }} onRestore={() => { void batch.restore(); }} />
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField}><strong>生成张数</strong>
@@ -180,7 +187,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
           onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
       </label>)}
       {conflictFields('prices')}
-      <button type="button" className={styles.primary} disabled={!canEdit || editor.conflicts.length > 0 || (batch.scope ? !batch.canCommit : !editor.dirty) || editor.loading || editor.saving || batch.busy || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.busy ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
+      <button type="button" className={styles.primary} disabled={!canEdit || editor.conflicts.length > 0 || (batch.scope ? !batch.canCommit || batch.busy : !editor.dirty) || editor.loading || editor.saving || batch.writing || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.writing ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>
     {editor.error && <div role="alert" className={styles.error}>{editor.error}

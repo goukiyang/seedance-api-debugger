@@ -22,6 +22,7 @@ import { observeOperation } from '@/lib/performance/server-operations';
 import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -73,7 +74,10 @@ export async function GET(request: NextRequest) {
       const ids = Array.from(new Set(params.getAll('id')));
       if (ids.length > 24 || ids.some(id => !/^[a-zA-Z0-9-]{1,120}$/.test(id))
         || moduleId && !validStudioModuleId(moduleId, user.id)) throw new StudioError('记录查询无效');
-      let rows = await prisma.imageStudioTask.findMany({ where: { AND: [studioTemplateTaskWhere(user.id, moduleId), { id: { in: ids } }] } });
+      const excludedToolBatches = await characterLabTaskBatchIds(user.id, prisma);
+      let rows = await prisma.imageStudioTask.findMany({ where: { AND: [
+        studioTemplateTaskWhere(user.id, moduleId, false, excludedToolBatches), { id: { in: ids } },
+      ] } });
       if (params.get('liked') === '1') {
         const marks = await prisma.contentReaction.findMany({ where: { user_id: user.id,
           content_key: { in: rows.flatMap(row => row.asset_id ? [`asset:${row.asset_id}`] : []) },

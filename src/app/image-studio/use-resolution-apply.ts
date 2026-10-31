@@ -16,6 +16,8 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
   const [value, setValue] = useState<ResolutionReceipt | null>(null);
   const [history, setHistory] = useState<ResolutionOperation[]>([]);
   const [busy, setBusy] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const [historyRequested, setHistoryRequested] = useState(false);
   const [error, setError] = useState('');
   const sequence = useRef(0);
   const scopeRef = useRef({ ownerId, open });
@@ -46,13 +48,13 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
     current.current = receipt; setValue(receipt); remember(receipt.operation.requestId);
     if (receipt.deltas?.length) onDeltas(receipt.deltas);
   }
-  async function exclusive(action: () => Promise<void>) {
+  async function exclusive(action: () => Promise<void>, write = false) {
     if (lock.current) return;
-    lock.current = true; setBusy(true); setError(''); stop.current = false;
+    lock.current = true; setBusy(true); setWriting(write); setError(''); stop.current = false;
     const token = sequence.current;
     try { await action(); }
     catch (cause) { if (token === sequence.current) setError(cause instanceof Error ? cause.message : '结果尚未确认，请查询原操作'); }
-    finally { if (token === sequence.current) { lock.current = false; setBusy(false); } }
+    finally { if (token === sequence.current) { lock.current = false; setBusy(false); setWriting(false); } }
   }
   async function query(id = current.current?.operation.requestId || pendingId.current, cursor = 0) {
     if (!id) return;
@@ -61,21 +63,30 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
   }
   useEffect(() => {
     ++sequence.current; lock.current = false; stop.current = true; current.current = null; prepared.current = null; pendingId.current = '';
-    setScope(false); setValue(null); setHistory([]); setError(''); setBusy(false);
+    setScope(false); setValue(null); setHistory([]); setHistoryRequested(false); setError(''); setBusy(false); setWriting(false);
     if (!open || !canEdit) return;
-    const token = sequence.current;
-    void exclusive(async () => {
-      const list = await request('GET', '', token) as { operations: ResolutionOperation[] };
-      setHistory(list.operations);
-      let id = '';
-      try { id = localStorage.getItem(key) || ''; pendingId.current = id; } catch { /* Read-only history provides the fallback. */ }
-      const active = list.operations.find(item => !terminal.has(item.phase));
-      if (active || list.operations.some(item => item.requestId === id)) await query(active?.requestId || id);
-    });
+    let id = '';
+    try { id = localStorage.getItem(key) || ''; pendingId.current = id; } catch { /* Explicit history remains available. */ }
+    if (id) void exclusive(() => query(id));
     return () => { ++sequence.current; stop.current = true; };
     // Account/open changes reset dangerous scope; reading a receipt never advances it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, ownerId, canEdit]);
+  async function loadHistory() {
+    if (lock.current || !open || !canEdit) return;
+    setHistoryRequested(true);
+    await exclusive(async () => {
+      const list = await request('GET', '') as { operations: ResolutionOperation[] };
+      setHistory(list.operations);
+      const active = list.operations.find(item => !terminal.has(item.phase));
+      if (active && !current.current) await query(active.requestId);
+    });
+  }
+  useEffect(() => {
+    if (scope && !historyRequested && !busy) void loadHistory();
+    // A failed read is retried explicitly, never in a render loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, historyRequested, busy]);
   async function prepare() {
     await exclusive(async () => {
       if (!editor.settings || !editor.draft) throw new Error('请先完整读取设置');
@@ -86,7 +97,7 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
       prepared.current = { settings, excludeIds: getExcluded(), draft: editor.draft };
       const requestId = crypto.randomUUID(); remember(requestId);
       accept(await request('POST', { action: 'prepare', requestId, ...prepared.current, draft: undefined }) as ResolutionReceipt);
-    });
+    }, true);
   }
   async function advance(restoring: boolean) {
     for (let count = 0; count <= 2500; count++) {
@@ -114,24 +125,24 @@ export function useResolutionApply({ open, ownerId, canEdit, editor, getExcluded
       if (receipt.settings) editor.controller.acceptCommitted(receipt.settings as SettingsValue, input.draft);
       await advance(false);
       finished = current.current?.operation.phase === 'complete' && !studioSettingsDirty(editor.controller.getSnapshot());
-    });
+    }, true);
     return finished;
   }
-  return { scope, setScope, value, history, busy, error,
+  return { scope, setScope, value, history, busy, writing, historyRequested, loadHistory, error,
     canCommit: Boolean(!editor.controller.getSnapshot().conflicts.length && prepared.current && editor.draft === prepared.current.draft && value?.operation.phase === 'preview'),
     prepare, commit, query: (id?: string) => exclusive(() => query(id)),
     more: () => exclusive(() => query(undefined, current.current?.nextCursor ?? 0)),
     continue: async () => {
       let finished = false;
-      await exclusive(async () => { await advance(false); finished = current.current?.operation.phase === 'complete' && !studioSettingsDirty(editor.controller.getSnapshot()); });
+      await exclusive(async () => { await advance(false); finished = current.current?.operation.phase === 'complete' && !studioSettingsDirty(editor.controller.getSnapshot()); }, true);
       return finished;
     },
-    restore: () => exclusive(() => advance(true)),
+    restore: () => exclusive(() => advance(true), true),
     stop: () => { stop.current = true; },
     cancel: () => exclusive(async () => {
       const operation = current.current?.operation;
       if (operation) accept(await request('POST', { action: 'cancel', requestId: operation.requestId,
         previewDigest: operation.previewDigest, operationRevision: operation.operationRevision }) as ResolutionReceipt);
-    }),
+    }, true),
   };
 }

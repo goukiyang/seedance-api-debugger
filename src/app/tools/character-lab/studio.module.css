@@ -80,8 +80,9 @@
 .batchList span { font-size: 12px; min-width: 0; }
 .batchList small { display: block; margin-top: 4px; color: var(--lab-muted); font-size: 10px; }
 .canvasColumn { min-width: 0; background: var(--lab-panel); border: 1px solid var(--lab-line); border-radius: 8px; padding: 12px; }
-.canvasHeading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
-.canvasHeading h2 { font-size: 14px; }
+.canvasHeading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+.canvasActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-inline-start: auto; }
+.canvasHeading h2 { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
 .canvasHeading h2 > span { font-weight: 400; color: var(--lab-muted); font-size: 12px; }
 .candidateGrid { display: grid; gap: 10px; }
 .candidate { border: 1px solid var(--lab-line); overflow: hidden; border-radius: 6px; background: var(--lab-bg); min-width: 0; }
