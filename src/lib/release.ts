@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '图片描述与提交恢复修复', outline: [
-  '个人补充与模板提示分别保存，恢复历史设置时保持可编辑',
-  '提交失败显示原请求的真实原因，未知请求可核对后安全结束',
+const notice = { title: '提示词组封面设置', outline: [
+  '新建和编辑提示词组时直接预览、选择或更换封面',
+  '支持拖入和粘贴图片，移除封面保留原素材',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

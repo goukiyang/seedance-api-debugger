@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Copy, FileText, Star, Pencil, Plus, RotateCcw, S
 import { useProductDialog } from '@/components/useProductDialog';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
+import { PromptGroupCoverField } from '@/components/PromptGroupCoverField';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import styles from './studio.module.css';
 import { PrivateDefinitionEditor } from './PrivateDefinitionEditor';
@@ -144,6 +145,8 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
   <dialog ref={editor} className={`${styles.dialog} ${styles.styleDialog}`} aria-label="编辑提示词组">
     {draft && <><header className={styles.header}><h2>{draft.id ? '编辑提示词组' : '新建提示词组'}</h2><button title="关闭" aria-label="关闭编辑" disabled={busy} onClick={() => void closeEditor()}><X size={20} /></button></header>
       <label>名称<input disabled={busy} value={draft.name} maxLength={80} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+      <div className={styles.skillCover}><PromptGroupCoverField assetId={draft.coverAssetId} coverUrl={draft.coverUrl} disabled={busy}
+        onChoose={() => setPicker(true)} onUpload={file => void uploadCover(file)} onRemove={() => setDraft({ ...draft, coverAssetId: null, coverUrl: null })} /></div>
       {draft.privatePrompt ? (draft.id && <PrivateDefinitionEditor userId={userId} moduleId={draft.id} dialog={editor}
         blocked={Boolean(disabled)} canRead={draft.canReadPrivatePrompt === true} needsIdentity={draft.requiresIdentityVerification === true}
         endpoint="/api/image-studio/skills" contextOnly label="提示词" maxLength={8000} allowEmpty={false}
@@ -155,7 +158,6 @@ export const StudioSkills = forwardRef<StudioSkillsHandle, { userId: string; sel
           const persisted = groups.find(group => group.id === draft.id);
           if (persisted) onUpdated?.({ ...persisted, revision });
         }} />) : <label>提示词<textarea disabled={busy} value={draft.prompt || ''} maxLength={8000} rows={8} onChange={event => setDraft({ ...draft, prompt: event.target.value })} /></label>}
-      <div className={styles.skillCover} tabIndex={0} aria-label="封面，仅展示" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void uploadCover(event.dataTransfer.files[0]); }} onPaste={event => { const file = Array.from(event.clipboardData.files).find(item => item.type.startsWith('image/')); if (file) { event.preventDefault(); void uploadCover(file); } }}><button onClick={() => setPicker(true)} disabled={busy}><Plus size={16} />封面<span>仅展示</span></button>{draft.coverUrl && <img src={draft.coverUrl} alt="封面" width={64} height={64} />}{draft.coverAssetId && <button title="移除封面" aria-label="移除封面" disabled={busy} onClick={() => setDraft({ ...draft, coverAssetId: null, coverUrl: null })}><X size={16} /></button>}</div>
       {phase === 'uploading' && busy && <p role="status">封面正在上传，文字尚未保存</p>}{error && <p role="alert" className={styles.error}>{error}</p>}<button className={styles.primary} disabled={busy || (!draft.privatePrompt && !draft.prompt?.trim())} onClick={() => void save()}><Save size={16} />{busy && phase === 'saving' ? '保存中…' : '保存'}</button>
     </>}
   </dialog>

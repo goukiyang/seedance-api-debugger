@@ -11,6 +11,7 @@ import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 import { useProductDialog } from '@/components/useProductDialog';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ResourceLibraryPicker, type ResourceLibraryPickerProps } from '@/components/ResourceLibraryPicker';
+import { PromptGroupCoverField } from '@/components/PromptGroupCoverField';
 import { VIDEO_GROUP_LIMIT, parseVideoPromptGroupRefs, reorderVideoPromptGroupPrefix, type VideoPromptGroupRef, type VideoPromptGroupSummary } from '@/lib/video/prompt-groups';
 import styles from './PromptGroupSelection.module.css';
 
@@ -127,6 +128,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
   const [fields, setFields] = useState<EditorFields>(empty), [revision, setRevision] = useState(0), [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [pending, setPending] = useState<string | null>(() => retainedRequests(receiptKey).pending);
   const [conflict, setConflict] = useState(false), [coverOpen, setCoverOpen] = useState(false);
+  const [savedCover, setSavedCover] = useState<{ assetId: string | null; url: string | null }>({ assetId: null, url: null });
   const [draftRevision, setDraftRevision] = useState(0), [durable, setDurable] = useState('');
   const [draftPending, setDraftPending] = useState<string | null>(() => retainedRequests(receiptKey).draftPending);
   const [latestView, setLatestView] = useState<EditorFields | null>(null), [readFailed, setReadFailed] = useState(false);
@@ -155,6 +157,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
         body: data.body, coverAssetId: data.coverAssetId, shared: data.shared, disabled: data.disabled } : source ? { name: `${source.name.slice(0, 77)} 副本`, description: source.description, conditions: source.conditions,
           body: source.body, coverAssetId: source.coverAssetId, shared: false, disabled: false, copyFrom: item.copyFrom } : empty;
       initial.current = JSON.stringify(value); setRevision(data.revision || 0); setSourceVersion(data.versionId || item.copyFrom?.versionId || item.versionId);
+      setSavedCover({ assetId: value.coverAssetId, url: (source || data).coverUrl || null });
       let restored = value;
       if (data.draft?.values) {
         restored = { ...value, ...JSON.parse(data.draft.values.metadata), body: data.draft.values.body };
@@ -186,6 +189,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
     return () => window.clearTimeout(timer);
   }, [open, loading, readFailed, conflict, draftPaused, pending, draftPending, busy, serialized, durable, editorId, draftRevision, revision]); // eslint-disable-line react-hooks/exhaustive-deps
   const close = async () => {
+    if (busy) { setNotice('当前操作尚未完成，编辑仍保留。'); return; }
     if (pending || draftPending) { setNotice('请先核对原保存，当前编辑仍保留。'); return; }
     if (serialized !== initial.current && serialized !== durable && !await confirm('当前编辑尚未可靠保存，关闭会丢失这次修改。', { title: '尚未保存', confirmLabel: '关闭' })) return;
     onClose();
@@ -208,6 +212,20 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
       if (error && typeof error === 'object' && 'status' in error && Number(error.status) >= 400 && Number(error.status) < 500) { setPending(null); setDraftPaused(true); setConflict(Number(error.status) === 409); }
       setNotice(error instanceof Error ? error.message : '保存结果待确认，请核对原保存');
     }
+    finally { if (generation === sequence.current) setBusy(false); }
+  };
+  const uploadCover = async (file: File) => {
+    if (!onUploadFile || busy || pending || draftPending || conflict) return;
+    if (!file.type.startsWith('image/')) { setNotice('请选择图片封面'); return; }
+    const generation = sequence.current;
+    setBusy(true); setNotice('封面正在上传，提示词组尚未保存。');
+    try {
+      const asset = await onUploadFile(file);
+      if (generation !== sequence.current) return;
+      const assetId = typeof asset === 'string' ? asset : asset.id;
+      if (!assetId) throw new Error('封面上传尚未确认，当前编辑保留。');
+      setFields(current => ({ ...current, coverAssetId: assetId })); setNotice('');
+    } catch (cause) { if (generation === sequence.current) setNotice(cause instanceof Error ? cause.message : '封面上传尚未完成，当前编辑保留。'); }
     finally { if (generation === sequence.current) setBusy(false); }
   };
   const remove = async (confirmed = false) => {
@@ -261,11 +279,15 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
           <button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy || loading || readFailed || conflict || fields.disabled || !fields.name.trim() || !fields.body.trim()} onClick={() => void save(true)}>{useLabel}</button></>}</div>
   </>}>{loading ? <p role="status">正在读取…</p> : readFailed ? <p role="status">完整内容读取失败，未开放空稿保存。<button type="button" className={styles.button} onClick={() => setReload(v => v + 1)}><RefreshCw size={16} />重新读取</button></p> : <fieldset className={styles.form} disabled={Boolean(pending)}>
     <label>名称<input maxLength={80} value={fields.name} onChange={e => setFields(v => ({ ...v, name: e.target.value }))} /></label>
+    <PromptGroupCoverField assetId={fields.coverAssetId}
+      coverUrl={fields.coverAssetId ? fields.coverAssetId === savedCover.assetId && savedCover.url ? savedCover.url : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${fields.coverAssetId}`)}&variant=thumbnail` : null}
+      disabled={!onUploadFile || busy || Boolean(pending || draftPending) || conflict} buttonClassName={styles.button}
+      onChoose={() => setCoverOpen(true)} onUpload={onUploadFile ? file => void uploadCover(file) : undefined}
+      onRemove={() => setFields(current => ({ ...current, coverAssetId: null }))} />
     <label>内部提示词<textarea className={styles.body} maxLength={8000} value={fields.body} onChange={e => setFields(v => ({ ...v, body: e.target.value }))} /></label>
-    <details className={styles.secondary}><summary>简介、条件与封面</summary><div className={styles.form}>
+    <details className={styles.secondary}><summary>简介与条件</summary><div className={styles.form}>
     <label>用途简介<textarea maxLength={800} value={fields.description} onChange={e => setFields(v => ({ ...v, description: e.target.value }))} /></label>
     <label>适用条件<textarea maxLength={800} value={fields.conditions} onChange={e => setFields(v => ({ ...v, conditions: e.target.value }))} /></label>
-    {onUploadFile && <button type="button" className={styles.button} onClick={() => setCoverOpen(true)}><ImageIcon size={16} />{fields.coverAssetId ? '更换封面' : '选择封面'}</button>}
     </div></details>
     <label className={styles.toggle}><input type="checkbox" role="switch" disabled={Boolean(fields.copyFrom)} checked={fields.shared} onChange={e => setFields(v => ({ ...v, shared: e.target.checked }))} />共享给同事</label>
     {revision > 0 && <details><summary>管理</summary><label className={styles.toggle}><input type="checkbox" checked={fields.disabled} onChange={e => setFields(v => ({ ...v, disabled: e.target.checked }))} />停用</label>
@@ -273,7 +295,7 @@ function GroupEditor({ open, item, onClose, onSaved, onUploadFile, useLabel = '�
       {versions?.map(version => <p className={styles.meta} key={version.versionId}>{version.name} · {version.current ? '当前版本' : '已保存版本'} · <RelativeTime value={version.createdAt} /></p>)}
       <button type="button" className={`${styles.button} ${styles.danger}`} disabled={busy || Boolean(pending || draftPending) || conflict} onClick={() => void remove()}><Trash2 size={15} />删除提示词组</button>
     </details>}
-  </fieldset>}</Modal><Modal open={open && Boolean(latestView)} narrow title="当前已保存版本" onClose={() => setLatestView(null)}>{latestView && <div className={styles.detail}><h3>{latestView.name}</h3><p>{latestView.description}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{latestView.body}</pre></div>}</Modal>{onUploadFile && <ResourceLibraryPicker open={open && coverOpen} onClose={() => setCoverOpen(false)} title="选择提示词组封面" imageOnly currentCount={0}
+  </fieldset>}</Modal><Modal open={open && Boolean(latestView)} narrow title="当前已保存版本" onClose={() => setLatestView(null)}>{latestView && <div className={styles.detail}><h3>{latestView.name}</h3><p>{latestView.description}</p><pre style={{ whiteSpace: 'pre-wrap' }}>{latestView.body}</pre></div>}</Modal>{onUploadFile && <ResourceLibraryPicker open={open && coverOpen} onClose={() => setCoverOpen(false)} title="选择提示词组封面" confirmLabel="设为封面" purpose="video-prompt-group-cover" contextKey={`${user?.id}:video-group-cover:${editorId}`} imageOnly currentCount={0}
     currentAssetIds={[]} maxSelection={1} onUploadFile={onUploadFile} onConfirm={async ids => { setFields(v => ({ ...v, coverAssetId: ids[0] || null })); setCoverOpen(false); return true; }} />}{productDialog}</>;
 }
 
