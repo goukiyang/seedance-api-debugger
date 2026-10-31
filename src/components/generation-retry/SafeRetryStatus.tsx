@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { OctagonX } from 'lucide-react';
+import { RelativeTime } from '@/components/RelativeTime';
 import type { publicRetry } from '@/lib/generation-retry/store';
 type View = NonNullable<ReturnType<typeof publicRetry>>;
 const states: Record<string, string> = { prepared: '等待发送', sent: '已发送', accepted: '已受理', free_failed: '明确失败且不收费', succeeded: '成功', failed: '失败，费用沿原合同', unknown: '原请求待核对' };
@@ -36,7 +37,9 @@ export default function SafeRetryStatus({ kind, id, initial, onChanged }: { kind
     {value.stopped && <p role="status">后续重试已停止</p>}
     {error && <p role="alert">{error}</p>}
     <details><summary>尝试记录（{value.attempts.length}/4）</summary>
-      {value.attempts.map(a => <p key={a.ordinal}>第 {a.ordinal + 1} 次：{states[a.state] || a.state}{a.code ? ` / ${a.code}` : ''}</p>)}
+      {value.attempts.map(a => <p key={a.ordinal}>第 {a.ordinal + 1} 次：{states[a.state] || a.state}{a.code ? ` / ${a.code}` : ''}<br />
+        <small><RelativeTime value={a.startedAt} /> · {a.fee === 'confirmed_no_charge' ? '已确认本次不收费' : a.state === 'unknown' ? '费用待核对' : '费用沿原任务合同'}
+          {a.ruleVersion ? ` · 规则版本 ${a.ruleVersion}` : ''}</small></p>)}
     </details>
   </div>;
 }
