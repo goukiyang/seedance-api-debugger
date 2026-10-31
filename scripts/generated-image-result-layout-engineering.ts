@@ -84,6 +84,38 @@ assert.equal(issueLabel({ width: 2048, height: 2048, format: 'png' }, { width: 2
 assert.equal(issueLabel({ width: 2048, height: 2048, format: 'jpeg' }, { width: 2048, height: 2048, format: 'png' }), '实际规格');
 assert.equal(issueLabel({ width: 2048, height: 2048 }, { width: null, height: null }), '实际规格');
 
+const Send = Symbol('send');
+const Feishu = load(read('src/components/image-studio/ImageFeishuStatus.tsx'), {
+  'react-dom': { createPortal: (value: unknown) => value },
+  '@radix-ui/react-popper': { Root: Symbol('root'), Anchor: Symbol('anchor'), Content: Symbol('content') },
+  'lucide-react': { Send, X: Symbol('close') },
+  '@/components/useDialogDismiss': { useDialogDismiss() {} },
+  '@/lib/context/AppSessionContext': { useAppSession: () => ({ user: { id: 'fixture-user' }, hasLoadedUser: true, sessionChanged: false }) },
+  '@/lib/auth/client-session-boundary': { isClientSessionBlocked: () => false },
+  '@/lib/video/feishu-errors': { videoFeishuErrorText: () => 'fixture error' },
+}).ImageFeishuStatus;
+function deliveryLabel(originalState: string, automaticState: string, expected: string) {
+  const initial = { version: 1, state: automaticState, canCancel: false, canRetry: false, imageSent: false, explanationSent: false, mode: 'link',
+    original: { version: 2, state: originalState, canSend: originalState === 'not_requested', canCancel: false, canRetry: false,
+      originalSent: originalState === 'sent', mode: originalState === 'sent' ? 'file' : null, fileSize: null, maxBytes: 30000000,
+      source: originalState === 'not_requested' ? null : 'manual', reason: null } };
+  const dom = render(Feishu, { owner: 'fixture-user', taskId: 'fixture-task', initial });
+  const button = nodes(dom).find(node => node.type === 'button')!;
+  assert.equal(button.props['aria-label'], expected);
+  assert.equal(button.props.title, expected);
+  assert.equal(button.props['data-state'], 'failed', 'the automatic warning remains discoverable without replacing the original action label');
+  assert.ok(nodes(button).some(node => node.type === Send));
+  const hiddenLabel = byClass(button, 'label'); assert.equal(hiddenLabel.props['aria-hidden'], 'true');
+  assert.ok(!String(hiddenLabel.props.children).includes('飞书通知未完成'));
+}
+deliveryLabel('sent', 'failed', '原图已发送；生成通知待核对');
+deliveryLabel('not_requested', 'failed', '原图发送到飞书；生成通知待核对');
+deliveryLabel('unknown', 'unknown', '原图发送待核对；生成通知待核对');
+const deliveryCss = postcss.parse(read('src/components/image-studio/ImageFeishuStatus.module.css'));
+let deliveryLabelHidden = false;
+deliveryCss.walkRules(rule => { if (rule.selectors.includes('.label')) rule.walkDecls('display', declaration => { deliveryLabelHidden ||= declaration.value === 'none'; }); });
+assert.equal(deliveryLabelHidden, true, 'delivery labels remain accessible names, without visible text beside the icon');
+
 let pageOptions: Props | undefined;
 const Waiting = Symbol('waiting');
 const StatusDetails = Symbol('status-details');
@@ -175,4 +207,4 @@ assert.equal(icon.width, '17.5px'); assert.equal(icon.height, '17.5px');
 assert.ok(declarations('.mediaActions[data-cover-context-delete] button').some(rule => rule.width === '44px' && rule['flex-basis'] === '44px'),
   'touch actions, including delivery, keep the shared 44px target');
 
-process.stdout.write('generated image result layout engineering passed (DOM and parsed CSS contracts)\n');
+process.stdout.write('generated image result layout engineering passed (DOM and parsed CSS contracts; original delivery label cases: 3)\n');

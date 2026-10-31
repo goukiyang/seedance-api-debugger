@@ -1,10 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '图片完成提醒与原图发送', outline: [
-  '生成完成后提醒，并可快速查看对应结果',
-  '结果卡可主动发送完整原图到本人飞书',
-  '等待异常入口更简洁，结果操作不再横向滚动',
-  '规格不符的完整原图也能保存查看，实际尺寸明确显示',
+const notice = { title: '原图发送状态更清楚', outline: [
+  '原图发送按钮准确显示用途和真实发送状态',
+  '生成通知待核对提示与原图发送状态清楚区分',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

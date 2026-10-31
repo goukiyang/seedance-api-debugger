@@ -91,9 +91,10 @@ export function ImageFeishuStatus({ owner, taskId, initial, onChanged }: { owner
   }
   if (!ready) return null;
   const initialWarning = ['failed','unknown'].includes(automatic?.state || '');
-  const label = mutationUnknown || error ? '原图发送待核对' : autoMutationUnknown || autoError ? '飞书通知待核对' : initialWarning ? automatic?.state === 'unknown' ? '飞书通知待核对' : '飞书通知未完成' : labels[value?.state || 'not_requested'];
+  const label = mutationUnknown || error ? '原图发送待核对' : labels[value?.state || 'not_requested'];
+  const triggerLabel = initialWarning || autoMutationUnknown || autoError ? `${label}；生成通知待核对` : label;
   return <Popper.Root><div className={styles.root}>
-    <Popper.Anchor asChild><button ref={trigger} type="button" className={styles.trigger} data-state={error || autoError || autoMutationUnknown || initialWarning ? 'failed' : busy ? 'sending' : value?.state} aria-busy={busy} aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="dialog" aria-label={label} title={label}
+    <Popper.Anchor asChild><button ref={trigger} type="button" className={styles.trigger} data-state={error || autoError || autoMutationUnknown || initialWarning ? 'failed' : busy ? 'sending' : value?.state} aria-busy={busy} aria-expanded={open} aria-controls={open ? id : undefined} aria-haspopup="dialog" aria-label={triggerLabel} title={triggerLabel}
       onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
       onClick={event => { event.preventDefault(); event.stopPropagation(); if (lock.current) return; setOpen(!open); if (!open) void (async () => { await run(undefined, true); await runAutomatic(); })(); }}><Send size={17.5} aria-hidden="true"/><span className={styles.label} aria-hidden="true">{label}</span></button></Popper.Anchor>
     {open && createPortal(<Popper.Content side="top" align="end" sideOffset={6} collisionPadding={12} avoidCollisions sticky="always" hideWhenDetached
