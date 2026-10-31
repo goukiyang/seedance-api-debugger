@@ -248,7 +248,7 @@ async function main() {
         const block=()=>{throw Error('restart network forbidden')};globalThis.fetch=block;for(const name of ['node:http','node:https']){const x=req(name);x.request=block;x.get=block;}req('node:dns/promises').lookup=block;
         process.chdir(${JSON.stringify(directory)});const r=req(${JSON.stringify(path.join(root, 'src/lib/image-studio/async-recovery.ts'))});const {prisma}=req(${JSON.stringify(path.join(root, 'src/lib/prisma.ts'))});
         (async()=>{try{let c=null;for(let i=0;i<6&&!c;i++)c=await r.claimStudioAsyncRecovery();if(!c||c.task.id!=='original-1')throw Error('restart claim missing');console.log(JSON.stringify({id:c.task.id,token:c.task.lease_token}));}finally{await prisma.$disconnect()}})().catch(e=>{console.error(e);process.exitCode=1});`;
-      const output = execFileSync(process.execPath, ['--import', 'tsx', '-e', child], { cwd: root, env: { ...env, SYNTHETIC_NOW: String(clock) }, encoding: 'utf8', timeout: 20000 });
+      const output = execFileSync(process.execPath, ['--require', path.join(root, 'scripts/server-runtime.cjs'), '--import', 'tsx', '-e', child], { cwd: root, env: { ...env, SYNTHETIC_NOW: String(clock) }, encoding: 'utf8', timeout: 20000 });
       const restarted = JSON.parse(output.trim()); assert.equal(restarted.id, claimed.task.id); assert.notEqual(restarted.token, claimed.task.lease_token);
       assert.equal(await finishStudioTask(claimed.task, 'succeeded'), false); assert.equal((await record(claimed.task.id)).attempts, 2);
       await db.imageStudioTask.update({ where: { id: claimed.task.id }, data: { lease_until: new Date(1000) } }); await patch(claimed.task.id, { leaseUntil: 1000, nextCheckAt: 0 });
