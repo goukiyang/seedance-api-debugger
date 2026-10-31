@@ -12,7 +12,7 @@ export async function stopTaskRetries(kind: 'image' | 'video', id: string, owner
     const value = structuredClone(prior.value);
     value.stopped = true;
     const last = value.attempts.at(-1)!;
-    if (value.state === 'wait' || kind === 'video' && (last.state === 'free_failed' || last.state === 'prepared' && last.ordinal > 0)) {
+    if (value.state === 'wait' || value.state === 'active' && kind === 'video' && (last.state === 'free_failed' || last.state === 'prepared' && last.ordinal > 0)) {
       value.state = 'failed';
       if (last.state === 'prepared') last.state = 'failed';
       if (kind === 'image') {

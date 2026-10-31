@@ -183,8 +183,8 @@ export async function processVideoRetries(shouldStop: () => boolean = () => fals
       });
       if (!(error instanceof SafeVideoPending)) {
         const record = await readRetry('video', taskId);
-        if (record?.value.attempts.at(-1)?.state === 'free_failed'
-          || record?.value.attempts.at(-1)?.state === 'prepared') {
+        if (record && record.value.state !== 'unknown' && (record.value.attempts.at(-1)?.state === 'free_failed'
+          || record.value.attempts.at(-1)?.state === 'prepared')) {
           await (await import('./control')).stopTaskRetries('video', taskId, record.value.ownerId);
         } else {
           await finishRetry('video', taskId, 'unknown');
@@ -207,10 +207,11 @@ export async function processVideoRetries(shouldStop: () => boolean = () => fals
 }
 
 export async function observeRetryCallback(task: VideoTask, providerTaskId: string | null) {
-  if (!providerTaskId || providerTaskId === task.provider_task_id) return false;
+  if (!providerTaskId) return false;
   const record = await readRetry('video', task.id);
   if (!record) return false;
   const prior = record.value.attempts.find(attempt => attempt.providerTaskId === providerTaskId);
+  if (providerTaskId === task.provider_task_id && prior?.state !== 'free_failed') return false;
   if (!prior) return true;
   const { getProviderTaskStatus } = await import('@/lib/provider/video-task-status');
   const status = await getProviderTaskStatus({ ...task, provider_task_id: providerTaskId }, { signal: AbortSignal.timeout(30000) });
