@@ -73,7 +73,7 @@ export async function readPrivatePromptDraftReceipt(actorId: string, target: Dra
 }
 export async function savePrivatePromptDraft(actorId: string, target: DraftTarget, input: {
   expectedRevision: number; sourceRevision: string; requestId: string; values: Record<string, string>;
-}) {
+}, sourceUnchanged?: (client: Prisma.TransactionClient) => Promise<boolean>) {
   await requirePrivatePromptRequest(actorId, target.origins);
   const { key, binding } = identity(actorId, target);
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 || typeof input.sourceRevision !== 'string'
@@ -93,7 +93,7 @@ export async function savePrivatePromptDraft(actorId: string, target: DraftTarge
     const current = await tx.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
     const revision = current ? decode(current.value_json, binding, target).revision : 0;
     if (revision === Number.MAX_SAFE_INTEGER) throw new PrivatePromptError();
-    if (revision !== input.expectedRevision) {
+    if (revision !== input.expectedRevision || sourceUnchanged && !await sourceUnchanged(tx)) {
       const rejected = { state: 'not-applied' } satisfies Rejected;
       await tx.platformSetting.create({ data: { key: receiptKey, value_json: sealPrivatePrompt(JSON.stringify({ version: 1,
         fingerprint, draft: rejected } satisfies Saved), receiptBinding), updated_by: actorId } });

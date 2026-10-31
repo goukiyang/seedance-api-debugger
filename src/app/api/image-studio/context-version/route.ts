@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { defaultStudioModuleId, validStudioModuleId } from '@/lib/image-studio/modules';
 import { ContextVersionError, resolveModuleContextVersion, snapshotModuleContextVersion } from '@/lib/image-studio/context-version';
+import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
@@ -17,8 +19,10 @@ export async function POST(request: NextRequest) {
     if (!workspace && body.moduleId !== defaultStudioModuleId(user.id)) return NextResponse.json({ error: '模块不存在' }, { status: 404 });
     if (body.taskId !== undefined) {
       if (typeof body.taskId !== 'string' || body.taskId.length > 120) return NextResponse.json({ error: '历史记录无效' }, { status: 400 });
-      const task = await prisma.imageStudioTask.findFirst({ where: { id: body.taskId, owner_id: user.id, deleted_at: null,
-        ...(body.moduleId === defaultStudioModuleId(user.id) ? { OR: [{ module_id: null }, { module_id: body.moduleId }] } : { module_id: body.moduleId }) }, select: { snapshot_json: true } });
+      const excludedToolBatches = await characterLabTaskBatchIds(user.id, prisma);
+      const task = await prisma.imageStudioTask.findFirst({ where: {
+        ...studioTemplateTaskWhere(user.id, body.moduleId, true, excludedToolBatches), id: body.taskId,
+      }, select: { snapshot_json: true } });
       if (!task) return NextResponse.json({ error: '历史记录不存在' }, { status: 404 });
       return NextResponse.json(await snapshotModuleContextVersion(task.snapshot_json), { headers: { 'Cache-Control': 'no-store' } });
     }

@@ -1,8 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '原图发送状态更清楚', outline: [
-  '原图发送按钮准确显示用途和真实发送状态',
-  '生成通知待核对提示与原图发送状态清楚区分',
+const notice = { title: '原图发送与创作设置体验更新', outline: [
+  '飞书发送反馈更轻，原图附件保留正确格式并可点击模块名返回网站',
+  '通用上下文可持续编辑和保存，分辨率历史按需读取',
+  '角色参考图留在独立工具，普通模板不再混入角色结果',
+  '更新弹窗的正文和操作留白更清楚',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

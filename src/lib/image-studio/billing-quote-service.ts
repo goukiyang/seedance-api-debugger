@@ -138,11 +138,11 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
 }
 
 export async function prepareImageBillingQuote(owner: string, body: Record<string, unknown>, avatar?: Parameters<typeof submitStudioBatch>[2],
-  canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0): Promise<PreparedImageQuoteResult> {
+  canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
   let phase = 'prepare_tasks';
   try {
     return await prepareImageBillingQuoteOnce(owner, body, avatar, canvasUse, canvasPrompt, additionalInputCharacters,
-      next => { phase = next; });
+      next => { phase = next; }, characterLabPlanId);
   } catch (error) {
     if (error && typeof error === 'object') quoteFailureStages.set(error, phase);
     throw error;
@@ -151,10 +151,10 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
 
 async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, unknown>, avatar: Parameters<typeof submitStudioBatch>[2],
   canvasUse: Parameters<typeof submitStudioBatch>[4], canvasPrompt: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters: number,
-  phase: (value: string) => void): Promise<PreparedImageQuoteResult> {
+  phase: (value: string) => void, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
   const prepared: Prisma.ImageStudioTaskUncheckedCreateInput[] = [];
   await submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
-    { batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt);
+    { batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt, undefined, undefined, characterLabPlanId);
   if (!prepared.length) throw new StudioError('本次提交已存在，请直接查询生成记录', 409);
 
   phase('prepared_snapshot');

@@ -1,17 +1,28 @@
 .root { position: relative; display: inline-flex; min-width: 0; }
-.trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 35px; width: 35px; min-width: 35px; height: 35px; min-height: 35px; padding: 0; border: 1px solid var(--border-color, #d8dbe2); border-radius: 7px; background: var(--panel-bg, #fff); color: inherit; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.trigger { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 35px; width: 35px; min-width: 35px; height: 35px; min-height: 35px; padding: 0; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-panel); color: var(--text-primary); font: inherit; cursor: pointer; }
+.trigger:focus-visible, .feedback button:focus-visible, .details button:focus-visible { outline: 2px solid var(--tone-info-text); outline-offset: 2px; }
 .label { display: none; }
-.trigger[data-state="sent"] { color: #23764a; border-color: #8fb6a0; }
-.trigger[data-state="pending"], .trigger[data-state="preparing"], .trigger[data-state="uploading"], .trigger[data-state="sending"] { color: #276aa5; border-color: #95b7d4; }
-.trigger[data-state="failed"], .trigger[data-state="unknown"] { color: #a55a13; border-color: #d5ac79; }
-.details { z-index: 30; width: min(310px, 76vw); padding: 12px; border: 1px solid var(--border-color, #d8dbe2); border-radius: 10px; background: var(--panel-bg, #fff); color: var(--text-primary, #222); box-shadow: 0 7px 28px #0002; font-size: 12px; white-space: normal; max-height: min(420px, 80dvh); overflow-y: auto; }
+.trigger[data-state="sent"] { color: var(--tone-success-text); border-color: var(--tone-success-border); }
+.trigger[data-state="pending"], .trigger[data-state="preparing"], .trigger[data-state="uploading"], .trigger[data-state="sending"], .trigger[data-state="sent_navigation_pending"] { color: var(--tone-info-text); border-color: var(--tone-info-border); }
+.trigger[aria-busy="true"] svg { animation: spin 1s linear infinite; }
+.trigger[data-state="failed"], .trigger[data-state="unknown"], .trigger[data-state="sent_navigation_failed"], .trigger[data-state="sent_navigation_unknown"] { color: var(--tone-warning-text); border-color: var(--tone-warning-border); }
+.feedback, .details { z-index: 30; border: 1px solid var(--border-color); border-radius: 9px; background: var(--bg-panel); color: var(--text-primary); box-shadow: 0 7px 28px #0002; font-size: 12px; }
+.feedback { max-width: min(380px, calc(100vw - 24px)); padding: 8px 10px; }
+.feedback[data-kind="success"] { border-color: var(--tone-success-border); }
+.feedback[data-kind="error"], .feedback[data-kind="unknown"] { border-color: var(--tone-warning-border); }
+.feedbackBody { display: flex; align-items: center; gap: 8px; }
+.feedbackBody > span { min-width: 0; }
+.feedback button { flex: 0 0 auto; border: 0; padding: 0; background: transparent; color: var(--tone-info-text); font: inherit; cursor: pointer; }
+.feedback .dismiss { display: grid; place-items: center; color: var(--text-secondary); }
+.details { width: min(270px, calc(100vw - 24px)); padding: 12px; max-height: min(420px, 80dvh); overflow-y: auto; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.heading button { display: grid; place-items: center; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.heading button { display: grid; place-items: center; border: 0; padding: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .details p { margin: 9px 0; line-height: 1.5; }
+.secondary { color: var(--text-secondary); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.actions button { border: 1px solid var(--border-color, #d8dbe2); border-radius: 6px; padding: 5px 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.actions button { border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 8px; background: var(--bg-panel); color: var(--text-primary); font: inherit; cursor: pointer; }
 .actions button:disabled { opacity: .55; cursor: wait; }
-
-.automatic { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border-color, #d8dbe2); }
-
+.automatic { margin-top: 12px; padding-top: 3px; border-top: 1px solid var(--border-color); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .trigger[aria-busy="true"] svg { animation: none; } }
 @media (hover: none), (any-pointer: coarse) { .trigger { flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; } }

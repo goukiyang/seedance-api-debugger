@@ -39,7 +39,8 @@ export async function readPrivateGlobalEditor(userId: string) {
 export async function savePrivateGlobalDraft(userId: string, input: Parameters<typeof savePrivatePromptDraft>[2]) {
   const { draftTarget } = await target(userId);
   if (input.values?.prompt !== '') throw new PrivatePromptError();
-  return savePrivatePromptDraft(userId, draftTarget, input);
+  return savePrivatePromptDraft(userId, draftTarget, input,
+    async tx => String((await getImageStudioSettings(tx)).revision) === input.sourceRevision);
 }
 export async function privateGlobalEditorStatus(userId: string, requestId: string, draft: boolean) {
   const { draftTarget } = await target(userId);

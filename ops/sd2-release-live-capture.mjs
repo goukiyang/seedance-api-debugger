@@ -22,6 +22,16 @@ for (const [role, name] of Object.entries(units)) {
   runtime[role] = { root, group: value.ControlGroup, version: JSON.parse(fs.readFileSync(root + '/package.json')).version };
 }
 assert.equal(runtime.web.root, runtime.image.root); assert.equal(runtime.web.root, runtime.hd.root);
+// This existing auxiliary writer shares the role source but is not a seventh release role.
+const periodic = Object.fromEntries(run('systemctl', ['show', 'sd2-periodic-credits.service',
+  '--property=MainPID,User,WorkingDirectory,ActiveState,SubState,ControlPID,ControlGroup']).split('\n')
+  .map(line => { const at = line.indexOf('='); return [line.slice(0, at), line.slice(at + 1)]; }));
+assert.equal(periodic.ActiveState, 'active'); assert.equal(periodic.SubState, 'running'); assert.equal(periodic.ControlPID, '0');
+assert.equal(periodic.User, 'gouki'); assert.match(periodic.MainPID, /^[1-9]\d*$/);
+const periodicRoot = fs.realpathSync(periodic.WorkingDirectory);
+assert.equal(periodicRoot, runtime.role.root);
+assert.equal(fs.realpathSync('/proc/' + periodic.MainPID + '/cwd'), periodicRoot);
+assert.deepEqual(fs.readFileSync('/proc/' + periodic.MainPID + '/status', 'utf8').match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$/m)?.slice(1), ['1004', '1004', '1004', '1004']);
 const managedPids = new Set();
 function groupPids(directory) {
   for (const file of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -30,7 +40,7 @@ function groupPids(directory) {
     else if (file.name === 'cgroup.procs') for (const pid of fs.readFileSync(target, 'utf8').trim().split(/\s+/).filter(Boolean)) managedPids.add(pid);
   }
 }
-for (const value of Object.values(runtime)) if (value.root === runtime.role.root) {
+for (const value of [...Object.values(runtime), { root: periodicRoot, group: periodic.ControlGroup }]) if (value.root === runtime.role.root) {
   assert.ok(value.group.startsWith('/system.slice/') && !value.group.includes('..'));
   groupPids('/sys/fs/cgroup' + value.group);
 }

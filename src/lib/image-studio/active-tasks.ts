@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { studioTaskStates } from './pricing-state';
 import { IMAGE_FEISHU_TYPE } from './feishu-contract';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 type Cursor = { version: 1; owner: string; module: string | null; at: number; id: string; ceiling: number };
 export async function activeStudioTaskPage(owner: string, module?: string, after?: string) {
@@ -16,12 +17,14 @@ export async function activeStudioTaskPage(owner: string, module?: string, after
     } catch { throw new Error('invalid_active_task_cursor'); }
   }
   const ceiling = cursor?.ceiling ?? Date.now();
+  const excludedToolBatches = await characterLabTaskBatchIds(owner, prisma);
   const scope = module ? module === `default-${owner}`
     ? Prisma.sql`(t."module_id" = ${module} OR t."module_id" IS NULL) AND (t."snapshot_json" IS NULL OR
       instr(t."snapshot_json", '"avatar":') = 0 AND instr(t."snapshot_json", '"avatarLayout":') = 0)` : Prisma.sql`t."module_id" = ${module}` : Prisma.sql`1 = 1`;
   const states = studioTaskStates(['queued', 'running', 'channel_queued', 'channel_running']);
   const rows = await prisma.$queryRaw<Array<{ id: string; created_at: bigint | number }>>(Prisma.sql`SELECT t."id", t."created_at"
     FROM "ImageStudioTask" t WHERE t."owner_id" = ${owner} AND t."deleted_at" IS NULL AND ${scope}
+    AND (${excludedToolBatches.length ? Prisma.sql`t."batch_id" NOT IN (${Prisma.join(excludedToolBatches)})` : Prisma.sql`1 = 1`})
     AND t."created_at" <= ${ceiling}
     AND (${cursor ? Prisma.sql`(t."created_at" > ${cursor.at} OR t."created_at" = ${cursor.at} AND t."id" > ${cursor.id})` : Prisma.sql`1 = 1`})
     AND (t."status" IN (${Prisma.join(states)}) OR t."billing_next_check_at" IS NOT NULL

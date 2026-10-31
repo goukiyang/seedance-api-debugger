@@ -7,7 +7,7 @@ import { release, newerRelease, parseReleaseVersion } from '@/lib/release';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { cancelPageExit, getPageExitRisk, refreshPage } from '@/lib/hooks/page-exit-guard';
-import styles from './CreditRequestDialog.module.css';
+import styles from './ReleaseNotice.module.css';
 
 export default function ReleaseNotice() {
   const laterKey=`sd2:release:later:video-api-debugger:${release.channel}`;
@@ -92,18 +92,19 @@ export default function ReleaseNotice() {
       <span>SD2 v{release.version}</span><button className="btn btn-secondary" disabled={checking} onClick={() => void check(true)}>{checking ? '检查中…' : '检查更新'}</button><span role="status">{message}</span>
     </footer>}
     {target && createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby="release-title">
-      <header className={styles.header}><h2 id="release-title" style={{ fontWeight: 700, fontSize: 20 }}>{risk?.busy.length ? '操作进行中' : risk?.unsaved.length ? '未保存内容' : '发现新版本'}</h2></header>
-      <div className={styles.body}><p>v{target.version}</p>
-        {user?.account_type === 'internal' && (target.title || target.summary) && <p><strong>{target.title || target.summary}</strong></p>}
-        {user?.account_type === 'internal' && Array.isArray(target.outline) && target.outline.length > 0 && <ul>{target.outline.slice(0, 4).map(item => <li key={item}>{item}</li>)}</ul>}
-        {risk?.busy.length ? <p role="status">{risk.busy.join('、')}。完成后再刷新，不会中断当前操作。</p>
-          : risk?.unsaved.length ? <p>{risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。</p>
-          : <p>新版本已就绪，可刷新后使用。</p>}
+      <header className={styles.header}><h2 id="release-title">{risk?.busy.length ? '操作进行中' : risk?.unsaved.length ? '未保存内容' : '发现新版本'}</h2></header>
+      <div className={styles.body}>
+        <p className={styles.version}>v{target.version}</p>
+        {user?.account_type === 'internal' && (target.title || target.summary) && <h3>{target.title || target.summary}</h3>}
+        {user?.account_type === 'internal' && Array.isArray(target.outline) && target.outline.length > 0 && <ul className={styles.outline}>{target.outline.slice(0, 4).map(item => <li key={item}>{item}</li>)}</ul>}
+        {risk?.busy.length ? <p className={styles.status} role="status">{risk.busy.join('、')}。完成后再刷新，不会中断当前操作。</p>
+          : risk?.unsaved.length ? <p className={styles.status}>{risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。</p>
+          : <p className={styles.status}>新版本已就绪，可刷新后使用。</p>}
         {refreshError && <p role="alert" className={styles.error}>{refreshError}</p>}
-        <div className={styles.actions}><button className="btn btn-primary" disabled={refreshing || Boolean(risk?.busy.length)} onClick={update}>
-          {refreshing ? '刷新中…' : risk?.unsaved.length ? '放弃修改并刷新' : '立即刷新'}
-        </button><button ref={returnButton} className="btn btn-secondary" onClick={later}>{risk?.unsaved.length && !risk.busy.length ? '返回编辑' : '稍后'}</button></div>
       </div>
+      <footer className={styles.actions}><button className="btn btn-primary" disabled={refreshing || Boolean(risk?.busy.length)} onClick={update}>
+          {refreshing ? '刷新中…' : risk?.unsaved.length ? '放弃修改并刷新' : '立即刷新'}
+        </button><button ref={returnButton} className="btn btn-secondary" onClick={later}>{risk?.unsaved.length && !risk.busy.length ? '返回编辑' : '稍后'}</button></footer>
     </dialog>, document.body)}
   </>;
 }

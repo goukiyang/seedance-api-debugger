@@ -77,7 +77,7 @@ export async function enqueueFrozenImageFeishuNotification(db: Db, task: { id: s
 export async function authorizedImageFeishuTask(db: Db, actorId: string, taskId: string) {
   if (!videoFeishuId(taskId)) throw new VideoFeishuError('task_unavailable', 404);
   const user = await actor(db, actorId);
-  const task = await db.imageStudioTask.findUnique({ where: { id: taskId }, select: { id: true, owner_id: true, module_id: true,
+  const task = await db.imageStudioTask.findUnique({ where: { id: taskId }, select: { id: true, owner_id: true, module_id: true, batch_id: true,
     status: true, asset_id: true, deleted_at: true, usage_json: true, finished_at: true } });
   if (!task || task.owner_id !== actorId || task.deleted_at) throw new VideoFeishuError('task_unavailable', 404);
   const asset = task.asset_id ? await db.asset.findFirst({ where: { id: task.asset_id, owner_id: actorId, type: 'image', status: 'active' },
@@ -192,7 +192,8 @@ export async function changeOriginalImageFeishu(db: Db, actorId: string, taskId:
   } else {
     if (!originalImageFeishuCanRetry(meta)) throw new VideoFeishuError('notification_cannot_retry', 409);
     if (videoFeishuBinding(current.actor) !== meta.identity) throw new VideoFeishuError('binding_changed', 409);
-    meta.state = 'pending'; meta.reason = null; meta.preparations = 0; meta.nextAttemptAt = Date.now(); meta.message.state = 'pending';
+    meta.state = 'pending'; meta.reason = meta.version === 1 && meta.reason === 'image_upload_rejected' ? meta.reason : null; meta.preparations = 0; meta.nextAttemptAt = Date.now(); if (meta.version === 2 && meta.message.receiptId && meta.mode === 'file') meta.navigationStep.state = 'pending';
+    else meta.message.state = 'pending';
   }
   if ((await db.notification.updateMany({ where: { id: row.id, type: IMAGE_FEISHU_ORIGINAL_TYPE, status: row.status, metadata_json: row.metadata_json },
     data: { status: action === 'cancel' ? 'failed' : 'pending', error_message: action === 'cancel' ? 'image_feishu_cancelled' : null, metadata_json: JSON.stringify(meta) } })).count !== 1) throw new VideoFeishuError('notification_changed', 409);

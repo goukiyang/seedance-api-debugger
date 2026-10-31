@@ -7,6 +7,7 @@ import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChanne
 import { ImageUsageProjectSelect } from '@/components/ImageUsageProjectSelect';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { RelativeTime } from '@/components/RelativeTime';
+import { ImageFeishuStatus } from '@/components/image-studio/ImageFeishuStatus';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
@@ -255,6 +256,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const currentPlan = draft?.stage === 'result' ? resultPlan : facePlan;
   const currentTask = currentPlan ? tasks[currentPlan.id] : null;
   const resultTask = shownResultPlan ? tasks[shownResultPlan.id] : null;
+  const displayedOutputTask = draft?.stage === 'result' ? resultTask : shownFacePlan ? tasks[shownFacePlan.id] : null;
+  const sendPresentationLabel = draft?.stage === 'result' ? '当前生成原图' : `候选整图（完整${shownFacePlan?.count || 4}宫格）`;
   const selectedResult = workspace?.savedResults.find(item => item.planId === shownResultPlan?.id);
   const workName = draft?.resultName || '';
   const resultName = workName.trim() || selectedResult?.name || workspace?.name || '角色参考图';
@@ -339,7 +342,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {draft.stage !== 'result' && facePlans.length > 0 && <section className={styles.materialSection}><h2>历史候选</h2><div className={styles.batchList}>{facePlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={facePlan?.id === plan.id} disabled={locked} onClick={() => updateDraft({ facePlanId: plan.id })}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`第${facePlans.length - index}组人脸候选`} /> : <Grid2X2 size={22} />}<span>第{facePlans.length - index}组<small>{taskState[tasks[plan.id]?.status || ''] || '未提交或待核对'}</small></span></button>)}</div></section>}
         </aside>
         <section className={styles.canvasColumn} aria-label={draft.stage === 'result' ? '角色成品预览' : '人脸候选'}>
-          <div className={styles.canvasHeading}><h2>{draft.stage === 'result' ? '角色参考图' : draft.stage === 'selection' ? '选择喜欢的面部方案' : '生成结果'}{draft.stage !== 'result' && shownFacePlan && <span> · {shownFacePlan.count}个候选</span>}</h2><button type="button" className={styles.iconButton} disabled={locked} onClick={() => void run('query', refreshTasks)} aria-label="查询生成状态" title="查询生成状态"><RefreshCw size={16} /></button></div>
+          <div className={styles.canvasHeading}><h2>{draft.stage === 'result' ? '角色参考图' : draft.stage === 'selection' ? '选择喜欢的面部方案' : '生成结果'}{draft.stage !== 'result' && shownFacePlan && <span> · {shownFacePlan.count}个候选</span>}</h2><div className={styles.canvasActions}>{displayedOutputTask?.asset && <ImageFeishuStatus key={`${ownerId}:${displayedOutputTask.id}`} owner={ownerId} taskId={displayedOutputTask.id} presentationLabel={sendPresentationLabel} />}<button type="button" className={styles.iconButton} disabled={locked} onClick={() => void run('query', refreshTasks)} aria-label="查询生成状态" title="查询生成状态"><RefreshCw size={16} /></button></div></div>
           {currentPlan && !currentTask && <div className={styles.taskStatus}>此计划尚未提交或提交结果待核对。下方已有结果保留。</div>}
           {currentTask && <div className={styles.taskStatus} role="status">{['queued', 'running'].includes(currentTask.status) && <Loader2 className={styles.spinner} size={15} />}<span>{taskState[currentTask.status] || '状态待确认'}{currentTask.error ? ` · ${currentTask.error}` : ''}</span>{currentTask.resultDisposition && <span>图片已返回，请核对实际规格。</span>}</div>}
           {draft.stage === 'result' ? shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={() => void generate('result')}>生成角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {

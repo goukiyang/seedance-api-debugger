@@ -6,6 +6,7 @@ import { defaultStudioModuleId, validStudioModuleId } from './modules';
 import { studioResultVersion, type StudioAttentionSnapshot } from './result-attention';
 import { studioTemplateTaskWhere } from './task-visibility';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const directory = (viewerId: string) => path.join(process.cwd(), 'storage', 'studio-viewer-receipts', hash(viewerId));
@@ -25,11 +26,15 @@ async function publishReceipt(file: string, value: unknown) {
 }
 
 async function visibleResults(viewerId: string, moduleId?: string) {
-  const modules = await prisma.imageStudioModule.findMany({ where: { owner_id: viewerId }, select: { id: true } });
+  const [modules, excludedToolBatches] = await Promise.all([
+    prisma.imageStudioModule.findMany({ where: { owner_id: viewerId }, select: { id: true } }),
+    characterLabTaskBatchIds(viewerId, prisma),
+  ]);
   const allowed = new Set([defaultStudioModuleId(viewerId), ...modules.map(item => item.id)]);
   if (moduleId && !allowed.has(moduleId)) throw new Error('模板不存在或不可访问');
   const tasks = await prisma.imageStudioTask.findMany({
-    where: { AND: [moduleId ? studioTemplateTaskWhere(viewerId, moduleId) : { OR: Array.from(allowed, id => studioTemplateTaskWhere(viewerId, id)) },
+    where: { AND: [moduleId ? studioTemplateTaskWhere(viewerId, moduleId, false, excludedToolBatches)
+      : { OR: Array.from(allowed, id => studioTemplateTaskWhere(viewerId, id, false, excludedToolBatches)) },
       { AND: [studioOutputTaskWhere], asset_id: { not: null }, finished_at: { not: null } }] },
     select: { id: true, module_id: true, asset_id: true, finished_at: true, status: true, usage_json: true },
   });

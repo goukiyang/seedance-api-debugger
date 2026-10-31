@@ -1,5 +1,6 @@
 import { IMAGE_FEISHU_ORIGINAL_TYPE } from './feishu-original-contract';
 import { deliverOriginalImageFeishuNotification } from './feishu-original-delivery';
+import { resolveImageFeishuNavigation, imageFeishuNavigationCard, feishuPayloadHash } from './feishu-navigation';
 import { randomUUID } from 'node:crypto';
 import type { Notification, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -71,7 +72,7 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       if (Date.now() - meta.createdAt >= 24 * 60 * 60_000) return await terminal('generation_wait_ended');
       return await defer('generation_not_ready', 5 * 60_000);
     }
-    const source = await prepareImageFeishuSource(initial, meta.version), stamp = imageFeishuSourceStamp(initial);
+    const source = await prepareImageFeishuSource(initial, meta.version === 1 ? 1 : 2), stamp = imageFeishuSourceStamp(initial);
     if (meta.sourceVersion && meta.sourceVersion !== source.version || meta.contentHash && meta.contentHash !== source.contentHash
       || meta.assetId && meta.assetId !== source.assetId) return await terminal('original_changed');
     meta.sourceVersion = source.version; meta.contentHash = source.contentHash; meta.assetId = source.assetId;
@@ -81,12 +82,15 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       if (!await heartbeat()) throw new VideoFeishuError('delivery_lease_lost', 409);
       return current.actor.feishu_open_id!;
     };
-    if (meta.version === 2) {
+    if (meta.version !== 1) {
       if (!source.presentation || source.mode !== 'image') return await terminal('image_original_unavailable');
       if (meta.presentation && JSON.stringify(meta.presentation) !== JSON.stringify(source.presentation)) return await terminal('presentation_changed');
       if (!meta.presentation) {
         meta.presentation = source.presentation;
-        meta.cardTemplate = imageFeishuCardTemplate(source.assetId, source.presentation);
+        if (meta.version === 3) {
+          meta.navigation = await resolveImageFeishuNavigation(db, initial.task, source.assetId);
+          meta.cardTemplate = imageFeishuNavigationCard(source.presentation, meta.navigation); meta.cardTemplateSha256 = feishuPayloadHash(meta.cardTemplate);
+        } else meta.cardTemplate = imageFeishuCardTemplate(source.assetId, source.presentation);
       }
     }
     if (source.mode === 'link') {
@@ -101,8 +105,9 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       catch (error) { const failure = safeError(error); meta.upload.state = failure.ambiguous ? 'unknown' : 'pending'; await save(); return await terminal(failure.ambiguous ? 'image_upload_unknown' : 'image_upload_rejected'); }
       await save();
     }
-    if (meta.version === 2 && !meta.cardPayload) {
-      meta.cardPayload = imageFeishuCardPayload(meta.cardTemplate!, meta.upload.key!); await save();
+    if (meta.version !== 1 && !meta.cardPayload) {
+      meta.cardPayload = imageFeishuCardPayload(meta.cardTemplate!, meta.upload.key!);
+      if (meta.version === 3) meta.cardPayloadSha256 = feishuPayloadHash(meta.cardPayload); await save();
     }
     const send = async (part: 'image' | 'explanation') => {
       const step = meta[part]; if (step.receiptId) { step.state = 'sent'; step.ambiguous = false; return true; }
@@ -114,9 +119,9 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       let receipt: string;
       try {
         const link = `${VIDEO_FEISHU_SITE}/template-studio?type=image&taskId=${encodeURIComponent(meta.taskId)}${initial.task.module_id ? `&moduleId=${encodeURIComponent(initial.task.module_id)}` : ''}`;
-        const content = meta.version === 2 ? JSON.parse(meta.cardPayload!) : part === 'image' ? { image_key: meta.upload.key! }
+        const content = meta.version !== 1 ? JSON.parse(meta.cardPayload!) : part === 'image' ? { image_key: meta.upload.key! }
           : { text: `任务 ${meta.taskId}\n${meta.mode === 'link' ? '本次仅发送查看链接，未发送图片消息。' : '图片已发送。'}\n${link}` };
-        receipt = await sendVideoFeishuMessage(token, openId, step.uuid, meta.version === 2 ? 'interactive' : part === 'image' ? 'image' : 'text', content, step.firstSendAt + SEND_WINDOW_MS, meta.leaseUntil!);
+        receipt = await sendVideoFeishuMessage(token, openId, step.uuid, meta.version !== 1 ? 'interactive' : part === 'image' ? 'image' : 'text', content, step.firstSendAt + SEND_WINDOW_MS, meta.leaseUntil!);
       } catch (error) {
         const failure = safeError(error); step.ambiguous = wasAmbiguous || failure.ambiguous; step.state = step.ambiguous ? 'sending' : 'pending';
         if (!failure.retryable && !step.ambiguous) await terminal('message_rejected');
