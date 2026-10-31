@@ -1,5 +1,10 @@
 # V1.2 剩余模块落地 Todo
 
+## CHAR01 Character reference workbench (2026-10-30)
+
+Approved implementation from two final references: original image and varied 4/9 faces, main/auxiliary selection, portrait 2:3 final preview with direct save/export. Administrator-editable prompt context has independent revisions; owner drafts and historical generation plans persist. Existing image quote/task chain is reused. Implementation and source review complete; Linux types/build and protected deployment pending. Final function acceptance is manual. Private references and scoped records: formal project docs/materials/2026-10-30-character-reference-workbench/.
+
+
 ## PG-UI03/04 与 PG-IP01 视频输入落地（2026-10-30）
 
 用户已明确授权原单§13 U1–U5实现、工程检查、自复核、聚焦推送及现有保护部署，功能用户手验。原[工单§13.11](todo/2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)为本批执行入口；正式根保完整历史和五张私有原图。U1–U4及U5实现、7组合同/任务复用基础/最终类型/局部lint及自复核已完成，完整构建与发布待执行；旧离线集成夹具同一失败已在未改基线复现，不冒通过。未部署，不冒功能验收。

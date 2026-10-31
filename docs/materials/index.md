@@ -1,5 +1,10 @@
 # 项目资料索引
 
+## CHAR01 Character reference workbench (2026-10-30)
+
+Approved implementation from two final references: original image and varied 4/9 faces, main/auxiliary selection, portrait 2:3 final preview with direct save/export. Administrator-editable prompt context has independent revisions; owner drafts and historical generation plans persist. Existing image quote/task chain is reused. Implementation and source review complete; Linux types/build and protected deployment pending. Final function acceptance is manual. Private references and scoped records: formal project docs/materials/2026-10-30-character-reference-workbench/.
+
+
 ## PG-UI03/04、PG-IP01 视频输入实施（2026-10-30）
 
 来源：用户明确授权正式根原单§13落地。关键词：输入footer、素材箭头、紧凑chip、可选网格拖排、普通/IP同下拉、mode-switch完整草稿、旧v2素材未知。原[工单§13.11](../../tasks/todo/2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)登记执行与证据；原五图及附件来源仍保正式根`docs/materials/2026-10-12-studio-ui-clarity/prompt-group-ux-20261030/ui03-preflight/`私有目录，主控已核可读，不上传。实施证据沿同主题`ui03-implementation/`，实现、7组合同/任务复用基础/最终类型/局部lint与自复核完成，完整构建和发布待执行；旧集成夹具基线同败不冒通过。实际效果用户手验。ARCH03正式成果为本批基础，旧前置不替代新授权。

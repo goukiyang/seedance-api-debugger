@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频输入优化', outline: [
-  '提示词组更紧凑，输入工具和素材排序更清楚',
-  '同一型号列表可选IP线路，换线保留当前输入和旧稿',
+const notice = { title: '角色参考图工作台', outline: [
+  '从原始设定图生成不同脸型的真人候选，自由调节面部差异',
+  '选择主面部与辅助参考，制作竖版四宫格角色参考图',
+  '成品直接保存导出，管理员可维护头像生成规则',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
