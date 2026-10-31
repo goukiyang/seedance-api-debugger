@@ -46,7 +46,7 @@ export async function prepareImageFeishuSource(current: Current, eventVersion: 1
     if (!metadata.width || !metadata.height || metadata.width !== asset.width || metadata.height !== asset.height
       || metadata.format !== (format.mimeType === 'image/jpeg' ? 'jpeg' : format.extension)) throw unavailable();
     const policy = imageFeishuMode(metadata.format, bytes.length, metadata.width, metadata.height);
-    let uploadBytes = bytes;
+    let uploadBytes: Buffer = bytes;
     let uploadMimeType = format.mimeType;
     let uploadExtension = format.extension;
     let presentation: ImageFeishuPresentation | undefined;
