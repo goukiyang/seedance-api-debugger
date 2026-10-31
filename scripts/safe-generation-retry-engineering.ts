@@ -151,6 +151,28 @@ async function main() {
     assert.equal(stoppedVideo.refund_amount, 5); assert.equal(stoppedVideo.frozen_cost, 0);
     assert.equal(await prisma.creditLedger.count({ where: { related_task_id: stopId } }), 1);
     checks.push('video_stop_and_refund_atomic_idempotent_preserves_receipt');
+    const lateOwner = await user(), lateId = randomUUID();
+    const lateTask = await prisma.videoTask.create({ data: { id: lateId, provider: 'seedance', model: task.model,
+      generation_mode: 'all_in_one_reference', prompt: 'fixture', user_id: lateOwner, owner_user_id: lateOwner,
+      provider_task_id: 'fixture-late-original', local_status: 'retry_wait', estimated_cost: 5, frozen_cost: 5,
+      credit_freeze_snapshot: JSON.stringify([{ source_type: 'balance', amount: 5 }]) } });
+    await video.freezeVideoRetry(lateTask, { provider: 'seedance', input: { model: task.model, generation_mode: 'all_in_one_reference', prompt: 'fixture' }, privateOrigins: [], sensitiveRecipe: false });
+    await prisma.videoTask.update({ where: { id: lateId }, data: { local_status: 'retry_wait' } });
+    await store.mutateRetry('video', lateId, value => { value.state = 'wait'; value.attempts[0].state = 'free_failed'; value.attempts[0].providerTaskId = 'fixture-late-original'; });
+    globalThis.fetch = async url => {
+      if (new URL(String(url)).pathname.endsWith('/call')) { posts++; throw new Error('Late success must not generate'); }
+      return Response.json({ id: 'fixture-late-original', status: 'succeeded', content: { video_url: 'https://result.fixture.invalid/original.mp4' } });
+    };
+    assert.equal(await video.observeRetryCallback(lateTask, 'fixture-late-original'), true);
+    assert.equal((await store.readRetry('video', lateId))!.value.state, 'unknown');
+    assert.equal((await prisma.videoTask.findUniqueOrThrow({ where: { id: lateId } })).local_status, 'submission_unknown');
+    await control.stopTaskRetries('video', lateId, lateOwner);
+    await video.processVideoRetries();
+    assert.equal(posts, 4);
+    assert.equal((await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: lateOwner } })).frozen_credits, 5);
+    assert.equal(await prisma.creditLedger.count({ where: { related_task_id: lateId } }), 0);
+    assert.ok(fs.existsSync(path.join(directory, 'storage/generation-retry', lateId, 'late-attempt-0.json')));
+    checks.push('late_original_success_stops_wait_and_stale_stop_keeps_unknown_reserve');
     const legacy = await prisma.videoTask.create({ data: { provider: 'seedance', model: task.model, generation_mode: 'text_to_video', prompt: 'legacy', local_status: 'failed' } });
     assert.equal(await store.readRetry('video', legacy.id), null);
     checks.push('legacy_not_adopted_or_replayed');
