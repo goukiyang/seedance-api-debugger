@@ -44,9 +44,11 @@ export async function prepareImageFeishuSource(current: Current, eventVersion: 1
     const image = sharp(bytes, { failOn: 'warning', limitInputPixels: 64_000_000 }).timeout({ seconds: 45 });
     const metadata = await image.metadata();
     await image.stats(); // Decode the complete original; dimensions alone are not completion evidence.
+    const decodedFormat = eventVersion === 'original' && format.mimeType === 'image/avif'
+      && metadata.format === 'heif' && metadata.compression === 'av1' ? 'avif' : metadata.format;
     if (!metadata.width || !metadata.height || metadata.width !== asset.width || metadata.height !== asset.height
-      || metadata.format !== (format.mimeType === 'image/jpeg' ? 'jpeg' : format.extension)) throw unavailable();
-    const policy = imageFeishuMode(metadata.format, bytes.length, metadata.width, metadata.height);
+      || decodedFormat !== (format.mimeType === 'image/jpeg' ? 'jpeg' : format.extension)) throw unavailable();
+    const policy = imageFeishuMode(decodedFormat, bytes.length, metadata.width, metadata.height);
     if (eventVersion === 'original' && bytes.length > IMAGE_FEISHU_ORIGINAL_MAX_BYTES) throw new VideoFeishuError('image_original_too_large', 409);
     let uploadBytes: Buffer = bytes;
     let uploadMimeType = format.mimeType;

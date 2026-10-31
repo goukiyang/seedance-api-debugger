@@ -33,13 +33,11 @@ export function useStudioSettings(userId: string, isAdmin: boolean) {
     };
     void controller.load();
     const refresh = () => { if (document.visibilityState === 'visible') void controller.load(); };
-    window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
       controller.dispose();
       channel?.close();
       if (broadcast.current === channel) broadcast.current = null;
-      window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [controller, userId]);

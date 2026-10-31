@@ -1,3 +1,4 @@
+import { feishuPayloadHash, validImageFeishuNavigation, imageFeishuNavigationCard, type ImageFeishuNavigation } from './feishu-navigation';
 import { createHash } from 'node:crypto';
 import { VIDEO_FEISHU_SITE, VideoFeishuError, videoFeishuHash, videoFeishuId, type VideoFeishuStep, type VideoFeishuUpload } from '@/lib/video/feishu-contract';
 
@@ -49,11 +50,11 @@ export type ImageFeishuEvent = { taskId: string; actorId: string; eventId: strin
   preparations: number; leaseToken: string | null; leaseUntil: number | null; externalStartedAt: number | null;
   sourceVersion: string | null; contentHash: string | null; assetId: string | null;
   upload: VideoFeishuUpload; image: VideoFeishuStep; explanation: VideoFeishuStep; reason: string | null } &
-  ({ version: 1 } | { version: 2; presentation: ImageFeishuPresentation | null; cardTemplate: string | null; cardPayload: string | null });
+  ({ version: 1 } | ({ version: 2 } | { version: 3; navigation: ImageFeishuNavigation | null; cardTemplateSha256: string | null; cardPayloadSha256: string | null }) & { presentation: ImageFeishuPresentation | null; cardTemplate: string | null; cardPayload: string | null });
 export function newImageFeishuEvent(taskId: string, frozen: FrozenImageFeishuChoice, now = Date.now()): ImageFeishuEvent {
   const step = (part: 'image' | 'explanation'): VideoFeishuStep => ({ uuid: imageFeishuUuid(taskId, part), state: 'pending', attempts: 0,
     firstSendAt: null, receiptId: null, ambiguous: false, leaseToken: null, leaseUntil: null });
-  return { version: 2, presentation: null, cardTemplate: null, cardPayload: null, taskId, actorId: frozen.actorId, eventId: imageFeishuUuid(taskId, 'event'), identity: frozen.identity,
+  return { version: 3, navigation: null, cardTemplateSha256: null, cardPayloadSha256: null, presentation: null, cardTemplate: null, cardPayload: null, taskId, actorId: frozen.actorId, eventId: imageFeishuUuid(taskId, 'event'), identity: frozen.identity,
     choice: frozen.choice, state: 'pending', mode: 'image', createdAt: now, nextAttemptAt: now, preparations: 0,
     leaseToken: null, leaseUntil: null, externalStartedAt: null, sourceVersion: null, contentHash: null, assetId: null,
     upload: { state: 'pending', attempts: 0, startedAt: null, key: null }, image: step('image'), explanation: { ...step('explanation'), state: 'skipped' }, reason: null };
@@ -66,8 +67,8 @@ export function parseImageFeishuEvent(raw: string | null): ImageFeishuEvent | nu
     const time = (v: unknown) => v === null || Number.isSafeInteger(v) && Number(v) >= 0;
     const lease = (v: { leaseToken: unknown; leaseUntil: unknown }) => (v.leaseToken === null || videoFeishuId(v.leaseToken)) && time(v.leaseUntil);
     if (!item || !keys(item, ['version', 'taskId', 'actorId', 'eventId', 'identity', 'choice', 'state', 'mode', 'createdAt', 'nextAttemptAt',
-      'preparations', 'leaseToken', 'leaseUntil', 'externalStartedAt', 'sourceVersion', 'contentHash', 'assetId', 'upload', 'image', 'explanation', 'reason', ...(item.version === 2 ? ['presentation', 'cardTemplate', 'cardPayload'] : [])])
-      || !([1, 2].includes(item.version)) || !parseFrozenImageFeishuChoice({ version: 1, actorId: item.actorId, identity: item.identity, choice: item.choice })
+      'preparations', 'leaseToken', 'leaseUntil', 'externalStartedAt', 'sourceVersion', 'contentHash', 'assetId', 'upload', 'image', 'explanation', 'reason', ...(item.version !== 1 ? ['presentation', 'cardTemplate', 'cardPayload'] : []), ...(item.version === 3 ? ['navigation','cardTemplateSha256','cardPayloadSha256'] : [])])
+      || !([1, 2, 3].includes(item.version)) || !parseFrozenImageFeishuChoice({ version: 1, actorId: item.actorId, identity: item.identity, choice: item.choice })
       || !videoFeishuId(item.taskId) || item.eventId !== imageFeishuUuid(item.taskId, 'event')
       || !['pending', 'sent', 'failed', 'unknown', 'cancelled'].includes(item.state) || !['image', 'link'].includes(item.mode)
       || !Number.isSafeInteger(item.createdAt) || item.createdAt < 0 || !Number.isSafeInteger(item.nextAttemptAt) || item.nextAttemptAt < 0
@@ -88,7 +89,7 @@ export function parseImageFeishuEvent(raw: string | null): ImageFeishuEvent | nu
       || !Number.isSafeInteger(u.attempts) || u.attempts < 0 || u.attempts > IMAGE_FEISHU_ATTEMPTS || !time(u.startedAt)
       || u.key !== null && (typeof u.key !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(u.key)) || u.state === 'ready' && !u.key
       || item.mode === 'link' && (item.image.firstSendAt !== null || item.image.receiptId)) return null;
-    if (item.version === 2) {
+    if (item.version !== 1) {
       const p = item.presentation;
       if (item.mode !== 'image' || item.explanation.state !== 'skipped' || item.explanation.attempts !== 0
         || item.explanation.firstSendAt !== null || item.explanation.receiptId !== null || item.explanation.ambiguous) return null;
@@ -99,9 +100,12 @@ export function parseImageFeishuEvent(raw: string | null): ImageFeishuEvent | nu
         || !['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/x-icon'].includes(p.mimeType))) return null;
       if (item.cardTemplate !== null) {
         if (!p || typeof item.cardTemplate !== 'string' || item.cardTemplate.length > 4000) return null;
-        if (!item.assetId || item.cardTemplate !== imageFeishuCardTemplate(item.assetId, p)) return null;
+        if (!item.assetId || (item.version === 2 ? item.cardTemplate !== imageFeishuCardTemplate(item.assetId, p)
+          : !validImageFeishuNavigation(item.navigation, item.assetId) || item.cardTemplate !== imageFeishuNavigationCard(p, item.navigation))) return null;
       } else if (p !== null) return null;
       if (item.cardPayload !== null && (!item.cardTemplate || !u.key || item.cardPayload !== imageFeishuCardPayload(item.cardTemplate, u.key))) return null;
+      if (item.version === 3 && (item.cardTemplateSha256 !== (item.cardTemplate ? feishuPayloadHash(item.cardTemplate) : null)
+        || item.cardPayloadSha256 !== (item.cardPayload ? feishuPayloadHash(item.cardPayload) : null) || !p && item.navigation !== null)) return null;
       if (item.externalStartedAt !== null && (!p || !item.cardTemplate) || item.image.firstSendAt !== null && !item.cardPayload) return null;
     }
     return item;
@@ -120,7 +124,7 @@ export function imageFeishuCanRetry(meta: ImageFeishuEvent) {
 export function imageFeishuStatus(meta: ImageFeishuEvent | null) {
   if (!meta) return { version: 1 as const, state: 'not_requested', canCancel: false, canRetry: false, imageSent: false, explanationSent: false, mode: null, reason: null };
   const state = meta.state === 'sent' ? meta.mode === 'image' ? 'sent_image' : 'sent_link'
-    : meta.state !== 'pending' ? meta.state : meta.image.receiptId ? meta.version === 2 ? 'sending' : 'image_sent_explanation_pending'
+    : meta.state !== 'pending' ? meta.state : meta.image.receiptId ? meta.version !== 1 ? 'sending' : 'image_sent_explanation_pending'
       : meta.upload.state === 'uploading' ? 'uploading' : meta.image.state === 'sending' || meta.explanation.state === 'sending' ? 'sending'
         : meta.leaseToken ? 'preparing' : 'pending';
   return { version: 1 as const, state, canCancel: imageFeishuCanCancel(meta), canRetry: imageFeishuCanRetry(meta), reason: meta.reason,

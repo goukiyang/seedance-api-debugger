@@ -85,10 +85,14 @@ async function main() {
       await prisma.imageStudioTask.update({ where: { id }, data: { asset_id: saved.id } });
       await notification.enqueueFrozenImageFeishuNotification(prisma, task, frozen);
       const row = await prisma.notification.findUniqueOrThrow({ where: { id: contract.imageFeishuUuid(id, 'event') } });
-      if (card) return row;
+      if (card) {
+        const legacyCard = JSON.parse(row.metadata_json!); legacyCard.version = 2;
+        delete legacyCard.navigation; delete legacyCard.cardTemplateSha256; delete legacyCard.cardPayloadSha256;
+        return prisma.notification.update({ where: { id: row.id }, data: { metadata_json: JSON.stringify(legacyCard) } });
+      }
       // Real old v1 rows retain their exact original image + text contract after upgrade.
       const legacy = JSON.parse(row.metadata_json!); legacy.version = 1; legacy.explanation.state = 'pending';
-      delete legacy.presentation; delete legacy.cardTemplate; delete legacy.cardPayload;
+      delete legacy.presentation; delete legacy.cardTemplate; delete legacy.cardPayload; delete legacy.navigation; delete legacy.cardTemplateSha256; delete legacy.cardPayloadSha256;
       return prisma.notification.update({ where: { id: row.id }, data: { metadata_json: JSON.stringify(legacy) } });
     };
     const row = await makeTask('fixture-image-one');

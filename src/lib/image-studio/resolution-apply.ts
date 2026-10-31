@@ -41,7 +41,7 @@ function supported(model: string, resolution: string) {
   return IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)
     && IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as ImageStudioModel].includes(resolution as ResolutionOperation['resolution']);
 }
-async function admin(tx: Tx, owner: string) {
+async function admin(tx: Pick<Tx, 'user'>, owner: string) {
   const user = await tx.user.findUnique({ where: { id: owner }, select: { role: true, status: true, expires_at: true } });
   if (!user || user.role !== 'admin' || user.status !== 'active' || (user.expires_at && user.expires_at.getTime() <= Date.now())) fail('当前账号没有修改权限', 403);
 }
@@ -115,7 +115,7 @@ async function receipt(tx: Tx, operation: ResolutionOperation, cursor = 0): Prom
   }
   return { operation, entries, nextCursor: next < operation.counts.total ? next : null, deltas: Array.from(deltas.values()) };
 }
-async function listHeaders(tx: Tx, owner: string) {
+async function listHeaders(tx: Pick<Tx, 'platformSetting'>, owner: string) {
   const rows = await tx.platformSetting.findMany({ where: { key: { startsWith: `${PREFIX}${owner}:` }, NOT: [
     { key: { contains: ':chunk:' } }, { key: { contains: ':batch:' } },
   ] }, orderBy: { created_at: 'desc' }, take: 12 });
@@ -123,9 +123,12 @@ async function listHeaders(tx: Tx, owner: string) {
 }
 export async function readResolutionOperations(owner: string, requestId?: string, cursor = 0, client: PrismaClient = prisma) {
   if (!Number.isInteger(cursor) || cursor < 0 || cursor > MAX_TARGETS || cursor % CHUNK_SIZE) fail('预览页位置无效', 400);
+  if (!requestId) {
+    await admin(client, owner);
+    return { operations: await listHeaders(client, owner) };
+  }
   return client.$transaction(async tx => {
     await admin(tx, owner);
-    if (!requestId) return { operations: await listHeaders(tx, owner) };
     return receipt(tx, (await readHeader(tx, owner, validId(requestId))).operation, cursor);
   });
 }

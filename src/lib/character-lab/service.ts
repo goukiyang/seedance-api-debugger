@@ -11,7 +11,7 @@ import { getPricingImageChannelOptions } from '@/lib/pricing/image';
 import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality } from '@/lib/image-studio/model-catalog';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
-import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
+import { captureImageGenerationRequestChannel, captureImageGenerationChannel } from '@/lib/integrations/image-generation';
 import { assertUsageProject } from '@/lib/admin/usage-attribution';
 import { defaultStudioReferencePolicy } from '@/lib/image-studio/reference-policy';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -152,9 +152,12 @@ export async function quoteLab(user: SessionUser, id: string) {
   const plan = await readLabPlan(user.id, id);
   const state = await labPlanState(user, id);
   if (state.task || state.submissionState !== 'prepared') throw new StudioError('原提交已受理、待确认或已结束，请查询原记录；新生成需重新确认', 409);
-  const quote = await prepareImageBillingQuote(user.id, submission(plan));
+  const imageChannel = plan.imageChannel ?? await captureImageGenerationRequestChannel(plan.model, plan.quality, plan.channelId)
+    ?? await captureImageGenerationChannel(plan.model, 'original');
+  const quote = await prepareImageBillingQuote(user.id, { ...submission(plan), imageChannel }, undefined, undefined, undefined, 0, plan.id);
   const key = quoteKey(user.id, plan.id);
-  await prisma.platformSetting.upsert({ where: { key }, create: { key, value_json: JSON.stringify(quote), updated_by: user.id }, update: { value_json: JSON.stringify(quote), updated_by: user.id } });
+  const value_json = JSON.stringify({ ...quote, characterLabSourceVersion: 1 });
+  await prisma.platformSetting.upsert({ where: { key }, create: { key, value_json, updated_by: user.id }, update: { value_json, updated_by: user.id } });
   return quote;
 }
 export async function submitLab(user: SessionUser, body: Record<string, unknown>) {
@@ -165,7 +168,8 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   if (!receipt || (JSON.parse(receipt.value_json) as Receipt).state !== 'prepared') throw new StudioError('原提交结果待确认或已结束，请查询原记录，不要重复生成', 409);
   const storedQuote = await prisma.platformSetting.findUnique({ where: { key: quoteKey(user.id, plan.id) } });
   if (!storedQuote) throw new StudioError('请先获取本次生成报价');
-  const quote = JSON.parse(storedQuote.value_json) as CharacterLabQuote;
+  const quote = JSON.parse(storedQuote.value_json) as CharacterLabQuote & { characterLabSourceVersion?: number };
+  if (quote.characterLabSourceVersion !== 1) throw new StudioError('角色工具报价来源已更新，请重新获取本次报价；原提交编号与输入保留', 409);
   if (Date.parse(quote.expiresAt) <= Date.now() || (body.billingQuoteId || null) !== quote.billingQuoteId
     || (body.pricingRevision || undefined) !== quote.pricingRevision || body.maxEstimatedCost !== quote.estimatedCredits) throw new StudioError('报价已过期或与本次确认不一致，请重新报价', 409);
   // A durable send marker prevents an unknown transport result being resent after reload.
@@ -173,7 +177,7 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   try {
     const result = await submitStudioBatch(user.id, { ...submission(plan),
       ...(quote.imageChannel ? { imageChannel: quote.imageChannel } : {}),
-      ...(quote.billingQuoteId ? { billingQuoteId: quote.billingQuoteId } : {}), ...(quote.pricingRevision ? { pricingRevision: quote.pricingRevision } : {}), maxEstimatedCost: quote.estimatedCredits });
+      ...(quote.billingQuoteId ? { billingQuoteId: quote.billingQuoteId } : {}), ...(quote.pricingRevision ? { pricingRevision: quote.pricingRevision } : {}), maxEstimatedCost: quote.estimatedCredits }, undefined, undefined, undefined, undefined, undefined, undefined, plan.id);
     await prisma.platformSetting.update({ where: { key: receiptKey(user.id, plan.id) }, data: { value_json: JSON.stringify({ state: 'accepted' }) } });
     return { batchId: result };
   } catch (error) {

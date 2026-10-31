@@ -56,6 +56,7 @@ import type { AvatarCandidate, AvatarLayout } from '@/lib/avatar-random/types';
 import { isAvatarSheet, validateSheetCandidates } from '@/lib/avatar-random/layout';
 import { evolutionCapability, parseEvolution, resolveEvolution, evolutionInstructions } from './evolution';
 import { studioTemplateTaskWhere } from './task-visibility';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 import { getSkillSelection, historicalSkills, parseSkillIds, resolveSkills, publicSkillVersion, publicSkillSnapshot, type SkillSnapshot } from './skills';
 import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
@@ -441,7 +442,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission, characterLabPlanId?: string) {
   let submissionStage = 'accepted-lookup';
   try {
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
@@ -494,6 +495,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
+  if (characterLabPlanId !== undefined && (characterLabPlanId !== input.requestId || moduleId !== undefined
+    || avatar || canvasUse || canvasPrompt || roleMedia || currentPricing || input.sharedLive || input.restoredSettings || input.reproduceFromTaskId)) {
+    throw new StudioError('角色工具来源与本次原提交不匹配，输入与原号保留', 409);
+  }
   if (input.taskSettings && (avatar || canvasUse || canvasPrompt || roleMedia || typeof moduleId !== 'string')) throw new StudioError('模板设置模式不能用于其他生成入口', 400);
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
   if (avatar && (moduleId !== undefined || input.sharedLive || input.restoredSettings || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
@@ -513,7 +518,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     fingerprintInput.channelId = requestedChannelId;
   }
   const requestFingerprint = createHash('sha256').update(JSON.stringify({ ...fingerprintInput,
-    requestId: undefined, ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
+    requestId: undefined, ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}), ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
     ...(canvasUse?.referenceInput?.canvas_references === undefined ? {} : { canvas_references: canvasUse.referenceInput.canvas_references }),
     ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}),
     ...(roleContextFingerprint ? { roleMediaContext: roleContextFingerprint } : {}),
@@ -748,8 +753,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     creditCents(price);
     const quotedUnitCredits = price;
     if (!currentPricing && !billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => quotedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
-    let snapshotGlobalContext = avatar ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
-    let snapshotModuleContext = input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
+    let snapshotGlobalContext = avatar || characterLabPlanId ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
+    let snapshotModuleContext = characterLabPlanId ? '' : input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
       snapshotModuleContext = sharedDefinition.reproduction?.moduleContext ?? sharedDefinition.context;
       if (sharedDefinition.reproduction && contextMode === 'historical') {
@@ -1126,6 +1131,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       personalPrompt,
+      ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}),
       ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
@@ -1414,11 +1420,13 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   if (taskId !== undefined && (typeof taskId !== 'string' || !taskId || taskId.length > 120)) throw new StudioError('历史生成记录无效');
   if (requestId !== undefined && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
-  const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId)),
+  // Explicit original-task/request lookup remains owner-scoped; only template catalogs exclude tool results.
+  const excludedToolBatches = taskId !== undefined || requestId ? [] : await characterLabTaskBatchIds(ownerId);
+  const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId), excludedToolBatches),
     ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}) };
   if (likedOnly) {
     if (!moduleId || taskId || requestId) throw new StudioError('请选择当前模板的喜欢结果');
-    const page = await likedStudioTaskPage(prisma, ownerId, moduleId, cursor, 25, [], true);
+    const page = await likedStudioTaskPage(prisma, ownerId, moduleId, cursor, 25, [], true, excludedToolBatches);
     if (!page.valid) throw new StudioError('结果目录已变化，请重新读取', 409);
     const items = page.rows.slice(0, 24);
     return { total: page.total, tasks: await studioTaskDTOs(ownerId, isAdmin, items), nextCursor: page.rows.length > 24 ? items.at(-1)!.id : null };

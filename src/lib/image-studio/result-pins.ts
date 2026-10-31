@@ -9,6 +9,7 @@ import { studioSharedBinding, type SharedStudioClient } from './shared-contract'
 import { studioHiddenAssetUrls } from './protected-assets';
 import type { StudioPinMutation, StudioPinState } from './result-pin-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
+import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 
 export class StudioPinError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -56,12 +57,15 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   const { document } = await readStudioPinDocument(presetId, db);
   const tasks = await db.imageStudioTask.findMany({ where: { id: { in: document.pins.map(p => p.taskId) },
     AND: [studioOutputTaskWhere], deleted_at: null }, select: { id: true, asset_id: true, owner_id: true, module_id: true,
-      source_preset_id: true, created_at: true, status: true, usage_json: true } });
+      source_preset_id: true, batch_id: true, created_at: true, status: true, usage_json: true } });
+  const excludedByOwner = new Map(await Promise.all(Array.from(new Set(tasks.map(task => task.owner_id)), async ownerId =>
+    [ownerId, new Set(await characterLabTaskBatchIds(ownerId, db))] as const)));
+  const visibleTasks = tasks.filter(task => !excludedByOwner.get(task.owner_id)?.has(task.batch_id));
   const assets = await db.asset.findMany({ where: { id: { in: document.pins.map(p => p.assetId) },
     type: 'image', status: 'active' }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true,
       width: true, height: true, mime_type: true } });
   const hidden = new Set(await studioHiddenAssetUrls(user, db));
-  const byTask = new Map(tasks.map(t => [t.id, t]));
+  const byTask = new Map(visibleTasks.map(t => [t.id, t]));
   const byAsset = new Map(assets.map(a => [a.id, a]));
   const pins = document.pins.flatMap(pin => {
     const task = byTask.get(pin.taskId), asset = byAsset.get(pin.assetId);

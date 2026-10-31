@@ -57,10 +57,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const startedAt = Date.now();
+  let phase = 'authorize';
+  let requestId: string | undefined;
   try {
     const user = await getAdminUser(request);
+    phase = 'parse';
     const body = await request.json();
     if (body?.action === 'save-private-definition' || body?.action === 'save-private-draft') {
+      phase = body.action;
+      if (typeof body.requestId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) requestId = body.requestId;
       const result = body.action === 'save-private-definition' ? await savePrivateGlobalEditor(user.id, body)
         : await savePrivateGlobalDraft(user.id, body);
       return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
@@ -78,6 +84,7 @@ export async function PUT(request: NextRequest) {
       try { templateDefaults = parseStudioTemplateDefaults(body.templateDefaults); }
       catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '统一默认设置无效' }, { status: 400 }); }
     }
+    phase = 'settings-write';
     const current = await getImageStudioSettings();
     const settings = await saveImageStudioSettings({ context: body.context ?? current.context, revision: body.revision, model: body.model ?? current.model,
       prices: body.prices ?? current.prices, ...(templateDefaults === undefined ? {} : { templateDefaults }) }, user.id,
@@ -91,6 +98,13 @@ export async function PUT(request: NextRequest) {
     if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     if (error instanceof StudioSettingsClearConfirmationError) return NextResponse.json({ error: error.message }, { status: 409 });
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') return NextResponse.json({ error: '设置已在其他页面更新，请重新读取后修改' }, { status: 409 });
-    return NextResponse.json({ error: '保存失败，修改仍保留在当前页面，请重试' }, { status: 500 });
+    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^P\d{4}$/.test(error.code) ? error.code : 'UNEXPECTED';
+    console.error('[image-studio-settings-save]', JSON.stringify({ phase, requestId, code, elapsedMs: Date.now() - startedAt }));
+    if (code === 'P1008' || code === 'P2028') return NextResponse.json({
+      error: requestId ? '保存结果尚未确认，请核对原保存；当前输入已保留' : '设置暂时无法保存，当前修改已保留，请重新读取核对',
+      code: 'settings_save_unconfirmed', ...(requestId ? { requestId } : {}),
+    }, { status: 503, headers: { 'Cache-Control': 'private, no-store' } });
+    return NextResponse.json({ error: '保存失败，修改仍保留在当前页面，请核对后重试', code: 'settings_save_unconfirmed',
+      ...(requestId ? { requestId } : {}) }, { status: 500, headers: { 'Cache-Control': 'private, no-store' } });
   }
 }
