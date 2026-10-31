@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## PG-COVER01 提示词组封面区前置（2026-10-31）
+
+来源：用户反馈缺少封面上传设置模块，要求复用旧模块，最新仅完成前置。[工单§13.12](../../tasks/todo/2026-10-12-style-skills-unified-selector.md#1312-pg-cover01-提示词组封面区前置2026-10-31收口)已记录旧模块选择、接线依赖、权限保存、回退和手验；业务前置完成，代码草案未交付，本轮不构建部署。原截图保正式根同主题`prompt-group-ux-20261030/cover01/`，736×795 PNG、168219字节，已查看并归档，不公开。关键词：封面常显、同业务模块复用、仅解除关联、显式保存、PG-COVER01。CodeGraph sync/context有当前源码关系证据；memory/docs状态接口缺失由主控上报，不将索引同步冒状态回写。
+
 ## PG-UI03/04、PG-IP01 视频输入实施（2026-10-30）
 
 来源：用户明确授权正式根原单§13落地。关键词：输入footer、素材箭头、紧凑chip、可选网格拖排、普通/IP同下拉、mode-switch完整草稿、旧v2素材未知。已于2026-10-31T02:17:19Z部署v0.120.0/e6c46122，BUILD `lKaGPYfNr9KqTNHAXqOz1`；7组合同/复用基础、最终Next/types/lint、自复核、6启动检查/7服务/4timer及公网两路资源有证。原[工单§13.11](../../tasks/todo/2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)登记交付，正式根同主题`ui03-implementation/r02/deployment-result.json`、原构建/启动/公网JSON及顶层`FIXED-RECOVERY.txt`可读；恢复6c3d4bb1，不回数据。旧集成检查基线同败不冒通过，准备目录重名1次已接续解决。五张原图仍ui03-preflight私有，不上传；ARCH03和同期成果保留，已部署，待用户手动验收。

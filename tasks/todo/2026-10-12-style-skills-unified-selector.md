@@ -25,3 +25,29 @@ CodeGraph：实际checkout已prepare，真实context查询命中GenerationCompos
 回退沿原相容版`6c3d4bb1d068242e71a9791dd50a7be87a800f72`/`0.118.5+arch03-guard.1`，BUILD `MMAEfyVWF5QO500lN6MR-`；固定恢复入口和配置备份保服务器现有staging，程序回退不回DB/账本/媒体/回执。原v0.119.0原件另保留，未扩启动门两版上限。中断后和切版前已鲜核实际线上f4ccc79e及无发布占用，未覆盖同期成果。
 
 本批证据沿正式根`docs/materials/2026-10-12-studio-ui-clarity/prompt-group-ux-20261030/ui03-implementation/`保存；原五图仍在相邻ui03-preflight目录，仅私有本地，不上传Git/公网。
+
+## 13.12 PG-COVER01 提示词组封面区前置（2026-10-31收口）
+
+用户反馈编辑提示词组弹窗缺少封面上传设置模块，要求复用旧模块；最新明确“把这个前置任务做完”。本轮仅补齐前置并提交安全文档，不继续业务代码、版本、构建或部署。完整原单、用户截图及来源沿正式根同路径和私有`cover01/`资料保留，不公开截图或内部提示词。原PG-UI03、PG-UI04、PG-IP01状态不变。
+
+| 编号 | 任务 | 完成标准 | 状态 |
+|---|---|---|---|
+| PG-COVER01 | 恢复提示词组封面设置模块 | 根因、旧模块、接线依赖、权限保存、回退及最小手验齐备；仅文档提交推送 | 业务前置已完成；既有代码草案未交付；CodeGraph状态接口缺口另列 |
+
+根因已核：`GroupEditor`只在折叠“简介、条件与封面”中提供依赖上传回调的文字按钮，没有旧封面区和当前预览；`GenerationComposer → PromptGroupSelection → GroupEditor`已经传入`workspace.uploadAssetToHistory`，不是上传接口缺失。旧`src/app/image-studio/skills-view.tsx`同业务封面区具备预览、原素材选择器、拖入/粘贴上传和解除关联；`ModuleCoverEditor`是模板拼图裁剪与独立保存，职责不同，明确排除。主控已确认复用同业务模块，抽新旧共用组件有两处真实消费，无待定产品选择。
+
+后续实施落点：
+- `src/components/PromptGroupCoverField.tsx`及CSS：从旧封面区提取受控展示组件，接收assetId/coverUrl/disabled及选图、上传、移除回调，不自行保存组定义。
+- `src/app/image-studio/skills-view.tsx`：原封面区换为共用组件，原上传、素材选择器与保存回调保持，不扩其它页面业务。
+- `src/components/generate/PromptGroupPicker.tsx`：名称后、正文前常显同一模块，覆盖新增和编辑；封面仍写原coverAssetId，已有封面用服务器受保护版本URL，新选图片沿原合法缩略图入口；简介/条件继续独立折叠。
+- 依赖现有`ResourceLibraryPicker`、`useWorkspace.uploadAssetToHistory`、prompt-groups服务器权限/版本与封面读取路由，不新增接口、组件库、裁剪规范或权限。共用组件与两个消费者一并接入后，检查原回调和字段链路，再做必要工程检查。
+
+保存边界：上传、选取、更换、解除关联只改变当前编辑及原草稿，不自动保存组定义、不加入生成参考区、不删原素材。原显式保存真实成功才更新已保存版本并关闭；取消选图不改当前值，失败/冲突保稿，未知只查原请求，不换号重发。新旧编辑器各自保原保存合同，上传继续原权限/请求号/恢复底座，不合并后台模型或另加理论防御。
+
+工程与回退：本轮不检查/构建/部署代码草案。后续另获实施授权时仅做必要类型/lint/Next构建和自复核，复用匹配证据，不加字符串自证/全站回归；沿既有保护部署鲜核实际线上、同期成果、发布占用和可执行相容回退，不沿用旧调查时的版本号。无数据迁移，回退只回程序与匹配配置，不回DB/媒体/账本/回执，不删除已上传素材或合法封面关联。
+
+最小用户手验：新增/编辑封面常显及已有预览；原选择器上传/选取、更换、拖入/粘贴与取消；解除关联不删素材；显式保存成功回显、失败/版本冲突/未知保稿；窄屏和键盘可达。无浏览器、收费、真实业务保存删除或独立审核，不用构建冒手验。
+
+现状分开：阶段切换前已在本地写入7份未提交源码/版本草案（共用组件及CSS、skills-view、PromptGroupPicker、package.json、package-lock.json、release.ts），未完成本项必要工程检查、未提交/推送/部署；原样保留，不夹带文档提交。完整截图736×795 PNG、168219字节已实际查看并私有归档。已有同站后续交付不被本前置覆盖，草案暂写版本不视为未来发布版本。
+
+CodeGraph证据与缺口：主控完成实际源码checkout的sync，1661 files / 28366 nodes / 97550 edges、up to date；CLI context指定实际路径、max-nodes 6、no-code、JSON返回6 symbols / 4 files / 3 relations，命中GroupEditor、PromptGroupCoverField和Cover，证明当前未提交源码关系，不证明线上或决策记忆。当前MCP无CodeGraph工具，CLI v0.9.3及其README/help/MCP实现无memory/docs状态存取接口，现有适配器仅负责源码新鲜度。无法完整读取/回写项目全局状态与决策，不把索引同步冒状态回写；缺口由主控上报，不留给实施者重做业务调查，不安装依赖或造新平台。
