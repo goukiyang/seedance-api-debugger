@@ -10,6 +10,8 @@
 
 ## SAFE-RETRY01 安全自动重试前置（2026-10-31）
 
+SR-IMPL01机制已部署v0.122.0/2dc01e20，详见[原单§8](../../tasks/todo/2026-10-31-safe-generation-retry-preflight.md#8-sr-impl01-机制实施与保护部署2026-10-31)；[公网](2026-10-31-safe-generation-retry/implementation/release/public-deployed.json)及[健康](2026-10-31-safe-generation-retry/implementation/release/service-health.json)同主BUILD`cYdgstc2qqw9Dsd35yEGj`。事务尝试记录、后台调度、单结算和界面/管理入口齐，10项隔离专项与主/guard完整构建/启动证据按最终产物收口；同目录保早期失败与修正。相容回退88f57e09仅回程序，原SQLite/媒体/账本/回执保留。供应商规则目录与启用数仍0，无真实付费/浏览器验收，不能把机制上线冒已验证免费自动重试。
+
 来源为用户要求查供应商接口文档并按首次失败后再试3次完成前置。[正式工单](../../tasks/todo/2026-10-31-safe-generation-retry-preflight.md)记录官方错误码矩阵、费用/原号保护、源码落点、状态体验、实施依赖及验收回退。FluxPort公开文档与模型JSON、Musk官方FAQ/故障排除已归档并做SHA核对，见[资料登记](2026-10-31-safe-generation-retry/evidence.md)。当前无充分证据启用免费新生成错误码，供应商合同仍待补；已有历史0元样本不泛化。仅前置调查/设计，无收费测试、外发、业务修改或上线；CodeGraph源码查询与状态回写缺口分开记录。网页原件本地保留，不公开Git转载。
 
 ## SD2现有抠图全功能升级交接（2026-10-06）

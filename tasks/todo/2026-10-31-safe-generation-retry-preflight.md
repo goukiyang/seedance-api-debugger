@@ -4,6 +4,8 @@
 
 ## 1. 目标、结论与完成边界
 
+当前实施结果：SR-IMPL01已部署v0.122.0，功能待用户手动验收；最终源码、工程与保护发布见§8。下面SR01前置缺证为原阶段记录：供应商免费重试代码仍待确认，但已不阻断按用户后续授权完成机制；当前有效规则0条，未冒称实际自动免费重试已验证。
+
 ### 2026-10-31 SR-IMPL01 当前实施授权
 
 用户最新明确要求先实现机制，供应商回复后再针对性调整；本要求替代本单此前“等待合同补齐后才能开始机制实施”的阶段限制。现在实施并沿项目既有授权检查、提交推送及保护部署：首次失败后最多再试3次、同任务单预留单结算、持久attempt/后台调度/状态展示、可维护的供应商规则。尚未确认的错误仍不得凭HTTP状态或客户文案推断免费，原受理或费用未知继续查原号；缺合同仅限制相应新生成规则的启用，不阻断基础机制交付。不是授权历史失败批量重跑、跨项目、换Key/供应商/模型或新增收费验收。
@@ -141,3 +143,17 @@ CodeGraph：正式根准备入口因`git ls-files`30秒超时失败，未反复�
 当前缺口阻止的是“自动重新生成可启用规则”的最终定案，不阻止其余机制设计。未向供应商发送问题，未新增对外沟通授权。取得回复后由本对话核对并更新同一工单，不另建并行清单。
 
 方法边界：[writing-plans技能](/Volumes/Data/CodexHome/skills/writing-plans/SKILL.md)明确要求“Do not declare an executable work order delivered or all preparation complete while a necessary prerequisite remains unresolved.” 本轮未完成项的实质原因是供应商计费/终态合同缺证；引用该要求只约束如实交付，不是另加审批或停止可做的工作。
+
+## 8. SR-IMPL01 机制实施与保护部署（2026-10-31）
+
+用户后续明确先落地机制、供应商回复再调整，实施已完成。主版`2dc01e20d7c0aadf8e6bbf65bb43dba0b90c9928` / v0.122.0 / BUILD`cYdgstc2qqw9Dsd35yEGj`，保留最新正式后继`849c895d53afba3b1dcf8ff6961d48cea66ce941`的已上线成果，不从旧3a覆盖。应用与guard已推既有origin，最终远端由执行回执核同。
+
+实际采用既有`PlatformSetting`单原子任务事务/CAS尝试日志，不加表、不迁库、不批量采用历史。图片worker、视频冻结输入及常驻后台调度、原号回调/查询、单预留单结算、任务状态与本人停止后续入口、管理员精确规则启停接口已接通。最多首次+3次，原受理/费用未知不重发；迟到旧成功/费用矛盾停止后续并留证，陈旧停止请求不退款。规则目录只接受带版本、精确协议/模型/通道/错误阶段及终态/免计费证据的已审条目；当前目录与启用条目均0，后续供应商回复应定向更新条目再由管理员启用，不能只从当前HTTP码推断免费。
+
+工程：最终合并源10项隔离SQLite/真实适配函数合成检查及guard禁止下一尝试检查通过，未调用真实模型。29项原生候选门的成功原证及未变证据复用、实际主/guard完整Next构建（含类型/lint）、6项启动检查与相容pair都有对应记录；早期计数fixture、依赖缺失、VM绑定/状态断言及runtime子进程接线失败原证保留，不称早期整套通过。主控核对实际改动、关键事务/权限投影和最终工程/发布证据，不再重复全套验收或派独立审核。
+
+19:29:57Z本地健康，19:32:30Z公网收口，19:33:56Z健康记录核同7服务新源、NRestarts0及4timer；4个实际公网资源同字节，新增API匿名保护符合预期。无生产生成/消息/浏览器功能测试，`functionalAcceptance=false`。停服按systemd单调时间实测约13.45秒，不把本机准备计为停服。保护了当前配置和一致SQLite备份，未回写账本/原件或历史任务。
+
+固定相容回退：`88f57e096c02a649b60b9788d469e5a0dadde68c` / v0.122.0+safe-retry-guard.1 / BUILD`bg-8r9i2u70uwEA2qJvwF`，读新attempt/sr_状态、保原号核对与结算，仅禁后续新生成。不能直接回不认识新任务的旧3a/6a/849c writer；只回程序不回DB、配置、媒体、账本或回执。命令入口见[固定恢复清单](../../docs/materials/2026-10-31-safe-generation-retry/implementation/release/FIXED-RECOVERY.txt)，未在线演练回退。
+
+实际证据：[公网产物](../../docs/materials/2026-10-31-safe-generation-retry/implementation/release/public-deployed.json)、[服务健康](../../docs/materials/2026-10-31-safe-generation-retry/implementation/release/service-health.json)、[主版构建](../../docs/materials/2026-10-31-safe-generation-retry/implementation/release/main-build-success.json)、[回退构建](../../docs/materials/2026-10-31-safe-generation-retry/implementation/release/rollback-build-success.json)及同目录专项/数据保护/启动记录。供应商缺证、模拟测试、工程通过、实际上线和用户手验分开；机制已部署，真实免费自动重试规则尚未启用。
