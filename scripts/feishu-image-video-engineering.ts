@@ -216,11 +216,17 @@ async function main() {
     // It must retain the durable ambiguous send intent, not rewrite it as a provider rejection or sent-without-receipt.
     const saveFailure = await makeTask('fixture-receipt-save-failure'), beforeSaveFailure = { uploads, images, texts };
     const updateMany = prisma.notification.updateMany.bind(prisma.notification); let failedSave = false;
-    const failingDb = Object.create(prisma); failingDb.notification = { updateMany: async (args: Parameters<typeof updateMany>[0]) => {
-      const value = args.data?.metadata_json; const next = typeof value === 'string' ? contract.parseImageFeishuEvent(value) : null;
-      if (!failedSave && next?.taskId === 'fixture-receipt-save-failure' && next.explanation.receiptId) { failedSave = true; throw new Error('isolated receipt storage failure'); }
-      return updateMany(args);
-    } };
+    const failingNotification = new Proxy(prisma.notification, { get(target, key, receiver) {
+      if (key !== 'updateMany') return Reflect.get(target, key, receiver);
+      return async (args: Parameters<typeof updateMany>[0]) => {
+        const value = args.data?.metadata_json; const next = typeof value === 'string' ? contract.parseImageFeishuEvent(value) : null;
+        if (!failedSave && next?.taskId === 'fixture-receipt-save-failure' && next.explanation.receiptId) { failedSave = true; throw new Error('isolated receipt storage failure'); }
+        return updateMany(args);
+      };
+    } });
+    const failingDb = new Proxy(prisma, { get(target, key, receiver) {
+      return key === 'notification' ? failingNotification : Reflect.get(target, key, receiver);
+    } });
     // All other delegates still use the isolated Prisma client.
     assert.equal(await worker.deliverImageFeishuNotification(failingDb, saveFailure), 'lease_lost'); assert.equal(failedSave, true);
     const receiptLost = await prisma.notification.findUniqueOrThrow({ where: { id: saveFailure.id } });
