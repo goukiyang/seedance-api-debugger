@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
+import { getBridgeUser } from '@/lib/bridge/panel-token';
 import { listBundles, parseGroups, resolveConfig, storeBundle, storeGroups, verifyBundle } from '@/lib/bridge/config';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 /** 插件拉取：GET /api/bridge/config?shell=0.2.11&channel=stable（管理员加 &list=1 查看已存规则包） */
 export async function GET(request: NextRequest) {
   try {
-    const user = await getSession();
+    const user = await getBridgeUser(request);
     if (!user) return NextResponse.json({ error: '未登录', ok: false }, { status: 401 });
     const sp = request.nextUrl.searchParams;
     if (sp.get('list') === '1') {
@@ -38,6 +39,12 @@ export async function POST(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录', ok: false }, { status: 401 });
     if (user.role !== 'admin') return NextResponse.json({ error: '无权限', ok: false }, { status: 403 });
+    // 防跨站提交：带 Origin 时必须是本站
+    const origin = request.headers.get('origin');
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    if (origin && host && new URL(origin).host !== host.split(',')[0].trim()) {
+      return NextResponse.json({ error: '来源不允许', ok: false }, { status: 403 });
+    }
     let body: Record<string, unknown>;
     try {
       body = await request.json();
