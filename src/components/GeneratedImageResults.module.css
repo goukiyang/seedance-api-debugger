@@ -111,13 +111,14 @@
 .mediaActions .commonActions button { padding: 0; }
 .mediaActions[data-cover-context-delete] .commonActions,
 .mediaActions[data-cover-context-delete] .specialtyActions { display: contents; }
-.mediaActions[data-cover-context-delete] button { position: relative; flex: 0 0 28px; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 4px; }
-.mediaActions[data-cover-context-delete] button svg { width: 14px; height: 14px; }
+.mediaActions[data-cover-context-delete] { gap: 5px; padding: 5px; }
+.mediaActions[data-cover-context-delete] button { position: relative; flex: 0 0 35px; width: 35px; min-width: 35px; height: 35px; min-height: 35px; padding: 0; border-radius: 5px; }
+.mediaActions[data-cover-context-delete] button svg { width: 17.5px; height: 17.5px; }
 @media (hover: none), (any-pointer: coarse) {
   /* Keep a full touch target without painting a large slab over the image. */
   .mediaActions[data-cover-context-delete] { gap: 0; padding: 4px; border: 0; background: transparent; box-shadow: none; }
   .mediaActions[data-cover-context-delete] button { isolation: isolate; flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; border: 0; background: transparent; }
-  .mediaActions[data-cover-context-delete] button::before { content: ''; position: absolute; inset: 8px; z-index: -1; pointer-events: none; border: 1px solid #414b48; border-radius: 4px; background: #202725; }
+  .mediaActions[data-cover-context-delete] button::before { content: ''; position: absolute; inset: 4.5px; z-index: -1; pointer-events: none; border: 1px solid #414b48; border-radius: 5px; background: #202725; }
   .mediaActions[data-cover-context-delete] button:hover { background: transparent; }
   .mediaActions[data-cover-context-delete] button:hover::before { background: #303c37; }
 }

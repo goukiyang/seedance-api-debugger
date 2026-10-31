@@ -10,7 +10,7 @@ import { studioTaskHasViewableOutput } from './dimension-mismatch';
 import { publicPricingTaskState } from './pricing-state';
 import { authorizedImageFeishuTask } from './feishu-notification';
 import { imageFeishuSourceStamp, prepareImageFeishuSource } from './feishu-source';
-import { IMAGE_FEISHU_TYPE, IMAGE_FEISHU_ATTEMPTS, parseImageFeishuEvent } from './feishu-contract';
+import { IMAGE_FEISHU_TYPE, IMAGE_FEISHU_ATTEMPTS, parseImageFeishuEvent, imageFeishuCardTemplate, imageFeishuCardPayload } from './feishu-contract';
 
 type Db = Prisma.TransactionClient;
 type Row = Pick<Notification, 'id' | 'type' | 'channel' | 'status' | 'target_user_id' | 'metadata_json'>;
@@ -37,9 +37,11 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
     for (const step of [meta.image, meta.explanation]) { step.leaseToken = !terminal && step.state === 'sending' ? lease : null; step.leaseUntil = step.leaseToken ? meta.leaseUntil : null; }
     const next = JSON.stringify(meta);
     if (!parseImageFeishuEvent(next)) throw new VideoFeishuError('notification_state_invalid', 503);
-    const changed = await db.notification.updateMany({ where: { id: row.id, type: IMAGE_FEISHU_TYPE, channel: 'feishu', status: 'pending', metadata_json: raw },
+    let changed;
+    try { changed = await db.notification.updateMany({ where: { id: row.id, type: IMAGE_FEISHU_TYPE, channel: 'feishu', status: 'pending', metadata_json: raw },
       data: { metadata_json: next, ...(terminal ? { status: meta.state === 'sent' ? 'sent' : 'failed', sent_at: meta.state === 'sent' ? new Date() : null,
-        error_message: meta.state === 'sent' ? null : `image_feishu_${meta.reason}` } : {}) } });
+        error_message: meta.state === 'sent' ? null : `image_feishu_${meta.reason}` } : {}) } }); }
+    catch { owned = false; throw new VideoFeishuError('delivery_lease_lost', 503); }
     if (changed.count !== 1) { owned = false; throw new VideoFeishuError('delivery_lease_lost', 409); }
     raw = next; owned = !terminal;
   };
@@ -67,7 +69,7 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       if (Date.now() - meta.createdAt >= 24 * 60 * 60_000) return await terminal('generation_wait_ended');
       return await defer('generation_not_ready', 5 * 60_000);
     }
-    const source = await prepareImageFeishuSource(initial), stamp = imageFeishuSourceStamp(initial);
+    const source = await prepareImageFeishuSource(initial, meta.version), stamp = imageFeishuSourceStamp(initial);
     if (meta.sourceVersion && meta.sourceVersion !== source.version || meta.contentHash && meta.contentHash !== source.contentHash
       || meta.assetId && meta.assetId !== source.assetId) return await terminal('original_changed');
     meta.sourceVersion = source.version; meta.contentHash = source.contentHash; meta.assetId = source.assetId;
@@ -77,6 +79,14 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       if (!await heartbeat()) throw new VideoFeishuError('delivery_lease_lost', 409);
       return current.actor.feishu_open_id!;
     };
+    if (meta.version === 2) {
+      if (!source.presentation || source.mode !== 'image') return await terminal('image_original_unavailable');
+      if (meta.presentation && JSON.stringify(meta.presentation) !== JSON.stringify(source.presentation)) return await terminal('presentation_changed');
+      if (!meta.presentation) {
+        meta.presentation = source.presentation;
+        meta.cardTemplate = imageFeishuCardTemplate(source.assetId, source.presentation);
+      }
+    }
     if (source.mode === 'link') {
       if (meta.image.firstSendAt !== null || meta.image.receiptId || meta.upload.startedAt !== null) return await terminal('original_delivery_unconfirmed');
       meta.mode = 'link'; meta.reason = source.reason; meta.upload.state = 'skipped'; meta.image.state = 'skipped';
@@ -89,19 +99,22 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
       catch (error) { const failure = safeError(error); meta.upload.state = failure.ambiguous ? 'unknown' : 'pending'; await save(); return await terminal(failure.ambiguous ? 'image_upload_unknown' : 'image_upload_rejected'); }
       await save();
     }
+    if (meta.version === 2 && !meta.cardPayload) {
+      meta.cardPayload = imageFeishuCardPayload(meta.cardTemplate!, meta.upload.key!); await save();
+    }
     const send = async (part: 'image' | 'explanation') => {
-      const step = meta[part]; if (step.receiptId) return true;
+      const step = meta[part]; if (step.receiptId) { step.state = 'sent'; step.ambiguous = false; return true; }
       if (step.attempts >= IMAGE_FEISHU_ATTEMPTS || step.firstSendAt !== null && Date.now() - step.firstSendAt >= SEND_WINDOW_MS) {
         await terminal('message_window_ended'); return false;
       }
       const openId = await authority(); meta.externalStartedAt ??= Date.now(); step.firstSendAt ??= Date.now(); step.state = 'sending'; step.attempts++;
       const wasAmbiguous = step.ambiguous; step.ambiguous = true; await save();
+      let receipt: string;
       try {
         const link = `${VIDEO_FEISHU_SITE}/template-studio?type=image&taskId=${encodeURIComponent(meta.taskId)}${initial.task.module_id ? `&moduleId=${encodeURIComponent(initial.task.module_id)}` : ''}`;
-        const content = part === 'image' ? { image_key: meta.upload.key! }
+        const content = meta.version === 2 ? JSON.parse(meta.cardPayload!) : part === 'image' ? { image_key: meta.upload.key! }
           : { text: `任务 ${meta.taskId}\n${meta.mode === 'link' ? '本次仅发送查看链接，未发送图片消息。' : '图片已发送。'}\n${link}` };
-        const receipt = await sendVideoFeishuMessage(token, openId, step.uuid, part === 'image' ? 'image' : 'text', content, step.firstSendAt + SEND_WINDOW_MS, meta.leaseUntil!);
-        step.receiptId = receipt; step.state = 'sent'; step.ambiguous = false; await save(); return true;
+        receipt = await sendVideoFeishuMessage(token, openId, step.uuid, meta.version === 2 ? 'interactive' : part === 'image' ? 'image' : 'text', content, step.firstSendAt + SEND_WINDOW_MS, meta.leaseUntil!);
       } catch (error) {
         const failure = safeError(error); step.ambiguous = wasAmbiguous || failure.ambiguous; step.state = step.ambiguous ? 'sending' : 'pending';
         if (!failure.retryable && !step.ambiguous) await terminal('message_rejected');
@@ -109,9 +122,11 @@ export async function deliverImageFeishuNotification(db: Db, row: Row, heartbeat
         else await defer(step.ambiguous ? 'message_receipt_unknown' : 'message_retry_pending');
         return false;
       }
+      // Persistence errors are not transport rejections. Leave the durable send intent and UUID intact.
+      step.receiptId = receipt; step.state = 'sent'; step.ambiguous = false; await save(); return true;
     };
     if (meta.mode === 'image' && !await send('image')) return meta.state;
-    if (!await send('explanation')) return meta.state;
+    if (meta.version === 1 && !await send('explanation')) return meta.state;
     meta.state = 'sent'; await save(true); return 'sent';
   } catch (error) {
     const failure = safeError(error);

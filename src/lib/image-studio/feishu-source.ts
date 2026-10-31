@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { VideoFeishuError } from '@/lib/video/feishu-contract';
 import { studioTaskHasViewableOutput, studioOutputFormatForMime } from './dimension-mismatch';
-import { IMAGE_FEISHU_MAX_BYTES } from './feishu-contract';
+import { IMAGE_FEISHU_MAX_BYTES, type ImageFeishuPresentation } from './feishu-contract';
 import type { authorizedImageFeishuTask } from './feishu-notification';
 
 type Current = Awaited<ReturnType<typeof authorizedImageFeishuTask>>;
@@ -23,7 +23,7 @@ export function imageFeishuMode(format: string, size: number, width: number, hei
   }
   return { mode: 'image' as const, reason: null };
 }
-export async function prepareImageFeishuSource(current: Current) {
+export async function prepareImageFeishuSource(current: Current, eventVersion: 1 | 2 = 1) {
   const { task, asset } = current;
   if (!studioTaskHasViewableOutput(task) || !asset || !asset.hash || !/^[a-f0-9]{64}$/.test(asset.hash)
     || !Number.isSafeInteger(asset.file_size) || !asset.file_size || asset.file_size > 96 * 1024 * 1024) throw unavailable();
@@ -46,10 +46,36 @@ export async function prepareImageFeishuSource(current: Current) {
     if (!metadata.width || !metadata.height || metadata.width !== asset.width || metadata.height !== asset.height
       || metadata.format !== (format.mimeType === 'image/jpeg' ? 'jpeg' : format.extension)) throw unavailable();
     const policy = imageFeishuMode(metadata.format, bytes.length, metadata.width, metadata.height);
+    let uploadBytes = bytes;
+    let uploadMimeType = format.mimeType;
+    let uploadExtension = format.extension;
+    let presentation: ImageFeishuPresentation | undefined;
+    if (eventVersion === 2) {
+      let kind: ImageFeishuPresentation['kind'] = 'original';
+      let uploadWidth = metadata.width;
+      let uploadHeight = metadata.height;
+      if (policy.mode === 'link') {
+        kind = 'preview';
+        uploadBytes = await sharp(bytes, { failOn: 'warning', limitInputPixels: 64_000_000 }).timeout({ seconds: 45 })
+          .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 86, alphaQuality: 100, effort: 4 })
+          .toBuffer();
+        const preview = await sharp(uploadBytes, { failOn: 'warning' }).metadata();
+        if (!preview.width || !preview.height || preview.format !== 'webp' || uploadBytes.length > IMAGE_FEISHU_MAX_BYTES) throw unavailable();
+        uploadWidth = preview.width;
+        uploadHeight = preview.height;
+        uploadMimeType = 'image/webp';
+        uploadExtension = 'webp';
+      }
+      presentation = { kind, contentHash: createHash('sha256').update(uploadBytes).digest('hex'), width: uploadWidth, height: uploadHeight,
+        originalWidth: metadata.width, originalHeight: metadata.height, mimeType: uploadMimeType, extension: uploadExtension };
+    }
     const stamp = imageFeishuSourceStamp(current);
-    return { ...policy, assetId: asset.id, contentHash: asset.hash, version: hash([stamp, before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs]),
-      file: policy.mode === 'image' ? new Blob([Uint8Array.from(bytes)], { type: format.mimeType }) : null,
-      extension: format.extension, current: async () => { try { return await realpath(file) === file && same(await lstat(file)); } catch { return false; } } };
+    return { ...(eventVersion === 2 ? { mode: 'image' as const, reason: null } : policy), assetId: asset.id, contentHash: asset.hash,
+      version: hash([stamp, before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs]),
+      file: eventVersion === 2 || policy.mode === 'image' ? new Blob([Uint8Array.from(uploadBytes)], { type: uploadMimeType }) : null,
+      extension: uploadExtension, ...(presentation ? { presentation } : {}),
+      current: async () => { try { return await realpath(file) === file && same(await lstat(file)); } catch { return false; } } };
   } catch (error) {
     if (error instanceof VideoFeishuError) throw error;
     throw unavailable();
