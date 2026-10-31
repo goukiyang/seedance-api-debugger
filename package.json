@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.121.1",
+  "version": "0.121.1+image-submit-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

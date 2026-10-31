@@ -96,7 +96,7 @@ export async function readStudioSubmitReceipt(account: string, requestId: string
   return saved ? projectReceipt(terminal(saved.value_json, account, requestId))
     : { schema: IMAGE_SUBMIT_RECEIPT_SCHEMA, requestId, state: 'unknown', stage: 'original-query', message: '尚未找到原受理或明确拒绝回执，请保留输入并核对原编号。' };
 }
-function writesEnabled() { return process.env.IMAGE_STUDIO_REQUEST_CLOSE_ENABLED !== '0'; }
+function writesEnabled() { return false; }
 /** The caller supplies only a recognized pre-acceptance failure; no prompt text is stored. */
 export async function rejectStudioSubmission(account: string, requestId: unknown, detail: { code: string; stage: string }): Promise<StudioSubmitReceipt | null> {
   if (!validStudioSubmitRequestId(requestId)) return null;
