@@ -12,7 +12,7 @@ export async function GET(request: Request, { params }: Context) {
     const user = await getSession(); if (!user) return videoFeishuResponse({ error: 'not_authenticated' }, 401);
     const expected = request.headers.get('x-app-session-user');
     if (expected !== null && expected !== user.id) throw new VideoFeishuError('account_changed', 409);
-    return videoFeishuResponse(await prisma.$transaction(tx => new URL(request.url).searchParams.get('intent') === 'original'
+    return videoFeishuResponse(await prisma.$transaction<Awaited<ReturnType<typeof readOriginalImageFeishuStatus>> | Awaited<ReturnType<typeof readImageFeishuStatus>>>(tx => new URL(request.url).searchParams.get('intent') === 'original'
       ? readOriginalImageFeishuStatus(tx, user.id, params.taskId) : readImageFeishuStatus(tx, user.id, params.taskId)));
   } catch (error) { return videoFeishuHttpError(error); }
 }
