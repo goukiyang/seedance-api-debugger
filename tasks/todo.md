@@ -981,3 +981,5 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本批Linux原生/定价/types/lint/Next、真实非零菜单与原事务DTO等价/fresh charge、30断言有效consumer及C0/C1按key索引SEARCH已证；采集原FAIL与writer未重叠保留。本批无DDL，[三修部署回执](../docs/materials/2026-11-01-admin-usage-read-snapshot/release/stage3-attempt01/deployment-result.json)为当前运行入口；59fb原产物仅程序回退，保表/数据/配置。部署后仅设置+B的自然观察已完成并归还原用户页：设置正文1.424s、Node0.531s且无旧计价事务；目录主区仍7.380s；B点击7.097s、媒体首字节3.578s/handler61.5ms，外段仍待查。其余功能待用户手验。
 
 应用源码已推送并部署；本段为脱敏进度记录，后续文档提交不作为运行源。
+
+- 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
