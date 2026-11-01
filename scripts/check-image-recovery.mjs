@@ -183,6 +183,7 @@ const publicUsageFixtures = [
       'fixed_cover_public_dto_and_original_status_hide_source_and_recheck_revocation',
     ], sources: [
       'scripts/template-author-cover-contract-engineering.ts', 'src/lib/image-studio/template-author.ts',
+      'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts',
       'src/lib/image-studio/definition-read.ts', 'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
       'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
       'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
