@@ -985,3 +985,10 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+
+## BR-BIND01 插件设备绑定（2026-11-01）
+
+- 已部署v0.126.0，待用户手动验收。四API、后台设备/账号视图与抽屉编辑、旧心跳相容写入完成；源`d751b888a8da1a1fd724a956b2fb7516930d6814`、BUILD `lEu8PCR4uRWhMlm6eyEOC`，已推送`codex/bridge-device-binding-20261101`。
+- 9组指定路由/合成数据库测试、两份Linux完整类型/lint/Next及内置工程、5项指定线上HTTP和公网资源检查通过；6启动门、7服务/4timer、11服务自然排空、一致DB备份与原价格保护有证。无DDL/业务数据恢复，兼容回退300ad4a52保设备字段与归属；只回程序。
+- [原交接工单与完整回执](/Volumes/Data/Projects/video-api-debugger-worktrees/HANDOFF-device-binding.md)、[部署证据](../docs/materials/2026-11-01-device-binding/attempt01/deployment-result.json)。插件0.3.1同步、后台改动回显及页面体验待用户手验；CodeGraph准备遇源码变动，已用定点源码检查，索引未冒同步成功。主目录已有改动保持，完整附件私有。
