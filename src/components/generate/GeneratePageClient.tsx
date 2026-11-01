@@ -3162,13 +3162,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       body: JSON.stringify({ name }),
     });
     const data = await readJsonResponse<{ collection?: AssetCollection; error?: string; message?: string }>(res);
-    if (activeAccountIdRef.current !== accountId) return;
+    if (activeAccountIdRef.current !== accountId) throw new Error('账号已变化，图集保存结果尚未确认，请回到原账号核对。');
     if (res.status === 401) {
       window.location.href = '/login';
       throw new Error('登录状态已失效，请重新登录后重试。');
     }
-    if (!res.ok) throw new Error(data.error);
-    if (data.collection) setCollections((current) => [data.collection!, ...current]);
+    if (!res.ok) throw new Error(data.message || data.error || '图集保存失败');
+    if (!data.collection?.id) throw new Error('图集保存结果尚未确认，请先刷新图集核对。');
+    setCollections((current) => [data.collection!, ...current]);
   }, [currentUser?.id]);
 
   const handleCollectionNew = useCallback(async (name: string) => {
@@ -3184,13 +3185,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       body: JSON.stringify({ name }),
     });
     const data = await readJsonResponse<{ collection?: AssetCollection; error?: string; message?: string }>(res);
-    if (activeAccountIdRef.current !== accountId) return;
+    if (activeAccountIdRef.current !== accountId) throw new Error('账号已变化，图集创建结果尚未确认，请回到原账号核对。');
     if (res.status === 401) {
       window.location.href = '/login';
       throw new Error('登录状态已失效，请重新登录后重试。');
     }
-    if (!res.ok) throw new Error(data.error);
-    if (data.collection) setCollections((current) => [data.collection!, ...current]);
+    if (!res.ok) throw new Error(data.message || data.error || '图集创建失败');
+    if (!data.collection?.id) throw new Error('图集创建结果尚未确认，请先刷新图集核对。');
+    setCollections((current) => [data.collection!, ...current]);
   }, [currentUser?.id]);
 
   const handleReset = useCallback(() => {

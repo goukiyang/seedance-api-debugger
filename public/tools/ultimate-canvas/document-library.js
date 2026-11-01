@@ -947,11 +947,28 @@
         form.append(ui.dialogTitle, ui.dialogDescription, ui.dialogProjectLabel, ui.titleLabel, ui.history, ui.dialogError, ui.historyRetry, dialogActions);
         form.addEventListener('submit', submitDialog);
         dialog.append(form);
-        dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+        let inputComposing = false, outsidePress = null, outsideClick = null;
+        const topDialog = () => [...document.querySelectorAll('dialog[open]')].at(-1);
+        const resetOutsidePress = () => { outsidePress = null; outsideClick = null; };
+        root.addEventListener('compositionstart', () => { inputComposing = true; });
+        root.addEventListener('compositionend', () => { inputComposing = false; });
+        form.addEventListener('keydown', event => {
+            if ((inputComposing || event.isComposing || event.keyCode === 229) && ['Enter', 'Escape'].includes(event.key)) {
+                // Keep the native form/cancel default from accepting an IME candidate as an action.
+                event.preventDefault(); event.stopPropagation();
+            }
+        }, true);
+        dialog.addEventListener('cancel', event => {
+            event.preventDefault();
+            if (busy || inputComposing || topDialog() !== dialog) return;
+            if (timeDisclosure) hideTimeBubble(true);
+            else dialog.close();
+        });
         dialog.addEventListener('close', () => {
+            inputComposing = false; resetOutsidePress();
             ++historySequence;
             if (timeDisclosure && dialog.contains(timeDisclosure.trigger)) hideTimeBubble(false);
-            if (root.hidden) return;
+            if (root.hidden || topDialog()) return;
             if (dialogJob?.trigger?.isConnected) dialogJob.trigger.focus({ preventScroll: true });
             else root.focus({ preventScroll: true });
         });
@@ -960,6 +977,8 @@
         ['keydown', 'keyup', 'keypress', 'paste', 'wheel', 'pointerdown', 'pointerup', 'click'].forEach(type => {
             root.addEventListener(type, event => {
                 if (type === 'keydown' && event.key === 'Escape') {
+                    if (inputComposing || event.isComposing || event.keyCode === 229) { event.preventDefault(); event.stopPropagation(); return; }
+                    if (topDialog() && topDialog() !== dialog) { event.stopPropagation(); return; }
                     if (timeDisclosure) {
                         hideTimeBubble(true);
                         event.preventDefault();
@@ -982,13 +1001,43 @@
                 && !timeDisclosure.bubble.contains(event.target)) hideTimeBubble(true);
             if (!target?.closest('details')) root.querySelectorAll('details[open]').forEach(item => { item.open = false; });
         });
+        const outsideLayer = event => {
+            if (root.hidden || timeDisclosure?.bubble.contains(event.target)) return null;
+            if (topDialog()) {
+                if (topDialog() !== dialog) return null;
+                const box = dialog.getBoundingClientRect();
+                return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom ? dialog : null;
+            }
+            return root.contains(event.target) ? null : root;
+        };
+        document.addEventListener('pointerdown', event => {
+            resetOutsidePress();
+            const layer = event.button === 0 ? outsideLayer(event) : null;
+            if (layer) outsidePress = { layer, pointerId: event.pointerId, x: event.clientX, y: event.clientY, time: timeDisclosure };
+        }, true);
+        document.addEventListener('pointermove', event => {
+            if (outsidePress && (event.pointerId !== outsidePress.pointerId || Math.hypot(event.clientX - outsidePress.x, event.clientY - outsidePress.y) >= 6)) outsidePress = null;
+        }, true);
+        document.addEventListener('pointerup', event => {
+            const press = outsidePress; outsidePress = null;
+            outsideClick = press && press.pointerId === event.pointerId && outsideLayer(event) === press.layer
+                && Math.hypot(event.clientX - press.x, event.clientY - press.y) < 6 ? press : null;
+        }, true);
+        document.addEventListener('pointercancel', resetOutsidePress, true);
+        window.addEventListener('scroll', resetOutsidePress, true);
         document.addEventListener('click', event => {
-            if (root.hidden || dialog.open || root.contains(event.target) || timeDisclosure?.bubble.contains(event.target)) return;
+            const press = outsideClick; outsideClick = null;
+            if (!press || outsideLayer(event) !== press.layer) return;
             event.preventDefault();
-            event.stopPropagation();
             event.stopImmediatePropagation();
-            if (timeDisclosure) hideTimeBubble(true);
-            if (!busy) void returnToEditor('outside');
+            if (press.time && timeDisclosure === press.time) { hideTimeBubble(true); return; }
+            if (busy) return;
+            if (press.layer === dialog) dialog.close();
+            else {
+                const menu = root.querySelector('details[open]');
+                if (menu) { menu.open = false; menu.querySelector('summary')?.focus(); }
+                else void returnToEditor('outside');
+            }
         }, true);
         root.addEventListener('scroll', positionTimeBubble, { passive: true });
         window.addEventListener('resize', positionTimeBubble);

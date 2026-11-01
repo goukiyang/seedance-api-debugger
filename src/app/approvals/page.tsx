@@ -1,12 +1,14 @@
 'use client';
 import { useProductDialog } from '@/components/useProductDialog';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { RelativeTime } from '@/components/RelativeTime';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { showVideoCardManagementUi } from '@/lib/navigation';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 
 type ApprovalUser = {
   id: string;
@@ -73,7 +75,11 @@ function formatTime(value?: string | null) {
 
 export default function ApprovalsPage() {
   const { prompt, productDialog } = useProductDialog();
+  const session = useAppSession();
   const [actorId, setActorId] = useState('');
+  const decisionActor = useRef<string | null>(null);
+  decisionActor.current = session.hasLoadedUser && !session.userLoadError && !session.sessionChanged ? session.user?.id || null : null;
+  useEffect(() => () => { decisionActor.current = ''; }, []);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -231,20 +237,20 @@ export default function ApprovalsPage() {
     setError('');
     setMessage('');
     const label = action === 'approve' ? '通过' : '拒绝';
-    const decisionReason = await prompt(`${label}审批：${typeLabel(approval.type)}`, action === 'approve' ? '审批通过' : '审批拒绝', { title: '审批理由', confirmLabel: `确认${label}`, allowEmpty: true, multiline: true, maxLength: null });
-    if (decisionReason === null) return;
-    const res = await fetch(`/api/approvals/${approval.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, reason: decisionReason }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || data.message || `${label}审批失败`);
-      return;
-    }
-    setMessage(`审批已${label}`);
-    await load();
+    const owner = actorId;
+    await prompt(`${label}审批：${typeLabel(approval.type)}`, action === 'approve' ? '审批通过' : '审批拒绝', { title: '审批理由', confirmLabel: `确认${label}`, allowEmpty: true, multiline: true, maxLength: null, onSubmit: async decisionReason => {
+      if (!owner || decisionActor.current !== owner || isClientSessionBlocked()) throw new Error('账号已变化，请返回原账号核对审批。');
+      const res = await fetch(`/api/approvals/${approval.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, reason: decisionReason }),
+      });
+      const data = await res.json();
+      if (decisionActor.current !== owner || isClientSessionBlocked()) throw new Error('账号已变化，请返回原账号核对审批结果。');
+      if (!res.ok) throw new Error(data.error || data.message || `${label}审批失败`);
+      setMessage(`审批已${label}`);
+      await load();
+    } });
   };
 
   return (

@@ -2,7 +2,7 @@
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -24,16 +24,19 @@ type Original = { key: string; runId: string; taskId: string | null };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), before = useRef<(() => Promise<boolean>) | null>(null);
+  const titleId = useId();
   const close = async () => { if (!before.current || await before.current()) onClose(); };
   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: () => void close() });
   useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
-  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>{kind === 'format' ? '动作格式' : '镜头与同步'}</h2><button type="button" aria-label="关闭规则编辑" onClick={()=>void close()}><X size={18}/></button></header><PrivateDefinitionEditor userId={ownerId} moduleId={kind} endpoint={`/api/video/multiview/actions/contexts/${kind}`} dialog={dialog} beforeClose={before} open blocked={false} canRead needsIdentity={false} contextOnly label={kind==='format'?'动作格式':'镜头与同步'} maxLength={12000} onSaved={()=>{onSaved();onClose();}} /></dialog>, document.body);
+  return createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId}><header><h2 id={titleId}>{kind === 'format' ? '动作格式' : '镜头与同步'}</h2><button type="button" aria-label="关闭规则编辑" onClick={()=>void close()}><X size={18}/></button></header><PrivateDefinitionEditor userId={ownerId} moduleId={kind} endpoint={`/api/video/multiview/actions/contexts/${kind}`} dialog={dialog} beforeClose={before} open blocked={false} canRead needsIdentity={false} contextOnly label={kind==='format'?'动作格式':'镜头与同步'} maxLength={12000} onSaved={()=>{onSaved();onClose();}} /></dialog>, document.body);
 }
 function ConfirmDialog({ quote, parameters, busy, onClose, onConfirm }: { quote: Quote; parameters: MultiviewActionParameters; busy: boolean; onClose(): void; onConfirm(): void }) {
   const dialog=useRef<HTMLDialogElement>(null);
-  useDialogDismiss({open:true,dialogRef:dialog,nativeDialog:true,onDismiss:()=>{if(!busy)onClose();}});
+  const titleId=useId();
+  const close=()=>{if(!busy)onClose();};
+  useDialogDismiss({open:true,dialogRef:dialog,nativeDialog:true,onDismiss:close});
   useEffect(()=>{dialog.current?.showModal();return()=>dialog.current?.close();},[]);
-  return createPortal(<dialog ref={dialog} className={styles.dialog}><header><h2>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={onClose}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>{quote.points===null?'费用待确认':<>本次预计 <strong>{quote.points} 点</strong></>}</p><footer><button disabled={busy} onClick={onClose}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备…':quote.points===null?'继续':'确认生成'}</button></footer></dialog>,document.body);
+  return createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} aria-busy={busy}><header><h2 id={titleId}>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={close}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>{quote.points===null?'费用待确认':<>本次预计 <strong>{quote.points} 点</strong></>}</p><footer><button disabled={busy} onClick={close}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备…':quote.points===null?'继续':'确认生成'}</button></footer></dialog>,document.body);
 }
 export function MultiviewActionPanel(props: Props) {
   const [state,setState]=useState<MultiviewActionState|null>(null),[draft,setDraft]=useState<MultiviewActionDraft|null>(null);

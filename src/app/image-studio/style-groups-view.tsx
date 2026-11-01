@@ -195,17 +195,32 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     finally { if (alive.current && actor.current === owner) setBusy(false); }
   }
   async function merge() {
-    if (managementOnly && disabled) return;
-    const owner = userId;
-    const name = await prompt('合并后的风格组名称（原组会保留）', '合并风格', { title: '合并风格组', confirmLabel: '合并风格组', maxLength: 80 });
-    if (!name?.trim() || busy || !alive.current || actor.current !== owner) return;
-    setBusy(true); setError('');
-    try {
-      const group = await responseValue(await fetch('/api/image-studio/style-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), references: [], mergeIds }) }));
-      if (!alive.current || actor.current !== owner) return;
-      reflect(group); setMergeIds([]); edit(group);
-    } catch (cause) { if (alive.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '合并失败'); }
-    finally { if (alive.current && actor.current === owner) setBusy(false); }
+    if (busy || pending || managementOnly && disabled) return;
+    const owner = userId, ids = [...mergeIds], requestId = crypto.randomUUID();
+    let awaiting = false, submittedName = '';
+    await prompt('合并后的风格组名称（原组会保留）', '合并风格', { title: '合并风格组', confirmLabel: '合并风格组', maxLength: 80, onSubmit: async name => {
+      if (!alive.current || actor.current !== owner) throw new Error('账号已变化，请返回原账号核对风格组。');
+      if (awaiting && name !== submittedName) throw new Error('原合并结果待确认，尚未提交新名称。请先取消此窗口并核对原操作。');
+      setBusy(true); setError('');
+      const querying = awaiting;
+      try {
+        let group: StudioStyleSummary;
+        if (awaiting) {
+          const status = await responseValue(await fetch(`/api/image-studio/style-groups?mode=status&requestId=${requestId}`, { cache: 'no-store' }));
+          if (status.state !== 'saved') throw new Error('原合并结果仍待确认，只查询原号，未重复提交。');
+          group = status.result;
+        } else {
+          if (!remember({ requestId, kind: 'save' })) throw new Error('无法保留原操作编号，尚未发送；当前输入保留。');
+          awaiting = true; submittedName = name;
+          group = await responseValue(await fetch('/api/image-studio/style-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, references: [], mergeIds: ids, requestId }) }));
+        }
+        if (!alive.current || actor.current !== owner) throw new Error('账号已变化，请返回原账号核对合并结果。');
+        reflect(group); setMergeIds([]); remember(null); edit(group);
+      } catch (cause) {
+        if (!querying && alive.current && actor.current === owner && (cause as { status?: number }).status! < 500) { awaiting = false; remember(null); }
+        throw cause;
+      } finally { if (alive.current && actor.current === owner) setBusy(false); }
+    } });
   }
   async function queryPending() {
     if (!pending || busy) return;

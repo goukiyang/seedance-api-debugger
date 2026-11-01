@@ -279,6 +279,8 @@ export function TemplateGenerateClient() {
   const [recoveredTaskId, setRecoveredTaskId] = useState('');
   const submitLock = useRef(false);
   const submissionScope = useRef('');
+  const activeAccountIdRef = useRef<string | null>(null);
+  activeAccountIdRef.current = currentUser?.id || null;
   const creation = useCreationContext({ ownerId: currentUser?.id, entry: 'template', draftId: 'template-generate', projectId: selectedProjectId, legacyCardId: selectedVideoCardId, enabled: !loadingProjects, onProjectChange: setSelectedProjectId });
   const [creationBaselineId, setCreationBaselineId] = useState('');
   const creationDraftBody = useRef<Record<string, unknown> | null>(null);
@@ -854,6 +856,8 @@ export function TemplateGenerateClient() {
   }, []);
 
   const handleCollectionSave = useCallback(async (name: string) => {
+    const accountId = currentUser?.id || null;
+    if (!accountId || activeAccountIdRef.current !== accountId) throw new Error('登录账号尚未确认，未保存图集。');
     const response = await fetch('/api/collections', {
       method: 'POST',
       headers: {
@@ -862,10 +866,16 @@ export function TemplateGenerateClient() {
       },
       body: JSON.stringify({ name }),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '图集保存失败');
-    setCollections((current) => [data.collection, ...current]);
-  }, []);
+    const data = await readJsonResponse<{ collection?: AssetCollection; error?: string; message?: string }>(response);
+    if (activeAccountIdRef.current !== accountId) throw new Error('账号已变化，图集保存结果尚未确认，请回到原账号核对。');
+    if (response.status === 401) {
+      window.location.href = '/login';
+      throw new Error('登录状态已失效，请重新登录后重试。');
+    }
+    if (!response.ok) throw new Error(data.message || data.error || '图集保存失败');
+    if (!data.collection?.id) throw new Error('图集保存结果尚未确认，请先刷新图集核对。');
+    setCollections((current) => [data.collection!, ...current]);
+  }, [currentUser?.id]);
 
   const checkPendingRequest = useCallback(async () => {
     if (!requestStorageKey) throw new Error('请先登录后核对原请求');

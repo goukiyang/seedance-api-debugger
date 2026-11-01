@@ -901,7 +901,7 @@
     }
 
     function handleKeydown(event) {
-        if (!root || !isTopLayer()) return;
+        if (!root || !isTopLayer() || event.isComposing || event.keyCode === 229) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopImmediatePropagation();

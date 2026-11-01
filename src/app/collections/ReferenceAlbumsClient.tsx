@@ -685,25 +685,25 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
 
   const handleRenameFolder = async (folder: PublicFolder) => {
     const epoch = boundaryRef.current.epoch;
-    const nextName = (await prompt('输入新的公共文件夹名称', folder.name, { title: '文件夹名称', maxLength: null }))?.trim();
-    if (!isCurrent(epoch) || !nextName || nextName === folder.name) return;
-    setActionFolderId(folder.id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/reference-album-folders/${folder.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nextName }),
-      });
-      const data = await res.json();
-      if (!isCurrent(epoch)) return;
-      if (!res.ok) throw new Error(data.error || data.message || '重命名公共文件夹失败');
-      loadFolders();
-    } catch (err) {
-      if (isCurrent(epoch)) setError(err instanceof Error ? err.message : '重命名公共文件夹失败');
-    } finally {
-      if (isCurrent(epoch)) setActionFolderId(null);
-    }
+    await prompt('输入新的公共文件夹名称', folder.name, { title: '文件夹名称', maxLength: null, onSubmit: async nextName => {
+      if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象操作。');
+      if (nextName === folder.name) return;
+      setActionFolderId(folder.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/reference-album-folders/${folder.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nextName }),
+        });
+        const data = await res.json();
+        if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象核对结果。');
+        if (!res.ok) throw new Error(data.error || data.message || '重命名公共文件夹失败');
+        loadFolders();
+      } finally {
+        if (isCurrent(epoch)) setActionFolderId(null);
+      }
+    } });
   };
 
   const handleDeleteFolder = async (folder: PublicFolder) => {
@@ -729,30 +729,30 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
 
   const handleRenameAlbum = async (album: AlbumItem) => {
     const epoch = boundaryRef.current.epoch;
-    const nextName = (await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null }))?.trim();
-    if (!isCurrent(epoch) || !nextName || nextName === album.name) return;
+    await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null, onSubmit: async nextName => {
+      if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象操作。');
+      if (nextName === album.name) return;
 
-    setActionAlbumId(album.id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/reference-albums/${album.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nextName }),
-      });
-      const data = await res.json();
-      if (!isCurrent(epoch)) return;
-      if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
-      setAlbums((current) => current.map((item) => (
-        item.id === album.id
-          ? { ...item, name: data.album?.name || nextName, updated_at: data.album?.updated_at || item.updated_at }
-          : item
-      )));
-    } catch (err) {
-      if (isCurrent(epoch)) setError(err instanceof Error ? err.message : '重命名失败');
-    } finally {
-      if (isCurrent(epoch)) setActionAlbumId(null);
-    }
+      setActionAlbumId(album.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/reference-albums/${album.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nextName }),
+        });
+        const data = await res.json();
+        if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象核对结果。');
+        if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
+        setAlbums((current) => current.map((item) => (
+          item.id === album.id
+            ? { ...item, name: data.album?.name || nextName, updated_at: data.album?.updated_at || item.updated_at }
+            : item
+        )));
+      } finally {
+        if (isCurrent(epoch)) setActionAlbumId(null);
+      }
+    } });
   };
 
   const handleDeleteAlbum = async (album: AlbumItem) => {
@@ -853,30 +853,29 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
 
   const handleReviewSubmission = async (submission: PublicSubmission, action: 'approve' | 'reject') => {
     const epoch = boundaryRef.current.epoch;
-    const reviewNoteInput = action === 'reject'
-      ? await prompt('填写拒绝原因，可留空', '', { title: '拒绝原因', confirmLabel: '确认拒绝', allowEmpty: true, multiline: true, maxLength: null })
-      : '';
-    if (!isCurrent(epoch) || reviewNoteInput === null) return;
-    const reviewNote = reviewNoteInput.trim();
-    setActionSubmissionId(submission.id);
-    setError(null);
-    try {
-      const res = await fetch(`/api/admin/reference-album-submissions/${submission.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, review_note: reviewNote }),
-      });
-      const data = await res.json();
-      if (!isCurrent(epoch)) return;
-      if (!res.ok) throw new Error(data.error || data.message || '审核失败');
-      loadPendingSubmissions();
-      loadAlbums();
-      loadFolders();
-    } catch (err) {
-      if (isCurrent(epoch)) setError(err instanceof Error ? err.message : '审核失败');
-    } finally {
-      if (isCurrent(epoch)) setActionSubmissionId(null);
-    }
+    const submit = async (reviewNoteInput: string) => {
+      if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象操作。');
+      const reviewNote = reviewNoteInput.trim();
+      setActionSubmissionId(submission.id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/admin/reference-album-submissions/${submission.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, review_note: reviewNote }),
+        });
+        const data = await res.json();
+        if (!isCurrent(epoch)) throw new Error('账号或目标已变化，请返回原对象核对结果。');
+        if (!res.ok) throw new Error(data.error || data.message || '审核失败');
+        loadPendingSubmissions();
+        loadAlbums();
+        loadFolders();
+      } finally {
+        if (isCurrent(epoch)) setActionSubmissionId(null);
+      }
+    };
+    if (action === 'reject') await prompt('填写拒绝原因，可留空', '', { title: '拒绝原因', confirmLabel: '确认拒绝', allowEmpty: true, multiline: true, maxLength: null, onSubmit: submit });
+    else try { await submit(''); } catch (err) { if (isCurrent(epoch)) setError(err instanceof Error ? err.message : '审核失败'); }
   };
 
   if (!accountId) return (

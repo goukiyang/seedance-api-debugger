@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { CopyPlus, Pencil, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useProductDialog } from '@/components/useProductDialog';
 import { ProductActionMenu } from '@/components/ProductActionMenu';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { uploadSession } from '@/lib/http/upload-session';
@@ -204,17 +207,23 @@ function MultiviewSettingsPickerContent(props: Props) {
   }
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const listRoot = useRef<HTMLDivElement>(null);
+  const pickerTrigger = useRef<HTMLButtonElement>(null);
+  const pickerPanel = useRef<HTMLDivElement>(null);
+  const pickerPanelId = `${inputId}-panel`;
   const pickerDisabled = Boolean(props.disabled || busy || loading);
   const options = [{ id: '', label: props.kind === 'generation' ? '当前360°旋转模板' : '当前选帧', item: null as (typeof items)[number] | null },
     ...(selected && !items.some(item => item.id === selected) ? [{ id: selected, label: selectedRecord?.name || '原设置待核对（输入保留）', item: null }] : []),
     ...items.map(item => ({ id: item.id, item, label: `${item.name} · ${item.ownedByViewer ? '我的' : '同事共享'}${item.ownedByViewer ? item.isShared ? ' · 已共享' : ' · 私有' : ''}` }))];
+  useDialogDismiss({ open, dialogRef: pickerPanel, layerSurfaceRef: pickerPanel,
+    branchRefs: [pickerTrigger], modal: false, onDismiss: () => setOpen(false) });
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => { if (!listRoot.current?.contains(event.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [open]);
+    const frame = requestAnimationFrame(() => {
+      (pickerPanel.current?.querySelector<HTMLButtonElement>('[aria-current="true"]')
+        || pickerPanel.current?.querySelector<HTMLButtonElement>('[data-setting-choice]'))?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, selected]);
   useEffect(() => { if (pickerDisabled) setOpen(false); }, [pickerDisabled]);
   async function manage(action: 'rename' | 'delete', anchor: HTMLElement, target = displaySelection) {
     if (!target?.ownedByViewer || lock.current || pendingRef.current || storageBlocked || live.current.disabled) return;
@@ -354,30 +363,50 @@ function MultiviewSettingsPickerContent(props: Props) {
   }
   return <div className={styles.settingsPicker} aria-busy={busy}>
     <div className={styles.settingsPickerRow}>
-      <div className={styles.settingsPickerSelect} ref={listRoot}><span id={`${inputId}-label`}>{label}</span>
-        <button type="button" id={inputId} className={styles.settingsPickerTrigger} aria-haspopup="listbox" aria-expanded={open} aria-labelledby={`${inputId}-label ${inputId}`}
+      <div className={styles.settingsPickerSelect}><span id={`${inputId}-label`}>{label}</span>
+        <Popper.Root><Popper.Anchor asChild><button ref={pickerTrigger} type="button" id={inputId} className={styles.settingsPickerTrigger}
+          aria-haspopup="dialog" aria-expanded={open} aria-controls={pickerPanelId} aria-labelledby={`${inputId}-label ${inputId}`}
           disabled={pickerDisabled} onClick={() => { setOpen(value => !value); setActiveIndex(Math.max(0, options.findIndex(option => option.id === selected))); }}
           onKeyDown={event => {
-            if (event.key === 'Escape') { setOpen(false); return; }
-            if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
             event.preventDefault();
-            if (!open) { setOpen(true); setActiveIndex(Math.max(0, options.findIndex(option => option.id === selected))); return; }
-            if (event.key === 'ArrowDown') setActiveIndex(index => Math.min(options.length - 1, index + 1));
-            else if (event.key === 'ArrowUp') setActiveIndex(index => Math.max(0, index - 1));
-            else { const option = options[activeIndex]; setOpen(false); if (option) void apply(option.id); }
-          }}>{options.find(option => option.id === selected)?.label || options[0].label}</button>
-        {open && <ul className={styles.settingsPickerList} role="listbox" aria-labelledby={`${inputId}-label`} aria-activedescendant={`${inputId}-option-${activeIndex}`}>
-          {options.map((option, index) => <li key={option.id || 'default'} id={`${inputId}-option-${index}`} role="option" aria-selected={option.id === selected}
-            data-active={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => { setOpen(false); void apply(option.id); }}>
-            <span>{option.label}</span>
-            {option.item?.ownedByViewer && <span className={styles.settingsPickerRowActions}>
-              <button type="button" title="编辑这份设置" aria-label={`编辑 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending)}
-                onClick={event => { event.stopPropagation(); setOpen(false); void apply(option.id, true); }}><Pencil size={14} />编辑</button>
-              <button type="button" title="删除这份设置" aria-label={`删除 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending) || storageBlocked}
-                onClick={event => { event.stopPropagation(); const anchor = event.currentTarget; const target = option.item; setOpen(false); void manage('delete', anchor, target); }}><Trash2 size={14} />删除</button>
-            </span>}
-          </li>)}
-        </ul>}
+            setActiveIndex(Math.max(0, options.findIndex(option => option.id === selected)));
+            setOpen(true);
+          }}>{options.find(option => option.id === selected)?.label || options[0].label}</button></Popper.Anchor>
+        {open && createPortal(<Popper.Content ref={pickerPanel} id={pickerPanelId} role="dialog" aria-label={`${label}预设`}
+          side="bottom" align="start" sideOffset={4} collisionPadding={8} avoidCollisions sticky="always" hideWhenDetached
+          className={styles.settingsPickerPanel} onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+              || !(event.target instanceof HTMLButtonElement) || !event.target.hasAttribute('data-setting-choice')) return;
+            event.preventDefault();
+            const choices = Array.from(pickerPanel.current?.querySelectorAll<HTMLButtonElement>('[data-setting-choice]:not(:disabled)') || []);
+            if (!choices.length) return;
+            const currentIndex = choices.indexOf(event.target);
+            const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1
+              : (Math.max(currentIndex, 0) + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
+            choices[nextIndex]?.focus();
+          }}>
+          <div className={styles.settingsPickerList} role="list" aria-label={`${label}列表`}>
+            {options.map((option, index) => <div key={option.id || 'default'} role="listitem" className={styles.settingsPickerOption}
+              data-active={index === activeIndex} data-selected={option.id === selected || undefined} onMouseEnter={() => setActiveIndex(index)}>
+              <button type="button" className={styles.settingsPickerChoice} data-setting-choice
+                aria-current={option.id === selected ? 'true' : undefined} onFocus={() => setActiveIndex(index)}
+                onClick={() => { setOpen(false); void apply(option.id); }}>
+                <span className={styles.settingsPickerChoiceLabel}>{option.label}</span>
+                {option.id === selected && <span className={styles.settingsPickerCurrent}>当前</span>}
+              </button>
+              {option.item?.ownedByViewer && <span className={styles.settingsPickerRowActions}>
+                <button type="button" title="编辑这份设置" aria-label={`编辑 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending)}
+                  onClick={() => { setOpen(false); void apply(option.id, true); }}><Pencil size={14} />编辑</button>
+                <button type="button" title="删除这份设置" aria-label={`删除 ${option.item.name}`} disabled={props.disabled || busy || Boolean(pending) || storageBlocked}
+                  onClick={event => { const anchor = event.currentTarget; const target = option.item; setOpen(false); void manage('delete', anchor, target); }}><Trash2 size={14} />删除</button>
+              </span>}
+            </div>)}
+          </div>
+        </Popper.Content>, document.body)}
+        </Popper.Root>
       </div>
       <div className={styles.settingsPickerActions}>
         <button type="button" disabled={props.disabled || busy || Boolean(pending) || storageBlocked || !props.value || Boolean(selected && !owned)} title={selected && !owned ? '共享设置由创建者维护，可另存为自己的设置' : undefined} onClick={event => void save(false, event.currentTarget)}><Save size={14} />存为预设</button>

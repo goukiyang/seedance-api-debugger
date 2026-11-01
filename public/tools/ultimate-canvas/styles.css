@@ -723,10 +723,22 @@ html, body {
 .canvas-confirm-close { width: 28px; height: 28px; border: 0; background: transparent; color: var(--text-secondary); font-size: 18px; cursor: pointer; }
 .canvas-confirm-dialog p { margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .canvas-confirm-detail { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font-size: 11px; }
-.canvas-confirm-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+.canvas-confirm-actions { margin-top: 16px; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
-.canvas-product-dialog { margin: auto; color: var(--text-primary); max-height: calc(100dvh - 32px); max-width: calc(100vw - 32px); overflow: auto; }
+.canvas-product-dialog {
+    --canvas-dialog-safe-top: env(safe-area-inset-top, 0px);
+    --canvas-dialog-safe-right: env(safe-area-inset-right, 0px);
+    --canvas-dialog-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --canvas-dialog-safe-left: env(safe-area-inset-left, 0px);
+    margin: auto; color: var(--text-primary); max-height: calc(100dvh - 32px); max-width: calc(100vw - 32px);
+    overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere;
+}
 .canvas-product-dialog::backdrop { background: rgba(0, 0, 0, .62); }
+.canvas-product-dialog .role-module-root,
+.canvas-product-dialog > .crw-dialog-content { max-height: calc(var(--canvas-dialog-max-height, 100dvh) - 2px); }
+.canvas-confirm-dialog > .canvas-confirm-head { position: sticky; top: 0; z-index: 1; background: #242424; }
+.canvas-confirm-dialog .canvas-confirm-close { flex-shrink: 0; }
+.canvas-confirm-dialog > .canvas-confirm-actions { position: sticky; bottom: 0; padding-top: 8px; background: #242424; }
 .canvas-name-input { width: 100%; padding: 10px; margin-top: 14px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-default); border-radius: 6px; }
 .canvas-backup-list { display: grid; gap: 8px; max-height: 45dvh; overflow: auto; margin-top: 12px; }
 .canvas-backup-list label { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; }

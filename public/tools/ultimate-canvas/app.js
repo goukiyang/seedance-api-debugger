@@ -22,6 +22,10 @@
     let roleCreator = null, roleWorkflow = null, roleInstanceLayer = null, workflowHub = null;
     const roleMediaContexts = new Map();
     const roleMediaRequests = new Map();
+    let canvasCompositionTarget = null;
+    document.addEventListener('compositionstart', event => { canvasCompositionTarget = event.target; }, true);
+    document.addEventListener('compositionend', () => { canvasCompositionTarget = null; }, true);
+    const canvasKeyIsComposing = event => canvasCompositionTarget === event.target || event.isComposing || event.keyCode === 229;
 
     function ensureNoticeStack() {
         let stack = document.getElementById('canvas-notice-stack');
@@ -295,6 +299,7 @@
         };
         input.addEventListener('input', render);
         panel.addEventListener('keydown', event => {
+            if (canvasKeyIsComposing(event)) return;
             if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(); }
             else if (event.key === 'ArrowDown' && event.target === input) { event.preventDefault(); results.querySelector('button')?.focus(); }
             else if (event.key === 'Enter' && event.target === input) { event.preventDefault(); results.querySelector('button')?.click(); }
@@ -388,7 +393,7 @@
         syncAllNodesFromDom(); graphCommands.commit(token);
     });
     document.addEventListener('keydown', event => {
-        if (event.defaultPrevented || event.isComposing || event.altKey || !canvasShortcutActive(event)) return;
+        if (event.defaultPrevented || canvasKeyIsComposing(event) || event.altKey || !canvasShortcutActive(event)) return;
         const key = event.key.toLowerCase();
         const modified = event.ctrlKey || event.metaKey;
         if (!modified && ['h', 'v'].includes(key)) {
@@ -2212,45 +2217,116 @@
 
     function openCanvasProductDialog(options) {
         const opener = document.activeElement;
+        const returnScope = opener?.closest?.('[role="dialog"],dialog');
         const dialog = document.createElement('dialog');
         dialog.className = `canvas-product-dialog ${options.className || ''}`;
         if (options.labelledBy) dialog.setAttribute('aria-labelledby', options.labelledBy);
         // Role leaves construct safe DOM with listeners; preserve that DOM rather than stringify it.
         if (options.content instanceof Node) dialog.append(options.content);
         else dialog.innerHTML = options.content;
-        let down = null, dismissing = false;
+        let down = null, outsideClick = false, dismissing = false, closed = false, frame = 0;
+        const topLayer = () => [...document.querySelectorAll('dialog[open]')].at(-1) === dialog;
         const outside = event => {
             const box = dialog.getBoundingClientRect();
             return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
         };
         const dismiss = async () => {
-            if (dismissing || document.querySelectorAll('dialog[open]')[document.querySelectorAll('dialog[open]').length - 1] !== dialog) return;
+            if (closed || dismissing || !topLayer()) return;
             dismissing = true;
             try { await options.onDismiss?.(); } finally { dismissing = false; }
         };
-        dialog.addEventListener('cancel', event => { event.preventDefault(); void dismiss(); });
+        dialog.addEventListener('cancel', event => {
+            event.preventDefault();
+            if (!canvasCompositionTarget || !dialog.contains(canvasCompositionTarget)) void dismiss();
+        });
+        dialog.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && canvasKeyIsComposing(event)) event.preventDefault();
+        }, true);
         dialog.addEventListener('keydown', event => { event.stopPropagation(); });
-        dialog.addEventListener('pointerdown', event => { down = outside(event) ? { x: event.clientX, y: event.clientY } : null; });
+        const resetPress = () => { down = null; outsideClick = false; };
+        dialog.addEventListener('pointerdown', event => {
+            outsideClick = false;
+            down = topLayer() && event.button === 0 && outside(event)
+                ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY } : null;
+        });
+        dialog.addEventListener('pointermove', event => {
+            if (down && (event.pointerId !== down.pointerId || Math.hypot(event.clientX - down.x, event.clientY - down.y) >= 6)) down = null;
+        });
+        dialog.addEventListener('pointercancel', resetPress);
         dialog.addEventListener('pointerup', event => {
-            if (down && outside(event) && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 6) void dismiss();
+            outsideClick = !!(down && topLayer() && down.pointerId === event.pointerId && outside(event)
+                && Math.hypot(event.clientX - down.x, event.clientY - down.y) < 6);
             down = null;
         });
+        dialog.addEventListener('click', event => {
+            if (!outsideClick) return;
+            outsideClick = false;
+            event.preventDefault(); event.stopImmediatePropagation();
+            void dismiss();
+        }, true);
+        // Reuse the canvas's viewport clamping and above/below placement while this native layer is open.
+        const viewport = window.visualViewport;
+        const position = () => {
+            frame = 0;
+            if (closed) return;
+            const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+            const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+            const safe = getComputedStyle(dialog);
+            const x = left + Math.max(16, parseFloat(safe.getPropertyValue('--canvas-dialog-safe-left')) || 0);
+            const y = top + Math.max(16, parseFloat(safe.getPropertyValue('--canvas-dialog-safe-top')) || 0);
+            const right = left + width - Math.max(16, parseFloat(safe.getPropertyValue('--canvas-dialog-safe-right')) || 0);
+            const bottom = top + height - Math.max(16, parseFloat(safe.getPropertyValue('--canvas-dialog-safe-bottom')) || 0);
+            dialog.style.maxWidth = Math.max(0, right - x) + 'px';
+            dialog.style.maxHeight = Math.max(0, bottom - y) + 'px';
+            dialog.style.setProperty('--canvas-dialog-max-height', Math.max(0, bottom - y) + 'px');
+            const box = dialog.getBoundingClientRect();
+            const anchor = options.anchor?.isConnected && options.anchor.getClientRects().length ? options.anchor.getBoundingClientRect() : null;
+            const anchored = width > 640 && anchor && anchor.right > x && anchor.left < right && anchor.bottom > y && anchor.top < bottom;
+            const below = anchored ? anchor.bottom + 8 : y + (bottom - y - box.height) / 2;
+            const nextTop = anchored && below + box.height > bottom ? anchor.top - box.height - 8 : below;
+            dialog.style.left = Math.max(x, Math.min(anchored ? anchor.left : x + (right - x - box.width) / 2, right - box.width)) + 'px';
+            dialog.style.top = Math.max(y, Math.min(nextTop, bottom - box.height)) + 'px';
+        };
+        const schedulePosition = () => { if (!closed && !frame) frame = requestAnimationFrame(position); };
+        const onScroll = () => { resetPress(); schedulePosition(); };
+        const resize = new ResizeObserver(schedulePosition);
+        const layout = new MutationObserver(schedulePosition);
+        const cleanup = () => {
+            closed = true; resetPress(); cancelAnimationFrame(frame);
+            resize.disconnect(); layout.disconnect();
+            window.removeEventListener('scroll', onScroll, true);
+            window.removeEventListener('resize', schedulePosition);
+            viewport?.removeEventListener('scroll', onScroll);
+            viewport?.removeEventListener('resize', schedulePosition);
+        };
         const close = () => {
+            if (closed) return;
+            cleanup();
             dialog.close(); dialog.remove();
             window.parent.postMessage({ type: 'sd2-canvas-modal', open: !!document.querySelector('dialog[open]') }, window.location.origin);
-            if (opener?.isConnected) opener.focus();
+            const parentLayer = [...document.querySelectorAll('dialog[open]')].at(-1);
+            const fallback = parentLayer || (returnScope?.isConnected && returnScope.querySelector('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),[tabindex="0"]')) || engine.container;
+            const target = opener?.isConnected && !opener.disabled && !opener.closest?.('[inert]')
+                && (!parentLayer || parentLayer.contains(opener)) ? opener : fallback;
+            target?.focus({ preventScroll: true });
         };
+        dialog.addEventListener('close', cleanup, { once: true });
         document.body.append(dialog); dialog.showModal();
-        if (options.anchor && window.innerWidth > 640) {
-            const anchor = options.anchor.getBoundingClientRect();
-            const box = dialog.getBoundingClientRect();
-            dialog.style.position = 'fixed';
-            dialog.style.margin = '0';
-            dialog.style.right = 'auto';
-            dialog.style.bottom = 'auto';
-            dialog.style.left = Math.max(16, Math.min(anchor.left, window.innerWidth - box.width - 16)) + 'px';
-            dialog.style.top = Math.max(16, Math.min(anchor.bottom + 8, window.innerHeight - box.height - 16)) + 'px';
+        dialog.style.position = 'fixed'; dialog.style.margin = '0';
+        dialog.style.right = 'auto'; dialog.style.bottom = 'auto';
+        position();
+        resize.observe(dialog);
+        layout.observe(document.body, { childList: true, subtree: true });
+        if (options.anchor?.isConnected) {
+            resize.observe(options.anchor);
+            for (let node = options.anchor; node && node !== document.body; node = node.parentElement) {
+                layout.observe(node, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+            }
         }
+        window.addEventListener('scroll', onScroll, true);
+        window.addEventListener('resize', schedulePosition);
+        viewport?.addEventListener('scroll', onScroll);
+        viewport?.addEventListener('resize', schedulePosition);
         window.parent.postMessage({ type: 'sd2-canvas-modal', open: true }, window.location.origin);
         return { dialog, close };
     }
@@ -2297,7 +2373,7 @@
             input.addEventListener('input', update);
             layer.dialog.querySelector('[data-name-cancel]').onclick = () => finish(null);
             save.onclick = () => { if (input.value.trim()) finish(input.value.trim()); };
-            input.addEventListener('keydown', event => { if (event.key === 'Enter' && input.value.trim()) finish(input.value.trim()); });
+            input.addEventListener('keydown', event => { if (!canvasKeyIsComposing(event) && event.key === 'Enter' && input.value.trim()) finish(input.value.trim()); });
             update(); input.focus(); input.select();
         });
     }
@@ -2938,7 +3014,7 @@
     });
 
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && canvasRuntime.openContextMenu) closeContextMenus();
+        if (!canvasKeyIsComposing(event) && event.key === 'Escape' && canvasRuntime.openContextMenu) closeContextMenus();
     });
 
     function updateSaveIndicator() {
@@ -3373,7 +3449,7 @@
     });
 
     document.addEventListener('keydown', event => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        if (!canvasKeyIsComposing(event) && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
             event.preventDefault();
             if (canvasRuntime.documentWritable) void flushCanvasSave('keyboard');
         }
@@ -4794,7 +4870,7 @@
     document.addEventListener('keyup', event => { if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) requestCanvasMention(event.target); });
     document.addEventListener('pointerdown', event => { if (pendingMention && event.target !== pendingMention.input) closeCanvasMention(); });
     document.addEventListener('keydown', event => {
-        if (!pendingMention || mentionComposing || event.isComposing || !['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) return;
+        if (!pendingMention || mentionComposing || canvasKeyIsComposing(event) || !['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key)) return;
         event.preventDefault(); event.stopPropagation();
         window.parent.postMessage({ type: 'sd2-canvas-mention-key', requestId: pendingMention.requestId, key: event.key }, location.origin);
     }, true);
@@ -6347,6 +6423,7 @@
             event.preventDefault(); event.stopPropagation(); engine.onReferenceNodePick(nodeId);
         }, { capture: true, signal: state.listeners.signal });
         nodeEl.addEventListener('keydown', event => {
+            if (canvasKeyIsComposing(event)) return;
             if (!event.target.closest('[data-canvas-inline-video], [data-video-play], [data-video-read-retry]')) return;
             if ([' ', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) event.stopPropagation();
             if (canvasRuntime.referenceSelection && [' ', 'Enter'].includes(event.key)) {
@@ -8555,7 +8632,7 @@
     document.addEventListener('pointercancel', () => { promptOutsidePress = null; }, true);
     document.addEventListener('keydown', event => {
         const modal = document.querySelector('[data-prompt-modal]');
-        if (!modal || document.querySelector('dialog[open]')) return;
+        if (!modal || document.querySelector('dialog[open]') || canvasKeyIsComposing(event)) return;
         if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closePromptModal(); return; }
         if (event.key !== 'Tab') return;
         const controls = [...modal.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled)')].filter(element => element.getClientRects().length);
@@ -9029,7 +9106,7 @@
     });
     document.addEventListener('pointercancel', () => { roleCardGesture = null; });
     document.addEventListener('keydown', event => {
-        if (event.key !== 'Enter' || event.target.closest('button,input,textarea,a,[contenteditable="true"],dialog')) return;
+        if (canvasKeyIsComposing(event) || event.key !== 'Enter' || event.target.closest('button,input,textarea,a,[contenteditable="true"],dialog')) return;
         const card = event.target.closest('.node-type-role');
         if (card) { event.preventDefault(); void roleWorkflow?.open(card.dataset.nodeId); }
     });
@@ -9202,7 +9279,7 @@
             && menu && !menu.contains(event.target) && !event.target.closest('.node-connector')) engine._hideAddMenu();
     });
     document.getElementById('add-node-menu')?.addEventListener('keydown', event => {
-        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        if (canvasKeyIsComposing(event) || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
         const options = [...event.currentTarget.querySelectorAll('button:not(:disabled)')].filter(item => item.getClientRects().length);
         const current = options.indexOf(document.activeElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
@@ -9232,7 +9309,7 @@
         };
         el.addEventListener('click', handler);
         el.addEventListener('keydown', (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if (canvasKeyIsComposing(event) || (event.key !== 'Enter' && event.key !== ' ')) return;
             handler(event);
         });
     });
@@ -9400,7 +9477,7 @@
     document.addEventListener('mouseout', closeUnpinnedRuleTime);
     document.addEventListener('focusout', closeUnpinnedRuleTime);
     document.addEventListener('keydown', event => {
-        if (event.key === 'Escape' && document.querySelector('[data-rules-time-bubble]')) {
+        if (!canvasKeyIsComposing(event) && !document.querySelector('dialog[open]') && event.key === 'Escape' && document.querySelector('[data-rules-time-bubble]')) {
             event.preventDefault(); event.stopImmediatePropagation(); rulesTimeClose();
         }
     }, true);
@@ -9414,7 +9491,7 @@
     });
     document.addEventListener('keydown', event => {
         const modal = document.querySelector('[data-context-rules-modal]');
-        if (document.querySelector('dialog[open]')) return;
+        if (document.querySelector('dialog[open]') || canvasKeyIsComposing(event)) return;
         if (!modal) return;
         if (event.key === 'Escape' && modal.querySelector('.rules-menu[open]')) {
             event.preventDefault(); event.stopImmediatePropagation(); modal.querySelector('.rules-menu[open]').open = false; return;
@@ -11187,6 +11264,7 @@
     // Keyboard Shortcuts
     // =====================
     document.addEventListener('keydown', (e) => {
+        if (e.defaultPrevented || canvasKeyIsComposing(e) || document.querySelector('dialog[open]')) return;
         switch (e.key) {
             case 'Escape':
                 if (canvasRuntime.referenceSelection) {
@@ -11206,7 +11284,7 @@
             closePromptModal();
             return;
         }
-        if (e.defaultPrevented || e.isComposing || !canvasShortcutActive(e)) return;
+        if (!canvasShortcutActive(e)) return;
         if ((e.ctrlKey||e.metaKey) && (e.key==='='||e.key==='+')) { e.preventDefault(); engine.setZoom(engine.scale+0.1); }
         if ((e.ctrlKey||e.metaKey) && e.key==='-') { e.preventDefault(); engine.setZoom(engine.scale-0.1); }
         if ((e.ctrlKey||e.metaKey) && e.shiftKey && e.key==='F') { e.preventDefault(); engine.fitView(); }

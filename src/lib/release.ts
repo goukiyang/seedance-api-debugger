@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '插件错误上报与图片规格保护', outline: [
-  '生产桥插件错误可自动上报，报告仅保留排查所需技术信息',
-  '中画质4K实测仅返回2048，暂停售新4K；选择和原图保留',
-  '其它规格和最高画质保留原通道、点数与历史任务',
+const notice = { title: '弹窗保存与关闭体验修正', outline: [
+  '改名、保存和创建失败留在原窗，保留输入与错误提示',
+  '关闭、菜单和预设操作统一，中文选词不误提交或关窗',
+  '画布弹窗跟随入口与可用视口，取消裁切不应用迟到图片',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

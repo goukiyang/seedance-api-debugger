@@ -12,8 +12,11 @@
 
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useId, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import type { UploadStatus, FrameRole } from '@/types';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 interface ThumbnailCardProps {
   /** 缩略图 URL，优先使用 thumbnailUrl，其次 originalUrl */
@@ -60,7 +63,16 @@ export function ThumbnailCard({
 }: ThumbnailCardProps) {
   const src = thumbnailUrl || originalUrl || '';
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuId = useId();
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  useDialogDismiss({ open: menuOpen, dialogRef: menuRef, layerSurfaceRef: menuRef,
+    branchRefs: [menuTriggerRef], modal: false, onDismiss: () => setMenuOpen(false) });
+  useEffect(() => {
+    if (!menuOpen) return;
+    const frame = requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [menuOpen]);
 
   const isUploading = uploadStatus === 'uploading';
   const isFailed = uploadStatus === 'failed';
@@ -153,28 +165,47 @@ export function ThumbnailCard({
       {frameRole === 'last_frame' && <div className="thumbnail-frame-badge thumbnail-frame-last">尾帧</div>}
 
       {/* P0-1: 操作菜单按钮 */}
-      <div className="thumbnail-menu-wrap" ref={menuRef}>
-        <button
+      <div className="thumbnail-menu-wrap">
+        <Popper.Root><Popper.Anchor asChild><button
+          ref={menuTriggerRef}
           className="thumbnail-menu-btn"
           onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          onKeyDown={event => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            setMenuOpen(true);
+          }}
           title="更多操作"
+          aria-label="更多操作"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
           type="button"
         >
           <svg fill="currentColor" viewBox="0 0 20 20" width="12" height="12">
             <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
           </svg>
-        </button>
+        </button></Popper.Anchor>
 
-        {menuOpen && (
-          <>
-            <div
-              className="thumbnail-menu-backdrop"
-              onClick={() => setMenuOpen(false)}
-            />
-            <div className="thumbnail-menu">
+        {menuOpen && createPortal(<Popper.Content side="bottom" align="end" sideOffset={4} collisionPadding={8}
+          avoidCollisions sticky="always" hideWhenDetached ref={menuRef} id={menuId} className="thumbnail-menu"
+          role="menu" aria-label={`图${index + 1}操作`} onClick={(event: React.MouseEvent<HTMLDivElement>) => event.stopPropagation()}
+          onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+            if (!items.length) return;
+            const current = items.indexOf(document.activeElement as HTMLButtonElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+              : (Math.max(current, 0) + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+            items[next]?.focus();
+          }}>
               <button
                 className="thumbnail-menu-item"
                 onClick={(e) => { e.stopPropagation(); onPreview?.(); setMenuOpen(false); }}
+                role="menuitem"
                 type="button"
               >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
@@ -188,6 +219,7 @@ export function ThumbnailCard({
               <button
                 className="thumbnail-menu-item"
                 onClick={(e) => { e.stopPropagation(); onReplace?.(); setMenuOpen(false); }}
+                role="menuitem"
                 type="button"
               >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
@@ -200,6 +232,7 @@ export function ThumbnailCard({
                 <button
                   className="thumbnail-menu-item"
                   onClick={(e) => { e.stopPropagation(); onSetFirst?.(); setMenuOpen(false); }}
+                  role="menuitem"
                   type="button"
                 >
                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
@@ -213,6 +246,7 @@ export function ThumbnailCard({
                 <button
                   className="thumbnail-menu-item"
                   onClick={(e) => { e.stopPropagation(); onSetLast?.(); setMenuOpen(false); }}
+                  role="menuitem"
                   type="button"
                 >
                   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
@@ -226,6 +260,7 @@ export function ThumbnailCard({
               <button
                 className="thumbnail-menu-item thumbnail-menu-item-danger"
                 onClick={(e) => { e.stopPropagation(); onRemove?.(); setMenuOpen(false); }}
+                role="menuitem"
                 type="button"
               >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
@@ -234,9 +269,8 @@ export function ThumbnailCard({
                 </svg>
                 删除
               </button>
-            </div>
-          </>
-        )}
+        </Popper.Content>, document.body)}
+        </Popper.Root>
       </div>
 
       {/* 删除按钮（保留简单版） */}

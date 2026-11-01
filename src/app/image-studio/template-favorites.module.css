@@ -17,7 +17,7 @@
 .row:hover .heart, .row:focus-within .heart, .row:hover .rowAction, .row:focus-within .rowAction { opacity: 1; }
 .row .heart:disabled { opacity: .35; }
 .menuHost { position: relative; flex: none; }
-.menu { position: fixed; z-index: 1200; width: min(208px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; background: var(--bg-secondary, #242424); color: var(--text-primary, #fff); border: 1px solid var(--border, #444); border-radius: 6px; padding: 4px; box-shadow: 0 5px 18px rgba(0,0,0,.22); }
+.menu { z-index: 1200; width: min(208px, calc(100vw - 16px)); max-height: min(calc(100dvh - 16px), var(--radix-popper-available-height, calc(100dvh - 16px))); overflow-y: auto; background: var(--bg-secondary, #242424); color: var(--text-primary, #fff); border: 1px solid var(--border, #444); border-radius: 6px; padding: 4px; box-shadow: 0 5px 18px rgba(0,0,0,.22); }
 .menu button { display: flex; gap: 8px; align-items: center; text-align: left; width: 100%; background: transparent; color: inherit; border: 0; padding: 8px; border-radius: 4px; font-size: 12px; }
 .menu button:hover { background: rgba(255,255,255,.08); }
 .menu label { display: flex; flex-direction: column; gap: 5px; padding: 8px; font-size: 12px; }

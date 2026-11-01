@@ -192,7 +192,7 @@ class CanvasEngine {
         });
 
         document.addEventListener('keydown', (e) => {
-            if (e.defaultPrevented || this._canvasInputBlocked()) return;
+            if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || this._canvasInputBlocked()) return;
             if (e.key === 'Escape') {
                 this._cancelInputGesture();
                 this._hideContextMenu();
@@ -208,7 +208,7 @@ class CanvasEngine {
         });
 
         window.addEventListener('keydown', (e) => {
-            if (e.defaultPrevented || e.isComposing || this._canvasInputBlocked()) return;
+            if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || this._canvasInputBlocked()) return;
             if (e.key === ' ' && !this._isInteractiveTarget(e.target)
                 && !this._isInteractiveTarget(document.activeElement)) {
                 this.isSpacePressed = true;
@@ -969,6 +969,7 @@ class CanvasEngine {
             if (c.classList.contains('role-relation-handle')) c.setAttribute('aria-label', '连接协作关系');
             c.title = c.getAttribute('aria-label');
             c.addEventListener('keydown', e => {
+                if (e.isComposing || e.keyCode === 229) return;
                 if (c.classList.contains('role-relation-handle') && this.roleCollaboration) return;
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
@@ -1727,6 +1728,7 @@ class CanvasEngine {
             this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));
         });
         group.addEventListener('keydown', event => {
+            if (event.isComposing || event.keyCode === 229) return;
             if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 this.performUserEdit('删除连线', () => this.disconnectNodes(connection.from, connection.to));

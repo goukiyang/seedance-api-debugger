@@ -4,7 +4,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 import { GenerationCompletionSettings } from '@/components/GenerationCompletion';
 
-import { useEffect, useRef, useState, type ComponentProps } from 'react';
+import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
@@ -28,6 +28,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
 }) {
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const contextInput = useRef<HTMLTextAreaElement>(null);
   const saveLock = useRef(false);
   const beforePrivateClose = useRef<(() => Promise<boolean>) | null>(null);
@@ -84,8 +85,8 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
       <button type="button" disabled={editor.saving || batch.writing} onClick={() => editor.controller.resolveConflict(item.field, 'saved')}>采用已保存值</button>
     </div>;
   });
-  return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`}>
-    <header className={styles.header}><h2>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
+  return <>{productDialog}{(<dialog ref={dialog} className={`${styles.dialog} ${styles.contextDialog}`} aria-labelledby={titleId}>
+    <header className={styles.header}><h2 id={titleId}>通用设置</h2><button type="button" aria-label="关闭设置" onClick={close}><X size={20} /></button></header>
     {open && <GenerationCompletionSettings key={ownerId} ownerId={ownerId} />}
     {canEdit && <>{editor.draft && defaults && <>
       {editor.settings?.privateContext ? <PrivateDefinitionEditor key={ownerId} userId={ownerId} moduleId="gpt_image_studio_v1"

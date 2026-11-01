@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import type { AssetCollection } from '@/types';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -19,8 +19,8 @@ interface Props {
   collections: AssetCollection[];
   currentCollectionId?: string;
   onLoad: (collectionId: string) => void;
-  onSave: (name: string) => void;
-  onNew: (name: string) => void;
+  onSave: (name: string) => Promise<void>;
+  onNew: (name: string) => Promise<void>;
   onOpenReferenceAlbums?: () => void;
   referenceAlbums?: ReferenceAlbumOption[];
   currentReferenceAlbumId?: string | null;
@@ -51,6 +51,11 @@ export function ImageSetToolbar({
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [dialogName, setDialogName] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const titleId = useId();
+  const closeSave = () => { if (!saveLock.current) setShowSaveDialog(false); };
+  const closeNew = () => { if (!saveLock.current) setShowNewDialog(false); };
   const loadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const loadMenuRef = useRef<HTMLDivElement>(null);
   const saveDialogBackdropRef = useRef<HTMLDivElement>(null);
@@ -69,42 +74,46 @@ export function ImageSetToolbar({
     open: showSaveDialog,
     dialogRef: saveDialogRef,
     dismissSurfaceRef: saveDialogBackdropRef,
-    onDismiss: () => setShowSaveDialog(false),
+    onDismiss: closeSave,
   });
   useDialogDismiss({
     open: showNewDialog,
     dialogRef: newDialogRef,
     dismissSurfaceRef: newDialogBackdropRef,
-    onDismiss: () => setShowNewDialog(false),
+    onDismiss: closeNew,
   });
 
   const currentCollection = collections.find((c) => c.id === currentCollectionId);
   const visibleReferenceAlbums = referenceAlbums.filter((album) => album.image_count > 0);
 
   const handleSave = async () => {
-    if (!dialogName.trim()) return;
+    if (!dialogName.trim() || loading || saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
     try {
       setActionError(null);
       if (onReferenceAlbumSaveCurrent) await onReferenceAlbumSaveCurrent(dialogName.trim());
-      else onSave(dialogName.trim());
+      else await onSave(dialogName.trim());
       setDialogName('');
       setShowSaveDialog(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存失败');
-    }
+    } finally { saveLock.current = false; setSaving(false); }
   };
 
   const handleNew = async () => {
-    if (!dialogName.trim()) return;
+    if (!dialogName.trim() || loading || saveLock.current) return;
+    saveLock.current = true;
+    setSaving(true);
     try {
       setActionError(null);
       if (onReferenceAlbumCreate) await onReferenceAlbumCreate(dialogName.trim());
-      else onNew(dialogName.trim());
+      else await onNew(dialogName.trim());
       setDialogName('');
       setShowNewDialog(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '创建失败');
-    }
+    } finally { saveLock.current = false; setSaving(false); }
   };
 
   return (
@@ -191,49 +200,52 @@ export function ImageSetToolbar({
           <button
             type="button"
             className="composer-toolbar-btn"
-            onClick={() => setShowSaveDialog(true)}
+            onClick={() => { setActionError(null); setShowSaveDialog(true); }}
           >
             保存素材为图集
           </button>
           <button
             type="button"
             className="composer-toolbar-btn"
-            onClick={() => setShowNewDialog(true)}
+            onClick={() => { setActionError(null); setShowNewDialog(true); }}
           >
             创建空图集
           </button>
         </div>
       </div>
 
-      {actionError && (
-        <div className="composer-toolbar-error">{actionError}</div>
+      {actionError && !showSaveDialog && !showNewDialog && (
+        <div className="composer-toolbar-error" role="alert">{actionError}</div>
       )}
 
       {/* 保存当前素材为图集对话框 */}
       {showSaveDialog && (
         <div ref={saveDialogBackdropRef} className="composer-dialog-backdrop">
-          <div ref={saveDialogRef} className="composer-dialog">
-            <div className="composer-dialog-title">保存当前素材为图集</div>
+          <div ref={saveDialogRef} className="composer-dialog" role="dialog" aria-modal="true" aria-labelledby={`${titleId}-save`} aria-busy={saving}>
+            <div id={`${titleId}-save`} className="composer-dialog-title">保存当前素材为图集</div>
             <input
               type="text"
               className="composer-dialog-input"
               placeholder="图集名称"
               value={dialogName}
               onChange={(e) => setDialogName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void handleSave()}
+              disabled={saving}
+              aria-label="图集名称"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void handleSave(); } }}
               autoFocus
             />
+            {actionError && <p role="alert" className="composer-toolbar-error">{actionError}</p>}
             <div className="composer-dialog-footer">
-              <button type="button" className="composer-dialog-cancel" onClick={() => setShowSaveDialog(false)}>
+              <button type="button" disabled={saving} className="composer-dialog-cancel" onClick={closeSave}>
                 取消
               </button>
               <button
                 type="button"
                 className="composer-dialog-confirm"
                 onClick={() => void handleSave()}
-                disabled={!dialogName.trim() || loading}
+                disabled={!dialogName.trim() || loading || saving}
               >
-                {loading ? '保存中...' : '保存'}
+                {saving ? '保存中...' : '保存'}
               </button>
             </div>
           </div>
@@ -243,28 +255,31 @@ export function ImageSetToolbar({
       {/* 创建空图集对话框 */}
       {showNewDialog && (
         <div ref={newDialogBackdropRef} className="composer-dialog-backdrop">
-          <div ref={newDialogRef} className="composer-dialog">
-            <div className="composer-dialog-title">创建空图集</div>
+          <div ref={newDialogRef} className="composer-dialog" role="dialog" aria-modal="true" aria-labelledby={`${titleId}-new`} aria-busy={saving}>
+            <div id={`${titleId}-new`} className="composer-dialog-title">创建空图集</div>
             <input
               type="text"
               className="composer-dialog-input"
               placeholder="图集名称"
               value={dialogName}
               onChange={(e) => setDialogName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void handleNew()}
+              disabled={saving}
+              aria-label="图集名称"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void handleNew(); } }}
               autoFocus
             />
+            {actionError && <p role="alert" className="composer-toolbar-error">{actionError}</p>}
             <div className="composer-dialog-footer">
-              <button type="button" className="composer-dialog-cancel" onClick={() => setShowNewDialog(false)}>
+              <button type="button" disabled={saving} className="composer-dialog-cancel" onClick={closeNew}>
                 取消
               </button>
               <button
                 type="button"
                 className="composer-dialog-confirm"
                 onClick={() => void handleNew()}
-                disabled={!dialogName.trim() || loading}
+                disabled={!dialogName.trim() || loading || saving}
               >
-                {loading ? '创建中...' : '创建'}
+                {saving ? '创建中...' : '创建'}
               </button>
             </div>
           </div>

@@ -402,26 +402,26 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
   const handleRenameAlbum = async () => {
     if (!album) return;
     const epoch = contextRef.current.epoch;
-    const nextName = (await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null }))?.trim();
-    if (!aliveRef.current || !isCurrent(epoch) || !nextName || nextName === album.name) return;
+    await prompt('输入新的图集名称', album.name, { title: '图集名称', maxLength: null, onSubmit: async nextName => {
+      if (!aliveRef.current || !isCurrent(epoch)) throw new Error('账号或图集已变化，请返回原图集操作。');
+      if (nextName === album.name) return;
 
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/reference-albums/${album.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nextName }),
-      });
-      const data = await res.json();
-      if (!aliveRef.current || !isCurrent(epoch)) return;
-      if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
-      setAlbum((current) => current ? { ...current, name: data.album?.name || nextName } : current);
-    } catch (err) {
-      if (aliveRef.current && isCurrent(epoch)) setError(err instanceof Error ? err.message : '重命名失败');
-    } finally {
-      if (aliveRef.current && isCurrent(epoch)) setLoading(false);
-    }
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/reference-albums/${album.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: nextName }),
+        });
+        const data = await res.json();
+        if (!aliveRef.current || !isCurrent(epoch)) throw new Error('账号或图集已变化，请返回原图集核对结果。');
+        if (!res.ok) throw new Error(data.error || data.message || '重命名失败');
+        setAlbum((current) => current ? { ...current, name: data.album?.name || nextName } : current);
+      } finally {
+        if (aliveRef.current && isCurrent(epoch)) setLoading(false);
+      }
+    } });
   };
 
   const handleDeleteAlbum = async () => {

@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { Heart, MoreHorizontal, Plus, RefreshCw, Pencil, Trash2, RotateCcw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useProductDialog } from '@/components/useProductDialog';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { cachedReactionState, pendingReactionMutation, writeReaction, notifyTemplateFavoritesChanged, installChannel } from '@/components/content-reactions/ContentReactions';
 import type { ReactionListItem, ReactionListResponse, TemplateFavoriteCommand, TemplateFavoriteMutation, TemplateFavoriteOrganization } from '@/lib/content-reactions/types';
 import styles from './template-favorites.module.css';
@@ -150,29 +152,16 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
   const [namingDirty, setNamingDirty] = useState(false);
   usePageExitRisk({ unsaved: namingDirty ? ['我的喜欢尚未保存的名称'] : [], busy: data.writing || data.unconfirmed ? ['我的喜欢保存结果待确认'] : [], revision: String(namingDirty) });
   const [menu, setMenu] = useState<string | null>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const menuPanel = useRef<HTMLDivElement>(null), menuTrigger = useRef<HTMLElement | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 8, top: 8 });
+  const menuId = useId();
+  const menuPanel = useRef<HTMLDivElement>(null), menuTrigger = useRef<HTMLButtonElement | null>(null);
   const disabled = busy || data.writing || !data.allowed || !data.organization;
   const group = data.organization?.groups.find(item => item.id === data.group);
+  useDialogDismiss({ open: Boolean(menu), dialogRef: menuPanel, layerSurfaceRef: menuPanel,
+    branchRefs: [menuTrigger], modal: false, onDismiss: () => setMenu(null) });
   useEffect(() => {
     if (!menu) return;
-    const trigger = panel.current?.querySelector<HTMLElement>('button[aria-expanded="true"]');
-    menuTrigger.current = trigger || null;
-    const rect = trigger?.getBoundingClientRect();
-    const height = menuPanel.current?.offsetHeight || 200;
-    if (rect) setMenuPosition({ left: Math.max(8, Math.min(rect.right - 208, window.innerWidth - 216)), top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - height - 8)) });
-    menuPanel.current?.querySelector<HTMLElement>('button, select')?.focus({ preventScroll: true });
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent ? event.key === 'Escape' : event.target instanceof Node && !panel.current?.contains(event.target) && !menuPanel.current?.contains(event.target)) {
-        if (event instanceof KeyboardEvent) menuTrigger.current?.focus({ preventScroll: true });
-        setMenu(null);
-      }
-    };
-    const reposition = (event: Event) => { if (!(event.target instanceof Node) || !menuPanel.current?.contains(event.target)) setMenu(null); };
-    document.addEventListener('pointerdown', close); document.addEventListener('keydown', close);
-    window.addEventListener('scroll', reposition, true); window.addEventListener('resize', reposition);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
+    const frame = requestAnimationFrame(() => menuPanel.current?.querySelector<HTMLElement>('button, select')?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
   }, [menu]);
   const name = (item: ReactionListItem) => item.personalAlias || item.content?.title || `不可用模板 · ${item.key.slice(-12)}`;
   async function renameGroup() {
@@ -180,16 +169,22 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
     setMenu(null);
     await prompt('分组名称', group.name, { title: '改名', confirmLabel: '保存', maxLength: 60, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'rename-group', groupId: group.id, name: value }) });
   }
-  return <div ref={panel} className={styles.list} data-template-favorites aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
+  return <div className={styles.list} data-template-favorites aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
     {data.allowed && <div className={styles.toolbar}>
       <select aria-label="喜欢分组" value={data.group} disabled={busy || data.writing} onChange={event => { setMenu(null); data.changeGroup(event.target.value); }}>
         <option value="all">全部 · {data.organization?.total ?? '—'}</option><option value="ungrouped">未分组 · {data.organization?.ungroupedCount ?? '—'}</option>
         {data.organization?.groups.map(item => <option key={item.id} value={item.id}>{item.name} · {item.count}</option>)}
       </select>
       <button type="button" title="新建分组" aria-label="新建分组" disabled={disabled || data.unconfirmed} onClick={() => { const groupId = crypto.randomUUID(); void prompt('分组名称', '', { title: '新建分组', confirmLabel: '创建', maxLength: 60, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'create-group', groupId, name: value }) }); }}><Plus size={16} /></button>
-      {group && <div className={styles.menuHost}><button type="button" title="管理分组" aria-label="管理分组" aria-expanded={menu === 'group'} disabled={disabled || data.unconfirmed} onClick={() => setMenu(menu === 'group' ? null : 'group')}><MoreHorizontal size={16} /></button>
-        {menu === 'group' && createPortal(<div ref={menuPanel} className={styles.menu} style={menuPosition}><button type="button" onClick={() => void renameGroup()}><Pencil size={14} />改名</button><button type="button" onClick={() => { setMenu(null); void confirm(`删除“${group.name}”？其中的模板将回到未分组，喜欢仍保留。`, { title: '删除分组', confirmLabel: '删除分组', danger: true, onSubmit: () => data.manage({ action: 'delete-group', groupId: group.id }) }); }}><Trash2 size={14} />删除分组</button></div>, document.body)}
-      </div>}
+      {group && <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" title="管理分组" aria-label="管理分组"
+        aria-haspopup="dialog" aria-controls={`${menuId}-group`} aria-expanded={menu === 'group'} disabled={disabled || data.unconfirmed}
+        onClick={event => { menuTrigger.current = event.currentTarget; setMenu(menu === 'group' ? null : 'group'); }}><MoreHorizontal size={16} /></button></Popper.Anchor>
+        {menu === 'group' && createPortal(<Popper.Content ref={menuPanel} id={`${menuId}-group`} role="dialog" aria-label="管理喜欢分组"
+          side="bottom" align="end" sideOffset={4} collisionPadding={8} avoidCollisions sticky="always" hideWhenDetached className={styles.menu}>
+          <button type="button" onClick={() => void renameGroup()}><Pencil size={14} />改名</button>
+          <button type="button" onClick={() => { setMenu(null); void confirm(`删除“${group.name}”？其中的模板将回到未分组，喜欢仍保留。`, { title: '删除分组', confirmLabel: '删除分组', danger: true, onSubmit: () => data.manage({ action: 'delete-group', groupId: group.id }) }); }}><Trash2 size={14} />删除分组</button>
+        </Popper.Content>, document.body)}
+      </Popper.Root></div>}
     </div>}
     {data.loading && <p role="status">正在读取喜欢模板</p>}
     {!data.loading && !data.allowed && <p role="status">请登录当前账号后查看喜欢模板</p>}
@@ -199,13 +194,17 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
       <button type="button" className={styles.item} disabled={busy || !item.content || !item.state.available} aria-pressed={selected === item.key} title={name(item)} onClick={() => onSelect(item)}>
         <span>{name(item)}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '不可用 · 喜欢保留'}</small>
       </button>
-      <div className={styles.menuHost}><button type="button" className={styles.rowAction} title="管理这条喜欢" aria-label={`管理${name(item)}`} disabled={disabled || data.unconfirmed} aria-expanded={menu === item.key} onClick={() => setMenu(menu === item.key ? null : item.key)}><MoreHorizontal size={16} /></button>
-        {menu === item.key && createPortal(<div ref={menuPanel} className={styles.menu} style={menuPosition}>
+      <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" className={styles.rowAction} title="管理这条喜欢" aria-label={`管理${name(item)}`}
+        disabled={disabled || data.unconfirmed} aria-haspopup="dialog" aria-controls={`${menuId}-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+        aria-expanded={menu === item.key} onClick={event => { menuTrigger.current = event.currentTarget; setMenu(menu === item.key ? null : item.key); }}><MoreHorizontal size={16} /></button></Popper.Anchor>
+        {menu === item.key && createPortal(<Popper.Content ref={menuPanel} id={`${menuId}-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+          role="dialog" aria-label={`管理${name(item)}`} side="bottom" align="end" sideOffset={4} collisionPadding={8}
+          avoidCollisions sticky="always" hideWhenDetached className={styles.menu}>
           <label>移到分组<select aria-label="移到分组" value={item.groupId || ''} disabled={disabled} onChange={event => { const groupId = event.target.value || null; void data.manage({ action: 'move', key: item.key, groupId }).then(() => setMenu(null)).catch(() => undefined); }}><option value="">未分组</option>{data.organization?.groups.map(value => <option key={value.id} value={value.id}>{value.name}</option>)}</select></label>
           <button type="button" onClick={() => { setMenu(null); void prompt('只修改我看到的名称', name(item), { title: '改名', confirmLabel: '保存', maxLength: 120, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'rename', key: item.key, name: value }) }); }}><Pencil size={14} />改名</button>
           {item.personalAlias && <button type="button" onClick={() => void data.manage({ action: 'rename', key: item.key, name: null }).then(() => setMenu(null)).catch(() => undefined)}><RotateCcw size={14} />恢复原名</button>}
-        </div>, document.body)}
-      </div>
+        </Popper.Content>, document.body)}
+      </Popper.Root></div>
       <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void data.cancelLike(item).catch(() => undefined); }}><Heart size={17} /></button>
     </div>)}
     {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">{data.group === 'all' ? '还没有喜欢的模板' : '这个分组还没有模板'}</p>}

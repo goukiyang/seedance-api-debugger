@@ -11,7 +11,7 @@ import { saveMainImageReminder, skipMainImageReminder } from './main-image-remin
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, ClipboardList, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ModuleGallery } from './ModuleGallery';
@@ -624,6 +624,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const [presetsLoading, setPresetsLoading] = useState(false);
   const [presetsError, setPresetsError] = useState('');
   const presetDialog = useRef<HTMLDialogElement>(null);
+  const presetTitleId = useId();
   const presetApplyLock = useRef(false);
   const [presetApplying, setPresetApplying] = useState(false);
   const sharing = useSharingCommand({ userId, onSettled: (presetId, current) => {
@@ -1550,8 +1551,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         setDirectory(current => current.map(item => item.id === galleryCoverModule.id ? { ...item, fixedCover: cover } : item));
         shared.refresh();
       }} />}
-    <dialog ref={presetDialog} className={styles.dialog}>
-      <header className={styles.header}><h2>模板库</h2><button type="button" disabled={Boolean(quickLinkingId) || presetApplying || presetManaging} aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
+    <dialog ref={presetDialog} className={styles.dialog} aria-labelledby={presetTitleId}>
+      <header className={styles.header}><h2 id={presetTitleId}>模板库</h2><button type="button" disabled={Boolean(quickLinkingId) || presetApplying || presetManaging} aria-label="关闭模板库" onClick={() => setPresetDialogOpen(false)}><X size={20} /></button></header>
       {isAdmin && <div role="group" aria-label="模板范围"><button type="button" aria-pressed={!allDefinitions} onClick={() => setAllDefinitions(false)}>可用模板</button><button type="button" aria-pressed={allDefinitions} onClick={() => setAllDefinitions(true)}>全部模板</button></div>}
       {allDefinitions && isAdmin ? <TemplateDefinitionDirectory ownerId={userId} /> : <>
       <label className={styles.presetSource}>更新设置取自<select aria-label="选择要写入模板的模块" value={presetSourceId} disabled={presetManaging || presetApplying} onChange={event => setPresetSourceId(event.target.value)}><option value="">选择模块</option>{modules.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -1908,6 +1909,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const loadedMore = useRef(false);
   const uploadLock = useRef(false);
   const moduleDialog = useRef<HTMLDialogElement>(null);
+  const moduleContextTitleId = useId();
   const moduleContextInput = useRef<HTMLTextAreaElement>(null);
   const changeModuleContext = (value: string) => {
     setModuleContext(value); setModuleSaveError('');
@@ -4642,12 +4644,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {deleteError && <p role="alert" className={styles.error}>{deleteError}</p>}
       <div className={templateWorkbench ? styles.resultDeleteActions : styles.resultActions}><button ref={deleteCancel} type="button" autoFocus disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</button><button type="button" className={styles.danger} disabled={deleting} onClick={() => void deleteResult()}><Trash2 size={16} />{deleting ? '删除中' : templateWorkbench ? '删除' : '确认删除'}</button></div>
     </dialog>
-    <dialog ref={moduleDialog} className={`${styles.dialog} ${styles.contextDialog}`} onPaste={event => {
+    <dialog ref={moduleDialog} className={`${styles.dialog} ${styles.contextDialog}`} aria-labelledby={moduleContextTitleId} onPaste={event => {
       if (personalSettingsOpen || !fixedEditable || assetPickerOpen) return;
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
       if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, true); }
     }}>
-      <header className={styles.header}><h2>{personalSettingsOpen ? '本次生成设置' : repairDefinition ? '修复模板' : '模板上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
+      <header className={styles.header}><h2 id={moduleContextTitleId}>{personalSettingsOpen ? '本次生成设置' : repairDefinition ? '修复模板' : '模板上下文'}</h2><button type="button" aria-label="关闭模块上下文" onClick={closeModuleDialog}><X size={20} /></button></header>
       {!personalSettingsOpen && templateSharingAttributes}
       <div className={styles.contextEditorTools}>{!personalSettingsOpen && <span>模块上下文版本：<ContextVersionLabel {...contextVersion} /></span>}
         {!personalSettingsOpen && module.sourcePresetId && (module.sourcePresetOwnedByViewer || sharedLive?.mode === 'publisher') && <button type="button" onClick={event => onLifecycleHistory(event.currentTarget)}>变更记录</button>}

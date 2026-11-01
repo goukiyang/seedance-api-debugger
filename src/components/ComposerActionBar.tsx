@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { Settings2, Sparkles } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { ParamChip } from '@/components/ParamChip';
@@ -36,6 +37,78 @@ export type ComposerProviderStatus = {
   onAction?: () => void;
   visible?: boolean;
 };
+
+type ComposerMenuOption = {
+  id: string;
+  label: string;
+  detail?: string;
+  disabled?: boolean;
+  title?: string;
+};
+
+function ComposerOptionMenu({ label, triggerLabel, open, onOpenChange, options, selectedId, detailed = false, onSelect }: {
+  label: string;
+  triggerLabel: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  options: ComposerMenuOption[];
+  selectedId: string | null;
+  detailed?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const id = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useDialogDismiss({
+    open,
+    dialogRef: panel,
+    layerSurfaceRef: panel,
+    branchRefs: [trigger],
+    modal: false,
+    onDismiss: () => onOpenChange(false),
+  });
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      (panel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)')
+        || panel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
+  return <Popper.Root>
+    <Popper.Anchor asChild>
+      <button ref={trigger} type="button" className="composer-chip" aria-haspopup="menu" aria-expanded={open} aria-controls={id}
+        onClick={() => onOpenChange(!open)} onKeyDown={event => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          onOpenChange(true);
+        }}>
+        {triggerLabel}<span className="composer-chip-arrow" aria-hidden="true">▼</span>
+      </button>
+    </Popper.Anchor>
+    {open && createPortal(<Popper.Content side="top" align="start" sideOffset={8} collisionPadding={8} avoidCollisions
+      sticky="always" hideWhenDetached ref={panel} id={id} role="menu" aria-label={label}
+      className={`composer-chip-dropdown ${detailed ? 'composer-model-options' : ''}`} onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+        if (!items.length) return;
+        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+          : (Math.max(index, 0) + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      }}>
+      {options.map(option => <button key={option.id} type="button" role="menuitemradio" aria-checked={option.id === selectedId}
+        className={`composer-chip-dropdown-item ${option.id === selectedId ? 'active' : ''}`} disabled={option.disabled}
+        title={option.title} onClick={() => { if (!option.disabled) { onSelect(option.id); onOpenChange(false); } }}>
+        <span>{option.label}</span>{option.detail && <small>{option.detail}</small>}
+      </button>)}
+    </Popper.Content>, document.body)}
+  </Popper.Root>;
+}
 
 interface Props {
   videoRedesign?: boolean;
@@ -167,27 +240,6 @@ export function ComposerActionBar({
   const [showProviderMenu, setShowProviderMenu] = useState(false);
   const [showModeMenu, setShowModeMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
-  const modelAnchor = useRef<HTMLDivElement>(null), modelPanel = useRef<HTMLDivElement>(null);
-  const [modelPosition, setModelPosition] = useState<React.CSSProperties | null>(null);
-  const closeModelMenu = () => { setShowModelMenu(false); requestAnimationFrame(() => modelAnchor.current?.querySelector('button')?.focus()); };
-  useDialogDismiss({ open: showModelMenu, dialogRef: modelPanel, layerSurfaceRef: modelPanel, branchRefs: [modelAnchor], modal: false, onDismiss: closeModelMenu });
-  useEffect(() => {
-    if (!showModelMenu) { setModelPosition(null); return; }
-    const place = () => {
-      if (!modelAnchor.current || !modelPanel.current) return;
-      const anchor = modelAnchor.current.getBoundingClientRect(), viewport = window.visualViewport;
-      const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0, width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
-      const panelWidth = Math.min(360, width - 16), below = top + height - anchor.bottom - 14, above = anchor.top - top - 14;
-      const maxHeight = Math.min(420, Math.max(below, above)), panelHeight = Math.min(modelPanel.current.scrollHeight, maxHeight);
-      setModelPosition({ position: 'fixed', bottom: 'auto', zIndex: 2147000000, width: panelWidth, maxHeight, overflowY: 'auto',
-        left: Math.max(left + 8, Math.min(anchor.left, left + width - panelWidth - 8)),
-        top: below >= panelHeight ? anchor.bottom + 6 : Math.max(top + 8, anchor.top - panelHeight - 6) });
-    };
-    place();
-    const frame = requestAnimationFrame(() => (modelPanel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)') || modelPanel.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus());
-    window.addEventListener('resize', place); window.addEventListener('scroll', place, true); window.visualViewport?.addEventListener('resize', place);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); };
-  }, [showModelMenu]);
   const [showAuxiliaryMenu, setShowAuxiliaryMenu] = useState(false);
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const [showDurationMenu, setShowDurationMenu] = useState(false);
@@ -207,109 +259,27 @@ export function ComposerActionBar({
         {/* 生成引擎：只有多引擎并列时才显示，避免和模型下拉重复 */}
         {hasProviderOptions && (
           <div className="composer-chip-wrap">
-            <ParamChip
-              label={effectiveProviderLabel}
-              dropdown
-              onClick={() => setShowProviderMenu(!showProviderMenu)}
-            />
-            {showProviderMenu && (
-              <>
-                <div className="composer-chip-dropdown-backdrop" onClick={() => setShowProviderMenu(false)} />
-                <div className="composer-chip-dropdown composer-model-options">
-                  {providerOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={`composer-chip-dropdown-item ${option.id === selectedProviderOption?.id ? 'active' : ''}`}
-                      disabled={option.disabled}
-                      onClick={() => {
-                        if (option.disabled) return;
-                        onProviderChange?.(option.id);
-                        setShowProviderMenu(false);
-                      }}
-                      title={option.disabledReason || option.id}
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.disabledReason || option.detail}</small>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+            <ComposerOptionMenu label="生成引擎" triggerLabel={effectiveProviderLabel} open={showProviderMenu}
+              onOpenChange={setShowProviderMenu} selectedId={selectedProviderOption?.id || null} detailed
+              options={providerOptions.map(option => ({ ...option, detail: option.disabledReason || option.detail, title: option.disabledReason || option.id }))}
+              onSelect={id => onProviderChange?.(id)} />
           </div>
         )}
 
         {/* 模型标签 */}
-        <div className="composer-chip-wrap" ref={modelAnchor} onKeyDown={event => {
-          if (event.target === modelAnchor.current?.querySelector('button') && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); setShowModelMenu(true); }
-        }}>
-          <ParamChip
-            label={effectiveModelLabel}
-            dropdown={hasModelOptions}
-            onClick={hasModelOptions ? () => setShowModelMenu(!showModelMenu) : undefined}
-          />
-          {showModelMenu && hasModelOptions && typeof document !== 'undefined' && createPortal(
-              <div ref={modelPanel} className="composer-chip-dropdown composer-model-options" role="menu" aria-label="生成型号" style={{ ...modelPosition, visibility: modelPosition ? 'visible' : 'hidden' }} onKeyDown={event => {
-                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-                event.preventDefault();
-                const items = Array.from(modelPanel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
-                const index = items.indexOf(document.activeElement as HTMLButtonElement);
-                const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-                items[next]?.focus();
-              }}>
-                {modelOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${option.id === selectedModelOption?.id ? 'active' : ''}`}
-                    role="menuitemradio"
-                    aria-checked={option.id === selectedModel}
-                    disabled={option.disabled}
-                    onClick={() => {
-                      if (option.disabled) return;
-                      onModelChange?.(option.id);
-                      closeModelMenu();
-                    }}
-                    title={option.disabledReason || option.label}
-                  >
-                    <span>{option.label}</span>
-                    <small>{option.disabledReason || option.detail}</small>
-                  </button>
-                ))}
-              </div>, document.body)}
+        <div className="composer-chip-wrap">
+          {hasModelOptions ? <ComposerOptionMenu label="生成型号" triggerLabel={effectiveModelLabel} open={showModelMenu}
+            onOpenChange={setShowModelMenu} selectedId={selectedModelOption?.id || null} detailed
+            options={modelOptions.map(option => ({ ...option, detail: option.disabledReason || option.detail, title: option.disabledReason || option.label }))}
+            onSelect={id => onModelChange?.(id)} /> : <ParamChip label={effectiveModelLabel} />}
         </div>
 
         {hasAuxiliaryOptions && (
           <div className="composer-chip-wrap">
-            <ParamChip
-              label={effectiveAuxiliaryLabel}
-              dropdown
-              onClick={() => setShowAuxiliaryMenu(!showAuxiliaryMenu)}
-            />
-            {showAuxiliaryMenu && (
-              <>
-                <div className="composer-chip-dropdown-backdrop" onClick={() => setShowAuxiliaryMenu(false)} />
-                <div className="composer-chip-dropdown composer-model-options">
-                  {auxiliaryOptions.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={`composer-chip-dropdown-item ${option.id === selectedAuxiliaryOption?.id ? 'active' : ''}`}
-                      disabled={option.disabled}
-                      onClick={() => {
-                        if (option.disabled) return;
-                        onAuxiliaryChange?.(option.id);
-                        setShowAuxiliaryMenu(false);
-                      }}
-                      title={option.disabledReason || option.id}
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.disabledReason || option.detail}</small>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+            <ComposerOptionMenu label="辅助模型" triggerLabel={effectiveAuxiliaryLabel} open={showAuxiliaryMenu}
+              onOpenChange={setShowAuxiliaryMenu} selectedId={selectedAuxiliaryOption?.id || null} detailed
+              options={auxiliaryOptions.map(option => ({ ...option, detail: option.disabledReason || option.detail, title: option.disabledReason || option.id }))}
+              onSelect={id => onAuxiliaryChange?.(id)} />
           </div>
         )}
 
@@ -355,112 +325,37 @@ export function ComposerActionBar({
 
         {/* 模式选择 */}
         <div className="composer-chip-wrap">
-          <ParamChip
-            label={GENERATION_MODE_LABELS[generationMode]}
-            dropdown
-            onClick={() => setShowModeMenu(!showModeMenu)}
-          />
-          {showModeMenu && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowModeMenu(false)} />
-              <div className="composer-chip-dropdown">
-                {(Object.keys(GENERATION_MODE_LABELS) as GenerationMode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${m === generationMode ? 'active' : ''}`}
-                    onClick={() => { onModeChange(m); setShowModeMenu(false); }}
-                  >
-                    {GENERATION_MODE_LABELS[m]}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          <ComposerOptionMenu label="生成模式" triggerLabel={GENERATION_MODE_LABELS[generationMode]} open={showModeMenu}
+            onOpenChange={setShowModeMenu} selectedId={generationMode}
+            options={(Object.keys(GENERATION_MODE_LABELS) as GenerationMode[]).map(id => ({ id, label: GENERATION_MODE_LABELS[id] }))}
+            onSelect={id => onModeChange(id as GenerationMode)} />
         </div>
 
         {/* 比例选择 */}
         <div className="composer-chip-wrap">
-          <ParamChip
-            label={ratioLabel}
-            dropdown={!ratioLocked}
-            disabled={ratioLocked}
-            title={followsFirstFrame ? 'Seedance 2.5 首尾帧的画面比例由首帧决定；需要固定比例时，请先调整首帧图片。' : lockedRatio ? lockReason : undefined}
-            onClick={ratioLocked ? undefined : () => setShowRatioMenu(!showRatioMenu)}
-          />
-          {showRatioMenu && !ratioLocked && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowRatioMenu(false)} />
-              <div className="composer-chip-dropdown">
-                {RATIO_OPTIONS.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${r === ratio ? 'active' : ''}`}
-                    onClick={() => { onRatioChange(r); setShowRatioMenu(false); }}
-                  >
-                    {RATIO_LABELS[r]}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          {ratioLocked ? <ParamChip label={ratioLabel} disabled
+            title={followsFirstFrame ? 'Seedance 2.5 首尾帧的画面比例由首帧决定；需要固定比例时，请先调整首帧图片。' : lockReason} />
+            : <ComposerOptionMenu label="视频比例" triggerLabel={ratioLabel} open={showRatioMenu} onOpenChange={setShowRatioMenu}
+              selectedId={ratio} options={RATIO_OPTIONS.map(id => ({ id, label: RATIO_LABELS[id] }))}
+              onSelect={id => onRatioChange(id as VideoRatio)} />}
         </div>
 
         {/* 时长选择 */}
         <div className="composer-chip-wrap">
-          <ParamChip
-            label={`${duration}s${durationValid ? '' : ' · 不支持'}`}
-            dropdown={!lockedDuration}
-            disabled={lockedDuration}
-            title={lockedDuration ? lockReason : undefined}
-            onClick={lockedDuration ? undefined : () => setShowDurationMenu(!showDurationMenu)}
-          />
-          {showDurationMenu && !lockedDuration && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowDurationMenu(false)} />
-              <div className="composer-chip-dropdown" style={{ maxHeight: 'min(320px, 50vh)', overflowY: 'auto' }}>
-                {durationOptions.map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${d === duration ? 'active' : ''}`}
-                    onClick={() => { onDurationChange(d); setShowDurationMenu(false); }}
-                  >
-                    {d} 秒
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          {lockedDuration ? <ParamChip label={`${duration}s${durationValid ? '' : ' · 不支持'}`} disabled title={lockReason} />
+            : <ComposerOptionMenu label="视频时长" triggerLabel={`${duration}s${durationValid ? '' : ' · 不支持'}`} open={showDurationMenu}
+              onOpenChange={setShowDurationMenu} selectedId={String(duration)}
+              options={durationOptions.map(value => ({ id: String(value), label: `${value} 秒` }))}
+              onSelect={id => onDurationChange(Number(id) as VideoDuration)} />}
         </div>
 
         {/* 分辨率选择 */}
         <div className="composer-chip-wrap">
-          <ParamChip
-            label={resolution}
-            dropdown={!lockedResolution}
-            disabled={lockedResolution}
-            title={lockedResolution ? lockReason : undefined}
-            onClick={lockedResolution ? undefined : () => setShowResolutionMenu(!showResolutionMenu)}
-          />
-          {showResolutionMenu && !lockedResolution && (
-            <>
-              <div className="composer-chip-dropdown-backdrop" onClick={() => setShowResolutionMenu(false)} />
-              <div className="composer-chip-dropdown">
-                {RESOLUTION_OPTIONS.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    className={`composer-chip-dropdown-item ${r === resolution ? 'active' : ''}`}
-                    onClick={() => { onResolutionChange(r); setShowResolutionMenu(false); }}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          {lockedResolution ? <ParamChip label={resolution} disabled title={lockReason} />
+            : <ComposerOptionMenu label="视频分辨率" triggerLabel={resolution} open={showResolutionMenu}
+              onOpenChange={setShowResolutionMenu} selectedId={resolution}
+              options={RESOLUTION_OPTIONS.map(id => ({ id, label: id }))}
+              onSelect={id => onResolutionChange(id as VideoResolution)} />}
         </div>
       {videoRedesign && settingsContent && <button ref={settingsTrigger} type="button" className="composer-chip video-settings-trigger"
         title="设置" aria-label="设置" aria-haspopup="dialog" aria-controls={settingsOpen ? settingsId : undefined} aria-expanded={settingsOpen}

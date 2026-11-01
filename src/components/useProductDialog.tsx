@@ -17,12 +17,14 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   const descriptionId = useId();
   const [value, setValue] = useState(request.value || '');
   const busy = useRef(false);
+  const active = useRef(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [checked, setChecked] = useState(request.checkbox?.checked === true);
   const dismiss = () => { if (!busy.current) onResolve(null); };
   const [position, setPosition] = useState<{ left: number; top: number; anchored: boolean } | null>(null);
   const naming = request.value !== undefined;
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   useEffect(() => { request.onDraftChange?.(naming && value !== (request.value || '')); }, [request, naming, value]);
   useEffect(() => () => request.onDraftChange?.(false), [request]);
   const maxLength = request.maxLength === undefined ? 120 : request.maxLength;
@@ -33,9 +35,9 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
     const result = naming ? value.trim() : 'yes';
     if (!request.onSubmit) { request.checkbox?.onConfirm?.(checked); onResolve(result); return; }
     busy.current = true; setSaving(true); setError('');
-    try { await request.onSubmit(result, checked); request.checkbox?.onConfirm?.(checked); onResolve(result); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败，请重试'); }
-    finally { busy.current = false; setSaving(false); }
+    try { await request.onSubmit(result, checked); if (active.current) { request.checkbox?.onConfirm?.(checked); onResolve(result); } }
+    catch (cause) { if (active.current) setError(cause instanceof Error ? cause.message : '保存失败，请重试'); }
+    finally { busy.current = false; if (active.current) setSaving(false); }
   }
   useEffect(() => {
     dialog.current?.showModal();
@@ -86,7 +88,9 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   return createPortal(<dialog ref={dialog} className={styles.dialog} data-anchored={Boolean(position?.anchored)}
     style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto', margin: 0 } : undefined}
     aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId}>
-    <form onSubmit={event => { event.preventDefault(); void submit(); }} aria-busy={saving}>
+    <form onSubmit={event => { event.preventDefault(); void submit(); }} onKeyDown={event => {
+      if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
+    }} aria-busy={saving}>
       <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
         <button type="button" className={styles.close} disabled={saving} onClick={dismiss} aria-label="关闭" title="关闭"><X size={18} /></button></header>
       <p id={descriptionId} className={styles.message}>{request.message}</p>

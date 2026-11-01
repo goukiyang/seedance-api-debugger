@@ -8,7 +8,7 @@ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Profiler, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import PaginationControls from '@/components/PaginationControls';
 import { gridPageCapacity } from '@/components/useResultPages';
 import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
@@ -267,6 +267,8 @@ const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
 function MultiviewAssetGroupCard({ item, cardSize, onOpenAsset }: { item: AssetLibraryItem; cardSize: AssetCardSize; onOpenAsset: (item: AssetLibraryItem) => void }) {
   const [open, setOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useDialogDismiss({ open, dialogRef: dialog, nativeDialog: true, onDismiss: () => setOpen(false) });
   useEffect(() => { if (open) dialog.current?.showModal(); else dialog.current?.close(); }, [open]);
   const group = item.multiviewGroup!;
   return <article className={`asset-card asset-card-${cardSize}`}>
@@ -274,8 +276,8 @@ function MultiviewAssetGroupCard({ item, cardSize, onOpenAsset }: { item: AssetL
       {item.thumbnailUrl && <img src={item.thumbnailUrl} alt={item.title} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
     </button>
     <div className="asset-card-meta"><strong>{item.title}</strong><div className="asset-card-config-row"><span>{group.frameCount} 张 · 3D多视图{group.missing > 0 ? ` · 缺 ${group.missing} 项` : group.syncing ? ' · 新成品同步中' : ''}</span><button type="button" onClick={() => setOpen(true)}>查看整套</button></div></div>
-    <dialog ref={dialog} className={assetStyles.multiviewGroupDialog} onCancel={() => setOpen(false)}>
-      <header><h2>{item.title}</h2><button type="button" aria-label="关闭整套方案" onClick={() => setOpen(false)}><X size={18} /></button></header>
+    <dialog ref={dialog} className={assetStyles.multiviewGroupDialog} aria-labelledby={titleId}>
+      <header><h2 id={titleId}>{item.title}</h2><button type="button" aria-label="关闭整套方案" onClick={() => setOpen(false)}><X size={18} /></button></header>
       <div className={assetStyles.multiviewGroupGrid}>{group.children.map((child, index) => <button key={`${index}:${child.id}`} type="button" onClick={() => { setOpen(false); onOpenAsset(child); }}>
         <AssetLibraryThumbnail item={child} /><span>{group.roles[index] === 'collage' ? '完整拼图' : `单图 ${group.roles.slice(0, index + 1).filter(role => role !== 'collage').length}`}</span>
       </button>)}</div>

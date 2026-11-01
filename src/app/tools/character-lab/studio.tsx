@@ -208,9 +208,35 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     finally { busyRef.current = false; if (alive.current) setBusy(''); }
   }
   async function createWorkspace() {
-    const name = await askName('角色名称', '未命名角色', { title: '新建角色', confirmLabel: '创建角色', maxLength: 80 });
-    if (name === null) return;
-    await run('create', async () => { await saveDraft(); const result = await labApi<{ workspace: CharacterLabWorkspace }>({ action: 'create-workspace', id: crypto.randomUUID(), name }); await openWorkspace(result.workspace.id); });
+    const capturedScope = scope.current, id = crypto.randomUUID();
+    let awaiting = false, submittedName = '';
+    await askName('角色名称', '未命名角色', { title: '新建角色', confirmLabel: '创建角色', maxLength: 80, onSubmit: async name => {
+      assertActive();
+      if (!alive.current || capturedScope !== scope.current) throw new Error('当前角色已变化，请返回原角色操作。');
+      if (busyRef.current) throw new Error('请等待当前操作结束。');
+      if (awaiting && name !== submittedName) throw new Error('原创建结果待确认，尚未提交新名称。请先核对原角色。');
+      busyRef.current = true; setBusy('create'); setError(''); setNotice('');
+      const querying = awaiting;
+      try {
+        if (awaiting) {
+          const result = await labApi<CharacterLabWorkspacePayload>(undefined, `?workspace=${encodeURIComponent(id)}`);
+          assertActive();
+          if (!alive.current || capturedScope !== scope.current) throw new Error('当前角色已变化，请返回原角色核对创建结果。');
+          scope.current++; loadSequence.current++; acceptWorkspace(result);
+        } else {
+          await saveDraft(); assertActive();
+          if (!alive.current || capturedScope !== scope.current) throw new Error('当前角色已变化，未创建新角色。');
+          awaiting = true; submittedName = name;
+          const result = await labApi<{ workspace: CharacterLabWorkspace }>({ action: 'create-workspace', id, name });
+          assertActive();
+          if (!alive.current || capturedScope !== scope.current) throw new Error('当前角色已变化，请返回原角色核对创建结果。');
+          await openWorkspace(result.workspace.id);
+        }
+      } catch (cause) {
+        if (!querying && (cause as { status?: number }).status! < 500) awaiting = false;
+        throw cause;
+      } finally { busyRef.current = false; if (alive.current) setBusy(''); }
+    } });
   }
   async function switchWorkspace(id: string) {
     if (id === workspace?.id) return;

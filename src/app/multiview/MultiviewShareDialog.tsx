@@ -1,13 +1,15 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Copy, Send, X } from 'lucide-react';
 import type { MultiviewWorkDto } from '@/lib/video/multiview-work-contract';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { useMultiviewShareOperation } from './useMultiviewShareOperation';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from './multiview-share.module.css';
 type Grant = { id: string; revision: number; revoked_at: string | null; recipients: Array<{ user_id: string; name: string; revoked_at: string | null }> };
 export function MultiviewShareDialog({ owner, work, onClose, blockedReason = '', recovery }: { owner: string; work: MultiviewWorkDto; onClose: () => void; blockedReason?: string; recovery?: { label: string; run: () => void; disabled?: boolean } }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const [q, setQ] = useState(''), [people, setPeople] = useState<Array<{ id: string; name: string }>>([]), [next, setNext] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]), [error, setError] = useState(''), [message, setMessage] = useState(''), [href, setHref] = useState('');
   const [management, setManagement] = useState(false), [grants, setGrants] = useState<Grant[]>([]);
@@ -30,6 +32,8 @@ export function MultiviewShareDialog({ owner, work, onClose, blockedReason = '',
     } else setMessage(receipt.action === 'send' ? '已发送站内通知。' : '分享权限已更新。');
     if (management) void readGrants().catch(cause => setError(cause.message));
   });
+  const close = () => { if (!operation.busy) onClose(); };
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: close });
   useEffect(() => { dialog.current?.showModal(); return () => { live.current = ''; }; }, []);
   async function loadPeople(after?: string) {
     const sequence = ++peopleRequest.current;
@@ -48,8 +52,8 @@ export function MultiviewShareDialog({ owner, work, onClose, blockedReason = '',
     setMessage(''); setHref('');
     void operation.send({ action, workId: work.id, revision: work.draftRevision, recipients: selected });
   };
-  return <dialog ref={dialog} className={styles.dialog} onCancel={event => { event.preventDefault(); if (!operation.busy) onClose(); }}>
-    <header><h2>分享方案</h2><button type="button" aria-label="关闭" title="关闭" disabled={operation.busy} onClick={onClose}><X size={18} /></button></header>
+  return <dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} aria-busy={operation.busy}>
+    <header><h2 id={titleId}>分享方案</h2><button type="button" aria-label="关闭" title="关闭" disabled={operation.busy} onClick={close}><X size={18} /></button></header>
     <p>{work.title}</p>
     {blockedReason && <p role="status">{blockedReason}{recovery && <button type="button" disabled={recovery.disabled} onClick={recovery.run}>{recovery.label}</button>}</p>}
     <input type="search" aria-label="查找同事" placeholder="查找同事" value={q} onChange={event => { peopleRequest.current++; setNext(null); setQ(event.target.value); }} />

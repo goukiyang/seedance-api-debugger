@@ -127,19 +127,27 @@
 }
 .progressComplete { display: flex; align-items: center; gap: 8px; padding: 8px 0; color: var(--text-secondary); font-size: 12px; }
 .progressComplete a { margin-left: auto; }
-/* Generation/frame settings dropdown: a listbox so each own row can carry 编辑/删除. */
+/* Generation/frame settings panel keeps selection and row management as separate controls. */
 .settingsPickerSelect { position: relative; }
 .settingsPicker .settingsPickerTrigger { width: 100%; min-height: 38px; justify-content: space-between; text-align: left; }
 .settingsPicker .settingsPickerTrigger::after { content: ''; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); flex: 0 0 auto; }
-.settingsPickerList { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; margin: 4px 0 0; padding: 4px; list-style: none; max-height: 320px; overflow: auto;
+.settingsPickerPanel { z-index: 30; width: min(520px, calc(100vw - 16px)); max-height: min(320px, var(--radix-popper-available-height, 320px)); overflow: auto;
   border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated, var(--bg-card, #1b1d21)); box-shadow: 0 12px 28px rgba(0, 0, 0, .35); }
-.settingsPickerList li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
-.settingsPickerList li > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settingsPickerList li[data-active="true"] { background: var(--bg-hover); }
-.settingsPickerList li[aria-selected="true"] > span:first-child { color: var(--primary, #2463eb); }
+.settingsPickerPanel button { min-height: 36px; padding: 6px 9px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font: inherit; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); }
+.settingsPickerPanel button:disabled { opacity: .5; cursor: not-allowed; }
+.settingsPickerPanel button:not(:disabled):hover { background: var(--bg-hover); border-color: var(--primary, #2463eb); }
+.settingsPickerPanel button:focus-visible { outline: 2px solid var(--primary, #2463eb); outline-offset: 3px; }
+.settingsPickerList { display: flex; flex-direction: column; gap: 2px; padding: 4px; }
+.settingsPickerOption { display: flex; align-items: center; gap: 4px; min-height: 38px; border-radius: 6px; }
+.settingsPickerOption[data-active="true"] { background: var(--bg-hover); }
+.settingsPickerChoice { flex: 1 1 auto; min-width: 0; justify-content: flex-start; border-color: transparent !important; background: transparent !important; text-align: left; }
+.settingsPickerChoiceLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settingsPickerOption[data-selected="true"] .settingsPickerChoiceLabel { color: var(--primary, #2463eb); }
+.settingsPickerCurrent { flex: 0 0 auto; margin-left: auto; color: var(--primary, #2463eb); font-size: 11px; }
 .settingsPickerRowActions { display: inline-flex; gap: 4px; flex: 0 0 auto; visibility: hidden; }
-.settingsPickerList li:hover .settingsPickerRowActions, .settingsPickerList li[data-active="true"] .settingsPickerRowActions, .settingsPickerList li:focus-within .settingsPickerRowActions { visibility: visible; }
-.settingsPicker .settingsPickerRowActions button { min-height: 28px; padding: 2px 8px; font-size: 13px; }
+.settingsPickerOption:hover .settingsPickerRowActions, .settingsPickerOption[data-active="true"] .settingsPickerRowActions, .settingsPickerOption:focus-within .settingsPickerRowActions { visibility: visible; }
+.settingsPickerRowActions button { min-height: 28px; padding: 2px 8px; font-size: 13px; }
 @media (hover: none) { .settingsPickerRowActions { visibility: visible; } }
 .blockedReason { margin: 6px 0 0; font-size: 12px; color: var(--tone-warning-text, #b45309); }
 .summaryActions .primary { background: var(--primary, #2563eb); border-color: var(--primary, #2563eb); color: #fff; font-weight: 650; }

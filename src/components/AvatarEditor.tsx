@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Cropper, { type Area } from 'react-easy-crop';
 import { ImagePlus, X } from 'lucide-react';
 import { uploadFileToHistory } from '@/lib/http/file-upload';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import { useDialogDismiss } from './useDialogDismiss';
 import type { PickerItem } from '@/lib/assets/picker-types';
 import styles from './AvatarEditor.module.css';
 
@@ -27,7 +28,10 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const large = useRef<HTMLCanvasElement>(null), small = useRef<HTMLCanvasElement>(null), image = useRef<HTMLImageElement | null>(null);
+  const close = () => { if (!busy) onClose(); };
+  useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: close });
 
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => () => { if (source.startsWith('blob:')) URL.revokeObjectURL(source); }, [source]);
@@ -89,10 +93,10 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
     await send({ action: 'custom', assetId, crop: { x: area.x, y: area.y, width: area.width, height: area.height } });
   });
 
-  return <dialog ref={dialog} className={styles.dialog} aria-labelledby="avatar-editor-title" onClose={onClose}
+  return <dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} aria-busy={busy}
     onPaste={event => { const pasted = Array.from(event.clipboardData.files).find(item => item.type.startsWith('image/')); if (pasted) { event.preventDefault(); choose(pasted); } }}>
-    <header className={styles.header}><h2 id="avatar-editor-title">更换头像</h2>
-      <button type="button" aria-label="关闭" disabled={busy} onClick={() => dialog.current?.close()}><X size={18} /></button></header>
+    <header className={styles.header}><h2 id={titleId}>更换头像</h2>
+      <button type="button" aria-label="关闭" disabled={busy} onClick={close}><X size={18} /></button></header>
     <div className={styles.body}>
       <div className={styles.stage} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); choose(event.dataTransfer.files[0]); }}>
         {source ? <Cropper image={source} crop={crop} zoom={zoom} aspect={1} cropShape="round" showGrid={false} maxZoom={8}
@@ -113,7 +117,7 @@ export function AvatarEditor({ userId, hasFeishu, onClose, onChanged }: {
       </aside>
     </div>
     {error && <p className={styles.error} role="alert">{error}</p>}
-    <footer className={styles.footer}><button type="button" disabled={busy} onClick={() => dialog.current?.close()}>取消</button>
+    <footer className={styles.footer}><button type="button" disabled={busy} onClick={close}>取消</button>
       <button type="button" className={styles.primary} disabled={busy || !file && !libraryAssetId || !area} onClick={() => void save()}>{busy ? '正在保存…' : '保存头像'}</button></footer>
     {pickerOpen && <UploadedImagePicker open imageOnly target="image-studio" purpose="avatar" title="选择头像图片" confirmLabel="用这张做头像"
       contextKey={`${userId}:avatar`} maxSelection={1} currentCount={0} currentAssetIds={[]} currentReferenceImageIds={[]} portalContainer={dialog.current || undefined}

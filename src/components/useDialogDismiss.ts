@@ -188,6 +188,11 @@ function handlePointerUp(event: PointerEvent) {
 }
 
 function handleKeyDown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) {
+    // Prevent a native dialog's Escape default from cancelling IME composition.
+    if (event.key === 'Escape') event.preventDefault();
+    return;
+  }
   const layer = getTopLayer();
   if (event.key === 'Escape') {
     if (!layer) {

@@ -126,7 +126,7 @@
                         if (spot) { const text = svg('text', { x: spot.x, y: spot.y, class: 'role-relation-label' }); text.textContent = LABELS[edge.type]; group.append(text); }
                     }
                     hit.addEventListener('click', event => { event.stopPropagation(); selected = edge.id; showDetails(flow, edge); schedule(); });
-                    hit.addEventListener('keydown', event => { if (['Enter', ' '].includes(event.key)) { event.preventDefault(); selected = edge.id; showDetails(flow, edge); schedule(); } });
+                    hit.addEventListener('keydown', event => { if (!event.isComposing && event.keyCode !== 229 && ['Enter', ' '].includes(event.key)) { event.preventDefault(); selected = edge.id; showDetails(flow, edge); schedule(); } });
                     layer.append(group);
                 }
             }
@@ -236,6 +236,7 @@
         });
         document.addEventListener('pointercancel', cancel);
         document.addEventListener('keydown', event => {
+            if (event.isComposing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
             if (event.key === 'Escape' && (source || menu)) { event.preventDefault(); event.stopImmediatePropagation(); cancel(); return; }
             if (event.key === 'Tab' && menu) {
                 const controls = [...menu.querySelectorAll('button,input,select,textarea')].filter(item => !item.disabled);

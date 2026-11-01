@@ -2,7 +2,7 @@
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProductDialog } from '@/components/useProductDialog';
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 
 type PermissionKey = 'view' | 'use' | 'copy' | 'download' | 'viewSource' | 'edit';
@@ -101,6 +101,8 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   const [notice, setNotice] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+  const close = () => { if (savingKey === null) onClose(); };
 
   const shareCount = shares.length;
   const permissionSummary = useMemo(() => formatPermissions(draftPermissions), [draftPermissions]);
@@ -190,7 +192,7 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
     open: open && Boolean(album),
     dialogRef,
     dismissSurfaceRef: backdropRef,
-    onDismiss: onClose,
+    onDismiss: close,
     dismissOnOutside: savingKey === null,
     dismissOnEscape: savingKey === null,
   });
@@ -374,13 +376,13 @@ export default function ShareAlbumDialog({ open, album, onClose, onChanged }: Sh
   return (
     <div ref={backdropRef} className="share-dialog-backdrop" role="presentation">
       {productDialog}
-      <section ref={dialogRef} className="share-dialog" role="dialog" aria-modal="true" aria-label={`共享 ${album.name}`}>
+      <section ref={dialogRef} className="share-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={savingKey !== null}>
         <div className="share-dialog-head">
-          <div>
+          <div id={titleId}>
             <span>共享图集</span>
             <h2>{album.name}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="关闭共享设置">关闭</button>
+          <button type="button" disabled={savingKey !== null} onClick={close} aria-label="关闭共享设置">关闭</button>
         </div>
 
         <div className="share-dialog-status">
