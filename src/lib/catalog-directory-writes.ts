@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { bumpCatalogRevision, catalogRevisionKey, type CatalogDomain } from './image-studio/catalog-revision';
+import { observeTransaction } from './performance/request-trace';
 
 const operations = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
 const both: CatalogDomain[] = ['templates', 'assets'];
@@ -66,17 +67,18 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const existing = installed.get(base); if (existing) return existing as T;
   const context = new AsyncLocalStorage<Prisma.TransactionClient>();
   const promises = new WeakMap<object, CatalogDomain[]>();
+  const observedInputs = new WeakSet<object>();
   const transaction = base.$transaction.bind(base);
   base.$use(async (params, next) => {
     const affected = domains(params.model, params.action, params.args);
     if (!affected.length) return next(params);
     const tx = context.getStore();
     if (!params.runInTransaction) {
-      return transaction(async current => context.run(current, async () => {
+      return observeTransaction('implicit', enter => transaction(async current => context.run(current, () => enter(async () => {
         const name = params.model![0].toLowerCase() + params.model!.slice(1);
         const delegate = Reflect.get(current, name);
         return Reflect.apply(Reflect.get(delegate, params.action), delegate, [params.args]);
-      }), { maxWait: 5000, timeout: 15000 });
+      })), { maxWait: 5000, timeout: 15000 }));
     }
     const result = await next(params);
     if (tx && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) await bumpCatalogRevision(tx, affected);
@@ -88,9 +90,14 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
       // Instrumentation may replace the method after capturing this callable.
       const targetTransaction = Reflect.get(target, '$transaction');
       return (input: unknown, options?: unknown) => {
-        if (typeof input === 'function') return Reflect.apply(targetTransaction, target, [
-          (tx: Prisma.TransactionClient) => context.run(tx, () => input(tx)), options,
-        ]);
+        if (typeof input === 'function') {
+          const call = async (enter: <R>(body: () => Promise<R>) => Promise<R>) => {
+            const callback = (tx: Prisma.TransactionClient) => context.run(tx, () => enter(() => input(tx)));
+            observedInputs.add(callback);
+            return Reflect.apply(targetTransaction, target, [callback, options]);
+          };
+          return observedInputs.has(input) ? call(body => body()) : observeTransaction('callback', call);
+        }
         if (!Array.isArray(input)) throw new Error('catalog_transaction_invalid');
         const affected = Array.from(new Set(input.flatMap(value => promises.get(value) || [])));
         const markers = affected.map(domain => {
@@ -98,7 +105,9 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           const value_json = JSON.stringify({ version: 1, revision: randomBytes(32).toString('hex') });
           return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
         });
-        const pending = Reflect.apply(targetTransaction, target, [[...input, ...markers], options]) as Promise<unknown[]>;
+        const batched = [...input, ...markers]; observedInputs.add(batched);
+        const call = () => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>;
+        const pending = observedInputs.has(input) ? call() : observeTransaction('batch', call);
         return pending.then(values => values.slice(0, input.length));
       };
     }

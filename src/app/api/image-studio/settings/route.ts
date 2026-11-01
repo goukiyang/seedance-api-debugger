@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -27,18 +28,19 @@ async function settingsForModel(channels: Awaited<ReturnType<typeof getImageGene
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getSession();
+  return traceHttpRequest('studio.settings', request.headers, async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   try {
     const mode = request.nextUrl.searchParams.get('mode');
     if (mode === 'private-editor' || mode === 'private-save-status' || mode === 'private-draft-status') {
-      const result = mode === 'private-editor' ? await readPrivateGlobalEditor(user.id)
-        : await privateGlobalEditorStatus(user.id, request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status');
+      const result = mode === 'private-editor' ? await tracePhase('resolve', () => readPrivateGlobalEditor(user.id))
+        : await tracePhase('resolve', () => privateGlobalEditorStatus(user.id, request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status'));
       return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
-    const settings = await getImageStudioSettings();
-    const channels = await getImageGenerationChannels();
-    const selectedSettings = await Promise.all(IMAGE_STUDIO_MODELS.map(async model => [model, await settingsForModel(channels, model)] as const));
+    const settings = await tracePhase('settings', () => getImageStudioSettings());
+    const channels = await tracePhase('channels', () => getImageGenerationChannels());
+    const selectedSettings = await tracePhase('model-readiness', () => Promise.all(IMAGE_STUDIO_MODELS.map(async model => [model, await settingsForModel(channels, model)] as const)));
     const byModel = new Map(selectedSettings);
     const modelReady = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => {
       const api = byModel.get(model);
@@ -47,13 +49,15 @@ export async function GET(request: NextRequest) {
     const providerReady = Object.values(modelReady).some(Boolean);
     const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, byModel.get(model)
       ? imageGenerationSupportsStudioFourToOne(byModel.get(model)!, model) : false]));
-    return NextResponse.json({ ...await imageStudioSettingsPayload(settings, user.id, request.nextUrl.searchParams.get('private') === '1'), providerReady, modelReady, modelFourToOne, imageChannels: await getPricingImageChannelOptions(),
+    return NextResponse.json({ ...await tracePhase('data', () => imageStudioSettingsPayload(settings, user.id, request.nextUrl.searchParams.get('private') === '1')), providerReady, modelReady, modelFourToOne, imageChannels: await tracePhase('pricing-readiness', () => getPricingImageChannelOptions()),
       taskSettingsProtocol: studioTaskSettingsWriterEnabled() ? STUDIO_TASK_SETTINGS_PROTOCOL : null,
-      billingReadiness: await imageBillingReadinessPayload() }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+      billingReadiness: await tracePhase('billing-readiness', () => imageBillingReadinessPayload()) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
     if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers: { 'Cache-Control': 'private, no-store' } });
     return NextResponse.json({ error: '读取设置失败，请重试' }, { status: 503 });
   }
+
+  });
 }
 
 export async function PUT(request: NextRequest) {

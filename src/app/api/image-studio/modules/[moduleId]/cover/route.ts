@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { ModuleCoverError, readModuleCoverEditor, readModuleCoverRequest, readModuleCoverSnapshotRequest, saveModuleCover } from '@/lib/image-studio/module-cover';
@@ -13,7 +14,8 @@ function failure(error: unknown) {
   return NextResponse.json({ error: '封面保存或读取未确认，请核对本次保存结果；输入仍保留' }, { status: 503, headers });
 }
 export async function GET(request: NextRequest, { params }: { params: { moduleId: string } }) {
-  const user = await getSession();
+  return traceHttpRequest('studio.cover-editor', request.headers, async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {
     const requestId = request.nextUrl.searchParams.get('requestId');
@@ -21,21 +23,21 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
     if (intent !== null && intent !== 'shared-snapshot') throw new ModuleCoverError('封面查询类型无效');
     if (intent === 'shared-snapshot') {
       if (!requestId) throw new ModuleCoverError('请保留原保存请求编号');
-      return NextResponse.json(await readModuleCoverSnapshotRequest(user, params.moduleId, requestId), { headers });
+      return NextResponse.json(await tracePhase('data', () => readModuleCoverSnapshotRequest(user, params.moduleId, requestId)), { headers });
     }
-    if (requestId !== null) return NextResponse.json(await readModuleCoverRequest(user, params.moduleId, requestId), { headers });
+    if (requestId !== null) return NextResponse.json(await tracePhase('data', () => readModuleCoverRequest(user, params.moduleId, requestId)), { headers });
     const originOf = request.nextUrl.searchParams.get('originOf');
     if (originOf !== null) {
       // Validate the selected result and target before disclosing any frozen input.
-      const selected = await readModuleCoverEditor(user, params.moduleId, [originOf]);
+      const selected = await tracePhase('resolve', () => readModuleCoverEditor(user, params.moduleId, [originOf]));
       const source = selected.sources[0];
       if (!source) throw new ModuleCoverError('未能确认选中的封面图片', 409);
-      const origin = await studioResultOrigin(user.id, originOf);
+      const origin = await tracePhase('resolve', () => studioResultOrigin(user.id, originOf));
       let originSource: ModuleCoverSelection['originSource'] = null;
       let originState: ModuleCoverSelection['originState'] = origin.state;
       if (origin.state === 'ready') {
         try {
-          const input = await readModuleCoverEditor(user, params.moduleId, [origin.assetId]);
+          const input = await tracePhase('resolve', () => readModuleCoverEditor(user, params.moduleId, [origin.assetId]));
           originSource = input.sources[0] || null;
           if (!originSource) originState = 'unavailable';
         } catch (error) {
@@ -47,8 +49,10 @@ export async function GET(request: NextRequest, { params }: { params: { moduleId
         originAssetId: originState === 'ready' ? originSource?.assetId || null : null } satisfies ModuleCoverSelection, { headers });
     }
     const sourceIds = request.nextUrl.searchParams.get('sourceAssetIds');
-    return NextResponse.json(await readModuleCoverEditor(user, params.moduleId, sourceIds === null ? undefined : sourceIds.split(',')), { headers });
+    return NextResponse.json(await tracePhase('resolve', () => readModuleCoverEditor(user, params.moduleId, sourceIds === null ? undefined : sourceIds.split(','))), { headers });
   } catch (error) { return failure(error); }
+
+  });
 }
 export async function PUT(request: NextRequest, { params }: { params: { moduleId: string } }) {
   const user = await getSession();

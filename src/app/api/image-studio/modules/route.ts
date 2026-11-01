@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { listStudioModules, saveStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
@@ -46,7 +47,8 @@ function openNotAppliedProjection(error: unknown): { openCommandOutcome: StudioO
   return { openCommandOutcome: { status: 'not-applied', actorId: proof.actorId, presetId: proof.presetId, requestId: proof.requestId } };
 }
 export async function GET(request: NextRequest) {
-  const user = await getSession();
+  return traceHttpRequest('studio.modules', request.headers, async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   const idsValue = request.nextUrl.searchParams.get('ids');
@@ -54,18 +56,18 @@ export async function GET(request: NextRequest) {
   if (ids && (ids.length > 12 || ids.some(id => !id || id.length > 100))) return NextResponse.json({ error: '模块读取参数无效' }, { status: 400, headers: privateHeaders });
   try {
     const mode = request.nextUrl.searchParams.get('mode');
-    if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(await privateStudioEditorStatus(user,
-      request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status'), { headers: privateHeaders });
-    if (mode === 'private-editor') return NextResponse.json(await readPrivateStudioEditor(user,
-      request.nextUrl.searchParams.get('id') || ''), { headers: privateHeaders });
-    if (mode === 'private-definition') return NextResponse.json(await readStudioModulePrivateDefinition(user,
-      request.nextUrl.searchParams.get('id') || ''), { headers: privateHeaders });
-    if (mode === 'open-status') return NextResponse.json(await studioSharedOpenStatus(user,
-      request.nextUrl.searchParams.get('presetId') || '', request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
-    if (mode === 'delete-status') return NextResponse.json(await studioModuleDeletionStatus(user.id,
-      request.nextUrl.searchParams.get('id'), request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
+    if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(await tracePhase('resolve', () => privateStudioEditorStatus(user,
+      request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status')), { headers: privateHeaders });
+    if (mode === 'private-editor') return NextResponse.json(await tracePhase('resolve', () => readPrivateStudioEditor(user,
+      request.nextUrl.searchParams.get('id') || '')), { headers: privateHeaders });
+    if (mode === 'private-definition') return NextResponse.json(await tracePhase('resolve', () => readStudioModulePrivateDefinition(user,
+      request.nextUrl.searchParams.get('id') || '')), { headers: privateHeaders });
+    if (mode === 'open-status') return NextResponse.json(await tracePhase('resolve', () => studioSharedOpenStatus(user,
+      request.nextUrl.searchParams.get('presetId') || '', request.nextUrl.searchParams.get('requestId'))), { headers: privateHeaders });
+    if (mode === 'delete-status') return NextResponse.json(await tracePhase('resolve', () => studioModuleDeletionStatus(user.id,
+      request.nextUrl.searchParams.get('id'), request.nextUrl.searchParams.get('requestId'))), { headers: privateHeaders });
     if (mode) return NextResponse.json({ error: '模块读取方式无效' }, { status: 400, headers: privateHeaders });
-    return NextResponse.json(await listStudioModules(user.id, request.nextUrl.searchParams.get('cursor') || undefined, user.role === 'admin', ids, user), { headers: privateHeaders });
+    return NextResponse.json(await tracePhase('data', () => listStudioModules(user.id, request.nextUrl.searchParams.get('cursor') || undefined, user.role === 'admin', ids, user)), { headers: privateHeaders });
   }
   catch (error) {
     if (businessError(error)) return NextResponse.json({ error: (error as StudioModuleError).message, reasonCode: errorReason(error) }, { status: (error as StudioModuleError).status, headers: privateHeaders });
@@ -73,13 +75,15 @@ export async function GET(request: NextRequest) {
       code: error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^P\d{4}$/.test(error.code) ? error.code : undefined });
     return NextResponse.json({ error: '模块读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
+
+  });
 }
 async function save(request: NextRequest, createOnly: boolean) {
-  const user = await getSession();
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   try {
-    const body = await request.json();
+    const body = await tracePhase('parse', () => request.json());
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
     if (!createOnly && (body.action === 'save-private-definition' || body.action === 'save-private-draft')) {
       if (typeof body.id !== 'string' || !body.id || body.id.length > 100) return NextResponse.json({ error: '模板编号无效' }, { status: 400, headers: privateHeaders });
@@ -90,8 +94,8 @@ async function save(request: NextRequest, createOnly: boolean) {
     if (!createOnly && body.action === 'set-sharing-preference') return NextResponse.json(await chooseStudioModuleSharing(user.id, body), { headers: privateHeaders });
     if (createOnly && body.action === 'open-shared') {
       if (typeof body.presetId !== 'string' || !body.presetId || body.presetId.length > 160) return NextResponse.json({ error: '共享模板编号无效' }, { status: 400, headers: privateHeaders });
-      const workspace = await openSharedStudioModule(user, body.presetId, body.requestId, undefined, { explicitSelection: body.explicitSelection === true });
-      return NextResponse.json(await studioModuleDTOForUser(user, workspace.id), { headers: privateHeaders });
+      const workspace = await tracePhase('resolve', () => openSharedStudioModule(user, body.presetId, body.requestId, undefined, { explicitSelection: body.explicitSelection === true }));
+      return NextResponse.json(await tracePhase('module-dto', () => studioModuleDTOForUser(user, workspace.id)), { headers: privateHeaders });
     }
     return NextResponse.json(await saveStudioModule(user.id, body, createOnly, user.role === 'admin', undefined, user), { headers: privateHeaders });
   }
@@ -106,8 +110,8 @@ async function save(request: NextRequest, createOnly: boolean) {
     return NextResponse.json({ error: '保存未确认，草稿仍保留，请保留原请求编号查询', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
 }
-export const POST = (request: NextRequest) => save(request, true);
-export const PUT = (request: NextRequest) => save(request, false);
+export const POST = (request: NextRequest) => traceHttpRequest('studio.modules', request.headers, () => save(request, true));
+export const PUT = (request: NextRequest) => traceHttpRequest('studio.modules', request.headers, () => save(request, false));
 
 export async function DELETE(request: NextRequest) {
   const user = await getSession();

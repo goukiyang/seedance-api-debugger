@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -42,8 +43,9 @@ function formatAllocationSummary(allocations: Array<{
 }
 
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('admin.cost-ledger-export', request.headers, async () => {
   try {
-    await getAdminUser(request);
+    await tracePhase('auth', () => getAdminUser(request));
 
     let filters;
     try { filters = parseCostListFilters(request.nextUrl.searchParams); }
@@ -221,7 +223,7 @@ export async function GET(request: NextRequest) {
     let handedOff = false;
     try {
       checkActive();
-      const exported = await prisma.$transaction(async tx => {
+      const exported = await tracePhase('capture', () => prisma.$transaction(async tx => {
         const total = await tx.costLedger.count({ where });
         checkActive();
         dataAsOf = new Date().toISOString();
@@ -239,7 +241,7 @@ export async function GET(request: NextRequest) {
           if (ledgers.length < 500) break;
         }
         return { dataAsOf, total };
-      }, { timeout: 120000 });
+      }, { timeout: 120000 }));
       checkActive();
       const prepared = await spool.finish();
       checkActive();
@@ -294,4 +296,5 @@ export async function GET(request: NextRequest) {
     console.error('[AdminCostLedgerExport] Failed:', error);
     return NextResponse.json({ error: '导出总账失败' }, { status: 500 });
   }
+  });
 }

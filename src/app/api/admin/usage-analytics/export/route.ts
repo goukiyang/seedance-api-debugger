@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -10,11 +11,12 @@ export const runtime = 'nodejs';
 const privateHeaders = { 'Cache-Control': 'private, no-store, max-age=0', Pragma: 'no-cache', Vary: 'Cookie' };
 
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('admin.usage-export', request.headers, async () => {
   try {
-    await getAdminUser(request);
+    await tracePhase('auth', () => getAdminUser(request));
     const query = parseUsageQuery(request.nextUrl.searchParams);
     const type = request.nextUrl.searchParams.get('type') === 'summary' ? 'summary' : 'records';
-    const snapshot = await getUsageAnalyticsSnapshot(query);
+    const snapshot = await tracePhase('capture', () => getUsageAnalyticsSnapshot(query));
     const { report } = snapshot;
     return new NextResponse(streamUsageCsv(snapshot, type, request.signal), { headers: {
       ...privateHeaders,
@@ -33,4 +35,6 @@ export async function GET(request: NextRequest) {
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '使用分析导出失败，请保留条件重试；未生成不完整导出文件' }, { status: 503, headers: privateHeaders });
   }
+
+  });
 }

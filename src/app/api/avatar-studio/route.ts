@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
@@ -50,7 +51,7 @@ async function sourceTask(owner:string,id?:string) {
 
 export const dynamic = 'force-dynamic';
 async function run(action: (owner: string) => Promise<unknown>) {
-  const user = await getSession();
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限有图片生成权限的公司账号使用' }, { status: 403 });
   try { return NextResponse.json(await action(user.id), { headers: { 'Cache-Control': 'no-store' } }); }
@@ -65,7 +66,8 @@ async function run(action: (owner: string) => Promise<unknown>) {
     return NextResponse.json({ error: e instanceof StudioError ? e.message : '操作未确认，请重新读取；不要重复新建出图任务' }, { status: e instanceof StudioError ? e.status : 503 });
   }
 }
-export async function GET(req: NextRequest) { return run(async owner => {
+export async function GET(req: NextRequest) {
+  return traceHttpRequest('avatar.read', req.headers, async () => { return run(async owner => {
   const imageTaskId=req.nextUrl.searchParams.get('imageTask');
   if(imageTaskId){if(!/^[a-zA-Z0-9-]{1,100}$/.test(imageTaskId))throw new StudioError('图片记录无效');return {sourceTask:await sourceTask(owner,imageTaskId), resultRecords: await avatarResultRecords(owner, [imageTaskId])};}
   const planId = req.nextUrl.searchParams.get('plan');
@@ -78,17 +80,19 @@ export async function GET(req: NextRequest) { return run(async owner => {
     return { plan, sourceTask: await sourceTask(owner, plan.sourceTaskId), ...result,
       resultRecords: await avatarResultRecords(owner, [...result.tasks.map(task => task.id), ...(plan.sourceTaskId ? [plan.sourceTaskId] : [])]) };
   }
-  const settings = await getImageStudioSettings();
+  const settings = await tracePhase('settings', () => getImageStudioSettings());
   const kind=req.nextUrl.searchParams.get('kind')||'result';
   if(!['config','character','result'].includes(kind))throw new StudioError('记录类别无效');
-  const records=await listAvatarRecords(owner, req.nextUrl.searchParams.get('cursor') || undefined,kind,req.nextUrl.searchParams.get('deleted')==='1');
+  const records=await tracePhase('records', () => listAvatarRecords(owner, req.nextUrl.searchParams.get('cursor') || undefined,kind,req.nextUrl.searchParams.get('deleted')==='1'));
   const ids=records.records.flatMap(r=>r.taskId?[r.taskId]:[]);
-  const rows=await prisma.imageStudioTask.findMany({where:{id:{in:ids},owner_id:owner}});
-  const assets=await prisma.asset.findMany({where:{id:{in:rows.flatMap(t=>t.asset_id?[t.asset_id]:[])},owner_id:owner,status:'active',type:'image'},select:{id:true}});
+  const rows=await tracePhase('tasks', () => prisma.imageStudioTask.findMany({where:{id:{in:ids},owner_id:owner}}));
+  const assets=await tracePhase('assets', () => prisma.asset.findMany({where:{id:{in:rows.flatMap(t=>t.asset_id?[t.asset_id]:[])},owner_id:owner,status:'active',type:'image'},select:{id:true}}));
   const byId=new Set(assets.map(a=>a.id));
   const recordTasks=Object.fromEntries(rows.map(t=>[t.id,{id:t.id,ordinal:t.ordinal,status:publicImageTaskStatus(t.status),error:t.error,snapshot:historicalImageSupplier(t.snapshot_json),billing:imageBillingView(t,owner,false),asset:t.asset_id&&byId.has(t.asset_id)?{id:t.asset_id,original_url:studioAssetUrl(t.asset_id),thumbnail_url:studioAssetUrl(t.asset_id,true)}:null}]));
-  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await getPricingImageChannelOptions(), billingReadiness: await imageBillingReadinessPayload() } };
-}); }
+  return { ...records, recordTasks, settings: { model: settings.model, revision: settings.revision, prices: settings.prices, imageChannels: await tracePhase('pricing-readiness', () => getPricingImageChannelOptions()), billingReadiness: await tracePhase('billing-readiness', () => imageBillingReadinessPayload()) } };
+});
+  });
+}
 export async function POST(req: NextRequest) { return run(async owner => {
   const body = await req.json();
   if (!body || typeof body !== 'object'||Array.isArray(body)) throw new StudioError('请求无效');

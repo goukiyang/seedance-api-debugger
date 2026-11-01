@@ -1,3 +1,5 @@
+import { headers as requestHeaders } from 'next/headers';
+import { traceServerRequest, tracePhase } from '@/lib/performance/request-trace';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import AdminUsageClient from '@/components/admin-usage/AdminUsageClient';
@@ -75,17 +77,18 @@ function balanceHealth(snapshot: {
 }
 
 export default async function AdminPage() {
-  const user = await getSession();
+  return traceServerRequest('admin.page', requestHeaders(), async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) redirect('/login');
   if (user.role !== 'admin') redirect('/generate');
 
-  const [dashboard, latestProviderBalance] = await Promise.all([
+  const [dashboard, latestProviderBalance] = await tracePhase('data', () => Promise.all([
     getGenerationDashboardData({ range: 'all' }),
     prisma.providerAccountSnapshot.findFirst({
       where: { provider_name: 'seedance' },
       orderBy: { fetched_at: 'desc' },
     }),
-  ]);
+  ]));
 
   const balanceState = balanceHealth(latestProviderBalance);
   const providerBalanceSyncEnabled = Boolean(process.env.SEEDANCE_BALANCE_ENDPOINT?.trim());
@@ -125,4 +128,6 @@ export default async function AdminPage() {
       </>
     )} />
   );
+
+  });
 }

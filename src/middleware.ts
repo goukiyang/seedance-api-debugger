@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { TRACE_ID_HEADER, TRACE_START_HEADER, traceOperationForPath } from '@/lib/performance/trace-contract';
 
 const SESSION_COOKIE = 'session';
 const LEGACY_HOST_REDIRECTS: Record<string, string> = {
@@ -44,7 +45,23 @@ function legacyRedirectUrl(request: NextRequest) {
   return new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, targetOrigin);
 }
 
+type RequestTrace = { id: string; startedAt: number };
+function continueRequest(request: NextRequest, trace?: RequestTrace) {
+  if (!trace) return NextResponse.next();
+  const headers = new Headers(request.headers);
+  headers.set(TRACE_ID_HEADER, trace.id);
+  headers.set(TRACE_START_HEADER, String(trace.startedAt));
+  return NextResponse.next({ request: { headers } });
+}
+
 export async function middleware(request: NextRequest) {
+  const trace = traceOperationForPath(request.nextUrl.pathname) ? { id: crypto.randomUUID(), startedAt: Date.now() } : undefined;
+  const response = await routeRequest(request, trace);
+  if (trace) response.headers.set(TRACE_ID_HEADER, trace.id);
+  return response;
+}
+
+async function routeRequest(request: NextRequest, trace?: RequestTrace) {
   const redirectUrl = legacyRedirectUrl(request);
   if (redirectUrl) return NextResponse.redirect(redirectUrl, 308);
 
@@ -71,15 +88,15 @@ export async function middleware(request: NextRequest) {
     if (accessResponse.status !== 204) {
       return NextResponse.json({ error: '图片不存在或无权访问' }, { status: accessResponse.status === 404 ? 404 : 503 });
     }
-    const response = NextResponse.next();
+    const response = continueRequest(request, trace);
     response.headers.set('Cache-Control', 'private, no-store');
     return response;
   }
   const needsAuth = PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-  if (!needsAuth) return NextResponse.next();
+  if (!needsAuth) return continueRequest(request, trace);
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  if (token) return NextResponse.next();
+  if (token) return continueRequest(request, trace);
 
   const loginUrl = new URL('/login', forwardedOrigin(request));
   loginUrl.searchParams.set('next', `${pathname}${request.nextUrl.search}`);

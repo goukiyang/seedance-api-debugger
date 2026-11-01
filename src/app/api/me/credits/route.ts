@@ -1,3 +1,4 @@
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
@@ -7,27 +8,28 @@ import { getCreditSummary } from '@/lib/credits/policy';
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof getCreditSummary>>>>();
 
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('credits.summary', request.headers, async () => {
   let user: { id: string } | null = null;
   try {
-    user = await getSessionUser(request);
+    user = await tracePhase('auth', () => getSessionUser(request));
   } catch {
     return errorJson('未登录', 401);
   }
 
-  const dbUser = await prisma.user.findUnique({
+  const dbUser = await tracePhase('credits-user', () => prisma.user.findUnique({
     where: { id: user.id },
     select: { id: true, role: true, account_type: true, user_profile: true, status: true },
-  });
+  }));
   if (!dbUser) return errorJson('用户不存在', 404);
 
   let pending = inflight.get(dbUser.id);
   if (!pending) {
-    pending = retrySqliteBusy(() => prisma.$transaction((tx) => getCreditSummary(tx, dbUser)));
+    pending = retrySqliteBusy(() => prisma.$transaction((tx) => tracePhase('credits-summary', () => getCreditSummary(tx, dbUser))));
     inflight.set(dbUser.id, pending);
     const settled = pending;
     settled.finally(() => { if (inflight.get(dbUser.id) === settled) inflight.delete(dbUser.id); }).catch(() => {});
   }
-  const summary = await pending;
+  const summary = await tracePhase('data', () => pending!);
   const { account } = summary;
 
   return NextResponse.json({
@@ -49,5 +51,7 @@ export async function GET(request: NextRequest) {
       balance: account.balance,
       frozen: account.frozen_credits,
     },
+  });
+
   });
 }

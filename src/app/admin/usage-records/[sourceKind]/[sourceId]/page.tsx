@@ -1,3 +1,5 @@
+import { headers as requestHeaders } from 'next/headers';
+import { traceServerRequest, tracePhase } from '@/lib/performance/request-trace';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
@@ -18,13 +20,14 @@ export default async function UsageRecordPage({ params, searchParams }: {
   params: { sourceKind: string; sourceId: string };
   searchParams: { return_to?: string; child_page?: string };
 }) {
-  const user = await getSession();
+  return traceServerRequest('admin.usage-record-page', requestHeaders(), async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) redirect('/login?next=' + encodeURIComponent(usageRecordHref(params.sourceKind, params.sourceId)));
   if (user.role !== 'admin') redirect('/');
   if (!/^[A-Za-z0-9:_-]{1,180}$/.test(params.sourceId)) notFound();
   try { parseUsageQuery(new URLSearchParams({ range: 'all', source_kind: params.sourceKind })); } catch { notFound(); }
   const query = parseUsageQuery(new URLSearchParams({ range: 'all' }));
-  const snapshot = await getUsageRecordPage(params.sourceKind as UsageSourceKind, params.sourceId, Number(searchParams.child_page || 1));
+  const snapshot = await tracePhase('capture', () => getUsageRecordPage(params.sourceKind as UsageSourceKind, params.sourceId, Number(searchParams.child_page || 1)));
   if (!snapshot) notFound();
   const { record, parents, children, total, page } = snapshot;
   const returnTo = sanitizeReturnTo(typeof searchParams.return_to === 'string' ? searchParams.return_to : '/admin');
@@ -68,4 +71,6 @@ export default async function UsageRecordPage({ params, searchParams }: {
       {total > 30 && <nav className="au-actions" aria-label="关联记录分页">{page > 1 && <Link className="au-link" href={childHref(page - 1)}>上一页</Link>}<span>{page} / {Math.ceil(total / 30)}</span>{page * 30 < total && <Link className="au-link" href={childHref(page + 1)}>下一页</Link>}</nav>}
     </section>
   </main>;
+
+  });
 }

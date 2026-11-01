@@ -1,3 +1,5 @@
+import { headers as requestHeaders } from 'next/headers';
+import { traceServerRequest, tracePhase } from '@/lib/performance/request-trace';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
@@ -11,7 +13,8 @@ import '../admin-usage.css';
 export const dynamic = 'force-dynamic';
 
 export default async function UnlinkedUsageCostsPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
-  const user = await getSession();
+  return traceServerRequest('admin.usage-costs', requestHeaders(), async () => {
+  const user = await tracePhase('auth', () => getSession());
   if (!user) redirect('/login?next=%2Fadmin');
   if (user.role !== 'admin') redirect('/');
   const params = new URLSearchParams();
@@ -24,7 +27,7 @@ export default async function UnlinkedUsageCostsPage({ searchParams }: { searchP
     if (!(error instanceof UsageQueryError)) throw error;
     return <main className="admin-usage-page"><h1>未关联费用</h1><p role="status">{error.message}</p><Link className="au-link" href="/admin">返回使用分析</Link></main>;
   }
-  const snapshot = await getUsageUnlinkedPage(query);
+  const snapshot = await tracePhase('capture', () => getUsageUnlinkedPage(query));
   const { rows, total, pages, page } = snapshot;
   const current = usageQuerySearchParams(query, true);
   const href = (next: number) => { const target = new URLSearchParams(current); target.set('page', String(next)); return `/admin/usage-costs?${target}`; };
@@ -37,4 +40,6 @@ export default async function UnlinkedUsageCostsPage({ searchParams }: { searchP
       {!rows.length && <tr><td colSpan={6}>当前条件没有未关联费用；未接入不等于没有费用。</td></tr>}
     </tbody></table></div><nav className="au-actions" aria-label="未关联费用分页">{page > 1 && <Link className="au-link" href={href(page - 1)}>上一页</Link>}<span>{page} / {pages}</span>{page < pages && <Link className="au-link" href={href(page + 1)}>下一页</Link>}</nav></section>
   </main>;
+
+  });
 }

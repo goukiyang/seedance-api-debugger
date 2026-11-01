@@ -1,9 +1,11 @@
 import type { Prisma } from '@prisma/client';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { observeOperation } from '@/lib/performance/server-operations';
+import { traceMetadata } from '@/lib/performance/request-trace';
 
 type ReadQueue = { tail: Promise<void>; pending: number; active?: {
   operation: string; requestedAt: number; startedAt: number; enteredAt: number | null;
+  requestId: string | null; txId: string | null;
 } | null };
 const processState = globalThis as typeof globalThis & { studioSharedReadQueue?: ReadQueue };
 const queue = processState.studioSharedReadQueue ??= { tail: Promise.resolve(), pending: 0 };
@@ -13,7 +15,8 @@ const queue = processState.studioSharedReadQueue ??= { tail: Promise.resolve(), 
 export function sharedStudioReadDiagnostics() {
   const now = Date.now(), active = queue.active;
   return { scope: 'process-shared-studio-reads', pending: queue.pending,
-    active: active ? { operation: active.operation, phase: active.enteredAt === null ? 'transaction_wait' : 'transaction_body',
+    active: active ? { operation: active.operation, requestId: active.requestId, txId: active.txId,
+      phase: active.enteredAt === null ? 'transaction_wait' : 'transaction_body',
       queuedMs: active.startedAt - active.requestedAt, elapsedMs: now - active.startedAt,
       heldMs: active.enteredAt === null ? null : now - active.enteredAt } : null };
 }
@@ -37,12 +40,16 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
     if (startedAt - requestedAt > 5000) throw busyError();
     let attempt = 0;
     return retrySqliteBusy(async () => {
-      const trace = { operation, requestedAt, startedAt: Date.now(), enteredAt: null as number | null };
+      const trace = { operation, requestedAt, startedAt: Date.now(), enteredAt: null as number | null,
+        requestId: traceMetadata().requestId, txId: null as string | null };
       const observed = observeOperation(operation === 'gallery' ? 'studio.gallery' : 'studio.shared-read');
       queue.active = trace;
       let code: string | null = null;
       try {
-        return await prisma.$transaction(tx => { trace.enteredAt = Date.now(); return read(tx); }, { timeout: 15000 });
+        return await prisma.$transaction(tx => {
+          trace.enteredAt = Date.now(); trace.txId = traceMetadata().txId;
+          return read(tx);
+        }, { timeout: 15000 });
       } catch (error) {
         const value = (error as { code?: unknown } | null)?.code;
         code = typeof value === 'string' && /^P\d{4}$/.test(value) ? value : 'READ_FAILED';
@@ -51,10 +58,14 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
         observed({ queueMs: startedAt - requestedAt,
           transactionWaitMs: (trace.enteredAt ?? Date.now()) - trace.startedAt,
           bodyMs: trace.enteredAt === null ? 0 : Date.now() - trace.enteredAt });
-        if (code || Date.now() - requestedAt >= 500) console.info('[StudioSharedRead]', JSON.stringify({
-          pid: process.pid, role: process.env.PROCESS_ROLE || 'web', at: Date.now(), attempt: ++attempt,
-          operation, elapsedMs: Date.now() - requestedAt, ...sharedStudioReadDiagnostics(), code,
-        }));
+        try {
+          const metadata = traceMetadata();
+          if (code || Date.now() - requestedAt >= 500) console.info('[StudioSharedRead]', JSON.stringify({
+            ...metadata, utc: metadata.at,
+            pid: process.pid, role: process.env.PROCESS_ROLE || 'web', at: Date.now(), attempt: ++attempt,
+            operation, elapsedMs: Date.now() - requestedAt, ...sharedStudioReadDiagnostics(), code,
+          }));
+        } catch { /* Diagnostics cannot change a snapshot or prevent queue release. */ }
         if (queue.active === trace) queue.active = null;
       }
     });

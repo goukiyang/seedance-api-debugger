@@ -1,3 +1,4 @@
+import { tracePhase } from '@/lib/performance/request-trace';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -233,17 +234,17 @@ async function inspectSources(actor: ImageStudioIdentity, state: TargetState, id
   } finally { activeJobs -= 1; }
 }
 export async function readModuleCoverEditor(user: ImageStudioIdentity, moduleId: string, requestedIds?: string[]): Promise<ModuleCoverEditorState> {
-  const actor = await assertStudioActor(user.id);
-  const state = await targetForModule(actor, moduleId, prisma);
-  const stored = await readRecord(state.target, prisma);
-  const fixedCover = stored ? await recordDTO(actor, state, stored.record, prisma) : null;
+  const actor = await tracePhase('auth', () => assertStudioActor(user.id));
+  const state = await tracePhase('resolve', () => targetForModule(actor, moduleId, prisma));
+  const stored = await tracePhase('data', () => readRecord(state.target, prisma));
+  const fixedCover = stored ? await tracePhase('resolve', () => recordDTO(actor, state, stored.record, prisma)) : null;
   if (requestedIds && !state.canManage) throw new ModuleCoverError('仅模板管理者可以选图', 403);
   let sources: ModuleCoverSourceDTO[] = [];
   let sourceError: string | undefined;
   if (state.canManage) {
     const ids = requestedIds ?? stored?.record.recipe.sources.map(source => source.assetId);
     if (ids?.length) {
-      try { sources = await inspectSources(actor, state, ids, prisma); }
+      try { sources = await tracePhase('file-metadata', () => inspectSources(actor, state, ids, prisma)); }
       catch (error) { if (requestedIds) throw error; sourceError = '原图已不可用，可重新选择封面图片'; }
     }
     if (!requestedIds && stored && sources.some((source, index) => source.version !== stored.record.recipe.sources[index]?.version)) sourceError = '原图已变化，请核对取景后再保存';
@@ -678,23 +679,23 @@ export async function saveModuleCover(user: ImageStudioIdentity, moduleId: strin
   }
 }
 export async function readModuleCoverImage(user: ImageStudioIdentity, target: ModuleCoverTarget, revision: number, size: 640 | 1280) {
-  const actor = await assertStudioActor(user.id);
-  const state = await targetForImage(actor, target, prisma);
-  const stored = await readRecord(target, prisma);
+  const actor = await tracePhase('auth', () => assertStudioActor(user.id));
+  const state = await tracePhase('resolve', () => targetForImage(actor, target, prisma));
+  const stored = await tracePhase('data', () => readRecord(target, prisma));
   if (!stored || stored.record.revision !== revision) throw new ModuleCoverError('封面已更新，请重新读取', 404);
-  if (!(await recordDTO(actor, state, stored.record, prisma)).available) throw new ModuleCoverError('封面已不可用', 403);
-  const directory = await coverDirectory();
-  const file = await fs.realpath(path.join(directory, size === 640 ? stored.record.files.thumbnail : stored.record.files.image));
+  if (!(await tracePhase('resolve', () => recordDTO(actor, state, stored.record, prisma))).available) throw new ModuleCoverError('封面已不可用', 403);
+  const directory = await tracePhase('file-stat', () => coverDirectory());
+  const file = await tracePhase('file-stat', () => fs.realpath(path.join(directory, size === 640 ? stored.record.files.thumbnail : stored.record.files.image)));
   if (!file.startsWith(`${directory}${path.sep}`)) throw new ModuleCoverError('封面文件不可用', 404);
-  const info = await fs.stat(file);
+  const info = await tracePhase('file-stat', () => fs.stat(file));
   if (!info.isFile() || info.size <= 0 || info.size > 4 * 1024 * 1024) throw new ModuleCoverError('封面文件不可用', 503);
-  const bytes = await fs.readFile(file);
+  const bytes = await tracePhase('file-read', () => fs.readFile(file));
   if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw new ModuleCoverError('封面文件不可用', 503);
   const output = coverOutput(stored.record.recipe);
   const width = size === 640 ? output.thumbnailWidth : output.width;
   const height = size === 640 ? output.thumbnailHeight : output.height;
   let metadata;
-  try { metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata(); }
+  try { metadata = await tracePhase('file-metadata', () => sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata()); }
   catch { throw new ModuleCoverError('封面文件无法读取，请管理者重新设置', 503); }
   if (metadata.format !== 'webp' || metadata.width !== width || metadata.height !== height || (metadata.pages ?? 1) > 1) {
     throw new ModuleCoverError('封面文件尺寸与保存记录不一致，请管理者重新设置', 503);
