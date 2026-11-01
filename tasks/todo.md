@@ -1,5 +1,24 @@
 # V1.2 剩余模块落地 Todo
 
+<!-- SAVE500-SUNBURST-BRIDGE-20261031 -->
+## SAVE500 / SUNBURST / BRIDGE 接续落地（2026-10-31）
+
+已部署 **v0.123.0** / `74d55961a91369996257043c5262a9f3bd5be602` 已聚焦提交推送；BUILD `eR2ihrtuj-7sSeQDLx8pW`，2026-11-01T01:57:43Z公网收口，待用户手动验收。只集成Bridge report最小切片，早期远程配置/panel令牌与frame权限不并入。
+
+- [x] **SAVE500**：只读原两时间窗及修后日志，v0.121.6后未观察到settings PUT；现有13项真实route/AES/SQLite工程与20个对应文件仍匹配。无新增可证失败，不虚构补丁或历史唯一根因；正常保存仍待用户手验。
+- [x] **SUNBURST**：原medium通道两次有界新诊断均实际发送2880²并完整返回2048²，A/B仅差ratio；共0.10 USD供应商usage，不放大、不换更贵通道、不重发四旧任务。供应商内部原因仍未知。
+- [x] 该独占medium通道通过正常preview/save/CAS同事务形成新不可变修订`f4a48550-4e17-409c-8b3e-a0e42ea05489`、开放1K/2K；仅重绑原Sunburst价规则，原0.05 CNY站内基价/10点每元不变。真实1K/2K各0.5点，新4K因capability拒绝且不提供收费报价；旧ae54/accepted/unknown、四图原件/冻结/退款、其它通道与费用不变。
+- [x] **BRIDGE**：新增`/api/bridge/client-reports`，复用OperationLog；服务端仅保留兼容producer的技术信息，自由正文摘要、URL去query/hash、DOM白名单、UTF8完整JSON上限。实际service/route隔离证明15个隐私标记未落库、身份401/403/200、去重/限频/kind指纹前缀；无生产报告试写。
+- [x] main完整Next内置types/lint通过；固定main+旧88 guard，11 writer自然排空、当前f4/2757一致SQLite备份、6启动门通过，7服务同源/4timer恢复，7静态资源公网200且SHA一致，report匿名GET/POST均401。切换01:57:17Z至本机健康01:57:41.744Z，约25秒；无强杀、无schema迁移。
+- [ ] 用户手验保存、插件真实错误报告及当前4K选择/素材保留；线上admin GET与普通GET未使用伪造身份测试。
+
+首候选2989仅因Bridge局部变量命名违反Next lint被拒；已纯rename为moduleName并证明行为等价，未降低检查。供应商usage自报0.05 USD/次与站内原0.05 CNY基价为独立来源，费用合同不变，不据此声称供应商成本已按人民币核实。
+
+部署原证：`docs/materials/2026-10-31-save500-sunburst/implementation/release/attempt02/deployment-result.json`；公网`paidGenerationTests=0`仅指部署检查，整批确有前述2次诊断共0.10 USD。
+
+正式根私有证据：`docs/materials/2026-10-31-save500-sunburst/implementation/`。原输入工单在`/Volumes/Data/Projects/video-api-debugger-worktrees/bridge-config-20261031/tasks/todo/bridge-client-reports-release-20261101.md`；未修改该外worktree源码。回退复用`88f57e096c02a649b60b9788d469e5a0dadde68c` / v0.122.0+safe-retry-guard.1原产物与原时间，仅回程序，不回配置/DB/账本/媒体；report退404沿插件原暂停恢复合同。新程序分辨率拒绝明确“暂不提供”，不宣称永久不支持或已修出4K。
+<!-- /SAVE500-SUNBURST-BRIDGE-20261031 -->
+
 ## FS-UX01 / FS-EXT01 飞书发送体验与附件后缀前置（2026-10-31）
 
 两个问题必要前置已完成，**待实施，未修改业务代码或部署**。[正式前置工单v1.0.0/R01](todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)已核v0.121.5源码/运行基线：点击自动展开管理及旧通知、错误主题变量白底、上传两个名称硬编码“原图”导致无后缀。现有transport隔离复现与官方SDK字段有证，原两图已归档。

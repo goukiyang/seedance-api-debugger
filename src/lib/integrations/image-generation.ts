@@ -1621,7 +1621,8 @@ export function validateImageGenerationChannel(
   for (const [value, allowed, label] of tests) {
     if (allowed === null && allowsUnconfirmed) continue;
     if (value !== undefined && (!allowed || !allowed.includes(value))) {
-      return { ok: false, code: 'image_channel_capability_mismatch', error: `当前供应商未确认支持所选${label}` };
+      return { ok: false, code: 'image_channel_capability_mismatch', error: label === '分辨率'
+        ? '当前通道暂不提供所选分辨率；选择和素材已保留，请手动调整。' : `当前供应商未确认支持所选${label}` };
     }
   }
   if (args.ratio !== undefined && (legacyRatioContract || !isStandardStudioRatio(args.ratio))) {

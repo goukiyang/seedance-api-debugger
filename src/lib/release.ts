@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '安全生成重试机制', outline: [
-  '生成尝试由后台保存，可停止后续重试',
-  '原提交和费用未知时保留原号核对，不重复生成',
-  '供应商规则核实后按具体合同启用',
+const notice = { title: '插件错误上报与图片规格保护', outline: [
+  '生产桥插件错误可自动上报，报告仅保留排查所需技术信息',
+  '中画质4K实测仅返回2048，暂停售新4K；选择和原图保留',
+  '其它规格和最高画质保留原通道、点数与历史任务',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
