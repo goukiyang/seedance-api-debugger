@@ -2531,3 +2531,34 @@ model GenerationTaskSnapshot {
 
   workspace Workspace? @relation(fields: [workspace_id], references: [id])
 }
+
+// SD2 生产桥：GPT 队列预设（插件「组合」）。不关联对话，按账号归属；shared=true 进共享池。
+// items_json = [{ text, images: [{ name, type, url }] }]，图片只存 SD2 素材地址（不存图片本身）。
+model BridgeQueuePreset {
+  id          String   @id @default(cuid())
+  owner_id    String
+  client_id   String?  // 插件本机组合 id：首次上传去重用
+  name        String
+  items_json  String
+  shared      Boolean  @default(false)
+  team_id     String?  // 预留：团队范围（目前共享池全站可见）
+  like_count  Int      @default(0)
+  use_count   Int      @default(0)
+  copied_from String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@unique([owner_id, client_id])
+  @@index([owner_id, updated_at])
+  @@index([shared, updated_at])
+}
+
+model BridgeQueuePresetLike {
+  id         String   @id @default(cuid())
+  preset_id  String
+  user_id    String
+  created_at DateTime @default(now())
+
+  @@unique([preset_id, user_id])
+  @@index([user_id])
+}
