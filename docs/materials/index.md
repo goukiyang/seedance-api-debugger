@@ -1,5 +1,11 @@
 # 项目资料索引
 
+<!-- SAVE500-SUNBURST-BRIDGE-20261031 -->
+## SAVE500 / SUNBURST / BRIDGE 接续交付（2026-10-31）
+
+已部署 **v0.123.0** / `74d55961a91369996257043c5262a9f3bd5be602` / BUILD `eR2ihrtuj-7sSeQDLx8pW`，2026-11-01T01:57:43Z收口，待用户手验。范围：保存500原窗/修后日志核查（历史唯一根因未证，无新可证失败）；原medium两次2880请求均返2048，0.10 USD独立诊断成本；正常能力与定价CAS暂停售该通道新4K，1K/2K仍0.5点，不冒恢复4K、不改原四退款；新增Bridge report并落实服务端脱敏，早期config/panel未并入。[发布工单](../../tasks/todo/bridge-client-reports-release-20261101.md)与[交接](../handoff-bridge-client-reports-2026-11-01.md)已接续。完整请求/原图/配置原receipt、工程、失败与发布原证保正式根私有`docs/materials/2026-10-31-save500-sunburst/implementation/`，总回执为`release/attempt02/deployment-result.json`；不公开凭据或原件。Guard复用88/v0.122原构建，仅回程序不回配置、账本、媒体或DB。
+<!-- /SAVE500-SUNBURST-BRIDGE-20261031 -->
+
 ## FS-UX01 / FS-EXT01 两项飞书前置（2026-10-31）
 
 来源：用户两张原始反馈截图与“两个问题，把前置处理完”。[工单](../../tasks/todo/2026-10-31-image-feishu-send-ux-and-filename-preflight.md)已完成根因、交互、真实格式/文件名合同、历史兼容、修改地图与相容回退设计，待实施。截图与隔离元数据复现/官方SDK引用保正式根`docs/materials/2026-10-31-image-feishu-send-ux-preflight/`，两原PNG可读且复制字节一致，不公开附件。不含业务代码/生产修改、真实外发或收费测试；设计完成不冒手验达标。
