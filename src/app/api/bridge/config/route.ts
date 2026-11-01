@@ -42,8 +42,10 @@ export async function POST(request: NextRequest) {
     // 防跨站提交：带 Origin 时必须是本站
     const origin = request.headers.get('origin');
     const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    if (origin && host && new URL(origin).host !== host.split(',')[0].trim()) {
-      return NextResponse.json({ error: '来源不允许', ok: false }, { status: 403 });
+    if (origin && host) {
+      let same = false;
+      try { same = new URL(origin).host === host.split(',')[0].trim(); } catch { same = false; }
+      if (!same) return NextResponse.json({ error: '来源不允许', ok: false }, { status: 403 });
     }
     let body: Record<string, unknown>;
     try {
