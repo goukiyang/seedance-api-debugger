@@ -447,4 +447,4 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 ### BR-CONFIG01 插件工作台发布（2026-11-01）
 
-[原工单](../../tasks/todo/2026-11-01-bridge-config-release.md) · [私有发布材料](2026-11-01-bridge-config-release/attempt01/)；v0.125.3候选准备中，真实插件操作仍用户手验。
+[原工单](../../tasks/todo/2026-11-01-bridge-config-release.md) · [私有发布材料](2026-11-01-bridge-config-release/attempt01/)；已部署v0.125.3/401da0c02，BUILD fWn7Rq1Pm_r34X5gwRe7a，完整构建/六项HTTP/运行保护通过；真实插件操作仍用户手验。

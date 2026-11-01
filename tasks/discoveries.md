@@ -13,7 +13,6 @@
 | 编号 | 类别 / 优先级 | 事实、潜在影响与证据边界 | 来源与证据 | 状态 / 下一步 |
 | --- | --- | --- | --- | --- |
 | D-20261101-01 | 待核线索 / P2 | 生产构建已确认共享 Prisma 类导入桥；实际客户端实例数、跨 Next 路由 bundle 的展示缓存是否共用仍未知。可能重复建连接或重算菜单，不能认定已发生。 | [窄拓扑证据](../docs/materials/2026-11-01-admin-usage-read-snapshot/built-cache-topology.md)、[初始化](/Volumes/Data/Projects/video-api-debugger-worktrees/admin-usage-read-snapshot-reader-20261101/src/lib/prisma.ts) | 待核；需要时映射实际初始化与缓存身份，不先改 singleton / TTL，不加生产探针。 |
-
 | D-20261101-05 | 待核线索 / P3 | 安装包入口先只排除空包，再readUInt32LE(0)读ZIP头；1–3字节非法包可能抛异常并由管理员API返回500，未走预期400。仅非法管理员输入错误分类，不涉及签名绕过；未在生产提交测试。 | [包校验源码](/Volumes/Data/Projects/video-api-debugger-worktrees/admin-usage-read-snapshot-reader-20261101/src/lib/bridge/ext-package.ts:44)、[本批原单](todo/2026-11-01-bridge-config-release.md) | 待核；夜间以隔离输入确认，另行局部修正，不扩大本次指定合入。 |
 
 ## 已确认问题

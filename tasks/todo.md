@@ -989,4 +989,4 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 ### BR-CONFIG01 插件远程配置 / 浮窗工作台 / 自更新安装包（2026-11-01）
 
-- 用户明确并入发布；三提交已合入，候选401da0c02/v0.125.3已推送，原未提交studio改动保持。无DDL；完整构建与指定六项HTTP检查接续，尚未部署。[原工单](todo/2026-11-01-bridge-config-release.md)与[发布证据](../docs/materials/2026-11-01-bridge-config-release/attempt01/)为入口，插件真实功能待用户手验。
+- 用户明确并入发布；三提交已合入，401da0c02/v0.125.3已推送并部署，原未提交studio改动保持。无DDL；完整Linux类型/lint/Next及内置检查通过，指定六项HTTP检查全部通过，BUILD fWn7Rq1Pm_r34X5gwRe7a；7服务/4timer正常，11服务自然排空、6启动门/一致DB及原价格保护有证；无DDL/业务数据恢复，88a73464完整产物仅程序回退。[原工单](todo/2026-11-01-bridge-config-release.md)与[发布证据](../docs/materials/2026-11-01-bridge-config-release/attempt01/)为入口，已部署，插件实际操作待用户手动验收。P3短非法ZIP错误分类线索D-20261101-05已入统一发现清单，未扩改。
