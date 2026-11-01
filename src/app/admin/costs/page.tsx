@@ -475,9 +475,9 @@ export default async function AdminCostsPage({
             <Link className="btn btn-secondary" href="/admin/points">
               点数账本
             </Link>
-            <Link className="btn btn-secondary" href={`/api/admin/costs/export?${costListSearch(filters)}`}>
+            <a className="btn btn-secondary" href={`/api/admin/costs/export?${costListSearch(filters)}`}>
               导出当前筛选总账 CSV
-            </Link>
+            </a>
           </>
         )}
       />

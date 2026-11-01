@@ -1036,7 +1036,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     if (!isAdmin || !activePageRef.current) { setOfficialChargeStatus('unavailable'); return; }
     setOfficialChargeStatus('loading');
     try {
-      const res = await fetch('/api/admin/costs/export', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/costs/export?${new URLSearchParams({ keyword: taskId })}`, { cache: 'no-store' });
       if (!res.ok) {
         setOfficialChargeStatus((current) => current === 'ready' ? current : 'unavailable');
         return;

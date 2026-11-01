@@ -5,6 +5,7 @@ import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
 import { costLedgerListWhere, parseCostListFilters } from '@/app/admin/costs/list-filters';
+import { usageRowSpool } from '@/lib/usage/row-spool';
 
 export const dynamic = 'force-dynamic';
 
@@ -193,56 +194,99 @@ export async function GET(request: NextRequest) {
       dataAsOf,
     ];
     const encoder = new TextEncoder();
+    const spool = await usageRowSpool<string>(() => 0);
     let cancelled = false;
-    let resume: (() => void) | null = null;
-    let resolveSnapshot!: (value: { dataAsOf: string; total: number }) => void;
-    let rejectSnapshot!: (error: unknown) => void;
-    const snapshot = new Promise<{ dataAsOf: string; total: number }>((resolve, reject) => { resolveSnapshot = resolve; rejectSnapshot = reject; });
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        void prisma.$transaction(async tx => {
-          const total = await tx.costLedger.count({ where });
-          dataAsOf = new Date().toISOString();
-          resolveSnapshot({ dataAsOf, total });
-          const write = async (text: string) => {
-            while (!cancelled && controller.desiredSize !== null && controller.desiredSize <= 0) {
-              await new Promise<void>(resolve => { resume = resolve; });
+    let iterator: AsyncGenerator<string> | null = null;
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    let cleanup: Promise<void> | null = null;
+    const dispose = () => {
+      request.signal.removeEventListener('abort', onAbort);
+      if (!cleanup) cleanup = (async () => {
+        try { await iterator?.return(undefined); }
+        finally { await spool.dispose(); }
+      })();
+      return cleanup;
+    };
+    const checkActive = () => {
+      if (cancelled || request.signal.aborted) throw new Error('Cost ledger export interrupted');
+    };
+    const onAbort = () => {
+      cancelled = true;
+      if (streamController) {
+        streamController.error(new Error('Cost ledger export interrupted'));
+        void dispose().catch(error => console.error('[AdminCostLedgerExport] Cleanup failed:', error));
+      }
+    };
+    request.signal.addEventListener('abort', onAbort, { once: true });
+    let handedOff = false;
+    try {
+      checkActive();
+      const exported = await prisma.$transaction(async tx => {
+        const total = await tx.costLedger.count({ where });
+        checkActive();
+        dataAsOf = new Date().toISOString();
+        let cursor: string | undefined;
+        for (;;) {
+          checkActive();
+          const ledgers = await tx.costLedger.findMany({ where, select,
+            orderBy: [{ occurred_at: 'desc' }, { id: 'desc' }], take: 500,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+          checkActive();
+          if (!ledgers.length) break;
+          await spool.add(ledgers.map(ledger => row(ledger).map(csvCell).join(',')));
+          checkActive();
+          cursor = ledgers[ledgers.length - 1].id;
+          if (ledgers.length < 500) break;
+        }
+        return { dataAsOf, total };
+      }, { timeout: 120000 });
+      checkActive();
+      const prepared = await spool.finish();
+      checkActive();
+      iterator = prepared.values();
+      let sentHeader = false;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) { streamController = controller; },
+        async pull(controller) {
+          try {
+            checkActive();
+            if (!sentHeader) {
+              sentHeader = true;
+              controller.enqueue(encoder.encode(`\uFEFF${headers.map(csvCell).join(',')}\n`));
+              return;
             }
-            if (cancelled || request.signal.aborted) throw new Error('Cost ledger export interrupted');
-            controller.enqueue(encoder.encode(text));
-          };
-          await write(`\uFEFF${headers.map(csvCell).join(',')}\n`);
-          let cursor: string | undefined;
-          for (;;) {
-            if (cancelled || request.signal.aborted) throw new Error('Cost ledger export interrupted');
-            const ledgers = await tx.costLedger.findMany({ where, select,
-              orderBy: [{ occurred_at: 'desc' }, { id: 'desc' }], take: 500,
-              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
-            if (!ledgers.length) break;
-            await write(ledgers.map(ledger => row(ledger).map(csvCell).join(',')).join('\n') + '\n');
-            cursor = ledgers[ledgers.length - 1].id;
-            if (ledgers.length < 500) break;
+            const batch: string[] = [];
+            let ended = false;
+            for (let index = 0; index < 500; index++) {
+              const next = await iterator!.next();
+              checkActive();
+              if (next.done) { ended = true; break; }
+              batch.push(next.value);
+            }
+            if (batch.length) controller.enqueue(encoder.encode(batch.join('\n') + '\n'));
+            if (ended) { await dispose(); controller.close(); }
+          } catch (error) {
+            try { await dispose(); }
+            finally { controller.error(error); }
           }
-        }, { timeout: 120000 }).then(() => { if (!cancelled) controller.close(); }).catch(error => {
-          rejectSnapshot(error);
-          const wasCancelled = cancelled; cancelled = true; const next = resume; resume = null; next?.();
-          if (!wasCancelled) controller.error(error);
-        });
-      },
-      pull() { const next = resume; resume = null; next?.(); },
-      cancel() { cancelled = true; const next = resume; resume = null; next?.(); },
-    });
-    const exported = await snapshot;
-    const today = new Date().toISOString().slice(0, 10);
-    return new NextResponse(stream, {
-      headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="cost-ledger-${today}.csv"`,
-        'Cache-Control': 'private, no-store',
-        'X-Data-As-Of': exported.dataAsOf,
-        'X-Export-Total': String(exported.total),
-      },
-    });
+        },
+        cancel() { cancelled = true; return dispose(); },
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      const response = new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="cost-ledger-${today}.csv"`,
+          'Cache-Control': 'private, no-store',
+          'X-Data-As-Of': exported.dataAsOf,
+          'X-Export-Total': String(exported.total),
+        },
+      });
+      handedOff = true;
+      return response;
+    } finally {
+      if (!handedOff) await dispose();
+    }
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

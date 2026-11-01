@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '页面读取与使用分析提速', outline: [
-  '使用分析减少重复查询，保留原费用与统计口径',
-  '超分操作展开后再读取费用，沿用原任务保存位置',
+const notice = { title: '账务导出与任务读取改进', outline: [
+  '账务文件准备完成后再下载，避免慢下载影响其他操作',
+  '任务详情按当前任务读取扣费记录，保留原账务口径',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
