@@ -968,3 +968,16 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - v0.124.3/e7506709已提交推送并保护部署，含449961ae报表/超分按需读取、23757988 CSV事务与任务筛选；完整Linux类型/lint/Next及数据保护有证。已部署，待用户手动验收。
 - [完整统计与限定Ego观察](../docs/materials/2026-10-31-navigation-performance/index.html)、[根因与未核项](../docs/materials/2026-10-31-navigation-performance/root-cause/findings.md)：原66类基线保留，新增16条定向记录；不冒全站复测或并发容量通过，640已显示但整体仍慢。
 - 纯读报表仍占写锁，沿ARCH03 A03/A05安排独立一致只读快照工程，原条件包不冒完成。额外余额GET一次及影响未知的更正单列原证，不声明浏览器全流程零写。完整资料本机私有，公开仅本摘要与入口。
+
+
+#### NAV-REQ01 / NAV-RO01 / BR-QUEUE01 接续（2026-11-01）
+
+- 请求关联已随v0.125.0/341c3b1c上线：目标API、SSR、中间件与事务分段共用请求ID及固定操作标签；事务入口包含连接池、锁和调度，不把进程窗口ELU当请求独占CPU。
+- 管理报表只读一致快照已随v0.125.1/59fb8760保护部署（BUILD `ovbcd8r72pb8RAiprIbYA`），保原权限、金额、排序、asOf及取消清理；结束快照后再归并/发送。实际历史副本的五组完整结果、指纹与完整CSV等价；独立写入可在只读快照未关闭时COMMIT。该工程不证明线上页面提速、同一Web进程容量或人数上限。完整构建、六启动检查、七服务/四timer、公网资源及原价格保护有证，本阶段无DDL。
+- 用户追加的42c64cc0deb4已合入发布线；仅新增BridgeQueuePreset、BridgeQueuePresetLike与5个显式索引，原表结构和行指纹保持。已查版本、匿名组合GET 401、真实登录初始列表为空；唯一测试组合只创建一次、按原ID删除一次，API与只读数据库确认两表无测试残留。原接口保护与静态资源保持。程序恢复保留两新表及用户组合，不自动删表或恢复业务数据。
+- [完整统计](../docs/materials/2026-10-31-navigation-performance/index.html)继续保留原66类路由、此前16条定向观察，并追加请求关联及隔离竞争记录；[本轮事实、失败与发布证据](../docs/materials/2026-11-01-admin-usage-read-snapshot/findings.md)为接续入口。v1243后的慢设置GET已定位到计价readiness callback内部，纯读报表不冒已修该慢点。
+- 四方向核查与统一架构判断已完成，三项已随v0.125.2/88a73464保护部署（BUILD `F-YL2MSYdalvJRR3Um4MH`）：展示计价按一致输入快照在写事务外计算并复用同次数据；精确区分回执与内容失效；明确版本失效后不先带旧版查询。实际收费鲜核、真实内容失效、合法恢复顺序均保持。[统一方案](../docs/materials/2026-11-01-admin-usage-read-snapshot/implementation-plan.md)与同主题A/B/C/D报告为入口。Ego补测及独立B暖态已归档、原用户页保留：原六项不改写，新B已闭合媒体分段与服务端同请求，handler外等待仍未知。正向profile主体与cleanup-only通过分开，原总FAIL保留。跨域目录故障影响面、全局版本fanout、report Node CPU及跨bundle实例范围作为条件残留，不冒已修。旧SAVE500/飞书/角色工具/弹窗仍待手验；SUNBURST新4K暂停、上游原因未知，保原图、不放大或换贵通道；CHAR02仅规划，ARCH03其他条件包不冒完成。
+
+- 本批Linux原生/定价/types/lint/Next、真实非零菜单与原事务DTO等价/fresh charge、30断言有效consumer及C0/C1按key索引SEARCH已证；采集原FAIL与writer未重叠保留。本批无DDL，[三修部署回执](../docs/materials/2026-11-01-admin-usage-read-snapshot/release/stage3-attempt01/deployment-result.json)为当前运行入口；59fb原产物仅程序回退，保表/数据/配置。部署后仅设置+B的自然观察已完成并归还原用户页：设置正文1.424s、Node0.531s且无旧计价事务；目录主区仍7.380s；B点击7.097s、媒体首字节3.578s/handler61.5ms，外段仍待查。其余功能待用户手验。
+
+应用源码已推送并部署；本段为脱敏进度记录，后续文档提交不作为运行源。

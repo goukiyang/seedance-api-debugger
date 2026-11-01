@@ -433,3 +433,11 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 - [统计与CSV入口](2026-10-31-navigation-performance/index.html)、[根因/验证/剩余项](2026-10-31-navigation-performance/root-cause/findings.md)、[架构后续](2026-10-31-navigation-performance/root-cause/architecture-review.md)。原基线与各版定向观察、隔离对照与实际部署分开。
 - e7506709/v0.124.3已保护部署，待用户手动验收；恢复23757988/v0.124.2仅回程序。SQL/CSV等价及文件清理有证；封面小图已显示，其他慢样本及执行边界更正保留。完整原证和截图本机私有，未整包Git发布。
+
+
+### NAV-REQ01 / NAV-RO01 / BR-QUEUE01（2026-11-01）
+
+- [统一统计](2026-10-31-navigation-performance/index.html)、[本轮事实与未核项](2026-11-01-admin-usage-read-snapshot/findings.md)、[v0.125.1公网与角色接线](2026-11-01-admin-usage-read-snapshot/release/stage2-attempt04/public-deployed.json)为既有NAV-PERF01与ARCH03 A03/A05后续入口；原历史证据保留。
+- 请求关联与42c64cc组合接口于v0.125.0/341c3b1c上线；迁移仅两表五显式索引，原数据保持。匿名401、真实登录空列表、唯一组合创建/删除及无残留已核；原一次误用未定义id GET所致405按测试失误保留，不当产品故障。
+- 只读快照阶段已于v0.125.1/59fb8760上线，BUILD `ovbcd8r72pb8RAiprIbYA`；当前三修已保护部署v0.125.2/88a73464，BUILD `F-YL2MSYdalvJRR3Um4MH`；只读快照保完整报表与CSV合同，真实副本/COMMIT及取消退出工程有证。新快照阶段无DDL，程序回退保组合表、数据与配置。该结论不冒网页时延或并发人数通过。
+- [六项限定Ego观察](2026-11-01-admin-usage-read-snapshot/ego-stage2-observation-summary.json)、[独立B媒体补样](2026-11-01-admin-usage-read-snapshot/ego-stage2-B-supplement-summary.json)及[统计CSV](2026-10-31-navigation-performance/post-snapshot-statistics.csv)已归档，原用户页保留；旧缺口不补造。四向调查与[统一实施方案](2026-11-01-admin-usage-read-snapshot/implementation-plan.md)已完成，三项已随v0.125.2/88a73464保护部署：展示菜单解除长写事务、回执精确失效归类、明确失效后省旧版往返。B handler外等待及四结构残留如实保留；当前源码已提交推送，Linux完整工程、真实非零菜单/DTO等价/fresh charge、30断言有效consumer与两段索引计划有证；原采集FAIL和writer非重叠保留。[本批部署回执](2026-11-01-admin-usage-read-snapshot/release/stage3-attempt01/deployment-result.json)可接续；本批无DDL，59fb仅程序回退保表/数据，[部署后两项限定观察](2026-11-01-admin-usage-read-snapshot/ego-stage3/summary.json)已完成：设置正文1.424s且无旧计价事务，目录主区仍7.380s；B点击7.097s、首字节3.578s/handler61.5ms，外段继续诊断。其他功能待手验，CHAR02只规划、SUNBURST上游原因未证且不造4K；原证本机私有，公开仅脱敏固定记录。
