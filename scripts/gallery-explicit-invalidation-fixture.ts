@@ -232,7 +232,8 @@ async function main() {
 
   let additionalAssertions = 0;
   const equal = (actual: unknown, expected: unknown, message?: string) => { assert.equal(actual, expected, message); additionalAssertions++; };
-  let props: HookProps;
+  const dataSnapshot = (): ReturnType<GalleryHook>['data'] => runner.result.data;
+  let props!: HookProps;
   const start = async (revision = '') => {
     runner.unmount();
     props = { userId: 'seed-viewer', query: { query: '', scope: 'all', navigationOnly: false }, enabled: true,
@@ -247,7 +248,7 @@ async function main() {
   const same = await start(); await seed('marker-1');
   equal(same.signal.aborted, false, 'First shared marker must not cancel the in-flight unversioned read'); noExtraRead();
   await respond(same, 200, galleryResult('query-hash-differs-from-marker', 'same-marker', 'marker-1'));
-  equal(runner.result.data?.fixtureLabel, 'same-marker'); noExtraRead();
+  equal(dataSnapshot()?.fixtureLabel, 'same-marker'); noExtraRead();
   const preseeded = await start('marker-1');
   await respond(preseeded, 200, galleryResult('preseeded-hash', 'preseeded', 'marker-1')); noExtraRead();
 
@@ -258,7 +259,7 @@ async function main() {
     const fresh = nextRequest(); equal(fresh.body.catalogRevision, undefined);
     equal(runner.result.data, null, 'A known-unconfirmed initial result is not published before the fresh read');
     await respond(fresh, 200, galleryResult('fresh-query-hash', 'fresh-'+kind, 'marker-later'));
-    equal(runner.result.data?.fixtureLabel, 'fresh-'+kind); noExtraRead();
+    equal(dataSnapshot()?.fixtureLabel, 'fresh-'+kind); noExtraRead();
   }
 
   const pendingInitial = await start(); await seed('marker-1'); await seed('marker-2');
@@ -266,7 +267,7 @@ async function main() {
   equal(changedBeforeSuccess.body.catalogRevision, undefined);
   await respond(changedBeforeSuccess, 200, galleryResult('changed-hash', 'real-change', 'marker-2'));
   await respond(pendingInitial, 200, galleryResult('late-hash', 'late-initial', 'marker-old'));
-  equal(runner.result.data?.fixtureLabel, 'real-change'); noExtraRead();
+  equal(dataSnapshot()?.fixtureLabel, 'real-change'); noExtraRead();
 
   const successful = await start(); await respond(successful, 200, galleryResult('success-hash', 'before-seed'));
   runner.result.refresh(); await runner.flush(); const alreadyRunning = nextRequest();
@@ -274,7 +275,7 @@ async function main() {
   equal(alreadyRunning.signal.aborted, true); equal(seededAfterSuccess.body.catalogRevision, undefined);
   await respond(seededAfterSuccess, 200, galleryResult('seeded-hash', 'after-seed', 'marker-1'));
   await respond(alreadyRunning, 200, galleryResult('late-existing-hash', 'late-existing'));
-  equal(runner.result.data?.fixtureLabel, 'after-seed');
+  equal(dataSnapshot()?.fixtureLabel, 'after-seed');
 
   for (const invalidateRevision of [false, true]) {
     const old = await start(); await seed('marker-1');
@@ -282,7 +283,7 @@ async function main() {
     const explicit = nextRequest(); equal(old.signal.aborted, true);
     await respond(explicit, 200, galleryResult('explicit-hash', 'explicit'));
     await respond(old, 200, galleryResult('late-explicit', 'late-explicit', 'marker-old'));
-    equal(runner.result.data?.fixtureLabel, 'explicit'); noExtraRead();
+    equal(dataSnapshot()?.fixtureLabel, 'explicit'); noExtraRead();
   }
 
   for (const change of ['scope', 'account'] as const) {
@@ -293,7 +294,7 @@ async function main() {
     equal(old.signal.aborted, true); equal(current.body.catalogRevision, undefined);
     await respond(current, 200, galleryResult('new-'+change, 'new-'+change));
     await respond(old, 200, galleryResult('late-'+change, 'late-'+change, 'marker-old'));
-    equal(runner.result.data?.fixtureLabel, 'new-'+change); noExtraRead();
+    equal(dataSnapshot()?.fixtureLabel, 'new-'+change); noExtraRead();
   }
 
   for (const status of [403, 200]) {
@@ -304,7 +305,7 @@ async function main() {
     props = { ...props, enabled: true }; runner.setProps(props); await runner.flush();
     const authorizedLater = nextRequest();
     await respond(authorizedLater, 200, galleryResult('authorized-later', 'authorized-later'));
-    equal(runner.result.data?.fixtureLabel, 'authorized-later'); noExtraRead();
+    equal(dataSnapshot()?.fixtureLabel, 'authorized-later'); noExtraRead();
   }
 
   const coverInitial = await start(); await seed('marker-1');
@@ -317,7 +318,7 @@ async function main() {
   equal(returnedCover.signal.aborted, false); noExtraRead();
   await respond(returnedCover, 200, galleryResult('return-hash', 'return-cover', 'marker-2'));
   await respond(coverInitial, 200, galleryResult('late-cover-hash', 'late-cover', 'marker-old'));
-  equal(runner.result.data?.fixtureLabel, 'return-cover'); noExtraRead();
+  equal(dataSnapshot()?.fixtureLabel, 'return-cover'); noExtraRead();
 
   // Run the actual studio initial-load effect, without rendering the rest of the workbench.
   const studioAst = ts.createSourceFile('studio.tsx', studioSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
