@@ -13,7 +13,7 @@ import * as trace from '../src/lib/performance/request-trace';
 import * as contract from '../src/lib/performance/trace-contract';
 
 type Exports = Record<string, any>;
-type Log = { label: string; value: Record<string, any> };
+type Log = { label: string; value: Record<string, any>; channel: 'stdout' | 'stderr' };
 const root = realpathSync(process.cwd()), require = createRequire(import.meta.url);
 const sources = ['src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/catalog-directory-writes.ts',
   'src/lib/performance/server-operations.ts', 'src/lib/image-studio/read-snapshot.ts', 'scripts/request-trace-engineering.ts'];
@@ -24,8 +24,10 @@ async function main() {
   const destination = process.argv[2] || '/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-01-admin-usage-read-snapshot/stage1-core-engineering.json';
   const previousDatabase = process.env.DATABASE_URL, previousNodeEnv = process.env.NODE_ENV;
   process.env.DATABASE_URL = `file:${directory}/observed.db`; Object.assign(process.env, { NODE_ENV: 'test' });
-  const originalInfo = console.info;
-  console.info = (label: unknown, value: unknown) => { logs.push({ label: String(label), value: JSON.parse(String(value)) }); };
+  const originalInfo = console.info, originalError = console.error;
+  const capture = (channel: Log['channel'], label: unknown, value: unknown) => { logs.push({ label: String(label), value: JSON.parse(String(value)), channel }); };
+  console.info = (label: unknown, value: unknown) => capture('stdout', label, value);
+  console.error = (label: unknown, value: unknown) => capture('stderr', label, value);
   const clients: PrismaClient[] = [];
   let forbiddenCalls = 0, envOverrides = 0;
   const forbidden = (name: string): never => { forbiddenCalls++; throw new Error(`Unapproved fixture boundary: ${name}`); };
@@ -176,12 +178,13 @@ async function main() {
     assert.equal(snapshot.sharedStudioReadDiagnostics().pending, 2); release();
     const values = await Promise.all([first, second]); assert.equal(typeof values[0], 'number'); assert.equal(values[1], 'second');
     assert.equal(snapshot.sharedStudioReadDiagnostics().pending, 0); assert.equal(snapshot.sharedStudioReadDiagnostics().active, null);
-    const savedInfo = console.info; console.info = () => { throw new Error(secret); };
+    const savedInfo = console.info, savedError = console.error;
+    console.info = console.error = () => { throw new Error(secret); };
     try {
       assert.equal(await trace.traceServerRequest('studio.shared', headers(), () => snapshot.readSharedStudioSnapshot(async () => 29, 'gallery')), 29);
       const error = Object.assign(new Error(secret), { code: 'P2002' });
       await assert.rejects(trace.traceServerRequest('studio.shared', headers(), () => snapshot.readSharedStudioSnapshot(async () => { throw error; }, 'definition')), value => value === error);
-    } finally { console.info = savedInfo; }
+    } finally { console.info = savedInfo; console.error = savedError; }
     assert.equal(snapshot.sharedStudioReadDiagnostics().pending, 0); assert.equal(snapshot.sharedStudioReadDiagnostics().active, null);
     checks.push('existing_shared_read_queue_holder_ids_and_release_survive_log_failure_without_behavior_change');
 
@@ -194,6 +197,7 @@ async function main() {
     const output = JSON.stringify(logs);
     assert.ok(!output.includes(secret)); assert.ok(!output.includes('NEXT_REDIRECT')); assert.ok(!output.includes('value_json'));
     assert.ok(logs.every(log => ['[RequestTrace]', '[Capacity]', '[StudioSharedRead]'].includes(log.label)));
+    assert.ok(logs.filter(log => log.label === '[RequestTrace]').every(log => log.channel === 'stderr'));
     assert.ok(logs.filter(log => log.label === '[RequestTrace]').every(log => log.value.at && typeof log.value.epochMs === 'number' && typeof log.value.mono === 'number' && log.value.pid === process.pid));
     assert.ok(logs.some(log => log.value.errorCode === 'P1008')); assert.ok(logs.some(log => log.value.errorCode === 'P2002'));
     assert.equal(forbiddenCalls, 0); assert.equal(envOverrides, 2);
@@ -204,7 +208,7 @@ async function main() {
       productionWrites: 0, productionDatabaseOpened: false, browserRuns: 0,
       scope: 'Real Prisma and disposable SQLite for wrapper contracts; request/phase/context and log safety; not production timing or functional acceptance' }), { flag: 'wx', mode: 0o600 });
   } finally {
-    await Promise.all(clients.map(client => client.$disconnect())); console.info = originalInfo;
+    await Promise.all(clients.map(client => client.$disconnect())); console.info = originalInfo; console.error = originalError;
     if (previousDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousDatabase;
     if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV'); else Object.assign(process.env, { NODE_ENV: previousNodeEnv });
     await rm(directory, { recursive: true, force: true });

@@ -29,7 +29,7 @@ function log(event: string, values: Record<string, unknown>, error?: unknown) {
     const failure = error as { name?: unknown; code?: unknown } | null;
     const errorClass = error === undefined ? undefined : typeof failure?.name === 'string' && classes.has(failure.name) ? failure.name : 'Error';
     const errorCode = typeof failure?.code === 'string' && codes.has(failure.code) ? failure.code : undefined;
-    console.info('[RequestTrace]', JSON.stringify({ ...traceMetadata(), event, ...values, errorClass, errorCode }));
+    console.error('[RequestTrace]', JSON.stringify({ ...traceMetadata(), event, ...values, errorClass, errorCode }));
   } catch { /* Logging is not part of the business operation. */ }
 }
 

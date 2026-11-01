@@ -1,4 +1,5 @@
 import './server-runtime.cjs';
+import * as requestTrace from '../src/lib/performance/request-trace';
 import assert from 'node:assert/strict';
 import * as privatePrompts from '../src/lib/security/private-prompts.server';
 import * as privateFields from '../src/lib/security/private-prompt-fields.server';
@@ -19,7 +20,7 @@ import ts from 'typescript';
 type Row = Record<string, any>;
 type Exports = Record<string, any>;
 const fixtureFile = 'scripts/template-author-cover-contract-engineering.ts';
-const sourceFiles = [fixtureFile, 'src/lib/image-studio/template-author.ts', 'src/lib/image-studio/definition-read.ts',
+const sourceFiles = [fixtureFile, 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/template-author.ts', 'src/lib/image-studio/definition-read.ts',
   'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
@@ -291,7 +292,7 @@ async function main() {
   const coverTypes = evaluate('src/lib/image-studio/module-cover-types.ts', {});
   const siteURL = evaluate('src/lib/assets/site-url.ts', {});
   const renderAttempts: string[] = [], protectedURLs = new Set<string>();
-  const cover = evaluate('src/lib/image-studio/module-cover.ts', { 'node:fs/promises': { __esModule: true, default: syntheticFs }, 'node:path': path,
+  const cover = evaluate('src/lib/image-studio/module-cover.ts', { '@/lib/performance/request-trace': requestTrace, 'node:fs/promises': { __esModule: true, default: syntheticFs }, 'node:path': path,
     'node:crypto': crypto, sharp: () => forbidden('image-encoder'), '@/lib/prisma': { prisma }, '@/lib/assets/site-url': siteURL,
     './access': access, './shared-contract': shared, './shared-command-storage': storage, './preset-lifecycle': lifecycle,
     './workspace-deletion': deletion, './protected-assets': { studioHiddenAssetUrls: async (viewer: Row) => {
