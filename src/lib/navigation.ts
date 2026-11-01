@@ -46,6 +46,7 @@ export const shellRoutes = [
   '/admin/usage-costs',
   '/admin/points',
   '/admin/integrations',
+  '/admin/bridge-devices',
   '/admin/templates',
   '/admin/agent-runs',
   '/admin/usage-records',
@@ -153,6 +154,7 @@ export const adminNavGroups: NavGroup[] = [
     title: '模型与接口',
     items: [
       { label: 'API 设置', href: '/admin/integrations', prefixMatch: true },
+      { label: '设备绑定', href: '/admin/bridge-devices', prefixMatch: true },
     ],
   },
   {
