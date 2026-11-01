@@ -94,20 +94,21 @@ function CropPreview({ slot }: { slot: Slot }) {
 type CurrentPreview = { imageUrl: string; referenceUrl?: string | null };
 type PreviewModule = { id: string; fixedCover?: ModuleCoverDTO | null; sharedLive?: { intent: { presetId: string }; available: boolean } | null;
   cover?: { thumbnailUrl?: string | null; referenceUrl?: string | null } | null; banner?: { thumbnailUrl?: string | null } | null; images?: Array<{ thumbnailUrl?: string | null }> };
-function CurrentCover({ cover, preview, error }: { cover: ModuleCoverDTO | null; preview: CurrentPreview | null; error: string }) {
+function CurrentCover({ cover, preview, error, visible = true, onReadError }: { cover: ModuleCoverDTO | null; preview: CurrentPreview | null; error: string; visible?: boolean; onReadError?: () => void }) {
   const [failed, setFailed] = useState(false);
   const src = cover ? cover.available ? cover.thumbnailUrl || cover.imageUrl : null : preview?.imageUrl;
-  return <div className={styles.currentCover}>
+  const fail = () => { setFailed(true); onReadError?.(); };
+  return <div className={styles.currentCover} style={visible ? undefined : { visibility: 'hidden' }} aria-hidden={!visible || undefined}>
     <span>{cover ? '当前已保存封面' : '当前显示封面，尚未固定'}</span>
     {src && !failed ? <div className={styles.currentPreview}>
-      {!cover && preview?.referenceUrl && <img src={preview.referenceUrl} alt="当前封面中的生成前参考图" draggable={false} onError={() => setFailed(true)} />}
-      <img src={src} alt={cover ? '当前已保存封面' : '当前封面代表图'} draggable={false} onError={() => setFailed(true)} />
+      {!cover && preview?.referenceUrl && <img src={preview.referenceUrl} alt="当前封面中的生成前参考图" draggable={false} onError={fail} />}
+      <img src={src} alt={cover ? '当前已保存封面' : '当前封面代表图'} draggable={false} onError={fail} />
     </div> : <p role="status">{cover ? cover.unavailableReason || '当前封面暂时无法读取，请稍后重新打开。'
       : error || (failed ? '当前封面图片暂时无法读取，请重新打开。' : '暂无合法代表图，可选图设置固定封面。')}</p>}
   </div>;
 }
 
-export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSaved }: { userId: string; moduleId: string; moduleName: string; onClose: () => void; onSaved: (cover: ModuleCoverDTO) => void }) {
+export function ModuleCoverEditor({ userId, moduleId, moduleName, initialFixedCover, onClose, onSaved }: { userId: string; moduleId: string; moduleName: string; initialFixedCover?: ModuleCoverDTO | null; onClose: () => void; onSaved: (cover: ModuleCoverDTO) => void }) {
   const { user, sessionChanged } = useAppSession();
   const scopeKey = `${userId}:${moduleId}:${user?.id || ''}:${sessionChanged}`;
   const scope = useRef({ key: scopeKey });
@@ -117,6 +118,10 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const dialog = useRef<HTMLDialogElement>(null);
   const { confirm, productDialog } = useProductDialog();
   const [state, setState] = useState<ModuleCoverEditorState | null>(null);
+  const [initialCover, setInitialCover] = useState(() => sessionAllowed && initialFixedCover?.available && initialFixedCover.thumbnailUrl
+    ? { scope: expectedScope, cover: initialFixedCover } : null);
+  const hint = sessionAllowed && initialCover?.scope === expectedScope ? initialCover.cover : null;
+  useEffect(() => { setInitialCover(previous => sessionAllowed && previous?.scope === expectedScope ? previous : null); }, [sessionAllowed, expectedScope]);
   const [preview, setPreview] = useState<CurrentPreview | null>(null);
   const [previewError, setPreviewError] = useState('');
   const [layout, setLayout] = useState<ModuleCoverLayout>('single');
@@ -142,13 +147,19 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
   const modified = () => { if (current() && !disabled) setDirty(true); };
   useUnsavedNavigation(dirty || busy || Boolean(pending), confirm, { unsaved: dirty ? ['模块封面'] : [], busy: busy || pending ? ['封面保存结果待确认'] : [], onBlocked: setError });
 
-  const initialize = useCallback(async () => {
+  const initialize = useCallback(async (firstRead = false) => {
     if (!current()) return;
+    if (!firstRead) setInitialCover(null);
     selectionEpoch.current += 1; selectionRequest.current?.abort(); selection.current = null;
     setReading(false); setLoading(true); setError(''); setState(null); setPreview(null); setPreviewError('');
     try {
       const value = await json<ModuleCoverEditorState>(await fetch(endpoint, { cache: 'no-store' }));
       if (!current()) return;
+      setInitialCover(previous => previous?.scope === expectedScope && !value.sourceError && value.fixedCover?.available
+        && value.target.kind === previous.cover.target.kind && value.target.id === previous.cover.target.id
+        && value.revision === previous.cover.revision && value.fixedCover.revision === previous.cover.revision
+        && value.fixedCover.target.kind === previous.cover.target.kind && value.fixedCover.target.id === previous.cover.target.id
+        && value.fixedCover.thumbnailUrl === previous.cover.thumbnailUrl ? previous : null);
       setState(value); setLayout(value.recipe?.layout || 'single'); setEditing(value.recipe?.version !== 3);
       const restored = value.recipe?.sources.map(item => {
         const source = value.sources.find(source => source.assetId === item.assetId && source.version === item.version);
@@ -169,11 +180,11 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
           setPreview(imageUrl ? { imageUrl, referenceUrl: previewModule.cover?.referenceUrl } : null);
         } catch (cause) { if (current()) setPreviewError(cause instanceof Error ? cause.message : '当前显示封面未能读取，请重新打开。'); }
       }
-    } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : '封面读取失败'); }
+    } catch (cause) { if (current()) { setInitialCover(null); setError(cause instanceof Error ? cause.message : '封面读取失败'); } }
     finally { if (current()) setLoading(false); }
-  }, [endpoint, moduleId, current]);
+  }, [endpoint, moduleId, current, expectedScope]);
   useEffect(() => {
-    alive.current = true; dialog.current?.showModal(); void initialize();
+    alive.current = true; dialog.current?.showModal(); void initialize(true);
     return () => { alive.current = false; selectionEpoch.current += 1; selectionRequest.current?.abort(); };
   }, [initialize]);
   const dismiss = () => {
@@ -289,11 +300,15 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, onClose, onSav
       setError('');
     }
   }
+  const currentCover = state ? state.fixedCover : hint;
+  const currentIdentity = state ? `${state.target.kind}:${state.target.id}:${state.revision}` : hint ? `${hint.target.kind}:${hint.target.id}:${hint.revision}` : '';
+  const currentSrc = currentCover ? currentCover.available ? currentCover.thumbnailUrl || currentCover.imageUrl : null : preview?.imageUrl;
   return createPortal(<>{productDialog}<dialog ref={dialog} className={styles.dialog} aria-label={`设置封面：${moduleName}`} aria-busy={busy || undefined}>
     <header className={styles.header}><div><h2>设置封面</h2><p>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
+    {sessionAllowed && (state || hint) && <CurrentCover key={`${hint ? 'initial' : 'fresh'}:${currentIdentity}:${currentSrc || ''}`} cover={currentCover} preview={state ? preview : null} error={previewError}
+      visible={!loading && Boolean(state)} onReadError={hint ? () => setInitialCover(null) : undefined} />}
     {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
       {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
-      <CurrentCover key={`${state.target.kind}:${state.target.id}:${state.revision}:${state.fixedCover?.imageUrl || state.fixedCover?.thumbnailUrl || preview?.imageUrl || ''}`} cover={state.fixedCover} preview={preview} error={previewError} />
       {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
       {editing && <><div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
         {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { if (selection.current) selection.current.index = 1 - selection.current.index; setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}

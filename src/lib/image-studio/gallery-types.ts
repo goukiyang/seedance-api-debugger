@@ -29,7 +29,7 @@ export type GalleryQuery = {
 };
 export type GalleryQueryResult = {
   protocol?: 'catalog-paged-v2'; navigationTotal?: number; navigationPage?: number; navigationPageSize?: number;
-  directoryGroups?: string[];
+  directoryGroups?: string[]; directoryRevision?: string;
   items: GalleryItem[]; navigation: GalleryNavigationItem[]; matches: GalleryNavigationItem[];
   total: number; page: number; pageSize: number; catalogRevision: string;
   capabilities: { independentReactions: true };

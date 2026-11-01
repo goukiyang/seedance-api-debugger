@@ -442,9 +442,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       .catch(() => undefined); // Ordering falls back to this browser's own record.
     return () => controller.abort();
   }, [templateWorkbench, userId]);
-  const [galleryCoverModuleId, setGalleryCoverModuleId] = useState<string | null>(null);
+  const [galleryCoverTarget, setGalleryCoverTarget] = useState<{ moduleId: string; moduleName: string; initialFixedCover?: ModuleCoverDTO | null } | null>(null);
   const [galleryReadErrors, setGalleryReadErrors] = useState<Set<string>>(new Set());
-  useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverModuleId(null); }, [userId]);
+  useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverTarget(null); }, [userId]);
   const [sharedOpening, setSharedOpening] = useState(false);
   const sharedOpenLock = useRef(false);
   const sharedOpenSequence = useRef(0);
@@ -699,7 +699,14 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     } catch (e) { if (moduleReadScope.current === scope) setError(e instanceof Error ? e.message : '模块读取失败'); }
     finally { if (moduleReadScope.current === scope) { listLock.current = false; setLoading(false); } }
   }, [userId, templateWorkbench, viewStorageKey]);
-  useEffect(() => { void loadModules(); }, [loadModules]);
+  const initialModulesView = useRef('');
+  useEffect(() => {
+    if (!viewRestored || initialModulesView.current === viewStorageKey) return;
+    initialModulesView.current = viewStorageKey;
+    const location = new URLSearchParams(window.location.search);
+    if (templateWorkbench && coverView && !location.get('moduleId') && !location.get('presetId')) { setLoading(false); return; }
+    void loadModules();
+  }, [viewRestored, viewStorageKey, templateWorkbench, coverView, loadModules]);
   const hydrateModules = useCallback(async (ids: string[]) => {
     const requested = ids.filter(id => !id.startsWith('shared:') && !hydratingIds.current.has(id)).slice(0, 12);
     if (!requested.length) return;
@@ -740,7 +747,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     if (installed) {
       if (options.forCoverEditor) {
         if (installed.coverEditable !== true) { setError('当前模板封面不可编辑，请重新读取权限'); return false; }
-        setGalleryCoverModuleId(installed.id);
+        setGalleryCoverTarget({ moduleId: installed.id, moduleName: installed.name });
       } else {
         const metadata = installed.sharedLive?.available === false ? navigationMemory.get({ moduleId: installed.id, presetId, name: installed.name, groupName: installed.groupName }) : installed;
         navigateToModule(metadata.groupName || '未分组', installed.id, options);
@@ -802,7 +809,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       pool.refresh();
       if (options.forCoverEditor) {
         if (opened.coverEditable !== true) throw new Error('当前模板封面不可编辑，请重新读取权限');
-        setGalleryCoverModuleId(opened.id);
+        setGalleryCoverTarget({ moduleId: opened.id, moduleName: opened.name });
       } else navigateToModule(opened.groupName || '未分组', opened.id, { ...options, ensureLoaded: false });
       shared.refresh();
       return true;
@@ -1210,17 +1217,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
   [gallery.lastOpened, serverRecentUse, userId]);
   const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
-    authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView,
-    navigationPage, ...(locateNavigation && active && !coverView ? { locate: { moduleId: active } } : {}) }, gallery.ready);
-  const observedSharedCatalog = useRef({ owner: userId, revision: shared.catalogRevision });
+    authorKey: gallery.authorKey, ...(gallery.sort === 'recent' ? { recentHints: galleryLastUsed } : {}), directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView,
+    navigationPage, ...(locateNavigation && active && !coverView ? { locate: { moduleId: active } } : {}) }, gallery.ready && viewRestored,
+  { revision: shared.catalogRevision, active: coverView });
   useEffect(() => {
-    const previous = observedSharedCatalog.current;
-    observedSharedCatalog.current = { owner: userId, revision: shared.catalogRevision };
-    if (!coverView || previous.owner !== userId) return;
-    pool.refresh(previous.revision !== shared.catalogRevision ? { invalidateRevision: true } : undefined);
-  }, [coverView, userId, shared.catalogRevision, pool.refresh]);
-  useEffect(() => {
-    if (pool.denied) { setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
+    if (pool.denied) { setGalleryCoverTarget(null); setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
     if (!pool.data) return;
     setDirectory(pool.data.navigation.map(entry => ({ ...entry, sourcePresetId: entry.sourcePresetId ?? entry.presetId ?? null,
       sourcePresetShared: entry.sourcePresetShared ?? entry.shared, canManageGroup: entry.mine && entry.coverEditable })));
@@ -1260,18 +1261,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     <button type="button" title="下一页模板" aria-label="下一页模板" disabled={pool.loading || directoryPaging.page >= navigationPages} onClick={() => changeNavigationPage(directoryPaging.page + 1)}><ChevronRight size={15} /></button>
     <button type="button" title="最后一页模板" aria-label="最后一页模板" disabled={pool.loading || directoryPaging.page >= navigationPages} onClick={() => changeNavigationPage(navigationPages)}><ChevronLast size={15} /></button>
   </nav> : null;
-  const galleryCoverModule = modules.find(item => item.id === galleryCoverModuleId && item.coverEditable === true);
-  useEffect(() => {
-    if (!galleryCoverModuleId || loading || hydrating) return;
-    if (!modules.some(item => item.id === galleryCoverModuleId && item.coverEditable === true)) {
-      setGalleryCoverModuleId(null); setError('封面设置未能读取或权限已变化，请重新读取后重试');
-    }
-  }, [galleryCoverModuleId, modules, loading, hydrating]);
-  const editGalleryCover = (entry: StudioNavigationEntry) => {
+  const editGalleryCover = (entry: StudioNavigationEntry, initialFixedCover?: ModuleCoverDTO | null) => {
     if (entry.coverEditable !== true || sharedOpening) return;
-    if (entry.presetId) { void openSharedPreset(entry.presetId, { forCoverEditor: true, recordUse: false, explicitSelection: true }); return; }
-    setGalleryCoverModuleId(entry.id);
-    if (!modules.some(item => item.id === entry.id)) void hydrateModules([entry.id]);
+    if (!entry.id.startsWith('shared:')) { setGalleryCoverTarget({ moduleId: entry.id, moduleName: entry.name, initialFixedCover }); return; }
+    if (entry.presetId) void openSharedPreset(entry.presetId, { forCoverEditor: true, recordUse: false, explicitSelection: true });
   };
   useEffect(() => {
     if (!navigation.length) return;
@@ -1504,7 +1497,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       query={gallery.query} onQueryChange={changeGalleryQuery} scope={gallery.scope} onScopeChange={changeGalleryScope}
       sort={gallery.sort} onSortChange={changeGallerySort} onReset={resetGallery} gridRef={coverPages.gridRef} pagination={coverPagination}
       authorKey={gallery.authorKey} authorLabel={pool.data?.navigation.find(item => item.author.key === gallery.authorKey)?.author.displayName} onAuthorChange={changeGalleryAuthor}
-      loading={pool.loading || !gallery.ready} error={Boolean(pool.error || galleryReadErrors.size)} opening={sharedOpening || Boolean(galleryCoverModuleId && !galleryCoverModule)}
+      loading={pool.loading || !gallery.ready} error={Boolean(pool.error || galleryReadErrors.size)} opening={sharedOpening}
       onRetry={() => { setGalleryReadErrors(new Set()); pool.refresh(); setCoverRetry(value => value + 1); }}
       headerActions={<div className={styles.counts}>
         <button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
@@ -1522,7 +1515,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         visual: pageItem?.fixedCover ? <FixedCoverVisual key={coverRetry} cover={pageItem.fixedCover} name={entry.name} onReadError={onReadError} />
           : <span className={styles.coverVisual} data-cover-source="模板素材">
             {pageItem?.cover?.thumbnailUrl || pageItem?.banner?.thumbnailUrl ? <img decoding="async" src={pageItem.cover?.thumbnailUrl || pageItem.banner!.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>{entry.available ? '暂无代表图' : '仅历史，来源暂不可用'}</span>}</span>,
-        canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry) };
+        canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry, pageItem?.fixedCover) };
     })} />}
     <div hidden={coverView || !viewRestored || !directoryReady || Boolean(routeQuery && resolvedRoute !== `${userId}:${routeQuery.startsWith("?") ? routeQuery : `?${routeQuery}`}`)}>
     {orderedModules.map(module => <ImageStudioBlock key={`${userId}:${module.id}`} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onSharedRefresh={shared.refresh} onMetadataChange={updateModuleMetadata} groups={groups} protectedGroups={['未分组', ...groups.filter(group => !DEFAULT_GROUPS.includes(group) && !(groupedModules[group] || []).some(canManageStudioGroupEntry))]} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
@@ -1550,11 +1543,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     {visibleModules.length > 0 && <button type="button" className={styles.newModule} disabled={creating} onClick={() => void createModule()}><Plus size={17} />新建模块</button>}
     </div>
     </div>
-    {galleryCoverModule && <ModuleCoverEditor key={`${userId}:${galleryCoverModule.id}`} userId={userId} moduleId={galleryCoverModule.id} moduleName={galleryCoverModule.name}
-      onClose={() => setGalleryCoverModuleId(null)} onSaved={cover => {
+    {galleryCoverTarget && <ModuleCoverEditor key={`${userId}:${galleryCoverTarget.moduleId}`} userId={userId} moduleId={galleryCoverTarget.moduleId} moduleName={galleryCoverTarget.moduleName} initialFixedCover={galleryCoverTarget.initialFixedCover}
+      onClose={() => setGalleryCoverTarget(null)} onSaved={cover => {
         pool.refresh();
-        setModules(current => current.map(item => item.id === galleryCoverModule.id ? { ...item, fixedCover: cover } : item));
-        setDirectory(current => current.map(item => item.id === galleryCoverModule.id ? { ...item, fixedCover: cover } : item));
+        setModules(current => current.map(item => item.id === galleryCoverTarget.moduleId ? { ...item, fixedCover: cover } : item));
+        setDirectory(current => current.map(item => item.id === galleryCoverTarget.moduleId ? { ...item, fixedCover: cover } : item));
         shared.refresh();
       }} />}
     <dialog ref={presetDialog} className={styles.dialog} aria-labelledby={presetTitleId}>

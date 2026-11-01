@@ -3,13 +3,14 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-type HookProps = { userId: string; query: Record<string, unknown>; enabled: boolean };
+type SharedRevision = { revision: string; active: boolean };
+type HookProps = { userId: string; query: Record<string, unknown>; enabled: boolean; shared?: SharedRevision };
 type EffectSlot = { kind: 'effect'; deps?: unknown[]; cleanup?: () => void; pending?: () => void | (() => void) };
 type StateSlot = { kind: 'state'; value: unknown };
 type RefSlot = { kind: 'ref'; value: { current: unknown } };
 type CallbackSlot = { kind: 'callback'; value: (...args: unknown[]) => unknown; deps: unknown[] };
 type HookSlot = EffectSlot | StateSlot | RefSlot | CallbackSlot;
-type GalleryHook = (userId: string, query: Record<string, unknown>, enabled: boolean) => {
+type GalleryHook = (userId: string, query: Record<string, unknown>, enabled: boolean, shared?: SharedRevision) => {
   data: ({ catalogRevision: string; fixtureLabel?: string } & Record<string, unknown>) | null;
   loading: boolean; error: string; denied: boolean;
   setPage(next: number, pageSize: number): void;
@@ -67,7 +68,7 @@ class HookRunner {
       await Promise.resolve();
       if (!this.renderPending) continue;
       this.renderPending = false; this.cursor = 0;
-      this.result = this.hook(this.props.userId, this.props.query, this.props.enabled);
+      this.result = this.hook(this.props.userId, this.props.query, this.props.enabled, this.props.shared);
       for (const slot of this.slots) {
         if (slot.kind !== 'effect' || !slot.pending) continue;
         slot.cleanup?.(); const pending = slot.pending; slot.pending = undefined;
@@ -78,6 +79,7 @@ class HookRunner {
   }
 
   async mount() { this.renderPending = true; await this.flush(); }
+  unmount() { for (const slot of this.slots) if (slot.kind === 'effect') slot.cleanup?.(); }
 }
 
 type PendingRequest = {
@@ -95,8 +97,8 @@ const fetchFixture = (_input: string, init: { body: string; signal: AbortSignal 
   });
 });
 
-const galleryResult = (catalogRevision: string, fixtureLabel: string) => ({
-  protocol: 'catalog-paged-v2', catalogRevision, fixtureLabel,
+const galleryResult = (catalogRevision: string, fixtureLabel: string, directoryRevision?: string) => ({
+  protocol: 'catalog-paged-v2', catalogRevision, fixtureLabel, ...(directoryRevision ? { directoryRevision } : {}),
   capabilities: { independentReactions: true }, items: [], navigation: [], matches: [],
 });
 
@@ -221,14 +223,131 @@ async function main() {
   assert.equal(runner.result.data, null, 'Permission denial clears previously visible gallery data');
 
   const studioSource = readFileSync('src/app/image-studio/studio.tsx', 'utf8');
-  assert.match(studioSource, /pool\.refresh\(previous\.revision !== shared\.catalogRevision \? \{ invalidateRevision: true \} : undefined\)/,
+  assert.match(executableHook, /refresh\(previous\.revision !== sharedRevision \? \{ invalidateRevision: true \} : undefined\)/,
     'The shared catalog revision effect must use the explicit invalidation API');
-  assert.match(studioSource, /if \(!coverView \|\| previous\.owner !== userId\) return;/,
+  assert.match(executableHook, /if \(!sharedActive \|\| sessionChanged \|\| isClientSessionBlocked\(\)\)/,
     'Shared invalidation must stay account-scoped and cover-view scoped');
   const openShared = studioSource.slice(studioSource.indexOf('async function openSharedPreset'), studioSource.indexOf('function navigateToEntry'));
   assert.ok(openShared.includes('pool.refresh();') && openShared.includes('shared.refresh();'), 'Open-shared keeps both existing refreshes');
 
-  console.log(JSON.stringify({ fixture: 'gallery-explicit-invalidation-fixture', assertions: 27, requests: pendingRequests.length, status: 'passed' }));
+  let additionalAssertions = 0;
+  const equal = (actual: unknown, expected: unknown, message?: string) => { assert.equal(actual, expected, message); additionalAssertions++; };
+  let props: HookProps;
+  const start = async (revision = '') => {
+    runner.unmount();
+    props = { userId: 'seed-viewer', query: { query: '', scope: 'all', navigationOnly: false }, enabled: true,
+      shared: { revision, active: true } };
+    runner = new HookRunner(useGalleryCatalog!, props); await runner.mount(); return nextRequest();
+  };
+  const seed = async (revision: string) => {
+    props = { ...props, shared: { revision, active: true } }; runner.setProps(props); await runner.flush();
+  };
+  const noExtraRead = () => equal(pendingRequests.length, requestCursor, 'The initial marker confirmation cannot cause another read');
+
+  const same = await start(); await seed('marker-1');
+  equal(same.signal.aborted, false, 'First shared marker must not cancel the in-flight unversioned read'); noExtraRead();
+  await respond(same, 200, galleryResult('query-hash-differs-from-marker', 'same-marker', 'marker-1'));
+  equal(runner.result.data?.fixtureLabel, 'same-marker'); noExtraRead();
+  const preseeded = await start('marker-1');
+  await respond(preseeded, 200, galleryResult('preseeded-hash', 'preseeded', 'marker-1')); noExtraRead();
+
+  for (const kind of ['different', 'missing', 'fallback'] as const) {
+    const first = await start(); await seed('marker-1'); equal(first.signal.aborted, false);
+    const result = galleryResult('first-query-hash', kind, kind === 'missing' ? undefined : 'marker-old');
+    await respond(first, 200, kind === 'fallback' ? { ...result, protocol: undefined } : result);
+    const fresh = nextRequest(); equal(fresh.body.catalogRevision, undefined);
+    equal(runner.result.data, null, 'A known-unconfirmed initial result is not published before the fresh read');
+    await respond(fresh, 200, galleryResult('fresh-query-hash', 'fresh-'+kind, 'marker-later'));
+    equal(runner.result.data?.fixtureLabel, 'fresh-'+kind); noExtraRead();
+  }
+
+  const pendingInitial = await start(); await seed('marker-1'); await seed('marker-2');
+  const changedBeforeSuccess = nextRequest(); equal(pendingInitial.signal.aborted, true);
+  equal(changedBeforeSuccess.body.catalogRevision, undefined);
+  await respond(changedBeforeSuccess, 200, galleryResult('changed-hash', 'real-change', 'marker-2'));
+  await respond(pendingInitial, 200, galleryResult('late-hash', 'late-initial', 'marker-old'));
+  equal(runner.result.data?.fixtureLabel, 'real-change'); noExtraRead();
+
+  const successful = await start(); await respond(successful, 200, galleryResult('success-hash', 'before-seed'));
+  runner.result.refresh(); await runner.flush(); const alreadyRunning = nextRequest();
+  await seed('marker-1'); const seededAfterSuccess = nextRequest();
+  equal(alreadyRunning.signal.aborted, true); equal(seededAfterSuccess.body.catalogRevision, undefined);
+  await respond(seededAfterSuccess, 200, galleryResult('seeded-hash', 'after-seed', 'marker-1'));
+  await respond(alreadyRunning, 200, galleryResult('late-existing-hash', 'late-existing'));
+  equal(runner.result.data?.fixtureLabel, 'after-seed');
+
+  for (const invalidateRevision of [false, true]) {
+    const old = await start(); await seed('marker-1');
+    runner.result.refresh(invalidateRevision ? { invalidateRevision: true } : undefined); await runner.flush();
+    const explicit = nextRequest(); equal(old.signal.aborted, true);
+    await respond(explicit, 200, galleryResult('explicit-hash', 'explicit'));
+    await respond(old, 200, galleryResult('late-explicit', 'late-explicit', 'marker-old'));
+    equal(runner.result.data?.fixtureLabel, 'explicit'); noExtraRead();
+  }
+
+  for (const change of ['scope', 'account'] as const) {
+    const old = await start(); await seed('marker-1');
+    props = change === 'scope' ? { ...props, query: { ...props.query, query: 'different-query' } }
+      : { ...props, userId: 'next-viewer', shared: { revision: '', active: true } };
+    runner.setProps(props); await runner.flush(); const current = nextRequest();
+    equal(old.signal.aborted, true); equal(current.body.catalogRevision, undefined);
+    await respond(current, 200, galleryResult('new-'+change, 'new-'+change));
+    await respond(old, 200, galleryResult('late-'+change, 'late-'+change, 'marker-old'));
+    equal(runner.result.data?.fixtureLabel, 'new-'+change); noExtraRead();
+  }
+
+  for (const status of [403, 200]) {
+    const request = await start(); await seed('marker-1');
+    await respond(request, status, status === 403 ? { error: 'forbidden' } : { code: 'account-changed', error: 'changed' });
+    equal(runner.result.denied, true); equal(runner.result.data, null);
+    props = { ...props, enabled: false }; runner.setProps(props); await runner.flush();
+    props = { ...props, enabled: true }; runner.setProps(props); await runner.flush();
+    const authorizedLater = nextRequest();
+    await respond(authorizedLater, 200, galleryResult('authorized-later', 'authorized-later'));
+    equal(runner.result.data?.fixtureLabel, 'authorized-later'); noExtraRead();
+  }
+
+  const coverInitial = await start(); await seed('marker-1');
+  props = { ...props, query: { ...props.query, navigationOnly: true }, shared: { revision: 'marker-1', active: false } };
+  runner.setProps(props); await runner.flush(); const workspace = nextRequest(); equal(coverInitial.signal.aborted, true);
+  await respond(workspace, 200, galleryResult('workspace-hash', 'workspace'));
+  props = { ...props, shared: { revision: 'marker-2', active: false } }; runner.setProps(props); await runner.flush(); noExtraRead();
+  props = { ...props, query: { ...props.query, navigationOnly: false }, shared: { revision: 'marker-2', active: true } };
+  runner.setProps(props); await runner.flush(); const returnedCover = nextRequest();
+  equal(returnedCover.signal.aborted, false); noExtraRead();
+  await respond(returnedCover, 200, galleryResult('return-hash', 'return-cover', 'marker-2'));
+  await respond(coverInitial, 200, galleryResult('late-cover-hash', 'late-cover', 'marker-old'));
+  equal(runner.result.data?.fixtureLabel, 'return-cover'); noExtraRead();
+
+  // Run the actual studio initial-load effect, without rendering the rest of the workbench.
+  const studioAst = ts.createSourceFile('studio.tsx', studioSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let initialEffect: ts.Expression | undefined;
+  const findInitial = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(studioAst) === 'useEffect'
+      && node.arguments[0]?.getText(studioAst).includes('initialModulesView.current')) initialEffect = node.arguments[0];
+    ts.forEachChild(node, findInitial);
+  };
+  findInitial(studioAst); assert.ok(initialEffect);
+  let initialLoads = 0, loadingReleased = false;
+  const initialLoad = { exports: {} as { run?: () => void }, viewRestored: false, viewStorageKey: 'view-a',
+    initialModulesView: { current: '' }, templateWorkbench: true, coverView: true, URLSearchParams,
+    window: { location: { search: '' } }, loadModules: () => { initialLoads++; }, setLoading: (value: boolean) => { loadingReleased = !value; } };
+  vm.runInNewContext(ts.transpileModule(`exports.run = ${initialEffect!.getText(studioAst)};`, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+  } }).outputText, initialLoad);
+  initialLoad.exports.run!(); equal(initialLoads, 0); equal(initialLoad.initialModulesView.current, '');
+  initialLoad.viewRestored = true; initialLoad.exports.run!(); equal(initialLoads, 0); equal(loadingReleased, true);
+  initialLoad.coverView = false; initialLoad.exports.run!(); equal(initialLoads, 0, 'Cover/workspace toggle cannot repeat initial load');
+  initialLoad.viewStorageKey = 'view-b'; initialLoad.window.location.search = '?moduleId=named'; initialLoad.exports.run!(); equal(initialLoads, 1);
+  initialLoad.coverView = true; initialLoad.exports.run!(); equal(initialLoads, 1);
+  initialLoad.viewStorageKey = 'view-c'; initialLoad.window.location.search = '?presetId=named'; initialLoad.exports.run!(); equal(initialLoads, 2);
+  initialLoad.viewStorageKey = 'view-d'; initialLoad.window.location.search = ''; initialLoad.templateWorkbench = false; initialLoad.exports.run!(); equal(initialLoads, 3);
+  assert.match(studioSource, /gallery\.ready && viewRestored/); additionalAssertions++;
+  assert.match(studioSource, /gallery\.sort === 'recent' \? \{ recentHints: galleryLastUsed \} : \{\}/); additionalAssertions++;
+  assert.match(executableHook, /observedShared\.current\.owner !== userId/); additionalAssertions++;
+
+  console.log(JSON.stringify({ fixture: 'gallery-explicit-invalidation-fixture', assertions: 27 + additionalAssertions,
+    requests: pendingRequests.length, status: 'passed' }));
 }
 
 void main().catch(error => { console.error(error); process.exitCode = 1; });

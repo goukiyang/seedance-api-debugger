@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '插件工作台更新', outline: [
-  '支持插件远程配置与浮窗工作台',
-  '支持获取签名的插件更新安装包',
+const notice = { title: '模板浏览优化', outline: [
+  '打开已有模板封面时减少等待',
+  '减少目录首次显示的重复读取',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

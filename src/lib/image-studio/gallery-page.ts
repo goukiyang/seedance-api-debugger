@@ -64,7 +64,7 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   if (before !== await readCatalogRevision(db, 'templates')) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   await assertStudioActor(user.id, db);
   const result: GalleryQueryResult = { protocol: 'catalog-paged-v2', items: cover.items, navigation: nav.navigation, matches: pageRows.length ? cover.navigation : [],
-    total, page, pageSize, catalogRevision: revision, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups.map(row => row.groupName),
+    total, page, pageSize, catalogRevision: revision, directoryRevision: before, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups.map(row => row.groupName),
     capabilities: { independentReactions: true }, removedDefaultGroups: nav.removedDefaultGroups, deletedSourcePresetIds: [] };
   observed({ rows: result.items.length + result.navigation.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
   return result;

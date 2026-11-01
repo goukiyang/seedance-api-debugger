@@ -6,8 +6,9 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 type GalleryRefreshOptions = { invalidateRevision?: true };
+type SharedDirectoryRevision = { revision: string; active: boolean };
 
-export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: boolean) {
+export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: boolean, shared?: SharedDirectoryRevision) {
   const { sessionChanged } = useAppSession();
   const [page, setPageState] = useState({ page: 1, pageSize: 12 });
   const [tick, setTick] = useState(0);
@@ -17,7 +18,13 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   const resultScope = useRef('');
   const revisionInvalidationEpoch = useRef(0);
   const revisionInvalidation = useRef<{ scope: string; epoch: number } | null>(null);
+  const pendingSharedRevision = useRef<{ owner: string; scope: string; revision: string } | null>(null);
+  const observedShared = useRef({ owner: userId, scope, revision: '', active: false });
+  if (observedShared.current.owner !== userId) observedShared.current = { owner: userId, scope, revision: '', active: false };
+  if (pendingSharedRevision.current?.scope !== scope || sessionChanged || isClientSessionBlocked()) pendingSharedRevision.current = null;
+  const sharedRevision = shared?.revision || '', sharedActive = shared?.active === true;
   const refresh = useCallback((options?: GalleryRefreshOptions) => {
+    pendingSharedRevision.current = null;
     if (options?.invalidateRevision) {
       revisionInvalidationEpoch.current += 1;
       revisionInvalidation.current = { scope: current.current, epoch: revisionInvalidationEpoch.current };
@@ -31,6 +38,19 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
     window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume);
     return () => { window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
   }, [refresh]);
+  useEffect(() => {
+    const previous = observedShared.current;
+    observedShared.current = { owner: userId, scope: current.current, revision: sharedRevision, active: sharedActive };
+    if (!sharedActive || sessionChanged || isClientSessionBlocked()) { pendingSharedRevision.current = null; return; }
+    if (previous.revision === sharedRevision && previous.active === sharedActive || !previous.revision && !sharedRevision) return;
+    // Returning with a changed query already starts its own fresh read.
+    if (previous.revision === sharedRevision && previous.scope !== current.current) return;
+    if (!previous.revision && sharedRevision && !(latest.current.owner === userId && (latest.current.data || latest.current.denied))) {
+      pendingSharedRevision.current = { owner: userId, scope: current.current, revision: sharedRevision };
+      return;
+    }
+    refresh(previous.revision !== sharedRevision ? { invalidateRevision: true } : undefined);
+  }, [userId, sharedRevision, sharedActive, sessionChanged, refresh]);
   useEffect(() => {
     if (!enabled || sessionChanged || isClientSessionBlocked()) return;
     const controller = new AbortController(), owner = scope;
@@ -47,13 +67,19 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
             ...(attempt === 0 && revision ? { catalogRevision: revision } : {}) }) });
         const result = await response.json();
         if (!valid || current.current !== owner || revisionInvalidationEpoch.current !== epoch || isClientSessionBlocked()) return;
-        if (result.code === 'account-changed') { setState({ owner: userId, data: null, loading: false, denied: true, error: result.error }); return; }
+        if (result.code === 'account-changed') { pendingSharedRevision.current = null; setState({ owner: userId, data: null, loading: false, denied: true, error: result.error }); return; }
         if (response.status === 409 && attempt === 0) continue;
         if (!response.ok) {
-          if ([401, 403].includes(response.status)) setState({ owner: userId, data: null, loading: false, denied: true, error: result.error || '无权读取封面' });
+          if ([401, 403].includes(response.status)) { pendingSharedRevision.current = null; setState({ owner: userId, data: null, loading: false, denied: true, error: result.error || '无权读取封面' }); }
           throw new Error(result.error || '封面目录未能读取');
         }
         if (result.capabilities?.independentReactions !== true || !Array.isArray(result.items) || !Array.isArray(result.navigation) || !Array.isArray(result.matches)) throw new Error('封面目录协议暂不可用');
+        const pending = pendingSharedRevision.current;
+        pendingSharedRevision.current = null;
+        if (pending?.owner === userId && pending.scope === scope
+          && (result.protocol !== 'catalog-paged-v2' || result.directoryRevision !== pending.revision)) {
+          refresh({ invalidateRevision: true }); return;
+        }
         if (revisionInvalidated && revisionInvalidation.current === invalidation) revisionInvalidation.current = null;
         resultScope.current = scope;
         setState({ owner: userId, data: result, loading: false, error: '' }); return;
@@ -61,7 +87,7 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
     };
     void run().catch(error => { if (valid && current.current === owner && revisionInvalidationEpoch.current === epoch && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); });
     return () => { valid = false; controller.abort(); };
-  }, [userId, scope, page, tick, enabled, sessionChanged]); // query fields are covered by scope.
+  }, [userId, scope, page, tick, enabled, sessionChanged, refresh]); // query fields are covered by scope.
   return { data: !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null, loading: state.owner !== userId || state.loading || !state.error && resultScope.current !== scope,
     error: state.owner === userId ? state.error : '', denied: state.owner === userId && state.denied === true, setPage, refresh };
 }
