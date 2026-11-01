@@ -32,7 +32,7 @@ async function main() {
   const spoolRoot = path.join(directory, 'spools'), filename = path.join(directory, 'fixture.db');
   const previous = { database: process.env.DATABASE_URL, tmp: process.env.TMPDIR, node: process.env.NODE_ENV };
   const { mkdir } = await import('node:fs/promises'); await mkdir(spoolRoot);
-  process.env.DATABASE_URL = `file:${filename}`; process.env.TMPDIR = spoolRoot; process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL = `file:${filename}`; process.env.TMPDIR = spoolRoot; Object.assign(process.env, { NODE_ENV: 'test' });
   const checks: string[] = [], details: Record<string, unknown> = {}, driverLogs: unknown[] = [];
   let forbiddenCalls = 0, active = false, starts = 0, closes = 0, finishes = 0;
   let fault: 'close' | 'capture' | null = null, cancelOnAdd: AbortController | null = null;
@@ -84,7 +84,7 @@ async function main() {
     // A second page, equal timestamps and orphan rows exercise cursor semantics.
     for (let index = 0; index < 503; index++) seed.CostLedger.push(ledger(`page-${String(index).padStart(4, '0')}`, { task_id: null, source_id: null, occurred_at: epoch + index % 3, reason: index % 2 ? null : 'fixture' }));
     const setup = spawnSync('/usr/bin/python3', ['-c', `import json,sqlite3,sys\np=json.load(sys.stdin)\nc=sqlite3.connect(p['file'])\nc.executescript(p['ddl'])\nc.execute('CREATE INDEX CostAllocation_ledger_id_idx ON CostAllocation(ledger_id)')\nc.execute('CREATE INDEX CostLedger_occurred_at_idx ON CostLedger(occurred_at)')\nfor table,rows in p['seed'].items():\n for row in rows:\n  names=list(row)\n  c.execute('INSERT INTO "'+table+'" ('+','.join('"'+n+'"' for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nc.commit()\nc.close()\n`],
-      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } });
+      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } as NodeJS.ProcessEnv });
     assert.ifError(setup.error); assert.equal(setup.status, 0, setup.stderr);
     db = new PrismaClient({ datasources: { db: { url: `file:${filename}` } }, log: [] });
     const actualDb = db;
@@ -251,7 +251,7 @@ async function main() {
     globalThis.fetch = originalFetch; console.error = originalError;
     if (previous.database === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous.database;
     if (previous.tmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previous.tmp;
-    if (previous.node === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous.node;
+    if (previous.node === undefined) Reflect.deleteProperty(process.env, 'NODE_ENV'); else Object.assign(process.env, { NODE_ENV: previous.node });
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

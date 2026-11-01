@@ -100,7 +100,7 @@ class SnapshotSession implements UsageSqlReader {
 
   constructor(script: string, database: string, dataAsOf?: string) {
     this.child = spawn('/usr/bin/python3', ['-u', script], {
-      shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: '/usr/bin:/bin', PYTHONIOENCODING: 'utf-8' },
+      shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: '/usr/bin:/bin', PYTHONIOENCODING: 'utf-8' } as NodeJS.ProcessEnv,
     });
     // Rejections are owned by ready/query/final cleanup; attach handlers before an early child failure.
     void this.ready.promise.catch(() => {});
