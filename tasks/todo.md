@@ -961,3 +961,10 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 
 - 本批已部署v0.116.2，实际应用源29cfd72a4ee3de02301872520264a36b0a0a2f69，BUILD ygNP6KmyZ_7w1WHD-nScc。完整Next/类型/lint、自身Review、6启动门、7服务及两页公网JS一致；B01–B09和MV-BTN01位置由用户手验。程序恢复复用531938fd/0.116.1，不回业务数据。详细私有证据沿正式根`docs/materials/2026-10-29-generate-ux21-25/implementation/`。
+
+
+### NAV-PERF01 全站跳转与封面根因（2026-10-31）
+
+- v0.124.3/e7506709已提交推送并保护部署，含449961ae报表/超分按需读取、23757988 CSV事务与任务筛选；完整Linux类型/lint/Next及数据保护有证。已部署，待用户手动验收。
+- [完整统计与限定Ego观察](../docs/materials/2026-10-31-navigation-performance/index.html)、[根因与未核项](../docs/materials/2026-10-31-navigation-performance/root-cause/findings.md)：原66类基线保留，新增16条定向记录；不冒全站复测或并发容量通过，640已显示但整体仍慢。
+- 纯读报表仍占写锁，沿ARCH03 A03/A05安排独立一致只读快照工程，原条件包不冒完成。额外余额GET一次及影响未知的更正单列原证，不声明浏览器全流程零写。完整资料本机私有，公开仅本摘要与入口。

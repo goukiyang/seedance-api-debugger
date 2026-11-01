@@ -427,3 +427,9 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 - 正式归档：[原始截图](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png)，正式路径：`/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-10-03-media-cover-interactions/codex-clipboard-26d3afd9-1a27-4df3-b50c-56913ad90d58.png`。PNG 566×216、29,327 字节；已打开可读，源与副本逐字节比较一致，SHA-256 均为 `b4a88859c4791c715259ae98e6163b49749a3fd88150954697df3f5e419378a6`。
 - 版本/关系：首次归档，截图对应的应用版本未知；保留原文件名，不覆盖或替代既有附件。此 Q1/Q2 记录与封面/banner V1 样板任务分开，V1 状态及资料不变。
 - 当前工单：[Q1/Q2固定记录](../../tasks/todo/2026-10-02-feedback-primary-navigation.md)。v0.39.0已实现快捷模板入口与原上下文恢复，统一发布检查中；用户手动功能验收。该截图只作需求参考，实现/发布状态由Codex写入工单，不要求用户补充。
+
+
+## NAV-PERF01 导航统计与根因原证（2026-10-31）
+
+- [统计与CSV入口](2026-10-31-navigation-performance/index.html)、[根因/验证/剩余项](2026-10-31-navigation-performance/root-cause/findings.md)、[架构后续](2026-10-31-navigation-performance/root-cause/architecture-review.md)。原基线与各版定向观察、隔离对照与实际部署分开。
+- e7506709/v0.124.3已保护部署，待用户手动验收；恢复23757988/v0.124.2仅回程序。SQL/CSV等价及文件清理有证；封面小图已显示，其他慢样本及执行边界更正保留。完整原证和截图本机私有，未整包Git发布。
