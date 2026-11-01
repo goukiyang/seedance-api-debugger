@@ -12,7 +12,7 @@ type CallbackSlot = { kind: 'callback'; value: (...args: unknown[]) => unknown; 
 type HookSlot = EffectSlot | StateSlot | RefSlot | CallbackSlot;
 type GalleryHook = (userId: string, query: Record<string, unknown>, enabled: boolean, shared?: SharedRevision) => {
   data: ({ catalogRevision: string; fixtureLabel?: string } & Record<string, unknown>) | null;
-  loading: boolean; error: string; denied: boolean;
+  loading: boolean; error: string; denied: boolean; matchingScope: boolean;
   setPage(next: number, pageSize: number): void;
   refresh(options?: { invalidateRevision?: true }): void;
 };
@@ -346,6 +346,81 @@ async function main() {
   assert.match(studioSource, /gallery\.ready && viewRestored/); additionalAssertions++;
   assert.match(studioSource, /gallery\.sort === 'recent' \? \{ recentHints: galleryLastUsed \} : \{\}/); additionalAssertions++;
   assert.match(executableHook, /observedShared\.current\.owner !== userId/); additionalAssertions++;
+
+  // Capacity belongs to pagination, not query identity; known invalidation/errors do not retain visuals.
+  const capacityInitial = await start(); equal(runner.result.matchingScope, false);
+  await respond(capacityInitial, 200, galleryResult('capacity', 'capacity'));
+  equal(runner.result.matchingScope, true);
+  runner.result.setPage(1, 15); await runner.flush(); const capacityRead = nextRequest();
+  equal(runner.result.matchingScope, true); equal(runner.result.loading, true);
+  await respond(capacityRead, 200, galleryResult('capacity', 'capacity-fresh'));
+  runner.result.refresh({ invalidateRevision: true }); await runner.flush(); const invalidCapacity = nextRequest();
+  equal(runner.result.matchingScope, false);
+  await respond(invalidCapacity, 200, galleryResult('capacity-new', 'capacity-fresh'));
+  equal(runner.result.matchingScope, true);
+  props = { ...props, query: { ...props.query, query: 'other' } }; runner.setProps(props); await runner.flush();
+  const changedCapacity = nextRequest(); equal(runner.result.matchingScope, false);
+  await respond(changedCapacity, 200, galleryResult('other', 'other'));
+  runner.result.refresh(); await runner.flush(); const failedCapacity = nextRequest();
+  await respond(failedCapacity, 503, { error: 'temporarily unavailable' }); equal(runner.result.matchingScope, false);
+  runner.result.refresh(); await runner.flush(); const deniedCapacity = nextRequest();
+  await respond(deniedCapacity, 403, { error: 'forbidden' }); equal(runner.result.matchingScope, false); equal(runner.result.data, null);
+  props = { ...props, userId: 'another-viewer' }; runner.setProps(props); await runner.flush();
+  equal(runner.result.matchingScope, false); const newCapacityActor = nextRequest();
+  await respond(newCapacityActor, 200, galleryResult('new-actor', 'new-actor')); equal(runner.result.matchingScope, true);
+
+  // Execute the exact studio range/slice/item-loading expressions, rather than reproducing their rules.
+  let compatible: ts.Expression | undefined, pageItem: ts.Expression | undefined, visibleItems: ts.Expression | undefined;
+  let itemLoading: ts.Expression | undefined;
+  const findCapacity = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(studioAst) === 'coverPageCompatible') compatible = node.initializer;
+    if (ts.isVariableDeclaration(node) && node.name.getText(studioAst) === 'pageItem') pageItem = node.initializer;
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(studioAst) === 'ModuleGallery') {
+      const attribute = node.attributes.properties.find(value => ts.isJsxAttribute(value) && value.name.getText(studioAst) === 'items');
+      if (attribute && ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer)) {
+        const map = attribute.initializer.expression;
+        if (map && ts.isCallExpression(map) && ts.isPropertyAccessExpression(map.expression)) visibleItems = map.expression.expression;
+        const callback = map && ts.isCallExpression(map) ? map.arguments[0] : undefined;
+        if (callback && ts.isArrowFunction(callback) && ts.isBlock(callback.body)) {
+          const returned = callback.body.statements.find(ts.isReturnStatement)?.expression;
+          if (returned && ts.isObjectLiteralExpression(returned)) {
+            const property = returned.properties.find(value => ts.isPropertyAssignment(value) && value.name.getText(studioAst) === 'loading');
+            if (property && ts.isPropertyAssignment(property)) itemLoading = property.initializer;
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, findCapacity);
+  };
+  findCapacity(studioAst); assert.ok(compatible && pageItem && visibleItems && itemLoading);
+  type Item = { key: string };
+  type Pool = { matchingScope: boolean; loading: boolean; data: { page: number; pageSize: number; items: Item[] } | null };
+  type Pages = { page: number; capacity: number; start: number; pageItems: Item[] };
+  const projection = { exports: {} as { run?: (pool: Pool, coverPages: Pages) => { key: string; available: boolean; loading: boolean }[] } };
+  vm.runInNewContext(ts.transpileModule(`exports.run = (pool, coverPages) => {
+    const coverPageCompatible = ${compatible!.getText(studioAst)};
+    return (${visibleItems!.getText(studioAst)}).map(entry => {
+      const pageItem = ${pageItem!.getText(studioAst)};
+      return { key: entry.key, available: Boolean(pageItem), loading: ${itemLoading!.getText(studioAst)} };
+    });
+  };`, { compilerOptions: { target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS } }).outputText, projection);
+  const rows = Array.from({ length: 15 }, (_, index) => ({ key: `entry-${index}` }));
+  const source: Pool = { matchingScope: true, loading: true, data: { page: 1, pageSize: 15, items: rows } };
+  const pages: Pages = { page: 1, capacity: 12, start: 0, pageItems: rows };
+  const projected = projection.exports.run!(source, pages);
+  equal(projected.length, 12); equal(projected.every(item => item.available && !item.loading), true);
+  equal(projected[11].key, 'entry-11', 'Capacity shrink cannot retain items beyond the target page range');
+  const smaller: Pool = { ...source, data: { page: 1, pageSize: 12, items: rows.slice(0, 12) } };
+  const expanded = projection.exports.run!(smaller, { ...pages, capacity: 15, pageItems: rows.slice(0, 12) });
+  equal(expanded.length, 12, 'Growing capacity does not invent the unread new entries'); equal(expanded.every(item => item.available), true);
+  equal(projection.exports.run!({ ...source, matchingScope: false }, { ...pages, capacity: 15 }).every(item => item.available && !item.loading), true,
+    'Exact page/size preserves the existing ordinary-refresh error recovery; only the new capacity branch requires matching scope');
+  for (const [pool, target] of [
+    [{ ...source, matchingScope: false }, pages],
+    [{ ...source, data: null }, pages],
+    [source, { ...pages, page: 2, start: 12 }],
+    [{ ...source, data: { ...source.data!, page: 2 } }, { ...pages, page: 2, start: 12 }],
+  ] as Array<[Pool, Pages]>) equal(projection.exports.run!(pool, target).every(item => !item.available && item.loading), true);
 
   console.log(JSON.stringify({ fixture: 'gallery-explicit-invalidation-fixture', assertions: 27 + additionalAssertions,
     requests: pendingRequests.length, status: 'passed' }));

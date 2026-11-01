@@ -1236,6 +1236,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const coverPages = useResultPages({ items: gallery.ready ? pool.data?.matches || [] : [], storageKey: `sd2:module-covers:v1:${userId}`,
     visible: coverView, busy: pool.loading || !gallery.ready, error: Boolean(pool.error), hasMore: false, tabScoped: true, positionKey: galleryPositionKey,
     total: pool.data?.total ?? null, loadMore: async () => undefined, currentId: null, serverPage: pool.data?.protocol === 'catalog-paged-v2' });
+  const coverPageCompatible = Boolean(pool.data?.page === coverPages.page
+    && (pool.data.pageSize === coverPages.capacity || pool.matchingScope && (pool.data.page - 1) * pool.data.pageSize === coverPages.start));
   useEffect(() => { if (coverView && !coverPages.restoring) pool.setPage(coverPages.page, coverPages.capacity); }, [coverView, coverPages.page, coverPages.capacity, coverPages.restoring, pool.setPage]);
   const resetCoverScroll = useRememberedScroll(`image-studio:${userId}${coverView ? ':covers' : ''}`,
     viewRestored && directoryReady && (!coverView || gallery.ready && galleryDirectoryReady && !coverPages.restoring && !hydrating) && !loading,
@@ -1504,9 +1506,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>
         <button type="button" disabled={creating || !directoryReady} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button>
       </div>}
-      items={coverPages.pageItems.map(entry => {
-      const pageItem = pool.data?.page === coverPages.page && pool.data.pageSize === coverPages.capacity
-        ? pool.data.items.find(item => item.key === entry.key) : undefined;
+      items={coverPages.pageItems.slice(0, coverPages.capacity).map(entry => {
+      const pageItem = coverPageCompatible
+        ? pool.data?.items.find(item => item.key === entry.key) : undefined;
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),

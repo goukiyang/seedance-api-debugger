@@ -88,6 +88,8 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
     void run().catch(error => { if (valid && current.current === owner && revisionInvalidationEpoch.current === epoch && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); });
     return () => { valid = false; controller.abort(); };
   }, [userId, scope, page, tick, enabled, sessionChanged, refresh]); // query fields are covered by scope.
-  return { data: !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null, loading: state.owner !== userId || state.loading || !state.error && resultScope.current !== scope,
+  const data = !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null;
+  return { data, matchingScope: Boolean(data && !state.denied && !state.error && resultScope.current === scope && revisionInvalidation.current?.scope !== scope),
+    loading: state.owner !== userId || state.loading || !state.error && resultScope.current !== scope,
     error: state.owner === userId ? state.error : '', denied: state.owner === userId && state.denied === true, setPage, refresh };
 }
