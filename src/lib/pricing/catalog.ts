@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { PricingMenuSources } from './image-menu-inputs';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateEstimatedCost, calculateEnhanceVideoEstimatedCost } from '@/lib/pricing';
@@ -38,22 +39,22 @@ export function pricingCanonical(value: unknown): string {
 export function pricingFingerprint(value: unknown) { return createHash('sha256').update(pricingCanonical(value)).digest('hex'); }
 export function pricingCatalogRowId(identity: PricingAdminIdentity) { return `rate-${pricingFingerprint(identity).slice(0, 32)}`; }
 
-export async function assertPricingCatalogIdentity(identity: PricingAdminIdentity, client: PricingClient = prisma, fixedPriceConfirmed = false) {
+export async function assertPricingCatalogIdentity(identity: PricingAdminIdentity, client: PricingClient = prisma, fixedPriceConfirmed = false, menu?: PricingMenuSources) {
   const reject = (): never => { throw new Error('收费作用域或规格不在当前合法能力范围，未回退旧价'); };
   if (!identity || !plain(identity.specifications) || Object.values(identity.specifications).some(value => typeof value !== 'string')) reject();
   const specifications = identity.specifications;
   if (identity.kind === 'image') {
     if (identity.unit !== 'image' || !IMAGE_STUDIO_MODELS.includes(identity.modelId as typeof IMAGE_STUDIO_MODELS[number])
       || Object.keys(specifications).some(key => !['quality', 'resolution', 'ratio'].includes(key))) reject();
-    await validateSources(client, 'image');
-    const channels = await getImageGenerationChannels(client, true);
-    const options = await getImageGenerationChannelOptions(client, true);
+    await validateSources(client, 'image', menu);
+    const channels = menu ? menu.channels : await getImageGenerationChannels(client, true);
+    const options = menu ? menu.options : await getImageGenerationChannelOptions(client, true);
     const channel = options.items.find(item => item.id === identity.channelId);
     if (!channel) {
       if (!/^image-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identity.channelId)) reject();
       throw new PricingItemUnavailableError(identity, 'configuration_missing', '该型号的供应商已归档或不存在，未切换供应商');
     }
-    const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client);
+    const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client, menu?.inputs.image);
     const capability = channel.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
     const adoptingFixed = fixedPriceConfirmed && identity.billingMode === 'fixed' && settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]?.billingMode === 'fixed';
     const validationSettings = adoptingFixed ? { ...settings, modelCapabilities: { ...settings.modelCapabilities,
@@ -76,26 +77,26 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
       return;
     }
     if (identity.channelId === 'volcengine_ark') {
-      await validateSources(client, 'ip');
-      const settings = await getVolcengineIpApiSettings(client);
+      await validateSources(client, 'ip', menu);
+      const settings = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
       if (!isVolcengineIpApiReady(settings) || !VOLCENGINE_IP_MODEL_OPTIONS.some(model => model.id === identity.modelId) && settings.default_model !== identity.modelId) reject();
       return;
     }
     reject();
   }
   if (identity.kind === 'enhance') {
-    await validateSources(client, 'enhance');
+    await validateSources(client, 'enhance', menu);
     if (identity.channelId !== 'volcengine_mediakit' || identity.modelId !== 'enhance-video'
       || Object.keys(specifications).some(key => !['resolution', 'toolVersion', 'fpsTier'].includes(key))
       || !['480p', '720p', '1080p', '2k', '4k'].includes(specifications.resolution)
       || !['standard', 'professional'].includes(specifications.toolVersion) || !['lte30', 'gt30'].includes(specifications.fpsTier)
-      || !isAiMediaKitApiReady(await getAiMediaKitApiSettings(client))) reject();
+      || !isAiMediaKitApiReady(await getAiMediaKitApiSettings(client, menu?.inputs.enhance))) reject();
     return;
   }
   if (identity.kind === 'h3') {
-    await validateSources(client, 'h3');
+    await validateSources(client, 'h3', menu);
     if (identity.channelId === 'h3' && H3_PRESET_OPTIONS.some(preset => preset.id === identity.modelId)
-      && !Object.keys(specifications).length && isH3Operational(await getH3ApiSettings(client))) return;
+      && !Object.keys(specifications).length && isH3Operational(await getH3ApiSettings(client, menu?.inputs.h3))) return;
   }
   reject();
 }
@@ -103,13 +104,32 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
 function plain(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 
 // Several legacy readers intentionally fall back. Pricing must reject present but corrupt sources first.
-async function validateSources(client: PricingClient, area?: 'image' | 'ip' | 'enhance' | 'h3') {
+async function validateSources(client: PricingClient, area?: 'image' | 'ip' | 'enhance' | 'h3', menu?: PricingMenuSources): Promise<Map<string, string>> {
+  if (menu) {
+    const key = area || 'all';
+    let value = menu.sourceValidation.get(key);
+    if (!value) { value = validateSourceValues(client, area, menu); menu.sourceValidation.set(key, value); }
+    return value;
+  }
+  return validateSourceValues(client, area);
+}
+
+async function validateSourceValues(client: PricingClient, area?: 'image' | 'ip' | 'enhance' | 'h3', menu?: PricingMenuSources) {
   const imageKeys = [IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY, IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY,
     `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}shared`, `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}banana`,
     IMAGE_STUDIO_SETTING_KEY, 'image_actual_billing_intent_v1'];
   const keys = !area ? [...imageKeys, VOLCENGINE_IP_API_SETTING_KEY, AIMEDIAKIT_API_SETTING_KEY, H3_API_SETTING_KEY]
     : area === 'image' ? imageKeys : [area === 'ip' ? VOLCENGINE_IP_API_SETTING_KEY : area === 'enhance' ? AIMEDIAKIT_API_SETTING_KEY : H3_API_SETTING_KEY];
-  const records = await client.platformSetting.findMany({ where: { key: { in: keys } } });
+  const captured = menu ? new Map<string, string | null>([
+    [IMAGE_GENERATION_API_SETTING_KEY, menu.inputs.image.shared], [BANANA_IMAGE_API_SETTING_KEY, menu.inputs.image.banana],
+    [IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, menu.inputs.image.registry],
+    [`${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}shared`, menu.inputs.image.sharedModels],
+    [`${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}banana`, menu.inputs.image.bananaModels],
+    [IMAGE_STUDIO_SETTING_KEY, menu.inputs.image.studio], ['image_actual_billing_intent_v1', menu.inputs.image.intent],
+    [VOLCENGINE_IP_API_SETTING_KEY, menu.inputs.ip], [AIMEDIAKIT_API_SETTING_KEY, menu.inputs.enhance], [H3_API_SETTING_KEY, menu.inputs.h3],
+  ]) : null;
+  const records = captured ? keys.flatMap(key => { const raw = captured.get(key); return raw === null ? [] : [{ key, value_json: raw! }]; })
+    : await client.platformSetting.findMany({ where: { key: { in: keys } } });
   for (const record of records) {
     let value: unknown;
     try { value = JSON.parse(record.value_json); } catch { throw new Error('现有收费来源配置损坏，未按空配置处理'); }
@@ -134,7 +154,7 @@ async function validateSources(client: PricingClient, area?: 'image' | 'ip' | 'e
       }
     }
   }
-  if (!area || area === 'image') { await getImageStudioSettings(client); await imageBillingIntent(client); }
+  if (!area || area === 'image') { await getImageStudioSettings(client, menu?.inputs.image.studio); await imageBillingIntent(client, menu?.inputs.image.intent); }
   return new Map(records.map(record => [record.key, pricingFingerprint(JSON.parse(record.value_json))]));
 }
 
@@ -162,8 +182,8 @@ function row(identity: PricingAdminIdentity, label: string, providerLabel: strin
     adoptionReason: actual ? '请确认汇率与费率；实际账单仍须沿原精确匹配及授权上限' : '请先补充独立人民币基价', updatedAt: null };
 }
 
-export async function getPricingCatalog(client: PricingClient = prisma): Promise<PricingCatalog> {
-  const sources = await validateSources(client);
+export async function getPricingCatalog(client: PricingClient = prisma, menu?: PricingMenuSources): Promise<PricingCatalog> {
+  const sources = await validateSources(client, undefined, menu);
   const rows: PricingAdminRow[] = [], bindings: PricingCatalog['bindings'] = {};
   const add = (value: PricingAdminRow, source: PricingCatalogBinding) => { rows.push(value); bindings[value.id] = source; };
   const seedance = getProviderConfig();
@@ -178,7 +198,7 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
       billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
     `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), price, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
   }
-  const ip = await getVolcengineIpApiSettings(client);
+  const ip = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
   const ipModels = [...VOLCENGINE_IP_MODEL_OPTIONS];
   if (ip.default_model && !ipModels.some(model => model.id === ip.default_model)) ipModels.push({ id: ip.default_model, label: ip.default_model, detail: '当前配置型号' });
   const ipBinding = binding('volcengine_ark', ip, ip.api_key, sources.get(VOLCENGINE_IP_API_SETTING_KEY) || 'legacy-default');
@@ -186,7 +206,7 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
     billingMode: 'fixed', unit: 'second', specifications: {} }, model.label, '火山 IP 视频', ip.enabled,
   isVolcengineIpApiReady(ip), calculateEstimatedCost('1080p', 1, model.id).finalCostPerSecond,
   'IP 视频接口未就绪', [model.detail, 'IP 视频'], model.id === ip.default_model), ipBinding);
-  const enhance = await getAiMediaKitApiSettings(client);
+  const enhance = await getAiMediaKitApiSettings(client, menu?.inputs.enhance);
   const enhanceBinding = binding('volcengine_mediakit', enhance, enhance.api_key, sources.get(AIMEDIAKIT_API_SETTING_KEY) || 'legacy-default');
   for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30']) {
     const price = calculateEnhanceVideoEstimatedCost({ duration: 1, resolution, toolVersion, fps: fpsTier === 'gt30' ? 60 : 30 }).finalCostPerSecond;
@@ -195,13 +215,13 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
     'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), price, '增强视频接口未就绪', ['时长向上取整秒',
       ...(resolution === '480p' ? ['含原 240p / 360p / 540p 同价档，不改变请求输出尺寸'] : [])], true), enhanceBinding);
   }
-  const h3 = await getH3ApiSettings(client);
+  const h3 = await getH3ApiSettings(client, menu?.inputs.h3);
   const h3Binding = binding('h3', { enabled: h3.enabled, base: h3.base_url }, h3.api_token, sources.get(H3_API_SETTING_KEY) || 'legacy-default');
   for (const preset of H3_PRESET_OPTIONS) add(row({ kind: 'h3', channelId: 'h3', modelId: preset.id,
     billingMode: 'fixed', unit: 'second', specifications: {} }, preset.label, 'H3 本地工作站', h3.enabled, isH3Operational(h3), 0,
   'H3 服务未就绪', ['沿原本地免费合同'], preset.id === h3.default_preset_id), h3Binding);
-  const channels = await getImageGenerationChannels(client, true);
-  const options = await getImageGenerationChannelOptions(client, true);
+  const channels = menu ? menu.channels : await getImageGenerationChannels(client, true);
+  const options = menu ? menu.options : await getImageGenerationChannelOptions(client, true);
   for (const channel of options.items) {
     if (channel.id === 'original') continue;
     for (const model of IMAGE_STUDIO_MODELS) {
@@ -213,7 +233,7 @@ export async function getPricingCatalog(client: PricingClient = prisma): Promise
       const scope = settings.api_key && address.protocol === 'https:' && !address.username && !address.password ? imageBillingScope(settings) : undefined;
       const source = binding(channel.id, { provider: settings.provider, baseUrl: settings.base_url,
         upstreamModel: settings.modelCapabilities[model]?.upstreamModel || model, protocol: capability,
-        credentials: pricingFingerprint(settings.api_key), billingIntent: actual ? await imageBillingIntent(client) : null },
+        credentials: pricingFingerprint(settings.api_key), billingIntent: actual ? await imageBillingIntent(client, menu?.inputs.image.intent) : null },
       settings.api_key, settings.configRevision, scope);
       const actualReady = capability.actualQuoteRequired && capability.ready;
       const rawCapability = settings.modelCapabilities[model];

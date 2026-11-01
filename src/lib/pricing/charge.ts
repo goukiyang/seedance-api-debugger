@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { PRICING_POLICY_KEY, type PricingAdminIdentity } from './admin-contract';
-import { resolvePricingCharge } from './policy';
+import { resolvePricingCharge, type PricingMenuContext } from './policy';
 import { normalizeDecimal } from './math';
 import { assertPricingImageConsumerReady } from './runtime';
 import { frozenPricingCredits, PricingChargeError, type FrozenPricingCharge } from './frozen-charge';
@@ -10,9 +10,9 @@ export { frozenPricingCredits, frozenPricingReservation, parseFrozenPricingCharg
 export type { FrozenPricingCharge } from './frozen-charge';
 type Client = Prisma.TransactionClient | typeof prisma;
 
-export async function quotePricingCharge(identity: PricingAdminIdentity, quantity: string, client: Client = prisma) {
-  if (!await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY }, select: { id: true } })) return null;
-  const resolved = await resolvePricingCharge(identity, client);
+export async function quotePricingCharge(identity: PricingAdminIdentity, quantity: string, client: Client = prisma, menu?: PricingMenuContext) {
+  if (menu ? menu.inputs.policy === null : !await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY }, select: { id: true } })) return null;
+  const resolved = await resolvePricingCharge(identity, client, menu);
   if (!resolved) return null;
   const row = resolved.row;
   if (row.mode === 'unset') throw new PricingChargeError('当前收费规则尚未设置');
@@ -20,7 +20,7 @@ export async function quotePricingCharge(identity: PricingAdminIdentity, quantit
     throw new PricingChargeError(row.unavailableReason || '该收费依据需要重新核实，原任务保持原合同');
   }
   const normalizedQuantity = normalizeDecimal(quantity, { min: '0', max: '10000000', maxScale: 8, allowZero: false });
-  if (identity.kind === 'image') await assertPricingImageConsumerReady(client);
+  if (identity.kind === 'image') await assertPricingImageConsumerReady(client, menu?.inputs.imageConsumer);
   const charge: FrozenPricingCharge = {
     schema: 'pricing-charge-v1', revision: resolved.revision, ruleId: resolved.ruleId, identity,
     binding: resolved.binding, basisKind: row.basisKind, mode: row.mode, baseCny: row.baseCny,

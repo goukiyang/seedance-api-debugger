@@ -8,12 +8,16 @@ import { readImageSupplierBills } from './billing-provider';
 import { supplierHistoryEstimate } from './billing-quote';
 import { exactSpecificationEstimate } from './billing-calibration';
 
-const KEY = 'image_actual_billing_intent_v1';
-const proofKey = (scope: string, model: string) => `image_billing_proof_v1:${scope}:${model}`;
+export const IMAGE_BILLING_INTENT_KEY = 'image_actual_billing_intent_v1';
+const KEY = IMAGE_BILLING_INTENT_KEY;
+export const imageBillingProofKey = (scope: string, model: string) => `image_billing_proof_v1:${scope}:${model}`;
 type Store = Pick<Prisma.TransactionClient, 'platformSetting'>;
 
-export async function imageBillingIntent(store: Store = prisma) {
-  const row = await store.platformSetting.findUnique({ where: { key: KEY } });
+export type CapturedImageBillingInputs = Readonly<{ intent: string | null; proofs: ReadonlyMap<string, string> }>;
+
+export async function imageBillingIntent(store: Store = prisma, raw?: string | null) {
+  const row = raw === undefined ? await store.platformSetting.findUnique({ where: { key: KEY } })
+    : raw === null ? null : { value_json: raw };
   if (!row) return { enabled: false, revision: 0, enabledModels: [] as string[] };
   const value = JSON.parse(row.value_json);
   if (typeof value.enabled !== 'boolean' || !Number.isSafeInteger(value.revision)) throw new Error('Invalid billing intent');
@@ -38,15 +42,17 @@ export async function saveImageBillingIntent(enabled: boolean, revision: number,
 // Only the exact reconciler can create this proof. No admin/API accepts a
 // request id or a claimed PASS supplied by a client.
 export async function recordImageBillingProof(tx: Store, input: { scope: string; model: string; taskId: string; ledgerId: string }) {
-  const key = proofKey(input.scope, input.model);
+  const key = imageBillingProofKey(input.scope, input.model);
   await tx.platformSetting.upsert({ where: { key },
     create: { key, value_json: JSON.stringify({ ...input, verifiedAt: new Date().toISOString(), match: 'generation_post_header_exact_bill' }) },
     update: { value_json: JSON.stringify({ ...input, verifiedAt: new Date().toISOString(), match: 'generation_post_header_exact_bill' }) } });
 }
 
-export async function imageBillingReady(scope: string, model: string, store: Store = prisma) {
-  const intent = await imageBillingIntent(store);
-  const row = await store.platformSetting.findUnique({ where: { key: proofKey(scope, model) } });
+export async function imageBillingReady(scope: string, model: string, store: Store = prisma, inputs?: CapturedImageBillingInputs) {
+  const intent = await imageBillingIntent(store, inputs?.intent);
+  const raw = inputs?.proofs.get(imageBillingProofKey(scope, model));
+  const row = inputs ? raw === undefined ? null : { value_json: raw }
+    : await store.platformSetting.findUnique({ where: { key: imageBillingProofKey(scope, model) } });
   let exactPostBill = false;
   if (row) {
     const proof = JSON.parse(row.value_json);

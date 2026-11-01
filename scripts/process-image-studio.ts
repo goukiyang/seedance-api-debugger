@@ -91,7 +91,7 @@ async function main() {
     if (row) {
       try {
         const value = JSON.parse(row.value_json);
-        if (value.workerId === workerId) await prisma.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json },
+        if (value.workerId === workerId) await prisma.platformSetting.updateMany({ where: { id: row.id, key: STUDIO_SHARED_WORKER_KEY, value_json: row.value_json },
           data: { value_json: JSON.stringify({ ...value, expiresAt: new Date(0).toISOString() }) } });
       } catch {}
     }

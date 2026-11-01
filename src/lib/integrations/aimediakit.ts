@@ -81,10 +81,11 @@ export function normalizeAiMediaKitApiSettings(value: unknown): AiMediaKitApiSet
 
 export async function getAiMediaKitApiSettings(
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  raw?: string | null,
 ): Promise<AiMediaKitApiSettings> {
-  const setting = await client.platformSetting.findUnique({
+  const setting = raw === undefined ? await client.platformSetting.findUnique({
     where: { key: AIMEDIAKIT_API_SETTING_KEY },
-  });
+  }) : raw === null ? null : { value_json: raw };
   if (!setting) return envFallbackSettings();
 
   try {

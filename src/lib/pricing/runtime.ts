@@ -136,14 +136,15 @@ export async function revokePricingWorkerCapability(client: Client, captured: Pr
   try {
     const current = JSON.parse(row.value_json) as PricingWorkerCapability;
     if (current.workerId !== captured.workerId) return;
-    await client.platformSetting.updateMany({ where: { id: row.id, value_json: row.value_json },
+    await client.platformSetting.updateMany({ where: { key: PRICING_IMAGE_CAPABILITY_KEY, id: row.id, value_json: row.value_json },
       data: { value_json: JSON.stringify({ ...current, expiresAt: new Date(0).toISOString() }) } });
   } catch { /* An unreadable receipt already denies all new contracts. */ }
 }
 
-export async function assertPricingImageConsumerReady(client: Client) {
+export async function assertPricingImageConsumerReady(client: Client, raw?: string | null) {
   assertPricingWriterIsolation();
-  const row = await client.platformSetting.findUnique({ where: { key: PRICING_IMAGE_CAPABILITY_KEY } });
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key: PRICING_IMAGE_CAPABILITY_KEY } })
+    : raw === null ? null : { value_json: raw };
   try {
     const value = JSON.parse(row?.value_json || 'null') as PricingWorkerCapability;
     const now = Date.now();

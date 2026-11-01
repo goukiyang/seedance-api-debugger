@@ -1212,7 +1212,13 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
     authorKey: gallery.authorKey, recentHints: galleryLastUsed, directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView,
     navigationPage, ...(locateNavigation && active && !coverView ? { locate: { moduleId: active } } : {}) }, gallery.ready);
-  useEffect(() => { if (coverView) pool.refresh(); }, [coverView, shared.catalogRevision, pool.refresh]);
+  const observedSharedCatalog = useRef({ owner: userId, revision: shared.catalogRevision });
+  useEffect(() => {
+    const previous = observedSharedCatalog.current;
+    observedSharedCatalog.current = { owner: userId, revision: shared.catalogRevision };
+    if (!coverView || previous.owner !== userId) return;
+    pool.refresh(previous.revision !== shared.catalogRevision ? { invalidateRevision: true } : undefined);
+  }, [coverView, userId, shared.catalogRevision, pool.refresh]);
   useEffect(() => {
     if (pool.denied) { setDirectory([]); setDirectoryReady(false); invalidateSharedDefinition(null, '当前账号无权读取模板', 'access-revoked'); return; }
     if (!pool.data) return;

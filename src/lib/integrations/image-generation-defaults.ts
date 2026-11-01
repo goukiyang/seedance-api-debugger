@@ -25,6 +25,10 @@ export class ImageGenerationQualityRouteError extends ImageGenerationDefaultRout
 }
 
 type DefaultRoutesClient = Prisma.TransactionClient | typeof prisma;
+export type ImageGenerationRouteInputs = Readonly<{
+  defaults: ImageGenerationDefaultRoutesDto;
+  hasLegacyOverride: (model: ImageStudioModel, channel: 'shared' | 'banana') => boolean;
+}>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -84,12 +88,12 @@ export function serializeImageGenerationDefaultRoutes(routes: ImageGenerationDef
 
 /** New requests must resolve quality before considering any client channel or snapshot. */
 export async function resolveImageGenerationRequestRoute(model: string, quality: unknown,
-  requestedChannelId?: string | null, client: DefaultRoutesClient = prisma): Promise<{
+  requestedChannelId?: string | null, client: DefaultRoutesClient = prisma, inputs?: ImageGenerationRouteInputs): Promise<{
     channelId: ImageGenerationChannelId | null; qualityRoute?: ImageQualityRouteSnapshot;
   }> {
-  if (model !== IMAGE_25_QUALITY_MODEL) return { channelId: await resolveImageGenerationRequestChannel(model, requestedChannelId, client) };
+  if (model !== IMAGE_25_QUALITY_MODEL) return { channelId: await resolveImageGenerationRequestChannel(model, requestedChannelId, client, undefined, inputs) };
   if (!isImage25Quality(quality)) throw new ImageGenerationQualityRouteError('原质量待选择，请明确选择中等或最高；输入和原请求已保留');
-  const defaults = await getImageGenerationDefaultRoutes(client);
+  const defaults = inputs ? inputs.defaults : await getImageGenerationDefaultRoutes(client);
   const channelId = defaults.qualityRoutes?.[IMAGE_25_QUALITY_MODEL]?.[quality];
   if (!channelId) throw new ImageGenerationQualityRouteError(`${quality === 'medium' ? '中等' : '最高'}图片 API 尚未配置，未切换到其他档位`);
   if (requestedChannelId && requestedChannelId !== 'original' && requestedChannelId !== channelId) {
@@ -114,8 +118,9 @@ export async function resolveImageGenerationRequestChannel(
   requestedChannelId?: string | null,
   client: DefaultRoutesClient = prisma,
   quality?: unknown,
+  inputs?: ImageGenerationRouteInputs,
 ): Promise<ImageGenerationChannelId | null> {
-  if (model === IMAGE_25_QUALITY_MODEL && quality !== undefined) return (await resolveImageGenerationRequestRoute(model, quality, requestedChannelId, client)).channelId;
+  if (model === IMAGE_25_QUALITY_MODEL && quality !== undefined) return (await resolveImageGenerationRequestRoute(model, quality, requestedChannelId, client, inputs)).channelId;
   const validatedModel = IMAGE_STUDIO_MODELS.find(allowedModel => allowedModel === model);
   if (!validatedModel) {
     throw new ImageGenerationDefaultRoutesError('所选图片型号不在允许列表中');
@@ -123,9 +128,10 @@ export async function resolveImageGenerationRequestChannel(
   if (requestedChannelId !== undefined && requestedChannelId !== null && requestedChannelId !== 'original') {
     return requestedChannelId;
   }
-  const defaults = await getImageGenerationDefaultRoutes(client);
+  const defaults = inputs ? inputs.defaults : await getImageGenerationDefaultRoutes(client);
   if (defaults.models[validatedModel]) return defaults.models[validatedModel]!;
   const legacyChannel = validatedModel.startsWith('gemini-') ? 'banana' : 'shared';
+  if (inputs) return inputs.hasLegacyOverride(validatedModel, legacyChannel) ? legacyChannel : null;
   const { hasLegacyImageGenerationModelOverride } = await import('@/lib/integrations/image-generation');
   return await hasLegacyImageGenerationModelOverride(validatedModel, legacyChannel, client) ? legacyChannel : null;
 }

@@ -85,10 +85,11 @@ export function normalizeVolcengineIpApiSettings(value: unknown): VolcengineIpAp
 
 export async function getVolcengineIpApiSettings(
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  raw?: string | null,
 ): Promise<VolcengineIpApiSettings> {
-  const setting = await client.platformSetting.findUnique({
+  const setting = raw === undefined ? await client.platformSetting.findUnique({
     where: { key: VOLCENGINE_IP_API_SETTING_KEY },
-  });
+  }) : raw === null ? null : { value_json: raw };
   if (!setting) return envFallbackSettings();
 
   try {

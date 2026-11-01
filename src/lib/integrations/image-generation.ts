@@ -1,4 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import type { CapturedPricingImageInputs } from '@/lib/pricing/image-menu-inputs';
+import { imageBillingIntent, imageBillingReady, imageBillingProofKey, type CapturedImageBillingInputs } from '@/lib/image-studio/billing-readiness';
+import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { parsePrivateCredentials, stringifyPrivateCredentials } from '@/lib/security/private-credentials.server';
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { privateCredentialFetch } from '@/lib/security/private-prompt-send.server';
@@ -310,11 +313,14 @@ export async function getImageGenerationApiSettings(
   client: Prisma.TransactionClient | typeof prisma = prisma,
   channel: 'default' | 'banana' = 'default',
   strictPricing = false,
+  raw?: string | null,
 ): Promise<ImageGenerationApiSettings> {
   const fallback = channel === 'banana'
     ? { ...DEFAULT_IMAGE_GENERATION_API_SETTINGS, max_outputs_per_request: 8 }
     : DEFAULT_IMAGE_GENERATION_API_SETTINGS;
-  const setting = await client.platformSetting.findUnique({ where: { key: channel === 'banana' ? BANANA_IMAGE_API_SETTING_KEY : IMAGE_GENERATION_API_SETTING_KEY } });
+  const key = channel === 'banana' ? BANANA_IMAGE_API_SETTING_KEY : IMAGE_GENERATION_API_SETTING_KEY;
+  const setting = raw === undefined ? await client.platformSetting.findUnique({ where: { key } })
+    : raw === null ? null : { key, value_json: raw };
   if (!setting) return fallback;
 
   try {
@@ -350,8 +356,9 @@ function assertPricingApiSource(value: unknown) {
   }
 }
 
-async function pricingStudioSettings(client: Prisma.TransactionClient | typeof prisma) {
-  const row = await client.platformSetting.findUnique({ where: { key: 'gpt_image_studio_v1' } });
+async function pricingStudioSettings(client: Prisma.TransactionClient | typeof prisma, raw?: string | null) {
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key: 'gpt_image_studio_v1' } })
+    : raw === null ? null : { value_json: raw };
   if (row) {
     const value: unknown = JSON.parse(row.value_json);
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('图片价格配置损坏');
@@ -359,7 +366,7 @@ async function pricingStudioSettings(client: Prisma.TransactionClient | typeof p
     if (!prices || typeof prices !== 'object' || Array.isArray(prices)
       || Object.values(prices).some(price => price !== null && (typeof price !== 'number' || !Number.isFinite(price) || price < 0 || price > 100000))) throw new Error('图片价格配置损坏');
   }
-  return getImageStudioSettings(client);
+  return getImageStudioSettings(client, row?.value_json ?? null);
 }
 
 export type ImageGenerationChannels = {
@@ -372,19 +379,21 @@ export type ImageGenerationChannels = {
   legacyModelApis: Record<'shared' | 'banana', LegacyModelApiRegistry>;
 };
 
-export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma, strictPricing = false): Promise<ImageGenerationChannels> {
+export async function getImageGenerationChannels(client: Prisma.TransactionClient | typeof prisma = prisma, strictPricing = false,
+  inputs?: CapturedPricingImageInputs, hydrate = true): Promise<ImageGenerationChannels> {
   const [shared, banana, registry, studioSettings, sharedModels, bananaModels] = await Promise.all([
-    getImageGenerationApiSettings(client, 'default', strictPricing),
-    getImageGenerationApiSettings(client, 'banana', strictPricing),
-    readManagedChannelRegistry(client),
-    strictPricing ? pricingStudioSettings(client) : getImageStudioSettings(client).catch(() => null),
-    readLegacyModelApiRegistry('shared', client),
-    readLegacyModelApiRegistry('banana', client),
+    getImageGenerationApiSettings(client, 'default', strictPricing, inputs?.shared),
+    getImageGenerationApiSettings(client, 'banana', strictPricing, inputs?.banana),
+    readManagedChannelRegistry(client, inputs?.registry),
+    strictPricing ? pricingStudioSettings(client, inputs?.studio) : getImageStudioSettings(client, inputs?.studio).catch(() => null),
+    readLegacyModelApiRegistry('shared', client, inputs?.sharedModels),
+    readLegacyModelApiRegistry('banana', client, inputs?.bananaModels),
   ]);
   const records = registry.channels;
-  const versions = await Promise.all(records.map(async record => hydrateActualBilling(
-    await resolveCurrentManagedSettings(record, client), client, strictPricing,
-  )));
+  const versions = await Promise.all(records.map(async record => {
+    const settings = await resolveCurrentManagedSettings(record, client, inputs);
+    return hydrate ? hydrateActualBilling(settings, client, strictPricing, inputs) : settings;
+  }));
   const fluxport = versions.find(item => item.channelId === 'fluxport') || emptyFluxPortSettings();
   return {
     shared,
@@ -417,11 +426,11 @@ export function selectImageGenerationSettings(
 
 /** Read-only pricing projection. Unlike capture, this never persists a private channel version. */
 export async function selectPricingImageGenerationSettings(channels: ImageGenerationChannels, model: string,
-  channelId: ImageGenerationChannelId, client: Prisma.TransactionClient | typeof prisma = prisma) {
+  channelId: ImageGenerationChannelId, client: Prisma.TransactionClient | typeof prisma = prisma, inputs?: CapturedImageBillingInputs) {
   const settings = selectImageGenerationSettings(channels, model, channelId);
   if (channelId !== 'shared' && channelId !== 'banana') return settings;
   const capability = settings.modelCapabilities[model as ImageStudioModel];
-  const intent = await legacyBillingIntentState(settings, model, client, true);
+  const intent = await legacyBillingIntentState(settings, model, client, true, inputs);
   if (!capability || !intent.selected) return settings;
   return { ...settings, modelCapabilities: { ...settings.modelCapabilities, [model]: {
     ...capability, billingMode: 'actual' as const, actualQuoteRequired: intent.quoteReady,
@@ -683,8 +692,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type LegacyModelApi = { protocol?: ImageGenerationChannelProtocol; upstreamModel?: string; baseUrl?: string; apiKey?: string };
 type LegacyModelApiRegistry = { version: 1; revision: string | null; models: Partial<Record<ImageStudioModel, LegacyModelApi>> };
 
-async function readLegacyModelApiRegistry(channel: 'shared' | 'banana', client: Prisma.TransactionClient | typeof prisma): Promise<LegacyModelApiRegistry> {
-  const row = await client.platformSetting.findUnique({ where: { key: `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${channel}` } });
+async function readLegacyModelApiRegistry(channel: 'shared' | 'banana', client: Prisma.TransactionClient | typeof prisma, raw?: string | null): Promise<LegacyModelApiRegistry> {
+  const key = `${IMAGE_GENERATION_LEGACY_MODEL_API_SETTING_PREFIX}${channel}`;
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key } }) : raw === null ? null : { key, value_json: raw };
   if (!row) return { version: 1, revision: null, models: {} };
   let value: unknown;
   try { value = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('原供应商型号配置损坏，未使用旧接口代替', 500, 'image_legacy_model_api_invalid'); }
@@ -912,8 +922,9 @@ function parseManagedCapabilities(
   return output;
 }
 
-async function readManagedChannelRegistry(client: Prisma.TransactionClient | typeof prisma): Promise<ManagedChannelRegistry> {
-  const row = await client.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+async function readManagedChannelRegistry(client: Prisma.TransactionClient | typeof prisma, raw?: string | null): Promise<ManagedChannelRegistry> {
+  const key = IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY;
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key } }) : raw === null ? null : { key, value_json: raw };
   if (!row) return { version: 1, channels: [emptyFluxPortRecord()] };
   let parsed: unknown;
   try { parsed = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('图片供应商注册表数据损坏，已停止使用配置', 500, 'image_channel_registry_invalid'); }
@@ -1032,8 +1043,12 @@ async function readPrivateChannelVersion(
   client: Prisma.TransactionClient | typeof prisma,
   channelId: string,
   revision: string,
+  inputs?: CapturedPricingImageInputs,
 ): Promise<PrivateImageGenerationChannelVersion> {
-  const row = await client.platformSetting.findUnique({ where: { key: privateVersionKey(channelId, revision) } });
+  const key = privateVersionKey(channelId, revision);
+  const raw = inputs?.versions.get(key);
+  const row = inputs ? raw === undefined ? null : { key, value_json: raw }
+    : await client.platformSetting.findUnique({ where: { key } });
   if (!row) throw new ImageGenerationChannelError('图片供应商配置修订不存在，不能替换为当前配置', 404, 'image_channel_revision_not_found');
   let parsed: unknown;
   try { parsed = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('图片供应商配置修订损坏，不能继续执行', 500, 'image_channel_revision_invalid'); }
@@ -1218,27 +1233,55 @@ export function isMuskImageGenerationChannel(settings: ImageGenerationApiSetting
     && (candidate.supplierKind === undefined || candidate.supplierKind === 'musk' || candidate.supplierKind === 'legacy');
 }
 
+/** The same eligibility calculation drives live readiness and finite menu proof discovery. */
+function imageBillingProofRequest(settings: ImageGenerationApiSettings, model: string) {
+  const resolved = settings as ImageGenerationResolvedSettings;
+  const upstreamModel = resolved.modelCapabilities?.[model as ImageStudioModel]?.upstreamModel || model;
+  if (resolved.modelCapabilities) settings = resolveImageGenerationModelSettings(resolved, model);
+  const source = { provider: settings.provider, supplierKind: resolved.supplierKind ?? null, upstreamModel };
+  if (upstreamModel !== model || !isMuskImageGenerationChannel(settings)) return { ...source, origin: null, settings: null };
+  const origin = new URL(settings.base_url).origin;
+  return { ...source, origin, settings: origin === 'https://api.muskapis.com' ? settings : null };
+}
+
+function imageBillingProofDependency(settings: ImageGenerationApiSettings, model: string) {
+  const { settings: eligible, ...source } = imageBillingProofRequest(settings, model);
+  return { ...source, scope: eligible ? imageBillingScope(eligible) : null, need: Boolean(eligible) };
+}
+
+export async function pricingImageProofDependencies(channels: ImageGenerationChannels, client: Prisma.TransactionClient | typeof prisma,
+  inputs: CapturedPricingImageInputs) {
+  const intent = await imageBillingIntent(client, inputs.intent);
+  const dependencies: Array<{ channel: string; model: string; selected: boolean; source: ReturnType<typeof imageBillingProofDependency> }> = [];
+  for (const settings of [channels.fluxport, ...channels.managed]) for (const model of IMAGE_STUDIO_MODELS) {
+    if (settings.modelCapabilities[model]?.billingMode === 'actual') dependencies.push({ channel: settings.channelId, model,
+      selected: true, source: imageBillingProofDependency(settings, model) });
+  }
+  for (const channel of ['shared', 'banana'] as const) for (const model of IMAGE_STUDIO_MODELS) {
+    if (intent.enabled && intent.enabledModels.includes(model)) dependencies.push({ channel, model, selected: true,
+      source: imageBillingProofDependency(selectImageGenerationSettings(channels, model, channel), model) });
+  }
+  dependencies.sort((a, b) => a.channel.localeCompare(b.channel) || a.model.localeCompare(b.model));
+  return { dependencies, proofKeys: Array.from(new Set(dependencies.flatMap(item => item.source.need
+    ? [imageBillingProofKey(item.source.scope!, item.model)] : []))).sort() };
+}
+
+export async function hydratePricingImageGenerationChannels(channels: ImageGenerationChannels,
+  client: Prisma.TransactionClient | typeof prisma, inputs: CapturedPricingImageInputs): Promise<ImageGenerationChannels> {
+  return { ...channels, fluxport: await hydrateActualBilling(channels.fluxport, client, true, inputs),
+    managed: await Promise.all(channels.managed.map(settings => hydrateActualBilling(settings, client, true, inputs))) };
+}
+
 async function isActualBillingReady(
   settings: ImageGenerationApiSettings,
   model: string,
   client: Prisma.TransactionClient | typeof prisma,
   strictPricing = false,
+  inputs?: CapturedImageBillingInputs,
 ) {
-  if ((settings as ImageGenerationResolvedSettings).modelCapabilities) {
-    const capability = (settings as ImageGenerationResolvedSettings).modelCapabilities[model as ImageStudioModel];
-    // Existing bill proofs identify the local model exactly, not an arbitrary alias.
-    if (capability?.upstreamModel && capability.upstreamModel !== model) return false;
-    settings = resolveImageGenerationModelSettings(settings as ImageGenerationResolvedSettings, model);
-  }
-  if (!isMuskImageGenerationChannel(settings)) return false;
   try {
-    if (new URL(settings.base_url).origin !== 'https://api.muskapis.com') return false;
-    const [{ imageBillingScope }, { imageBillingReady }] = await Promise.all([
-      import('@/lib/image-studio/billing-scope'),
-      import('@/lib/image-studio/billing-readiness'),
-    ]);
-    const scope = imageBillingScope(settings);
-    return (await imageBillingReady(scope, model, client)).ready;
+    const request = imageBillingProofDependency(settings, model);
+    return request.need && (await imageBillingReady(request.scope!, model, client, inputs)).ready;
   } catch (error) {
     if (strictPricing) throw error;
     return false;
@@ -1246,8 +1289,8 @@ async function isActualBillingReady(
 }
 
 export async function readPricingImageActualReadiness(settings: ImageGenerationApiSettings, model: string,
-  client: Prisma.TransactionClient | typeof prisma = prisma) {
-  return isActualBillingReady(settings, model, client, true);
+  client: Prisma.TransactionClient | typeof prisma = prisma, inputs?: CapturedImageBillingInputs) {
+  return isActualBillingReady(settings, model, client, true, inputs);
 }
 
 async function legacyBillingIntentState(
@@ -1255,32 +1298,20 @@ async function legacyBillingIntentState(
   model: string,
   client: Prisma.TransactionClient | typeof prisma,
   strictPricing = false,
+  inputs?: CapturedImageBillingInputs,
 ) {
-  if ((settings as ImageGenerationResolvedSettings).modelCapabilities) {
-    const resolved = settings as ImageGenerationResolvedSettings;
-    const capability = resolved.modelCapabilities[model as ImageStudioModel];
-    settings = resolveImageGenerationModelSettings(resolved, model);
-    if (capability?.upstreamModel && capability.upstreamModel !== model) {
-      const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
-      const intent = await imageBillingIntent(client);
-      return { selected: intent.enabled && intent.enabledModels.includes(model), revision: intent.revision, quoteReady: false };
-    }
-  }
-  const { imageBillingIntent, imageBillingReady } = await import('@/lib/image-studio/billing-readiness');
-  const intent = await imageBillingIntent(client);
+  const intent = await imageBillingIntent(client, inputs?.intent);
   const selected = intent.enabled && intent.enabledModels.includes(model);
   if (!selected) return { selected: false, revision: intent.revision, quoteReady: false };
-  if (!isMuskImageGenerationChannel(settings)) return { selected: true, revision: intent.revision, quoteReady: false };
+  let request: ReturnType<typeof imageBillingProofRequest>;
   try {
-    if (new URL(settings.base_url).origin !== 'https://api.muskapis.com') {
-      return { selected: true, revision: intent.revision, quoteReady: false };
-    }
+    request = imageBillingProofRequest(settings, model);
   } catch (error) {
     if (strictPricing) throw error;
     return { selected: true, revision: intent.revision, quoteReady: false };
   }
-  const { imageBillingScope } = await import('@/lib/image-studio/billing-scope');
-  const readiness = await imageBillingReady(imageBillingScope(settings), model, client);
+  if (!request.settings) return { selected: true, revision: intent.revision, quoteReady: false };
+  const readiness = await imageBillingReady(imageBillingScope(request.settings), model, client, inputs);
   return { selected: true, revision: intent.revision, quoteReady: readiness.ready };
 }
 
@@ -1288,6 +1319,7 @@ async function hydrateActualBilling(
   settings: ImageGenerationResolvedSettings,
   client: Prisma.TransactionClient | typeof prisma,
   strictPricing = false,
+  inputs?: CapturedImageBillingInputs,
 ): Promise<ImageGenerationResolvedSettings> {
   const modelCapabilities = { ...settings.modelCapabilities };
   for (const model of IMAGE_STUDIO_MODELS) {
@@ -1297,8 +1329,8 @@ async function hydrateActualBilling(
     modelCapabilities[model] = {
       ...capability,
       actualQuoteRequired: legacyAlias
-        ? (await legacyBillingIntentState(settings, model, client, strictPricing)).quoteReady
-        : await isActualBillingReady(settings, model, client, strictPricing),
+        ? (await legacyBillingIntentState(settings, model, client, strictPricing, inputs)).quoteReady
+        : await isActualBillingReady(settings, model, client, strictPricing, inputs),
     };
   }
   return { ...settings, modelCapabilities };
@@ -1309,6 +1341,7 @@ async function modelDisabledReason(
   model: ImageStudioModel,
   client: Prisma.TransactionClient | typeof prisma,
   strictPricing = false,
+  inputs?: CapturedImageBillingInputs,
 ) {
   settings = resolveImageGenerationModelSettings(settings, model);
   if (settings.deleted) return '该配置已归档，只保留已受理任务查询与结算';
@@ -1320,7 +1353,7 @@ async function modelDisabledReason(
   if (capability?.billingMode === 'actual') {
     if (capability.upstreamModel && capability.upstreamModel !== model) return '供应商型号名称与本站型号不同，尚无对应的精确账单证明；请使用已确认的固定点数';
     if (!isMuskImageGenerationChannel(settings)) return '实际计费仅适用于已确认的 Musk 供应商与同一 API Key';
-    if (capability.actualQuoteRequired !== true || !await isActualBillingReady(settings, model, client, strictPricing)) {
+    if (capability.actualQuoteRequired !== true || !await isActualBillingReady(settings, model, client, strictPricing, inputs)) {
       return '该 API Key 与型号暂无有效的精确账单证明，实际计费未就绪';
     }
   }
@@ -1364,12 +1397,12 @@ function emptyFluxPortSettings(): ImageGenerationResolvedSettings {
   } as ImageGenerationResolvedSettings;
 }
 
-async function resolveCurrentManagedSettings(record: ManagedChannelRegistryRecord, client: Prisma.TransactionClient | typeof prisma) {
+async function resolveCurrentManagedSettings(record: ManagedChannelRegistryRecord, client: Prisma.TransactionClient | typeof prisma, inputs?: CapturedPricingImageInputs) {
   if (!record.configRevision) {
     if (record.id === 'fluxport') return { ...emptyFluxPortSettings(), enabled: record.enabled, modelCapabilities: record.modelCapabilities };
     return emptyManagedSettings(record);
   }
-  const version = await readPrivateChannelVersion(client, record.id, record.configRevision);
+  const version = await readPrivateChannelVersion(client, record.id, record.configRevision, inputs);
   return { ...managedSettingsFromVersion(version), enabled: record.enabled, deleted: record.deleted };
 }
 
@@ -1647,17 +1680,18 @@ async function channelOption(
   enabled: boolean,
   client: Prisma.TransactionClient | typeof prisma,
   strictPricing = false,
+  inputs?: CapturedImageBillingInputs,
 ): Promise<ImageGenerationChannelDto> {
   const models: ImageGenerationChannelDto['models'] = {};
   for (const model of IMAGE_STUDIO_MODELS) {
     const capability = settings.modelCapabilities[model];
     const legacySlot = settings.channelId === 'shared' || settings.channelId === 'banana';
     const legacyIntent = legacySlot
-      ? await legacyBillingIntentState(settings, model, client, strictPricing)
+      ? await legacyBillingIntentState(settings, model, client, strictPricing, inputs)
       : null;
     const actualReady = legacySlot
       ? legacyIntent?.quoteReady === true
-      : capability?.billingMode === 'actual' && await isActualBillingReady(settings, model, client, strictPricing);
+      : capability?.billingMode === 'actual' && await isActualBillingReady(settings, model, client, strictPricing, inputs);
     const effectiveCapability = capability && legacySlot && legacyIntent?.selected
       ? { ...capability, billingMode: 'actual' as const, billingSource: 'same_scope_actual_billing_proof', actualQuoteRequired: actualReady }
       : capability && actualReady
@@ -1668,7 +1702,7 @@ async function channelOption(
       : settings;
     let reason = !configured ? '尚未配置 API Key' : !enabled ? '通道已停用' : null;
     if (!reason && settings.channelId === 'original') reason = null;
-    else if (!reason) reason = await modelDisabledReason(effectiveSettings, model, client, strictPricing);
+    else if (!reason) reason = await modelDisabledReason(effectiveSettings, model, client, strictPricing, inputs);
     models[model] = {
       ready: settings.channelId === 'original' ? true : !reason,
       disabledReason: settings.channelId === 'original' ? null : reason,
@@ -1700,26 +1734,27 @@ async function channelOption(
 export async function getImageGenerationChannelOptions(
   client: Prisma.TransactionClient | typeof prisma = prisma,
   strictPricing = false,
+  prepared?: { channels: ImageGenerationChannels; defaults: ReturnType<typeof parseImageGenerationDefaultRoutes>; inputs: CapturedPricingImageInputs },
 ): Promise<ImageGenerationChannelsDto> {
   const [channels, defaultRoutes] = await Promise.all([
-    getImageGenerationChannels(client, strictPricing),
-    getImageGenerationDefaultRoutes(client),
+    prepared ? prepared.channels : getImageGenerationChannels(client, strictPricing),
+    prepared ? prepared.defaults : getImageGenerationDefaultRoutes(client),
   ]);
   const items: ImageGenerationChannelDto[] = [];
   const shared = selectImageGenerationSettings(channels, 'gpt-image-2', 'shared');
   const banana = selectImageGenerationSettings(channels, IMAGE_STUDIO_MODELS[0], 'banana');
   items.push(await channelOption(shared, '共享接口', channels.shared.api_key ? providerSupplierName(channels.shared.provider) : null,
-    Boolean((channels.shared.api_key || Object.values(shared.modelApiKeys || {}).some(Boolean)) && channels.shared.base_url), channels.shared.enabled, client, strictPricing));
+    Boolean((channels.shared.api_key || Object.values(shared.modelApiKeys || {}).some(Boolean)) && channels.shared.base_url), channels.shared.enabled, client, strictPricing, prepared?.inputs));
   items.push(await channelOption(banana, 'Banana 专用接口', channels.banana.api_key ? providerSupplierName(channels.banana.provider) : null,
-    Boolean((channels.banana.api_key || Object.values(banana.modelApiKeys || {}).some(Boolean)) && channels.banana.base_url), channels.banana.enabled, client, strictPricing));
+    Boolean((channels.banana.api_key || Object.values(banana.modelApiKeys || {}).some(Boolean)) && channels.banana.base_url), channels.banana.enabled, client, strictPricing, prepared?.inputs));
   const fluxport = channels.fluxport;
-  items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean((fluxport.api_key || Object.values(fluxport.modelApiKeys || {}).some(Boolean)) && fluxport.base_url), fluxport.enabled, client, strictPricing));
+  items.push(await channelOption(fluxport, fluxport.label || 'FluxPort', 'FluxPort', Boolean((fluxport.api_key || Object.values(fluxport.modelApiKeys || {}).some(Boolean)) && fluxport.base_url), fluxport.enabled, client, strictPricing, prepared?.inputs));
   for (const settings of channels.managed) {
     if (settings.deleted) continue;
     const group = IMAGE_API_GROUPS.find(item => imageApiGroupSources(channels).some(id => imageApiGroupChannelId(item, id) === settings.channelId));
     const label = `${settings.label || settings.supplierName}${group ? `（${group === 'banana' ? 'Banana' : 'Image'}组）` : ''}`;
     items.push(await channelOption(settings, label, settings.supplierName,
-      Boolean((settings.api_key || Object.values(settings.modelApiKeys || {}).some(Boolean)) && settings.base_url), settings.enabled, client, strictPricing));
+      Boolean((settings.api_key || Object.values(settings.modelApiKeys || {}).some(Boolean)) && settings.base_url), settings.enabled, client, strictPricing, prepared?.inputs));
   }
 
   const originalModels: ImageGenerationChannelDto['models'] = {};

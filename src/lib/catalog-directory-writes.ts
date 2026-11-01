@@ -44,7 +44,8 @@ function domains(model: string | undefined, operation: string, args: unknown): C
   if (model === 'PlatformSetting') {
     const keys = settingKeys(input?.where?.key ?? input?.data?.key ?? input?.create?.key);
     if (!keys) return both;
-    const relevant = keys.filter(key => key !== 'studio_shared_worker_v1' && !both.some(domain => key === catalogRevisionKey(domain)));
+    const relevant = keys.filter(key => key !== 'studio_shared_worker_v1' && !key.startsWith('studio_shared_request_v1:')
+      && !both.some(domain => key === catalogRevisionKey(domain)));
     if (!relevant.length) return [];
     return Array.from(new Set(relevant.flatMap(key => [
       ...(templatePrefixes.some(prefix => key.startsWith(prefix)) ? both : []),

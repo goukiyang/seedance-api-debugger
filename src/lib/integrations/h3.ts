@@ -357,10 +357,11 @@ export function normalizeH3ApiSettings(value: unknown): H3ApiSettings {
 
 export async function getH3ApiSettings(
   client: Prisma.TransactionClient | typeof prisma = prisma,
+  raw?: string | null,
 ): Promise<H3ApiSettings> {
-  const setting = await client.platformSetting.findUnique({
+  const setting = raw === undefined ? await client.platformSetting.findUnique({
     where: { key: H3_API_SETTING_KEY },
-  });
+  }) : raw === null ? null : { value_json: raw };
   if (!setting) return envFallbackSettings();
 
   try {

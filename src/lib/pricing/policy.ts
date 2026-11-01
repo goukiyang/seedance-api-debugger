@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import type { PricingMenuSources } from './image-menu-inputs';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { PricingItemUnavailableError } from './item-unavailable';
@@ -37,6 +38,12 @@ type Revision = { schemaVersion: 1; policy: Policy; authoring?: PricingAuthoring
   rows: PricingAdminRow[]; bindings: Record<string, PricingCatalogBinding> };
 type Receipt = { schemaVersion: 1; actorId: string; requestFingerprint: string; result: PricingAdminOperation };
 type State = { policy: Policy; raw: string | null; catalog: PricingCatalog; rows: PricingAdminRow[]; authoring: PricingAuthoring; authoringRaw: string | null };
+export type PricingMenuContext = PricingMenuSources & { policy?: Policy; state?: Promise<State> };
+
+function menuPolicy(menu: PricingMenuContext) {
+  return menu.policy ?? (menu.policy = menu.inputs.policy === null ? emptyPolicy() : parsePolicy(menu.inputs.policy));
+}
+
 type Prepared = { input: PricingAdminPreviewInput; next: Policy; rows: PricingAdminRow[];
   affected: string[]; changes: PricingAdminPreview['changes']; skipped: PricingAdminPreview['skipped'];
   simulation: PricingAdminSimulation | null; scenarios: PricingAdminSimulation[]; authoring: PricingAuthoring; authoringChanged: boolean; inputFingerprint: string; confirmationTime: string };
@@ -296,21 +303,24 @@ function effectiveRow(original: PricingAdminRow, policy: Policy, binding: Pricin
 function signedDifferenceFromHundred(value: string): string {
   return compareDecimal(value, '100') < 0 ? `-${subtractDecimal('100', value)}` : subtractDecimal(value, '100');
 }
-async function readState(client: PricingClient): Promise<State> {
-  const stored = await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
-  const policy = stored ? parsePolicy(stored.value_json) : emptyPolicy();
+async function readState(client: PricingClient, menu?: PricingMenuContext): Promise<State> {
+  const stored = menu ? menu.inputs.policy === null ? null : { value_json: menu.inputs.policy }
+    : await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
+  const policy = menu ? menuPolicy(menu) : stored ? parsePolicy(stored.value_json) : emptyPolicy();
   let revisionAuthoring: PricingAuthoring | undefined;
   if (stored) {
-    const revision = await client.platformSetting.findUnique({ where: { key: `${PRICING_REVISION_PREFIX}${policy.revision}` } });
+    const revision = menu ? menu.inputs.policyRevision === null ? null : { value_json: menu.inputs.policyRevision }
+      : await client.platformSetting.findUnique({ where: { key: `${PRICING_REVISION_PREFIX}${policy.revision}` } });
     if (!revision) corrupt();
     try { const value = JSON.parse(revision.value_json); if (pricingCanonical(value.policy) !== pricingCanonical(policy)) corrupt();
       revisionAuthoring = value.authoring;
       if (value.authoring && pricingCanonical(value.history?.authoringAfter) !== pricingCanonical(value.authoring)) corrupt();
     } catch { corrupt(); }
   }
-  const catalog = await getPricingCatalog(client);
+  const catalog = await getPricingCatalog(client, menu);
   await appendPricingCatalogScopes(catalog, policy.rules.map(rule => rule.identity), client, false);
-  const authoringStored = await client.platformSetting.findUnique({ where: { key: PRICING_AUTHORING_KEY } });
+  const authoringStored = menu ? menu.inputs.authoring === null ? null : { value_json: menu.inputs.authoring }
+    : await client.platformSetting.findUnique({ where: { key: PRICING_AUTHORING_KEY } });
   let authoring = emptyPricingAuthoring(policy.revision);
   try {
     if (authoringStored) {
@@ -849,20 +859,21 @@ export async function exportAdminPricingCsv(actor: Actor, input: PricingAdminFil
     row.authoringEntry?.evidence ? pricingCanonical(row.authoringEntry.evidence) : '', row.authoringEntry?.baseRelation ? pricingCanonical(row.authoringEntry.baseRelation) : ''])].map(values => values.map(csvCell).join(',')).join('\r\n');
 }
 
-export async function resolvePricingCharge(identity: PricingAdminIdentity, client: PricingClient = prisma): Promise<{
+export async function resolvePricingCharge(identity: PricingAdminIdentity, client: PricingClient = prisma, menu?: PricingMenuContext): Promise<{
   revision: string; ruleId: string; row: PricingAdminRow; binding: PricingCatalogBinding;
 } | null> {
-  if (client === prisma) return prisma.$transaction(tx => resolvePricingCharge(identity, tx), { maxWait: 10000, timeout: 30000 });
-  const stored = await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
-  const policy = stored ? parsePolicy(stored.value_json) : emptyPolicy();
+  if (client === prisma && !menu) return prisma.$transaction(tx => resolvePricingCharge(identity, tx), { maxWait: 10000, timeout: 30000 });
+  const stored = menu ? menu.inputs.policy === null ? null : { value_json: menu.inputs.policy }
+    : await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
+  const policy = menu ? menuPolicy(menu) : stored ? parsePolicy(stored.value_json) : emptyPolicy();
   const adopted = selectPricingRule(policy.rules, identity);
   if (!adopted && policy.rules.some(rule => rule.identity.kind === identity.kind && rule.identity.channelId === identity.channelId
     && rule.identity.modelId === identity.modelId && rule.identity.unit === identity.unit)) {
     throw new PricingAdminServiceError('该收费作用域已采用新策略，但当前规格没有唯一规则，未回退旧价', 409, 'pricing_scope_unmatched');
   }
-  await assertPricingCatalogIdentity(identity, client, Boolean(adopted && ['follow', 'custom'].includes(adopted.mode) && adopted.baseCny && adopted.source));
+  await assertPricingCatalogIdentity(identity, client, Boolean(adopted && ['follow', 'custom'].includes(adopted.mode) && adopted.baseCny && adopted.source), menu);
   if (!adopted) return null;
-  const state = await readState(client);
+  const state = await (menu ? menu.state ?? (menu.state = readState(client, menu)) : readState(client));
   const catalogRow = selectPricingRule(state.catalog.rows, identity);
   if (!catalogRow) throw new PricingAdminServiceError('当前规格没有唯一且已确认的收费目录项，未回退旧价', 409, 'pricing_scope_unmatched');
   const row = state.rows.find(item => item.id === catalogRow.id)!;
@@ -875,6 +886,6 @@ export async function resolvePricingCharge(identity: PricingAdminIdentity, clien
     if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', '已采用新策略的收费项缺少有效依据，不能使用旧价');
     throw new PricingAdminServiceError('已采用新策略的收费项缺少有效依据，不能使用旧价', 409, 'pricing_evidence_unavailable');
   }
-  if (identity.kind === 'image') await assertPricingImageConsumerReady(client);
+  if (identity.kind === 'image') await assertPricingImageConsumerReady(client, menu?.inputs.imageConsumer);
   return { revision: state.policy.revision, ruleId: adopted.id, row, binding: state.catalog.bindings[catalogRow.id] };
 }

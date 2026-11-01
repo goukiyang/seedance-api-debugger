@@ -5,6 +5,8 @@ import { watchReactionChanges } from '@/components/content-reactions/ContentReac
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
+type GalleryRefreshOptions = { invalidateRevision?: true };
+
 export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: boolean) {
   const { sessionChanged } = useAppSession();
   const [page, setPageState] = useState({ page: 1, pageSize: 12 });
@@ -13,7 +15,15 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   const scope = JSON.stringify([userId, query]), current = useRef(scope); current.current = scope;
   const latest = useRef(state); latest.current = state;
   const resultScope = useRef('');
-  const refresh = useCallback(() => setTick(value => value + 1), []);
+  const revisionInvalidationEpoch = useRef(0);
+  const revisionInvalidation = useRef<{ scope: string; epoch: number } | null>(null);
+  const refresh = useCallback((options?: GalleryRefreshOptions) => {
+    if (options?.invalidateRevision) {
+      revisionInvalidationEpoch.current += 1;
+      revisionInvalidation.current = { scope: current.current, epoch: revisionInvalidationEpoch.current };
+    }
+    setTick(value => value + 1);
+  }, []);
   const setPage = useCallback((next: number, pageSize: number) => setPageState(previous => previous.page === next && previous.pageSize === pageSize ? previous : { page: next, pageSize }), []);
   useEffect(() => watchReactionChanges(userId, refresh), [userId, refresh]);
   useEffect(() => {
@@ -24,17 +34,19 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   useEffect(() => {
     if (!enabled || sessionChanged || isClientSessionBlocked()) return;
     const controller = new AbortController(), owner = scope;
+    const epoch = revisionInvalidationEpoch.current, invalidation = revisionInvalidation.current;
+    const revisionInvalidated = invalidation?.scope === scope && invalidation.epoch === epoch;
     let valid = true;
     const previous = latest.current.owner === userId ? latest.current.data : null;
     setState({ owner: userId, data: previous, loading: true, error: '' });
     const run = async () => {
-      const revision = resultScope.current === scope ? previous?.catalogRevision : undefined;
+      const revision = !revisionInvalidated && resultScope.current === scope ? previous?.catalogRevision : undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await fetch('/api/image-studio/gallery/query', { method: 'POST', cache: 'no-store',
           signal: controller.signal, headers: { 'Content-Type': 'application/json', 'x-app-session-user': userId }, body: JSON.stringify({ protocol: 'catalog-paged-v2', ...query, ...page,
             ...(attempt === 0 && revision ? { catalogRevision: revision } : {}) }) });
         const result = await response.json();
-        if (!valid || current.current !== owner || isClientSessionBlocked()) return;
+        if (!valid || current.current !== owner || revisionInvalidationEpoch.current !== epoch || isClientSessionBlocked()) return;
         if (result.code === 'account-changed') { setState({ owner: userId, data: null, loading: false, denied: true, error: result.error }); return; }
         if (response.status === 409 && attempt === 0) continue;
         if (!response.ok) {
@@ -42,11 +54,12 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
           throw new Error(result.error || '封面目录未能读取');
         }
         if (result.capabilities?.independentReactions !== true || !Array.isArray(result.items) || !Array.isArray(result.navigation) || !Array.isArray(result.matches)) throw new Error('封面目录协议暂不可用');
+        if (revisionInvalidated && revisionInvalidation.current === invalidation) revisionInvalidation.current = null;
         resultScope.current = scope;
         setState({ owner: userId, data: result, loading: false, error: '' }); return;
       }
     };
-    void run().catch(error => { if (valid && current.current === owner && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); });
+    void run().catch(error => { if (valid && current.current === owner && revisionInvalidationEpoch.current === epoch && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); });
     return () => { valid = false; controller.abort(); };
   }, [userId, scope, page, tick, enabled, sessionChanged]); // query fields are covered by scope.
   return { data: !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null, loading: state.owner !== userId || state.loading || !state.error && resultScope.current !== scope,

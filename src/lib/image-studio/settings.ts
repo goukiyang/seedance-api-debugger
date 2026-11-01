@@ -40,8 +40,9 @@ function readSettings(value: ImageStudioSettings) {
     [{ field: 'context', origins: origin ? [origin] : [] }]));
 }
 
-export async function getImageStudioSettings(client: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
-  const row = await client.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } });
+export async function getImageStudioSettings(client: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma, raw?: string | null) {
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key: IMAGE_STUDIO_SETTING_KEY } })
+    : raw === null ? null : { value_json: raw };
   return readSettings(row ? JSON.parse(row.value_json) : { context: '', model: IMAGE_STUDIO_MODELS[0], revision: 0, prices: { ...DEFAULT_STUDIO_PRICES } });
 }
 
