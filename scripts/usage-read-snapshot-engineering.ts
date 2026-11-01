@@ -84,7 +84,7 @@ async function main() {
     // A second page, equal timestamps and orphan rows exercise cursor semantics.
     for (let index = 0; index < 503; index++) seed.CostLedger.push(ledger(`page-${String(index).padStart(4, '0')}`, { task_id: null, source_id: null, occurred_at: epoch + index % 3, reason: index % 2 ? null : 'fixture' }));
     const setup = spawnSync('/usr/bin/python3', ['-c', `import json,sqlite3,sys\np=json.load(sys.stdin)\nc=sqlite3.connect(p['file'])\nc.executescript(p['ddl'])\nc.execute('CREATE INDEX CostAllocation_ledger_id_idx ON CostAllocation(ledger_id)')\nc.execute('CREATE INDEX CostLedger_occurred_at_idx ON CostLedger(occurred_at)')\nfor table,rows in p['seed'].items():\n for row in rows:\n  names=list(row)\n  c.execute('INSERT INTO "'+table+'" ('+','.join('"'+n+'"' for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nc.commit()\nc.close()\n`],
-      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } as NodeJS.ProcessEnv });
+      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } as unknown as NodeJS.ProcessEnv });
     assert.ifError(setup.error); assert.equal(setup.status, 0, setup.stderr);
     db = new PrismaClient({ datasources: { db: { url: `file:${filename}` } }, log: [] });
     const actualDb = db;
