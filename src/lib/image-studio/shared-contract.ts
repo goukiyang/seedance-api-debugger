@@ -1270,12 +1270,15 @@ export async function deleteStudioGroup(user: ImageStudioIdentity, body: Record<
   });
 }
 
-export async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient) {
-  const keys = rows.flatMap(row => [
+export function sharedDependencySettingKeys(rows: Array<{ id: string; owner_id: string }>) {
+  return rows.flatMap(row => [
     `studio_fixed_references_v1:preset:${row.id}`, `studio_reference_policy_v1:preset:${row.owner_id}:${row.id}`,
     `studio_style_preset_selection_v1:${row.id}`, `studio_skill_selection_v1:preset:${row.id}`, studioSharedReproductionKey(row.id),
     moduleCoverKey({ kind: 'preset', id: row.id }),
   ]);
+}
+export async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient) {
+  const keys = sharedDependencySettingKeys(rows);
   const dependencies = await client.platformSetting.findMany({ where: { key: { in: keys } }, select: { key: true, value_json: true }, orderBy: { key: 'asc' } });
   for (const row of dependencies) {
     if (row.key.startsWith('studio_shared_reproduction_v1:')) row.value_json = JSON.stringify(await transformReproduction(client,

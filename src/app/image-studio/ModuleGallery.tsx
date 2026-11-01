@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { MoreHorizontal, RefreshCw, Search, UserRound, X } from 'lucide-react';
 import type { GalleryAuthor, GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
 import styles from './ModuleGallery.module.css';
@@ -57,6 +57,26 @@ const scopes = [
   { value: 'favorites', label: '我的收藏' },
 ] as const;
 
+// Native lazy images can prefetch offscreen rows; mount each visual when it enters the viewport.
+function GalleryVisual({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    if (typeof IntersectionObserver === 'undefined') { setVisible(true); return; }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={ref} className={styles.visual} aria-busy={!visible}>{visible ? children : null}</div>;
+}
+
 export function ModuleGallery({ items, total, filteredTotal, query, onQueryChange, scope, onScopeChange,
   sort, onSortChange, onReset, gridRef, pagination, headerActions, title, loading = false,
   error = false, onRetry, opening = false, authorKey, authorLabel, onAuthorChange }: ModuleGalleryProps) {
@@ -110,11 +130,11 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
         const editable = item.canEditCover === true && Boolean(item.onEditCover);
         return <article key={item.key} className={styles.card} data-module-id={item.id} data-remember-scroll-anchor={`module-cover:${item.key}`}
           data-shared={item.shared} data-mine={item.mine} data-loading={Boolean(item.loading)} data-error={Boolean(item.error)}>
-          <div className={styles.visual}>
+          <GalleryVisual>
             {item.loading || item.error ? <div className={styles.placeholder}>
               <span role={item.error ? 'alert' : 'status'}>{item.error ? '封面未能读取' : '读取封面中…'}</span>
             </div> : item.visual}
-          </div>
+          </GalleryVisual>
           <button type="button" className={styles.openCard} disabled={opening || item.loading}
             aria-label={`打开模块：${item.name}`} onClick={item.onOpen} />
           {item.reactions}

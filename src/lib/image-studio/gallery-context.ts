@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { sharedDependencyState, type SharedStudioClient } from './shared-contract';
+import { sharedDependencySettingKeys, sharedDependencyState, type SharedStudioClient } from './shared-contract';
 import { sharedCommandFingerprint } from './shared-command-storage';
 import { moduleCoverKey } from './module-cover';
 
@@ -38,7 +38,7 @@ export async function createGalleryReadContext(tx: Prisma.TransactionClient, own
     'studio_reference_policy_v1:', 'studio_style_', 'studio_skill_selection_v1:', 'studio_shared_reproduction_v1:',
     'studio_preset_archived_v1:', 'studio_deleted_workspace', 'studio_module_cover_v1:', 'studio_removed_default_groups_v1:'];
   const dependency = await sharedDependencyState(sources, tx);
-  const pageKeys = [...dependency.dependencies.map(row => row.key), ...dependency.styles.map(row => row.key),
+  const pageKeys = [...sharedDependencySettingKeys(sources), ...dependency.styles.map(row => row.key),
     ...modules.flatMap(row => [`studio_shared_binding_v1:${row.id}`, moduleCoverKey({ kind: 'module', id: row.id }),
       `studio_deleted_workspace_v1:${sharedCommandFingerprint(ownerId)}:${row.id}`]),
     ...sources.flatMap(row => [`studio_shared_publisher_v1:${row.id}`, `studio_preset_archived_v1:${row.id}`,
