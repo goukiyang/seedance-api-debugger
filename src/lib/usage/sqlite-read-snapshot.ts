@@ -137,8 +137,9 @@ class SnapshotSession implements UsageSqlReader {
   }
   private log(event: string, fields: Record<string, unknown>) {
     try {
+      const epochMs = Date.now(), at = new Date(epochMs).toISOString();
       console.error('[UsageReadSnapshot]', JSON.stringify({ ...this.metadata, event, ...fields,
-        utc: new Date().toISOString(), mono: performance.now(), pid: process.pid, childPID: this.child.pid ?? null }));
+        at, utc: at, epochMs, mono: performance.now(), pid: process.pid, childPID: this.child.pid ?? null }));
     } catch { /* Diagnostics never change capture or release. */ }
   }
   private send(message: object) {
