@@ -96,7 +96,7 @@ type PreviewModule = { id: string; fixedCover?: ModuleCoverDTO | null; sharedLiv
   cover?: { thumbnailUrl?: string | null; referenceUrl?: string | null } | null; banner?: { thumbnailUrl?: string | null } | null; images?: Array<{ thumbnailUrl?: string | null }> };
 function CurrentCover({ cover, preview, error }: { cover: ModuleCoverDTO | null; preview: CurrentPreview | null; error: string }) {
   const [failed, setFailed] = useState(false);
-  const src = cover ? cover.available ? cover.imageUrl || cover.thumbnailUrl : null : preview?.imageUrl;
+  const src = cover ? cover.available ? cover.thumbnailUrl || cover.imageUrl : null : preview?.imageUrl;
   return <div className={styles.currentCover}>
     <span>{cover ? '当前已保存封面' : '当前显示封面，尚未固定'}</span>
     {src && !failed ? <div className={styles.currentPreview}>
