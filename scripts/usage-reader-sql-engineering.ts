@@ -270,6 +270,7 @@ print(json.dumps([dict(r) for r in c.execute(p['sql'],p['values'])]))
   assert.ok(!peerSnapshot.cashEvents.some(event => event.id.startsWith('excluded-peer-')));
   assert.equal(forbiddenCalls, 0); assert.ok(queries > 10);
   const sources = ['scripts/usage-reader-sql-engineering.ts', 'prisma/schema.prisma', migrationFile, 'src/lib/usage/facts.ts',
+    'src/lib/usage/database.ts',
     'src/lib/usage/source-scope.ts', 'src/lib/usage/media.ts', 'src/lib/usage/access.ts', 'src/lib/usage/query.ts'];
   writeFileSync(destination, JSON.stringify({ schema: 'usage-reader-sql-engineering.v1', completed: true, synthetic: true,
     runId: process.env.IMAGE_RECOVERY_GATE_RUN_ID, candidateRoot: root, startedAt, finishedAt: Date.now(),

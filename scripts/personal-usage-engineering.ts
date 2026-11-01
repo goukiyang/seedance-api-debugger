@@ -136,7 +136,7 @@ print(json.dumps(out))
   checks.push('csv_whitelist_formula_protection_precision_no_private_events');
   const sources = ['src/lib/usage/dto.ts', 'src/lib/usage/access.ts', 'src/lib/usage/source-scope.ts', 'src/lib/usage/query.ts',
     'src/lib/usage/aggregate.ts', 'src/lib/usage/personal.ts', 'src/lib/usage/media.ts', 'src/lib/usage/csv.ts', 'src/lib/usage/http.ts',
-    'src/lib/usage/facts.ts', 'src/lib/admin/usage-facts.ts', 'scripts/personal-usage-engineering.ts'];
+    'src/lib/usage/facts.ts', 'src/lib/usage/database.ts', 'src/lib/admin/usage-facts.ts', 'scripts/personal-usage-engineering.ts'];
   writeFileSync(destination, JSON.stringify({ schema: 'personal-usage-engineering.v1', synthetic: true, completed: true,
     checks, forbiddenCalls, applicationDatabaseOpened: false, paidRequests: 0, browserRuns: 0,
     sourceSha256: Object.fromEntries(sources.map(file => [file, createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex')])),

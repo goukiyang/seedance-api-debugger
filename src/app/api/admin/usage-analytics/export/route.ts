@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     await tracePhase('auth', () => getAdminUser(request));
     const query = parseUsageQuery(request.nextUrl.searchParams);
     const type = request.nextUrl.searchParams.get('type') === 'summary' ? 'summary' : 'records';
-    const snapshot = await tracePhase('capture', () => getUsageAnalyticsSnapshot(query));
+    const snapshot = await getUsageAnalyticsSnapshot(query, request.signal);
     const { report } = snapshot;
     return new NextResponse(streamUsageCsv(snapshot, type, request.signal), { headers: {
       ...privateHeaders,

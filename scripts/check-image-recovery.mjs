@@ -244,7 +244,7 @@ const publicUsageFixtures = [
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/usage/dto.ts', 'src/lib/usage/access.ts', 'src/lib/usage/source-scope.ts', 'src/lib/usage/query.ts',
       'src/lib/usage/aggregate.ts', 'src/lib/usage/personal.ts', 'src/lib/usage/media.ts', 'src/lib/usage/csv.ts', 'src/lib/usage/http.ts',
-      'src/lib/usage/facts.ts', 'src/lib/admin/usage-facts.ts', 'scripts/personal-usage-engineering.ts',
+      'src/lib/usage/facts.ts', 'src/lib/usage/database.ts', 'src/lib/admin/usage-facts.ts', 'scripts/personal-usage-engineering.ts',
     ] },
   { file: 'scripts/project-operations-engineering.ts', schema: 'project-operations-engineering.v1',
     databaseFlag: 'databaseOpened', sources: [
@@ -254,6 +254,7 @@ const publicUsageFixtures = [
   { file: 'scripts/usage-reader-sql-engineering.ts', schema: 'usage-reader-sql-engineering.v1',
     timeoutMs: 60000, databaseFlag: 'applicationDatabaseOpened', sources: [
       'scripts/usage-reader-sql-engineering.ts', 'prisma/schema.prisma', 'src/lib/usage/facts.ts',
+      'src/lib/usage/database.ts',
       'prisma/migrations/20261021073000_usage_attribution/migration.sql',
       'src/lib/usage/source-scope.ts', 'src/lib/usage/media.ts', 'src/lib/usage/access.ts', 'src/lib/usage/query.ts',
     ] },

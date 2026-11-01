@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { CANVAS_SOURCE_LABELS, canvasSourceJsonMarkers } from '@/lib/canvas-source';
 
 export type CostListFilters = {
@@ -72,4 +72,30 @@ export function costLedgerListWhere(filters: CostListFilters): Prisma.CostLedger
   if (filters.cost_status === 'conflict') and.push({ confidence: 'disputed' });
   if (filters.cost_status === 'confirmed') and.push({ confidence: { in: ['confirmed', 'reconciled'] } });
   return and.length ? { AND: and } : {};
+}
+
+/** Fixed ledger-export predicates; the original Prisma list filters remain above. */
+export function costLedgerListSql(filters: CostListFilters): Prisma.Sql {
+  const and: Prisma.Sql[] = [];
+  if (filters.source !== 'all') {
+    const canvas = Prisma.sql`(t."source_label" IN (${Prisma.join([...CANVAS_SOURCE_LABELS])}) OR ${Prisma.join(canvasSourceJsonMarkers().map(marker => Prisma.sql`t."source_metadata_json" LIKE ${`%${marker}%`}`), ' OR ')})`;
+    const source = filters.source === 'ultimate_canvas' ? canvas : filters.source === 'web'
+      ? Prisma.sql`t."source_type" = 'web' AND NOT ${canvas}` : Prisma.sql`t."source_type" = 'codex_api'`;
+    and.push(Prisma.sql`EXISTS (SELECT 1 FROM "VideoTask" t WHERE t."id" = l."task_id" AND (${source}))`);
+  }
+  if (filters.owner_user_id) and.push(Prisma.sql`l."user_id" = ${filters.owner_user_id}`);
+  if (filters.project_id) and.push(filters.project_id === 'unassigned' ? Prisma.sql`l."project_id" IS NULL` : Prisma.sql`l."project_id" = ${filters.project_id}`);
+  const range = dateRange(filters);
+  if (range.gte) and.push(Prisma.sql`l."occurred_at" >= ${range.gte}`);
+  if (range.lte) and.push(Prisma.sql`l."occurred_at" <= ${range.lte}`);
+  if (filters.resolution) and.push(Prisma.sql`EXISTS (SELECT 1 FROM "VideoTask" t WHERE t."id" = l."task_id" AND (${filters.resolution === 'unknown'
+    ? Prisma.sql`t."resolution" IS NULL OR t."resolution" NOT IN ('480p', '720p', '1080p')` : Prisma.sql`t."resolution" = ${filters.resolution}`}))`);
+  if (filters.keyword) {
+    const pattern = `%${filters.keyword}%`;
+    and.push(Prisma.sql`(l."id" LIKE ${pattern} OR l."task_id" LIKE ${pattern} OR l."provider_task_id" LIKE ${pattern} OR l."source_id" LIKE ${pattern})`);
+  }
+  if (filters.cost_status === 'pending') and.push(Prisma.sql`l."confidence" NOT IN ('confirmed', 'reconciled', 'disputed')`);
+  if (filters.cost_status === 'conflict') and.push(Prisma.sql`l."confidence" = 'disputed'`);
+  if (filters.cost_status === 'confirmed') and.push(Prisma.sql`l."confidence" IN ('confirmed', 'reconciled')`);
+  return and.length ? Prisma.join(and.map(condition => Prisma.sql`(${condition})`), ' AND ') : Prisma.sql`1 = 1`;
 }

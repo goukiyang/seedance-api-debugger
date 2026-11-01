@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   try {
     await tracePhase('auth', () => getAdminUser(request));
     const query = parseUsageQuery(request.nextUrl.searchParams);
-    return NextResponse.json(await tracePhase('capture', () => getUsageAnalytics(query)), { headers });
+    return NextResponse.json(await getUsageAnalytics(query, request.signal), { headers });
   } catch (error) {
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '使用分析读取失败，当前条件已保留，请重试原查询' }, { status: 503, headers });

@@ -1,11 +1,11 @@
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
-import type { Prisma } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { getAdminUser } from '@/lib/auth/api-helpers';
 import { costAmountToCnyEstimate, usdToCnyRateText } from '@/lib/costs/currency';
-import { costLedgerListWhere, parseCostListFilters } from '@/app/admin/costs/list-filters';
+import { parseCostListFilters } from '@/app/admin/costs/list-filters';
+import { withUsageReadSnapshot } from '@/lib/usage/sqlite-read-snapshot';
+import { countCostLedgers, readCostLedgerBatch, type CostLedgerExportRow } from '@/lib/usage/cost-ledger-read';
 import { usageRowSpool } from '@/lib/usage/row-spool';
 
 export const dynamic = 'force-dynamic';
@@ -50,66 +50,7 @@ export async function GET(request: NextRequest) {
     let filters;
     try { filters = parseCostListFilters(request.nextUrl.searchParams); }
     catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : '筛选条件无效' }, { status: 400 }); }
-    const where = costLedgerListWhere(filters);
     let dataAsOf = '';
-    const select = {
-        id: true,
-        source_type: true,
-        source_id: true,
-        task_id: true,
-        user_id: true,
-        project_id: true,
-        provider_request_id: true,
-        provider_name: true,
-        provider_account_id: true,
-        provider_task_id: true,
-        event_type: true,
-        amount_minor: true,
-        amount_micros: true,
-        currency: true,
-        usage_quantity: true,
-        usage_unit: true,
-        cost_source: true,
-        confidence: true,
-        pricing_rule_id: true,
-        official_charge_id: true,
-        reason: true,
-        idempotency_key: true,
-        occurred_at: true,
-        created_at: true,
-        task: {
-          select: {
-            source_type: true,
-            source_label: true,
-            source_request_id: true,
-            local_status: true,
-            model: true,
-            resolution: true,
-            duration: true,
-          },
-        },
-        project: { select: { name: true } },
-        provider_request: {
-          select: {
-            status: true,
-            endpoint: true,
-            http_status: true,
-            error_code: true,
-          },
-        },
-        allocations: {
-          select: {
-            allocation_type: true,
-            allocation_id: true,
-            amount_minor: true,
-            amount_micros: true,
-            currency: true,
-            usage_quantity: true,
-            usage_unit: true,
-          },
-        },
-      } satisfies Prisma.CostLedgerSelect;
-
     const headers = [
       'ledger_id',
       'occurred_at',
@@ -153,7 +94,7 @@ export async function GET(request: NextRequest) {
       'data_as_of',
     ];
 
-    const row = (ledger: Prisma.CostLedgerGetPayload<{ select: typeof select }>) => [
+    const row = (ledger: CostLedgerExportRow) => [
       ledger.id,
       ledger.occurred_at.toISOString(),
       ledger.created_at.toISOString(),
@@ -223,16 +164,14 @@ export async function GET(request: NextRequest) {
     let handedOff = false;
     try {
       checkActive();
-      const exported = await tracePhase('capture', () => prisma.$transaction(async tx => {
-        const total = await tx.costLedger.count({ where });
+      const exported = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, asOf) => tracePhase('capture', async () => {
+        const total = await countCostLedgers(reader, filters);
         checkActive();
-        dataAsOf = new Date().toISOString();
+        dataAsOf = asOf;
         let cursor: string | undefined;
         for (;;) {
           checkActive();
-          const ledgers = await tx.costLedger.findMany({ where, select,
-            orderBy: [{ occurred_at: 'desc' }, { id: 'desc' }], take: 500,
-            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+          const ledgers = await readCostLedgerBatch(reader, filters, cursor);
           checkActive();
           if (!ledgers.length) break;
           await spool.add(ledgers.map(ledger => row(ledger).map(csvCell).join(',')));
@@ -241,9 +180,9 @@ export async function GET(request: NextRequest) {
           if (ledgers.length < 500) break;
         }
         return { dataAsOf, total };
-      }, { timeout: 120000 }));
+      }), { signal: request.signal }));
       checkActive();
-      const prepared = await spool.finish();
+      const prepared = await tracePhase('fold', () => spool.finish());
       checkActive();
       iterator = prepared.values();
       let sentHeader = false;

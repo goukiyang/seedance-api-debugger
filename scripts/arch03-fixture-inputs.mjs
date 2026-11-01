@@ -44,6 +44,8 @@ export const ARCH03_SOURCES = [
   'src/components/GenerationCompletion.tsx', 'src/app/story-studio/story-studio.tsx',
   'src/app/api/assets/picker/route.ts', 'src/lib/assets/library-removal.ts', 'src/lib/usage/read-window.ts',
   'src/lib/usage/project-directory.ts', 'src/lib/usage/facts.ts',
+  'src/lib/usage/database.ts', 'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py',
+  'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts',
   'src/lib/usage/summary-fold.ts', 'src/lib/usage/public-summary-fold.ts', 'src/lib/usage/source-scope.ts',
   'src/lib/usage/csv.ts', 'src/lib/usage/http.ts', 'src/lib/usage/dto.ts', 'src/lib/usage/row-spool.ts', 'src/lib/admin/usage-csv.ts',
   'src/app/admin/usage-costs/page.tsx', 'src/app/admin/usage-records/[sourceKind]/[sourceId]/page.tsx',

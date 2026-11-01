@@ -9,6 +9,9 @@ import { iterateUsageCashBatches, iterateUsageFactBatches, readUsageDirectories,
 import { UsageSummaryFold } from '@/lib/usage/summary-fold';
 import { usageRowSpool, type UsageRows } from '@/lib/usage/row-spool';
 import { observeOperation } from '@/lib/performance/server-operations';
+import { tracePhase } from '@/lib/performance/request-trace';
+import { usageReaderDatabase, type UsageDbSource } from '@/lib/usage/database';
+import { withUsageReadSnapshot } from '@/lib/usage/sqlite-read-snapshot';
 import type { Prisma } from '@prisma/client';
 
 const ZERO = BigInt(0);
@@ -266,14 +269,46 @@ export async function getUsageAnalyticsReferenceSnapshot(query: UsageQuery): Pro
 
 type FoldDimension = { id: string | null; label: string; fold: UsageSummaryFold; first: string; last: string };
 
-/** The caller's one database snapshot is folded in batches; only whitelist rows are spooled. */
+type CapturedUsageBatch = { kind: 'facts'; value: UsageFactSnapshot } | { kind: 'cash'; value: UsageCashEvent[] };
+type UsageCaptureSpool = Awaited<ReturnType<typeof usageRowSpool<CapturedUsageBatch>>>;
+function checkUsageSignal(signal?: AbortSignal) {
+  if (signal?.aborted) throw new Error('Usage read interrupted');
+}
+
+async function captureUsageAnalytics(db: UsageDbSource, query: UsageQuery, dataAsOf: string, spool: UsageCaptureSpool, signal?: AbortSignal) {
+  checkUsageSignal(signal);
+  const directory = await readUsageDirectories(db);
+  const window = query.startUtc || query.endUtc ? { startUtc: query.startUtc, endUtc: query.endUtc } : undefined;
+  for await (const batch of iterateUsageFactBatches(db, dataAsOf, window)) {
+    checkUsageSignal(signal);
+    await spool.add([{ kind: 'facts', value: batch }]);
+  }
+  for await (const batch of iterateUsageCashBatches(db, window)) {
+    checkUsageSignal(signal);
+    await spool.add([{ kind: 'cash', value: batch }]);
+  }
+  checkUsageSignal(signal);
+  return { directory, dataAsOf };
+}
+
+/** Compatibility for engineering callers that own a Prisma transaction. */
 export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, query: UsageQuery, dataAsOf: string): Promise<UsageAnalyticsSnapshot> {
+  const spool = await usageRowSpool<CapturedUsageBatch>(() => 0);
+  try {
+    const captured = await captureUsageAnalytics(db, query, dataAsOf, spool);
+    return await foldUsageAnalytics(captured, spool, query);
+  } finally { await spool.dispose(); }
+}
+
+async function foldUsageAnalytics(captured: Awaited<ReturnType<typeof captureUsageAnalytics>>, spool: UsageCaptureSpool, query: UsageQuery, signal?: AbortSignal): Promise<UsageAnalyticsSnapshot> {
+  const { directory, dataAsOf } = captured;
+  checkUsageSignal(signal);
+  const capturedRows = await spool.finish();
   const observed = observeOperation('usage.report');
   const records = await usageRowSpool<UsageFact>((a, b) => compareFact(a, b, query.sort));
   const events = await usageRowSpool<UsageCashEvent>((a, b) => a.id.localeCompare(b.id)).catch(async error => { await records.dispose(); throw error; });
   let completed = false, rows = 0;
   try {
-    const directory = await readUsageDirectories(db);
     const members = new Map<string | null, FoldDimension>(), projects = new Map<string | null, FoldDimension>();
     const memberDirectory = new Map<string | null, FoldDimension>(), projectDirectory = new Map<string | null, FoldDimension>();
     const seed = (target: Map<string | null, FoldDimension>, source: Map<string, string>, selected: string | null) => {
@@ -293,7 +328,6 @@ export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, q
     const unlinkedMoney = new Map<string, bigint>();
     const fingerprint = createHash('sha256').update('usage-report.v2-bounded\0').update(usageQuerySearchParams(query, false).toString())
       .update(JSON.stringify({ startUtc: query.startUtc, endUtc: query.endUtc })).update(JSON.stringify(usageExchangeRate));
-    const window = query.startUtc || query.endUtc ? { startUtc: query.startUtc, endUtc: query.endUtc } : undefined;
     const addDimension = (target: Map<string | null, FoldDimension>, fact: UsageFact, field: 'member' | 'project') => {
       const id = field === 'member' ? fact.ownerUserId : fact.projectId, label = field === 'member' ? fact.ownerLabel : fact.projectLabel;
       const group = target.get(id) || { id, label, fold: new UsageSummaryFold(), first: '', last: '' };
@@ -302,7 +336,10 @@ export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, q
       if (fact.occurredAt > group.last) group.last = fact.occurredAt;
       target.set(id, group);
     };
-    for await (const batch of iterateUsageFactBatches(db, dataAsOf, window)) {
+    for await (const capturedBatch of capturedRows.values()) {
+      checkUsageSignal(signal);
+      if (capturedBatch.kind !== 'facts') continue;
+      const batch = capturedBatch.value;
       rows += batch.facts.length;
       for (const diagnostic of batch.sourceDiagnostics || []) {
         const total = sourceDiagnostics.get(diagnostic.source) || { ...diagnostic, total: 0, frozen: 0, invalid: 0, unavailableCash: 0, pointMissing: 0, pointConflicts: 0 };
@@ -341,7 +378,10 @@ export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, q
       await events.add(cash);
       for (const part of batch.sourceFingerprintParts) fingerprint.update(part);
     }
-    for await (const batch of iterateUsageCashBatches(db, window)) {
+    for await (const capturedBatch of capturedRows.values()) {
+      checkUsageSignal(signal);
+      if (capturedBatch.kind !== 'cash') continue;
+      const batch = capturedBatch.value;
       const selected: UsageCashEvent[] = [];
       for (const event of batch) {
         cashPartial ||= !event.occurredAt || event.cashEvidence && event.status !== 'confirmed';
@@ -355,7 +395,9 @@ export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, q
       await events.add(selected);
       for (const event of selected) fingerprint.update(JSON.stringify(event));
     }
+    checkUsageSignal(signal);
     const recordRows = await records.finish(), cashRows = await events.finish();
+    checkUsageSignal(signal);
     const recordPage = Math.min(Math.max(1, query.records_page || query.page), Math.max(1, Math.ceil(recordRows.length / query.page_size)));
     const pageRows: UsageFact[] = [];
     for await (const fact of recordRows.values((recordPage - 1) * query.page_size, query.page_size)) pageRows.push(fact);
@@ -411,16 +453,21 @@ export async function readUsageAnalyticsSnapshot(db: Prisma.TransactionClient, q
   } finally { if (!completed) { await records.dispose(); await events.dispose(); } }
 }
 
-export async function getUsageAnalyticsSnapshot(query: UsageQuery): Promise<UsageAnalyticsSnapshot> {
-  return prisma.$transaction(db => readUsageAnalyticsSnapshot(db, query, new Date().toISOString()), { maxWait: 10000, timeout: 120000 });
+export async function getUsageAnalyticsSnapshot(query: UsageQuery, signal?: AbortSignal): Promise<UsageAnalyticsSnapshot> {
+  const spool = await usageRowSpool<CapturedUsageBatch>(() => 0);
+  try {
+    const captured = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, dataAsOf) =>
+      tracePhase('capture', () => captureUsageAnalytics(usageReaderDatabase(reader), query, dataAsOf, spool, signal)), { signal }));
+    return await tracePhase('fold', () => foldUsageAnalytics(captured, spool, query, signal));
+  } finally { await spool.dispose(); }
 }
 
-export async function getUsageAnalytics(query: UsageQuery): Promise<UsageReport> {
-  const snapshot = await getUsageAnalyticsSnapshot(query);
+export async function getUsageAnalytics(query: UsageQuery, signal?: AbortSignal): Promise<UsageReport> {
+  const snapshot = await getUsageAnalyticsSnapshot(query, signal);
   try { return snapshot.report; } finally { await snapshot.dispose?.(); }
 }
 
-async function exactUsageFact(db: Prisma.TransactionClient, kind: UsageSourceKind, id: string, asOf: string) {
+async function exactUsageFact(db: UsageDbSource, kind: UsageSourceKind, id: string, asOf: string) {
   const ids = kind === 'cutout_receipt' ? (await db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "PlatformSetting"
     WHERE substr("key", 1, 21) = 'image_result_next_v1:' AND json_extract(CASE WHEN json_valid("value_json") THEN "value_json" ELSE '{}' END, '$.receiptId') = ${id}
     ORDER BY "id" ASC LIMIT 2`).map(row => row.id) : [id];
@@ -429,37 +476,60 @@ async function exactUsageFact(db: Prisma.TransactionClient, kind: UsageSourceKin
 }
 
 export async function getUsageRecordPage(kind: UsageSourceKind, id: string, requestedPage: number) {
-  return prisma.$transaction(async db => {
-    const asOf = new Date().toISOString(), record = await exactUsageFact(db, kind, id, asOf);
-    if (!record) return null;
-    const parent = record.parentSourceKind && record.parentSourceId ? await exactUsageFact(db, record.parentSourceKind, record.parentSourceId, asOf) : null;
-    const spool = await usageRowSpool<UsageFact>((a, b) => compareFact(a, b, 'newest'));
-    try {
+  const spool = await usageRowSpool<UsageFact>(() => 0);
+  try {
+    const captured = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, asOf) => tracePhase('capture', async () => {
+      const db = usageReaderDatabase(reader), record = await exactUsageFact(db, kind, id, asOf);
+      if (!record) return null;
+      const parent = record.parentSourceKind && record.parentSourceId ? await exactUsageFact(db, record.parentSourceKind, record.parentSourceId, asOf) : null;
       for await (const batch of iterateUsageFactBatches(db, asOf, undefined, { kind, id })) {
         await spool.add(batch.facts.filter(fact => fact.parentSourceKind === kind && fact.parentSourceId === id && fact.sourceId !== id && fact.occurredAt <= asOf));
       }
-      const children = await spool.finish(), page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, Math.max(1, Math.ceil(children.length / 30)));
-      const items: UsageFact[] = []; for await (const child of children.values((page - 1) * 30, 30)) items.push(child);
-      return { asOf, record, parents: parent ? [parent] : [], children: items, total: children.length, page };
-    } finally { await spool.dispose(); }
-  }, { maxWait: 10000, timeout: 120000 });
+      return { asOf, record, parent };
+    })));
+    if (!captured) return null;
+    return await tracePhase('fold', async () => {
+      const sorted = await usageRowSpool<UsageFact>((a, b) => compareFact(a, b, 'newest'));
+      try {
+        const raw = await spool.finish(); let batch: UsageFact[] = [];
+        for await (const fact of raw.values()) {
+          batch.push(fact);
+          if (batch.length === 500) { await sorted.add(batch); batch = []; }
+        }
+        await sorted.add(batch);
+        const children = await sorted.finish(), page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, Math.max(1, Math.ceil(children.length / 30)));
+        const items: UsageFact[] = []; for await (const child of children.values((page - 1) * 30, 30)) items.push(child);
+        return { asOf: captured.asOf, record: captured.record, parents: captured.parent ? [captured.parent] : [], children: items, total: children.length, page };
+      } finally { await sorted.dispose(); }
+    });
+  } finally { await spool.dispose(); }
 }
 
 export async function getUsageUnlinkedPage(query: UsageQuery) {
-  return prisma.$transaction(async db => {
-    const asOf = new Date().toISOString(), spool = await usageRowSpool<UsageCashEvent>((a, b) => b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id));
-    const totals = new Map<string, bigint>();
-    try {
-      for await (const batch of iterateUsageCashBatches(db, query.startUtc || query.endUtc ? { startUtc: query.startUtc, endUtc: query.endUtc } : undefined)) {
-        const selected = batch.filter(event => unlinkedMatches(event, query, asOf));
-        for (const event of selected) if (event.cashEvidence && event.status === 'confirmed' && event.currency && event.amountMicros !== null) {
-          totals.set(event.currency, (totals.get(event.currency) || ZERO) + usageInteger(event.amountMicros)!);
-        }
-        await spool.add(selected);
+  const spool = await usageRowSpool<UsageCashEvent>(() => 0);
+  try {
+    const asOf = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, dataAsOf) => tracePhase('capture', async () => {
+      for await (const batch of iterateUsageCashBatches(usageReaderDatabase(reader), query.startUtc || query.endUtc ? { startUtc: query.startUtc, endUtc: query.endUtc } : undefined)) {
+        await spool.add(batch.filter(event => unlinkedMatches(event, query, dataAsOf)));
       }
-      const stored = await spool.finish(), pages = Math.max(1, Math.ceil(stored.length / query.page_size)), page = Math.min(query.page, pages);
-      const rows: UsageCashEvent[] = []; for await (const event of stored.values((page - 1) * query.page_size, query.page_size)) rows.push(event);
-      return { asOf, rows, total: stored.length, page, pages, confirmedCost: usageMoneyTotals(Array.from(totals, ([currency, amount]) => ({ currency, amountMicros: amount.toString() }))) };
-    } finally { await spool.dispose(); }
-  }, { maxWait: 10000, timeout: 120000 });
+      return dataAsOf;
+    })));
+    return await tracePhase('fold', async () => {
+      const sorted = await usageRowSpool<UsageCashEvent>((a, b) => b.occurredAt.localeCompare(a.occurredAt) || a.id.localeCompare(b.id));
+      try {
+        const raw = await spool.finish(), totals = new Map<string, bigint>(); let batch: UsageCashEvent[] = [];
+        for await (const event of raw.values()) {
+          if (event.cashEvidence && event.status === 'confirmed' && event.currency && event.amountMicros !== null) {
+            totals.set(event.currency, (totals.get(event.currency) || ZERO) + usageInteger(event.amountMicros)!);
+          }
+          batch.push(event);
+          if (batch.length === 500) { await sorted.add(batch); batch = []; }
+        }
+        await sorted.add(batch);
+        const stored = await sorted.finish(), pages = Math.max(1, Math.ceil(stored.length / query.page_size)), page = Math.min(query.page, pages);
+        const rows: UsageCashEvent[] = []; for await (const event of stored.values((page - 1) * query.page_size, query.page_size)) rows.push(event);
+        return { asOf, rows, total: stored.length, page, pages, confirmedCost: usageMoneyTotals(Array.from(totals, ([currency, amount]) => ({ currency, amountMicros: amount.toString() }))) };
+      } finally { await sorted.dispose(); }
+    });
+  } finally { await spool.dispose(); }
 }

@@ -4,11 +4,12 @@ import { Prisma } from '@prisma/client';
 import type { UsageAttributionBasis, UsageCoverage, UsageFact, UsageKind, UsageSourceKind } from '@/lib/admin/usage-types';
 import { usageInteger, usageDecimalUnits, usageUnitsText, usageMoneyTotals, usageCnyMicros } from '@/lib/admin/usage-money';
 import { usageRecordHref } from '@/lib/admin/usage-record-link';
+import { usageDatabase, usageDateTime, type UsageDb, type UsageDbSource } from './database';
 import { usageWindowCondition, usageSqlTime, type UsageReadWindow } from './read-window';
 
 type Cell = string | number | bigint | Date | boolean | null;
 type Row = Record<string, Cell>;
-type Db = Prisma.TransactionClient;
+type Db = UsageDb;
 export type UsageFactSlice = { kind: UsageSourceKind; ids: string[] };
 export interface UsageFactReadOptions {
   scoped: true;
@@ -49,6 +50,10 @@ async function rows(db: Db, from: Prisma.Sql, fields: Prisma.Sql, id: Prisma.Sql
   for (;;) {
     const page = await db.$queryRaw<Row[]>(Prisma.sql`SELECT ${fields} FROM ${from}
       WHERE (${condition}) AND ${id} > ${cursor} ORDER BY ${id} ASC LIMIT ${CHUNK}`);
+    // These names are direct DateTime columns in the audited facts projections.
+    for (const row of page) for (const field of ['created_at', 'updated_at', 'occurred_at', 'completed_at', 'finished_at', 'started_at', 'billing_settled_at']) {
+      if (field in row) row[field] = usageDateTime(row[field]);
+    }
     result.push(...page);
     if (page.length < CHUNK) return result;
     cursor = String(page[page.length - 1].id);
@@ -127,7 +132,7 @@ async function readAttributions(db: Db, selected?: Array<{ kind: UsageSourceKind
         "billing_subject_id", "project_id", "occurred_at", "context_version", "parent_source_kind", "parent_source_id"
         FROM "UsageAttribution" WHERE ${Prisma.join(conditions, ' OR ')} LIMIT ${CHUNK}`);
       for (const row of page) {
-        const time = iso(row.occurred_at);
+        const time = iso(usageDateTime(row.occurred_at));
         values.set(keyOf(String(row.source_kind), String(row.source_id)), { owner: str(row.owner_user_id), actor: str(row.actor_user_id),
           project: str(row.project_id), time, payer: str(row.billing_subject_type) && str(row.billing_subject_id) ? `${row.billing_subject_type}:${row.billing_subject_id}` : null,
           parentKind: str(row.parent_source_kind), parentId: str(row.parent_source_id), valid: usageInteger(row.context_version) === BigInt(1) && time !== null });
@@ -142,7 +147,7 @@ async function readAttributions(db: Db, selected?: Array<{ kind: UsageSourceKind
       FROM "UsageAttribution" WHERE "source_kind" > ${kind} OR ("source_kind" = ${kind} AND "source_id" > ${id})
       ORDER BY "source_kind", "source_id" LIMIT ${CHUNK}`;
     for (const row of page) {
-      const time = iso(row.occurred_at);
+      const time = iso(usageDateTime(row.occurred_at));
       values.set(keyOf(String(row.source_kind), String(row.source_id)), {
         owner: str(row.owner_user_id), actor: str(row.actor_user_id), project: str(row.project_id), time,
         payer: str(row.billing_subject_type) && str(row.billing_subject_id) ? `${row.billing_subject_type}:${row.billing_subject_id}` : null,
@@ -267,7 +272,8 @@ async function directories(db: Db, model: 'user' | 'project') {
 }
 
 /** Read-only whitelist projection. Caller owns the enclosing interactive snapshot. */
-export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFactReadOptions, window?: UsageReadWindow, slice?: UsageFactSlice): Promise<UsageFactSnapshot> {
+export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, options?: UsageFactReadOptions, window?: UsageReadWindow, slice?: UsageFactSlice): Promise<UsageFactSnapshot> {
+  const db = usageDatabase(source, options?.projectWhere);
   if (slice && (slice.ids.length > CHUNK || slice.ids.some(id => typeof id !== 'string' || !id || id.length > 200))) throw new Error('usage_slice_invalid');
   const sourceId = (kind: UsageSourceKind) => kind === 'role_run' ? Prisma.sql`r."id"` : kind === 'role_attempt'
     ? Prisma.sql`a."id"` : kind === 'agent_text_step' ? Prisma.sql`s."id"` : Prisma.sql`"id"`;
@@ -467,14 +473,14 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
   if (options || slice) {
     const ids = Array.from(usedProjectIds).filter((id): id is string => !!id && (!options || !!options.projectWhere || options.projectNames.has(id)));
     for (let offset = 0; offset < ids.length; offset += CHUNK) {
-      const page = await db.project.findMany({ where: { AND: [{ id: { in: ids.slice(offset, offset + CHUNK) } }, options?.projectWhere || {}] }, select: { id: true, name: true }, take: CHUNK });
-      for (const project of page) projectNames.set(project.id, project.name);
+      const page = await db.projectNames(ids.slice(offset, offset + CHUNK));
+      for (const project of page) projectNames.set(project.id, project.name || '');
     }
   }
   if (slice && !options) {
     const ids = Array.from(new Set(internal.flatMap(item => item.fact.ownerUserId ? [item.fact.ownerUserId] : [])));
     for (let offset = 0; offset < ids.length; offset += CHUNK) {
-      const users = await db.user.findMany({ where: { id: { in: ids.slice(offset, offset + CHUNK) } }, select: { id: true, name: true } });
+      const users = await db.userNames(ids.slice(offset, offset + CHUNK));
       for (const user of users) memberNames.set(user.id, user.name && !user.name.includes('@') ? user.name : `成员 ${user.id.slice(0, 8)}`);
     }
     for (const [id, name] of Array.from(projectNames)) if (!name || name.includes('@')) projectNames.set(id, `项目 ${id.slice(0, 8)}`);
@@ -511,7 +517,8 @@ export async function readUsageFacts(db: Db, dataAsOf: string, options?: UsageFa
 }
 
 /** Batches use the original projection and settlement readers, not a second billing formula. */
-export async function* iterateUsageFactBatches(db: Db, dataAsOf: string, window?: UsageReadWindow, parent?: { kind: UsageSourceKind; id: string }, options?: UsageFactReadOptions) {
+export async function* iterateUsageFactBatches(sourceDb: UsageDbSource, dataAsOf: string, window?: UsageReadWindow, parent?: { kind: UsageSourceKind; id: string }, options?: UsageFactReadOptions) {
+  const db = usageDatabase(sourceDb, options?.projectWhere);
   const sources: Array<{ kind: UsageSourceKind; from: Prisma.Sql; id: Prisma.Sql; condition: Prisma.Sql }> = [
     { kind: 'video_task', from: Prisma.sql`"VideoTask"`, id: Prisma.sql`"VideoTask"."id"`, condition: Prisma.sql`1 = 1` },
     { kind: 'image_task', from: Prisma.sql`"ImageStudioTask"`, id: Prisma.sql`"ImageStudioTask"."id"`, condition: Prisma.sql`1 = 1` },
@@ -547,7 +554,8 @@ export async function* iterateUsageFactBatches(db: Db, dataAsOf: string, window?
   }
 }
 
-export async function* iterateUsageCashBatches(db: Db, window?: UsageReadWindow) {
+export async function* iterateUsageCashBatches(source: UsageDbSource, window?: UsageReadWindow) {
+  const db = usageDatabase(source);
   let cursor = '';
   const time = usageSqlTime(Prisma.sql`"occurred_at"`);
   for (;;) {
@@ -564,7 +572,10 @@ export async function* iterateUsageCashBatches(db: Db, window?: UsageReadWindow)
   }
 }
 
-export const readUsageDirectories = async (db: Db) => ({ members: await directories(db, 'user'), projects: await directories(db, 'project') });
+export const readUsageDirectories = async (source: UsageDbSource) => {
+  const db = usageDatabase(source);
+  return { members: await directories(db, 'user'), projects: await directories(db, 'project') };
+};
 
 // Cash and point ledgers are attached below. These readers never import an
 // execution/finalizer/provider module or read an unbounded JSON blob.
@@ -734,7 +745,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
   const requestIds = Array.from(new Set(ledgers.flatMap(row => [str(row.provider_request_id), row.source_type === 'provider_request' ? str(row.source_id) : null]).filter((id): id is string => !!id)));
   const requestTasks = new Map<string, string>();
   for (let offset = 0; offset < requestIds.length; offset += CHUNK) {
-    const page = await db.providerApiRequest.findMany({ where: { id: { in: requestIds.slice(offset, offset + CHUNK) } }, select: { id: true, task_id: true } });
+    const page = await db.requestTasks(requestIds.slice(offset, offset + CHUNK));
     for (const request of page) if (request.task_id) requestTasks.set(request.id, request.task_id);
   }
   for (const row of ledgers) {
@@ -919,6 +930,7 @@ async function attachPoints(db: Db, items: InternalFact[], versions: string[], s
       : await db.$queryRaw<Row[]>(Prisma.sql`SELECT ${projectFields} FROM "ProjectBudgetLedger" WHERE ${projectCondition} ORDER BY "created_at", "id"`);
     for (const [kind, values] of [['user', userRows], ['project', projectRows]] as const) {
       for (const row of values) {
+        row.created_at = usageDateTime(row.created_at);
         const key = String(row.related_task_id), value = byTask.get(key) || [];
         value.push({ ...row, ledger_kind: kind }); byTask.set(key, value);
         versions.push(JSON.stringify({ ...row, ledger_kind: kind }, (_key, cell) => typeof cell === 'bigint' ? cell.toString() : cell));

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   return traceHttpRequest('admin.usage-records', request.headers, async () => {
   try {
     await tracePhase('auth', () => getAdminUser(request));
-    const report = await tracePhase('capture', () => getUsageAnalytics(parseUsageQuery(request.nextUrl.searchParams)));
+    const report = await getUsageAnalytics(parseUsageQuery(request.nextUrl.searchParams), request.signal);
     return NextResponse.json({ records: report.records, query: report.query, dataAsOf: report.dataAsOf, reportFingerprint: report.reportFingerprint }, { headers });
   } catch (error) {
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
