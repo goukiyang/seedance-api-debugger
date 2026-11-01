@@ -68,11 +68,11 @@ function normalizeTechnicalIdentity(body: Record<string, unknown>) {
   const raw = typeof body.fingerprint === 'string' ? body.fingerprint.slice(0, 160) : '';
   if (!raw) return null;
   const parts = raw.split(':');
-  const module = safeTechnicalPart(parts[0], 40);
+  const moduleName = safeTechnicalPart(parts[0], 40);
   const event = safeTechnicalPart(parts[1], 80);
   const version = parts.length === 3 ? safeManifestVersion(parts[2]) : '';
-  if (parts.length === 3 && module && event && version) {
-    return { fingerprint: `${module}:${event}:${version}`, kind: `${module}:${event}`, version };
+  if (parts.length === 3 && moduleName && event && version) {
+    return { fingerprint: `${moduleName}:${event}:${version}`, kind: `${moduleName}:${event}`, version };
   }
   const fallback = `invalid:${digest(raw).slice(0, 32)}`;
   return { fingerprint: fallback, kind: 'invalid', version: safeManifestVersion(body.version) };
@@ -128,15 +128,15 @@ function sanitizeItems(items: unknown[]) {
   return items.slice(-MAX_REPORT_ITEMS).flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const item = value as Record<string, unknown>;
-    const module = safeTechnicalPart(item.m, 40);
+    const moduleName = safeTechnicalPart(item.m, 40);
     const event = safeTechnicalPart(item.e, 80);
-    if (!module || !event) return [];
+    if (!moduleName || !event) return [];
     const level = typeof item.lv === 'string' && ['info', 'warn', 'error'].includes(item.lv) ? item.lv : 'info';
     return [{
       t: normalizeIsoTime(item.t),
       lv: level,
       at: safeSite(item.at),
-      m: module,
+      m: moduleName,
       e: event,
       ...(item.d === undefined ? {} : { d: diagnosticValue(item.d) }),
     }];
