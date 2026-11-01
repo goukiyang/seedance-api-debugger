@@ -595,7 +595,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
           const ids = references.get(providerScope) || new Set<string>(); ids.add(providerReference); references.set(providerScope, ids);
         }
       }
-      for (const [source, ids] of sources) links.push(Prisma.sql`"source_type" = ${source} AND "source_id" IN (${Prisma.join(ids)})`);
+      for (const [source, ids] of Array.from(sources)) links.push(Prisma.sql`"source_type" = ${source} AND "source_id" IN (${Prisma.join(ids)})`);
       if (videoIds.length) {
         const requests = await rows(db, Prisma.sql`"ProviderApiRequest"`, Prisma.sql`"id"`, Prisma.sql`"id"`, Prisma.sql`"task_id" IN (${Prisma.join(videoIds)})`);
         for (let requestOffset = 0; requestOffset < requests.length; requestOffset += CHUNK) {
@@ -604,7 +604,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
             Prisma.sql`"source_type" = 'provider_request' AND "source_id" IN (${Prisma.join(ids)})`);
         }
       }
-      for (const [scope, ids] of references) links.push(Prisma.sql`"provider_account_id" = ${scope} AND "provider_task_id" IN (${Prisma.join(Array.from(ids))})`);
+      for (const [scope, ids] of Array.from(references)) links.push(Prisma.sql`"provider_account_id" = ${scope} AND "provider_task_id" IN (${Prisma.join(Array.from(ids))})`);
       const values = new Map<string, Row>();
       for (const link of links) for (const row of await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, link)) values.set(String(row.id), row);
       // Preserve the original per-leaf-batch ID order, including rows found by
@@ -632,7 +632,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
           groups.set(key, group);
         }
         const values = new Map<string, Row>();
-        for (const group of groups.values()) {
+        for (const group of Array.from(groups.values())) {
           const matches: Prisma.Sql[] = [];
           if (group.proofs.size) matches.push(Prisma.sql`"official_charge_id" IN (${Prisma.join(Array.from(group.proofs))})`);
           if (group.references.size) matches.push(Prisma.sql`COALESCE(NULLIF("provider_task_id", ''), "provider_request_id") IN (${Prisma.join(Array.from(group.references))})`);
