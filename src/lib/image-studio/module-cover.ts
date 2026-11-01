@@ -6,6 +6,8 @@ import sharp from 'sharp';
 import type { Asset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { lookupHd, hdRepresentationVersion } from '@/lib/media/hd-derivatives';
+import { comparisonOriginalVersion } from '@/lib/media/image-comparison-version';
 import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { assertStudioActor, studioPublisherModule, studioSharedBinding, type SharedStudioClient } from './shared-contract';
 import { studioPresetArchived } from './preset-lifecycle';
@@ -225,10 +227,21 @@ async function inspectSources(actor: ImageStudioIdentity, state: TargetState, id
       if (bytes.length > 40 * 1024 * 1024) throw new ModuleCoverError('封面原图过大');
       const metadata = await sharp(bytes, { limitInputPixels: 40_000_000, animated: false, failOn: 'warning' }).metadata();
       if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new ModuleCoverError('请选择普通静态图片');
-      if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
       const swapped = [5, 6, 7, 8].includes(metadata.orientation ?? 1);
-      inspected.push({ assetId: asset.id, version, previewUrl: studioTemplateAssetUrl(asset.id),
-        width: swapped ? metadata.height : metadata.width, height: swapped ? metadata.width : metadata.height });
+      const width = swapped ? metadata.height : metadata.width, height = swapped ? metadata.width : metadata.height;
+      let previewUrl = studioTemplateAssetUrl(asset.id);
+      try {
+        const hd = await lookupHd(asset.original_url);
+        if (hd?.status === 'ready' && (hd.format === 'avif' || hd.format === 'webp')
+          && hd.width === width && hd.height === height && hd.bytes !== undefined && hd.bytes < bytes.length) {
+          const representation = await hdRepresentationVersion(asset.original_url, hd);
+          const comparison = await comparisonOriginalVersion(asset.original_url);
+          if (representation && comparison) previewUrl += `?${new URLSearchParams({ hd: '1', 'hd-version': hd.version,
+            'hd-representation': representation, 'comparison-version': comparison })}`;
+        }
+      } catch { /* Optional HD uncertainty keeps the authorized original URL. */ }
+      if (version !== await sourceVersion(asset)) throw new ModuleCoverError('原图刚刚变化，请重新选择', 409);
+      inspected.push({ assetId: asset.id, version, previewUrl, width, height });
     }
     return inspected;
   } finally { activeJobs -= 1; }

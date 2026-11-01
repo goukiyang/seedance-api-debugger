@@ -46,6 +46,11 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const loaded = useRef(false), restored = useRef(false), latestArea = useRef<Area | null>(null);
+  const cropImage = useRef<HTMLImageElement | null>(null);
+  useEffect(() => () => {
+    const image = cropImage.current;
+    if (image && !image.isConnected && !image.complete) image.removeAttribute('src');
+  }, []);
   const publishCrop = (area: Area) => {
     latestArea.current = area;
     if (!loaded.current || !validCrop(area, slot.source, aspect)) return;
@@ -58,14 +63,15 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
   };
   return <div className={styles.cropSlot} aria-disabled={disabled || !ready || undefined}>
     <Cropper image={slot.source.previewUrl} crop={position} zoom={zoom} aspect={aspect} maxZoom={12}
+      setImageRef={ref => { cropImage.current = ref.current; }}
       initialCroppedAreaPercentages={slot.restore}
       onCropChange={value => { if (!restored.current || !disabled) setPosition(value); }}
       onZoomChange={value => { if (!restored.current || !disabled) setZoom(value); }}
       onCropAreaChange={publishCrop} onInteractionStart={() => { if (ready && !disabled) onInteract(); }}
       onMediaLoaded={media => {
         if (!(media.naturalWidth > 0 && media.naturalHeight > 0)) return;
-        // The protected source URL serves the oriented original, so crop percentages
-        // and the saved Sharp render both refer to these exact pixel dimensions.
+        // Original and verified full-resolution HD share these oriented dimensions;
+        // the saved Sharp render still reads the original with these percentages.
         if (!Number.isInteger(slot.source.width) || !Number.isInteger(slot.source.height) || slot.source.width < 1 || slot.source.height < 1
           || media.naturalWidth !== slot.source.width || media.naturalHeight !== slot.source.height) {
           loaded.current = false; setFailed(true); setReady(false); onCrop(); return;

@@ -78,7 +78,7 @@ const source = readFileSync(sourcePath, 'utf8');
 const ast = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const executable = ast.statements.filter(statement => !ts.isImportDeclaration(statement)
   && !(ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression))).map(statement => statement.getText(ast)).join('\n');
-const compiled = ts.transpileModule(`${executable}\nexports.__CurrentCover = CurrentCover;`, { compilerOptions: {
+const compiled = ts.transpileModule(`${executable}\nexports.__CurrentCover = CurrentCover;\nexports.__CropSlot = CropSlot;`, { compilerOptions: {
   target: ts.ScriptTarget.ES2017, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const cover = (changes: Partial<ModuleCoverDTO> = {}): ModuleCoverDTO => ({
@@ -113,7 +113,7 @@ class Fixture {
   constructor(initialFixedCover: ModuleCoverDTO | null | undefined = cover()) {
     let active: Hooks;
     const activate = (hooks: Hooks) => { active = hooks; };
-    const exports = {} as { ModuleCoverEditor: Component; __CurrentCover: Component };
+    const exports = {} as { ModuleCoverEditor: Component; __CurrentCover: Component; __CropSlot: Component };
     const sandbox = {
       exports, Error, AbortController,
       React: { Fragment: 'fragment', createElement: (type: unknown, props: Props | null, ...children: unknown[]) => ({ type, key: props?.key ?? null, props: { ...props, children } }) },
@@ -140,8 +140,11 @@ class Fixture {
     this.props = { userId: 'viewer-a', moduleId: 'module-a', moduleName: 'Module A', initialFixedCover, onClose: () => undefined, onSaved: () => undefined };
     this.hooks = new Hooks(exports.ModuleCoverEditor, this.props, activate);
     this.childFactory = props => new Hooks(this.currentCover, props, activate);
+    this.cropFactory = props => new Hooks(exports.__CropSlot, props, activate);
   }
   private childFactory: (props: Props) => Hooks;
+  private cropFactory: (props: Props) => Hooks;
+  crop(props: Props) { return this.cropFactory(props); }
   async flush() { await this.hooks.flush(); }
   async reply(index: number, payload: unknown, status = 200, invalidJSON = false) {
     assert.ok(this.requests[index], `Expected request ${index}`);
@@ -261,6 +264,35 @@ async function main() {
     await current.reply(0, editorState());
     equal(current.current()!.node.key?.startsWith('fresh:'), true, 'Serial initial read renders only fresh state');
   }
+  const cropOwner = new Fixture(), originalUrl = '/fixture/original-full-resolution';
+  const cropProps = { slot: { source: { previewUrl: originalUrl, width: 2048, height: 2048 }, key: 1 },
+    aspect: 1, disabled: false, onCrop: () => undefined, onInteract: () => undefined };
+  const pendingCrop = cropOwner.crop(cropProps); await pendingCrop.flush();
+  const pendingCropper = nodes(pendingCrop.result).find(({ node }) => node.type === 'cropper')!.node;
+  equal(pendingCropper.props.image, originalUrl, 'Cropping still requests the supplied full-resolution URL');
+  let abandonedRemovals = 0, currentRemovals = 0;
+  const abandoned = { complete: false, isConnected: false, removeAttribute(name: string) { equal(name, 'src', 'Only the abandoned image source is removed'); abandonedRemovals++; } };
+  const imageRef: { current: typeof abandoned | null } = { current: abandoned };
+  (pendingCropper.props.setImageRef as (ref: typeof imageRef) => void)(imageRef);
+  const currentCrop = cropOwner.crop(cropProps); await currentCrop.flush();
+  const currentCropper = nodes(currentCrop.result).find(({ node }) => node.type === 'cropper')!.node;
+  const loadedImage = { complete: true, isConnected: false, removeAttribute() { currentRemovals++; } };
+  (currentCropper.props.setImageRef as (ref: { current: typeof loadedImage }) => void)({ current: loadedImage });
+  imageRef.current = null; // React clears the library ref before passive teardown.
+  pendingCrop.unmount();
+  equal(abandonedRemovals, 1, 'Unmount cancels the captured unfinished read even after the library ref clears');
+  equal(currentRemovals, 0, 'An old owner cannot cancel a newly mounted crop image');
+  currentCrop.unmount();
+  equal(currentRemovals, 0, 'A completed full-resolution image is left intact');
+  const connectedCrop = cropOwner.crop(cropProps); await connectedCrop.flush();
+  const connectedCropper = nodes(connectedCrop.result).find(({ node }) => node.type === 'cropper')!.node;
+  let connectedRemovals = 0;
+  const connectedImage = { complete: false, isConnected: true, removeAttribute() { connectedRemovals++; } };
+  (connectedCropper.props.setImageRef as (ref: { current: typeof connectedImage }) => void)({ current: connectedImage });
+  connectedCrop.unmount(); // Development effect replay cleans up while the DOM remains connected.
+  equal(connectedRemovals, 0, 'Connected development cleanup must retain the still-used image');
+  connectedImage.isConnected = false; connectedCrop.unmount();
+  equal(connectedRemovals, 1, 'Later detached cleanup cancels the same unfinished read');
   const studio = readFileSync('src/app/image-studio/studio.tsx', 'utf8');
   assert.match(studio, /onEditCover: \(\) => editGalleryCover\(entry, pageItem\?\.fixedCover\)/); checks++;
   assert.match(studio, /initialFixedCover=\{galleryCoverTarget\.initialFixedCover\}/); checks++;

@@ -9,6 +9,7 @@ import { catalogReaderReady, readCatalogRevision } from './catalog-revision';
 import type { ImageStudioIdentity } from './access';
 import type { GalleryQuery, GalleryQueryResult } from './gallery-types';
 import { observeOperation } from '@/lib/performance/server-operations';
+import { tracePhase } from '@/lib/performance/request-trace';
 
 export async function queryGalleryDirectory(user: ImageStudioIdentity, raw: unknown): Promise<GalleryQueryResult> {
   const input = parseGalleryQuery(raw);
@@ -59,7 +60,8 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
     return { ...result, navigation: rows.map(row => available.get(row.key)!),
       items: rows.flatMap(row => result.items.filter(item => item.key === row.key)) };
   };
-  const cover = await project(pageRows, Boolean(input.navigationOnly)), nav = await project(navigationRows, true);
+  const cover = await tracePhase('gallery-cover', () => project(pageRows, Boolean(input.navigationOnly))),
+    nav = await tracePhase('gallery-navigation', () => project(navigationRows, true));
   const groups = await db.$queryRaw<Array<{ groupName: string }>>(Prisma.sql`WITH ${navigation.ctes} SELECT DISTINCT groupName FROM filtered ORDER BY groupName`);
   if (before !== await readCatalogRevision(db, 'templates')) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   await assertStudioActor(user.id, db);

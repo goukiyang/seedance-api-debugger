@@ -22,6 +22,7 @@ type Exports = Record<string, any>;
 const fixtureFile = 'scripts/template-author-cover-contract-engineering.ts';
 const sourceFiles = [fixtureFile, 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/template-author.ts', 'src/lib/image-studio/definition-read.ts',
   'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
+  'src/lib/media/hd-derivatives.ts', 'src/lib/media/image-comparison-version.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
   'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts',
@@ -294,6 +295,8 @@ async function main() {
   const renderAttempts: string[] = [], protectedURLs = new Set<string>();
   const cover = evaluate('src/lib/image-studio/module-cover.ts', { '@/lib/performance/request-trace': requestTrace, 'node:fs/promises': { __esModule: true, default: syntheticFs }, 'node:path': path,
     'node:crypto': crypto, sharp: () => forbidden('image-encoder'), '@/lib/prisma': { prisma }, '@/lib/assets/site-url': siteURL,
+    '@/lib/media/hd-derivatives': { lookupHd: () => forbidden('hd-lookup'), hdRepresentationVersion: () => forbidden('hd-representation') },
+    '@/lib/media/image-comparison-version': { comparisonOriginalVersion: () => forbidden('comparison-original-version') },
     './access': access, './shared-contract': shared, './shared-command-storage': storage, './preset-lifecycle': lifecycle,
     './workspace-deletion': deletion, './protected-assets': { studioHiddenAssetUrls: async (viewer: Row) => {
       assert.equal(viewer.id, 'module-cover-audience'); return Array.from(protectedURLs);

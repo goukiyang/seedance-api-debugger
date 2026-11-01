@@ -16,7 +16,8 @@ type Exports = Record<string, any>;
 type Log = { label: string; value: Record<string, any>; channel: 'stdout' | 'stderr' };
 const root = realpathSync(process.cwd()), require = createRequire(import.meta.url);
 const sources = ['src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/catalog-directory-writes.ts',
-  'src/lib/performance/server-operations.ts', 'src/lib/image-studio/read-snapshot.ts', 'scripts/request-trace-engineering.ts'];
+  'src/lib/performance/server-operations.ts', 'src/lib/image-studio/read-snapshot.ts', 'src/app/api/image-studio/gallery/query/route.ts',
+  'src/lib/image-studio/gallery-page.ts', 'scripts/request-trace-engineering.ts'];
 
 async function main() {
   const startedAt = Date.now(), checks: string[] = [], logs: Log[] = [];
@@ -148,6 +149,21 @@ async function main() {
     assert.equal(seen.length, 4); assert.equal(trace.traceMetadata().requestId, null);
     checks.push('parallel_requests_and_promise_all_phase_siblings_are_isolated_across_duplicate_bundles');
 
+    const galleryId = randomUUID(), galleryPhases: string[] = [];
+    const galleryResponse = await trace.traceHttpRequest('studio.gallery', headers(galleryId), async () => {
+      for (const phase of ['gallery-cover', 'gallery-navigation'] as const) await trace.tracePhase(phase, async () => {
+        const current = trace.traceMetadata();
+        assert.equal(current.requestId, galleryId); assert.equal(current.op, 'studio.gallery'); assert.equal(current.phase, phase);
+        galleryPhases.push(phase);
+      });
+      return new Response('gallery-trace-observation', { status: 207, headers: { 'Cache-Control': 'private, no-store' } });
+    });
+    assert.equal(galleryResponse.headers.get(contract.TRACE_ID_HEADER), galleryId);
+    assert.equal(galleryResponse.status, 207); assert.equal(await galleryResponse.text(), 'gallery-trace-observation');
+    assert.equal(galleryResponse.headers.get('Cache-Control'), 'private, no-store');
+    assert.deepEqual(galleryPhases, ['gallery-cover', 'gallery-navigation']);
+    checks.push('gallery_fixed_operation_and_ordered_projection_phases_keep_response_and_request_context');
+
     const response = new Response(new ReadableStream<Uint8Array>({ pull() { return new Promise<void>(() => {}); } }), { status: 206, headers: { 'Cache-Control': 'private, no-store', 'X-Fixture': 'preserved' } });
     const originalBody = response.body;
     assert.equal(await trace.traceHttpRequest('admin.usage-export', headers(one), async () => response), response);
@@ -193,6 +209,8 @@ async function main() {
     assert.equal(contract.traceOperationForPath('/admin/usage-records/video_task/' + secret), 'admin.usage-record-page');
     assert.equal(contract.traceOperationForPath('/untraced/' + secret), null);
     assert.equal(contract.traceOperationForPath('/api/release'), 'release.read');
+    assert.equal(contract.traceOperationForPath('/api/image-studio/gallery/query'), 'studio.gallery');
+    assert.equal(contract.traceOperationForPath('/api/image-studio/gallery/query/'), 'studio.gallery');
     assert.equal(contract.traceOperationForPath('/api/admin/costs/export'), 'admin.cost-ledger-export');
     const output = JSON.stringify(logs);
     assert.ok(!output.includes(secret)); assert.ok(!output.includes('NEXT_REDIRECT')); assert.ok(!output.includes('value_json'));

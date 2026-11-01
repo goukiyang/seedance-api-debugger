@@ -2,11 +2,11 @@
 export const TRACE_ID_HEADER = 'x-sd2-request-id';
 export const TRACE_START_HEADER = 'x-sd2-request-start';
 export const TRACE_OPERATIONS = ['admin.page', 'admin.usage-costs', 'admin.usage-record-page', 'admin.usage-analytics',
-  'admin.usage-records', 'admin.usage-export', 'studio.settings', 'studio.modules', 'studio.shared',
+  'admin.usage-records', 'admin.usage-export', 'studio.settings', 'studio.modules', 'studio.shared', 'studio.gallery',
   'studio.cover-editor', 'studio.cover-media', 'credits.summary', 'avatar.read', 'release.read', 'admin.cost-ledger-export'] as const;
 export type TraceOperation = typeof TRACE_OPERATIONS[number];
 export const TRACE_PHASES = ['auth', 'parse', 'data', 'serialize', 'snapshot', 'resolve', 'file', 'render',
-  'settings', 'channels', 'model-readiness', 'pricing-readiness', 'billing-readiness', 'module-dto',
+  'settings', 'channels', 'model-readiness', 'pricing-readiness', 'billing-readiness', 'module-dto', 'gallery-cover', 'gallery-navigation',
   'file-stat', 'file-read', 'file-metadata', 'records', 'tasks', 'assets', 'credits-user', 'credits-summary',
   'dashboard', 'capture', 'fold'] as const;
 export type TracePhase = typeof TRACE_PHASES[number];
@@ -22,6 +22,7 @@ export function traceOperationForPath(pathname: string): TraceOperation | null {
     case '/api/image-studio/settings': return 'studio.settings';
     case '/api/image-studio/modules': return 'studio.modules';
     case '/api/image-studio/shared': return 'studio.shared';
+    case '/api/image-studio/gallery/query': return 'studio.gallery';
     case '/api/me/credits': return 'credits.summary';
     case '/api/avatar-studio': return 'avatar.read';
     case '/api/release': return 'release.read';
