@@ -580,16 +580,36 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
     const leaves = items.filter(item => item.fact.leaf);
     for (let offset = 0; offset < leaves.length; offset += CHUNK) {
       const batch = leaves.slice(offset, offset + CHUNK);
-      const links = batch.map(({ fact, providerScope, providerReference }) => {
-        const direct = fact.sourceKind === 'video_task' ? Prisma.sql`"task_id" = ${fact.sourceId}` : fact.sourceKind === 'image_task' ? Prisma.sql`"image_task_id" = ${fact.sourceId}` : Prisma.sql`0 = 1`;
+      const links: Prisma.Sql[] = [];
+      const videoIds = batch.filter(item => item.fact.sourceKind === 'video_task').map(item => item.fact.sourceId);
+      const imageIds = batch.filter(item => item.fact.sourceKind === 'image_task').map(item => item.fact.sourceId);
+      if (videoIds.length) links.push(Prisma.sql`"task_id" IN (${Prisma.join(videoIds)})`);
+      if (imageIds.length) links.push(Prisma.sql`"image_task_id" IN (${Prisma.join(imageIds)})`);
+      const sources = new Map<string, string[]>(), references = new Map<string, Set<string>>();
+      for (const { fact, providerScope, providerReference } of batch) {
         const aliases = fact.sourceKind === 'video_task' ? ['task', 'video_task'] : fact.sourceKind === 'image_task' ? ['image_task', 'image_studio_task'] : [fact.sourceKind];
-        const request = fact.sourceKind === 'video_task' ? Prisma.sql`EXISTS (SELECT 1 FROM "ProviderApiRequest" p WHERE p."task_id" = ${fact.sourceId}
-          AND (p."id" = "CostLedger"."provider_request_id" OR "CostLedger"."source_type" = 'provider_request' AND p."id" = "CostLedger"."source_id"))` : Prisma.sql`0 = 1`;
-        const reference = providerScope && providerReference ? Prisma.sql`"provider_account_id" = ${providerScope} AND "provider_task_id" = ${providerReference}` : Prisma.sql`0 = 1`;
-        return Prisma.sql`(${direct} OR "source_type" IN (${Prisma.join(aliases)}) AND "source_id" = ${fact.sourceId} OR ${request} OR (${reference}))`;
-      });
-      const values = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`${Prisma.join(links, ' OR ')}`);
-      for (const row of values) selected.set(String(row.id), row);
+        for (const alias of aliases) {
+          const ids = sources.get(alias) || []; ids.push(fact.sourceId); sources.set(alias, ids);
+        }
+        if (providerScope && providerReference) {
+          const ids = references.get(providerScope) || new Set<string>(); ids.add(providerReference); references.set(providerScope, ids);
+        }
+      }
+      for (const [source, ids] of sources) links.push(Prisma.sql`"source_type" = ${source} AND "source_id" IN (${Prisma.join(ids)})`);
+      if (videoIds.length) {
+        const requests = await rows(db, Prisma.sql`"ProviderApiRequest"`, Prisma.sql`"id"`, Prisma.sql`"id"`, Prisma.sql`"task_id" IN (${Prisma.join(videoIds)})`);
+        for (let requestOffset = 0; requestOffset < requests.length; requestOffset += CHUNK) {
+          const ids = requests.slice(requestOffset, requestOffset + CHUNK).map(row => String(row.id));
+          links.push(Prisma.sql`"provider_request_id" IN (${Prisma.join(ids)})`,
+            Prisma.sql`"source_type" = 'provider_request' AND "source_id" IN (${Prisma.join(ids)})`);
+        }
+      }
+      for (const [scope, ids] of references) links.push(Prisma.sql`"provider_account_id" = ${scope} AND "provider_task_id" IN (${Prisma.join(Array.from(ids))})`);
+      const values = new Map<string, Row>();
+      for (const link of links) for (const row of await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, link)) values.set(String(row.id), row);
+      // Preserve the original per-leaf-batch ID order, including rows found by
+      // several links; later batches/window/peers retain their insertion order.
+      for (const [id, row] of Array.from(values).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) selected.set(id, row);
     }
     if (window) {
       const occurred = usageSqlTime(Prisma.sql`"occurred_at"`);
@@ -601,13 +621,28 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
     if (window || adminSlice) {
       const seeds = Array.from(selected.values());
       for (let offset = 0; offset < seeds.length; offset += 100) {
-        const peers = seeds.slice(offset, offset + 100).map(row => Prisma.sql`(
-          COALESCE("provider_account_id", '') = ${str(row.provider_account_id) || ''}
-          AND COALESCE("provider_name", '') = ${str(row.provider_name) || ''} AND "event_type" = ${row.event_type}
-          AND ((${str(row.official_charge_id)} IS NOT NULL AND "official_charge_id" = ${str(row.official_charge_id)})
-            OR (${str(row.provider_task_id) || str(row.provider_request_id)} IS NOT NULL
-              AND COALESCE(NULLIF("provider_task_id", ''), "provider_request_id") = ${str(row.provider_task_id) || str(row.provider_request_id)})))`);
-        for (const row of await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`${Prisma.join(peers, ' OR ')}`)) selected.set(String(row.id), row);
+        const groups = new Map<string, { scope: string; provider: string; event: Cell; proofs: Set<string>; references: Set<string> }>();
+        for (const row of seeds.slice(offset, offset + 100)) {
+          const scope = str(row.provider_account_id) || '', provider = str(row.provider_name) || '';
+          const key = JSON.stringify([scope, provider, row.event_type]);
+          const group = groups.get(key) || { scope, provider, event: row.event_type, proofs: new Set<string>(), references: new Set<string>() };
+          const proof = str(row.official_charge_id), reference = str(row.provider_task_id) || str(row.provider_request_id);
+          if (proof) group.proofs.add(proof);
+          if (reference) group.references.add(reference);
+          groups.set(key, group);
+        }
+        const values = new Map<string, Row>();
+        for (const group of groups.values()) {
+          const matches: Prisma.Sql[] = [];
+          if (group.proofs.size) matches.push(Prisma.sql`"official_charge_id" IN (${Prisma.join(Array.from(group.proofs))})`);
+          if (group.references.size) matches.push(Prisma.sql`COALESCE(NULLIF("provider_task_id", ''), "provider_request_id") IN (${Prisma.join(Array.from(group.references))})`);
+          if (!matches.length) continue;
+          const peers = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`, Prisma.sql`
+            COALESCE("provider_account_id", '') = ${group.scope} AND COALESCE("provider_name", '') = ${group.provider}
+            AND "event_type" = ${group.event} AND (${Prisma.join(matches, ' OR ')})`);
+          for (const row of peers) values.set(String(row.id), row);
+        }
+        for (const [id, row] of Array.from(values).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) selected.set(id, row);
       }
     }
     ledgers = Array.from(selected.values());

@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '弹窗保存与关闭体验修正', outline: [
-  '改名、保存和创建失败留在原窗，保留输入与错误提示',
-  '关闭、菜单和预设操作统一，中文选词不误提交或关窗',
-  '画布弹窗跟随入口与可用视口，取消裁切不应用迟到图片',
+const notice = { title: '页面读取与使用分析提速', outline: [
+  '使用分析减少重复查询，保留原费用与统计口径',
+  '超分操作展开后再读取费用，沿用原任务保存位置',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

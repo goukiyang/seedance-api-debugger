@@ -46,6 +46,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [hasExpanded, setHasExpanded] = useState(false);
 
   const shouldRender = task.local_status === 'succeeded'
     && Boolean(task.local_video_path || task.result_video_url)
@@ -53,7 +54,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     && task.generation_mode !== 'enhance_video';
 
   useEffect(() => {
-    if (!shouldRender) return;
+    if (!shouldRender || !hasExpanded) return;
 
     let cancelled = false;
     fetch('/api/config', { cache: 'no-store' })
@@ -67,16 +68,16 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     return () => {
       cancelled = true;
     };
-  }, [shouldRender]);
+  }, [hasExpanded, shouldRender]);
 
   const pricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration: task.duration || 0,
-    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps) }, shouldRender && configured === true);
+    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps) }, shouldRender && hasExpanded && configured === true);
   const estimatedCost = pricing.quote?.estimatedCost ?? null;
   const [destination, setDestination] = useState(task.project_id || '');
   const [destinationConfirmed, setDestinationConfirmed] = useState(Boolean(task.project_id));
-  const creation = useCreationContext({ ownerId: pricing.actorId, entry: 'enhance', draftId: task.id, projectId: destination, legacyCardId: task.video_card_id, onProjectChange: setDestination, enabled: shouldRender });
+  const creation = useCreationContext({ ownerId: pricing.actorId, entry: 'enhance', draftId: task.id, projectId: destination, legacyCardId: task.video_card_id, onProjectChange: setDestination, enabled: shouldRender && hasExpanded });
   const [destinations, setDestinations] = useState<Array<{id:string;name:string}>>([]);
-  useEffect(() => { let active = true; if (!shouldRender || task.project_id) return; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setDestinations(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [shouldRender, task.project_id, projectCatalogRevision]);
+  useEffect(() => { let active = true; if (!shouldRender || !hasExpanded || task.project_id) return; void fetch('/api/projects?lite=true', { cache: 'no-store' }).then(response => response.json()).then(data => { if (active) setDestinations(data.projects || []); }).catch(() => undefined); return () => { active = false; }; }, [hasExpanded, shouldRender, task.project_id, projectCatalogRevision]);
 
   if (!shouldRender) return null;
 
@@ -139,13 +140,13 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
   };
 
   return (
-    <details className="enhance-video-action">
+    <details className="enhance-video-action" onToggle={(event) => { if (event.currentTarget.open) setHasExpanded(true); }}>
       <summary>
         <span>
           <Sparkles size={16} aria-hidden="true" />
           超分/增强
         </span>
-        <strong>{estimatedCost !== null ? `预估冻结 ${estimatedCost} 点` : '待估算'}</strong>
+        <strong>{hasExpanded ? (estimatedCost !== null ? `预估冻结 ${estimatedCost} 点` : '待估算') : '展开查看费用'}</strong>
       </summary>
       {!task.project_id && <label>本次保存到<ProjectSelector  className="input" value={destinationConfirmed ? destination : ''} onChange={event => { setDestination(event.target.value); setDestinationConfirmed(Boolean(event.target.value)); }}><option value="">选择项目</option>{destinations.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector></label>}
       <CreationAvailability controller={creation} />

@@ -28,6 +28,7 @@ type EnhanceTaskCandidate = {
   resolution: string | null;
   created_at: string;
   completed_at: string | null;
+  project_id?: string | null;
   project?: { id: string; name: string; type?: string | null } | null;
   video_card_id: string | null;
   video_card?: { id: string; title: string; project_id?: string | null } | null;
@@ -300,6 +301,7 @@ export default function EnhanceVideoPageClient() {
                       result_video_url: task.result_video_url,
                       local_video_path: task.local_video_path,
                       duration: task.duration,
+                      project_id: task.project_id,
                       video_card_id: task.video_card_id,
                     }}
                   />
