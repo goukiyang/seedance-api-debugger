@@ -2,7 +2,7 @@
 
 ## BR-FEISHU01 插件出图发到本人飞书（2026-11-02）
 
-候选 `205bf68d9` / v0.127.0，分支 `codex/bridge-feishu-send-20261102`，用户已告知推送并授权上线。三个本人 API、独立 Notification 队列与现有 feedback worker 接线已实现，无 DDL；既有14组新功能、30组旧视频飞书、类型及lint检查通过。2026-11-02 发布只读核对发现现网已为 `6629e540…` / v0.126.7 / BUILD `qnhbdC9RfbHdNzOGAiN0Z`，Web/worker 工作目录一致，本机匿名新接口仍404；fetch 该运行源时写入 `FETCH_HEAD` 被环境拒绝，按用户要求停止，未构建、未上传、未停服、未切版、未真实外发。本次发布记录仅存本地，未提交/推送。确切命令、原错误、回退核验缺口及原工程证据见 [交付与发布记录](2026-11-02-bridge-feishu-send.md)，原合同见 [工单](../../HANDOFF-feishu-send.md)。插件/飞书实际收件待部署后用户手验。
+**已部署，待用户手动验收。** 2026-11-02T08:39:37Z 发布 `32a956d4b508e085cb60defb1830176e2e43b811` / **v0.127.0** / BUILD **`ybCPF_HfWFqDOgMeIxfX4`**，分支 `codex/bridge-feishu-send-20261102-r2`。服务器完整构建、类型/lint和原生检查通过，公网匿名GET新接口401；Web与原timer自然触发的feedback worker已加载本版，五队列无失败，旧视频/图片消费者字节未变。无DDL、业务数据探针写入、飞书配置/权限修改或真实发信测试；一致备份及固定程序回退 `6629e540d / v0.126.7 / qnhbdC9RfbHdNzOGAiN0Z` 已保留。原旧入口与v2配置不匹配的失败、现网无DDL保护链接续、回退命令、服务器总回执及手验边界见 [交付与发布记录](2026-11-02-bridge-feishu-send.md)，原合同见 [工单](../../HANDOFF-feishu-send.md)。按第二轮指令未执行fetch/commit/push，记录留当前工作区由用户提交推送；首次Git沙箱阻点保历史。
 
 <!-- SAVE500-SUNBURST-BRIDGE-20261031 -->
 ## SAVE500 / SUNBURST / BRIDGE 接续交付（2026-10-31）
