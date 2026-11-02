@@ -1019,3 +1019,8 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+
+## BR-PULL01 插件后台近24小时反馈（2026-11-02）
+
+- 已按固定滚动24小时只读拉取并归档：11条手动反馈、11张截图、12条自动技术上报；原状态均new，未改状态/通知/业务代码/部署。[脱敏入口](todo/2026-11-02-plugin-feedback-pull-summary.md)定位正式根本地完整工单与私有原证。原编号/准确时间/原文/截图对应完整，BR-FEEDBACK01/BR-FEISHU01/模型与队列既有能力已交叉去重，缺口据实保留；后续修复未实施，未新增任务外线索。
