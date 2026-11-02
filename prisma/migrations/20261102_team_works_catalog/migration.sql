@@ -198,4 +198,3 @@ CREATE INDEX "ImageStudioTask_updated_at_id_idx" ON "ImageStudioTask"("updated_a
 
 -- CreateIndex
 CREATE INDEX "MultiviewWork_updated_at_id_idx" ON "MultiviewWork"("updated_at", "id");
-
