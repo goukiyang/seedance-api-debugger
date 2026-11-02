@@ -521,6 +521,14 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
       assert.equal(ready.status, 'ready');
       assert.equal(ready.width, 256); assert.equal(ready.height, 192);
       assert.deepEqual(await fs.readFile(file), original);
+      const { authorizedImageResponse } = await import('../src/lib/media/authorized-image-response');
+      const response = await authorizedImageResponse(new Request('https://fixture.invalid/api/image', {
+        headers: { 'x-image-read-intent': 'status' },
+      }), source, 'hd-description', 'image/png');
+      const description = await response.json();
+      assert.equal(response.status, 200); assert.equal(description.status, 'ready');
+      assert.equal(description.encodingStrategy, undefined, 'Old open tabs must accept the optional recipe metadata');
+      assert.equal(description.representationVersion, await core.hdRepresentationVersion(source, ready));
       process.env.HD_ENCODER_STRATEGY = 'hd-legacy-e6-v1';
       const reused = (await core.requestHd(source, 0, false))!;
       assert.equal(reused.key, ready.key); assert.equal(reused.attempts, ready.attempts);
