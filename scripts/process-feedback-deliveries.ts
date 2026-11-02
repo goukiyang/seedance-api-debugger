@@ -2,6 +2,7 @@ import { processFeedbackDeliveries } from '../src/lib/feedback/delivery';
 import { processFeedbackRetestDeliveries } from '../src/lib/feedback/retest-delivery';
 import { processVideoFeishuDeliveries } from '../src/lib/video/feishu-delivery';
 import { processImageFeishuDeliveries } from '../src/lib/image-studio/feishu-delivery';
+import { processBridgeFeishuDeliveries } from '../src/lib/bridge/feishu-delivery';
 import { feedbackPrisma as prisma } from '../src/lib/feedback/notification';
 import { prisma as videoPrisma } from '../src/lib/prisma';
 import { createHash, randomUUID } from 'node:crypto';
@@ -10,8 +11,8 @@ import path from 'node:path';
 
 async function deliveries() {
   // These queues own different notification types. One unavailable queue must not starve the others.
-  const names = ['feedback', 'retest', 'video', 'image'];
-  const outcomes = await Promise.allSettled([processFeedbackDeliveries(), processFeedbackRetestDeliveries(), processVideoFeishuDeliveries(1), processImageFeishuDeliveries(1)]);
+  const names = ['feedback', 'retest', 'video', 'image', 'bridge'];
+  const outcomes = await Promise.allSettled([processFeedbackDeliveries(), processFeedbackRetestDeliveries(), processVideoFeishuDeliveries(1), processImageFeishuDeliveries(1), processBridgeFeishuDeliveries(1)]);
   const failedQueues = names.filter((_, index) => outcomes[index].status === 'rejected');
   if (failedQueues.length) process.exitCode = 1;
   return { queues: Object.fromEntries(outcomes.map((item, index) => [names[index], item.status === 'fulfilled' ? item.value : null])), failedQueues };
@@ -26,6 +27,7 @@ deliveries().then(result => {
       notificationSha: hash('src/lib/feedback/notification.ts'), deliverySha: hash('src/lib/feedback/delivery.ts'),
       retestDeliverySha: hash('src/lib/feedback/retest-delivery.ts'), videoDeliverySha: hash('src/lib/video/feishu-delivery.ts'),
       imageDeliverySha: hash('src/lib/image-studio/feishu-delivery.ts'),
+      bridgeDeliverySha: hash('src/lib/bridge/feishu-delivery.ts'),
       attachmentsSha: hash('src/lib/feedback/attachments.ts'), result };
     const temporary = path.join(process.env.TMPDIR, `last-run-${randomUUID()}.tmp`);
     writeFileSync(temporary, JSON.stringify(receipt), { flag: 'wx', mode: 0o600 });

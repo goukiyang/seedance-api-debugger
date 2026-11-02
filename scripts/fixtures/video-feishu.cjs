@@ -33,7 +33,9 @@ const permissions = load('src/lib/projects/permissions.ts', {
 });
 const privacy = load('src/lib/video/multiview-task-privacy.ts', { './multiview-action-contract': load('src/lib/video/multiview-action-contract.ts'), './task-thumbnail-projection': {
   taskThumbnailProjection() { throw Error('unused thumbnail boundary'); },
-} });
+}, './prompt-groups': load('src/lib/video/prompt-groups.ts', {
+  './prompt-groups-build-mode': load('src/lib/video/prompt-groups-build-mode.ts'),
+}) });
 const notification = load('src/lib/video/feishu-notification.ts', {
   '@/lib/prisma': { prisma: noGlobalDb }, '@/lib/auth/session': { AuthError }, '@/lib/feedback/notification': feedback, '@/lib/projects/permissions': permissions,
   './multiview-task-privacy': privacy, '@/lib/tasks/retention': retention, './feishu-contract': contract,
