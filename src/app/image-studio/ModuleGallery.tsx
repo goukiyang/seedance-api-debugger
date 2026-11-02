@@ -65,6 +65,13 @@ function GalleryVisual({ children }: { children: ReactNode }) {
     const element = ref.current;
     if (!element) return;
     if (typeof IntersectionObserver === 'undefined') { setVisible(true); return; }
+    // Start visible images without waiting for the observer's initial callback.
+    const bounds = element.getBoundingClientRect();
+    if (bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.top < window.innerHeight
+      && bounds.right > 0 && bounds.left < window.innerWidth) {
+      setVisible(true);
+      return;
+    }
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) {
         setVisible(true);
