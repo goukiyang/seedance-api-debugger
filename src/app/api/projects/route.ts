@@ -79,6 +79,7 @@ export async function GET(request: NextRequest) {
         type: string;
         status: string;
         owner_user_id: string;
+        work_audience: string | null;
         members?: Array<{ role: string; status: string }>;
       };
 
@@ -92,6 +93,7 @@ export async function GET(request: NextRequest) {
               type: true,
               status: true,
               owner_user_id: true,
+              work_audience: true,
             },
           })
         : await prisma.project.findMany({
@@ -103,6 +105,7 @@ export async function GET(request: NextRequest) {
               type: true,
               status: true,
               owner_user_id: true,
+              work_audience: true,
               members: { where: { user_id: user.id }, select: { role: true, status: true } },
             },
           })) as LiteProject[];
@@ -121,6 +124,7 @@ export async function GET(request: NextRequest) {
             type: project.type,
             status: project.status,
             owner_user_id: project.owner_user_id,
+            work_audience: project.work_audience,
             my_role: myRole,
             can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
             can_manage_project: managementAllowed && (myRole === 'admin' || myRole === 'project_owner'),

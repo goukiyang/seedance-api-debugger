@@ -77,6 +77,7 @@ export async function ensureDefaultProjectForUser(userId: string) {
         description: '系统自动创建的个人默认项目',
         type: 'personal',
         visibility: 'private',
+        work_audience: 'private',
         owner_user_id: userId,
         created_by: userId,
         status: 'active',

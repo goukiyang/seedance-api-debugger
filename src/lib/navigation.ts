@@ -28,6 +28,7 @@ export const shellRoutes = [
   '/template-studio',
   '/notifications',
   '/assets',
+  '/works',
   '/templates',
   '/template-generate',
   '/projects',
@@ -78,6 +79,7 @@ export const topbarQuickItems: NavItem[] = [
   { label: '创作首页', href: '/', match: ['/'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
   { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
+  { label: '作品广场', href: '/works', match: ['/works'], externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
@@ -104,6 +106,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '项目',
     items: [
+      { label: '作品广场', href: '/works', externalHidden: true },
       { label: '我的项目', href: '/projects', prefixMatch: true, externalHidden: true },
       { label: '我的用量', href: '/usage', prefixMatch: true },
       { label: 'IP生成', href: '/generate/ip' },

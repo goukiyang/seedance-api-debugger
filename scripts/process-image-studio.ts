@@ -20,6 +20,7 @@ loadEnvConfig(process.cwd());
 let stopping = false;
 let billingWork: Promise<void> | null = null;
 let retryWork: Promise<void> | null = null;
+let worksWork: Promise<unknown> | null = null;
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 async function main() {
@@ -64,6 +65,13 @@ async function main() {
       console.error('[safe-generation-retry] background pass deferred; original receipts retained');
     }).finally(() => { retryWork = null; });
   }, 5000);
+  const runWorks = () => {
+    if (stopping || isImageStudioDraining() || worksWork) return;
+    worksWork = import('../src/lib/works/ingestion').then(module => module.processWorksRegistrationPass({ shouldStop: () => stopping || isImageStudioDraining() }))
+      .catch(() => console.warn('[works] directory pass deferred; original tasks and billing retained')).finally(() => { worksWork = null; });
+  };
+  const worksTimer = setInterval(runWorks, 15_000);
+  runWorks();
   try {
     do {
       if (isImageStudioDraining()) break;
@@ -82,6 +90,8 @@ async function main() {
     } while (!stopping);
     await billingWork;
   } finally {
+    clearInterval(worksTimer);
+    await worksWork;
     clearInterval(retryTimer);
     await retryWork;
     clearInterval(readinessTimer);

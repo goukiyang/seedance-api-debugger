@@ -102,6 +102,7 @@ async function getProjectSection(
       visibility: true,
       status: true,
       owner_user_id: true,
+      work_audience: true,
       owner: { select: { id: true, name: true, username: true, avatar_url: true, account_type: true } },
       members: {
         where: { status: 'active' },
@@ -446,7 +447,7 @@ export async function GET(
       const canManage = isFeatureAllowed(user, 'team_project_manage') && access.canManageProject;
       const operations = await readProjectOperationProjection(prisma, project, canManage);
       return NextResponse.json({ project: { id: project.id, name: project.name, description: project.description,
-        type: project.type, status: project.status, updated_at: project.updated_at, status_version: projectStatusVersion(project) },
+        type: project.type, work_audience: project.work_audience, status: project.status, updated_at: project.updated_at, status_version: projectStatusVersion(project) },
         permission: { can_manage_project: canManage, can_delete: operations.can_delete, can_archive: operations.can_archive } },
       { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }

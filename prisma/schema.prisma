@@ -219,6 +219,7 @@ model VideoTask {
   @@index([creation_intent_id])
   @@index([lineage_root_task_id, created_at, id])
   @@index([derived_from_task_id])
+  @@index([updated_at, id])
 }
 
 // v2 is additive. Legacy tasks and their frozen billing/card contracts remain v1.
@@ -550,6 +551,7 @@ model ImageStudioTask {
   @@index([tool_flow_run_id, tool_flow_node_id, status])
   @@index([billing_status, billing_next_check_at])
   @@index([billing_scope, gateway_request_id])
+  @@index([updated_at, id])
 }
 
 model MultiviewWork {
@@ -592,6 +594,7 @@ model MultiviewWork {
   @@index([owner_id, removed_at, updated_at, id])
   @@index([status, next_attempt_at, lease_until])
   @@index([owner_id, source_id])
+  @@index([updated_at, id])
 }
 
 model MultiviewSource {
@@ -1004,6 +1007,8 @@ model Project {
   description   String?
   type          String    @default("team") // personal | team | public | system
   visibility    String    @default("private") // private | internal_public | external_public | global_public
+  // Null preserves source permissions; a selected audience applies to future source operations.
+  work_audience String? // team | project | private
   owner_user_id String
   created_by    String
   status        String    @default("active") // active | locked | archived | deleted
@@ -2561,4 +2566,149 @@ model BridgeQueuePresetLike {
 
   @@unique([preset_id, user_id])
   @@index([user_id])
+}
+
+
+// Logical outputs and immutable source-version links. No input, recipe or billing data is copied here.
+model Work {
+  id                 String   @id @default(cuid())
+  source_kind        String
+  source_id          String
+  output_role        String   @default("output")
+  author_id          String
+  project_id         String?
+  title              String
+  medium             String
+  current_version_id String?
+  audience           String   @default("source")
+  discoverable       Boolean  @default(true)
+  withdrawn_at       DateTime?
+  revision           Int      @default(1)
+  completed_at       DateTime
+  admitted_at        DateTime @default(now())
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  versions           WorkMediaVersion[]
+  personal_states    WorkPersonalState[]
+  collection_items   WorkCollectionItem[]
+  @@unique([source_kind, source_id, output_role])
+  @@index([discoverable, completed_at, id])
+  @@index([author_id, completed_at, id])
+  @@index([project_id, completed_at, id])
+  @@index([admitted_at])
+}
+
+model WorkMediaVersion {
+  id                String   @id @default(cuid())
+  work_id           String
+  source_revision   String
+  policy_id         String?
+  asset_id          String?
+  video_task_id     String?
+  content_hash      String?
+  source_url        String?
+  source_updated_at DateTime?
+  width             Int?
+  height            Int?
+  duration          Float?
+  thumbnail_url     String?
+  preview_url       String?
+  preview_status    String   @default("pending")
+  preview_hash      String?
+  created_at        DateTime @default(now())
+  work              Work     @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  @@unique([work_id, source_revision])
+  @@index([asset_id])
+  @@index([preview_status, created_at, id])
+}
+
+// Admission/save-time policy. Missing rows never receive a later team grant.
+model WorkSourcePolicy {
+  id           String   @id @default(cuid())
+  source_kind  String
+  source_id    String
+  operation_id String   @default("initial")
+  owner_id     String
+  project_id   String?
+  audience     String
+  captured_at  DateTime @default(now())
+  @@unique([source_kind, source_id, operation_id])
+  @@index([project_id, captured_at])
+}
+
+model WorkRegistrationJob {
+  id                String   @id @default(cuid())
+  source_kind       String
+  source_id         String
+  source_revision   String
+  source_updated_at DateTime
+  status            String   @default("pending")
+  attempts          Int      @default(0)
+  run_after         DateTime @default(now())
+  lease_token       String?
+  lease_until       DateTime?
+  error_code        String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  @@unique([source_kind, source_id, source_revision])
+  @@index([source_kind, status, run_after, id])
+  @@index([status, lease_until])
+}
+
+model WorkDiscoveryCheckpoint {
+  source_kind String @id
+  cursor_at   DateTime?
+  cursor_id   String?
+  upper_at    DateTime?
+  cycles      Int @default(0)
+  updated_at  DateTime @updatedAt
+}
+
+model WorkPersonalState {
+  owner_id   String
+  work_id    String
+  liked      Boolean @default(false)
+  favorited  Boolean @default(false)
+  hidden     Boolean @default(false)
+  version    Int @default(1)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  work       Work @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  @@id([owner_id, work_id])
+  @@index([owner_id, favorited, work_id])
+  @@index([owner_id, hidden, work_id])
+  @@index([work_id, liked])
+}
+
+model WorkCollection {
+  id         String @id @default(cuid())
+  owner_id   String
+  name       String
+  revision   Int @default(1)
+  removed_at DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  items      WorkCollectionItem[]
+  @@index([owner_id, removed_at, created_at, id])
+}
+
+model WorkCollectionItem {
+  collection_id String
+  work_id       String
+  created_at    DateTime @default(now())
+  collection    WorkCollection @relation(fields: [collection_id], references: [id], onDelete: Restrict)
+  work          Work @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  @@id([collection_id, work_id])
+  @@index([work_id, collection_id])
+}
+
+model WorkOperation {
+  id          String @id @default(cuid())
+  owner_id    String
+  request_id  String
+  fingerprint String
+  result_json String
+  created_at  DateTime @default(now())
+  @@unique([owner_id, request_id])
+  @@index([owner_id, created_at])
 }
