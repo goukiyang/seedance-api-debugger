@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '插件出图发送到本人飞书', outline: [
-  '插件图片可连同提示词和作品链接发到本人飞书',
-  '支持查询发送状态，重复点击不会重复投递',
+const notice = { title: '网站与插件反馈', outline: [
+  '插件反馈可附截图并在网站查看',
+  '提交中断后保留原稿，核对原提交即可继续',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

@@ -126,3 +126,22 @@ test('actual widget cannot send without durable storage; successful late result 
   widgetFunction('finishSubmission', ctx)('old-account', original, { feedback: { id: 'accepted' } });
   assert.equal(stored.get('old-account').content, 'later original-account edit'); assert.equal(stored.get('old-account').uploads[0].id, 'new-image'); assert.ok(!stored.has('new-account'));
 });
+test('compatible recovery build replays accepted operations and closes every fresh creation', async () => {
+  const f = fixture(), first = await f.bridge.POST(request(body())), saved = await first.json();
+  f.load('src/lib/feedback/submission-mode.ts').FEEDBACK_SUBMISSIONS_ENABLED = false;
+  const replay = await f.bridge.POST(request(body())); assert.equal(replay.status, 200); assert.equal((await replay.json()).feedback.id, saved.feedback.id);
+  const closed = await f.bridge.POST(request({ ...body(), operationId: 'new-during-recovery' }));
+  assert.equal(closed.status, 503); assert.equal((await closed.json()).code, 'FEEDBACK_SUBMISSIONS_UNAVAILABLE');
+  const legacy = await f.website.POST(request({ content: 'New legacy request during recovery' })); assert.equal(legacy.status, 503);
+  const query = await f.bridge.GET(request(null, '?operationId=synthetic-original-operation&expectedUserId=author'));
+  assert.equal((await query.json()).status, 'accepted'); assert.equal(f.feedback.size, 2); assert.equal(f.notifications.size, 1);
+});
+test('actual widget storage refusal emits no request and leaves editable input intact', async () => {
+  let requests = 0;
+  const ctx = { submittingRef: { current: false }, draftIdentityReadyRef: { current: true }, draftKeyRef: { current: 'draft-author' },
+    ownerRef: { current: 'author' }, pendingRef: { current: null }, contentRef: { current: 'unsent content' }, uploadsRef: { current: [] },
+    crypto: { randomUUID: () => 'unsent-original' }, window: { location: { href: 'https://synthetic.invalid/page', pathname: '/page' } },
+    feedbackPendingKey: key => key + ':pending', localStorage: { setItem: () => { throw new Error('synthetic storage unavailable'); } },
+    setError: () => {}, setMessage: () => {}, setOriginalNotFound: () => {}, setPending: () => {}, setSubmitting: () => {}, fetch: async () => { requests++; } };
+  await widgetFunction('submit', ctx)(); assert.equal(requests, 0); assert.equal(ctx.contentRef.current, 'unsent content'); assert.equal(ctx.pendingRef.current, null);
+});
