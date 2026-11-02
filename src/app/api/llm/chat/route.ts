@@ -7,6 +7,9 @@ import {
   MuskApiError,
   openMuskChatStream,
   resolveMuskChatModels,
+  effectiveMuskDefaultModel,
+  isMuskModelUnavailableError,
+  markMuskModelUnavailable,
 } from '@/lib/integrations/musk';
 import {
   MuskChatImageError,
@@ -164,6 +167,7 @@ function toDeltaSse(upstream: Response, model: string): ReadableStream<Uint8Arra
 }
 
 export async function POST(request: NextRequest) {
+  let usedModel = '';
   try {
     const user = await getSession();
     if (!user) {
@@ -186,14 +190,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let model = settings.default_model;
-    if (requestedModel && requestedModel !== settings.default_model) {
-      const allowed = await resolveMuskChatModels(settings);
+    const allowed = await resolveMuskChatModels(settings);
+    let model = effectiveMuskDefaultModel(settings, allowed);
+    if (requestedModel && requestedModel !== model) {
       if (!allowed.includes(requestedModel)) {
-        return NextResponse.json({ error: '模型不在可用名单内', ok: false, code: 'model_not_allowed' }, { status: 400 });
+        return NextResponse.json({ error: '这个模型现在不可用，请点「更新」后换一个', ok: false, code: 'model_not_allowed' }, { status: 400 });
       }
       model = requestedModel;
     }
+    usedModel = model;
     const muskMessages = await prepareMuskChatMessages(messages, user.id, request.signal);
 
     if (stream) {
@@ -238,8 +243,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message, ok: false, code: error.code }, { status: error.status });
     }
     if (error instanceof MuskApiError) {
+      const unavailable = Boolean(usedModel) && isMuskModelUnavailableError(error.message);
+      if (unavailable) markMuskModelUnavailable(usedModel);
       return NextResponse.json(
-        { error: error.message, ok: false, code: error.code },
+        {
+          error: unavailable ? `模型 ${usedModel} 现在不可用，请点「更新」后换一个（${error.message}）` : error.message,
+          ok: false,
+          code: unavailable ? 'model_unavailable' : error.code,
+        },
         { status: error.status },
       );
     }

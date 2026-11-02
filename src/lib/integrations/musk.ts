@@ -424,14 +424,44 @@ export async function fetchMuskUpstreamModels(
   }
 }
 
-/** 对话可用模型：白名单 ∩ 上游列表（上游不可达时信任白名单）；白名单为空只给 default_model。 */
-export async function resolveMuskChatModels(settings: MuskApiSettings): Promise<string[]> {
+// 上游 /models 会列出已被分组停用的模型；真实调用报「无可用渠道」后在本进程内隐藏 10 分钟。
+const UNAVAILABLE_MODEL_TTL_MS = 10 * 60 * 1000;
+const unavailableModels = new Map<string, number>();
+const NON_CHAT_MODEL = /embed|whisper|tts|dall-e|moderation|audio|realtime|transcribe|sora|image/i;
+
+export function isMuskModelUnavailableError(message: string) {
+  return /no available channel|model_not_found|model .* does not exist/i.test(message);
+}
+
+export function markMuskModelUnavailable(model: string) {
+  unavailableModels.set(model, Date.now() + UNAVAILABLE_MODEL_TTL_MS);
+}
+
+function isMuskModelHidden(model: string) {
+  const until = unavailableModels.get(model);
+  if (!until) return false;
+  if (until > Date.now()) return true;
+  unavailableModels.delete(model);
+  return false;
+}
+
+/** 对话可用模型：白名单 ∩ 上游列表（上游不可达时信任白名单）；白名单为空时用上游对话模型，上游不可达只给 default_model。已报不可用的模型隐藏。 */
+export async function resolveMuskChatModels(
+  settings: MuskApiSettings,
+  options?: { force?: boolean },
+): Promise<string[]> {
   const allow = settings.allowed_models;
-  if (!allow.length) return [settings.default_model];
-  const upstream = await fetchMuskUpstreamModels(settings);
-  const list = upstream ? allow.filter((id) => upstream.includes(id)) : [...allow];
-  if (!list.includes(settings.default_model)) list.unshift(settings.default_model);
-  return list;
+  const upstream = await fetchMuskUpstreamModels(settings, options);
+  const base = allow.length
+    ? (upstream ? allow.filter((id) => upstream.includes(id)) : [...allow])
+    : (upstream ? upstream.filter((id) => !NON_CHAT_MODEL.test(id)) : []);
+  if (!base.includes(settings.default_model)) base.unshift(settings.default_model);
+  return base.filter((id) => !isMuskModelHidden(id));
+}
+
+/** 默认模型被隐藏时退到第一个可用模型。 */
+export function effectiveMuskDefaultModel(settings: MuskApiSettings, models: string[]) {
+  return models.includes(settings.default_model) ? settings.default_model : (models[0] || settings.default_model);
 }
 
 /** 流式调用：返回上游 Response（SSE），调用方负责解析。 */
