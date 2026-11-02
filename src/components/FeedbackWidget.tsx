@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { ImagePlus, MessageSquare, X } from 'lucide-react';
-import { feedbackPendingKey, readPendingFeedback, type PendingFeedback } from '@/lib/feedback/submission-client';
 
 type UploadItem = {
   id: string;
@@ -72,10 +71,6 @@ export default function FeedbackWidget() {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [draftKey, setDraftKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [pending, setPending] = useState<PendingFeedback | null>(null);
-  const pendingRef = useRef<PendingFeedback | null>(null);
-  const [originalNotFound, setOriginalNotFound] = useState(false);
-  const ownerRef = useRef<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const uploadsRef = useRef<UploadItem[]>([]);
@@ -135,15 +130,10 @@ export default function FeedbackWidget() {
         return response.json() as Promise<{ user?: { id?: unknown } | null }>;
       })
       .then((data) => {
+        draftIdentityReadyRef.current = true;
         const userId = typeof data.user?.id === 'string' ? data.user.id : null;
         const nextKey = feedbackDraftKey(userId);
-        if (draftKeyRef.current === nextKey) { draftIdentityReadyRef.current = true; return; }
-        let original: PendingFeedback | null;
-        try { original = readPendingFeedback(nextKey); } catch (err) {
-          setError(err instanceof Error ? err.message : '原提交记录无法读取'); return;
-        }
-        ownerRef.current = userId;
-        pendingRef.current = original; setPending(original); setOriginalNotFound(false);
+        if (draftKeyRef.current === nextKey) return;
 
         const draft = readFeedbackDraft(nextKey);
         const currentUploads = uploadsRef.current;
@@ -161,10 +151,9 @@ export default function FeedbackWidget() {
 
         draftKeyRef.current = nextKey;
         setDraftKey(nextKey);
-        draftIdentityReadyRef.current = true;
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError('暂时无法确认反馈账号，请刷新后重试；原稿已保留。');
+        if (!controller.signal.aborted) draftIdentityReadyRef.current = true;
       });
     return () => controller.abort();
   }, [pathname, replaceUploads, updateContent]);
@@ -284,73 +273,71 @@ export default function FeedbackWidget() {
     onFiles(imageFiles);
   };
 
-  const finishSubmission = (key: string, original: PendingFeedback, data: { feedback?: { id?: string }; attachments?: { notSaved?: number } }) => {
-    if (!data.feedback?.id) throw new Error('未收到有效反馈编号，请核对原提交。');
-    const submittedIds = new Set(original.uploadIds);
-    // A late result belongs to its original account. Preserve later edits there too.
-    if (draftKeyRef.current !== key) {
-      const draft = readFeedbackDraft(key);
-      localStorage.setItem(key, JSON.stringify({ version: 1, content: draft.content === original.content ? '' : draft.content,
-        uploads: draft.uploads.filter(item => !submittedIds.has(item.id)) }));
-      localStorage.removeItem(feedbackPendingKey(key));
+  const submit = async () => {
+    if (submittingRef.current) return;
+    if (!draftIdentityReadyRef.current) {
+      setError('正在恢复反馈草稿，请稍候再提交。');
       return;
     }
-    const persistedUploads = uploadsRef.current.filter(item => !submittedIds.has(item.id)).flatMap(item => item.assetId && item.imageUrl ? [{ id: item.id, assetId: item.assetId, imageUrl: item.imageUrl }] : []);
-    localStorage.setItem(key, JSON.stringify({ version: 1, content: contentRef.current === original.content ? '' : contentRef.current, uploads: persistedUploads }));
-    localStorage.removeItem(feedbackPendingKey(key));
-    pendingRef.current = null; setPending(null); setOriginalNotFound(false);
-    const notSaved = Number.isSafeInteger(data.attachments?.notSaved) ? data.attachments!.notSaved! : 0;
-    setMessage(notSaved > 0 ? `意见已提交，${notSaved} 项附件未通过核验，未保存。` : '意见已提交');
-    const remaining = uploadsRef.current.filter(item => !submittedIds.has(item.id));
-    uploadsRef.current.filter(item => submittedIds.has(item.id)).forEach(item => revokePreviewUrl(item.previewUrl));
-    replaceUploads(remaining);
-    if (contentRef.current === original.content) { contentEditedRef.current = false; updateContent(''); }
-    if (!contentRef.current && !remaining.length) setOpen(false);
+    setError('');
+    setMessage('');
+    const submittedContent = contentRef.current;
+    const submittedUploads = [...uploadsRef.current];
+    if (!submittedContent.trim()) {
+      setError('请输入反馈内容');
+      return;
+    }
+    if (submittedUploads.some((item) => item.uploading)) {
+      setError('图片仍在上传，请稍候');
+      return;
+    }
+    if (submittedUploads.some((item) => !item.imageUrl || !item.assetId)) {
+      setError('有图片上传失败，请移除或重试后再提交');
+      return;
+    }
+
+    const imageUrls = submittedUploads.map((item) => item.imageUrl as string);
+    const uploadedAssetIds = submittedUploads.map((item) => item.assetId as string);
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: submittedContent,
+          imageUrls,
+          uploadedAssetIds,
+          pageUrl: window.location.href,
+          pathname: window.location.pathname,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '提交失败，请稍后重试。');
+      const notSaved = Number.isSafeInteger(data.attachments?.notSaved) && data.attachments.notSaved > 0 ? data.attachments.notSaved : 0;
+      setMessage(notSaved ? `意见已提交，${notSaved} 项附件未通过核验，未保存。` : '意见已提交');
+      const submittedIds = new Set(submittedUploads.map((item) => item.id));
+      const submittedPreviewUrls = new Set(submittedUploads.map((item) => item.previewUrl).filter(Boolean));
+      const remainingUploads = uploadsRef.current.filter((item) => !submittedIds.has(item.id));
+      submittedPreviewUrls.forEach((url) => revokePreviewUrl(url));
+      replaceUploads(remainingUploads);
+      if (contentRef.current === submittedContent) {
+        contentEditedRef.current = false;
+        updateContent('');
+      }
+      // New edits made while this request was pending remain a draft, not submitted.
+      if (!contentRef.current && remainingUploads.length === 0) setOpen(false);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : '提交失败，请稍后重试。';
+      setError(imageUrls.length > 0 ? `截图已上传成功，但反馈提交失败：${reason}` : reason);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
-  const submit = async (retryOriginal = false) => {
-    if (submittingRef.current) return;
-    if (!draftIdentityReadyRef.current || !draftKeyRef.current) {
-      setError('正在恢复反馈账号和原提交，请稍候再提交。'); return;
-    }
-    const key = draftKeyRef.current;
-    let original = pendingRef.current;
-    const existing = Boolean(original);
-    setError(''); setMessage(''); setOriginalNotFound(false);
-    if (!original) {
-      const selected = [...uploadsRef.current];
-      if (!contentRef.current.trim()) { setError('请输入反馈内容'); return; }
-      if (selected.some(item => item.uploading)) { setError('图片仍在上传，请稍候'); return; }
-      if (selected.some(item => !item.imageUrl || !item.assetId)) { setError('有图片上传失败，请移除或重试后再提交'); return; }
-      original = { operationId: crypto.randomUUID(), expectedUserId: ownerRef.current, content: contentRef.current,
-        imageUrls: selected.map(item => item.imageUrl!), uploadedAssetIds: selected.map(item => item.assetId!),
-        uploadIds: selected.map(item => item.id), pageUrl: window.location.href, pathname: window.location.pathname };
-      try {
-        localStorage.setItem(feedbackPendingKey(key), JSON.stringify(original));
-      } catch { setError('无法保存原提交记录，尚未发送反馈；请恢复浏览器存储后重试。'); return; }
-      pendingRef.current = original; setPending(original);
-    }
-    submittingRef.current = true; setSubmitting(true);
-    try {
-      if (existing) {
-        const query = new URLSearchParams({ operationId: original.operationId, expectedUserId: original.expectedUserId || '' });
-        const response = await fetch(`/api/feedback?${query}`, { cache: 'no-store' });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || '原提交暂时无法核对。');
-        if (data.status === 'accepted') { finishSubmission(key, original, data); return; }
-        if (data.status !== 'not_found') throw new Error('原提交结果尚未确认。');
-        if (!retryOriginal) {
-          if (draftKeyRef.current === key) { setOriginalNotFound(true); setError('暂未查到原提交，可继续核对，或使用原编号重试；不会另建提交编号。'); }
-          return;
-        }
-      }
-      const response = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(original) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '原提交结果待确认。');
-      finishSubmission(key, original, data);
-    } catch (err) {
-      if (draftKeyRef.current === key) setError(`${err instanceof Error ? err.message : '提交结果待确认。'} 原稿和原提交编号已保留，请核对提交。`);
-    } finally { submittingRef.current = false; setSubmitting(false); }
+  const retrySubmitUploadedAssets = () => {
+    void submit();
   };
 
   return (
@@ -441,17 +428,17 @@ export default function FeedbackWidget() {
               {error}
             </div>
           )}
-          {pending && originalNotFound && (
-            <button type="button" onClick={() => void submit(true)} disabled={submitting} style={{ ...linkButtonStyle, marginTop: 8 }}>
-              使用原编号重试
+          {error.startsWith('截图已上传成功，但反馈提交失败') && (
+            <button type="button" onClick={retrySubmitUploadedAssets} disabled={submitting} style={{ ...linkButtonStyle, marginTop: 8 }}>
+              重新提交意见
             </button>
           )}
 
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             {draftKey?.includes('user:') && <Link href="/feedback" onClick={() => setOpen(false)} style={{ marginRight: 'auto', fontSize: 13 }}>我的反馈</Link>}
             <button type="button" onClick={() => setOpen(false)} disabled={submitting} style={secondaryButtonStyle}>取消</button>
-            <button type="button" onClick={() => void submit()} disabled={submitting} style={primaryButtonStyle}>
-              {submitting ? '正在核对/提交' : pending ? '核对提交' : '提交意见'}
+            <button type="button" onClick={submit} disabled={submitting} style={primaryButtonStyle}>
+              {submitting ? '提交中' : '提交意见'}
             </button>
           </div>
         </section>
