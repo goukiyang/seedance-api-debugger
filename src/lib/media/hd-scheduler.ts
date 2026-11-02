@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { atomicHdJson, hdDirectory, hdRequestIdentity, hdSource, withHdLease, type HdJob, type HdRequestContext } from './hd-derivatives';
+import { atomicHdJson, hdDirectory, hdRequestIdentity, hdSource, readHdJob, withHdLease, type HdJob, type HdRequestContext } from './hd-derivatives';
 import { hdReadonlyDb } from './hd-readonly-db';
-import { hdEncoderStrategy } from './hd-encoder';
+import { HD_ENCODER_STRATEGIES, hdEncoderStrategy } from './hd-encoder';
 import { observeOperation } from '@/lib/performance/server-operations';
 
 export const HD_SCHEDULER_PROTOCOL = 'hd-user-round-robin-v1';
@@ -59,8 +59,12 @@ export async function readHdScheduler(): Promise<Scheduler> {
 async function mutate<T>(action: (state: Scheduler) => Promise<T> | T): Promise<T> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const result = await withHdLease('scheduler', async () => {
-      const state = await readHdScheduler(), value = await action(state);
-      state.revision++; await atomicHdJson(filename(), state); return { value };
+      const state = await readHdScheduler(), before = JSON.stringify(state), value = await action(state);
+      const exists = await fs.stat(filename()).then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error; });
+      if (!exists || JSON.stringify(state) !== before) {
+        state.revision++; await atomicHdJson(filename(), state);
+      }
+      return { value };
     });
     if (result) return result.value;
     await new Promise(resolve => setTimeout(resolve, 25));
@@ -128,7 +132,7 @@ export async function removeHdViewingInterest(requesterId: string, source: strin
   // This is invoked only after an authenticated object read was denied. Never
   // turn the browser's source into an owner or a new queue registration.
   const identities = await Promise.all([false, true].flatMap(preserveText =>
-    (['hd-legacy-e6-v1', 'hd-avif-e4-v1'] as const).map(strategy => hdRequestIdentity(source, preserveText, strategy))));
+    HD_ENCODER_STRATEGIES.map(strategy => hdRequestIdentity(source, preserveText, strategy))));
   const keys = new Set(identities.flatMap(value => value ? [value.key] : []));
   if (!keys.size) return;
   await mutate(state => { for (const entry of Object.values(state.entries)) if (keys.has(entry.key))
@@ -151,18 +155,40 @@ export async function synchronizeHdScheduler(jobs: HdJob[]) {
       && clock - Date.parse(snapshot.entries[job.key].ownerEvidence.checkedAt) >= 60000) await registerHdScheduling(job);
   }
   const jobsByKey = new Map(jobs.map(job => [job.key, job]));
+  const terminal = new Set(jobs.filter(job => !['queued', 'running'].includes(job.status) && !job.publicationPending).map(job => job.key));
+  const claimed = snapshot.claim ? jobsByKey.get(snapshot.claim.key) : null;
+  if (snapshot.claim && (!claimed || claimed.version !== snapshot.claim.sourceVersion
+    || hdEncoderStrategy(claimed.encoderStrategy) !== snapshot.claim.strategy)) throw new Error('invalid_hd_scheduler_claim');
+  const changed = Object.entries(snapshot.entries).some(([key, entry]) => entry.interests.some(value => value.expiresAt <= clock)
+    || terminal.has(key) && snapshot.claim?.key !== key && !entry.interests.length);
+  if (!changed) { observed({ rows: jobs.length }); return; }
   await mutate(state => {
     pruneInterests(state, Date.now());
-    const active = new Set(jobs.filter(job => ['queued', 'running'].includes(job.status) || job.publicationPending).map(job => job.key));
-    for (const [key, entry] of Object.entries(state.entries)) if (!active.has(key) && state.claim?.key !== key && !entry.interests.length) delete state.entries[key];
+    // An entry absent from this snapshot may have been registered concurrently.
+    // Only an observed terminal manifest authorizes removing its scheduling hint.
+    for (const [key, entry] of Object.entries(state.entries)) if (terminal.has(key) && state.claim?.key !== key && !entry.interests.length) delete state.entries[key];
     const claimed = state.claim ? jobsByKey.get(state.claim.key) : null;
     if (state.claim && (!claimed || claimed.version !== state.claim.sourceVersion
       || hdEncoderStrategy(claimed.encoderStrategy) !== state.claim.strategy)) throw new Error('invalid_hd_scheduler_claim');
   });
   observed({ rows: jobs.length });
 }
+/** Fast work hints only. Startup/periodic full manifest scans remain authoritative. */
+export async function listHdScheduledJobs(): Promise<HdJob[]> {
+  const snapshot = await readHdScheduler(), jobs: HdJob[] = [];
+  for (const key of Object.keys(snapshot.entries)) {
+    const job = await readHdJob(key);
+    if (!job) continue;
+    const publication = await fs.stat(path.join(hdDirectory(), key + '.publish.json'))
+      .then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error; });
+    jobs.push(publication ? { ...job, publicationPending: true } : job);
+  }
+  return jobs;
+}
 export async function claimHdScheduledJob(jobs: HdJob[], excluded = new Set<string>(), clock = Date.now()): Promise<HdJob | null> {
   await synchronizeHdScheduler(jobs);
+  if (!(await readHdScheduler()).claim && !jobs.some(job => !excluded.has(job.key) && (job.publicationPending
+    || ['queued', 'running'].includes(job.status) && (!job.retryAt || Date.parse(job.retryAt) <= clock)))) return null;
   return mutate(state => {
     if (state.claim) {
       const job = jobs.find(value => value.key === state.claim!.key)!;

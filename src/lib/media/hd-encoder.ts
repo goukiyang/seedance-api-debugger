@@ -4,17 +4,20 @@ import sharp from 'sharp';
 export const HD_MAX_PIXELS = 40_000_000;
 export const HD_ENCODING_TIMEOUT_SECONDS = 600;
 export const HD_VALIDATION_VERSION = 'hd-output-integrity-v2';
-export type HdEncoderStrategy = 'hd-legacy-e6-v1' | 'hd-avif-e4-v1';
+export const HD_ENCODER_STRATEGIES = ['hd-legacy-e6-v1', 'hd-avif-e4-v1', 'hd-avif-q90-e4-v1'] as const;
+export type HdEncoderStrategy = typeof HD_ENCODER_STRATEGIES[number];
 export const HD_LEGACY_ENCODER_STRATEGY: HdEncoderStrategy = 'hd-legacy-e6-v1';
 export function hdEncoderStrategy(value: unknown = HD_LEGACY_ENCODER_STRATEGY): HdEncoderStrategy {
-  if (value !== 'hd-legacy-e6-v1' && value !== 'hd-avif-e4-v1') throw new Error('invalid_hd_encoder_strategy');
-  return value;
+  if (!HD_ENCODER_STRATEGIES.includes(value as HdEncoderStrategy)) throw new Error('invalid_hd_encoder_strategy');
+  return value as HdEncoderStrategy;
 }
-// The unapproved quality candidate is available only in an explicit isolated
-// candidate environment. Production registration retains its approved effort6.
+// Frozen legacy recipes remain readable. Only new, unregistered originals use
+// the reviewed A recipe; existing ready/queued jobs retain their own strategy.
 export function defaultHdEncoderStrategy(): HdEncoderStrategy {
-  return process.env.NODE_ENV === 'test' && process.env.HD_CANDIDATE_ENCODER_STRATEGY === 'hd-avif-e4-v1'
+  if (process.env.HD_ENCODER_STRATEGY !== undefined) return hdEncoderStrategy(process.env.HD_ENCODER_STRATEGY);
+  if (process.env.NODE_ENV === 'test') return process.env.HD_CANDIDATE_ENCODER_STRATEGY === 'hd-avif-e4-v1'
     ? 'hd-avif-e4-v1' : HD_LEGACY_ENCODER_STRATEGY;
+  return 'hd-avif-q90-e4-v1';
 }
 type HdIntegrityCheck = { expected: unknown; actual: unknown; ok: boolean };
 export type HdIntegrity = { version: string; checks: Record<string, HdIntegrityCheck>; failedChecks: string[] };
@@ -33,15 +36,15 @@ export function hdEligibility(meta: sharp.Metadata) {
 }
 export function hdEncoderParameters(format: 'avif' | 'webp', strategy?: HdEncoderStrategy): HdEncoderParameters {
   const selected = hdEncoderStrategy(strategy);
-  return { format, lossless: format === 'webp', effort: format === 'avif' && selected === 'hd-avif-e4-v1' ? 4 : 6, orientation: 'auto', bitdepth: 8,
-    ...(format === 'avif' ? { quality: 95, chromaSubsampling: '4:4:4' } : {}) };
+  return { format, lossless: format === 'webp', effort: format === 'avif' && selected !== HD_LEGACY_ENCODER_STRATEGY ? 4 : 6, orientation: 'auto', bitdepth: 8,
+    ...(format === 'avif' ? { quality: selected === 'hd-avif-q90-e4-v1' ? 90 : 95, chromaSubsampling: '4:4:4' } : {}) };
 }
-// Shared with receipt recovery. These are the existing full-size encode and
-// integrity rules, extracted without changing quality, alpha or colour policy.
+// Shared with receipt recovery. Encode the frozen full-size recipe while
+// retaining the original alpha, colour and output-integrity protections.
 export async function encodeHdOutput(input: string, output: string, format: 'avif' | 'webp', strategy?: HdEncoderStrategy) {
   const parameters = hdEncoderParameters(format, strategy);
   const image = sharp(input, { limitInputPixels: HD_MAX_PIXELS, failOn: 'warning' }).rotate().timeout({ seconds: HD_ENCODING_TIMEOUT_SECONDS });
-  await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: 95, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
+  await (format === 'webp' ? image.webp({ lossless: true, effort: parameters.effort }) : image.avif({ quality: parameters.quality, chromaSubsampling: '4:4:4', effort: parameters.effort, bitdepth: 8 })).toFile(output);
   await fs.chmod(output, 0o600);
 }
 export async function validateHdOutput(inputFile: string, meta: sharp.Metadata, outputFile: string, format: 'avif' | 'webp'): Promise<HdIntegrity> {

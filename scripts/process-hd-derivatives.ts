@@ -1,11 +1,12 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
+import { watch } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
 import { hdReadonlyDb as prisma } from '../src/lib/media/hd-readonly-db';
 import { assertHdDirectoryAccess, assertHdWorkerLock, atomicHdJson, hdCapacity, hdControl, hdDirectory, hdEligibility, hdSource, hdStatus, hdWorkerFailureSummary, listHdJobs, processHdJob, readHdJob, recordHdWorkerFailure, recheckHdResources, requestHd, retryFailedHd, retryHdKey, setHdControl, type HdFairnessState, type HdRequestContext } from '../src/lib/media/hd-derivatives';
-import { claimHdScheduledJob, finishHdScheduledClaim, readHdScheduler, seedHdSchedulerFairness } from '../src/lib/media/hd-scheduler';
+import { claimHdScheduledJob, finishHdScheduledClaim, listHdScheduledJobs, readHdScheduler, seedHdSchedulerFairness } from '../src/lib/media/hd-scheduler';
 import { stopHdImageProcessors } from '../src/lib/media/hd-image-processor';
 import { HD_RESOURCE_POLICY } from '../src/lib/media/hd-resource-state';
 import { discoverHdBatch, hdSourceIsolationReason, readHdDiscoveryCheckpoint } from '../src/lib/media/hd-discovery';
@@ -101,8 +102,22 @@ async function main() {
   let stopping = false;
   let fatal: Error | null = null;
   let shutdown: Promise<void> | undefined;
+  let notified = false, wakeEncoding: (() => void) | undefined;
+  const watcher = watch(hdDirectory(), { persistent: false }, (_event, name) => {
+    if (name !== 'scheduler-v1.json' && !/^[a-f0-9]{64}\.json$/.test(String(name))) return;
+    notified = true; wakeEncoding?.();
+  });
+  // Notifications reduce latency; bounded polling and full scans cover lost events.
+  watcher.on('error', () => watcher.close());
+  const waitForWork = () => new Promise<void>(resolve => {
+    const done = () => { clearTimeout(timer); wakeEncoding = undefined; notified = false; resolve(); };
+    const timer = setTimeout(done, HD_RESOURCE_POLICY.minimumCheckMs);
+    wakeEncoding = done;
+    if (notified || stopping) done();
+  });
   const stop = () => {
     stopping = true;
+    watcher.close(); wakeEncoding?.();
     shutdown ||= stopHdImageProcessors().catch(error => { fatal ||= error instanceof Error ? error : new Error('hd_child_exit_unknown'); });
   };
   process.on('SIGTERM', stop);
@@ -149,6 +164,7 @@ async function main() {
   const encode = async () => {
     const contentionUntil = new Map<string, number>();
     let ownerRetryAt = 0, ownerFailures = 0;
+    let nextReconciliationAt = 0;
     try {
       while (!stopping) {
         let control = await hdControl();
@@ -158,7 +174,10 @@ async function main() {
           for (const [key, until] of Array.from(contentionUntil)) if (until <= clock) contentionUntil.delete(key);
           let job: Awaited<ReturnType<typeof claimHdScheduledJob>>;
           try {
-            job = await claimHdScheduledJob(await listHdJobs(), new Set(contentionUntil.keys()), clock);
+            const reconcile = clock >= nextReconciliationAt;
+            const jobs = reconcile ? await listHdJobs() : await listHdScheduledJobs();
+            if (reconcile) nextReconciliationAt = clock + HD_RESOURCE_POLICY.discoveryIntervalMs;
+            job = await claimHdScheduledJob(jobs, new Set(contentionUntil.keys()), clock);
             ownerFailures = 0;
           } catch (error) {
             if (!(error instanceof Error) || error.message !== 'hd_scheduler_owner_unavailable') throw error;
@@ -189,7 +208,7 @@ async function main() {
             continue;
           }
         }
-        if (!stopping) await wait();
+        if (!stopping) await waitForWork();
       }
     } catch (error) { await fail(error, 'encoding'); }
   };
