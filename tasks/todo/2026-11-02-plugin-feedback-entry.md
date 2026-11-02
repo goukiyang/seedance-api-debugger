@@ -241,3 +241,7 @@ D-20261102-02在R01发现旧入口缺少耐久提交回执，历史重复数量�
 后端两份原构建、真实SQLite八项、备份/健康与可执行恢复入口： [正式根私有发布记录](../../docs/materials/2026-11-02-plugin-feedback-entry/release/attempt02/README.md)。原件含环境/业务数据的部分保留服务器私有目录，不随源码公开；本单链接供同机正式根追溯。
 
 插件在2026-11-02T16:35:30.703Z通过现有管理员Cookie发布接口保存，POST/GET均200，回读v0.4.0、240810字节与签名包SHA `1bb5c55f2ef4cb28258603528e75f6024d06cbeac422184930cfb7a5bbb78119` 一致；[脱敏发布回执](../../docs/materials/2026-11-02-plugin-feedback-entry/release/attempt02/plugin-package-publication.json)。实际安装/三站布局/飞书实收仍未冒通过。原Ego发布空间27丢失，库存与原号查找确认未找到，原上传动作未发出；未借用暂停性能空间3。独立BrowserSkill发布窗口复核同一管理员和v0.128.0，按工具提供的旧协议strict同步取得每步上下文后完成唯一上传，最后关闭会话。没有读出Cookie/Token或扩大权限。
+
+### 本轮任务外线索
+
+D-20261102-03：插件CodeGraph普通增量刷新报告与实际索引不一致，已在本工作树强制重建并用新进程CLI验证storageUpdate第8行、handleFeedback第134行与源码一致（78文件、664节点、状态up-to-date）。没有修改工具源码/全局配置；增量根因待核，登记在统一discoveries。此前原图/性能等暂停目标未因此恢复，不将工具线索当本轮业务缺陷。
