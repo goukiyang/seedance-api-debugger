@@ -15,6 +15,8 @@ import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import workbenchStyles from '../integrations/workbench.module.css';
 import { FeedbackLifecyclePanel } from '@/components/feedback/FeedbackLifecyclePanel';
 
+import { feedbackPluginPageName, type FeedbackSource } from '@/lib/feedback/source';
+
 type FeedbackUser = {
   id: string;
   name: string;
@@ -32,6 +34,7 @@ type FeedbackItem = {
   image_urls_json: string | null;
   page_url: string | null;
   pathname: string | null;
+  source?: FeedbackSource | null;
   user_agent: string | null;
   status: string;
   admin_note: string | null;
@@ -463,7 +466,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
                     <td style={tdStyle}>
                       <UserIdentityBadge user={item.user} size="sm" showEmail />
                     </td>
-                    <td style={tdStyle}>{item.pathname || item.page_url || '-'}</td>
+                    <td style={tdStyle}>{feedbackPluginPageName(item.pathname) || item.pathname || item.page_url || '-'}</td>
                     <td style={tdStyle}>{item.task_id || '-'}</td>
                     <td style={tdStyle}><RelativeTime value={item.created_at} /></td>
                     <td style={tdStyle}>
@@ -513,7 +516,7 @@ export default function AdminFeedbackClient({ currentUser, feedbackId }: { curre
             <p style={{ margin: '0 0 16px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 15, lineHeight: 1.65 }}>{active.content}</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
               <UserIdentityBadge user={active.user} size="sm" />
-              <span style={{ overflowWrap: 'anywhere' }}>{active.pathname || '未提供页面'}</span>
+              <span style={{ overflowWrap: 'anywhere' }}>{feedbackPluginPageName(active.pathname) || active.pathname || '未提供页面'}{active.source && ` · v${active.source.extensionVersion}`}</span>
               <RelativeTime value={active.created_at} />
             </div>
             {parseImages(active.image_urls_json).length > 0 && (
