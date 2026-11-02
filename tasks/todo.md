@@ -7,11 +7,11 @@
 - [x] 共享传输读取并限制上游错误原因；429/502/503/504 约2秒后最多重试一次，400/中止/总超时边界保留。
 - [x] `/api/llm/chat` 对本人 active image 按账号、ID与规范化原路径核权，元数据/实际字节单张8MB双检查后内联；外部URL不变，文本不复制base64。
 - [x] 专用 mock、脚本语法、定向 lint、完整 TypeScript 与差异格式检查通过；旧 PRE34/私密提示词整套检查分别受独立缺包和沙箱缓存权限阻断，不冒通过。
-- [ ] 完整 Next 构建、聚焦提交与推送：直接 `next build` 已退出0；`npm run build` 的既有 Linux-only prebuild 在 darwin 拒绝。聚焦 `git add` 创建 `index.lock` 被环境 `Operation not permitted` 拒绝，暂存区为空，`.codegraph/` 未纳入，远端目标分支尚不存在。
-- [ ] 按实际现网基线完成保护部署、服务健康和公网检查：只读确认现网仍为 `32a956d4b` / v0.127.0 / BUILD `ybCPF_HfWFqDOgMeIxfX4`，无需合并后来源码；因无候选提交/推送而未上传、停服或切版，功能仍待用户手动验收。
+- [x] 完整 Next 构建、聚焦提交与推送：本机直接 `next build` 退出0；Linux候选完整构建含原生 prebuild、类型和 lint 退出0。聚焦提交 `9192307b42acbeab707f4bf18b4e278731ff7af6` 已推送 `origin/codex/musk-llm-503-20261102`，`.codegraph/` 未纳入。
+- [x] 按实际现网基线完成保护部署、服务健康和公网检查：2026-11-02T15:43:51Z 切到 `9192307b4` / v0.127.1 / BUILD `mqbbPIa7InO353xi4DK2Z`；7个常驻服务同源健康、4个timer active，公网 `/api/release` 与 BUILD 资源匹配。数据库身份/schema、价格全字段、Musk配置和媒体目录未改，无强杀、真实聊天或业务探针写入；功能仍待用户手动验收。
 - [x] 只读日志核对：11月2日三次浏览器 `/api/llm/chat` 均为503/88字节，精确匹配旧通用上游错误体；应用日志无上游正文。配置启用、Key已配、默认 `gpt-5.5`、未设置 `allowed_models`；本轮未发聊天或 Musk 请求。
 
-架构判断：共享 `createMuskChatCompletion` 的有限重试有7个文本消费者，按本工单统一生效；图片内联保持聊天路由专属，不改全站资产读取、权限、数据库或账务。详细证据与残留见 [交付记录](../docs/materials/2026-11-02-musk-llm-503.md)。
+架构判断：共享 `createMuskChatCompletion` 的有限重试有7个文本消费者，按本工单统一生效；图片内联保持聊天路由专属，不改全站资产读取、权限、数据库或账务。发布只复用现有服务指针、数据保护与程序回退合同，不把旧 v0.127.0 回执冒充本次候选。详细证据与残留见 [交付记录](../docs/materials/2026-11-02-musk-llm-503.md)。
 
 ## BR-FEISHU01 插件出图发到本人飞书（2026-11-02）
 
