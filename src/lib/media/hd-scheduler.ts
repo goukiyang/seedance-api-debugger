@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { atomicHdJson, hdDirectory, hdRequestIdentity, hdSource, withHdLease, type HdJob, type HdRequestContext } from './hd-derivatives';
 import { hdReadonlyDb } from './hd-readonly-db';
-import { hdEncoderStrategy } from './hd-encoder';
+import { HD_ENCODER_STRATEGIES, hdEncoderStrategy } from './hd-encoder';
 import { observeOperation } from '@/lib/performance/server-operations';
 
 export const HD_SCHEDULER_PROTOCOL = 'hd-user-round-robin-v1';
@@ -128,7 +128,7 @@ export async function removeHdViewingInterest(requesterId: string, source: strin
   // This is invoked only after an authenticated object read was denied. Never
   // turn the browser's source into an owner or a new queue registration.
   const identities = await Promise.all([false, true].flatMap(preserveText =>
-    (['hd-legacy-e6-v1', 'hd-avif-e4-v1'] as const).map(strategy => hdRequestIdentity(source, preserveText, strategy))));
+    HD_ENCODER_STRATEGIES.map(strategy => hdRequestIdentity(source, preserveText, strategy))));
   const keys = new Set(identities.flatMap(value => value ? [value.key] : []));
   if (!keys.size) return;
   await mutate(state => { for (const entry of Object.values(state.entries)) if (keys.has(entry.key))

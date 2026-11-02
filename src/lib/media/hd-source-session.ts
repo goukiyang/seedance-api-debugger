@@ -1,7 +1,7 @@
 'use client';
 
 export type HdDescription = { status: 'queued' | 'running' | 'ready' | 'failed' | 'skipped'; sourceVersion: string | null; policy: string; reason?: string; format?: string; mime?: string; bytes?: number; width?: number; height?: number; original?: boolean; stage?: string; retryAt?: string; errorKind?: string;
-  encodingStrategy?: 'hd-legacy-e6-v1' | 'hd-avif-e4-v1'; representationVersion?: string;
+  encodingStrategy?: 'hd-legacy-e6-v1' | 'hd-avif-e4-v1' | 'hd-avif-q90-e4-v1'; representationVersion?: string;
   processingAvailability?: 'active' | 'resource_wait' | 'manual_pause' | 'hard_pause' | 'unknown' };
 export type HdSourceState = { description?: HdDescription; denied?: boolean; error?: boolean; httpStatus?: number };
 export function hdDescriptionPending(description?: HdDescription) {
@@ -65,7 +65,7 @@ function parseDescription(value: unknown): HdDescription {
   if (data.policy !== 'hd-f-v1' || !['queued', 'running', 'ready', 'failed', 'skipped'].includes(data.status) || !(data.sourceVersion === null || typeof data.sourceVersion === 'string' && data.sourceVersion.length <= 256)) throw new Error('invalid_descriptor');
   if (data.status === 'ready' && (!data.sourceVersion || ![data.bytes, data.width, data.height].every(number => Number.isSafeInteger(number) && number! > 0) || !data.mime?.startsWith('image/'))) throw new Error('invalid_descriptor');
   if (data.representationVersion !== undefined && !/^hd-representation-v1:[a-f0-9]{64}$/.test(data.representationVersion)) throw new Error('invalid_descriptor');
-  if (data.encodingStrategy !== undefined && !['hd-legacy-e6-v1', 'hd-avif-e4-v1'].includes(data.encodingStrategy)
+  if (data.encodingStrategy !== undefined && !['hd-legacy-e6-v1', 'hd-avif-e4-v1', 'hd-avif-q90-e4-v1'].includes(data.encodingStrategy)
     || data.retryAt !== undefined && (typeof data.retryAt !== 'string' || !Number.isFinite(Date.parse(data.retryAt)))) throw new Error('invalid_descriptor');
   if (data.stage !== undefined && !['queued', 'reading', 'encoding', 'validating', 'publishing'].includes(data.stage)
     || data.processingAvailability !== undefined && !['active', 'resource_wait', 'manual_pause', 'hard_pause', 'unknown'].includes(data.processingAvailability)) throw new Error('invalid_descriptor');

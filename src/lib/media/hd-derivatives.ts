@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_CONTROL_PROTOCOL, HD_RETRY_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
-import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
+import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HD_ENCODER_STRATEGIES, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
 import { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
 import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity, type HdChildClose, type HdGroupExit } from './hd-image-processor';
 export type { HdControl, HdResourceSample } from './hd-resource-state';
@@ -116,6 +116,11 @@ export async function hdSource(source: string) {
 export async function readHdJob(key: string): Promise<HdJob | null> {
   if (!/^[a-f0-9]{64}$/.test(key)) return null;
   if (process.env.NODE_ENV === 'production') await assertHdStorageRoot();
+  return readHdJobRecord(key);
+}
+// Only callers which have just checked the shared root may batch these reads.
+// Individual public readers and every writer retain their own boundary check.
+async function readHdJobRecord(key: string): Promise<HdJob | null> {
   try {
     const job = JSON.parse(await fs.readFile(jobPath(key), 'utf8')) as HdJob;
     if (job.key !== key || job.policy !== HD_POLICY || typeof job.source !== 'string' || typeof job.version !== 'string'
@@ -194,19 +199,22 @@ async function withControlLease<T>(action: () => Promise<T>): Promise<T | null> 
   }
   return null;
 }
+function hdIdentity(current: NonNullable<Awaited<ReturnType<typeof hdSource>>>, preserveText: boolean, encoderStrategy: HdEncoderStrategy) {
+  const parameters = hdEncoderParameters('avif', encoderStrategy);
+  const key = createHash('sha256').update(JSON.stringify({ file: current.file, version: current.version,
+    policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: parameters.quality, chroma: '4:4:4', effort: parameters.effort, orientation: 'auto', color: '8bit-srgb',
+    library: sharp.versions, preserveText, ...(encoderStrategy !== 'hd-legacy-e6-v1' ? { encoderStrategy } : {}) })).digest('hex');
+  return { current, key, preserveText: Boolean(preserveText), encoderStrategy };
+}
 export async function hdRequestIdentity(source: string, preserveText?: boolean, strategy: HdEncoderStrategy = 'hd-legacy-e6-v1') {
-  const encoderStrategy = hdEncoderStrategy(strategy);
-  const current = await hdSource(source);
+  const encoderStrategy = hdEncoderStrategy(strategy), current = await hdSource(source);
   if (!current) return null; // Unknown remote versions never become permanent derivative keys.
   if (preserveText === undefined) {
     const local = siteUploadPathFromUrl(source)!;
     const assets = await hdReadonlyDb.asset.findMany({ where: { status: 'active', type: 'image', original_url: { endsWith: local } }, select: { metadata_json: true } });
     preserveText = assets.some(asset => { try { return JSON.parse(asset.metadata_json || '{}').preserveText === true; } catch { return false; } });
   }
-  const key = createHash('sha256').update(JSON.stringify({ file: current.file, version: current.version,
-    policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: 95, chroma: '4:4:4', effort: encoderStrategy === 'hd-avif-e4-v1' ? 4 : 6, orientation: 'auto', color: '8bit-srgb',
-    library: sharp.versions, preserveText, ...(encoderStrategy === 'hd-avif-e4-v1' ? { encoderStrategy } : {}) })).digest('hex');
-  return { current, key, preserveText: Boolean(preserveText), encoderStrategy };
+  return hdIdentity(current, preserveText, encoderStrategy);
 }
 const compatibleHdKeys = new Map<string, string[]>();
 async function compatibleHdRecords(source: string, identity: NonNullable<Awaited<ReturnType<typeof hdRequestIdentity>>>) {
@@ -230,14 +238,15 @@ async function compatibleHdRecords(source: string, identity: NonNullable<Awaited
 async function registeredHd(source: string, preserveText?: boolean) {
   const legacy = await hdRequestIdentity(source, preserveText);
   if (!legacy) return null;
-  const candidate = await hdRequestIdentity(source, legacy.preserveText, 'hd-avif-e4-v1');
-  const identities = [legacy, candidate!];
+  // All recipes refer to one observed source version; avoid re-resolving the
+  // same file for each recipe during every viewer status request.
+  const identities = HD_ENCODER_STRATEGIES.map(strategy => hdIdentity(legacy.current, legacy.preserveText, strategy));
   const records = await Promise.all(identities.map(async identity => ({ identity, job: await readHdJob(identity.key) })));
   for (const row of records) if (row.job && (row.job.version !== row.identity.current.version
     || row.job.preserveText !== row.identity.preserveText || hdEncoderStrategy(row.job.encoderStrategy) !== row.identity.encoderStrategy)) throw new Error('invalid_hd_manifest');
   if (!records.some(row => row.job)) records.push(...await compatibleHdRecords(source, legacy));
   return records.find(row => row.job?.status === 'ready') || records.find(row => row.job && ['queued', 'running'].includes(row.job.status))
-    || records.find(row => row.job) || { identity: defaultHdEncoderStrategy() === 'hd-avif-e4-v1' ? candidate! : legacy, job: null };
+    || records.find(row => row.job) || { identity: identities.find(value => value.encoderStrategy === defaultHdEncoderStrategy())!, job: null };
 }
 export async function lookupHd(source: string) {
   const registered = await registeredHd(source);
@@ -319,11 +328,13 @@ export async function listHdJobs() {
     if (error.code === 'ENOENT') return []; throw error;
   });
   const jobs: HdJob[] = [];
+  const publications = new Set(names.filter(name => /^[a-f0-9]{64}\.publish\.json$/.test(name)).map(name => name.slice(0, -13)));
   for (const name of names) if (/^[a-f0-9]{64}\.json$/.test(name)) {
-    const job = await readHdJob(name.slice(0, -5));
-    if (job) jobs.push(names.includes(job.key + '.publish.json') ? { ...job, publicationPending: true } : job);
+    const job = await readHdJobRecord(name.slice(0, -5));
+    if (job) jobs.push(publications.has(job.key) ? { ...job, publicationPending: true } : job);
   }
-  for (const name of names.filter(name => /^[a-f0-9]{64}\.publish\.json$/.test(name))) if (!jobs.some(job => job.key === name.slice(0, -13))) throw new Error('hd_publish_unknown');
+  const found = new Set(jobs.map(job => job.key));
+  for (const key of Array.from(publications)) if (!found.has(key)) throw new Error('hd_publish_unknown');
   return jobs;
 }
 export async function hdCapacity(reserve = 0) {
