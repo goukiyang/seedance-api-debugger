@@ -76,12 +76,15 @@ export async function authorizedImageResponse(request: Request, source: string, 
         'output_integrity', 'published_integrity', 'worker_integrity_failure', 'hd_child_exit_unknown', 'capacity_guard', 'retry_limit', 'original_smaller',
         'existing_webp', 'multi_frame', 'pixel_limit', 'high_bit_depth', 'wide_gamut', 'unverified_color_profile'];
       const representationVersion = job?.status === 'ready' ? await hdRepresentationVersion(source, job) : undefined;
+      // Older open tabs whitelist this optional diagnostic label. The byte
+      // identity remains bound by representationVersion for every recipe.
+      const encodingStrategy = job ? hdEncoderStrategy(job.encoderStrategy) : undefined;
       return Response.json({ policy: 'hd-f-v1', sourceVersion: job?.version || null,
         status: job?.status || 'skipped', reason: !job ? 'not_registered' : errors.includes(job.reason || '') ? job.reason : null,
         processingAvailability, ...(job?.stage && stages.includes(job.stage) ? { stage: job.stage } : {}),
         ...(job?.retryAt ? { retryAt: job.retryAt } : {}), ...(!schedulingKnown ? { errorKind: 'scheduling_unconfirmed' }
           : job?.errorKind && errors.includes(job.errorKind) ? { errorKind: job.errorKind } : {}),
-        ...(job ? { encodingStrategy: hdEncoderStrategy(job.encoderStrategy) } : {}), ...(representationVersion ? { representationVersion } : {}),
+        ...(encodingStrategy && encodingStrategy !== 'hd-avif-q90-e4-v1' ? { encodingStrategy } : {}), ...(representationVersion ? { representationVersion } : {}),
         ...(job?.status === 'ready' ? { width: job.width, height: job.height, bytes: job.bytes,
           format: job.format === 'original' ? rawMime.split('/')[1] : job.format,
           mime: job.format === 'original' ? rawMime : job.mime, original: job.format === 'original' } : {}) }, { headers: privateImageHeaders });
