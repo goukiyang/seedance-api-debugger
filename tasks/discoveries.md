@@ -38,4 +38,4 @@
 - 短线索就地记录；较长调查与方案放 `discoveries/<编号>.md`。已有工单或附件直接链接，不复制长文、私有媒体或凭据；没有实际详情时不造空文件。
 - 详情按需保存现象、证据、影响、根因/假设、候选方案与推荐、确认状态、实施及验证/恢复结果。状态区分待核、待处理、待确认、处理中、受阻、已修待手验、已关闭。
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
-| D-20261102-03 | 工具线索 / P3；本工作树已刷新，增量根因待核 | 插件CodeGraph普通sync/index返回Already up to date，但status仍报8个modified，handleFeedback索引126行与实际134行不符。非业务运行问题，未用旧图指导后续改码。 | 实际worktree `.worktrees/sd2b-integration`；CodeGraph CLI context/status与源码行号；[本轮工单](todo/2026-11-02-plugin-feedback-entry.md) | 已对该本地索引执行force重建，CLI确认storageUpdate:8/handleFeedback:134、78文件/664节点且up-to-date。未改CodeGraph工具源码或全局配置；再次出现时单列核索引增量/适配输入，不阻塞已发布反馈功能。 |
+| D-20261102-03 | 已确认共享checkout漂移；本次误推已修 / P2 | 共用插件worktree在本轮文档推送期间由cc/panel-standard被切到cc/integration并合入0.4.1；随后一次HEAD推送误将18文件整合差量带入发布线。已发布包始终固定980/v0.4.0/SHA1bb，不受误推影响。先前索引旧行号与source漂移同时发生，不能据此单独归为CodeGraph增量工具bug。 | [本轮工单与更正](todo/2026-11-02-plugin-feedback-entry.md)、正式根plugin-git-ref-repair.json | 已普通原子FF：发布线e68b34恢复与980相同的运行代码；integration的6a69合并记录吸收修正历史但运行树与原28e7完全相同，避免未来merge误删功能。不强推、不动用户工作树；后续Git写入固定父commit/ref并验差量，插件再改码需独占/隔离checkout。 |

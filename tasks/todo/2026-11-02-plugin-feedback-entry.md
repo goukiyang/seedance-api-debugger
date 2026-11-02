@@ -242,6 +242,10 @@ D-20261102-02在R01发现旧入口缺少耐久提交回执，历史重复数量�
 
 插件在2026-11-02T16:35:30.703Z通过现有管理员Cookie发布接口保存，POST/GET均200，回读v0.4.0、240810字节与签名包SHA `1bb5c55f2ef4cb28258603528e75f6024d06cbeac422184930cfb7a5bbb78119` 一致；[脱敏发布回执](../../docs/materials/2026-11-02-plugin-feedback-entry/release/attempt02/plugin-package-publication.json)。实际安装/三站布局/飞书实收仍未冒通过。原Ego发布空间27丢失，库存与原号查找确认未找到，原上传动作未发出；未借用暂停性能空间3。独立BrowserSkill发布窗口复核同一管理员和v0.128.0，按工具提供的旧协议strict同步取得每步上下文后完成唯一上传，最后关闭会话。没有读出Cookie/Token或扩大权限。
 
-### 本轮任务外线索
+### 本轮任务外线索与误判更正
 
-D-20261102-03：插件CodeGraph普通增量刷新报告与实际索引不一致，已在本工作树强制重建并用新进程CLI验证storageUpdate第8行、handleFeedback第134行与源码一致（78文件、664节点、状态up-to-date）。没有修改工具源码/全局配置；增量根因待核，登记在统一discoveries。此前原图/性能等暂停目标未因此恢复，不将工具线索当本轮业务缺陷。
+D-20261102-03：初查发现索引旧126行与实际134行不一致，强制刷新后当前checkout可查，但后续reflog确认共用worktree被另一会话切到cc/integration、提交887整合0.4.1，且远端继续推进28e7。该source漂移与索引观察重叠，不能将其单独定性为CodeGraph工具增量bug；原P3工具归因已更正，未改工具源码或全局配置。
+
+本轮一次据HEAD推文档使cc/panel-standard误快进740并包含18文件整合源差量。已用普通原子FF修正：发布线e68b34bff26fb3ddc66458a66db1d97d0a2ea5f6的运行树逐字等于已发布980；integration的6a69fa56c69ae3b4a3235d9b25b9534b10b689ca以原28e7运行树合并修正历史，保留全部整合功能并避免未来merge把功能反向移除。全程不强推、不reset/checkout用户工作树、不重发安装包或改运行服务。[脱敏修正回执](../../docs/materials/2026-11-02-plugin-feedback-entry/release/attempt02/plugin-git-ref-repair.json)已核两个remote和两棵树；已发布包仍0.4.0/980/SHA1bb。
+
+后续Git操作绑定明确父commit、目标ref和实际差量，不向共享工作树的可变HEAD盲推。当前插件worktree仍留给原integration会话，后续代码修改应独占或隔离checkout；索引只代表当时实际checkout，不冒发布源。原图/性能等暂停目标没有因此恢复，A01–A10仍用户手验。
