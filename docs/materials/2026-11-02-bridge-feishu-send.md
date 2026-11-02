@@ -4,7 +4,39 @@
 
 ## 范围与状态
 
-三个接口及独立消费者已实现，本地工程检查通过；Git 暂存被环境拒绝，尚无本轮提交或推送。本轮不部署、不连接生产、不真实发送飞书消息。检查结果在下方登记，不能用 mock 代替插件/飞书收件手验。
+三个接口及独立消费者已实现，既有本地工程检查通过。当前本地分支 HEAD 为 `205bf68d958d2048ad943bafd0c2f683e6206661` / v0.127.0；用户本次明确告知已推送 origin，并授权发布。2026-11-02 本次发布在只读核对后因 Git 元数据写入被环境拒绝而停止，**未部署**。下方旧 Git 阻点及“将来上线注意”为实现阶段历史，当前状态以本节及下面的发布尝试为准；不把 mock 或服务检查当作插件/飞书收件手验。
+
+## 发布尝试：现网基线变化与环境阻点（2026-11-02）
+
+记录时间：2026-11-02T06:35:57Z。用户已明确授权本次上线，引用其 06:30Z 原话「我之前不是说过了么。这些以后都一律同意」；没有再次索取上线批准。沿 `ops/sd2-release-prepare.mjs`、`ops/sd2-release-profile.json`、现网部署文档及 `server-deploy-closure` 核对发布范围，不真实发送飞书消息。
+
+已完成的只读核对：
+
+- 本地分支为 `codex/bridge-feishu-send-20261102`，HEAD 为上述 `205bf68d9`，remote 为 `https://github.com/goukiyang/seedance-api-debugger.git`。已有未跟踪 `HANDOFF-feishu-send.md` 原样保留。
+- root SSH 成功。`sd2-gray.service` 为 active/running；Web 与 `sd2-feedback-delivery.service` 的 WorkingDirectory 均为 `/data/video-api-debugger/managed-releases/6629e540dadaa816d17e6784a904d24ec50262a1`。投递 service 当时 inactive/dead，配套 timer 为 active/waiting；没有手动启动投递。
+- 该目录 `.deployed-commit` 为 `6629e540dadaa816d17e6784a904d24ec50262a1`，package 版本为 **v0.126.7**，`.next-prod/BUILD_ID` 为 **`qnhbdC9RfbHdNzOGAiN0Z`**。实际现网已不同于本次请求所列 `37c8eb37f / v0.126.6`。
+- 服务器本机匿名 GET `http://127.0.0.1:3302/api/bridge/feishu/send` 返回 **404**；这不是公网检查，也不是部署后结果。
+- 本地没有现网 `6629e540…` 对象，`git show` 返回 `fatal: bad object`。为核对新版本差异，执行下列 fetch，被环境拒绝：
+
+```sh
+git fetch --no-tags origin 6629e540dadaa816d17e6784a904d24ec50262a1
+```
+
+原错误（退出码 255）：
+
+```text
+error: cannot open '/Volumes/Data/Projects/video-api-debugger/.git/worktrees/bridge-feishu-send-20261102/FETCH_HEAD': Operation not permitted
+```
+
+按用户“沙箱若挡住……不要绕过：停在那一步”的要求，停止 Git 写入与后续发布，没有更换 Git 目录、使用 `--no-write-fetch-head`、更换工具或提权绕过。记录仅更新到当前工作树，**本次发布记录未提交、未推送**；既有功能提交的远端状态按用户提供信息记录，没有冒称本轮重新核实。
+
+未执行：固定入口候选准备、归档上传、服务器构建/内置检查、新数据保护备份、Web/worker 切换、停服、生产数据写入、DDL、飞书配置/权限变更、真实消息发送及部署后公网检查。既有视频/图片飞书通知源码差异和工程结果见原实现记录，本次没有部署，未验证新版本下真实通知效果。现有应用的 `im:resource` / `im:message:send_as_bot` 权限未核实，不能声称已确认或缺失。
+
+回退：本次未切版，不需要执行回退。用户指定的 `37c8eb37f / v0.126.6` 仍是计划程序回退目标，**未完成其现存产物、保护入口及与当前 v0.126.7 差异的核验，不提供未经核实的可执行回退命令**；任何接续均只回程序，不回数据库、Notification 回执、限频记录或原图。
+
+接续缺口：先解除当前 Git 元数据写入限制，再核对实际现网 `6629e540…` 的来源和差异，确保本候选不覆盖后来上线的改动；以届时实际运行版本准备固定发布入口、候选与回退。此次没有启动 release run，也没有发布锁或待恢复停服操作。插件真实发送仍由用户手验。
+
+本轮新发现的线索与问题：未新增任务外问题；现网基线变化和环境拒绝均属于本次发布直接阻点。
 
 ## 架构判断与实现
 

@@ -2,7 +2,7 @@
 
 ## BR-FEISHU01 插件出图发到本人飞书（2026-11-02）
 
-基线 `37c8eb37f` / v0.126.6，候选 v0.127.0，分支 `codex/bridge-feishu-send-20261102`。三个本人 API、独立 Notification 队列与现有 feedback worker 接线已实现，无 DDL；不改上传和视频/图片通知。新功能14组、旧视频飞书30组、全量类型及lint通过；Git暂存因index.lock写入被环境拒绝，尚无提交/推送。测试、Git 接续与上线注意见 [交付记录](2026-11-02-bridge-feishu-send.md)，原合同见 [工单](../../HANDOFF-feishu-send.md)。本轮不部署、不连生产、不真实外发；插件/飞书实际收件待后续用户手验。
+候选 `205bf68d9` / v0.127.0，分支 `codex/bridge-feishu-send-20261102`，用户已告知推送并授权上线。三个本人 API、独立 Notification 队列与现有 feedback worker 接线已实现，无 DDL；既有14组新功能、30组旧视频飞书、类型及lint检查通过。2026-11-02 发布只读核对发现现网已为 `6629e540…` / v0.126.7 / BUILD `qnhbdC9RfbHdNzOGAiN0Z`，Web/worker 工作目录一致，本机匿名新接口仍404；fetch 该运行源时写入 `FETCH_HEAD` 被环境拒绝，按用户要求停止，未构建、未上传、未停服、未切版、未真实外发。本次发布记录仅存本地，未提交/推送。确切命令、原错误、回退核验缺口及原工程证据见 [交付与发布记录](2026-11-02-bridge-feishu-send.md)，原合同见 [工单](../../HANDOFF-feishu-send.md)。插件/飞书实际收件待部署后用户手验。
 
 <!-- SAVE500-SUNBURST-BRIDGE-20261031 -->
 ## SAVE500 / SUNBURST / BRIDGE 接续交付（2026-10-31）
