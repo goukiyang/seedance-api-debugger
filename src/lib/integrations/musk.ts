@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { setTimeout as delay } from 'node:timers/promises';
 import { prisma } from '@/lib/prisma';
 import { readPrivateCredential, writePrivateCredential } from '@/lib/security/private-credentials.server';
 import { isPrivatePromptError, isStoredPrivatePrompt, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
@@ -200,6 +201,54 @@ function safeMuskRequestId(value: string | null) {
   return value && /^[A-Za-z0-9_.:-]{1,160}$/.test(value) ? value : null;
 }
 
+const RETRYABLE_MUSK_HTTP_STATUSES = new Set([429, 502, 503, 504]);
+const DEFAULT_MUSK_RETRY_DELAY_MS = 2000;
+
+function muskUpstreamErrorReason(text: string) {
+  const raw = text.trim();
+  if (!raw) return '';
+  let reason = '';
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const nested = parsed.error && typeof parsed.error === 'object'
+      ? parsed.error as Record<string, unknown>
+      : null;
+    reason = typeof nested?.message === 'string'
+      ? nested.message
+      : typeof parsed.error === 'string'
+        ? parsed.error
+        : typeof parsed.message === 'string'
+          ? parsed.message
+          : '';
+  } catch {
+    // 非 JSON 正文也保留给调用方排查。
+  }
+  return (reason || raw).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+function muskUpstreamError(status: number, text: string) {
+  const reason = muskUpstreamErrorReason(text);
+  return new MuskApiError(
+    `Musk API 调用失败 (HTTP ${status})${reason ? `：${reason}` : ''}`,
+    status,
+    'musk_api_upstream_error',
+  );
+}
+
+function logMuskUpstreamError(status: number, text: string, attempt: number) {
+  console.error('[musk/chat] upstream error', {
+    status,
+    body: muskUpstreamErrorReason(text),
+    attempt,
+  });
+}
+
+async function waitForMuskRetry(ms: number, signal: AbortSignal) {
+  signal.throwIfAborted();
+  if (ms <= 0) return;
+  await delay(ms, undefined, { signal });
+}
+
 export async function createMuskChatCompletion(params: {
   settings: MuskApiSettings;
   messages: MuskChatMessage[];
@@ -213,6 +262,8 @@ export async function createMuskChatCompletion(params: {
   model?: string;
   /** 外部中止信号（例如客户端断开）。 */
   signal?: AbortSignal;
+  /** mock 可覆盖；生产默认约 2 秒。 */
+  retryDelayMs?: number;
 }): Promise<MuskChatCompletionResult> {
   if (!isMuskApiReady(params.settings)) {
     throw new MuskApiError('Musk API 未启用或缺少 API Key', 503, 'musk_api_not_configured');
@@ -234,7 +285,8 @@ export async function createMuskChatCompletion(params: {
     phase: 'awaiting_headers', elapsedMs: 0, headersMs: null, bodyMs: null, httpStatus: null, upstreamRequestId: null };
   const timeout = setTimeout(() => controller.abort(), diagnostics.timeoutMs);
   const onExternalAbort = () => controller.abort();
-  params.signal?.addEventListener('abort', onExternalAbort, { once: true });
+  if (params.signal?.aborted) controller.abort();
+  else params.signal?.addEventListener('abort', onExternalAbort, { once: true });
 
   try {
     const endpoint = buildChatCompletionsUrl(params.settings.base_url);
@@ -248,19 +300,33 @@ export async function createMuskChatCompletion(params: {
       signal: controller.signal,
     };
     const origins = privateCredentialSendOrigins(params.privateOrigins);
-    const response = origins.length
-      ? await privatePromptFetch({ endpoint, provider: 'musk', credential: params.settings.api_key || '', model }, origins, init, params.fetchImpl || fetch)
-      : await (params.fetchImpl || fetch)(endpoint, init);
-    diagnostics.headersMs = Date.now() - started;
-    diagnostics.httpStatus = response.status;
-    diagnostics.upstreamRequestId = safeMuskRequestId(response.headers.get('x-request-id') || response.headers.get('request-id'));
-    diagnostics.phase = 'reading_body';
-    const text = await response.text();
-    diagnostics.bodyMs = Date.now() - started - diagnostics.headersMs;
-    diagnostics.phase = 'parsing';
-    if (!response.ok) {
-      throw new MuskApiError(`Musk API 调用失败 (HTTP ${response.status})`, response.status, 'musk_api_upstream_error');
+    const fetcher = params.fetchImpl || fetch;
+    let response: Response | null = null;
+    let text = '';
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      controller.signal.throwIfAborted();
+      diagnostics.phase = 'awaiting_headers';
+      response = origins.length
+        ? await privatePromptFetch({ endpoint, provider: 'musk', credential: params.settings.api_key || '', model }, origins, init, fetcher)
+        : await fetcher(endpoint, init);
+      const headersAt = Date.now();
+      diagnostics.headersMs = headersAt - started;
+      diagnostics.httpStatus = response.status;
+      diagnostics.upstreamRequestId = safeMuskRequestId(response.headers.get('x-request-id') || response.headers.get('request-id'));
+      diagnostics.phase = 'reading_body';
+      text = await response.text();
+      diagnostics.bodyMs = Date.now() - headersAt;
+      diagnostics.phase = 'parsing';
+      if (response.ok) break;
+
+      logMuskUpstreamError(response.status, text, attempt);
+      if (attempt === 1 && RETRYABLE_MUSK_HTTP_STATUSES.has(response.status) && !controller.signal.aborted) {
+        await waitForMuskRetry(params.retryDelayMs ?? DEFAULT_MUSK_RETRY_DELAY_MS, controller.signal);
+        continue;
+      }
+      throw muskUpstreamError(response.status, text);
     }
+    if (!response) throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed');
 
     let data: Record<string, unknown>;
     try {
@@ -376,16 +442,20 @@ export async function openMuskChatStream(params: {
   model?: string;
   signal?: AbortSignal;
   connectTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  /** mock 可覆盖；生产默认约 2 秒。 */
+  retryDelayMs?: number;
 }): Promise<Response> {
   if (!isMuskApiReady(params.settings)) {
     throw new MuskApiError('Musk API 未启用或缺少 API Key', 503, 'musk_api_not_configured');
   }
   const controller = new AbortController();
   const onAbort = () => controller.abort();
-  params.signal?.addEventListener('abort', onAbort, { once: true });
+  if (params.signal?.aborted) controller.abort();
+  else params.signal?.addEventListener('abort', onAbort, { once: true });
   const timeout = setTimeout(() => controller.abort(), params.connectTimeoutMs || 45000);
   try {
-    const response = await fetch(buildChatCompletionsUrl(params.settings.base_url), {
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -398,11 +468,23 @@ export async function openMuskChatStream(params: {
         stream: true,
       }),
       signal: controller.signal,
-    });
-    if (!response.ok || !response.body) {
-      throw new MuskApiError(`Musk API 调用失败 (HTTP ${response.status})`, response.status || 502, 'musk_api_upstream_error');
+    };
+    const fetcher = params.fetchImpl || fetch;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      controller.signal.throwIfAborted();
+      const response = await fetcher(buildChatCompletionsUrl(params.settings.base_url), init);
+      if (response.ok && response.body) return response;
+
+      const status = response.ok ? 502 : response.status || 502;
+      const text = await response.text();
+      logMuskUpstreamError(status, text, attempt);
+      if (attempt === 1 && RETRYABLE_MUSK_HTTP_STATUSES.has(status) && !controller.signal.aborted) {
+        await waitForMuskRetry(params.retryDelayMs ?? DEFAULT_MUSK_RETRY_DELAY_MS, controller.signal);
+        continue;
+      }
+      throw muskUpstreamError(status, text);
     }
-    return response;
+    throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed');
   } catch (error) {
     if (error instanceof MuskApiError) throw error;
     if (error instanceof Error && error.name === 'AbortError') {

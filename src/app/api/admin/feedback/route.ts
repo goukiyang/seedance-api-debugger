@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 
+import { feedbackSources } from '@/lib/feedback/submission';
+
 const VALID_STATUS = new Set(['new', 'reviewed', 'archived']);
 
 function numberParam(value: string | null, fallback: number, max: number) {
@@ -81,5 +83,6 @@ export async function GET(request: NextRequest) {
     prisma.feedback.count({ where }),
   ]);
 
-  return NextResponse.json({ items, total, page, pageSize }, { headers: { 'Cache-Control': 'private, no-store' } });
+  const sources = await feedbackSources(prisma, items.map(item => item.id));
+  return NextResponse.json({ items: items.map(item => ({ ...item, source: sources.get(item.id) || null })), total, page, pageSize }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

@@ -7,9 +7,13 @@ import {
   MuskApiError,
   openMuskChatStream,
   resolveMuskChatModels,
-  type MuskChatContentPart,
-  type MuskChatMessage,
 } from '@/lib/integrations/musk';
+import {
+  MuskChatImageError,
+  prepareMuskChatMessages,
+  type MuskChatInputImage,
+  type MuskChatInputMessage,
+} from '@/lib/integrations/musk-chat-images';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,16 +23,8 @@ const MAX_CONTENT_CHARS = 24000;
 const MAX_IMAGES_PER_MESSAGE = 6;
 const MAX_IMAGE_URL_CHARS = 2048;
 
-type IncomingImage = {
-  id?: string;
-  url: string;
-};
-
-type IncomingMessage = {
-  role: string;
-  content: string;
-  images?: IncomingImage[];
-};
+type IncomingImage = MuskChatInputImage;
+type IncomingMessage = MuskChatInputMessage;
 
 function asTrimmedString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -100,7 +96,7 @@ function parseIncomingMessages(body: unknown): { messages: IncomingMessage[]; te
     }
 
     messages.push({
-      role,
+      role: role as IncomingMessage['role'],
       content,
       images: images.length ? images : undefined,
     });
@@ -117,36 +113,6 @@ function parseIncomingMessages(body: unknown): { messages: IncomingMessage[]; te
 
   const model = asTrimmedString(payload.model).slice(0, 80) || undefined;
   return { messages, temperature, model, stream: payload.stream === true };
-}
-
-function toMuskMessages(messages: IncomingMessage[]): MuskChatMessage[] {
-  return messages.map((msg) => {
-    const role = msg.role as MuskChatMessage['role'];
-    const images = msg.images || [];
-    if (images.length === 0) {
-      return { role, content: msg.content };
-    }
-
-    // 多模态优先：OpenAI 兼容 image_url parts
-    const parts: MuskChatContentPart[] = [
-      { type: 'text', text: msg.content },
-      ...images.map((img) => ({
-        type: 'image_url' as const,
-        image_url: { url: img.url },
-      })),
-    ];
-
-    // 文本兜底：若上游不吃 vision，至少把 URL 写进同条文本（多数兼容层仍读 text part）
-    const urlLines = images
-      .map((img, idx) => `- image${idx + 1}${img.id ? ` (id=${img.id})` : ''}: ${img.url}`)
-      .join('\n');
-    parts[0] = {
-      type: 'text',
-      text: `${msg.content}\n\n[Attached image URLs]\n${urlLines}`,
-    };
-
-    return { role, content: parts };
-  });
 }
 
 /** 把上游 OpenAI SSE 转成 `data: {"delta":"..."}`，结尾 `event: done`。 */
@@ -228,11 +194,12 @@ export async function POST(request: NextRequest) {
       }
       model = requestedModel;
     }
+    const muskMessages = await prepareMuskChatMessages(messages, user.id, request.signal);
 
     if (stream) {
       const upstream = await openMuskChatStream({
         settings,
-        messages: toMuskMessages(messages),
+        messages: muskMessages,
         temperature: temperature ?? 0.4,
         model,
         signal: request.signal,
@@ -251,7 +218,7 @@ export async function POST(request: NextRequest) {
       settings,
       model,
       signal: request.signal,
-      messages: toMuskMessages(messages),
+      messages: muskMessages,
       temperature: temperature ?? 0.4,
       jsonMode: false,
       timeoutMs: 90000,
@@ -266,6 +233,9 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message, ok: false }, { status: error.status });
+    }
+    if (error instanceof MuskChatImageError) {
+      return NextResponse.json({ error: error.message, ok: false, code: error.code }, { status: error.status });
     }
     if (error instanceof MuskApiError) {
       return NextResponse.json(
