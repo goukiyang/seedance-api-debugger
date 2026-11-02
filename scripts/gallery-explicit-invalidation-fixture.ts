@@ -111,11 +111,11 @@ const compiledHook = ts.transpileModule(executableHook, { compilerOptions: {
 } }).outputText;
 
 let runner: HookRunner;
-const browserListeners = new Map<string, Set<() => void>>();
-const addListener = (name: string, listener: () => void) => {
-  const listeners = browserListeners.get(name) || new Set<() => void>(); listeners.add(listener); browserListeners.set(name, listeners);
+const browserListeners = new Map<string, Set<(event: { type: string }) => void>>();
+const addListener = (name: string, listener: (event: { type: string }) => void) => {
+  const listeners = browserListeners.get(name) || new Set<(event: { type: string }) => void>(); listeners.add(listener); browserListeners.set(name, listeners);
 };
-const removeListener = (name: string, listener: () => void) => browserListeners.get(name)?.delete(listener);
+const removeListener = (name: string, listener: (event: { type: string }) => void) => browserListeners.get(name)?.delete(listener);
 const sandbox = {
   exports: {} as { useGalleryCatalog?: GalleryHook }, AbortController,
   useState: (initial: unknown) => runner.useState(initial),
@@ -421,6 +421,36 @@ async function main() {
     [source, { ...pages, page: 2, start: 12 }],
     [{ ...source, data: { ...source.data!, page: 2 } }, { ...pages, page: 2, start: 12 }],
   ] as Array<[Pool, Pages]>) equal(projection.exports.run!(pool, target).every(item => !item.available && item.loading), true);
+
+  // Passive resume reuses the actual pending read; stronger changes still replace it immediately.
+  const resume = async (type: string) => {
+    browserListeners.get(type)?.forEach(listener => listener({ type })); await runner.flush();
+  };
+  const pendingResume = await start('resume-marker');
+  for (const type of ['focus', 'visibilitychange', 'focus']) await resume(type);
+  equal(pendingRequests.length, requestCursor, 'Repeated passive resume must not start another read');
+  equal(pendingResume.signal.aborted, false);
+  runner.result.setPage(2, 12); await runner.flush(); const resumePage = nextRequest();
+  equal(pendingResume.signal.aborted, true, 'Pagination still replaces the pending request immediately');
+  equal(resumePage.body.page, 2);
+  await respond(pendingResume, 200, galleryResult('old-resume', 'old-resume'));
+  await resume('focus'); equal(pendingRequests.length, requestCursor, 'Late completion cannot clear the newer active read');
+  equal(resumePage.signal.aborted, false);
+  runner.result.refresh({ invalidateRevision: true }); await runner.flush(); const resumeInvalidation = nextRequest();
+  equal(resumePage.signal.aborted, true, 'Explicit invalidation must still replace a pending read');
+  equal(resumeInvalidation.body.catalogRevision, undefined);
+  await respond(resumePage, 200, galleryResult('late-page', 'late-page'));
+  await resume('visibilitychange'); equal(pendingRequests.length, requestCursor);
+  await resume('online'); const reconnected = nextRequest();
+  equal(resumeInvalidation.signal.aborted, true, 'Online always replaces a possibly interrupted request');
+  await respond(resumeInvalidation, 200, galleryResult('late-invalidated', 'late-invalidated'));
+  await resume('focus'); equal(pendingRequests.length, requestCursor);
+  await respond(reconnected, 200, galleryResult('reconnected', 'reconnected', 'resume-marker'));
+  equal(dataSnapshot()?.fixtureLabel, 'reconnected');
+  await resume('focus'); const settledResume = nextRequest();
+  equal(settledResume.signal.aborted, false, 'Resume after completion still starts a fresh read');
+  await respond(settledResume, 200, galleryResult('settled-resume', 'settled-resume', 'resume-marker'));
+  equal(dataSnapshot()?.fixtureLabel, 'settled-resume');
 
   console.log(JSON.stringify({ fixture: 'gallery-explicit-invalidation-fixture', assertions: 27 + additionalAssertions,
     requests: pendingRequests.length, status: 'passed' }));

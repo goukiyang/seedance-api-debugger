@@ -16,6 +16,7 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   const scope = JSON.stringify([userId, query]), current = useRef(scope); current.current = scope;
   const latest = useRef(state); latest.current = state;
   const resultScope = useRef('');
+  const activeRead = useRef<AbortController | null>(null);
   const revisionInvalidationEpoch = useRef(0);
   const revisionInvalidation = useRef<{ scope: string; epoch: number } | null>(null);
   const pendingSharedRevision = useRef<{ owner: string; scope: string; revision: string } | null>(null);
@@ -34,7 +35,9 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   const setPage = useCallback((next: number, pageSize: number) => setPageState(previous => previous.page === next && previous.pageSize === pageSize ? previous : { page: next, pageSize }), []);
   useEffect(() => watchReactionChanges(userId, refresh), [userId, refresh]);
   useEffect(() => {
-    const resume = () => { if (!document.hidden) refresh(); };
+    const resume = (event: Event) => {
+      if (!document.hidden && (event.type === 'online' || !activeRead.current)) refresh();
+    };
     window.addEventListener('focus', resume); window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume);
     return () => { window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
   }, [refresh]);
@@ -54,6 +57,7 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   useEffect(() => {
     if (!enabled || sessionChanged || isClientSessionBlocked()) return;
     const controller = new AbortController(), owner = scope;
+    activeRead.current = controller;
     const epoch = revisionInvalidationEpoch.current, invalidation = revisionInvalidation.current;
     const revisionInvalidated = invalidation?.scope === scope && invalidation.epoch === epoch;
     let valid = true;
@@ -85,8 +89,9 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
         setState({ owner: userId, data: result, loading: false, error: '' }); return;
       }
     };
-    void run().catch(error => { if (valid && current.current === owner && revisionInvalidationEpoch.current === epoch && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); });
-    return () => { valid = false; controller.abort(); };
+    void run().catch(error => { if (valid && current.current === owner && revisionInvalidationEpoch.current === epoch && !controller.signal.aborted) setState(previous => ({ ...previous, loading: false, error: error instanceof Error ? error.message : '封面目录未能读取' })); })
+      .finally(() => { if (activeRead.current === controller) activeRead.current = null; });
+    return () => { valid = false; controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
   }, [userId, scope, page, tick, enabled, sessionChanged, refresh]); // query fields are covered by scope.
   const data = !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null;
   return { data, matchingScope: Boolean(data && !state.denied && !state.error && resultScope.current === scope && revisionInvalidation.current?.scope !== scope),
