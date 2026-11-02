@@ -19,6 +19,10 @@ const display = Prisma.sql`CASE WHEN trim(u."name") <> '' AND NOT ${technical(Pr
   WHEN trim(u."username") <> '' AND NOT ${technical(Prisma.sql`trim(u."username")`)} THEN trim(u."username") ELSE '用户 ' || substr(u."id", 1, 6) END`;
 
 export type GalleryDirectoryRow = { key: string; targetKind: 'module' | 'preset'; targetId: string };
+export type GalleryDirectoryPageBundle = {
+  total: number; page: number; pageRows: GalleryDirectoryRow[];
+  navigationTotal: number; navigationPage: number; navigationRows: GalleryDirectoryRow[]; directoryGroups: string[];
+};
 
 /** Permission and normalization precede the count and page. No private body leaves SQLite here. */
 export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: ImageStudioIdentity, input: GalleryQuery, keys?: string[],
@@ -57,6 +61,10 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
       AND ${field(Prisma.sql`pb."value_json"`, '$.presetId')} = p."id"
       AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" d WHERE d."key" GLOB 'studio_deleted_workspace_v1:*'
         AND ${field(Prisma.sql`d."value_json"`, '$.ownerId')} = p."owner_id" AND ${field(Prisma.sql`d."value_json"`, '$.moduleId')} = pm."id")))`;
+  const coverPredicate = Prisma.sql`${input.scope === 'mine' ? Prisma.sql`mine = 1` : input.scope === 'shared' ? Prisma.sql`shared = 1` : input.scope === 'favorites' ? Prisma.sql`favorited = 1` : Prisma.sql`1 = 1`}
+      AND (${input.query?.trim() ? Prisma.sql`instr(lower(name), lower(${input.query.trim()})) > 0 OR instr(lower(groupName), lower(${input.query.trim()})) > 0 OR instr(lower(authorName), lower(${input.query.trim()})) > 0` : Prisma.sql`1 = 1`})
+      AND (${input.authorKey ? Prisma.sql`knownAuthor = ${authorId}` : Prisma.sql`1 = 1`})
+      AND (${keys ? catalogIdsSql(Prisma.sql`key`, keys) : Prisma.sql`1 = 1`})`;
   const ctes = Prisma.sql`${visibility.ctes},
     source_settings AS MATERIALIZED (
       SELECT p.*, (${sourceVisible}) AS visible,
@@ -152,17 +160,69 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
           CASE WHEN e.presetId IS NOT NULL THEN 'preset:' || e.presetId ELSE 'module:' || e.targetId END)), 0) AS recent
       FROM entries e LEFT JOIN "User" u ON u."id" = e.authorId LEFT JOIN "ContentReaction" own ON own."content_key" = e.key AND own."user_id" = ${actor.id}
     ), filtered AS MATERIALIZED (SELECT * FROM decorated WHERE
-      ${input.scope === 'mine' ? Prisma.sql`mine = 1` : input.scope === 'shared' ? Prisma.sql`shared = 1` : input.scope === 'favorites' ? Prisma.sql`favorited = 1` : Prisma.sql`1 = 1`}
-      AND (${input.query?.trim() ? Prisma.sql`instr(lower(name), lower(${input.query.trim()})) > 0 OR instr(lower(groupName), lower(${input.query.trim()})) > 0 OR instr(lower(authorName), lower(${input.query.trim()})) > 0` : Prisma.sql`1 = 1`})
-      AND (${input.authorKey ? Prisma.sql`knownAuthor = ${authorId}` : Prisma.sql`1 = 1`})
-      AND (${keys ? catalogIdsSql(Prisma.sql`key`, keys) : Prisma.sql`1 = 1`})
+      ${coverPredicate}
     )`;
   const directoryOrder = Prisma.sql`groupRank, itemRank, natural`;
   const order = input.sort === 'updated' ? Prisma.sql`COALESCE(updated, 0) DESC, ${directoryOrder}`
     : input.sort === 'likes' ? Prisma.sql`likes DESC, COALESCE(created, 0) DESC`
       : input.sort === 'recent' ? Prisma.sql`recent DESC, ${directoryOrder}`
         : input.sort === 'directory' ? directoryOrder : Prisma.sql`COALESCE(created, 0) DESC, ${directoryOrder}`;
-  return { ctes, order: Prisma.sql`${order}, key`, all: Prisma.sql`SELECT * FROM filtered`, rows: async (page: number, size: number): Promise<GalleryDirectoryRow[]> => {
+  // One materialized directory graph serves the filtered cover page and unfiltered navigation.
+  // Name ordering keeps the existing locale-aware spool below.
+  const pageBundle = input.sort === 'name' ? null : async (): Promise<GalleryDirectoryPageBundle> => {
+    const size = input.pageSize || 12;
+    const locate = input.locate?.moduleId ? Prisma.sql`targetKind = 'module' AND targetId = ${input.locate.moduleId}`
+      : input.locate?.presetId ? Prisma.sql`key = ${'image_template:' + input.locate.presetId}` : Prisma.sql`0 = 1`;
+    const rows = await db.$queryRaw<Array<{
+      kind: bigint; total: bigint | null; page: bigint | null; navigationTotal: bigint | null; navigationPage: bigint | null;
+      key: string | null; targetKind: 'module' | 'preset' | null; targetId: string | null; groupName: string | null;
+    }>>(Prisma.sql`WITH ${ctes},
+      capture_input AS MATERIALIZED (
+        SELECT d.*, CASE WHEN d.key IS NOT NULL AND (${coverPredicate}) THEN 1 ELSE 0 END AS cover_match
+        FROM (SELECT 1 AS seed) AS empty_seed LEFT JOIN decorated d ON 1 = 1
+      ), capture_ranked AS MATERIALIZED (
+        SELECT key, targetKind, targetId, groupName, cover_match,
+          sum(cover_match) OVER () AS total, count(key) OVER () AS navigationTotal,
+          sum(cover_match) OVER (ORDER BY ${order}, key ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cover_position,
+          row_number() OVER (ORDER BY ${directoryOrder}, key) AS navigation_position,
+          row_number() OVER (PARTITION BY groupName ORDER BY key) AS group_position
+        FROM capture_input
+      ), capture_located AS MATERIALIZED (
+        SELECT *, min(CASE WHEN ${locate} THEN navigation_position END) OVER () AS locate_position FROM capture_ranked
+      ), capture_pages AS MATERIALIZED (
+        SELECT *,
+          min(${input.page || 1}, max(1, CAST((total + ${size - 1}) / ${size} AS INTEGER))) AS page,
+          COALESCE(CAST((locate_position - 1) / 24 AS INTEGER) + 1,
+            min(${input.navigationPage || 1}, max(1, CAST((navigationTotal + 23) / 24 AS INTEGER)))) AS navigationPage
+        FROM capture_located
+      ), output_kinds(kind) AS (VALUES (0), (1), (2), (3))
+      SELECT kind,
+        CASE WHEN kind IN (1, 2) THEN key END AS key,
+        CASE WHEN kind IN (1, 2) THEN targetKind END AS targetKind,
+        CASE WHEN kind IN (1, 2) THEN targetId END AS targetId,
+        CASE WHEN kind = 3 THEN groupName END AS groupName,
+        CASE WHEN kind = 0 THEN total END AS total, CASE WHEN kind = 0 THEN page END AS page,
+        CASE WHEN kind = 0 THEN navigationTotal END AS navigationTotal,
+        CASE WHEN kind = 0 THEN navigationPage END AS navigationPage
+      FROM capture_pages CROSS JOIN output_kinds
+      WHERE (kind = 0 AND navigation_position = 1)
+        OR (kind = 1 AND ${input.navigationOnly ? 0 : 1} = 1 AND cover_match = 1
+          AND cover_position BETWEEN (page - 1) * ${size} + 1 AND page * ${size})
+        OR (kind = 2 AND key IS NOT NULL
+          AND navigation_position BETWEEN (navigationPage - 1) * 24 + 1 AND navigationPage * 24)
+        OR (kind = 3 AND key IS NOT NULL AND group_position = 1)
+      ORDER BY kind, CASE kind WHEN 1 THEN cover_position WHEN 2 THEN navigation_position ELSE 0 END, groupName`);
+    const pageRows: GalleryDirectoryRow[] = [], navigationRows: GalleryDirectoryRow[] = [], directoryGroups: string[] = [];
+    for (const row of rows) {
+      const kind = Number(row.kind);
+      if (kind === 1 || kind === 2) (kind === 1 ? pageRows : navigationRows).push({ key: row.key!, targetKind: row.targetKind!, targetId: row.targetId! });
+      else if (kind === 3) directoryGroups.push(row.groupName!);
+    }
+    const header = rows[0];
+    return { total: Number(header.total), page: Number(header.page), pageRows,
+      navigationTotal: Number(header.navigationTotal), navigationPage: Number(header.navigationPage), navigationRows, directoryGroups };
+  };
+  return { ctes, pageBundle, order: Prisma.sql`${order}, key`, all: Prisma.sql`SELECT * FROM filtered`, rows: async (page: number, size: number): Promise<GalleryDirectoryRow[]> => {
     if (input.sort !== 'name') return db.$queryRaw<GalleryDirectoryRow[]>(Prisma.sql`WITH ${ctes} SELECT key, targetKind, targetId FROM filtered ORDER BY ${order}, key LIMIT ${size} OFFSET ${(page - 1) * size}`);
     const spool = await usageRowSpool<GalleryDirectoryRow & { name: string }>((a, b) => a.name.localeCompare(b.name, 'zh-CN') || a.key.localeCompare(b.key));
     try {

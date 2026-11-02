@@ -35,21 +35,29 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
     input.query || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', input.directoryOrder || {}, input.recentHints || {}])).digest('hex');
   if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   const directory = await galleryDirectorySql(db, actor, input);
-  const counts = await db.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`WITH ${directory.ctes} SELECT count(*) AS total FROM filtered`);
-  const total = Number(counts[0].total), pageSize = input.pageSize || 12, page = Math.min(input.page || 1, Math.max(1, Math.ceil(total / pageSize)));
-  const pageRows = input.navigationOnly ? [] : await directory.rows(page, pageSize);
-  const navigation = await galleryDirectorySql(db, actor, { sort: 'directory', directoryOrder: input.directoryOrder });
-  const navigationCounts = await db.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`WITH ${navigation.ctes} SELECT count(*) AS total FROM filtered`);
-  const navigationTotal = Number(navigationCounts[0].total), navigationPageSize = 24;
-  let navigationPage = Math.min(input.navigationPage || 1, Math.max(1, Math.ceil(navigationTotal / navigationPageSize)));
-  if (input.locate?.moduleId || input.locate?.presetId) {
-    const positions = await db.$queryRaw<Array<{ position: bigint }>>(Prisma.sql`WITH ${navigation.ctes}, positioned AS
-      (SELECT *, row_number() OVER (ORDER BY ${navigation.order}) AS position FROM filtered)
-      SELECT position FROM positioned WHERE ${input.locate.moduleId ? Prisma.sql`targetKind = 'module' AND targetId = ${input.locate.moduleId}`
-        : Prisma.sql`key = ${'image_template:' + input.locate.presetId}`} LIMIT 1`);
-    if (positions.length) navigationPage = Math.floor((Number(positions[0].position) - 1) / navigationPageSize) + 1;
+  const pageSize = input.pageSize || 12, navigationPageSize = 24;
+  let total: number, page: number, pageRows: GalleryDirectoryRow[], navigationTotal: number, navigationPage: number,
+    navigationRows: GalleryDirectoryRow[], capturedGroups: string[] | null = null;
+  let navigation: Awaited<ReturnType<typeof galleryDirectorySql>> | null = null;
+  if (directory.pageBundle) {
+    ({ total, page, pageRows, navigationTotal, navigationPage, navigationRows, directoryGroups: capturedGroups } = await directory.pageBundle());
+  } else {
+    const counts = await db.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`WITH ${directory.ctes} SELECT count(*) AS total FROM filtered`);
+    total = Number(counts[0].total); page = Math.min(input.page || 1, Math.max(1, Math.ceil(total / pageSize)));
+    pageRows = input.navigationOnly ? [] : await directory.rows(page, pageSize);
+    navigation = await galleryDirectorySql(db, actor, { sort: 'directory', directoryOrder: input.directoryOrder });
+    const navigationCounts = await db.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`WITH ${navigation.ctes} SELECT count(*) AS total FROM filtered`);
+    navigationTotal = Number(navigationCounts[0].total);
+    navigationPage = Math.min(input.navigationPage || 1, Math.max(1, Math.ceil(navigationTotal / navigationPageSize)));
+    if (input.locate?.moduleId || input.locate?.presetId) {
+      const positions = await db.$queryRaw<Array<{ position: bigint }>>(Prisma.sql`WITH ${navigation.ctes}, positioned AS
+        (SELECT *, row_number() OVER (ORDER BY ${navigation.order}) AS position FROM filtered)
+        SELECT position FROM positioned WHERE ${input.locate.moduleId ? Prisma.sql`targetKind = 'module' AND targetId = ${input.locate.moduleId}`
+          : Prisma.sql`key = ${'image_template:' + input.locate.presetId}`} LIMIT 1`);
+      if (positions.length) navigationPage = Math.floor((Number(positions[0].position) - 1) / navigationPageSize) + 1;
+    }
+    navigationRows = await navigation.rows(navigationPage, navigationPageSize);
   }
-  const navigationRows = await navigation.rows(navigationPage, navigationPageSize);
   const project = async (rows: GalleryDirectoryRow[], navigationOnly: boolean) => {
     const result = await queryStudioGallery(actor, { navigationOnly, pageSize: 24 }, { tx: db, selection: {
       moduleIds: rows.filter(row => row.targetKind === 'module').map(row => row.targetId),
@@ -62,11 +70,11 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   };
   const cover = await tracePhase('gallery-cover', () => project(pageRows, Boolean(input.navigationOnly))),
     nav = await tracePhase('gallery-navigation', () => project(navigationRows, true));
-  const groups = await db.$queryRaw<Array<{ groupName: string }>>(Prisma.sql`WITH ${navigation.ctes} SELECT DISTINCT groupName FROM filtered ORDER BY groupName`);
+  const groups = capturedGroups ?? (await db.$queryRaw<Array<{ groupName: string }>>(Prisma.sql`WITH ${navigation!.ctes} SELECT DISTINCT groupName FROM filtered ORDER BY groupName`)).map(row => row.groupName);
   if (before !== await readCatalogRevision(db, 'templates')) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   await assertStudioActor(user.id, db);
   const result: GalleryQueryResult = { protocol: 'catalog-paged-v2', items: cover.items, navigation: nav.navigation, matches: pageRows.length ? cover.navigation : [],
-    total, page, pageSize, catalogRevision: revision, directoryRevision: before, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups.map(row => row.groupName),
+    total, page, pageSize, catalogRevision: revision, directoryRevision: before, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups,
     capabilities: { independentReactions: true }, removedDefaultGroups: nav.removedDefaultGroups, deletedSourcePresetIds: [] };
   observed({ rows: result.items.length + result.navigation.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
   return result;
