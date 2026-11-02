@@ -332,8 +332,16 @@ assertIncludes(templatePicker, 'onUploadFile={(file, onProgress) => uploadFileTo
 
 const feedbackWidget = read('src/components/FeedbackWidget.tsx');
 assertIncludes(feedbackWidget, 'assetId?: string', '反馈截图状态必须保留上传后的 assetId。');
-assertIncludes(feedbackWidget, 'retrySubmitUploadedAssets', '反馈提交失败必须允许复用已上传截图重新提交。');
-assertIncludes(feedbackWidget, '截图已上传成功，但反馈提交失败', '反馈提交失败提示必须区分截图上传和反馈入库。');
+if (feedbackWidget.includes('readPendingFeedback')) {
+  assertIncludes(feedbackWidget, 'feedbackPendingKey(key)', '反馈必须在发送前持久保存原提交编号。');
+  assertIncludes(feedbackWidget, 'body: JSON.stringify(original)', '反馈重试必须复用冻结原输入及已上传截图。');
+  assertIncludes(feedbackWidget, '核对提交', '反馈结果未知必须提供原号核对入口，不能冒确定失败。');
+  assertIncludes(feedbackWidget, '使用原编号重试', '原号未找到后，必须由用户明确选择同号重试。');
+} else {
+  assertIncludes(read('src/lib/feedback/submission-mode.ts'), 'FEEDBACK_SUBMISSIONS_ENABLED = false', '旧反馈表单仅可留在关闭新反馈写入的相容保护版。');
+  assertIncludes(feedbackWidget, 'retrySubmitUploadedAssets', '保护版仍保留原已上传截图状态。');
+  assertIncludes(feedbackWidget, '截图已上传成功，但反馈提交失败', '保护版仍应区分截图上传与反馈入库。');
+}
 
 void checkWorkspaceRecoveryCallbacks().then(() => { console.log('upload-root-cure-smoke: ok'); }).catch((error: unknown) => {
   console.error(error); process.exitCode = 1;
