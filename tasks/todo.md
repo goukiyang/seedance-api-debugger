@@ -1,5 +1,17 @@
 # V1.2 剩余模块落地 Todo
 
+## BR-FEISHU01 插件出图发到本人飞书（2026-11-02）
+
+目标：按 `HANDOFF-feishu-send.md` 的既定插件合同，实现本人预检、投递与状态查询。基线 `37c8eb37f` / v0.126.6，目标 v0.127.0。只在当前 worktree 实施，不部署、不连接生产、不真实外发。
+
+- [x] 复用上一轮架构判断并完成 hook 登记；独立通知类型、本人资产原图 hash、冻结绑定、CAS 租约、未知不重发，无 DDL。
+- [x] 实现三个 API 入口并接入现有 feedback worker；不改上传及视频/图片工作室投递。
+- [x] 临时 SQLite + 严格 fetch mock 的14组实际路由/消费者检查通过，旧视频飞书30组检查通过；全量类型0错误、整体lint退出0（271条既有warning），8个改动文件定向lint无warning/error。
+- [ ] 聚焦提交并推送 `origin/codex/bridge-feishu-send-20261102`：`git add` 创建 worktree 的 `index.lock` 被环境拒绝（Operation not permitted），尚无本轮提交；全部改动保留，精确接续命令见交付记录。
+- [ ] 后续获上线授权后，用户手验插件 MJ 四图、提示词、作品链接与本人飞书收件；本轮不执行。
+
+验证按 L2 数据归属/幂等影响选择真实隔离 DB 和 mock 传输，不使用生产数据或真实飞书请求，不派独立审查。Git Plan：沿当前分支/基线，不 rebase/reset、不装依赖；实现、版本与本工单记录形成一个聚焦提交。详细文件、检查和上线/回退注意见 [交付记录](../docs/materials/2026-11-02-bridge-feishu-send.md)。
+
 <!-- SAVE500-SUNBURST-BRIDGE-20261031 -->
 ## SAVE500 / SUNBURST / BRIDGE 接续落地（2026-10-31）
 
