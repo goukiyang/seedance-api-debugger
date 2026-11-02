@@ -3,6 +3,7 @@ import { PrismaClient, type Prisma } from '@prisma/client';
 import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 import { feedbackAttachmentNotice, validFeedbackAttachments, type FeedbackAttachments } from './attachments';
 import { initializeFeedbackAcknowledgment } from './flow-state';
+import { feedbackPluginPageName } from './source';
 import { FEEDBACK_CARD_SOURCE } from '@/lib/feishu/feedback-relay';
 
 const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
@@ -111,6 +112,8 @@ export function safeFeedbackAuthor(name: string | null | undefined, signedIn: bo
 
 export function feedbackPageName(pathname: string | null) {
   const path = safeFeedbackPath(pathname);
+  const plugin = feedbackPluginPageName(path);
+  if (plugin) return plugin;
   if (path === '/image-studio') return '图片生成';
   const items = [...userNavItems, ...adminNavItems].filter(item => isNavItemActive(path, item));
   items.sort((a, b) => b.href.length - a.href.length);

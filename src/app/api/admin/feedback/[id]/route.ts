@@ -5,6 +5,8 @@ import { feedbackPrisma } from '@/lib/feedback/notification';
 import { feedbackLifecycleView, markFeedbackFixed } from '@/lib/feedback/lifecycle';
 import { FeedbackFlowError } from '@/lib/feedback/flow-state';
 
+import { feedbackSources } from '@/lib/feedback/submission';
+
 const VALID_STATUS = new Set(['new', 'reviewed', 'archived']);
 
 function text(value: unknown) {
@@ -36,7 +38,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     include: { user: { select: { id: true, name: true, username: true, email: true } } },
   });
   if (!feedback) return errorJson('反馈不存在', 404);
-  return NextResponse.json({ feedback });
+  const sources = await feedbackSources(prisma, [feedback.id]);
+  return NextResponse.json({ feedback: { ...feedback, source: sources.get(feedback.id) || null } });
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
