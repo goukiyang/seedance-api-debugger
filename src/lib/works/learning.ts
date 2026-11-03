@@ -46,7 +46,7 @@ function parseCursor(value: string | null) {
   } catch { throw new WorkError('浏览位置无效，请重新读取讨论', 400, 'WORK_LEARNING_CURSOR_INVALID'); }
 }
 async function projectEntries(tx: Prisma.TransactionClient, rows: LearningRow[], viewerId: string): Promise<WorkLearningEntry[]> {
-  const authors = await tx.user.findMany({ where: { id: { in: Array.from(new Set(rows.map(row => row.author_id))) } }, select: { id: true, name: true } });
+  const authors = await tx.user.findMany({ where: { id: { in: Array.from(new Set(rows.map(row => row.author_id))) } }, select: { id: true, name: true, avatar_url: true } });
   const names = new Map(authors.map(author => {
     const name = author.name?.trim();
     return [author.id, name && !name.includes('@') && !/^\+?[\d\s-]{7,}$/.test(name) ? name : '同事'];
@@ -55,7 +55,7 @@ async function projectEntries(tx: Prisma.TransactionClient, rows: LearningRow[],
     id: row.id, workId: row.work_id, mediaVersion: row.media_version_id, kind: row.kind as WorkLearningKind,
     parentId: row.parent_id, body: row.body, timeSeconds: row.time_seconds, revision: row.revision,
     createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
-    author: { id: row.author_id, name: names.get(row.author_id) || '同事' }, canEdit: row.author_id === viewerId,
+    author: { id: row.author_id, name: names.get(row.author_id) || '同事', avatarUrl: authors.find(author => author.id === row.author_id)?.avatar_url || null }, canEdit: row.author_id === viewerId,
   }));
 }
 /** Reading is limited to the exact current media, and never creates an entry or a job. */

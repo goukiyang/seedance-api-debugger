@@ -3,6 +3,7 @@ export type WorkMedium = 'image' | 'video';
 export type WorkAudience = 'source' | 'team' | 'project' | 'private';
 export type WorkSourceKind = 'image_task' | 'video_task' | 'multiview_work' | 'upload_asset';
 export type WorkPersonal = { liked: boolean; favorited: boolean; hidden: boolean; version: number };
+export type WorkProvenance = { tool: { label: string; href: string }; template: { label: string; href: string; version: string | null } | null };
 export type WorkCard = {
   id: string; title: string; medium: WorkMedium; mediaVersion: string; revision: number;
   width: number | null; height: number | null; duration: number | null; completedAt: string;
@@ -14,6 +15,7 @@ export type WorkCard = {
   sourceHref: string | null; audience: WorkAudience; canManage: boolean;
   discoverable: boolean; withdrawn: boolean; personal: WorkPersonal;
   likeCount: number; collectionIds: string[];
+  provenance?: WorkProvenance;
 };
 export type WorkQuery = {
   q?: string; medium?: 'all' | WorkMedium; scope?: 'all' | 'mine' | 'favorites' | 'hidden' | 'managed';

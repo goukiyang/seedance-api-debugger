@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { workAccessSql, type WorkPermissionRow } from './access';
 import { WORKS_PROTOCOL, WorkError, type WorkAudience, type WorkCard, type WorkPage, type WorkQuery } from './types';
+import { projectWorkProvenance } from './provenance';
 
 type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint };
 type Position = { time: string; id: string };
@@ -57,9 +58,10 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     db.$queryRaw<Array<{ work_id: string; amount: bigint | number }>>(Prisma.sql`SELECT work_id, count(*) AS amount FROM WorkPersonalState
       WHERE work_id IN (${Prisma.join(ids)}) AND liked = 1 GROUP BY work_id`),
   ]);
-  const [authors, projects] = await Promise.all([
+  const [authors, projects, provenance] = await Promise.all([
     db.user.findMany({ where: { id: { in: Array.from(new Set(works.map(work => work.author_id))) } }, select: { id: true, name: true, avatar_url: true } }),
     db.project.findMany({ where: { id: { in: Array.from(new Set(works.flatMap(work => work.project_id ? [work.project_id] : []))) } }, select: { id: true, name: true } }),
+    projectWorkProvenance(user, works, db),
   ]);
   const workById = new Map(works.map(work => [work.id, work])), versionById = new Map(versions.map(version => [version.id, version]));
   const stateById = new Map(states.map(state => [state.work_id, state])), authorById = new Map(authors.map(author => [author.id, author]));
@@ -78,7 +80,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     const reuse = key.can_reuse ? key.reference_id ? { referenceImageId: key.reference_id } : media.asset_id ? { assetId: media.asset_id } : null : null;
     return [{ id: work.id, title: work.title, medium: work.medium as WorkCard['medium'], mediaVersion: media.id, revision: work.revision,
       width: media.width, height: media.height, duration: media.duration, completedAt: work.completed_at.toISOString(),
-      author: { id: work.author_id, name: safeName, avatarUrl: author?.avatar_url || null },
+      author: { id: work.author_id, name: safeName, avatarUrl: author?.avatar_url || null }, provenance: provenance.get(work.id),
       project: key.project_visible && project ? { id: project.id, name: project.name } : null,
       thumbnailUrl: canPreview && media.thumbnail_url ? workMediaUrl(work.id, media.id, 'thumbnail') : null,
       previewUrl: hasPreview ? workMediaUrl(work.id, media.id, 'preview') : null,

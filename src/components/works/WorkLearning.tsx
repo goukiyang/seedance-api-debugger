@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RelativeTime } from '@/components/RelativeTime';
+import { WorkAuthor } from './WorkAuthor';
 import { pendingWorkOperations, queryWorkOperation, worksMutate, worksRead, WorksClientError, type PendingWorkOperation } from '@/lib/works/client';
 import type { WorkCard, WorkPage } from '@/lib/works/types';
 import type { WorkDerivationPage, WorkLearningEntry, WorkLearningKind, WorkLearningPage } from '@/lib/works/learning-types';
@@ -24,6 +25,8 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
   const [editor, setEditor] = useState<Editor | null>(null), [draftReady, setDraftReady] = useState('');
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [reading, setReading] = useState(false), [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(() => pendingWorkOperations(viewerId).filter(item => item.key.startsWith(prefix)));
+  const [practiceOpen, setPracticeOpen] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [ownPage, setOwnPage] = useState<WorkPage | null>(null), [pickerOpen, setPickerOpen] = useState(false), [selected, setSelected] = useState('');
   const current = useRef(identity); current.current = identity;
   const editorRef = useRef(editor); editorRef.current = editor;
@@ -37,22 +40,19 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
     setReading(true);
     try {
       const query = new URLSearchParams({ version: work.mediaVersion });
-      const [next, nextLinks] = await Promise.all([
-        worksRead<WorkLearningPage>(`${endpoint}?${query}`, viewerId, signal),
-        worksRead<WorkDerivationPage>(`${derivationsEndpoint}?${query}`, viewerId, signal),
-      ]);
+      const next = await worksRead<WorkLearningPage>(`${endpoint}?${query}`, viewerId, signal);
       if (current.current !== captured || signal?.aborted) return;
-      setPage(next); setLinks(nextLinks); setError('');
+      setPage(next); setError('');
     } catch (cause) {
       if (current.current !== captured || signal?.aborted) return;
       if (cause instanceof WorksClientError && [403, 404, 409].includes(cause.status)) { setPage(null); setLinks(null); setAnswers(null); }
       setError(message(cause));
     } finally { if (current.current === captured && !signal?.aborted) setReading(false); }
-  }, [identity, work.mediaVersion, endpoint, derivationsEndpoint, viewerId]);
+  }, [identity, work.mediaVersion, endpoint, viewerId]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setPage(null); setLinks(null); setAnswers(null); setOpenQuestion(null); setOwnPage(null); setPickerOpen(false); setSelected(''); setNotice(''); setBusy(false);
+    setPracticeOpen(false); setPage(null); setLinks(null); setAnswers(null); setOpenQuestion(null); setOwnPage(null); setPickerOpen(false); setSelected(''); setNotice(''); setBusy(false);
     setPending(pendingWorkOperations(viewerId).filter(item => item.key.startsWith(prefix)));
     setEditor(null);
     try {
@@ -90,6 +90,7 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
     setNotice(''); setError('');
     setEditor({ kind, parentId: entry?.parentId ?? parentId, entryId: entry?.id || null, revision: entry?.revision || 0,
       body: entry?.body || '', time: entry?.timeSeconds != null ? String(entry.timeSeconds) : '' });
+    requestAnimationFrame(() => composerRef.current?.focus());
   }
   async function write(key: string, url: string, body: Record<string, unknown>, method = 'POST') {
     const captured = identity; setBusy(true); setError(''); setNotice('');
@@ -135,7 +136,7 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
     }, draft.entryId ? 'PATCH' : 'POST');
     if (!result) return;
     if (editorRef.current && editorKey(editorRef.current) === editorKey(draft)) setEditor(null);
-    setNotice('已保存。'); await load();
+    setNotice(draft.entryId ? '已保存修改。' : '已发布。'); await load();
     if (draft.parentId) await readAnswers(draft.parentId);
   }
   async function remove(entry: WorkLearningEntry) {
@@ -202,51 +203,60 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
     } catch (cause) { if (current.current === captured) setError(message(cause)); return; }
     const result = await write(`${prefix}derivation:${chosen.id}`, derivationsEndpoint, { expectedMediaVersion: work.mediaVersion,
       derivedWorkId: chosen.id, expectedDerivedMediaVersion: chosen.mediaVersion, expectedRevision: revision });
-    if (result) { setNotice('已关联本人实践作品。'); setPickerOpen(false); await load(); }
+    if (result) { setNotice('已关联本人实践作品。'); setPickerOpen(false); await readLinks(); }
   }
+  async function readLinks() {
+    const captured = identity;
+    try {
+      const next = await worksRead<WorkDerivationPage>(`${derivationsEndpoint}?${new URLSearchParams({ version: work.mediaVersion })}`, viewerId);
+      if (current.current === captured) setLinks(next);
+    } catch (cause) { if (current.current === captured) setError(message(cause)); }
+  }
+  const composer: Editor = editor || { kind: 'question', parentId: null, entryId: null, revision: 0, body: '', time: '' };
   function entryView(entry: WorkLearningEntry) {
     return <article key={entry.id} className={styles.entry}>
-      <div className={styles.entryMeta}><span>{entry.author.name}</span><RelativeTime value={entry.createdAt} />
+      <div className={styles.entryMeta}><WorkAuthor author={entry.author} /><RelativeTime value={entry.createdAt} />
         {entry.timeSeconds !== null && <button type="button" disabled={!onSeek || disabled} onClick={() => onSeek?.(entry.timeSeconds!)} aria-label={`跳到视频 ${timeText(entry.timeSeconds)}`}>{timeText(entry.timeSeconds)}</button>}
       </div><p className={styles.body}>{entry.body}</p>
       <div className={styles.row}>
-        {entry.kind === 'question' && <button type="button" disabled={busy || disabled} onClick={() => openQuestion === entry.id ? (setOpenQuestion(null), setAnswers(null)) : void readAnswers(entry.id)}>{openQuestion === entry.id ? '收起回答' : '查看 / 回答'}</button>}
+        {entry.kind === 'question' && <button type="button" disabled={busy || disabled} onClick={() => openQuestion === entry.id ? (setOpenQuestion(null), setAnswers(null)) : void readAnswers(entry.id)}>{openQuestion === entry.id ? '收起回复' : '查看回复'}</button>}
         {entry.canEdit && <><button type="button" disabled={blocked} onClick={() => begin(entry.kind, entry)}>编辑</button><button type="button" disabled={blocked} onClick={() => void remove(entry)}>删除</button></>}
       </div>
       {entry.kind === 'question' && openQuestion === entry.id && <div className={styles.answers}>
         {answers?.items.map(entryView)}
-        {answers && !answers.items.length && <p className={styles.muted}>还没有回答。</p>}
-        <div className={styles.row}><button type="button" disabled={blocked} onClick={() => begin('answer', undefined, entry.id)}>写回答</button>
-          {answers?.nextCursor && <button type="button" disabled={busy} onClick={() => void readAnswers(entry.id, answers.nextCursor!)}>后续回答</button>}</div>
+        {answers && !answers.items.length && <p className={styles.muted}>还没有回复。</p>}
+        <div className={styles.row}><button type="button" disabled={blocked} onClick={() => begin('answer', undefined, entry.id)}>写回复</button>
+          {answers?.nextCursor && <button type="button" disabled={busy} onClick={() => void readAnswers(entry.id, answers.nextCursor!)}>更多回复</button>}</div>
       </div>}
     </article>;
   }
-  return <section className={styles.learning} aria-label="作品学习">
-    <header className={styles.heading}><h2>学习与交流</h2><button type="button" disabled={reading || busy} onClick={() => { void load(); setAnswers(null); setOpenQuestion(null); }}>{reading ? '读取中…' : '刷新'}</button></header>
+  return <section className={styles.learning} aria-label="留言交流">
+    <header className={styles.heading}><h2>留言交流</h2><button type="button" disabled={reading || busy} onClick={() => { void load(); setAnswers(null); setOpenQuestion(null); }}>{reading ? '读取中…' : '刷新'}</button></header>
     {error && <p className={styles.error} role="status">{error}</p>}
     {pending.length > 0 && <div className={styles.pending} role="status"><span>提交结果待确认，当前输入已保留。</span><button type="button" disabled={busy} onClick={() => void reconcile()}>核对原操作</button></div>}
     {notice && <p className={styles.muted} role="status">{notice}</p>}
     {page && page.workId === work.id && page.mediaVersion === work.mediaVersion && <>
-      <div className={styles.experience}><h3>作者的一句经验</h3>{page.experience ? entryView(page.experience) : <p className={styles.muted}>{isAuthor ? '有想分享的做法时，留一句就好。' : '作者暂未分享经验。'}</p>}
-        {isAuthor && !page.experience && <button type="button" disabled={blocked} onClick={() => begin('experience')}>分享一句经验</button>}</div>
-      <div className={styles.heading}><h3>问答</h3><button type="button" disabled={blocked} onClick={() => begin('question')}>提问</button></div>
+      {page.experience && <div className={styles.experience}><h3>作者经验</h3>{entryView(page.experience)}</div>}
       {page.items.map(entryView)}
-      {!page.items.length && <p className={styles.muted}>还没有问题。</p>}
-      {page.nextCursor && <button type="button" disabled={busy} onClick={() => void nextQuestions()}>更早的问题</button>}
+      {!page.items.length && <p className={styles.muted}>还没有留言，聊聊做法吧。</p>}
+      {page.nextCursor && <button type="button" disabled={busy} onClick={() => void nextQuestions()}>更早的留言</button>}
     </>}
-    {editor && draftReady === identity && <form className={styles.editor} onSubmit={event => { event.preventDefault(); void save(); }}>
-      <label>{editor.entryId ? '编辑' : editor.kind === 'experience' ? '一句经验' : editor.kind === 'answer' ? '回答' : '问题'}
-        <textarea value={editor.body} maxLength={editor.kind === 'experience' ? 500 : 4000} disabled={blocked} rows={editor.kind === 'experience' ? 2 : 4} onChange={event => setEditor({ ...editor, body: event.target.value })} /></label>
-      {editor.kind !== 'experience' && canTime && <label className={styles.timeInput}>视频时间点（秒，可选）<input type="number" min="0" max={work.duration!} step="0.1" value={editor.time} disabled={blocked} onChange={event => setEditor({ ...editor, time: event.target.value })} /></label>}
-      <div className={styles.row}><button type="submit" disabled={blocked || !editor.body.trim()}>{busy ? '保存中…' : '保存'}</button><button type="button" disabled={busy || pending.length > 0} onClick={() => setEditor(null)}>收起编辑</button></div>
+    {draftReady === identity && <form className={styles.editor} onSubmit={event => { event.preventDefault(); void save(); }}>
+      <label>{composer.entryId ? '编辑留言' : composer.kind === 'experience' ? '作者经验' : composer.kind === 'answer' ? '回复' : '写留言'}
+        <textarea ref={composerRef} value={composer.body} maxLength={composer.kind === 'experience' ? 500 : 4000} disabled={blocked} rows={3} placeholder="聊聊做法，或问问作者…" onChange={event => setEditor({ ...composer, body: event.target.value })} /></label>
+      {composer.kind !== 'experience' && canTime && <details className={styles.timeInput}><summary>添加视频时间点</summary><label>秒<input type="number" min="0" max={work.duration!} step="0.1" value={composer.time} disabled={blocked} onChange={event => setEditor({ ...composer, time: event.target.value })} /></label></details>}
+      <div className={styles.row}><button type="submit" disabled={blocked || !composer.body.trim()}>{busy ? '发送中…' : composer.entryId ? '保存修改' : composer.kind === 'answer' ? '发送回复' : '发布留言'}</button>{editor && (editor.entryId || editor.kind !== 'question') && <button type="button" disabled={busy || pending.length > 0} onClick={() => setEditor(null)}>取消编辑</button>}</div>
     </form>}
+    <details className={styles.extras} onToggle={event => { const open = event.currentTarget.open; setPracticeOpen(open); if (open && !links) void readLinks(); }}><summary>分享经验与实践作品</summary>
+      {isAuthor && !page?.experience && <button type="button" disabled={blocked} onClick={() => begin('experience')}>分享作者经验</button>}
+      {practiceOpen && !links && <p className={styles.muted}>正在读取实践作品…<button type="button" onClick={() => void readLinks()}>重试</button></p>}
     {links && links.workId === work.id && links.mediaVersion === work.mediaVersion && <div className={styles.derivations}><div className={styles.heading}><h3>从这件作品出发的实践</h3><button type="button" disabled={blocked} onClick={() => void readOwn()}>关联我的作品</button></div>
       {links.items.map(({ link, work: linked }) => <div key={link.id} className={styles.linkedWork}><a href={`/works?work=${encodeURIComponent(linked.id)}`} onClick={event => {
         if (onOpenWork && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) { event.preventDefault(); onOpenWork(linked); }
       }}>{linked.title}<span>{linked.author.name}</span></a>
         {link.canEdit && <button type="button" disabled={blocked} onClick={async () => { const result = await write(`${prefix}derivation:${linked.id}`, derivationsEndpoint, {
           expectedMediaVersion: work.mediaVersion, linkId: link.id, expectedRevision: link.revision,
-        }, 'DELETE'); if (result) { setNotice('已取消本人声明的关联。'); await load(); } }}>取消关联</button>}</div>)}
+        }, 'DELETE'); if (result) { setNotice('已取消本人声明的关联。'); await readLinks(); } }}>取消关联</button>}</div>)}
       {!links.items.length && <p className={styles.muted}>实践后可自愿关联自己的作品。</p>}
       {links.nextCursor && <button type="button" disabled={busy} onClick={async () => { const captured = identity; try {
         const next = await worksRead<WorkDerivationPage>(`${derivationsEndpoint}?${new URLSearchParams({ version: work.mediaVersion, after: links.nextCursor! })}`, viewerId);
@@ -258,5 +268,6 @@ export function WorkLearning({ work, viewerId, disabled = false, onSeek, onOpenW
           {ownPage?.nextCursor && <button type="button" disabled={busy} onClick={() => void readOwn(ownPage.nextCursor!)}>下一页本人作品</button>}
           <button type="button" disabled={busy} onClick={() => setPickerOpen(false)}>收起</button></div></div>}
     </div>}
+    </details>
   </section>;
 }

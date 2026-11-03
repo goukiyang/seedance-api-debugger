@@ -494,6 +494,24 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
         sharedLive: { protocol: 'shared-live-v1', presetId: methodPreset.id, definitionToken: originalDefinition.definition.intent.definitionToken },
         referencePolicy: { primaryIds: [] }, primaryReferenceImages: [], referenceImages: [] }) } });
     await database.$transaction(tx => indexWorkContext(tx, methodImage.work, methodImage.media.id));
+    const { projectWorkProvenance } = await import('../src/lib/works/provenance');
+    const imageSource = await database.work.findUniqueOrThrow({ where: { id: methodImage.work.id } });
+    const publicOrigin = (await projectWorkProvenance(colleague, [imageSource], database)).get(imageSource.id)!;
+    assert.equal(publicOrigin.template?.label, methodPreset.name);
+    assert.equal(new URL(publicOrigin.template!.href, 'https://fixture.invalid').searchParams.get('presetId'), methodPreset.id);
+    await database.imageStudioPreset.update({ where: { id: methodPreset.id }, data: { is_shared: false, updated_at: methodPreset.updated_at } });
+    assert.equal((await projectWorkProvenance(colleague, [imageSource], database)).get(imageSource.id)!.template, null, 'Output visibility must not expose a private template name');
+    await database.imageStudioPreset.update({ where: { id: methodPreset.id }, data: { is_shared: true, updated_at: methodPreset.updated_at } });
+    const archivedKey = `studio_preset_archived_v1:${methodPreset.id}`;
+    await database.platformSetting.create({ data: { key: archivedKey, value_json: '{}' } });
+    assert.equal((await projectWorkProvenance(owner, [imageSource], database)).get(imageSource.id)!.template, null, 'An archived source has no template hyperlink');
+    await database.platformSetting.delete({ where: { key: archivedKey } });
+    const differentVersion = await createImage('same-template-new-version');
+    await database.workContext.create({ data: { work_id: differentVersion.work.id, media_version_id: differentVersion.media.id,
+      template_module: 'image-preset', template_id: methodPreset.id, template_version: 'other-version' } });
+    const relatedVersions = await readWorkContext(colleague, imageSource.id);
+    assert.equal(relatedVersions.groups[0]?.id, 'same-template');
+    assert.ok(relatedVersions.groups[0]?.items.some(item => item.id === differentVersion.work.id), 'Same-template browsing spans versions without changing method execution pins');
     const moduleCountBefore = await database.imageStudioModule.count();
     const methodInput = { viewerId: owner.id, requestId: 'prepare-exact-image-method', expectedMediaVersion: methodImage.media.id,
       expectedTemplateVersion: originalDefinition.definition.sourceRevision };
@@ -515,13 +533,16 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
       source_url: methodVideo.local_video_path, source_updated_at: registrationTime, duration: 6, preview_status: 'pending' } });
     await database.work.update({ where: { id: methodVideoWork.id }, data: { current_version_id: methodVideoMedia.id } });
     await database.$transaction(tx => indexWorkContext(tx, methodVideoWork, methodVideoMedia.id));
+    const videoSource = await database.work.findUniqueOrThrow({ where: { id: methodVideoWork.id } });
+    assert.equal((await projectWorkProvenance(owner, [videoSource], database)).get(videoSource.id)!.template?.label, template.name);
+    assert.equal((await projectWorkProvenance(colleague, [videoSource], database)).get(videoSource.id)!.template, null, 'Private video template labels remain private');
     const videoMethodInput = { viewerId: owner.id, requestId: 'prepare-exact-video-method', expectedMediaVersion: methodVideoMedia.id, expectedTemplateVersion: 'studio:1' };
     const videoMethodReceipt = await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput);
     assert.deepEqual(await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput), videoMethodReceipt);
     const actualDraft = await database.videoStudioDraft.findUniqueOrThrow({ where: { id: String(videoMethodReceipt.result.draftId) } });
     assert.deepEqual(JSON.parse(actualDraft.parameters_json), { provider: 'seedance', model: 'dreamina-seedance-2-0-260128', generationMode: 'all_in_one_reference',
       ratio: '16:9', duration: 6, resolution: '720p', seed: 123, generateAudio: true, returnLastFrame: false, watermark: false, draft: false });
-    metrics.methodSettings = { imageActualOverridesPreserved: true, videoActualParametersPreserved: true, defaultsNotInherited: true, originalRequestIdempotent: true };
+    metrics.methodSettings = { publicSourceLinksChecked: true, privateAndArchivedSourceLabelsAbsent: true, crossVersionSameTemplateBrowsing: true, imageActualOverridesPreserved: true, videoActualParametersPreserved: true, defaultsNotInherited: true, originalRequestIdempotent: true };
     checks.push(WORKS_CHECKS[9]);
     assert.deepEqual(checks, WORKS_CHECKS); assert.equal(forbiddenCalls, 0); completed = true;
   } finally {

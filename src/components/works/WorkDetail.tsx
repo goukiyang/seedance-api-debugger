@@ -1,18 +1,22 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronUp, Plus, Download, ExternalLink } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { ArrowLeft, ChevronDown, ChevronUp, Plus, Download, Maximize2 } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
-import { WorkActions, type WorkOperate } from './WorkActions';
+import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import { worksRead, WorksClientError, workWorkspaceTabId } from '@/lib/works/client';
 import { workAudienceLabels, type WorkCard } from '@/lib/works/types';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
 import { WorkPreviewImage } from './WorkPreviewImage';
+import { WorkAuthor } from './WorkAuthor';
 import { WorkLearning } from './WorkLearning';
 import { WorkCompare } from './WorkCompare';
 import type { WorkContext, WorkContextGroup } from '@/lib/works/context-types';
 import styles from './Works.module.css';
+
+const ZoomableImagePreview = dynamic(() => import('@/components/ZoomableImagePreview').then(component => component.ZoomableImagePreview), { ssr: false });
 
 function RelatedGroup({ group, viewerId, workId, medium, playback, loading, error, hasPrevious, hasWindowStart, onMore, onPrevious, onStart, onOpen, onCompare }: {
   group: WorkContextGroup; viewerId: string; workId: string; medium: WorkCard['medium']; playback: AssetPlaybackCoordinator;
@@ -24,7 +28,7 @@ function RelatedGroup({ group, viewerId, workId, medium, playback, loading, erro
     <header className={styles.relatedHeading}><h2 id={`work-group-${group.id}`}>{group.label}</h2>{items.some(item => item.medium === medium) && <button type="button" onClick={onCompare}>选作比较范围</button>}</header>
     {visible.length > 0 ? <div className={styles.relatedGrid}>{visible.map(item => <article key={item.id} className={styles.relatedCard}>
       <button type="button" className={styles.relatedMedia} onClick={() => onOpen(item)} aria-label={`查看作品：${item.title}`}><WorkMedia work={item} playback={playback} contextKey={`${viewerId}:related:${workId}`} detailOpen />
-      </button><button type="button" className={styles.relatedTitle} onClick={() => onOpen(item)}>{item.title || '未命名作品'}</button><span className={styles.relatedAuthor}>{item.author.name}</span>
+      </button><div className={styles.relatedIdentity}><WorkAuthor author={item.author} />{item.provenance?.template && <a href={item.provenance.template.href} title={item.provenance.template.label}>{item.provenance.template.label}</a>}</div>
     </article>)}</div> : <p className={styles.muted}>目前没有其他可查看的作品。</p>}
     {(items.length > 4 || group.nextCursor || hasPrevious || hasWindowStart) && <div className={styles.groupControls}>
       <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}{expanded ? '收起这组' : '展开这组'}</button>
@@ -44,6 +48,7 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
   const [work, setWork] = useState<WorkCard | null>(null), [replacement, setReplacement] = useState<WorkCard | null>(null), [error, setError] = useState(''), [notice, setNotice] = useState(''), [retry, setRetry] = useState(0), [reading, setReading] = useState(false), [mediaFailed, setMediaFailed] = useState(false), [mediaAttempt, setMediaAttempt] = useState(0);
   const [context, setContext] = useState<WorkContext | null>(null), [contextError, setContextError] = useState(''), [contextRetry, setContextRetry] = useState(0), [groupReading, setGroupReading] = useState(''), [groupErrors, setGroupErrors] = useState<Record<string, string>>({}), [methodReading, setMethodReading] = useState(false), [comparing, setComparing] = useState(false), [compareGroup, setCompareGroup] = useState('');
   const [groupPages, setGroupPages] = useState<Record<string, WorkContextGroup[]>>({}), [groupPositions, setGroupPositions] = useState<Record<string, number>>({}), [groupTrimmed, setGroupTrimmed] = useState<Record<string, boolean>>({});
+  const [zoomed, setZoomed] = useState(false), [compareOpen, setCompareOpen] = useState(false);
   const detailLease = useRef<number | null>(null), processedRetry = useRef(0), currentWork = useRef(work); currentWork.current = work;
   const video = useRef<HTMLVideoElement>(null), heading = useRef<HTMLHeadingElement>(null), compareArea = useRef<HTMLDivElement>(null), alive = useRef(true), methodBusy = useRef(false), groupBusy = useRef(false), contextGeneration = useRef(0), seekTarget = useRef<number | null>(null);
   const onWorkRef = useRef(onWork); onWorkRef.current = onWork;
@@ -127,10 +132,7 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
         if (alive.current && result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。');
         return;
       }
-      const result = await operate(`method:${work.id}`, `/api/works/${encodeURIComponent(id)}/method`, { expectedMediaVersion: work.mediaVersion, expectedTemplateVersion: context.method.template?.version });
-      if (!alive.current || !result) return;
-      if (typeof result.href !== 'string' || !result.href.startsWith('/') || result.href.startsWith('//')) throw new WorksClientError('方法入口读取未完成，请核对原操作');
-      window.location.assign(result.href);
+      if (context.method.template) await reuseWorkTemplate(work, operate, context.method.template.version);
     } catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '方法入口读取未完成'); setContextRetry(value => value + 1); } }
     finally { methodBusy.current = false; if (alive.current) setMethodReading(false); }
   }
@@ -140,39 +142,54 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
     if (media && media.readyState >= 1) { media.currentTime = Math.min(timeSeconds, Number.isFinite(media.duration) ? media.duration : timeSeconds); seekTarget.current = null; }
   }
   const previewSource = work?.detailPreviewUrl || (work?.previewStatus === 'ready' ? work.previewUrl : null);
-  const blocked = busy || reading || Boolean(replacement), groups = context?.groups || [], firstGroup = groups[0], remainingGroups = groups.slice(1);
+  const blocked = busy || reading || Boolean(replacement), groups = context?.groups || [], firstGroup = groups.find(group => group.id === 'same-template' || group.id === 'same-submission'), remainingGroups = groups.filter(group => group !== firstGroup);
+  const source = work?.provenance?.template || work?.provenance?.tool;
   const compareCandidates = (compareGroup ? groups.filter(group => group.id === compareGroup) : groups).flatMap(group => group.items).filter((item, index, all) => all.findIndex(other => other.id === item.id) === index);
-  const renderGroup = (group: WorkContextGroup) => <RelatedGroup key={group.id} group={group} viewerId={viewerId} workId={id} medium={work?.medium || 'image'} playback={playback} loading={groupReading === group.id} error={groupErrors[group.id] || ''} hasPrevious={(groupPositions[group.id] || 0) > 0} hasWindowStart={Boolean(groupTrimmed[group.id])} onPrevious={() => previousGroup(group)} onStart={() => void moreGroup(group, true)} onMore={() => void moreGroup(group)} onOpen={onOpen} onCompare={() => { setCompareGroup(group.id); compareArea.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' as ScrollBehavior : 'smooth', block: 'start' }); requestAnimationFrame(() => compareArea.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })); }} />;
+  const renderGroup = (group: WorkContextGroup) => <RelatedGroup key={group.id} group={group} viewerId={viewerId} workId={id} medium={work?.medium || 'image'} playback={playback} loading={groupReading === group.id} error={groupErrors[group.id] || ''} hasPrevious={(groupPositions[group.id] || 0) > 0} hasWindowStart={Boolean(groupTrimmed[group.id])} onPrevious={() => previousGroup(group)} onStart={() => void moreGroup(group, true)} onMore={() => void moreGroup(group)} onOpen={onOpen} onCompare={() => { setCompareGroup(group.id); setCompareOpen(true); requestAnimationFrame(() => compareArea.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' as ScrollBehavior : 'smooth', block: 'start' })); requestAnimationFrame(() => compareArea.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })); }} />;
   return <article className={styles.detailPage} aria-labelledby={work && !error ? "work-detail-title" : undefined} aria-label={!work || error ? "作品详情" : undefined}>
     <nav className={styles.detailNav} aria-label="作品导航"><button type="button" onClick={onClose}><ArrowLeft size={18} />返回</button><button type="button" onClick={onList}>作品列表</button></nav>
     {error ? <div className={styles.empty} role="status"><p>{error}</p><button type="button" disabled={reading} onClick={retryPreview}>重试读取</button></div> : !work ? <div className={styles.detailSkeleton} role="status">正在读取作品…</div> : <>
       <div className={styles.detailLayout}>
         <div className={styles.detailPrimary}>
           {!comparing && <div className={styles.detailMedia} style={{ aspectRatio: work.width && work.height ? `${work.width}/${work.height}` : undefined }}>
-            {replacement ? <div className={styles.previewMessage} role="status"><p>媒体版本已变化，请打开当前版本后重新操作。</p><button type="button" onClick={openCurrentVersion}>打开当前版本</button></div> : mediaFailed || !previewSource ? <div className={styles.previewMessage} role="status"><p>{mediaFailed ? '预览读取未完成。' : work.previewStatus === 'preparing' ? '预览正在准备。' : '当前预览不可用。'}</p><button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : mediaFailed ? '重试预览' : '重新读取预览'}</button></div> : work.medium === 'image' ? <WorkPreviewImage key={`${work.mediaVersion}:${mediaAttempt}`} work={work} attempt={mediaAttempt} onFailure={() => setMediaFailed(true)} /> : <video key={`${work.mediaVersion}:${mediaAttempt}`} ref={video} src={previewSource!} poster={work.thumbnailUrl || undefined} controls playsInline muted preload="metadata" onError={() => setMediaFailed(true)} onLoadedMetadata={event => { if (seekTarget.current !== null) { event.currentTarget.currentTime = Math.min(seekTarget.current, event.currentTarget.duration); seekTarget.current = null; } }} onPlay={event => { detailLease.current = playback.claimDetail(`${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); }} onPause={event => { if (detailLease.current !== null) playback.releaseDetail(detailLease.current, `${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); detailLease.current = null; }} />}
+            {replacement ? <div className={styles.previewMessage} role="status"><p>媒体版本已变化，请打开当前版本后重新操作。</p><button type="button" onClick={openCurrentVersion}>打开当前版本</button></div> : mediaFailed || !previewSource ? <div className={styles.previewMessage} role="status"><p>{mediaFailed ? '预览读取未完成。' : work.previewStatus === 'preparing' ? '预览正在准备。' : '当前预览不可用。'}</p><button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : mediaFailed ? '重试预览' : '重新读取预览'}</button></div> : work.medium === 'image' ? <button type="button" className={styles.imageZoomTrigger} onClick={() => setZoomed(true)} aria-label="放大图片"><WorkPreviewImage key={`${work.mediaVersion}:${mediaAttempt}`} work={work} attempt={mediaAttempt} onFailure={() => setMediaFailed(true)} /><span className={styles.zoomHint}><Maximize2 size={16} /></span></button> : <video key={`${work.mediaVersion}:${mediaAttempt}`} ref={video} src={previewSource!} poster={work.thumbnailUrl || undefined} controls playsInline muted preload="metadata" onError={() => setMediaFailed(true)} onLoadedMetadata={event => { if (seekTarget.current !== null) { event.currentTarget.currentTime = Math.min(seekTarget.current, event.currentTarget.duration); seekTarget.current = null; } }} onPlay={event => { detailLease.current = playback.claimDetail(`${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); }} onPause={event => { if (detailLease.current !== null) playback.releaseDetail(detailLease.current, `${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); detailLease.current = null; }} />}
           </div>}
           <div className={styles.detailInfo}>
-            <h1 ref={heading} tabIndex={-1} id="work-detail-title">{work.title || '未命名作品'}</h1>
-            <div className={styles.identity}><button type="button" onClick={() => onFilter('author', work.author.id)}>{work.author.name}</button>{work.project && <button type="button" onClick={() => onFilter('project', work.project!.id)}>{work.project.name}</button>}<RelativeTime value={work.completedAt} />{context?.delivery && <span className={styles.deliveryStatus}>{context.delivery.label}</span>}</div>
-            <div className={styles.detailControls}><WorkActions work={work} labels busy={blocked} operate={operate} onClassify={onClassify} />
-              {!replacement && work.downloadUrl && <a href={work.downloadUrl} download className={styles.textAction}><Download size={16} />下载原件</a>}
-              {work.reuse && <button type="button" disabled={blocked} onClick={async () => { const result = await operate(`work:${work.id}`, `/api/works/${work.id}/reference`, { expectedMediaVersion: work.mediaVersion, tabId: workWorkspaceTabId() }); if (result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。'); }}><Plus size={16} />加入生成工作区</button>}
-              {work.medium === 'video' && work.previewStatus === 'preparing' && <button type="button" disabled={blocked} onClick={() => void operate(`preview:${work.id}:${work.mediaVersion}`, `/api/works/${work.id}/preview`, { expectedMediaVersion: work.mediaVersion })}>准备轻预览</button>}
-              {work.sourceHref && <a href={work.sourceHref} className={styles.textAction}><ExternalLink size={16} />打开原记录</a>}
+            <div className={styles.detailByline}><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /><RelativeTime value={work.completedAt} /><WorkActions work={work} busy={blocked} operate={operate} onClassify={onClassify} /></div>
+            <h1 ref={heading} tabIndex={-1} id="work-detail-title" className={styles.sourceTitle}>{source ? <a href={source.href}>{source.label}</a> : '作品详情'}</h1>
+            <div className={styles.detailSource}>
+              {work.provenance?.template && <a href={work.provenance.tool.href}>{work.provenance.tool.label}</a>}
+              {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键复用'}</button>}
             </div>
             {notice && <p className={styles.notice} role="status">{notice}{notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>}</p>}
-            {context?.method && <section className={styles.method} aria-labelledby="work-method-title"><div className={styles.methodHeading}><h2 id="work-method-title">制作方法</h2>{context.method.action.kind !== 'unavailable' && <button type="button" className={styles.primary} disabled={blocked || methodReading} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : context.method.action.label}</button>}</div><p>{context.method.label}</p>{context.method.settings.length > 0 && <dl className={styles.methodSettings}>{context.method.settings.map(item => <div key={item.key}><dt>{item.label}</dt><dd>{typeof item.value === 'boolean' ? item.value ? '是' : '否' : String(item.value)}</dd></div>)}</dl>}{context.method.template && <details className={styles.metadata}><summary>来源与版本</summary><p>{context.method.template.label} · {({ 'image-preset': '图片模板', 'image-module': '图片工作区', 'video-studio': '视频模板', 'video-legacy': '历史视频模板' })[context.method.template.module]}</p><p>版本 {context.method.template.version}</p></details>}{context.method.action.reason && <p className={styles.muted}>{context.method.action.reason}</p>}</section>}
-            <div ref={compareArea} className={styles.compareArea}>
-              {groups.length > 1 && <label className={styles.compareScope}>比较范围<select value={compareGroup} disabled={comparing} onChange={event => setCompareGroup(event.target.value)}><option value="">全部相关作品</option>{groups.map(group => <option key={group.id} value={group.id}>{group.label}</option>)}</select></label>}
-              <WorkCompare work={work} viewerId={viewerId} playback={playback} candidates={compareCandidates} disabled={blocked} onActiveChange={onCompareActive} />
-            </div>
             <WorkLearning work={work} viewerId={viewerId} onOpenWork={onOpen} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />
-            <details className={styles.metadata}><summary>作品信息</summary><p>{workAudienceLabels[work.audience]}{work.width && work.height ? ` · ${work.width} × ${work.height}` : ''}</p><p>作品编号 {work.id}</p>{work.withdrawn && <p>已撤回分享</p>}{!work.discoverable && <p>已移出广场</p>}<button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : '重新读取预览'}</button></details>
+            <details className={styles.metadata}><summary>作品信息与操作</summary>
+              {work.title && <p>{work.title}</p>}
+              <p>{workAudienceLabels[work.audience]}{work.width && work.height ? ` · ${work.width} × ${work.height}` : ''}</p>
+              {work.project && <button type="button" onClick={() => onFilter('project', work.project!.id)}>{work.project.name}</button>}
+              {context?.delivery && <p>{context.delivery.label}</p>}
+              {context?.method?.settings.length ? <dl className={styles.methodSettings}>{context.method.settings.map(item => <div key={item.key}><dt>{item.label}</dt><dd>{typeof item.value === 'boolean' ? item.value ? '是' : '否' : String(item.value)}</dd></div>)}</dl> : null}
+              {context?.method?.action.reason && <p>{context.method.action.reason}</p>}
+              {context?.method?.template && <p>原模板版本 {context.method.template.version}</p>}
+              <div className={styles.detailControls}>
+                {!replacement && work.downloadUrl && <a href={work.downloadUrl} download className={styles.textAction}><Download size={16} />下载原件</a>}
+                {work.reuse && <button type="button" disabled={blocked || methodReading} onClick={async () => { const result = await operate(`work:${work.id}`, `/api/works/${work.id}/reference`, { expectedMediaVersion: work.mediaVersion, tabId: workWorkspaceTabId() }); if (result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。'); }}><Plus size={16} />用作参考图</button>}
+                {work.medium === 'video' && work.previewStatus === 'preparing' && <button type="button" disabled={blocked} onClick={() => void operate(`preview:${work.id}:${work.mediaVersion}`, `/api/works/${work.id}/preview`, { expectedMediaVersion: work.mediaVersion })}>准备轻预览</button>}
+                <button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : '重新读取预览'}</button>
+              </div>
+              {work.withdrawn && <p>已撤回分享</p>}{!work.discoverable && <p>已移出广场</p>}
+            </details>
+            <details open={compareOpen} onToggle={event => setCompareOpen(event.currentTarget.open)} className={styles.metadata}><summary>比较作品</summary><div ref={compareArea} className={styles.compareArea}>
+              {groups.length > 1 && <label className={styles.compareScope}>比较范围<select value={compareGroup} disabled={comparing} onChange={event => setCompareGroup(event.target.value)}><option value="">全部相关作品</option>{groups.map(group => <option key={group.id} value={group.id}>{group.label}</option>)}</select></label>}
+              {compareOpen && <WorkCompare work={work} viewerId={viewerId} playback={playback} candidates={compareCandidates} disabled={blocked} onActiveChange={onCompareActive} />}
+            </div></details>
+
           </div>
         </div>
         <aside className={styles.relatedRail} aria-label="相关作品">{firstGroup ? renderGroup(firstGroup) : contextError ? <div className={styles.readError} role="status"><p>{contextError}</p><button type="button" onClick={() => setContextRetry(value => value + 1)}>重试相关作品</button></div> : !context ? <div className={styles.relatedSkeleton} role="status">正在读取相关作品…</div> : <p className={styles.muted}>{context.indexing ? '正在整理这件作品的关联。' : '目前没有其他可查看的相关作品。'}</p>}</aside>
       </div>
-      {remainingGroups.length > 0 && <div className={styles.relatedBelow}>{remainingGroups.map(renderGroup)}</div>}
+      {remainingGroups.length > 0 && <details className={styles.metadata}><summary>更多相关作品</summary><div className={styles.relatedBelow}>{remainingGroups.map(renderGroup)}</div></details>}
     </>}
+    {zoomed && work && previewSource && !error && !replacement && <ZoomableImagePreview src={previewSource} thumbnailSrc={work.thumbnailUrl || undefined} alt={work.title || '作品图片'} previewKey={`work:${work.id}:${work.mediaVersion}`} previewOnly={!work.downloadUrl} imageSharing={false} safeDetails={{ width: work.width || undefined, height: work.height || undefined }} resolveDownload={() => work.downloadUrl ? () => { window.location.assign(work.downloadUrl!); } : undefined} onClose={() => setZoomed(false)} />}
   </article>;
 }
