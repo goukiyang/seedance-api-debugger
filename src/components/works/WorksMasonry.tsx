@@ -49,7 +49,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);
   const virtual = useWindowVirtualizer({ count: width ? items.length : 0, lanes, gap, scrollMargin: margin, overscan: 2, getItemKey,
-    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 76; },
+    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 44; },
     rangeExtractor: range => { const visible = defaultRangeExtractor(range); return focusedIndex < 0 || visible.includes(focusedIndex) ? visible : [...visible, focusedIndex].sort((a, b) => a - b); },
   });
   useLayoutEffect(() => {
@@ -121,10 +121,10 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
       <div className={styles.cardOverlay}><WorkActions work={work} onReuse={() => void reuse(work)} busy={busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`)} operate={operate} onClassify={onClassify} /></div>
     </div>
     <div className={styles.cardInfo}>
-      <div className={styles.cardIdentity} data-work-action="author"><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></div>
       <div className={styles.cardSource} data-work-action="source">{work.provenance
         ? <a href={(work.provenance.template || work.provenance.tool).href} title={`${work.provenance.tool.label} · ${work.provenance.template?.label || work.provenance.tool.label}`}>{(work.provenance.template || work.provenance.tool).label}</a>
         : <span>来源未记录</span>}</div>
+      <div className={styles.cardIdentity} data-work-action="author"><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></div>
     </div>
   </article>; })}</div>;
 }

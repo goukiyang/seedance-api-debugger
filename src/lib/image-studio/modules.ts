@@ -233,7 +233,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     canViewDefinition: templateRead.canViewTemplateContext,
     reasonCode: resolved ? null : sharedRead.unavailable?.reasonCode });
   const viewState = { ...state, capabilities: { ...state.capabilities, viewDefinition: { allowed: templateRead.canViewTemplateContext, reasonCode: templateRead.canViewTemplateContext ? null : 'access-revoked' as const, reason: templateRead.canViewTemplateContext ? null : '无权读取模板上下文' } } };
-  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, mode: binding.mode, available: Boolean(resolved),
+  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, mode: binding.mode, available: Boolean(resolved), methodDraft: resolved?.methodDraft ?? false,
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
@@ -318,6 +318,8 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     .map(row => row.source_preset_id).filter((id): id is string => Boolean(id))));
   const sourceRows = sourceIds.length ? await prisma.imageStudioPreset.findMany({ where: { id: { in: sourceIds } },
     select: { id: true, owner_id: true, scope: true, is_shared: true, name: true, group_name: true, updated_at: true } }) : [];
+  const methodPins = directory?.length ? await prisma.platformSetting.findMany({ where: { key: { in: directory.map(item => `studio_works_method_pin_v1:${item.id}`) } }, select: { key: true } }) : [];
+  const methodDraftIds = new Set(methodPins.map(row => row.key.slice('studio_works_method_pin_v1:'.length)));
   const sourceById = new Map(sourceRows.map(row => [row.id, row]));
   const archivedSources = sourceIds.length ? await prisma.platformSetting.findMany({ where: { key: { in: sourceIds.map(archivedPresetKey) } }, select: { key: true } }) : [];
   const archivedSourceIds = new Set(archivedSources.map(row => row.key));
@@ -363,7 +365,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     // source's current authorization/lifecycle. Unknown dependencies never grant
     // generate; opening the workspace still performs the full strict read.
     const available = sharedRead ? Boolean(resolved) : canViewSource && !archived && reasonCode === null;
-    const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available,
+    const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available, methodDraft: methodDraftIds.has(item.id),
       overriddenFields: Object.keys(resolved?.personalOverrides || {}) as SharedStudioLiveDTO['overriddenFields'],
       ...(resolved ? { defaults: resolved.publicDTO.defaults } : {}),
       ...(sharedRead?.unavailable ? { unavailableReason: sharedRead.unavailable.message } : {}) };

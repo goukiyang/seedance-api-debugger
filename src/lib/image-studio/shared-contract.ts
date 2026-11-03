@@ -450,7 +450,7 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   }
   if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403, 'access-revoked');
   const personalOverrides = await getSharedStudioPersonalOverrides(user.id, moduleId, client);
-  return { binding, definition, personalOverrides, publicDTO };
+  return { binding, definition, personalOverrides, publicDTO, methodDraft: Boolean(methodPin) };
 }
 
 /** The caller owns the durable operation transaction. Never reuses or edits an existing personal workspace. */
@@ -621,7 +621,10 @@ export async function openSharedStudioModule(user: ImageStudioIdentity, presetId
       // record. Reuse only this actor/source's real, exactly bound workspace.
       const candidates = await tx.imageStudioModule.findMany({ where: { owner_id: actor.id, source_preset_id: presetId },
         orderBy: [{ created_at: 'asc' }, { id: 'asc' }] });
+      const pins = candidates.length ? await tx.platformSetting.findMany({ where: { key: { in: candidates.map(candidate => `studio_works_method_pin_v1:${candidate.id}`) } }, select: { key: true } }) : [];
+      const methodDrafts = new Set(pins.map(pin => pin.key.slice('studio_works_method_pin_v1:'.length)));
       for (const candidate of candidates) {
+        if (methodDrafts.has(candidate.id)) continue;
         const binding = await studioSharedBinding(actor.id, candidate.id, tx);
         if (binding?.presetId === presetId && binding.mode === mode) {
           await assertStudioWorkspaceNotDeleted(actor.id, candidate.id, tx);

@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品广场浏览与复用优化', outline: [
-  '直接查看制作模板，一键带入自己的工作区',
-  '精简作品卡片与详情，支持留言交流',
-  '图片放大沿用统一查看器',
+const notice = { title: '作品广场留言与模板入口优化', outline: [
+  '留言按对话回复，支持选择表情',
+  '模板入口回到原工作区，复用草稿明确区分',
+  '卡片摘要和顶部工具栏收成一行',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

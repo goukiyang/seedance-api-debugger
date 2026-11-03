@@ -149,6 +149,7 @@ export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioState
   intent: SharedStudioIntent;
   mode: 'publisher' | 'live';
   available: boolean;
+  methodDraft?: boolean;
   unavailableReason?: string;
   overriddenFields: SharedStudioOverrideField[];
   defaults?: SharedStudioDefaults;

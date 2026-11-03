@@ -1,7 +1,10 @@
 'use client';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Bookmark, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { AssetPlaybackCoordinator } from '@/lib/media/asset-playback';
 import { parseWorksQuery, pendingWorkOperations, queryWorkOperation, worksMutate, worksQueryString, worksRead, WorksClientError, type PendingWorkOperation } from '@/lib/works/client';
@@ -31,6 +34,8 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
   const epoch = useRef(0), alive = useRef(true), loadBusy = useRef(false), pagesRef = useRef(pages), queryRef = useRef(queryKey), loadedQueryRef = useRef(queryKey), resetWindow = useRef(false), restoringList = useRef(false), operationLocks = useRef(new Set<string>()), detailOpenedHere = useRef(false), pendingDetailBack = useRef(false), navigationEpoch = useRef(0), restoreGeneration = useRef(0), workIdRef = useRef(workId), previousWorkId = useRef<string | null>(null), sentinel = useRef<HTMLDivElement>(null), autoAttempt = useRef(''), autoMore = useRef<() => void>(() => {});
   pagesRef.current = pages; queryRef.current = queryKey; workIdRef.current = workId;
   const playback = useMemo(() => new AssetPlaybackCoordinator(), []), directory = useWorkCollections(viewerId, collectionRevision);
+  const filterPanelId = useId(), filterTrigger = useRef<HTMLButtonElement>(null), filterPanel = useRef<HTMLDivElement>(null);
+  useDialogDismiss({ open: filtersOpen && !workId, dialogRef: filterPanel, branchRefs: [filterTrigger], modal: false, onDismiss: () => setFiltersOpen(false) });
   const items = useMemo(() => pages.flatMap(page => page.items).filter((work, index, all) => all.findIndex(other => other.id === work.id) === index).filter(work => {
     if (query.scope === 'managed') return true;
     if (work.withdrawn || !work.discoverable && query.scope !== 'favorites' && !query.collection || (query.scope === 'hidden' ? !work.personal.hidden : work.personal.hidden)) return false;
@@ -157,7 +162,8 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     finally { operationLocks.current.delete(operation.key); if (alive.current) { setBusy(old => old.filter(item => item !== operation.key)); setPending(pendingWorkOperations(viewerId)); } }
   }
   useEffect(() => { if (ready && pagesRef.current.length && loadedQueryRef.current === queryKey) remember(); }, [workId, queryKey, ready, remember]);
-  const onRestored = useCallback((generation: number) => { restoringList.current = false; setRestore(old => old?.generation === generation ? null : old); }, []), first = pages[0], last = pages[pages.length - 1], hasFilters = Boolean(query.q || query.author || query.project || query.collection);
+  const onRestored = useCallback((generation: number) => { restoringList.current = false; setRestore(old => old?.generation === generation ? null : old); }, []), first = pages[0], last = pages[pages.length - 1];
+  const activeFilterCount = [query.q, query.author, query.project, query.collection, query.medium && query.medium !== 'all'].filter(Boolean).length, hasFilters = activeFilterCount > 0;
   autoMore.current = () => {
     if (!ready || loading || error || workId || classify || adding || loadBusy.current) return;
     const current = pagesRef.current, last = current[current.length - 1]; if (!last?.nextCursor) return;
@@ -182,21 +188,38 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
   }
   return <div className={styles.page}>
     {!workId && <>
-    <header className={styles.heading}><h1>作品广场</h1><div><button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); }}><RefreshCw size={16} />刷新</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}><Plus size={17} />添加作品</button></div></header>
-    <nav className={styles.scopes} aria-label="作品范围">{([['all', '全部作品'], ['mine', '我的作品'], ['favorites', '我的收藏'], ['hidden', '我隐藏的作品'], ['managed', '作品管理']] as const).map(([scope, label]) => <button key={scope} type="button" aria-pressed={(query.scope || 'all') === scope} onClick={() => updateQuery({ scope, collection: undefined })}>{scope === 'favorites' && <Bookmark size={15} />}{label}</button>)}</nav>
-    <div className={styles.toolbar}><form onSubmit={event => { event.preventDefault(); updateQuery({ q: search.trim() || undefined }); }} className={styles.search}><Search size={17} /><input type="search" value={search} maxLength={120} aria-label="搜索作品标题" placeholder="搜索作品标题" onChange={event => setSearch(event.target.value)} /><button type="submit">搜索</button></form><div className={styles.types} role="group" aria-label="作品类型">{([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([medium, label]) => <button key={medium} type="button" aria-pressed={(query.medium || 'all') === medium} onClick={() => updateQuery({ medium })}>{label}</button>)}</div><button type="button" className={styles.filterTrigger} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={17} />筛选</button></div>
-    <div className={styles.filterHelp} data-open={filtersOpen || undefined}>
-      <WorkFilterPicker viewerId={viewerId} kind="authors" value={query.author} label={filterLabel('author')} onSelect={(id, name) => chooseFilter('author', id, name)} />
-      <WorkFilterPicker viewerId={viewerId} kind="projects" value={query.project} label={filterLabel('project')} onSelect={(id, name) => chooseFilter('project', id, name)} />
-    </div>
-    {hasFilters && <div className={styles.chips} aria-label="当前筛选">{query.q && <button type="button" onClick={() => updateQuery({ q: undefined })}>标题：{query.q}<X size={14} /></button>}{(['author', 'project'] as const).map(key => query[key] && <button key={key} type="button" onClick={() => updateQuery({ [key]: undefined })}>{filterLabel(key) ? `${key === 'author' ? '作者' : '项目'}：${filterLabel(key)}` : key === 'author' ? '已选作者' : '已选项目'}<X size={14} /></button>)}{query.collection && <button type="button" onClick={() => updateQuery({ collection: undefined })}>{directory.collections.find(item => item.id === query.collection)?.name || '已选集合'}<X size={14} /></button>}<button type="button" onClick={() => updateQuery({ q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button></div>}
+    <header className={styles.toolbar} aria-label="作品浏览工具栏">
+      <h1 className={styles.visuallyHidden}>作品广场</h1>
+      <select className={styles.scopePicker} aria-label="作品范围" value={query.scope || 'all'} onChange={event => updateQuery({ scope: event.target.value as WorkQuery['scope'], collection: undefined })}>
+        {([['all', '全部作品'], ['mine', '我的作品'], ['favorites', '我的收藏'], ['hidden', '已隐藏'], ['managed', '作品管理']] as const).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}
+      </select>
+      <form onSubmit={event => { event.preventDefault(); updateQuery({ q: search.trim() || undefined }); }} className={styles.search}><input type="search" value={search} maxLength={120} aria-label="搜索作品标题" placeholder="搜索作品标题" onChange={event => setSearch(event.target.value)} /><button type="submit" aria-label="搜索作品" title="搜索作品"><Search size={17} /></button></form>
+      <Popper.Root>
+        <Popper.Anchor asChild><button ref={filterTrigger} type="button" className={styles.filterTrigger} aria-label={activeFilterCount ? `筛选，已启用${activeFilterCount}项` : '筛选作品'} aria-haspopup="dialog" aria-controls={filtersOpen ? filterPanelId : undefined} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={17} /><span className={styles.toolbarLabel}>筛选</span>{activeFilterCount > 0 && <span className={styles.filterCount} aria-hidden="true">{activeFilterCount}</span>}</button></Popper.Anchor>
+        {filtersOpen && createPortal(<Popper.Content ref={filterPanel} id={filterPanelId} role="dialog" aria-label="筛选作品" sideOffset={8} collisionPadding={12} align="end" className={styles.filtersPopover}>
+          <div className={styles.filterPanelHeading}><span>筛选作品</span><button type="button" aria-label="关闭筛选" onClick={() => setFiltersOpen(false)}><X size={16} /></button></div>
+          <div className={styles.types} role="group" aria-label="作品类型">{([['all', '全部类型'], ['image', '图片'], ['video', '视频']] as const).map(([medium, label]) => <button key={medium} type="button" aria-pressed={(query.medium || 'all') === medium} onClick={() => updateQuery({ medium })}>{label}</button>)}</div>
+          <div className={styles.filterHelp}>
+            <WorkFilterPicker viewerId={viewerId} kind="authors" value={query.author} label={filterLabel('author')} onSelect={(id, name) => chooseFilter('author', id, name)} />
+            <WorkFilterPicker viewerId={viewerId} kind="projects" value={query.project} label={filterLabel('project')} onSelect={(id, name) => chooseFilter('project', id, name)} />
+          </div>
+          {hasFilters && <div className={styles.chips} aria-label="当前筛选">
+            {query.q && <button type="button" title={query.q} onClick={() => updateQuery({ q: undefined })}><span>标题：{query.q}</span><X size={14} /></button>}
+            {(['author', 'project'] as const).map(key => query[key] && <button key={key} type="button" title={filterLabel(key)} onClick={() => updateQuery({ [key]: undefined })}><span>{filterLabel(key) ? `${key === 'author' ? '作者' : '项目'}：${filterLabel(key)}` : key === 'author' ? '已选作者' : '已选项目'}</span><X size={14} /></button>)}
+            {query.collection && <button type="button" onClick={() => updateQuery({ collection: undefined })}><span>{directory.collections.find(item => item.id === query.collection)?.name || '已选集合'}</span><X size={14} /></button>}
+          </div>}
+          <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
+        </Popper.Content>, document.body)}
+      </Popper.Root>
+      <button type="button" className={styles.primary} aria-label="添加作品" title="添加作品" onClick={() => setAdding(true)}><Plus size={17} /><span className={styles.toolbarLabel}>添加作品</span></button>
+    </header>
     </>}
     {notice && <div className={styles.notice} role="status"><span>{notice}{methodHref && <a href={methodHref} className={styles.textAction}>打开本人模板草稿</a>}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(''); setMethodHref(''); }}><X size={15} /></button></div>}
     {pending.length > 0 && <div className={styles.pending} role="status"><p>有 {pending.length} 项提交结果待确认，原操作编号已保留。</p>{pending.map(operation => <button key={operation.requestId} type="button" title={operation.requestId} disabled={busy.includes(operation.key)} onClick={() => void reconcile(operation)}>核对原操作 {operation.requestId.slice(0, 8)}</button>)}</div>}
     {!workId && <div className={styles.workspace}>{query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button></div>}
-        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <div className={styles.empty}><h2>{hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'}</h2><p>{hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}</p><div>{hasFilters ? <button type="button" onClick={() => updateQuery({ q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</div></div>}
+        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <div className={styles.empty}><h2>{hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'}</h2><p>{hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}</p><div>{hasFilters ? <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</div></div>}
         {error && failedDirection === 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load('after')}>在这里重试</button></div>}
         <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}

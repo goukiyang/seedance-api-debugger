@@ -33,8 +33,14 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
   const metadata = rows.filter(row => row.media_version_id === current.get(row.work_id));
   if (!metadata.some(row => row.template_id)) return result;
   const ids = (kind: string) => metadata.filter(row => row.template_module === kind && row.template_id).map(row => row.template_id!);
+  const ownImageSources = await db.imageStudioTask.findMany({ where: { id: { in: works.filter(work => work.source_kind === 'image_task').map(work => work.source_id) }, owner_id: user.id, deleted_at: null },
+    select: { id: true, module_id: true, source_preset_id: true } });
+  const ownSourceByWork = new Map(works.flatMap(work => {
+    const task = work.source_kind === 'image_task' ? ownImageSources.find(task => task.id === work.source_id) : null;
+    return task ? [[work.id, task] as const] : [];
+  }));
   const [modules, videos, legacy] = await Promise.all([
-    db.imageStudioModule.findMany({ where: { id: { in: ids('image-module') }, owner_id: user.id }, select: { id: true, name: true, owner_id: true, source_preset_id: true } }),
+    db.imageStudioModule.findMany({ where: { id: { in: [...ids('image-module'), ...ownImageSources.flatMap(task => task.module_id ? [task.module_id] : [])] }, owner_id: user.id }, select: { id: true, name: true, owner_id: true, source_preset_id: true } }),
     db.videoStudioTemplate.findMany({ where: { id: { in: ids('video-studio') }, status: { not: 'archived' } },
       select: { id: true, name: true, owner_user_id: true, status: true, visibility: true, revision: true, published_version: { select: { id: true, name: true } } } }),
     db.generationTemplate.findMany({ where: { id: { in: ids('video-legacy') }, status: 'active' }, select: { id: true, name: true } }),
@@ -58,6 +64,10 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
       const template = preset || (row.template_module === 'image-module' ? allowedModules.get(row.template_id) : null);
       if (!template) continue;
       query.set('type', 'image'); query.set(row.template_module === 'image-preset' ? 'presetId' : 'moduleId', template.id);
+      const ownTask = ownSourceByWork.get(row.work_id), ownModule = ownTask?.module_id ? allowedModules.get(ownTask.module_id) : null;
+      if (preset && ownTask?.source_preset_id === preset.id && ownModule?.source_preset_id === preset.id) {
+        query.delete('presetId'); query.set('moduleId', ownModule.id);
+      }
       source.tool = { label: '图片模板', href: '/template-studio?type=image' };
       source.template = { label: template.name, href: '/template-studio?' + query, version: row.template_version,
         reuseVersion: preset && row.template_token && preset.updated_at.toISOString() === row.template_version ? row.template_version : null };
