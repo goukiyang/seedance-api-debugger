@@ -97,6 +97,10 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
   }
   const pending = (async () => {
     let imageResponse: Response | undefined, imageAccepted = false;
+    // Keep the existing metadata deadline. A negotiated image body may use
+    // the longer image-read budget only after its headers have been accepted.
+    const metadataController = imageConsumer ? new AbortController() : undefined;
+    const metadataDeadline = metadataController ? setTimeout(() => metadataController.abort(), 15000) : undefined;
     try {
       let state: HdSourceState, status = 0;
       try {
@@ -104,7 +108,7 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
         const headers: Record<string, string> = token ? { 'X-Image-View-Token': token } : { 'X-Image-Read-Intent': 'status' };
         if (imageConsumer) headers['X-Image-Accept'] = 'hd-open-v1';
         const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers,
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(imageConsumer ? 60000 : 15000)]) });
+          signal: AbortSignal.any([controller.signal, ...(metadataController ? [metadataController.signal] : []), AbortSignal.timeout(imageConsumer ? 60000 : 15000)]) });
         status = response.status;
         if (response.ok && imageConsumer && response.headers.get('Content-Type')?.startsWith('image/')) {
           imageResponse = response;
@@ -139,6 +143,7 @@ async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState
       descriptors.delete(entry.key); descriptors.set(entry.key, entry);
       notify(entry); poll(entry); return entry.state;
     } finally {
+      clearTimeout(metadataDeadline);
       if (imageResponse && !imageAccepted) void imageResponse.body?.cancel().catch(() => {});
       releaseImageSlot?.();
     }
