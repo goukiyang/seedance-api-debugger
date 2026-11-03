@@ -6,7 +6,7 @@ import type { WorkCard } from '@/lib/works/types';
 import type { WorkAnchor, WorkRestore } from '@/lib/works/view-state';
 import type { AssetPlaybackCoordinator } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
-import { WorkActions, type WorkOperate } from './WorkActions';
+import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import { WorkAuthor } from './WorkAuthor';
 import styles from './Works.module.css';
 
@@ -26,6 +26,14 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   const container = useRef<HTMLDivElement>(null), [width, setWidth] = useState(0), [margin, setMargin] = useState(0), [focused, setFocused] = useState<string | null>(null);
   const resizeRestore = useRef<WorkRestore | null>(null), lastWidth = useRef(0), restorationGeneration = useRef(0), resizeGeneration = useRef(0), focus = useRef<LogicalFocus | null>(null), previousGeometry = useRef('');
   const itemsRef = useRef(items); itemsRef.current = items;
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function reuse(work: WorkCard) {
+    const epoch = navigationEpoch.current, version = work.provenance?.template?.reuseVersion;
+    if (!version) return;
+    const href = await reuseWorkTemplate(work, operate, version);
+    if (mounted.current && epoch === navigationEpoch.current && href) window.location.assign(href);
+  }
   useLayoutEffect(() => {
     const element = container.current; if (!element) return;
     const update = () => {
@@ -110,7 +118,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
     onFocusCapture={event => rememberFocus(work.id, event.target)} onKeyDownCapture={event => rememberFocus(work.id, event.target)} onPointerDownCapture={event => { if (event.currentTarget.contains(document.activeElement)) rememberFocus(work.id, document.activeElement); }}>
     <div className={styles.cardVisual}>
       <div className={styles.mediaButton} data-work-action="preview" role="button" tabIndex={0} aria-label={`查看作品：${work.title}`} onClick={() => onOpen(work)} onKeyDown={event => { if (event.target === event.currentTarget && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onOpen(work); } }}><WorkMedia key={`${work.id}:${work.mediaVersion}`} work={work} playback={playback} contextKey={contextKey} detailOpen={detailOpen} /></div>
-      <div className={styles.cardOverlay}><WorkActions work={work} templateReuse busy={busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`)} operate={operate} onClassify={onClassify} /></div>
+      <div className={styles.cardOverlay}><WorkActions work={work} onReuse={() => void reuse(work)} busy={busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`)} operate={operate} onClassify={onClassify} /></div>
     </div>
     <div className={styles.cardInfo}>
       <div className={styles.cardIdentity} data-work-action="author"><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></div>

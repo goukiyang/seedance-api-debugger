@@ -132,7 +132,10 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
         if (alive.current && result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。');
         return;
       }
-      if (context.method.template) await reuseWorkTemplate(work, operate, context.method.template.version);
+      if (context.method.template) {
+        const href = await reuseWorkTemplate(work, operate, context.method.template.version);
+        if (alive.current && href) window.location.assign(href);
+      }
     } catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '方法入口读取未完成'); setContextRetry(value => value + 1); } }
     finally { methodBusy.current = false; if (alive.current) setMethodReading(false); }
   }
