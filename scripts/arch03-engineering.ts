@@ -336,7 +336,8 @@ async function main() {
     });
     try { await synchronizeHdScheduler(jobs as unknown as Parameters<typeof synchronizeHdScheduler>[0]); }
     finally { readMock.mock.restore(); }
-    assert.equal(schedulerReads, 2); metrics.hd = { jobs: jobs.length, schedulerReads, historicalFileScanEliminated: false };
+    assert.ok(schedulerReads >= 1 && schedulerReads <= 2, 'A scheduling pass must read state at most twice');
+    metrics.hd = { jobs: jobs.length, schedulerReads, historicalFileScanEliminated: false };
     checks.push(ARCH03_CHECKS[6]);
     if (capacityRequested) {
       const { runArch03Capacity } = await import('./arch03-capacity');

@@ -14,6 +14,7 @@ Restart=on-failure
 RestartSec=10
 TimeoutStopSec=180
 Nice=10
+CPUQuota=200%
 
 [Install]
 WantedBy=multi-user.target

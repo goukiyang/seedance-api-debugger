@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { mock } from 'node:test';
 import sharp from 'sharp';
 import * as runner from '../src/lib/media/hd-image-processor';
 
@@ -304,19 +305,24 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     await assert.rejects(core.retryHdKey(job.key, job.version), /hd_hard_pause_requires_review/);
   });
   await check('E06 supervisor crash disconnects actual child; PID/group exit is confirmed', async () => {
-    const directory = await fixture(); const original = await image('orphan');
+    const directory = await fs.realpath(await fixture()); const original = await image('orphan');
     const identity = (await core.hdRequestIdentity(original.source, false))!;
     const workDirectory = path.join(directory, 'private-child'); await fs.mkdir(workDirectory, { mode: 0o700 });
     const identityFile = path.join(directory, 'child-identity.json'), prepared = path.join(directory, 'prepared');
     const holder = path.join(evidenceRoot, 'holder.mts');
     const request = { protocol: runner.HD_IMAGE_PROTOCOL, key: identity.key, executionId: randomUUID(), sourceVersion: identity.current.version,
       inputFile: identity.current.file, workDirectory, preserveText: false };
-    await fs.writeFile(holder, `import fs from 'node:fs/promises';import {runHdImageProcessor} from ${JSON.stringify(pathToFileURL(path.join(applicationRoot, 'src/lib/media/hd-image-processor.ts')).href)};await runHdImageProcessor(${JSON.stringify(request)},{applicationRoot:${JSON.stringify(applicationRoot)},onSpawn:async i=>{await fs.writeFile(${JSON.stringify(identityFile)},JSON.stringify(i))},onPrepared:async()=>{await fs.writeFile(${JSON.stringify(prepared)},'prepared');return new Promise(()=>{})}});`, { mode: 0o600 });
+    await fs.writeFile(holder, `import fs from 'node:fs/promises';import {createRequire} from 'node:module';const {runHdImageProcessor}=createRequire(${JSON.stringify(pathToFileURL(path.join(applicationRoot, 'package.json')).href)})(${JSON.stringify(path.join(applicationRoot, 'src/lib/media/hd-image-processor.ts'))});await runHdImageProcessor(${JSON.stringify(request)},{applicationRoot:${JSON.stringify(applicationRoot)},onSpawn:async i=>{await fs.writeFile(${JSON.stringify(identityFile)},JSON.stringify(i))},onPrepared:async()=>{await fs.writeFile(${JSON.stringify(prepared)},'prepared');return new Promise(()=>{})}});`, { mode: 0o600 });
     const loader = createRequire(path.join(applicationRoot, 'package.json')).resolve('tsx');
-    const parent = spawn(process.execPath, ['--import', loader, holder], { stdio: 'ignore' });
+    const parent = spawn(process.execPath, ['--import', loader, holder], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let holderError = '';
+    parent.stderr.on('data', chunk => { holderError = (holderError + String(chunk)).slice(-2000); });
     const exited = new Promise<void>((resolve, reject) => { parent.once('error', reject); parent.once('exit', () => resolve()); });
     try {
-      await waitFor(() => exists(prepared));
+      await waitFor(() => {
+        if (parent.exitCode !== null || parent.signalCode !== null) throw new Error('hd_fixture_holder_exited: ' + holderError);
+        return exists(prepared);
+      }, runner.HD_IMAGE_LIMITS.readingMs);
       const child = JSON.parse(await fs.readFile(identityFile, 'utf8'));
       parent.kill('SIGKILL'); await exited;
       // Passive exit proof first: assertHdExecutionExited may terminate a known
@@ -443,6 +449,98 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     await processJob(job.key);
     assert.equal((await core.readHdJob(job.key))!.status, 'failed'); assert.equal((await core.hdControl()).state, 'hard_pause');
     assert.equal(await exists(path.join(core.hdDirectory(), job.key + '.publish.json')), false);
+  });
+  await check('HD03 idle work does not read 1670 archives or rewrite scheduler; full reconciliation recovers missing hint', async () => {
+    await fixture();
+    const scheduler = await import('../src/lib/media/hd-scheduler');
+    await scheduler.seedHdSchedulerFairness({ consecutiveViewer: 0, consecutiveForeground: 0 });
+    const archive = Array.from({ length: 1670 }, (_, index) => ({ key: index.toString(16).padStart(64, '0'),
+      source: '/uploads/archive-' + index + '.png', version: 'fixture-archive', policy: core.HD_POLICY,
+      priority: 3, attempts: 1, preserveText: false, status: 'ready', format: 'original',
+      bytes: 1, width: 1, height: 1, updatedAt: new Date().toISOString() }));
+    for (let offset = 0; offset < archive.length; offset += 64) await Promise.all(archive.slice(offset, offset + 64)
+      .map(job => fs.writeFile(path.join(core.hdDirectory(), job.key + '.json'), JSON.stringify(job))));
+    const schedulerFile = path.join(core.hdDirectory(), 'scheduler-v1.json');
+    const before = await fs.readFile(schedulerFile, 'utf8'), beforeStat = await fs.stat(schedulerFile);
+    const reader = fs.readFile.bind(fs);
+    let manifestReads = 0;
+    const spy = mock.method(fs, 'readFile', (...args: Parameters<typeof fs.readFile>) => {
+      if (/[/\\][a-f0-9]{64}\.json$/.test(String(args[0]))) manifestReads++;
+      return reader(...args);
+    });
+    try {
+      for (let index = 0; index < 3; index++) {
+        const jobs = await scheduler.listHdScheduledJobs();
+        assert.deepEqual(jobs, []);
+        assert.equal(await scheduler.claimHdScheduledJob(jobs), null);
+      }
+      assert.equal(manifestReads, 0);
+    } finally { spy.mock.restore(); }
+    assert.equal(await fs.readFile(schedulerFile, 'utf8'), before);
+    assert.equal((await fs.stat(schedulerFile)).ino, beforeStat.ino);
+    const original = await image('reconcile-unindexed');
+    ownerBindings = [{ id: 'fixture-owner-asset', owner_id: 'fixture-owner', original_url: original.source }];
+    const job = (await core.requestHd(original.source, 0, false))!;
+    const state = await scheduler.readHdScheduler();
+    delete state.entries[job.key];
+    await core.atomicHdJson(schedulerFile, state);
+    assert.deepEqual(await scheduler.listHdScheduledJobs(), []);
+    const all = await core.listHdJobs();
+    assert.equal(all.length, 1671);
+    assert.equal((await scheduler.claimHdScheduledJob(all))!.key, job.key);
+    await scheduler.finishHdScheduledClaim(await core.readHdJob(job.key), job.key);
+    // A registration arriving after a completed-history snapshot must survive.
+    const second = await image('concurrent-registration');
+    ownerBindings.push({ id: 'second-fixture-asset', owner_id: 'fixture-owner', original_url: second.source });
+    const newJob = (await core.requestHd(second.source, 0, false))!;
+    await scheduler.synchronizeHdScheduler(archive as Awaited<ReturnType<typeof core.listHdJobs>>);
+    assert.ok((await scheduler.readHdScheduler()).entries[newJob.key]);
+  });
+  await check('HD03 A has frozen q90/e4 identity; legacy results and alpha protection survive strategy switches', async () => {
+    await fixture();
+    const encoder = await import('../src/lib/media/hd-encoder');
+    const prior = process.env.HD_ENCODER_STRATEGY;
+    try {
+      const file = path.join(process.cwd(), 'public/uploads', 'a-recipe.png');
+      const pixels = Buffer.alloc(256 * 192 * 3);
+      for (let index = 0; index < pixels.length; index++) pixels[index] = (index * 29 + Math.floor(index / 31) * 71) % 256;
+      await sharp(pixels, { raw: { width: 256, height: 192, channels: 3 } }).png().toFile(file);
+      const source = '/uploads/a-recipe.png', original = await fs.readFile(file);
+      ownerBindings = [{ id: 'a-fixture-asset', owner_id: 'fixture-owner', original_url: source }];
+      process.env.HD_ENCODER_STRATEGY = 'hd-avif-q90-e4-v1';
+      const job = (await core.requestHd(source, 0, false))!;
+      assert.equal(job.encoderStrategy, 'hd-avif-q90-e4-v1');
+      assert.notEqual(job.key, (await core.hdRequestIdentity(source, false))!.key);
+      assert.deepEqual(encoder.hdEncoderParameters('avif', job.encoderStrategy), { format: 'avif', lossless: false,
+        effort: 4, orientation: 'auto', bitdepth: 8, quality: 90, chromaSubsampling: '4:4:4' });
+      assert.equal(encoder.hdEncoderParameters('avif', 'hd-legacy-e6-v1').quality, 95);
+      assert.equal(encoder.hdEncoderParameters('avif', 'hd-avif-e4-v1').quality, 95);
+      assert.deepEqual(encoder.hdEncoderParameters('webp', job.encoderStrategy), encoder.hdEncoderParameters('webp'));
+      await processJob(job.key);
+      const ready = (await core.readHdJob(job.key))!;
+      assert.equal(ready.status, 'ready');
+      assert.equal(ready.width, 256); assert.equal(ready.height, 192);
+      assert.deepEqual(await fs.readFile(file), original);
+      const { authorizedImageResponse } = await import('../src/lib/media/authorized-image-response');
+      const response = await authorizedImageResponse(new Request('https://fixture.invalid/api/image', {
+        headers: { 'x-image-read-intent': 'status' },
+      }), source, 'hd-description', 'image/png');
+      const description = await response.json();
+      assert.equal(response.status, 200); assert.equal(description.status, 'ready');
+      assert.equal(description.encodingStrategy, undefined, 'Old open tabs must accept the optional recipe metadata');
+      assert.equal(description.representationVersion, await core.hdRepresentationVersion(source, ready));
+      process.env.HD_ENCODER_STRATEGY = 'hd-legacy-e6-v1';
+      const reused = (await core.requestHd(source, 0, false))!;
+      assert.equal(reused.key, ready.key); assert.equal(reused.attempts, ready.attempts);
+      const alpha = await image('a-alpha');
+      ownerBindings.push({ id: 'a-alpha-asset', owner_id: 'fixture-owner', original_url: alpha.source });
+      const legacy = (await core.requestHd(alpha.source, 0, false))!;
+      await processJob(legacy.key);
+      process.env.HD_ENCODER_STRATEGY = 'hd-avif-q90-e4-v1';
+      assert.equal((await core.requestHd(alpha.source, 0, false))!.key, legacy.key);
+    } finally {
+      if (prior === undefined) delete process.env.HD_ENCODER_STRATEGY; else process.env.HD_ENCODER_STRATEGY = prior;
+    }
   });
   process.chdir(applicationRoot);
   await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();

@@ -88,6 +88,22 @@ await check('normal resources admit; spike waits; wait state is safe for old wor
   assert.equal(value.paused, true); assert.equal(value.reason, 'resource_wait');
   assert.ok(value.wait); assert.equal(value.wait!.stableSamples, 0);
 });
+await check('HD03 verified two-CPU budget avoids unrelated load waits; missing proof retains protection', () => {
+  assert.equal(observed(12, { cpuBudgetCpus: 2 }).result, 'safe');
+  for (const cpuBudgetCpus of [undefined, 0, -1, 3, NaN, Infinity]) {
+    assert.equal(observed(12, { cpuBudgetCpus }).result, 'busy');
+  }
+  assert.equal(observed(12, { cpuBudgetCpus: 2, availableMemory: 512 * 1024 ** 2 }).result, 'busy');
+  assert.equal(observed(12, { cpuBudgetCpus: 2, capacitySafe: false }).result, 'unsafe');
+  assert.equal(observed(12, { cpuBudgetCpus: 2, availableMemory: null }).result, 'unknown');
+  let value = transition(active(), observed(12));
+  const start = clock;
+  for (const offset of [0, 15_000, 30_000]) {
+    clock = start + offset;
+    value = transition(value, observed(12, { cpuBudgetCpus: 2 }));
+    assert.equal(value.state, offset < 30_000 ? 'resource_wait' : 'active');
+  }
+});
 await check('persistent busy checks have finite 5–60s backoff; no automatic admission', () => {
   let value = active();
   for (let iteration = 0; iteration < 20; iteration++) {

@@ -2,7 +2,7 @@ import './server-runtime.cjs';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mock } from 'node:test';
@@ -152,6 +152,29 @@ db.close()
     assert.equal((await readWorkFilters(colleague, new URLSearchParams({ kind: 'authors', q: '%' }))).items.length, 0);
     assert.equal((await readWorkFilters(colleague, new URLSearchParams({ kind: 'projects' }))).items.length, 0);
     await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=download`), colleague, current.work.id), error => (error as { status?: number }).status === 403);
+    for (const variant of ['original', 'hd', 'hd-description', 'hd-download']) {
+      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=${variant}`), colleague, current.work.id), error => (error as { status?: number }).status === 403);
+      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=old-media-version&variant=${variant}`), owner, current.work.id), error => (error as { status?: number }).status === 409);
+    }
+    const hdFixture = mkdtempSync(path.join(directory, 'hd-read-'));
+    mkdirSync(path.join(hdFixture, 'public/uploads'), { recursive: true }); mkdirSync(path.join(hdFixture, 'hd'), { mode: 0o700 });
+    const sharp = (await import('sharp')).default;
+    writeFileSync(path.join(hdFixture, 'public/uploads/fixture-current.png'), await sharp({ create: { width: 8, height: 8, channels: 3, background: '#999' } }).png().toBuffer());
+    const oldHdRoot = process.env.HD_DERIVATIVES_ROOT;
+    try {
+      process.chdir(hdFixture); process.env.HD_DERIVATIVES_ROOT = path.join(hdFixture, 'hd');
+      const description = await workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=hd-description`,
+        { headers: { 'X-Image-View-Token': randomUUID() } }), owner, current.work.id);
+      assert.equal(description.status, 200); assert.equal(description.headers.get('X-Work-Media-Version'), current.media.id);
+      assert.equal((await description.json()).reason, 'not_registered');
+      const unavailableHd = await workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=hd`), owner, current.work.id);
+      assert.equal(unavailableHd.status, 409);
+      assert.deepEqual(readdirSync(path.join(hdFixture, 'hd')), [], 'Work reads must not create HD manifests or scheduler state');
+      metrics.hdReads = { previewOnlyDenied: true, oldWorkVersionDenied: true, missingHdReturns409: true, getCreatesJobs: false };
+    } finally {
+      process.chdir(root);
+      if (oldHdRoot === undefined) delete process.env.HD_DERIVATIVES_ROOT; else process.env.HD_DERIVATIVES_ROOT = oldHdRoot;
+    }
     const videoTime = new Date(Date.now() - 60_000);
     const video = await database.videoTask.create({ data: { id: 'video-fixture-01', provider: 'synthetic', model: 'synthetic', generation_mode: 'text-to-video',
       prompt: 'PRIVATE_VIDEO_RECIPE', user_id: owner.id, owner_user_id: owner.id, project_id: project.id, local_status: 'succeeded',

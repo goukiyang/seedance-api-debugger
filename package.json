@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.129.2+hd-guard.1",
+  "version": "0.129.2+hd-read-guard.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

@@ -14,10 +14,10 @@ export function hdEncoderStrategy(value: unknown = HD_LEGACY_ENCODER_STRATEGY): 
 // Frozen legacy recipes remain readable. Only new, unregistered originals use
 // the reviewed A recipe; existing ready/queued jobs retain their own strategy.
 export function defaultHdEncoderStrategy(): HdEncoderStrategy {
-  if (process.env.NODE_ENV === 'test' && process.env.HD_ENCODER_STRATEGY !== undefined) return hdEncoderStrategy(process.env.HD_ENCODER_STRATEGY);
+  if (process.env.HD_ENCODER_STRATEGY !== undefined) return hdEncoderStrategy(process.env.HD_ENCODER_STRATEGY);
   if (process.env.NODE_ENV === 'test') return process.env.HD_CANDIDATE_ENCODER_STRATEGY === 'hd-avif-e4-v1'
     ? 'hd-avif-e4-v1' : HD_LEGACY_ENCODER_STRATEGY;
-  return HD_LEGACY_ENCODER_STRATEGY;
+  return 'hd-avif-q90-e4-v1';
 }
 type HdIntegrityCheck = { expected: unknown; actual: unknown; ok: boolean };
 export type HdIntegrity = { version: string; checks: Record<string, HdIntegrityCheck>; failedChecks: string[] };

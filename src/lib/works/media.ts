@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { authorizedImageResponse } from '@/lib/media/authorized-image-response';
+import { authorizedImageResponse, type ImageVariant } from '@/lib/media/authorized-image-response';
 import { mediaPreviewResponse, parsePreviewRange, previewMime } from '@/lib/media/preview-response';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { getWorkAccess, type WorkAccess } from './access';
@@ -70,13 +70,21 @@ async function originalVideo(request: Request, access: WorkAccess) {
 }
 export async function workMediaResponse(request: Request, user: SessionUser, workId: string) {
   const params = new URL(request.url).searchParams, version = params.get('version'), variant = params.get('variant') || 'preview';
-  if (!version || !['thumbnail', 'preview', 'detail', 'download'].includes(variant)) throw new WorkError('成品版本或读取方式无效');
+  if (!version || !['thumbnail', 'preview', 'detail', 'original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant)) throw new WorkError('成品版本或读取方式无效');
   const access = await getWorkAccess(user, workId);
   if (!access?.canPreview) throw new WorkError('成品已不可用或当前无权查看', 404);
   if (version !== access.media.id) throw new WorkError('成品版本已变化，请重新打开当前作品', 409, 'WORKS_VERSION_CHANGED');
   const { work, media } = access;
   let response: Response;
-  if (variant === 'thumbnail') {
+  if (['original', 'hd', 'hd-description', 'hd-download'].includes(variant)) {
+    if (work.medium !== 'image' || !(access.canDownload || access.reuse) || !media.source_url
+      || variant === 'hd-download' && !access.canDownload) throw new WorkError('当前未获得此成品的原件权限', 403);
+    const asset = media.asset_id ? await prisma.asset.findUnique({ where: { id: media.asset_id }, select: { mime_type: true, file_name: true } }) : null;
+    // Work reads reuse published HD files. Existing background consumers own production.
+    const headers = new Headers(request.headers); headers.set('X-Image-Read-Intent', 'status');
+    response = await authorizedImageResponse(new Request(request, { headers }), media.source_url, variant as ImageVariant,
+      asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`);
+  } else if (variant === 'thumbnail') {
     if (!media.thumbnail_url) throw new WorkError('封面仍在准备，成品记录已保留', 404);
     response = await storedPreview(request, media.thumbnail_url);
   } else if (variant === 'download') {

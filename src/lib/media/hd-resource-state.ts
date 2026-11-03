@@ -6,6 +6,7 @@ export const HD_RETRY_POLICY = Object.freeze({ attempts: 3, delaysMs: [60_000, 5
 export type HdRunState = 'active' | 'resource_wait' | 'manual_pause' | 'hard_pause';
 export type HdResourceSample = {
   checkedAt: string; load1: number | null; cpuCount: number | null; availableMemory: number | null;
+  cpuBudgetCpus?: number;
   capacitySafe: boolean | null; result: 'safe' | 'busy' | 'unknown' | 'unsafe'; reason?: string;
 };
 export type HdResourceWait = { since: string; stableSince?: string; stableSamples: number; checks: number; nextCheckAt: string };
@@ -38,12 +39,17 @@ export function classifyHdResources(sample: Omit<HdResourceSample, 'result' | 'r
     return { ...sample, result: 'unknown', reason: 'resource_sample_unknown' };
   }
   const enterLoad = Math.max(HD_RESOURCE_POLICY.minimumLoad, sample.cpuCount * HD_RESOURCE_POLICY.loadPerCpu);
-  const busy = sample.load1 > enterLoad * (waiting ? HD_RESOURCE_POLICY.exitLoadRatio : 1)
+  // A verified kernel-enforced budget bounds HD's contribution independently
+  // of unrelated build/API load. Unknown or excessive budgets retain admission.
+  const budgeted = Number.isFinite(sample.cpuBudgetCpus) && sample.cpuBudgetCpus! > 0
+    && sample.cpuBudgetCpus! <= sample.cpuCount / 2;
+  const busy = !budgeted && sample.load1 > enterLoad * (waiting ? HD_RESOURCE_POLICY.exitLoadRatio : 1)
     || sample.availableMemory < (waiting ? HD_RESOURCE_POLICY.exitMemory : HD_RESOURCE_POLICY.minimumMemory);
   return { ...sample, result: busy ? 'busy' : 'safe', ...(busy ? { reason: 'resource_busy' } : {}) };
 }
 export async function sampleHdResources(capacitySafe: boolean | null, clock = Date.now): Promise<HdResourceSample> {
   let memory: number | null = null, load: number | null = null, cpus: number | null = null;
+  let cpuBudgetCpus: number | undefined;
   try {
     load = os.loadavg()[0]; cpus = os.cpus().length;
     if (process.platform === 'linux') {
@@ -51,8 +57,17 @@ export async function sampleHdResources(capacitySafe: boolean | null, clock = Da
       memory = match ? Number(match[1]) * 1024 : null;
     } else memory = os.freemem();
   } catch { /* Unknown sampling never authorizes a claim. */ }
+  if (process.platform === 'linux' && process.env.NODE_ENV === 'production') {
+    try {
+      // Read the fixed worker's cgroup so Web/admin and worker checks agree.
+      // An environment variable cannot claim that a CPU cap is installed.
+      const value = (await fs.readFile('/sys/fs/cgroup/system.slice/sd2-hd-derivatives.service/cpu.max', 'utf8')).trim();
+      const match = /^(\d+)\s+(\d+)$/.exec(value);
+      if (match && Number(match[2]) > 0) cpuBudgetCpus = Number(match[1]) / Number(match[2]);
+    } catch { /* Missing cgroup proof retains the existing load gate. */ }
+  }
   return classifyHdResources({ checkedAt: new Date(clock()).toISOString(), load1: load, cpuCount: cpus,
-    availableMemory: memory, capacitySafe }, false);
+    availableMemory: memory, capacitySafe, ...(cpuBudgetCpus !== undefined ? { cpuBudgetCpus } : {}) }, false);
 }
 export function hdResourceTransition(control: HdControl, observed: HdResourceSample, timestamp: number, allowManualResume = false): Omit<HdControl, 'token'> | null {
   const legacyLoad = control.paused && control.reason === 'load_guard';
