@@ -151,14 +151,18 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
   }, []);
   useEffect(() => {
     if (!account) return;
-    const reusable = !attempt && preparation?.account === account && preparation.source === src && preparation.sourceVersion === version
-      && preparation.previewOnly === previewOnly && preparation.original === original && preparation.isCurrent();
+    const matching = !attempt && preparation?.account === account && preparation.source === src && preparation.sourceVersion === version
+      && preparation.previewOnly === previewOnly && preparation.isCurrent();
+    // The viewer owns the saved original/HD choice when adopting the click.
+    if (matching) preparation.confirmOpen(original);
+    const reusable = matching && preparation.original === original;
     const handle = reusable && preparation ? preparation : prepareImagePreview({ account, source: src, sourceVersion: version, previewOnly, original, localFrame });
     handle.confirmOpen();
     // Subscribe first: closing the click's lease must never abort and relaunch
     // the already accepted foreground read between the card and this dialog.
     const unsubscribe = handle.subscribe(state => setPrepared({ identity, handle, state }));
     handle.release();
+    if (preparation !== handle) preparation?.release();
     return unsubscribe;
   }, [account, identity, src, version, previewOnly, original, attempt, preparation, localFrame]);
   const current = prepared?.identity === identity && visible ? prepared : null;

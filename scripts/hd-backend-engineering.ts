@@ -21,10 +21,29 @@ async function main() {
   process.env.DATABASE_URL = 'file:' + path.join(evidenceRoot, 'unused-private.db');
 // Complete authoritative lookup fixture: scheduler ownership is exercised
 // without opening the application's SQL database.
-let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }> = [];
+let ownerBindings: Array<{ id: string; owner_id: string; original_url: string; status?: string; type?: string }> = [];
+let referenceBindings: Array<{ id: string; owner_user_id: string; url: string }> = [];
+let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
 (globalThis as unknown as { hdReadonlyDb?: unknown }).hdReadonlyDb = {
-  asset: { findMany: async () => ownerBindings, findFirst: async () => null },
-  referenceImage: { findMany: async () => [] }, imageStudioTask: { findFirst: async () => null },
+  asset: {
+    findMany: async (args?: { where?: { status?: string; type?: string; original_url?: { in?: string[]; endsWith?: string } } }) => {
+      const filter = args?.where?.original_url;
+      const rows = ownerBindings.map(row => ({ status: 'active', type: 'image', ...row })).filter(row => (!args?.where?.status || row.status === args.where.status) && (!args?.where?.type || row.type === args.where.type)
+        && (!filter?.in || filter.in.includes(row.original_url)) && (!filter?.endsWith || row.original_url.endsWith(filter.endsWith)));
+      ownerReads.push({ table: 'asset', kind: 'many', rows: rows.length }); return rows;
+    },
+    findFirst: async (args: { where: { id: string; owner_id: string } }) => {
+      const row = ownerBindings.find(value => value.id === args.where.id && value.owner_id === args.where.owner_id);
+      ownerReads.push({ table: 'asset', kind: 'one', rows: row ? 1 : 0 }); return row || null;
+    },
+  },
+  referenceImage: {
+    findMany: async () => { ownerReads.push({ table: 'reference', kind: 'many', rows: referenceBindings.length }); return referenceBindings; },
+    findFirst: async (args: { where: { id: string; owner_user_id: string } }) => {
+      const row = referenceBindings.find(value => value.id === args.where.id && value.owner_user_id === args.where.owner_user_id);
+      ownerReads.push({ table: 'reference', kind: 'one', rows: row ? 1 : 0 }); return row || null;
+    },
+  }, imageStudioTask: { findFirst: async () => null },
   $disconnect: async () => {},
 };
   const core = await import('../src/lib/media/hd-derivatives');
@@ -41,7 +60,7 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     finally { process.chdir(applicationRoot); delete process.env.HD_DERIVATIVES_ROOT; }
   };
   const fixture = async () => {
-    ownerBindings = [];
+    ownerBindings = []; referenceBindings = []; ownerReads = [];
     const directory = await fs.mkdtemp(path.join(evidenceRoot, 'case-'));
     await fs.chmod(directory, 0o700);
     await fs.mkdir(path.join(directory, 'public/uploads'), { recursive: true });
@@ -164,6 +183,44 @@ let ownerBindings: Array<{ id: string; owner_id: string; original_url: string }>
     assert.equal(secondState.globalTurn, 1); assert.equal(queued.filter(Boolean).length, 3);
     await scheduling.finishHdScheduledClaim(second, second.key);
 
+  });
+  await check('HD03 owner facts use bounded reads, validate the file and preserve frozen ownership', async () => {
+    await fixture(); const original = await image('known-owner');
+    const unrelated = () => Array.from({ length: 2000 }, (_, index) => ({ id: `archive-${index}`, owner_id: 'another-owner', original_url: `/uploads/archive-${index}.png` }));
+    ownerBindings = [...unrelated(), { id: 'target', owner_id: 'actual-owner', original_url: original.source }];
+    const job = (await core.requestHd(original.source, 0, false, undefined, { owner: { kind: 'asset', id: 'target', ownerId: 'actual-owner' } }))!;
+    const scheduler = await import('../src/lib/media/hd-scheduler');
+    assert.equal((await scheduler.readHdScheduler()).entries[job.key].ownerEvidence.ownerId, 'actual-owner');
+    assert.deepEqual(ownerReads, [{ table: 'asset', kind: 'one', rows: 1 }]);
+    await scheduler.registerHdScheduling(job, { owner: { kind: 'asset', id: 'archive-0', ownerId: 'another-owner' } });
+    assert.equal((await scheduler.readHdScheduler()).entries[job.key].ownerEvidence.ownerId, 'actual-owner');
+    assert.equal(ownerReads.length, 1, 'A frozen owner must not be rebound or queried again');
+
+    await fixture(); const target = await image('correct-source'), other = await image('other-owner-source');
+    ownerBindings = [...unrelated(), { id: 'actual', owner_id: 'actual-owner', original_url: target.source }, { id: 'wrong', owner_id: 'wrong-owner', original_url: other.source }];
+    const corrected = (await core.requestHd(target.source, 0, false, undefined, { owner: { kind: 'asset', id: 'wrong', ownerId: 'wrong-owner' } }))!;
+    assert.equal((await scheduler.readHdScheduler()).entries[corrected.key].ownerEvidence.ownerId, 'actual-owner');
+    assert.deepEqual(ownerReads, [{ table: 'asset', kind: 'one', rows: 1 }, { table: 'asset', kind: 'many', rows: 1 }]);
+
+    await fixture(); const reference = await image('standalone-reference'); ownerBindings = unrelated();
+    referenceBindings = [{ id: 'reference', owner_user_id: 'reference-owner', url: reference.source }];
+    const referenced = (await core.requestHd(reference.source, 0, false, undefined, { owner: { kind: 'reference', id: 'reference', ownerId: 'reference-owner' } }))!;
+    assert.equal((await scheduler.readHdScheduler()).entries[referenced.key].ownerEvidence.kind, 'reference');
+    assert.deepEqual(ownerReads, [{ table: 'reference', kind: 'one', rows: 1 }]);
+
+    await fixture(); const legacy = await image('legacy-domain');
+    ownerBindings = [...unrelated(), { id: 'legacy', owner_id: 'legacy-owner', original_url: `https://sd2.youdoodesign.com${legacy.source}` }];
+    const recovered = (await core.requestHd(legacy.source, 0, false))!;
+    assert.equal((await scheduler.readHdScheduler()).entries[recovered.key].ownerEvidence.ownerId, 'legacy-owner');
+    assert.deepEqual(ownerReads, [{ table: 'asset', kind: 'many', rows: 1 }]);
+
+    await fixture(); const current = await image('hidden-owner-candidate');
+    ownerBindings = [{ id: 'hidden', owner_id: 'hidden-owner', original_url: current.source, status: 'hidden' },
+      { id: 'video', owner_id: 'video-owner', original_url: current.source, type: 'video' },
+      { id: 'active', owner_id: 'active-owner', original_url: current.source }];
+    const active = (await core.requestHd(current.source, 0, false))!;
+    assert.equal((await scheduler.readHdScheduler()).entries[active.key].ownerEvidence.ownerId, 'active-owner');
+    assert.deepEqual(ownerReads, [{ table: 'asset', kind: 'many', rows: 3 }]);
   });
   await check('E02 unexplained final file is preserved and blocks a second publication', async () => {
     await fixture(); const original = await image('conflict'), job = (await core.requestHd(original.source, 0, false))!;

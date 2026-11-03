@@ -40,7 +40,7 @@ export function imageDisplaySource(src: string, mode: 'preview' | 'thumbnail' | 
     } else if (/^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname)) {
       for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
-    } else if (url.pathname === '/api/content-reactions/media') {
+    } else if (url.pathname === '/api/content-reactions/media' || /^\/api\/works\/[^/]+\/media$/.test(url.pathname)) {
       for (const variant of ['thumbnail', 'preview', 'detail', 'download', 'hd', 'hd-description', 'hd-download', 'hd-version', 'hd-representation']) url.searchParams.delete(variant);
       url.searchParams.set('variant', mode);
     } else return src;

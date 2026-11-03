@@ -63,7 +63,7 @@ function sourceFamily(source: string) {
 }
 function reusableSource(source: string) {
   const url = new URL(source, location.href);
-  return url.origin === location.origin && /^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)|reference-images\/[^/]+\/content|content-reactions\/media)/.test(url.pathname)
+  return url.origin === location.origin && /^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/|style-groups\/[^/]+\/assets\/)|reference-images\/[^/]+\/content|content-reactions\/media|works\/[^/]+\/media$)/.test(url.pathname)
     && !['download', 'hd-download', 'hd-description'].some(mode => url.searchParams.get('variant') === mode || url.searchParams.get(mode) === '1');
 }
 function responseVersion(response: Response) {
