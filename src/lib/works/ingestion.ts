@@ -6,6 +6,7 @@ import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { worksRegistrationPaused, worksSchemaReady } from './source-policy';
+import { backfillWorkContexts, indexWorkContext, worksContextSchemaReady } from './context-index';
 
 type SourceKind = 'image_task' | 'video_task' | 'multiview_work';
 const sourceKinds: SourceKind[] = ['image_task', 'video_task', 'multiview_work'];
@@ -91,7 +92,17 @@ async function discoverPage(kind: SourceKind, pageSize: number, recent = false) 
       SELECT id, updated_at FROM ${table} WHERE updated_at <= ${upper} ${after} ORDER BY updated_at ASC, id ASC LIMIT ${pageSize}`);
     const excludedBatches = new Map<string, string[]>();
     for (const row of rows) {
-      const candidate = await readySource(db, kind, row.id, excludedBatches);
+      let candidate: Candidate | null;
+      try { candidate = await readySource(db, kind, row.id, excludedBatches); }
+      catch {
+        // One malformed legacy source must not strand the page or unrelated ready jobs.
+        // The original source identity is retried through the same durable, bounded lease queue.
+        await db.workRegistrationJob.upsert({ where: { source_kind_source_id_source_revision: {
+          source_kind: kind, source_id: row.id, source_revision: `discovery:${row.updated_at.toISOString()}` } },
+          create: { source_kind: kind, source_id: row.id, source_revision: `discovery:${row.updated_at.toISOString()}`,
+            source_updated_at: row.updated_at, error_code: 'WORKS_SOURCE_DISCOVERY_DEFERRED' }, update: {} });
+        continue;
+      }
       if (!candidate) continue;
       await db.workRegistrationJob.upsert({ where: { source_kind_source_id_source_revision: { source_kind: kind, source_id: row.id, source_revision: candidate.revision } },
         create: { source_kind: kind, source_id: row.id, source_revision: candidate.revision, source_updated_at: candidate.updatedAt }, update: {} });
@@ -142,7 +153,7 @@ async function registerClaimed(job: WorkRegistrationLease) {
   return prisma.$transaction(async db => {
     if (!await db.workRegistrationJob.findFirst({ where: workRegistrationLeaseWhere(job) })) return false;
     const source = await readySource(db, job.source_kind as SourceKind, job.source_id);
-    if (!source || source.revision !== job.source_revision) {
+    if (!source || !job.source_revision.startsWith('discovery:') && source.revision !== job.source_revision) {
       await db.workRegistrationJob.updateMany({ where: workRegistrationLeaseWhere(job), data: { status: 'superseded', lease_token: null, lease_until: null } });
       return false;
     }
@@ -160,6 +171,7 @@ async function registerClaimed(job: WorkRegistrationLease) {
         preview_status: source.medium === 'image' && source.thumbnailUrl ? 'ready' : 'pending' }, update: {} });
     if (work.current_version_id !== version.id) await db.work.update({ where: { id: work.id }, data: {
       current_version_id: version.id, title: source.title, project_id: source.projectId, audience, completed_at: source.completedAt, revision: { increment: 1 } } });
+    if (await worksContextSchemaReady(db)) await indexWorkContext(db, work, version.id);
     if (source.medium === 'video' && policy || source.medium === 'image' && !source.thumbnailUrl) await db.workRegistrationJob.upsert({
       where: { source_kind_source_id_source_revision: { source_kind: 'media_preview', source_id: version.id, source_revision: version.id } },
       create: { source_kind: 'media_preview', source_id: version.id, source_revision: version.id, source_updated_at: source.updatedAt }, update: {} });
@@ -170,17 +182,26 @@ async function registerClaimed(job: WorkRegistrationLease) {
 export async function processWorksRegistrationPass(options: { pageSize?: number; jobs?: number; shouldStop?: () => boolean } = {}) {
   if (!await worksSchemaReady()) return { state: 'schema-unavailable' as const, scanned: 0, registered: 0 };
   if (await worksRegistrationPaused()) return { state: 'paused' as const, scanned: 0, registered: 0 };
-  let scanned = 0, registered = 0;
+  let scanned = 0, registered = 0, deferred = 0;
   const pageSize = Math.min(40, Math.max(1, options.pageSize || 12));
+  const turn = await prisma.workDiscoveryCheckpoint.upsert({ where: { source_kind: 'registration:fairness' },
+    create: { source_kind: 'registration:fairness', cycles: 1 }, update: { cycles: { increment: 1 } }, select: { cycles: true } });
+  // Existing ready jobs run before discovery. Each source gets a turn even when another source has a larger backlog.
+  for (let count = 0; count < Math.min(12, Math.max(1, options.jobs || 4)) && !options.shouldStop?.(); count++) {
+    const kind = sourceKinds[(turn.cycles - 1 + count) % sourceKinds.length];
+    const job = await claimWorkRegistrationJob([kind], 90_000, count % 2 === 0);
+    if (!job) continue;
+    try { if (await registerClaimed(job)) registered++; }
+    catch { deferred++; await failWorkRegistrationJob(job, 'WORKS_SOURCE_REGISTRATION_DEFERRED'); }
+  }
   for (const recent of [true, false]) for (const kind of sourceKinds) {
     if (options.shouldStop?.()) break;
-    scanned += await discoverPage(kind, pageSize, recent);
+    try { scanned += await discoverPage(kind, pageSize, recent); }
+    catch { deferred++; console.warn('[works-registration] source discovery deferred', { source: kind, window: recent ? 'recent' : 'history' }); }
   }
-  for (let count = 0; count < Math.min(12, Math.max(1, options.jobs || 4)) && !options.shouldStop?.(); count++) {
-    const job = await claimWorkRegistrationJob(sourceKinds, 90_000, count % 2 === 0);
-    if (!job) break;
-    try { if (await registerClaimed(job)) registered++; }
-    catch { await failWorkRegistrationJob(job, 'WORKS_SOURCE_REGISTRATION_DEFERRED'); }
+  if (!options.shouldStop?.()) {
+    try { await backfillWorkContexts(pageSize); }
+    catch { deferred++; console.warn('[works-registration] context checkpoint deferred'); }
   }
-  return { state: 'processed' as const, scanned, registered };
+  return { state: 'processed' as const, scanned, registered, deferred };
 }

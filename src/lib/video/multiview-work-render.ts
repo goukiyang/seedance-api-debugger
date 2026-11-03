@@ -300,7 +300,7 @@ async function publish(lease: MultiviewWorkLease, signal: AbortSignal) {
 }
 export type MultiviewWorkProcessResult = { state: 'empty' | 'ready' | 'superseded' | 'waiting' | 'failed'; workId?: string };
 /** One claim only. The dedicated consumer holds the cross-release flock for its entire lifetime. */
-export async function processNextMultiviewWork(): Promise<MultiviewWorkProcessResult> {
+export async function processNextMultiviewWork(options: { beforePrepare?: () => Promise<void> } = {}): Promise<MultiviewWorkProcessResult> {
   if (active) throw unavailable('已有作品正在准备。');
   active = true;
   let lease: MultiviewWorkLease | null = null;
@@ -309,11 +309,13 @@ export async function processNextMultiviewWork(): Promise<MultiviewWorkProcessRe
     await assertMultiviewWorkConsumerLock();
     const { cleanAbandonedMultiviewSources } = await import('./multiview-source-cleanup.server');
     await cleanAbandonedMultiviewSources().catch(() => { console.warn('multiview_source_cleanup_deferred'); });
-    const registeredWork = await registerNextSavedMultiviewOutputs(multiviewWorkAdmission);
+    const registeredWork = await registerNextSavedMultiviewOutputs(async () => {
+      await options.beforePrepare?.();
+      return multiviewWorkAdmission();
+    });
     if (registeredWork) return { state: 'ready', workId: registeredWork };
     lease = await claimNextMultiviewWork();
     if (!lease) return { state: 'empty' };
-    await multiviewWorkAdmission();
     const user = await multiviewWorkActor(lease.ownerId);
     await assertMultiviewWorkReference(user, { owner_id: lease.ownerId, source_task_id: lease.sourceTaskId, source_id: lease.sourceId || null });
     const source = lease.sourceId ? null : await assertMultiviewWorkSource(user, lease.sourceTaskId);
@@ -330,6 +332,10 @@ export async function processNextMultiviewWork(): Promise<MultiviewWorkProcessRe
       await failMultiviewWork(lease, '原视频已变化，原配方和已保存成果保留。', { sourceChanged: true, retryable: false });
       return { state: 'failed', workId: lease.workId };
     }
+    // Waiting/failed/changed sources never interrupt a preview. Only a ready
+    // intent reaches the shared heavy-media admission boundary.
+    await options.beforePrepare?.();
+    await multiviewWorkAdmission();
     if (!lease.recipe || !lease.info || !lease.sourceVersion) {
       const info = await multiviewInfoForWork(user, lease.sourceTaskId, undefined, signal, access);
       lease = await initializeMultiviewWork(lease, info);

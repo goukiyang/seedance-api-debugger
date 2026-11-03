@@ -162,14 +162,5 @@ export async function readWorkDetail(user: SessionUser, id: string, db: Prisma.T
     (${access.projectView(Prisma.sql`w.project_id`)}) AS project_visible FROM Work w ${access.joins}
     WHERE w.id = ${id} AND ((${access.canPreview}) OR ${access.owner}) LIMIT 1`);
   const card = (await projectWorkCards(access.user, keys, db))[0] || null;
-  // Historic videos are cataloged without bulk-transcoding them. An explicit
-  // native detail open may request this one derivative while its original plays.
-  if (card?.medium === 'video' && card.detailPreviewUrl && card.previewStatus === 'preparing') {
-    const media = await db.workMediaVersion.findUnique({ where: { id: card.mediaVersion }, select: { source_updated_at: true, created_at: true } });
-    if (media) await db.workRegistrationJob.upsert({
-      where: { source_kind_source_id_source_revision: { source_kind: 'media_preview', source_id: card.mediaVersion, source_revision: card.mediaVersion } },
-      create: { source_kind: 'media_preview', source_id: card.mediaVersion, source_revision: card.mediaVersion, source_updated_at: media.source_updated_at || media.created_at }, update: {},
-    }).catch(() => {}); // This optional local preview must not hide a readable original.
-  }
   return card;
 }

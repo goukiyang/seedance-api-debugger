@@ -2712,3 +2712,63 @@ model WorkOperation {
   @@unique([owner_id, request_id])
   @@index([owner_id, created_at])
 }
+
+// Indexed safe provenance; prompts, private references and billing remain in their source.
+model WorkContext {
+  work_id          String @id
+  media_version_id String
+  schema_version   Int @default(1)
+  submission_key   String?
+  template_module  String?
+  template_id      String?
+  template_version String?
+  template_token   String?
+  settings_json    String @default("[]")
+  indexed_at       DateTime @default(now())
+  @@index([submission_key, work_id])
+  @@index([template_module, template_id, template_version, work_id])
+}
+
+model WorkSourceLink {
+  work_id          String
+  media_version_id String
+  source_kind      String
+  source_id        String
+  relation         String
+  @@id([work_id, source_kind, source_id])
+  @@index([source_kind, source_id, work_id])
+}
+
+model WorkLearningEntry {
+  id               String @id @default(cuid())
+  work_id          String
+  media_version_id String
+  author_id        String
+  kind             String
+  parent_id        String?
+  body             String
+  time_seconds     Float?
+  revision         Int @default(1)
+  removed_at       DateTime?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+  @@index([work_id, media_version_id, removed_at, created_at, id])
+  @@index([parent_id, removed_at, created_at, id])
+}
+
+// Explicit learning declarations are independent of execution provenance.
+model WorkDerivedLink {
+  id                       String @id @default(cuid())
+  source_work_id           String
+  derived_work_id          String
+  source_media_version_id  String
+  derived_media_version_id String
+  author_id                String
+  revision                 Int @default(1)
+  removed_at               DateTime?
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  @@unique([source_work_id, derived_work_id, author_id])
+  @@index([source_work_id, removed_at, created_at, id])
+  @@index([derived_work_id, removed_at, created_at, id])
+}

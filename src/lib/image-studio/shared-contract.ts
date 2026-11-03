@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ImageStudioPreset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
@@ -440,9 +440,34 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   const workspace = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
   if (!workspace || workspace.source_preset_id !== binding.presetId) throw new StudioSharingError('共享模板工作区不存在或来源不匹配', 409);
   const { definition, publicDTO } = await resolveSharedStudioDefinition(user, binding.presetId, client);
+  const methodPin = await client.platformSetting.findUnique({ where: { key: `studio_works_method_pin_v1:${moduleId}` }, select: { value_json: true } });
+  if (methodPin) {
+    const pin = parseRecord(methodPin.value_json, '作品方法草稿来源无法确认');
+    if (pin.ownerId !== user.id || pin.presetId !== binding.presetId || pin.sourceRevision !== definition.sourceRevision
+      || pin.definitionToken !== definition.intent.definitionToken) {
+      throw new StudioSharingError('原作品使用的模板版本已变化，当前草稿保留；请重新选择可用方法', 409, 'state-conflict');
+    }
+  }
   if (binding.mode === 'publisher' && definition.sourceOwnerId !== user.id) throw new StudioSharingError('无权管理他人的原模板', 403, 'access-revoked');
   const personalOverrides = await getSharedStudioPersonalOverrides(user.id, moduleId, client);
   return { binding, definition, personalOverrides, publicDTO };
+}
+
+/** The caller owns the durable operation transaction. Never reuses or edits an existing personal workspace. */
+export async function prepareSharedStudioMethodWorkspace(user: ImageStudioIdentity, presetId: string,
+  expectedVersion: string, expectedToken: string | null, client: SharedStudioClient, actualSettings: SharedStudioPersonalOverrides) {
+  const { definition } = await resolveSharedStudioDefinition(user, presetId, client);
+  if (!expectedToken || definition.sourceRevision !== expectedVersion || definition.intent.definitionToken !== expectedToken) {
+    throw new StudioSharingError('原作品使用的模板版本已变化，不能改用新版', 409, 'state-conflict');
+  }
+  const moduleId = randomUUID();
+  const workspace = await client.imageStudioModule.create({ data: { id: moduleId, owner_id: user.id, source_preset_id: presetId,
+    name: definition.name, group_name: definition.groupName, revision: 1 } });
+  await bindStudioModule(client, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: user.id, presetId, mode: 'live' });
+  await writeSharedStudioPersonalState(user, workspace, { personalOverrides: actualSettings }, client);
+  await writeSetting(client, `studio_works_method_pin_v1:${moduleId}`, user.id, { ownerId: user.id, presetId,
+    sourceRevision: expectedVersion, definitionToken: expectedToken });
+  return moduleId;
 }
 
 export type SharedStudioModuleRead = {

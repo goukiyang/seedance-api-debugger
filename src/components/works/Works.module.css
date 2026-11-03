@@ -73,9 +73,9 @@
 .detail { width: min(1180px, 100%); max-height: calc(100dvh - 48px); overflow: auto; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 12px; }
 .detailHeader { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 18px; }
 .detailHeader h2 { font-size: 16px; font-weight: 550; overflow-wrap: anywhere; }
-.detailMedia { width: 100%; min-height: 160px; height: min(65dvh, 800px); display: flex; align-items: center; justify-content: center; background: var(--bg-input); }
-.detailMedia img, .detailMedia video { display: block; width: 100%; height: 100%; object-fit: contain; }
-.detailInfo { padding: 12px 18px 18px; }
+.detailMedia { width: 100%; min-height: 160px; max-height: 78dvh; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 12px; background: var(--bg-input); }
+.detailMedia img, .detailMedia video { display: block; width: 100%; height: 100%; max-height: 78dvh; object-fit: contain; }
+.detailInfo { padding: 18px 0 0; }
 .identity { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text-secondary); }
 .detailControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .detailControls .actions { gap: 6px; }
@@ -109,7 +109,8 @@
   .cardIdentity > :last-child { display: none; }
   .backdrop { padding: 8px; }
   .detail, .smallDialog { max-height: calc(100dvh - 16px); }
-  .detailMedia { height: 55dvh; }
+  .detailMedia { max-height: 70dvh; }
+  .detailMedia img, .detailMedia video { max-height: 70dvh; }
   .detailHeader, .detailInfo { padding-left: 12px; padding-right: 12px; }
   .skeletonGrid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 }
@@ -125,3 +126,62 @@
 .previewMessage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 18px; text-align: center; color: var(--text-secondary); }
 .previewMessage button { border: 1px solid var(--border-color); }
 @media (max-width: 760px) { .filterPanel { position: static; width: min(320px, calc(100vw - 80px)); margin-top: 6px; } }
+
+.detailPage { min-width: 0; }
+.detailNav { display: flex; align-items: center; gap: 8px; margin: -4px 0 18px; }
+.detailNav > button:first-child { color: var(--text-primary); font-weight: 500; }
+.detailLayout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); align-items: start; gap: 36px; }
+.detailPrimary { min-width: 0; }
+.detailInfo h1 { margin: 0 0 5px; color: var(--text-primary); font-size: 22px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.detailInfo h1:focus { outline: none; }
+.detailInfo .identity { gap: 4px 10px; }
+.detailInfo .identity button { justify-content: flex-start; padding: 0; }
+.detailInfo .identity > :last-child { font-size: 12px; }
+.detailControls { gap: 4px 8px; margin-top: 8px; }
+.detailControls .actions { margin-right: 8px; }
+.detailControls > a, .detailControls > button { font-size: 12px; }
+.method { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-color); }
+.methodHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.methodHeading h2, .relatedHeading h2 { font-size: 15px; font-weight: 550; color: var(--text-primary); }
+.method > p { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
+.methodSettings { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font-size: 12px; line-height: 1.8; }
+.methodSettings > div { display: flex; gap: 6px; min-width: 0; }
+.methodSettings dt { color: var(--text-secondary); flex-shrink: 0; }
+.methodSettings dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.relatedRail { min-width: 0; }
+.relatedHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.relatedHeading > button { font-size: 12px; }
+.relatedGrid { columns: 2; column-gap: 16px; }
+.relatedCard { display: inline-block; width: 100%; margin: 0 0 18px; break-inside: avoid; vertical-align: top; }
+.page .relatedMedia { display: block; width: 100%; padding: 0; overflow: hidden; border-radius: 9px; background: var(--bg-panel); }
+.page .relatedTitle { display: block; min-height: 34px; padding: 6px 2px 0; max-width: 100%; color: var(--text-primary); text-align: left; font-size: 13px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relatedAuthor { display: block; padding: 0 2px; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
+.groupControls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.groupControls button { font-size: 12px; }
+.relatedBelow { display: grid; gap: 28px; margin-top: 38px; padding-top: 20px; border-top: 1px solid var(--border-color); }
+.relatedBelow .relatedGrid { columns: 5; column-gap: 18px; }
+.compareArea { scroll-margin-top: 20px; margin-top: 20px; }
+.compareScope { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.compareScope select { max-width: 75%; min-height: 40px; border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: var(--text-primary); background: var(--bg-input); }
+.detailSkeleton { min-height: 65dvh; border-radius: 12px; padding: 30px; color: var(--text-secondary); background: var(--bg-panel); }
+.relatedSkeleton { min-height: 320px; border-radius: 9px; padding: 20px; color: var(--text-secondary); background: var(--bg-panel); font-size: 13px; }
+@media (max-width: 1100px) {
+  .detailLayout { grid-template-columns: minmax(0, 1.3fr) minmax(250px, 1fr); gap: 24px; }
+  .relatedGrid { column-gap: 12px; }
+  .relatedBelow .relatedGrid { columns: 4; }
+}
+@media (max-width: 760px) {
+  .detailNav { margin-bottom: 12px; }
+  .detailLayout { display: flex; flex-direction: column; gap: 28px; }
+  .detailPrimary, .relatedRail { width: 100%; }
+  .detailInfo { padding: 14px 0 0; }
+  .detailInfo h1 { font-size: 20px; }
+  .detailControls { gap: 4px; }
+  .detailControls .actions { margin-right: 2px; }
+  .detailControls .actions .classifyButton { display: inline-flex; }
+  .relatedGrid, .relatedBelow .relatedGrid { columns: 2; column-gap: 12px; }
+  .relatedBelow { margin-top: 28px; gap: 28px; }
+  .method { margin-top: 20px; }
+}
+
+.deliveryStatus { font-size: 12px; color: var(--text-secondary); }

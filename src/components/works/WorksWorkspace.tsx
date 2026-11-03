@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Bookmark, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -20,14 +20,15 @@ export default function WorksWorkspace() {
   if (session.sessionChanged) return <div className="container" role="status">账号已变化，原账号的待核对操作已保留。<button type="button" className="btn btn-secondary" onClick={() => window.location.reload()}>刷新后继续</button></div>;
   if (!session.hasLoadedUser || session.loadingUser) return <div className={styles.page}><div className={styles.skeleton} role="status">正在读取账号…</div></div>;
   if (!session.user) return <div className="container" role="status">{session.userLoadError || '请先登录后查看作品。'}<button type="button" onClick={() => void session.refreshUser({ force: true })}>重试读取账号</button></div>;
+  if (!session.user.works_preview) return <div className="container" role="status">此页面暂不可用。</div>;
   return <AccountWorks key={session.user.id} viewerId={session.user.id} />;
 }
 function AccountWorks({ viewerId }: { viewerId: string }) {
   const router = useRouter(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
   const query = useMemo(() => parseWorksQuery(new URLSearchParams(paramsKey)), [paramsKey]), queryKey = worksQueryString(query).toString(), workId = searchParams.get('work') || '';
-  const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
+  const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [methodHref, setMethodHref] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
   const [refresh, setRefresh] = useState(0), [detailRevision, setDetailRevision] = useState(0), [collectionRevision, setCollectionRevision] = useState(0), [classify, setClassify] = useState<WorkCard | null>(null), [adding, setAdding] = useState(false), [search, setSearch] = useState(query.q || ''), [busy, setBusy] = useState<string[]>([]), [pending, setPending] = useState<PendingWorkOperation[]>([]), [restore, setRestore] = useState<WorkRestore | null>(null), [filtersOpen, setFiltersOpen] = useState(false), [filterNames, setFilterNames] = useState<Record<string, string>>({});
-  const epoch = useRef(0), alive = useRef(true), loadBusy = useRef(false), pagesRef = useRef(pages), queryRef = useRef(queryKey), loadedQueryRef = useRef(queryKey), resetWindow = useRef(false), operationLocks = useRef(new Set<string>()), detailOpenedHere = useRef(false), navigationEpoch = useRef(0), restoreGeneration = useRef(0), workIdRef = useRef(workId), sentinel = useRef<HTMLDivElement>(null), autoAttempt = useRef(''), autoMore = useRef<() => void>(() => {});
+  const epoch = useRef(0), alive = useRef(true), loadBusy = useRef(false), pagesRef = useRef(pages), queryRef = useRef(queryKey), loadedQueryRef = useRef(queryKey), resetWindow = useRef(false), restoringList = useRef(false), operationLocks = useRef(new Set<string>()), detailOpenedHere = useRef(false), pendingDetailBack = useRef(false), navigationEpoch = useRef(0), restoreGeneration = useRef(0), workIdRef = useRef(workId), previousWorkId = useRef<string | null>(null), sentinel = useRef<HTMLDivElement>(null), autoAttempt = useRef(''), autoMore = useRef<() => void>(() => {});
   pagesRef.current = pages; queryRef.current = queryKey; workIdRef.current = workId;
   const playback = useMemo(() => new AssetPlaybackCoordinator(), []), directory = useWorkCollections(viewerId, collectionRevision);
   const items = useMemo(() => pages.flatMap(page => page.items).filter((work, index, all) => all.findIndex(other => other.id === work.id) === index).filter(work => {
@@ -54,10 +55,12 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
   }, [viewerId]);
   useEffect(() => setSearch(query.q || ''), [query.q]);
   const remember = useCallback(() => {
-    const current = pagesRef.current; if (!current.length) return;
+    const current = pagesRef.current; if (!current.length || restoringList.current && !workIdRef.current) return;
     const query: SavedWorkView['query'] = parseWorksQuery(new URLSearchParams(loadedQueryRef.current));
     if (queryRef.current === loadedQueryRef.current && workIdRef.current) query.work = workIdRef.current;
-    saveWorkView(viewerId, { query, window: current[0].window, anchor: visibleWorkAnchor() });
+    const previous = savedWorkView(viewerId, loadedQueryRef.current);
+    // A detail page has its own scroll; it must never overwrite the list position.
+    saveWorkView(viewerId, { query, window: current[0].window, anchor: workIdRef.current ? previous?.anchor || null : visibleWorkAnchor() });
   }, [viewerId]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -76,6 +79,7 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
       loadedQueryRef.current = queryKey;
       setPages(old => direction === 'initial' ? [data] : direction === 'after' ? [...old, data].slice(-6) : [data, ...old].slice(0, 6));
       const position = direction === 'initial' ? anchor : visibleWorkAnchor();
+      restoringList.current = Boolean(!data.anchorUnavailable && position && navigation === navigationEpoch.current);
       setRestore(!data.anchorUnavailable && position && navigation === navigationEpoch.current ? { ...position, navigationEpoch: navigation, generation: ++restoreGeneration.current } : null);
       if (data.anchorUnavailable) setNotice('原位置当前不可访问，已显示附近可读作品。'); resetWindow.current = false;
     } catch (cause) { if (alive.current && token === epoch.current) setError(cause instanceof WorksClientError && [401, 403].includes(cause.status) ? '当前账号暂时无法访问作品广场，请确认登录或权限。' : cause instanceof Error ? cause.message : '作品读取未完成'); }
@@ -87,12 +91,39 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     for (const key of Object.keys(next) as Array<keyof WorkQuery>) if (!next[key] || next[key] === 'all') delete next[key];
     const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); window.scrollTo({ top: 0 });
   }
-  useEffect(() => { if (!workId) detailOpenedHere.current = false; }, [workId]);
-  function open(work: WorkCard) { navigationEpoch.current++; detailOpenedHere.current = true; remember(); playback.stopHover('modal'); const params = new URLSearchParams(searchParams); params.set('work', work.id); router.push(`/works?${params}`, { scroll: false }); }
-  function close() { navigationEpoch.current++; if (detailOpenedHere.current) { detailOpenedHere.current = false; router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`/works?${params}`, { scroll: false }); }
+  useLayoutEffect(() => {
+    if (previousWorkId.current === workId) return;
+    const wasDetail = Boolean(previousWorkId.current); previousWorkId.current = workId;
+    const state = window.history.state || {}, marker = state.__sd2WorksPage;
+    // Each router entry remembers whether Back has a known works-page destination.
+    // Direct links and restored last views keep a safe list fallback, including after reload.
+    const canBack = Boolean(workId && (pendingDetailBack.current || marker?.viewerId === viewerId && marker.workId === workId && marker.canBack === true));
+    pendingDetailBack.current = false; detailOpenedHere.current = canBack;
+    window.history.replaceState({ ...state, __sd2WorksPage: { viewerId, workId, canBack } }, '');
+    if (workId) { window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior }); return; }
+    if (wasDetail) {
+      const anchor = savedWorkView(viewerId, queryKey)?.anchor;
+      restoringList.current = Boolean(anchor);
+      setRestore(anchor ? { ...anchor, navigationEpoch: navigationEpoch.current, generation: ++restoreGeneration.current } : null);
+      if (!anchor) window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    }
+  }, [workId, queryKey, viewerId]);
+  function open(work: WorkCard) {
+    if (work.id === workId) return;
+    navigationEpoch.current++; remember(); pendingDetailBack.current = true;
+    if (!workId) {
+      const saved = savedWorkView(viewerId, queryKey);
+      if (saved?.anchor) saveWorkView(viewerId, { ...saved, anchor: { ...saved.anchor, focusId: work.id, focusAction: document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('[data-work-action]')?.dataset.workAction || 'preview' : 'preview' } });
+    }
+    playback.stopAll('page');
+    const params = new URLSearchParams(searchParams); params.set('work', work.id); router.push(`/works?${params}`, { scroll: false });
+  }
+  function close() { navigationEpoch.current++; if (detailOpenedHere.current) { router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`/works?${params}`, { scroll: false }); }
+  function returnToList() { navigationEpoch.current++; remember(); const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); }
   const updateWork = useCallback((work: WorkCard) => { setPages(old => old.map(page => ({ ...page, items: page.items.map(item => item.id === work.id ? work : item) }))); setClassify(old => old?.id === work.id ? work : old); }, []);
   const applyResult = useCallback(async (result: Record<string, unknown>, key: string) => {
     if (!alive.current) return;
+    if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) setMethodHref(result.href);
     const idForPatch = typeof result.workId === 'string' ? result.workId : '';
     if (idForPatch) setPages(old => old.map(page => ({ ...page, items: page.items.map(work => {
       if (work.id !== idForPatch) return work;
@@ -114,9 +145,9 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     if (id) { try { const data = await worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(id)}`, viewerId); if (alive.current) updateWork(data.work); } catch { if (alive.current) setNotice('操作已保存，作品信息暂未更新，可重新读取。'); } }
   }, [viewerId, updateWork, router]);
   const operate: WorkOperate = useCallback(async (key, url, body, method = 'POST') => {
-    if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]); setNotice('');
+    if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]); setNotice(''); setMethodHref('');
     try { const result = await worksMutate(viewerId, key, url, body, method); if (!alive.current) return null; await applyResult(result, key); setNotice(url.endsWith('/publish') ? '已加入我的作品，点击刷新查看新作品。' : url.endsWith('/reference') ? '已加入生成工作区' : '已保存'); return result; }
-    catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '操作未完成'); if (cause instanceof WorksClientError && cause.status === 409 && key.startsWith('work:')) { setDetailRevision(value => value + 1); void worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${key.slice(5)}`, viewerId).then(data => { if (alive.current) updateWork(data.work); }).catch(() => {}); } } return null; }
+    catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '操作未完成'); if (cause instanceof WorksClientError && cause.status === 409 && (key.startsWith('work:') || key.startsWith('method:'))) { setDetailRevision(value => value + 1); void worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(key.slice(key.indexOf(':') + 1))}`, viewerId).then(data => { if (alive.current) updateWork(data.work); }).catch(() => {}); } } return null; }
     finally { operationLocks.current.delete(key); if (alive.current) { setBusy(old => old.filter(item => item !== key)); setPending(pendingWorkOperations(viewerId)); } }
   }, [viewerId, applyResult, updateWork]);
   async function reconcile(operation: PendingWorkOperation) {
@@ -126,7 +157,7 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     finally { operationLocks.current.delete(operation.key); if (alive.current) { setBusy(old => old.filter(item => item !== operation.key)); setPending(pendingWorkOperations(viewerId)); } }
   }
   useEffect(() => { if (ready && pagesRef.current.length && loadedQueryRef.current === queryKey) remember(); }, [workId, queryKey, ready, remember]);
-  const onRestored = useCallback((generation: number) => setRestore(old => old?.generation === generation ? null : old), []), first = pages[0], last = pages[pages.length - 1], hasFilters = Boolean(query.q || query.author || query.project || query.collection);
+  const onRestored = useCallback((generation: number) => { restoringList.current = false; setRestore(old => old?.generation === generation ? null : old); }, []), first = pages[0], last = pages[pages.length - 1], hasFilters = Boolean(query.q || query.author || query.project || query.collection);
   autoMore.current = () => {
     if (!ready || loading || error || workId || classify || adding || loadBusy.current) return;
     const current = pagesRef.current, last = current[current.length - 1]; if (!last?.nextCursor) return;
@@ -138,7 +169,7 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     const target = sentinel.current; if (!ready || !hasNext || !target) return;
     const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) autoMore.current(); }, { rootMargin: '500px 0px' });
     observer.observe(target); return () => observer.disconnect();
-  }, [ready, hasNext, queryKey, refresh]);
+  }, [ready, hasNext, queryKey, refresh, workId]);
   const filterLabel = (key: 'author' | 'project') => {
     const match = items.find(work => key === 'author' ? work.author.id === query.author : work.project?.id === query.project);
     return (key === 'author' ? match?.author.name : match?.project?.name) || filterNames[`${key}:${query[key]}`];
@@ -150,6 +181,7 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     updateQuery({ [key]: id });
   }
   return <div className={styles.page}>
+    {!workId && <>
     <header className={styles.heading}><h1>作品广场</h1><div><button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); }}><RefreshCw size={16} />刷新</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}><Plus size={17} />添加作品</button></div></header>
     <nav className={styles.scopes} aria-label="作品范围">{([['all', '全部作品'], ['mine', '我的作品'], ['favorites', '我的收藏'], ['hidden', '我隐藏的作品'], ['managed', '作品管理']] as const).map(([scope, label]) => <button key={scope} type="button" aria-pressed={(query.scope || 'all') === scope} onClick={() => updateQuery({ scope, collection: undefined })}>{scope === 'favorites' && <Bookmark size={15} />}{label}</button>)}</nav>
     <div className={styles.toolbar}><form onSubmit={event => { event.preventDefault(); updateQuery({ q: search.trim() || undefined }); }} className={styles.search}><Search size={17} /><input type="search" value={search} maxLength={120} aria-label="搜索作品标题" placeholder="搜索作品标题" onChange={event => setSearch(event.target.value)} /><button type="submit">搜索</button></form><div className={styles.types} role="group" aria-label="作品类型">{([['all', '全部'], ['image', '图片'], ['video', '视频']] as const).map(([medium, label]) => <button key={medium} type="button" aria-pressed={(query.medium || 'all') === medium} onClick={() => updateQuery({ medium })}>{label}</button>)}</div><button type="button" className={styles.filterTrigger} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}><SlidersHorizontal size={17} />筛选</button></div>
@@ -158,9 +190,10 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
       <WorkFilterPicker viewerId={viewerId} kind="projects" value={query.project} label={filterLabel('project')} onSelect={(id, name) => chooseFilter('project', id, name)} />
     </div>
     {hasFilters && <div className={styles.chips} aria-label="当前筛选">{query.q && <button type="button" onClick={() => updateQuery({ q: undefined })}>标题：{query.q}<X size={14} /></button>}{(['author', 'project'] as const).map(key => query[key] && <button key={key} type="button" onClick={() => updateQuery({ [key]: undefined })}>{filterLabel(key) ? `${key === 'author' ? '作者' : '项目'}：${filterLabel(key)}` : key === 'author' ? '已选作者' : '已选项目'}<X size={14} /></button>)}{query.collection && <button type="button" onClick={() => updateQuery({ collection: undefined })}>{directory.collections.find(item => item.id === query.collection)?.name || '已选集合'}<X size={14} /></button>}<button type="button" onClick={() => updateQuery({ q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button></div>}
-    {notice && <div className={styles.notice} role="status"><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={() => setNotice('')}><X size={15} /></button></div>}
+    </>}
+    {notice && <div className={styles.notice} role="status"><span>{notice}{methodHref && <a href={methodHref} className={styles.textAction}>打开本人模板草稿</a>}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(''); setMethodHref(''); }}><X size={15} /></button></div>}
     {pending.length > 0 && <div className={styles.pending} role="status"><p>有 {pending.length} 项提交结果待确认，原操作编号已保留。</p>{pending.map(operation => <button key={operation.requestId} type="button" title={operation.requestId} disabled={busy.includes(operation.key)} onClick={() => void reconcile(operation)}>核对原操作 {operation.requestId.slice(0, 8)}</button>)}</div>}
-    <div className={styles.workspace}>{query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
+    {!workId && <div className={styles.workspace}>{query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button></div>}
         {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <div className={styles.empty}><h2>{hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'}</h2><p>{hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}</p><div>{hasFilters ? <button type="button" onClick={() => updateQuery({ q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</div></div>}
@@ -168,8 +201,8 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
         <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}
       </section>
-    </div>
-    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} revision={detailRevision} playback={playback} onClose={close} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`)} operate={operate} />}
+    </div>}
+    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} revision={detailRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
     {classify && <ClassifyWork work={classify} directory={directory} operate={operate} busy={busyKeys.includes(`work:${classify.id}`) || busyKeys.includes('collection:create')} onClose={() => setClassify(null)} />}
     {adding && <AddWorkPicker viewerId={viewerId} operate={operate} onClose={() => setAdding(false)} />}
   </div>;

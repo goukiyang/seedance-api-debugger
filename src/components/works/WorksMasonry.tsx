@@ -12,7 +12,10 @@ import styles from './Works.module.css';
 
 export function visibleWorkAnchor(): WorkAnchor | null {
   const card = Array.from(document.querySelectorAll<HTMLElement>('[data-work-card]')).filter(card => card.getBoundingClientRect().bottom > 100).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
-  return card ? { id: card.dataset.workCard!, offset: card.getBoundingClientRect().top } : null;
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusCard = active?.closest<HTMLElement>('[data-work-card]');
+  const focusAction = focusCard ? active?.closest<HTMLElement>('[data-work-action]')?.dataset.workAction : undefined;
+  return card ? { id: card.dataset.workCard!, offset: card.getBoundingClientRect().top, ...(focusAction && focusCard?.dataset.workCard ? { focusId: focusCard.dataset.workCard, focusAction } : {}) } : null;
 }
 type LogicalFocus = { workId: string; action: string; navigationEpoch: number };
 export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys, operate, onClassify, onOpen, onFilter, restore, navigationEpoch, onRestored }: {
@@ -35,7 +38,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   }, [navigationEpoch]);
   useLayoutEffect(() => { const element = container.current; if (element) setMargin(element.getBoundingClientRect().top + window.scrollY); }, [items, busyKeys, detailOpen]);
   const lanes = width >= 1450 ? 5 : width >= 1100 ? 4 : width >= 760 ? 3 : 2, gap = width < 600 ? 10 : 18, columnWidth = Math.max(0, (width - gap * (lanes - 1)) / lanes);
-  const focusedIndex = items.findIndex(work => work.id === focused), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
+  const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);
   const virtual = useWindowVirtualizer({ count: width ? items.length : 0, lanes, gap, scrollMargin: margin, overscan: 2, getItemKey,
     estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 124; },
@@ -56,19 +59,27 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
     const finish = () => { if (generation !== restorationGeneration.current) return; resizeRestore.current = null; onRestored(anchor.generation); };
     if (!current()) { finish(); return; }
     const index = items.findIndex(work => work.id === anchor.id), offset = index >= 0 ? virtual.getOffsetForIndex(index, 'start')?.[0] : undefined;
-    if (offset === undefined) { finish(); return; }
+    if (offset === undefined) { window.scrollTo({ top: margin, behavior: 'instant' as ScrollBehavior }); finish(); return; }
     // A single explicit scroll avoids the virtualizer retaining a scroll-to-index retry intent.
     window.scrollTo({ top: offset, behavior: 'instant' as ScrollBehavior });
     const settle = () => {
       if (!current()) { finish(); return; }
       const card = container.current?.querySelector<HTMLElement>(`[data-work-card="${CSS.escape(anchor.id)}"]`);
       if (!card && ++attempts < 3) { frame = requestAnimationFrame(settle); return; }
-      if (card && current()) window.scrollBy({ top: card.getBoundingClientRect().top - anchor.offset, behavior: 'instant' as ScrollBehavior });
+      if (card && current()) {
+        window.scrollBy({ top: card.getBoundingClientRect().top - anchor.offset, behavior: 'instant' as ScrollBehavior });
+        if (anchor.focusAction) {
+          const focusCard = anchor.focusId ? container.current?.querySelector<HTMLElement>(`[data-work-card="${CSS.escape(anchor.focusId)}"]`) : card;
+          const action = focusCard?.querySelector<HTMLElement>(`[data-work-action="${CSS.escape(anchor.focusAction)}"]`);
+          const target = action?.matches('button, a, [tabindex]') ? action : action?.querySelector<HTMLElement>('button, a, [tabindex]');
+          if (target && !target.matches(':disabled, [aria-disabled="true"]')) target.focus({ preventScroll: true });
+        }
+      }
       finish();
     };
     frame = requestAnimationFrame(settle);
     return () => { restorationGeneration.current++; cancelAnimationFrame(frame); };
-  }, [geometry, items, navigationEpoch, onRestored, restore, virtual, width]);
+  }, [geometry, items, margin, navigationEpoch, onRestored, restore, virtual, width]);
   useEffect(() => {
     const moved = (event: FocusEvent) => {
       const target = event.target;
