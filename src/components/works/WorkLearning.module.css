@@ -1,28 +1,28 @@
 .learning, .compare { color: var(--text-primary, #e8e8ec); min-width: 0; }
-.learning { border-top: 1px solid var(--border, #34343e); padding-top: 24px; margin-top: 24px; }
-.compare { border-top: 1px solid var(--border, #34343e); padding-top: 20px; margin-top: 20px; }
+.learning { border-top: 1px solid var(--border-color); padding-top: 24px; margin-top: 24px; }
+.compare { border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .heading h2, .heading h3, .experience h3 { margin: 0; font-size: 15px; font-weight: 600; }
 .heading h2 { font-size: 17px; }
-.learning button, .compare button, .learning select, .compare select { min-height: 36px; border: 1px solid var(--border, #42424d); border-radius: 8px; background: var(--surface-secondary, #25252e); color: inherit; padding: 6px 10px; font: inherit; font-size: 13px; }
+.learning button, .compare button, .learning select, .compare select { min-height: 36px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-panel); color: inherit; padding: 6px 10px; font: inherit; font-size: 13px; }
 .learning button, .compare button { cursor: pointer; }
 .learning button:disabled, .compare button:disabled, .learning select:disabled, .compare select:disabled { opacity: .5; cursor: default; }
 .learning button:focus-visible, .compare button:focus-visible, .learning select:focus-visible, .compare select:focus-visible, .learning textarea:focus-visible, .learning input:focus-visible, .compare input:focus-visible, .linkedWork a:focus-visible { outline: 2px solid var(--accent, #9b8cff); outline-offset: 3px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.experience { padding: 16px; margin: 12px 0 24px; border: 1px solid var(--border, #34343e); border-radius: 12px; }
-.entry { padding: 14px 0; border-bottom: 1px solid var(--border, #34343e); }
+.experience { margin: 12px 0; }
+.entry { padding: 14px 0; border-bottom: 1px solid var(--border-color); }
 .experience > .entry { border-bottom: 0; padding-bottom: 0; }
 .entryMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary, #a6a6b2); }
 .entryMeta button { min-height: 28px; padding: 2px 7px; }
 .body { margin: 8px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
-.answers { padding: 8px 0 0 16px; margin-top: 12px; border-left: 2px solid var(--border, #42424d); }
+.answers { padding: 8px 0 0 18px; margin-top: 8px; }
 .answers .entry { margin-bottom: 8px; }
 .muted { color: var(--text-secondary, #a6a6b2); font-size: 13px; line-height: 1.6; margin: 8px 0; }
-.error { color: var(--danger, #f0a3aa); font-size: 13px; line-height: 1.6; }
-.pending { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; background: var(--surface-secondary, #25252e); border-radius: 10px; font-size: 13px; }
-.editor, .picker { padding: 16px; margin-top: 16px; border: 1px solid var(--border, #42424d); border-radius: 12px; }
+.error { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.pending { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; background: var(--bg-panel); border-radius: 10px; font-size: 13px; }
+.editor, .picker { padding: 16px; margin-top: 16px; border: 1px solid var(--border-color); border-radius: 12px; }
 .editor label, .picker label { display: grid; gap: 8px; margin-bottom: 12px; font-size: 13px; }
-.editor textarea, .editor input { width: 100%; box-sizing: border-box; background: var(--surface, #17171e); color: inherit; border: 1px solid var(--border, #42424d); border-radius: 8px; padding: 10px; font: inherit; resize: vertical; }
+.editor textarea, .editor input { width: 100%; box-sizing: border-box; background: var(--bg-input); color: inherit; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font: inherit; resize: vertical; }
 .editor .timeInput { max-width: 240px; }
 .derivations { margin-top: 28px; }
 .linkedWork { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; }
@@ -34,7 +34,7 @@
 .pane { margin: 0; min-width: 0; }
 .pane figcaption { display: grid; gap: 3px; margin-bottom: 8px; font-size: 13px; overflow-wrap: anywhere; }
 .pane figcaption span { font-size: 12px; color: var(--text-secondary, #a6a6b2); }
-.comparisonMedia { display: flex; align-items: center; justify-content: center; height: clamp(180px, 37vw, 480px); background: var(--surface, #17171e); border-radius: 8px; overflow: hidden; }
+.comparisonMedia { display: flex; align-items: center; justify-content: center; height: clamp(180px, 37vw, 480px); background: var(--bg-input); border-radius: 8px; overflow: hidden; }
 .comparisonMedia img, .comparisonMedia video { width: 100%; height: 100%; object-fit: contain; }
 .videoControls { margin-top: 12px; }
 .videoControls .row { font-size: 12px; }
@@ -44,7 +44,7 @@
 .methodDifferences summary { cursor: pointer; padding: 8px 0; }
 .tableScroll { overflow-x: auto; }
 .methodDifferences table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-.methodDifferences th, .methodDifferences td { padding: 9px; border-bottom: 1px solid var(--border, #34343e); vertical-align: top; overflow-wrap: anywhere; }
+.methodDifferences th, .methodDifferences td { padding: 9px; border-bottom: 1px solid var(--border-color); vertical-align: top; overflow-wrap: anywhere; }
 .methodDifferences th { font-weight: 500; }
 @media (max-width: 600px) {
   .comparisonPanes { gap: 6px; }
@@ -53,3 +53,9 @@
   .linkedWork { align-items: flex-start; }
   .compareSelect { flex-basis: 100%; }
 }
+
+.editor { padding: 0; border: 0; border-radius: 0; }
+.extras { margin-top: 20px; font-size: 12px; color: var(--text-secondary); }
+.extras summary, .timeInput summary { cursor: pointer; min-height: 36px; padding: 8px 0; }
+.extras .derivations { margin-top: 12px; }
+.timeInput { font-size: 12px; color: var(--text-secondary); }

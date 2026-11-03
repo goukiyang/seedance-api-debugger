@@ -34,11 +34,23 @@
 .media img { object-fit: contain; }
 .duration { display: flex; align-items: center; gap: 4px; position: absolute; bottom: 8px; right: 8px; padding: 4px 7px; border-radius: 5px; color: var(--text-primary); background: var(--bg-primary); font-size: 11px; pointer-events: none; }
 .placeholder { display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-secondary); font-size: 12px; }
-.cardInfo { height: 124px; padding: 4px 0 0; }
-.cardInfo .workTitle { display: block; text-align: left; padding: 0 4px; min-height: 40px; height: 40px; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-size: 14px; font-weight: 500; }
-.cardIdentity { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 4px; color: var(--text-secondary); font-size: 11px; white-space: nowrap; overflow: hidden; }
-.cardIdentity button { padding: 0; min-width: 40px; min-height: 40px; max-width: 44%; flex-shrink: 1; display: block; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
-.cardIdentity > :last-child { margin-left: auto; flex-shrink: 0; }
+.cardInfo { height: 76px; padding: 4px 0 0; }
+.cardIdentity { height: 36px; display: flex; align-items: center; min-width: 0; }
+.authorIdentity { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; font-size: 12px; color: var(--text-secondary); }
+.page .authorIdentity { padding: 0; justify-content: flex-start; }
+.authorAvatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 24px; border-radius: 50%; overflow: hidden; color: var(--text-secondary); background: var(--bg-hover); font-size: 11px; }
+.authorAvatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.authorName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cardSource { display: flex; align-items: center; height: 36px; min-width: 0; font-size: 12px; color: var(--text-secondary); }
+.cardSource a { display: block; padding: 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); text-decoration: none; }
+.cardSource a:hover, .relatedIdentity a:hover { text-decoration: underline; }
+.cardVisual { position: relative; }
+.cardOverlay { position: absolute; top: 8px; right: 8px; left: 8px; display: flex; justify-content: flex-end; opacity: 0; pointer-events: none; transition: opacity 150ms ease-out; }
+.workCard:hover .cardOverlay, .workCard:focus-within .cardOverlay, .cardOverlay:has([aria-expanded=true]) { opacity: 1; pointer-events: auto; }
+.cardOverlay .actions { height: auto; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.cardOverlay .actions > button, .cardOverlay .actionEnd > button { border-radius: 50%; background: var(--bg-primary); box-shadow: 0 1px 5px oklch(.08 .006 160 / .18); }
+.cardOverlay .actionEnd { margin-left: 0; }
+@media (hover: none), (pointer: coarse) { .cardOverlay { opacity: 1; pointer-events: auto; } }
 .actions { display: flex; align-items: center; gap: 2px; height: 40px; }
 .actions button { padding: 6px; }
 .actions button[aria-pressed=true] { color: var(--tone-info-text); }
@@ -106,7 +118,6 @@
   .collectionRow { display: inline-flex; max-width: 100%; }
   .collectionPanel > .collectionChoice { width: auto; }
   .cardIdentity { font-size: 10px; }
-  .cardIdentity > :last-child { display: none; }
   .backdrop { padding: 8px; }
   .detail, .smallDialog { max-height: calc(100dvh - 16px); }
   .detailMedia { max-height: 70dvh; }
@@ -185,3 +196,21 @@
 }
 
 .deliveryStatus { font-size: 12px; color: var(--text-secondary); }
+
+.detailByline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 12px; color: var(--text-secondary); font-size: 12px; }
+.detailByline .actions { margin-left: auto; }
+.detailByline .authorAvatar { width: 30px; height: 30px; flex-basis: 30px; }
+.detailInfo .sourceTitle { font-size: 20px; margin-bottom: 8px; }
+.sourceTitle a { color: inherit; text-decoration: none; }
+.sourceTitle a:hover { text-decoration: underline; }
+.detailSource { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.detailSource > a { font-size: 12px; color: var(--text-secondary); }
+.detailSource .primary { margin-left: auto; }
+.detailMedia .imageZoomTrigger { display: block; position: relative; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; cursor: zoom-in; background: transparent; }
+.zoomHint { position: absolute; bottom: 12px; right: 12px; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--bg-primary); color: var(--text-primary); opacity: 0; }
+.imageZoomTrigger:hover .zoomHint, .imageZoomTrigger:focus-visible .zoomHint { opacity: 1; }
+.relatedIdentity { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding-top: 6px; }
+.relatedIdentity > a { max-width: 100%; padding: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); font-size: 11px; text-decoration: none; }
+@media (hover: none), (pointer: coarse) { .zoomHint { opacity: 1; } }
+
+.cardOverlay .actions > button[data-work-action=reuse] { border-radius: 6px; padding-inline: 10px; }

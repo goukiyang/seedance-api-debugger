@@ -93,7 +93,7 @@ function serializeLegacy(template: any): StudioTemplateDto {
   };
 }
 
-function canReadTemplate(row: any, user: SessionUser) {
+export function canReadTemplate(row: any, user: SessionUser) {
   return user.role === 'admin'
     || (row.owner_user_id === user.id)
     || (row.status === 'published' && row.visibility === 'shared');

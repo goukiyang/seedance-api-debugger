@@ -16,7 +16,7 @@ export const WORKS_SOURCES = [
   'scripts/works-engineering.ts', 'scripts/works-consumer-scheduler.ts',
   'prisma/migrations/20261103_works_learning/migration.sql',
   'src/lib/works/preview-request.ts', 'src/app/api/works/[id]/preview/route.ts',
-  'src/lib/works/context-index.ts', 'src/lib/works/context.ts', 'src/lib/works/context-types.ts', 'src/lib/works/context-method.ts',
+  'src/lib/works/provenance.ts', 'src/lib/works/context-index.ts', 'src/lib/works/context.ts', 'src/lib/works/context-types.ts', 'src/lib/works/context-method.ts',
   'src/lib/works/learning.ts', 'src/lib/works/learning-types.ts', 'src/lib/works/learning-derivations.ts', 'scripts/works-fixture-inputs.mjs', 'prisma/schema.prisma',
   'scripts/fixtures/works-baseline-0.128.0.prisma', 'prisma/migrations/20261102_team_works_catalog/migration.sql',
   'src/lib/works/access.ts', 'src/lib/works/query.ts', 'src/lib/works/filters.ts', 'src/lib/works/media.ts', 'src/lib/works/lifecycle.ts',

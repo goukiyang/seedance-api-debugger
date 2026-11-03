@@ -44,7 +44,7 @@ export async function readWorkContext(user: SessionUser, workId: string, params 
   if (cursor && (cursor.viewer !== user.id || cursor.work !== workId || cursor.media !== root.media.id || cursor.group !== requestedGroup)) throw new WorkError('关联浏览位置已变化，请重新打开', 409, 'WORKS_CONTEXT_CHANGED');
   const upper = cursor?.upper || new Date().toISOString();
   const access = await workAccessSql(db, user);
-  const groupIds = requestedGroup ? [requestedGroup as WorkContextGroupId] : Object.keys(labels) as WorkContextGroupId[];
+  const groupIds: WorkContextGroupId[] = requestedGroup ? [requestedGroup as WorkContextGroupId] : ['same-template', 'same-submission', 'derived', 'source'];
   const result: WorkContext = { viewerId: user.id, workId, mediaVersion: root.media.id, method: await readIndexedWorkMethod(access.user, root, metadata, db), groups: [], indexing: false, ...(delivery ? { delivery } : {}) };
   for (const group of groupIds) {
     let candidates: Prisma.Sql;
@@ -52,9 +52,9 @@ export async function readWorkContext(user: SessionUser, workId: string, params 
       if (!metadata.submission_key) continue;
       candidates = Prisma.sql`SELECT work_id,media_version_id FROM WorkContext WHERE schema_version = 1 AND submission_key = ${metadata.submission_key} AND indexed_at <= ${new Date(upper)}`;
     } else if (group === 'same-template') {
-      if (!metadata.template_module || !metadata.template_id || !metadata.template_version) continue;
+      if (!metadata.template_module || !metadata.template_id) continue;
       candidates = Prisma.sql`SELECT work_id,media_version_id FROM WorkContext WHERE schema_version = 1 AND template_module = ${metadata.template_module}
-        AND template_id = ${metadata.template_id} AND template_version = ${metadata.template_version} AND indexed_at <= ${new Date(upper)}`;
+        AND template_id = ${metadata.template_id} AND indexed_at <= ${new Date(upper)}`;
     } else if (group === 'source') {
       candidates = Prisma.sql`SELECT source.id AS work_id,source.current_version_id AS media_version_id
         FROM WorkSourceLink link JOIN Work source ON source.source_kind = link.source_kind AND source.source_id = link.source_id
