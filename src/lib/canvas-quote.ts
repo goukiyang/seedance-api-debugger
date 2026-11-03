@@ -3,16 +3,16 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
-import { getImageGenerationChannels, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
+import { resolveImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel } from '@/lib/integrations/image-generation-defaults';
 import { captureImageGenerationRequestChannel } from '@/lib/integrations/image-generation';
-import { getPricingImageChannelOptions, pricingImageIdentity, readPricingImageScopes, resolvePricingImageCandidate, withImagePricing } from '@/lib/pricing/image';
+import { capturePricingImageMenu, projectPricingImageChannelOptions, pricingImageIdentity, readPricingImageScopes, resolvePricingImageCandidate, withImagePricing } from '@/lib/pricing/image';
 import { assertPricingImageAvailability } from '@/lib/pricing/image-availability';
 import { isPricingItemUnavailable, PricingItemUnavailableError } from '@/lib/pricing/item-unavailable';
 import { imagePricingSpecificationsRequired, type CanvasImageModelOption } from '@/lib/pricing/image-option-contract';
 import { normalizePricingImageSpecifications } from '@/lib/pricing/pricing-authoring-contract';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
-import type { Prisma } from '@prisma/client';
+import type { PricingMenuContext } from '@/lib/pricing/policy';
 import { prisma } from '@/lib/prisma';
 
 export type CanvasQuoteInput = {
@@ -58,26 +58,27 @@ export async function getCanvasImageQuote(user: SessionUser, input: CanvasQuoteI
   assertInternalOnly(user, '外部账号无权使用无限画布。');
   await assertCanGenerateInProject(user, input.project_id);
   if (!IMAGE_STUDIO_MODELS.includes(input.model as ImageStudioModel)) throw new AuthError('所选图片型号不在允许列表中', 400);
-  return prisma.$transaction(tx => buildCanvasImageQuote(input, tx), { maxWait: 10000, timeout: 30000 });
+  return buildCanvasImageQuote(input, await capturePricingImageMenu());
 }
 
-// One transaction pins every candidate to the same settings and pricing view.
-async function buildCanvasImageQuote(input: CanvasQuoteInput, tx: Prisma.TransactionClient) {
+// One fresh read snapshot pins every candidate without taking SQLite's writer lock.
+async function buildCanvasImageQuote(input: CanvasQuoteInput, captured: PricingMenuContext) {
+  const client = prisma;
   const specifications = normalizePricingImageSpecifications(input);
-  const channels = await getImageGenerationChannels(tx, true);
-  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId, tx, input.quality) || 'original';
-  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationRequestChannel(input.model, input.quality, input.channelId, tx) : undefined;
-  const studio = await getImageStudioSettings(tx);
-  const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId, tx, specifications);
+  const channels = captured.channels;
+  const effectiveChannelId = await resolveImageGenerationRequestChannel(input.model, input.channelId, client, input.quality, captured.routes) || 'original';
+  const imageChannel = effectiveChannelId !== 'original' ? await captureImageGenerationRequestChannel(input.model, input.quality, input.channelId, client, captured) : undefined;
+  const studio = await getImageStudioSettings(client, captured.inputs.image.studio);
+  const selected = await resolvePricingImageCandidate(channels, input.model as ImageStudioModel, input.channelId, client, specifications, captured);
   if (selected.unavailable) throw selected.unavailable;
   // The selected model alone retains its bound snapshot. Other options never capture or borrow it.
-  const selectedSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, tx, true, input.model) : selected.settings!;
+  const selectedSettings = imageChannel ? await resolveImageGenerationChannelSnapshot(imageChannel, client, true, input.model, captured) : selected.settings!;
   const provider = selectedSettings.provider;
-  const scopes = await readPricingImageScopes(tx);
-  let menu: ReturnType<typeof getPricingImageChannelOptions> | undefined;
+  const scopes = await readPricingImageScopes(client, captured.inputs.policy);
+  let menu: ReturnType<typeof projectPricingImageChannelOptions> | undefined;
   const quoteModel = async (model: ImageStudioModel, selectedModel = false): Promise<CanvasImageModelOption> => {
-    const candidate = selectedModel ? { settings: selectedSettings, identity: await pricingImageIdentity(selectedSettings, model, tx, specifications), unavailable: null }
-      : await resolvePricingImageCandidate(channels, model, input.channelId, tx, specifications);
+    const candidate = selectedModel ? { settings: selectedSettings, identity: await pricingImageIdentity(selectedSettings, model, client, specifications, captured), unavailable: null }
+      : await resolvePricingImageCandidate(channels, model, input.channelId, client, specifications, captured);
     const actual = candidate.identity.billingMode === 'actual';
     const base: CanvasImageModelOption = { model, label: IMAGE_STUDIO_MODEL_LABELS[model], status: 'estimate', reason: null, reasonText: null,
       unitCredits: null, estimatedCredits: null, count: input.count, chargeEnabled: false, billingMode: actual ? 'actual' : 'fixed',
@@ -86,13 +87,13 @@ async function buildCanvasImageQuote(input: CanvasQuoteInput, tx: Prisma.Transac
     try {
       if (candidate.unavailable) throw candidate.unavailable;
       if (imagePricingSpecificationsRequired(candidate.identity, scopes)) {
-        const options = await (menu ||= getPricingImageChannelOptions(tx));
+        const options = await (menu ||= projectPricingImageChannelOptions(client, captured));
         const capability = options.items.find(channel => channel.id === candidate.identity.channelId)?.models[model];
         if (!capability?.ready) throw new PricingItemUnavailableError(candidate.identity, 'price_unconfigured',
           capability?.disabledReason || '该型号尚无可用的规格价格');
         return { ...base, pricingBySpecification: true, pricingQuoteRequired: true };
       }
-      const priced = await withImagePricing(candidate.settings!, model, tx, undefined, specifications);
+      const priced = await withImagePricing(candidate.settings!, model, client, undefined, specifications, captured);
       const api = priced.settings;
       const capability = assertPricingImageAvailability(api, candidate.identity, specifications);
       // Full-quote submissions enqueue independent single-image tasks, not one upstream POST with n=count.

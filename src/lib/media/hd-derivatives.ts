@@ -894,7 +894,7 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
       }
       const filename = key + '.' + format;
       Object.assign(job, { width, height, bytes: result.bytes, format, mime: 'image/' + format });
-      if (format === 'avif' && result.bytes! >= input.size) {
+      if ((format === 'avif' || job.encoderStrategy === 'hd-webp-q93-e4-v1') && result.bytes! >= input.size) {
         Object.assign(job, { format: 'original', mime: 'image/' + (result.metadata.originalFormat === 'jpg' ? 'jpeg' : result.metadata.originalFormat), bytes: input.size, reason: 'original_smaller', file: undefined });
       } else Object.assign(job, { file: filename, reason: undefined });
       job.stage = 'publishing'; job.lastProgressAt = timestamp();
