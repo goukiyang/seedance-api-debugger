@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { hdAvailabilityLabel, hdDescriptionUsesOriginal, hdDisplayLabel, hdDisplayPolicy } from '../src/lib/media/hd-display-policy';
 import { acquireHdImageSource, hdImageHint, invalidateHdImageSource, prefetchHdImageSource, registerImageReadFamilyInvalidator, setHdImageSessionOwner, type HdDescription, type HdSourceState } from '../src/lib/media/hd-source-session';
 import { runHdDisplayEngineering } from './hd-display-engineering';
+import { runImagePreviewHistoryEngineering } from './image-preview-history-engineering';
 
 // In-memory engineering matrix only. No browser, server, files, or production requests.
 async function main() {
@@ -125,7 +126,7 @@ try {
   assert.equal(replies.length, 0);
   const checks = ['display_selection', 'transient_status_recovery', 'ready_readonly_recheck', 'visibility', 'source_version_change',
     'revocation_clears_family', 'account_boundary', 'readonly_prefetch', 'unopened_policy_stays_preview' , 'known_incompatibility_only_original',
-    ...await runHdDisplayEngineering()];
+    ...await runImagePreviewHistoryEngineering(), ...await runHdDisplayEngineering()];
   console.log(JSON.stringify({ completed: true, passed: checks.length, groups: checks.length, total: checks.length, checks, browser: false, network: 'mocked-only' }));
 } finally {
   release?.(); setHdImageSessionOwner('');

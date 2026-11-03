@@ -82,10 +82,9 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
       if (event.detail > 1) { cancelPreview(); return; }
       cancelPreview();
       if (previewSource) {
-        preparation.current = prepareImagePreview({ ...previewSource, intent: 'prepare' });
-        // Read the chosen representation while deciding single/double click.
-        // The viewer adopts this lease; double click still cancels it below.
-        preparation.current.confirmOpen();
+        // The saved choice is already known. Start one foreground session
+        // during the double-click delay, without aborting a readonly probe.
+        preparation.current = prepareImagePreview(previewSource);
       }
       try {
         onSelect();
