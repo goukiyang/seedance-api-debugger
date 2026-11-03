@@ -41,6 +41,8 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   const descriptorWait: { resolve?: (response: Response) => void } = {};
   const savedViews = new Map<string, string>();
   let heldDescriptor = '';
+  const abortingDescriptors = new Set<string>();
+  const heldJsonBodies = new Set<string>();
   const globals = {
     URL: MemoryURL, URLSearchParams, Blob, Response, Request, Headers, AbortController, AbortSignal, DOMException,
     Image: DecodedImage, Date: Clock, queueMicrotask, console, crypto: webcrypto,
@@ -60,7 +62,16 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
       assert.ok(method === 'GET' || method === 'HEAD', 'no business writes are permitted');
       requests.push({ id, variant, method, readonly });
       if (variant === 'hd-description') {
-        if (heldDescriptor === id) return new Promise<Response>(resolve => { descriptorWait.resolve = resolve; });
+        if (heldDescriptor === id) return new Promise<Response>((resolve, reject) => {
+          descriptorWait.resolve = resolve;
+          if (abortingDescriptors.has(id)) init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        });
+        if (heldJsonBodies.has(id)) {
+          let stream!: ReadableStreamDefaultController<Uint8Array>;
+          const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller; controller.enqueue(new TextEncoder().encode('{')); } });
+          init?.signal?.addEventListener('abort', () => stream.error(new DOMException('Aborted', 'AbortError')), { once: true });
+          return new Response(body, { headers: { 'Content-Type': 'application/json' } });
+        }
         const description = descriptions.get(id) || ready;
         if (combinedBodies.has(id) && typeof description !== 'number' && description.status === 'ready' && !description.original && description.format !== 'original'
           && new Headers(init?.headers).get('X-Image-Accept') === 'hd-open-v1') {
@@ -217,9 +228,27 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     reset(); combinedBodies.add('combined-cancel'); heldBodies.add('combined-cancel');
     const cancelling = mount('combined-cancel'); await flush();
     assert.equal(cancelling.getSnapshot().result.decoded, undefined, 'complete Content-Length alone is not body completion');
+    assert.equal(Array.from(timers.values()).some(timer => timer.at - now === 15000), false,
+      'the metadata timer must not abort an already accepted image body');
     for (const release of releases.splice(0)) release(); await flush();
     assert.equal(cancelledBodies.has('combined-cancel'), true, 'closing cancels a body whose descriptor fetch already returned');
     checks.push('closing_negotiated_body_cancels_existing_reader');
+
+    reset(); heldDescriptor = 'combined-header-timeout'; abortingDescriptors.add(heldDescriptor);
+    const metadataStart = now, headerTimeout = mount(heldDescriptor); await flush();
+    await advance(); heldDescriptor = '';
+    assert.equal(now - metadataStart, 15000, 'negotiation must retain the existing 15s metadata deadline');
+    assert.equal(headerTimeout.getSnapshot().displayKind, 'original');
+    assert.equal(requests.filter(request => request.variant === 'original').length, 1);
+    checks.push('combined_response_keeps_metadata_timeout_separate_from_body');
+
+    reset(); heldJsonBodies.add('combined-json-timeout');
+    const jsonStart = now, jsonTimeout = mount('combined-json-timeout'); await flush();
+    await advance();
+    assert.equal(now - jsonStart, 15000, 'an older server with hanging JSON body still has the original descriptor deadline');
+    assert.equal(jsonTimeout.getSnapshot().displayKind, 'original');
+    assert.equal(requests.filter(request => request.variant === 'original').length, 1);
+    checks.push('combined_response_keeps_timeout_until_json_body_is_parsed');
 
     reset(); combinedBodies.add('combined-original');
     const rawChoice = mount('combined-original', { original: true }); await flush();
