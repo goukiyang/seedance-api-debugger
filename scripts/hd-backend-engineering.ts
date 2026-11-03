@@ -560,7 +560,10 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
     try {
       const file = path.join(process.cwd(), 'public/uploads', 'a-recipe.png');
       const pixels = Buffer.alloc(256 * 192 * 3);
-      for (let index = 0; index < pixels.length; index++) pixels[index] = (index * 29 + Math.floor(index / 31) * 71) % 256;
+      let seed = 123456789;
+      for (let index = 0; index < pixels.length; index++) {
+        seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; pixels[index] = seed & 255;
+      }
       await sharp(pixels, { raw: { width: 256, height: 192, channels: 3 } }).png().toFile(file);
       const source = '/uploads/a-recipe.png', original = await fs.readFile(file);
       ownerBindings = [{ id: 'a-fixture-asset', owner_id: 'fixture-owner', original_url: source }];
@@ -576,6 +579,7 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
       await processJob(job.key);
       const ready = (await core.readHdJob(job.key))!;
       assert.equal(ready.status, 'ready');
+      assert.equal(ready.format, 'avif', 'the combined-body fixture must actually publish compressed bytes');
       assert.equal(ready.width, 256); assert.equal(ready.height, 192);
       assert.deepEqual(await fs.readFile(file), original);
       const { authorizedImageResponse } = await import('../src/lib/media/authorized-image-response');
@@ -586,6 +590,34 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
       assert.equal(response.status, 200); assert.equal(description.status, 'ready');
       assert.equal(description.encodingStrategy, undefined, 'Old open tabs must accept the optional recipe metadata');
       assert.equal(description.representationVersion, await core.hdRepresentationVersion(source, ready));
+      const combined = await authorizedImageResponse(new Request('https://fixture.invalid/api/image', {
+        headers: { 'X-Image-Read-Intent': 'status', 'X-Image-Accept': 'hd-open-v1' },
+      }), source, 'hd-description', 'image/png');
+      assert.equal(combined.headers.get('Content-Type'), ready.mime);
+      const combinedDescription = JSON.parse(combined.headers.get('X-Image-HD-Description') || 'null');
+      assert.equal(combinedDescription.sourceVersion, ready.version);
+      assert.equal(combinedDescription.representationVersion, description.representationVersion);
+      assert.equal(combined.headers.get('X-Image-Representation-Version'), description.representationVersion);
+      assert.deepEqual(Buffer.from(await combined.arrayBuffer()), await fs.readFile(path.join(core.hdDirectory(), ready.file!)),
+        'negotiated readonly Work-style reads deliver the exact published bytes');
+      assert.match(combined.headers.get('Cache-Control')!, /private.*no-store/);
+      for (const request of [new Request('https://fixture.invalid/api/image', { method: 'HEAD', headers: { 'X-Image-Accept': 'hd-open-v1' } }),
+        new Request('https://fixture.invalid/api/image', { headers: { 'X-Image-Accept': 'hd-open-v1', 'X-Image-Read-Intent': 'prefetch' } })]) {
+        const readonly = await authorizedImageResponse(request, source, 'hd-description', 'image/png');
+        assert.equal(readonly.headers.get('X-Image-HD-Description'), null);
+        assert.match(readonly.headers.get('Content-Type')!, /application\/json/);
+        await readonly.body?.cancel();
+      }
+      const smallSource = '/uploads/combined-original.png';
+      await sharp({ create: { width: 8, height: 8, channels: 3, background: '#999' } }).png().toFile(path.join(process.cwd(), 'public', smallSource));
+      ownerBindings.push({ id: 'combined-original-asset', owner_id: 'fixture-owner', original_url: smallSource });
+      const small = (await core.requestHd(smallSource, 0, false))!; await processJob(small.key);
+      assert.equal((await core.readHdJob(small.key))?.format, 'original');
+      const originalDescription = await authorizedImageResponse(new Request('https://fixture.invalid/api/image', {
+        headers: { 'X-Image-Accept': 'hd-open-v1' },
+      }), smallSource, 'hd-description', 'image/png');
+      assert.equal(originalDescription.headers.get('X-Image-HD-Description'), null);
+      assert.equal((await originalDescription.json()).original, true, 'raw fallback stays an explicit JSON choice, not a second hidden original body');
       process.env.HD_ENCODER_STRATEGY = 'hd-legacy-e6-v1';
       const reused = (await core.requestHd(source, 0, false))!;
       assert.equal(reused.key, ready.key); assert.equal(reused.attempts, ready.attempts);

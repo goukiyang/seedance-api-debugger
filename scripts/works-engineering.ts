@@ -153,8 +153,10 @@ db.close()
     assert.equal((await readWorkFilters(colleague, new URLSearchParams({ kind: 'projects' }))).items.length, 0);
     await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=download`), colleague, current.work.id), error => (error as { status?: number }).status === 403);
     for (const variant of ['original', 'hd', 'hd-description', 'hd-download']) {
-      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=${variant}`), colleague, current.work.id), error => (error as { status?: number }).status === 403);
-      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=old-media-version&variant=${variant}`), owner, current.work.id), error => (error as { status?: number }).status === 409);
+      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=${variant}`,
+        { headers: { 'X-Image-Accept': 'hd-open-v1' } }), colleague, current.work.id), error => (error as { status?: number }).status === 403);
+      await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=old-media-version&variant=${variant}`,
+        { headers: { 'X-Image-Accept': 'hd-open-v1' } }), owner, current.work.id), error => (error as { status?: number }).status === 409);
     }
     const hdFixture = mkdtempSync(path.join(directory, 'hd-read-'));
     mkdirSync(path.join(hdFixture, 'public/uploads'), { recursive: true }); mkdirSync(path.join(hdFixture, 'hd'), { mode: 0o700 });
@@ -164,7 +166,7 @@ db.close()
     try {
       process.chdir(hdFixture); process.env.HD_DERIVATIVES_ROOT = path.join(hdFixture, 'hd');
       const description = await workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=hd-description`,
-        { headers: { 'X-Image-View-Token': randomUUID() } }), owner, current.work.id);
+        { headers: { 'X-Image-View-Token': randomUUID(), 'X-Image-Accept': 'hd-open-v1' } }), owner, current.work.id);
       assert.equal(description.status, 200); assert.equal(description.headers.get('X-Work-Media-Version'), current.media.id);
       assert.equal((await description.json()).reason, 'not_registered');
       const unavailableHd = await workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=hd`), owner, current.work.id);

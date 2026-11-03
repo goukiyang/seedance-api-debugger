@@ -25,6 +25,7 @@ type Entry = {
   checking?: Promise<void>; transfer?: Promise<void>; transferController?: AbortController; decoding?: Promise<void>;
   transferExpectedVersion?: string;
   representationVersion?: string; transferId?: string;
+  stagedResponse?: Response;
 };
 type Transfer = { entry: Entry; controller: AbortController; run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void };
 const entries = new Map<string, Entry>();
@@ -32,6 +33,7 @@ const waiting: Transfer[] = [], running = new Set<Transfer>();
 const MAX_ENTRIES = 32, MAX_BYTES = 64 * 1024 * 1024, IDLE_TTL = 10 * 60_000;
 const REVALIDATE_AFTER = 60_000, MAX_DECODED_IMAGES = 3, MAX_DECODED_BYTES = 96 * 1024 * 1024;
 let owner = '', epoch = 0, foregroundPreparations = 0, detachedBorrowBytes = 0;
+let responseReservations = 0;
 const reading = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 'reading', loadedBytes: 0 } });
 const decoding = (entry: Entry): ImageReadResult => ({ imageSrc: null, progress: { phase: 'decoding', loadedBytes: entry.bytes, bodyComplete: entry.complete, transferId: entry.transferId }, bytes: entry.bytes });
 const mimeOf = (response: Response) => response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() || '';
@@ -124,6 +126,7 @@ function pruneDecoded() {
 function dropBody(entry: Entry) {
   entry.revision++; entry.transferController?.abort();
   entry.transfer = undefined; entry.transferController = undefined; entry.transferExpectedVersion = undefined;
+  void entry.stagedResponse?.body?.cancel().catch(() => {}); entry.stagedResponse = undefined;
   // A revoked/version-changed body cannot be reused, but an outstanding browser
   // handoff still owns its bytes until release. Keep those bytes in the budget.
   if (entry.borrow?.references) {
@@ -173,7 +176,7 @@ function fail(entry: Entry, message: string, denied = false, refreshSource = fal
   blocked(entry, message, denied, refreshSource);
 }
 function drain() {
-  while (running.size < 2) {
+  while (running.size + responseReservations < 2) {
     const backgroundRunning = Array.from(running).filter(task => !task.entry.consumers.size).length;
     let index = waiting.findIndex(task => task.entry.consumers.size > 0);
     if (index < 0 && backgroundRunning < 1 && backgroundAllowed()) index = 0;
@@ -190,7 +193,10 @@ function schedule(entry: Entry, controller: AbortController, run: () => Promise<
       controller.abort(); reject(new DOMException('Aborted', 'AbortError')); return;
     }
     const task: Transfer = { entry, controller, run, resolve, reject };
-    waiting.push(task);
+    // A negotiated response has already occupied a reserved network slot.
+    // Consume it before starting another request when that slot is released.
+    if (entry.stagedResponse) waiting.unshift(task);
+    else waiting.push(task);
     controller.signal.addEventListener('abort', () => {
       const index = waiting.indexOf(task);
       if (index >= 0) { waiting.splice(index, 1); reject(new DOMException('Aborted', 'AbortError')); drain(); }
@@ -239,7 +245,8 @@ async function transfer(entry: Entry, expectedVersion = '') {
   const active = () => expected === epoch && revision === entry.revision && !controller.signal.aborted && !entry.controller.signal.aborted;
   const pending = schedule(entry, controller, async () => {
     try {
-      const response = await fetch(entry.source, { cache: 'no-store', credentials: 'same-origin', headers: entry.consumers.size ? {} : { 'X-Image-Read-Intent': 'prefetch' }, signal: AbortSignal.any([entry.controller.signal, controller.signal, AbortSignal.timeout(60000)]) });
+      const response = entry.stagedResponse || await fetch(entry.source, { cache: 'no-store', credentials: 'same-origin', headers: entry.consumers.size ? {} : { 'X-Image-Read-Intent': 'prefetch' }, signal: AbortSignal.any([entry.controller.signal, controller.signal, AbortSignal.timeout(60000)]) });
+      entry.stagedResponse = undefined;
       if (!active()) return;
       if (!response.ok) { fail(entry, '图片未能读取，请重试', [401, 403, 404].includes(response.status), response.status === 409); return; }
       if (!comparisonResponseMatches(entry.source, response)) {
@@ -255,6 +262,9 @@ async function transfer(entry: Entry, expectedVersion = '') {
       if (total !== undefined && (!Number.isSafeInteger(total) || total <= 0)) total = undefined;
       if (total && total > MAX_BYTES) throw new Error('图片过大，请使用原图下载');
       const reader = response.body.getReader(), chunks: ArrayBuffer[] = [];
+      const readSignal = AbortSignal.any([entry.controller.signal, controller.signal, AbortSignal.timeout(60000)]);
+      const cancelReader = () => { void reader.cancel().catch(() => {}); };
+      readSignal.addEventListener('abort', cancelReader, { once: true });
       let bytes = 0, notified = 0, lengthMatches = true;
       try {
         while (true) {
@@ -282,7 +292,7 @@ async function transfer(entry: Entry, expectedVersion = '') {
         entry.complete = response.status === 200 && !response.headers.has('content-range') && lengthMatches;
         entry.reusable = entry.complete && entry.reusableAllowed && Boolean(actualVersion); entry.checkedAt = Date.now(); entry.retryAfter = 0; entry.stale = false;
         touch(entry); await decode(entry);
-      } finally { void reader.cancel().catch(() => {}); }
+      } finally { readSignal.removeEventListener('abort', cancelReader); void reader.cancel().catch(() => {}); }
     } catch (error) {
       if (!active()) return;
       fail(entry, error instanceof Error && error.message !== 'Failed to fetch' ? error.message : '图片读取失败，请重试');
@@ -370,12 +380,31 @@ function releaseUnused(entry: Entry) {
 }
 export function setImageReadSessionOwner(next: string) {
   if (owner === next) return;
-  owner = next; epoch++; foregroundPreparations = 0; setHdImageSessionOwner(next);
+  owner = next; epoch++; foregroundPreparations = 0; responseReservations = 0; setHdImageSessionOwner(next);
   for (const entry of Array.from(entries.values())) { blockEntry(entry, '账号已变化，请重新打开图片', true); discard(entry); }
 }
 export function captureImageReadSessionScope(account: string): () => boolean {
   const expected = epoch;
   return () => Boolean(account && owner === account && epoch === expected);
+}
+/** A foreground descriptor may carry its body inside the existing two-read budget. */
+export function reserveImageReadResponseSlot(account: string): (() => void) | undefined {
+  if (!account || account !== owner || document.hidden || running.size + responseReservations >= 2) return;
+  const expected = epoch; responseReservations++;
+  let released = false;
+  return () => {
+    if (released) return; released = true;
+    if (expected !== epoch || account !== owner) return;
+    responseReservations--; drain();
+  };
+}
+/** The descriptor reader has validated the same response's HD metadata. */
+export function stageImageReadResponse(account: string, source: string, response: Response) {
+  const entry = account === owner ? getEntry(account, source) : null;
+  if (!entry || entry.blob || entry.transfer || entry.stagedResponse) {
+    void response.body?.cancel().catch(() => {}); return;
+  }
+  entry.stagedResponse = response;
 }
 export function beginImageForegroundPreparation(account: string): () => void {
   setImageReadSessionOwner(account);
