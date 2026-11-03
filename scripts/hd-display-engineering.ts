@@ -200,6 +200,8 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
         currentTarget: { querySelector: () => ({ complete: true, naturalWidth: 640 }) }, stopPropagation() {}, preventDefault() {} });
       card.props.onClick(click(1)); await flush();
       assert.equal(opened, 0, 'the modal still respects double-click timing');
+      assert.equal(requests.filter(request => request.variant === 'hd-description').length, 1,
+        'a known first-click choice needs one descriptor, without starting and immediately canceling another');
       assert.equal(requests.filter(request => request.variant === (original ? 'original' : 'hd')).length, 1,
         'the actual selected full representation starts before the 500ms decision');
       assert.equal(requests.filter(request => request.variant === (original ? 'hd' : 'original')).length, 0,

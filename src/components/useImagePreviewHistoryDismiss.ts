@@ -1,11 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 import { isTopmostDialogLayer } from './useDialogDismiss';
 
 const IMAGE_PREVIEW_HISTORY_STATE_KEY = '__sd2ImagePreviewHistoryEntry';
-let imagePreviewHistorySequence = 0;
 
 type ImagePreviewHistorySession = {
   token: string;
@@ -49,7 +48,6 @@ function writeImagePreviewHistoryMarker(marker: ImagePreviewHistoryMarker, repla
 }
 
 export function useImagePreviewHistoryDismiss<T extends HTMLElement>(open: boolean, dialogRef: RefObject<T>, onClose: () => void) {
-  const instanceId = useId();
   const onCloseRef = useRef(onClose);
   const sessionRef = useRef<ImagePreviewHistorySession | null>(null);
   const effectGenerationRef = useRef(0);
@@ -83,7 +81,9 @@ export function useImagePreviewHistoryDismiss<T extends HTMLElement>(open: boole
     closeCalledRef.current = false;
     let session = sessionRef.current;
     if (!session || !session.ownsEntry || !hasActiveImagePreviewHistoryEntry(session.token)) {
-      const token = `${instanceId}:${++imagePreviewHistorySequence}`;
+      // React IDs and module counters can repeat after a full reload, while
+      // history.state still contains the previous document's active marker.
+      const token = crypto.randomUUID();
       const url = window.location.href;
       const existingMarker = getImagePreviewHistoryMarker();
       const reuseEntry = existingMarker?.active === false && existingMarker.url === url;
@@ -115,7 +115,7 @@ export function useImagePreviewHistoryDismiss<T extends HTMLElement>(open: boole
         }
       });
     };
-  }, [closeOnce, dialogRef, instanceId, open]);
+  }, [closeOnce, dialogRef, open]);
 
   return useCallback(() => {
     if (closeCalledRef.current || closeRequestedRef.current) return;
