@@ -20,7 +20,7 @@ export type ImagePreviewPreparation = {
   subscribe: (listener: (state: PreparedImagePreviewState) => void) => () => void;
   isCurrent: () => boolean;
   markDisplayed: () => void;
-  confirmOpen: () => void;
+  confirmOpen: (original?: boolean) => void;
   /** Relinquish only the initiating click's lease, after the viewer subscribes. */
   release: () => void;
 };
@@ -29,7 +29,8 @@ const waiting = (): ImageReadResult => ({ imageSrc: null, progress: { phase: 're
 
 /** A consumer lease over the existing sessions, never a second cache or queue. */
 export function prepareImagePreview(options: ImagePreviewPreparationOptions): ImagePreviewPreparation {
-  const { account, source } = options, sourceVersion = options.sourceVersion || '', previewOnly = Boolean(options.previewOnly), original = Boolean(options.original);
+  const { account, source } = options, sourceVersion = options.sourceVersion || '', previewOnly = Boolean(options.previewOnly);
+  let original = Boolean(options.original);
   const descriptionSource = imageDisplaySource(source, 'hd-description');
   const supported = !previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source);
   // Unknown readiness is not absence: confirm it before starting original bytes.
@@ -181,7 +182,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
     }
   };
   const handle: ImagePreviewPreparation = {
-    account, source, sourceVersion, previewOnly, original,
+    account, source, sourceVersion, previewOnly, get original() { return original; },
     getSnapshot: () => state,
     isCurrent: () => !disposed && sameScope() && (!options.localFrame || options.localFrame.isCurrent()),
     subscribe: listener => {
@@ -197,8 +198,9 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
       state = { ...state, displayedVariant: state.displayKind === 'pending' ? undefined : state.displayKind };
       dropRetained(); endPriority(); notify();
     },
-    confirmOpen: () => {
+    confirmOpen: preferredOriginal => {
       if (!active() || confirmed) return;
+      original = preferredOriginal ?? original;
       confirmed = true; releaseHd?.(); releaseHd = undefined;
       const hint = !previewOnly && !original ? hdImageHint(account, descriptionSource, sourceVersion) : undefined;
       load(initialKind(hint), hint);

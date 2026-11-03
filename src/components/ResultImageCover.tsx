@@ -40,7 +40,6 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
   const handOffPreview = () => {
     const prepared = preparation.current;
     preparation.current = null;
-    prepared?.confirmOpen();
     try { latest.current.onPreview(prepared || undefined); }
     catch (cause) { prepared?.release(); throw cause; }
   };

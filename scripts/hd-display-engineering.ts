@@ -47,8 +47,9 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     setTimeout: (callback: () => void, delay = 0) => { const key = ++timerSequence; timers.set(key, { at: now + delay, callback }); return key; },
     clearTimeout: (key: number) => timers.delete(key),
     fetch: async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(String(input), origin), id = url.pathname.split('/').at(-1)!;
-      assert.equal(url.origin, origin); assert.match(url.pathname, /^\/api\/image-studio\/assets\/[a-z0-9-]+$/);
+      const url = new URL(String(input), origin), work = /^\/api\/works\/([a-z0-9-]+)\/media$/.exec(url.pathname), id = work?.[1] || url.pathname.split('/').at(-1)!;
+      assert.equal(url.origin, origin); assert.ok(work || /^\/api\/image-studio\/assets\/[a-z0-9-]+$/.test(url.pathname));
+      if (work) assert.equal(url.searchParams.get('version'), 'work-v1', 'Every Work variant must preserve its exact media version');
       const variant = url.searchParams.get('variant') || ['hd-description', 'hd-download', 'hd', 'thumbnail', 'preview', 'download'].find(name => url.searchParams.get(name) === '1') || 'original';
       const method = init?.method || 'GET', readonly = ['prefetch', 'status'].includes(new Headers(init?.headers).get('X-Image-Read-Intent') || '');
       assert.ok(method === 'GET' || method === 'HEAD', 'no business writes are permitted');
@@ -131,6 +132,25 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.ok(descriptorWait.resolve); descriptorWait.resolve(Response.json(ready)); heldDescriptor = ''; await flush();
     assert.equal(confirmReady.getSnapshot().displayKind, 'hd'); noOriginal();
     checks.push('confirm_open_during_descriptor_read_does_not_pin_original');
+
+    reset();
+    const preferredOriginal = mount('prepare-user-original', { intent: 'prepare' }); await flush();
+    noOriginal();
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
+    preferredOriginal.confirmOpen(true); await flush();
+    assert.equal(preferredOriginal.original, true);
+    assert.equal(preferredOriginal.getSnapshot().displayKind, 'original');
+    assert.equal(requests.filter(request => request.variant === 'original').length, 1);
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0,
+      'A saved original preference must not start a separate HD body during handoff');
+    checks.push('first_confirmation_adopts_actual_original_preference');
+
+    reset();
+    const workPreview = preview.prepareImagePreview({ account, source: '/api/works/work-a/media?version=work-v1&variant=detail' });
+    releases.push(workPreview.subscribe(() => {})); workPreview.release(); await flush();
+    assert.equal(workPreview.getSnapshot().displayKind, 'hd');
+    assert.equal(workPreview.getSnapshot().result.decoded, true); noOriginal();
+    checks.push('work_detail_reuses_hd_with_exact_work_version');
 
     for (const status of ['queued', 'running', 'failed', 'skipped'] as const) {
       reset(); heldDescriptor = `fallback-${status}`;
