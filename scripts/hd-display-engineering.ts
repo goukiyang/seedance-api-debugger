@@ -13,6 +13,9 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   const checks: string[] = [], requests: Array<{ id: string; variant: string; method: string; readonly: boolean }> = [];
   const descriptions = new Map<string, HdDescription | number>();
   const bodies = new Map<string, number>();
+  const combinedBodies = new Set<string>();
+  const heldBodies = new Set<string>(), cancelledBodies = new Set<string>();
+  const invalidCombined = new Map<string, 'version' | 'length' | 'mime'>();
   const heads = new Map<string, { status?: number; version?: string; bytes?: number; mime?: string }>();
   const decodes = new Map<string, () => void>(), heldDecodes = new Set<string>();
   const objectUrls = new Map<string, Blob>(), clicked: string[] = [];
@@ -59,6 +62,16 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
       if (variant === 'hd-description') {
         if (heldDescriptor === id) return new Promise<Response>(resolve => { descriptorWait.resolve = resolve; });
         const description = descriptions.get(id) || ready;
+        if (combinedBodies.has(id) && typeof description !== 'number' && description.status === 'ready' && !description.original && description.format !== 'original'
+          && new Headers(init?.headers).get('X-Image-Accept') === 'hd-open-v1') {
+          const combined = { ...description, representationVersion: `hd-representation-v1:${'a'.repeat(64)}` };
+          const body = heldBodies.has(id) ? new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2, 3, 4])); },
+            cancel() { cancelledBodies.add(id); } }) : new Uint8Array([1, 2, 3, 4]);
+          return new Response(body, { headers: { 'Content-Type': invalidCombined.get(id) === 'mime' ? 'image/webp' : combined.mime!,
+            'Content-Length': invalidCombined.get(id) === 'length' ? '5' : '4',
+            'X-Image-Source-Version': invalidCombined.get(id) === 'version' ? 'wrong-version' : combined.sourceVersion!, 'X-Image-Representation-Version': combined.representationVersion,
+            'X-Image-HD-Description': JSON.stringify(combined) } });
+        }
         return typeof description === 'number' ? new Response(null, { status: description }) : Response.json(description);
       }
       const head = heads.get(id) || {};
@@ -165,6 +178,81 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(coldReady.getSnapshot().displayKind, 'hd');
     assert.equal(coldReady.getSnapshot().result.decoded, true); noOriginal();
     checks.push('cold_open_confirms_ready_hd_without_original_request');
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 1, 'an older server JSON response retains the existing body GET');
+
+    reset(); combinedBodies.add('combined-ready');
+    const combinedReady = mount('combined-ready'); await flush();
+    assert.equal(combinedReady.getSnapshot().result.decoded, true);
+    assert.equal(combinedReady.getSnapshot().displayKind, 'hd');
+    assert.equal(requests.filter(request => request.variant === 'hd-description').length, 1);
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0,
+      'a ready negotiated descriptor already owns the full bytes; a second GET must not start');
+    assert.equal(requests.filter(request => request.variant === 'original').length, 0);
+    const combinedSource = combinedReady.getSnapshot().readSource;
+    const borrowedCombined = reads.borrowImageRead(account, combinedSource, 'source-v1', proof);
+    assert.ok(borrowedCombined, 'the combined response must enter the existing exact-version download cache');
+    borrowedCombined.release();
+    const combinedRequestCount = requests.length;
+    const combinedAgain = mount('combined-ready'); await flush();
+    assert.equal(combinedAgain.getSnapshot().result.decoded, true);
+    assert.equal(requests.length, combinedRequestCount, 'the same fresh combined body and descriptor are reusable');
+    checks.push('negotiated_ready_hd_uses_one_response_and_existing_cache');
+
+    reset();
+    const firstSlot = reads.reserveImageReadResponseSlot(account), secondSlot = reads.reserveImageReadResponseSlot(account);
+    assert.ok(firstSlot); assert.ok(secondSlot); assert.equal(reads.reserveImageReadResponseSlot(account), undefined);
+    releases.push(reads.acquireImageRead(account, '/api/image-studio/assets/reserved-read', '', 0, () => {})); await flush();
+    assert.equal(requests.length, 0, 'reserved descriptor bodies count against the same two-transfer budget');
+    firstSlot(); await flush(); assert.equal(requests.length, 1); secondSlot();
+    checks.push('combined_response_reservation_preserves_two_transfer_budget');
+
+    for (const invalid of ['version', 'length', 'mime'] as const) {
+      reset(); const id = `combined-invalid-${invalid}`; combinedBodies.add(id); invalidCombined.set(id, invalid);
+      const handle = mount(id); await flush();
+      assert.equal(handle.getSnapshot().displayKind, 'original', 'invalid HD headers only allow the existing freshly authorized fallback');
+      assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
+      assert.equal(requests.filter(request => request.variant === 'original').length, 1);
+      checks.push(`combined_response_rejects_mismatched_${invalid}`);
+    }
+    reset(); combinedBodies.add('combined-cancel'); heldBodies.add('combined-cancel');
+    const cancelling = mount('combined-cancel'); await flush();
+    assert.equal(cancelling.getSnapshot().result.decoded, undefined, 'complete Content-Length alone is not body completion');
+    for (const release of releases.splice(0)) release(); await flush();
+    assert.equal(cancelledBodies.has('combined-cancel'), true, 'closing cancels a body whose descriptor fetch already returned');
+    checks.push('closing_negotiated_body_cancels_existing_reader');
+
+    reset(); combinedBodies.add('combined-original');
+    const rawChoice = mount('combined-original', { original: true }); await flush();
+    assert.equal(rawChoice.getSnapshot().displayKind, 'original');
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
+    checks.push('combined_response_does_not_fetch_hd_for_original_choice');
+
+    reset(); combinedBodies.add('combined-viewonly');
+    const restricted = mount('combined-viewonly', { previewOnly: true }); await flush();
+    assert.equal(restricted.getSnapshot().displayKind, 'preview');
+    assert.equal(requests.filter(request => request.variant === 'hd-description' || request.variant === 'hd').length, 0);
+    checks.push('combined_response_never_expands_preview_only_access');
+
+    reset(); combinedBodies.add('work-combined');
+    const combinedWork = preview.prepareImagePreview({ account, source: '/api/works/work-combined/media?version=work-v1&variant=detail' });
+    releases.push(combinedWork.subscribe(() => {})); combinedWork.release(); await flush();
+    assert.equal(combinedWork.getSnapshot().result.decoded, true);
+    assert.equal(requests.filter(request => request.variant === 'hd').length, 0);
+    checks.push('combined_work_preserves_media_version_without_second_get');
+
+    reset(); heldDescriptor = 'combined-late-account';
+    const lateCombined = mount('combined-late-account'); await flush();
+    assert.ok(descriptorWait.resolve); const resolveCombined = descriptorWait.resolve;
+    account = `engineering:${++accountSequence}`; reads.setImageReadSessionOwner(account); heldDescriptor = '';
+    let lateBodyCancelled = false;
+    const lateDescription = { ...ready, representationVersion: `hd-representation-v1:${'a'.repeat(64)}` };
+    resolveCombined(new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2, 3, 4])); },
+      cancel() { lateBodyCancelled = true; } }), { headers: { 'Content-Type': ready.mime!, 'Content-Length': '4',
+      'X-Image-Source-Version': ready.sourceVersion!, 'X-Image-Representation-Version': lateDescription.representationVersion,
+      'X-Image-HD-Description': JSON.stringify(lateDescription) } })); await flush();
+    assert.equal(lateCombined.getSnapshot().denied, true); assert.equal(lateBodyCancelled, true);
+    assert.equal(objectUrls.size, 0, 'late bytes cannot enter the new account cache');
+    checks.push('late_combined_account_response_is_cancelled_without_cache');
 
     reset(); heldDescriptor = 'confirm-ready';
     const confirmReady = mount('confirm-ready', { intent: 'prepare' }); await flush();

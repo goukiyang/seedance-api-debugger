@@ -1,6 +1,6 @@
 'use client';
 
-import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, resetImageReadForRetry, setImageReadSessionOwner, type ImageReadResult, type LocalFrameContext } from './image-read-session';
+import { acquireImageRead, beginImageForegroundPreparation, captureImageReadSessionScope, hasCachedImagePreview, invalidateImageReadSource, reserveImageReadResponseSlot, resetImageReadForRetry, setImageReadSessionOwner, stageImageReadResponse, type ImageReadResult, type LocalFrameContext } from './image-read-session';
 import { acquireHdImageSource, hdDescriptionPending, hdImageHint, refreshHdImageSource, type HdDescription, type HdSourceState } from './hd-source-session';
 import { hdDescriptionUsesOriginal, type HdDisplayKind } from './hd-display-policy';
 import { imageDisplaySource } from './image-comparison';
@@ -181,6 +181,13 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
       else load('original', undefined, true, true);
     }
   };
+  const imageResponse = {
+    reserve: () => active() ? reserveImageReadResponseSlot(account) : undefined,
+    receive: (response: Response, description: HdDescription) => {
+      if (!active() || originalRoute || original || !confirmed) { void response.body?.cancel().catch(() => {}); return; }
+      stageImageReadResponse(account, versionedHdSource(source, 'hd', description.sourceVersion, description.representationVersion), response);
+    },
+  };
   const handle: ImagePreviewPreparation = {
     account, source, sourceVersion, previewOnly, get original() { return original; },
     getSnapshot: () => state,
@@ -205,7 +212,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
       const hint = !previewOnly && !original ? hdImageHint(account, descriptionSource, sourceVersion) : undefined;
       load(initialKind(hint), hint);
       if (!previewOnly && descriptionSource !== source && !/^(blob:|data:)/i.test(source))
-        releaseHd = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, { intent: 'open', viewToken });
+        releaseHd = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, { intent: 'open', viewToken, imageResponse: !original ? imageResponse : undefined });
     },
     release: () => { if (!initialLease) return; initialLease = false; if (!listeners.size) dispose(); },
   };
@@ -219,7 +226,7 @@ export function prepareImagePreview(options: ImagePreviewPreparationOptions): Im
   } else {
     const hint = hdImageHint(account, descriptionSource, sourceVersion);
     load(!confirmed ? 'preview' : initialKind(hint), hint);
-    const release = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, confirmed ? { intent: 'open', viewToken } : { intent: 'status' });
+    const release = acquireHdImageSource(account, descriptionSource, sourceVersion, descriptionChanged, confirmed ? { intent: 'open', viewToken, imageResponse: !original ? imageResponse : undefined } : { intent: 'status' });
     releaseHd = release; if (disposed) release();
   }
   return handle;

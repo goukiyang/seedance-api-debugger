@@ -64,7 +64,11 @@ export async function authorizedImageResponse(request: Request, source: string, 
     const job = readOnly ? await lookupHd(source) : await requestHd(source, 1, undefined, undefined,
       context ? { ...context, viewToken } : undefined);
     const rawMime = previewMime(source, mime);
-    if (variant === 'hd-description') {
+    // Only a foreground GET explicitly accepts a compressed ready body. The
+    // caller has already applied the same original permission to both variants.
+    const combinedHd = variant === 'hd-description' && request.method === 'GET' && !isImagePrefetch(request)
+      && request.headers.get('X-Image-Accept') === 'hd-open-v1' && job?.status === 'ready' && job.format !== 'original';
+    if (variant === 'hd-description' && !combinedHd) {
       if (isImagePrefetch(request) && job?.status !== 'ready') return notPrepared();
       if (request.method === 'HEAD') return new Response(null, { headers: { ...privateImageHeaders, 'Content-Type': 'application/json' } });
       let processingAvailability = await hdControl().then(value => value.state).catch(() => 'unknown');
@@ -89,6 +93,7 @@ export async function authorizedImageResponse(request: Request, source: string, 
           format: job.format === 'original' ? rawMime.split('/')[1] : job.format,
           mime: job.format === 'original' ? rawMime : job.mime, original: job.format === 'original' } : {}) }, { headers: privateImageHeaders });
     }
+    if (combinedHd) variant = 'hd';
     if (!job || job.status !== 'ready') return Response.json({ error: '高清图尚未准备好，可先查看或下载原图' }, { status: 409, headers: privateImageHeaders });
     const requestedVersion = new URL(request.url).searchParams.get('hd-version');
     if (requestedVersion && requestedVersion !== job.version) return Response.json({ error: '图片已更新，请重新打开' }, { status: 409, headers: privateImageHeaders });
@@ -119,6 +124,9 @@ export async function authorizedImageResponse(request: Request, source: string, 
       ? `attachment; filename*=UTF-8''${encodeURIComponent(`${(fileName || 'image').replace(/\.[^.]+$/, '').replace(/[\r\n]/g, '')}-hd.${extension}`).replace(/'/g, '%27')}` : 'inline');
     response.headers.set('X-Image-Source-Version', job.version);
     if (representationVersion) response.headers.set('X-Image-Representation-Version', representationVersion);
+    if (combinedHd) response.headers.set('X-Image-HD-Description', JSON.stringify({ policy: 'hd-f-v1', status: 'ready',
+      sourceVersion: job.version, representationVersion, width: job.width, height: job.height, bytes: job.bytes,
+      format: job.format, mime: job.mime, original: false }));
   } else if (variant === 'original' || variant === 'download') {
     if (isImagePrefetch(request)) return notPrepared();
     response = await mediaPreviewResponse(request, source, mime, variant === 'original' ? 'protected-inline-original-v1' : undefined);

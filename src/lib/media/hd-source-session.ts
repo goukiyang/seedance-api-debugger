@@ -8,7 +8,8 @@ export function hdDescriptionPending(description?: HdDescription) {
   return description?.errorKind !== 'scheduling_unconfirmed' && ['queued', 'running'].includes(description?.status || '');
 }
 type Listener = (state: HdSourceState) => void;
-type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; viewTokens: Map<Listener, string>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
+type ImageResponseConsumer = { reserve: () => (() => void) | undefined; receive: (response: Response, description: HdDescription) => void };
+type Descriptor = { key: string; account: string; source: string; state: HdSourceState; at: number; retryAfter: number; unchangedPolls: number; generation: number; listeners: Set<Listener>; viewTokens: Map<Listener, string>; imageResponses: Map<Listener, ImageResponseConsumer>; prefetches: number; controller?: AbortController; pending?: Promise<HdSourceState>; refreshing?: Promise<HdSourceState>; timer?: ReturnType<typeof setTimeout> };
 type ImageReadFamilyInvalidator = (source: string, account: string) => void;
 const descriptors = new Map<string, Descriptor>();
 const READY_TTL = 60_000, IDLE_TTL = 10 * 60_000;
@@ -54,7 +55,7 @@ function getEntry(account: string, source: string, version: string) {
   if (!entry) {
     for (const [id, value] of Array.from(descriptors)) if (!value.listeners.size && !value.prefetches && (descriptors.size >= 32 || Date.now() - value.at >= IDLE_TTL)) { stop(value); descriptors.delete(id); }
     if (descriptors.size >= 32) return null;
-    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, generation: 0, listeners: new Set(), viewTokens: new Map(), prefetches: 0 };
+    entry = { key, account, source: canonical(source), state: {}, at: 0, retryAfter: 0, unchangedPolls: 0, generation: 0, listeners: new Set(), viewTokens: new Map(), imageResponses: new Map(), prefetches: 0 };
     descriptors.set(key, entry);
   }
   return entry;
@@ -89,34 +90,58 @@ function poll(entry: Descriptor) {
 async function read(entry: Descriptor, readonly: boolean): Promise<HdSourceState> {
   if (entry.pending) return entry.pending;
   const previous = entry.state, controller = new AbortController(), expected = epoch, generation = entry.generation; entry.controller = controller;
+  let imageConsumer: ImageResponseConsumer | undefined, releaseImageSlot: (() => void) | undefined;
+  if (!readonly && !document.hidden) for (const consumer of Array.from(entry.imageResponses.values())) {
+    releaseImageSlot = consumer.reserve();
+    if (releaseImageSlot) { imageConsumer = consumer; break; }
+  }
   const pending = (async () => {
-    let state: HdSourceState, status = 0;
+    let imageResponse: Response | undefined, imageAccepted = false;
     try {
-      const token = !readonly && !document.hidden ? entry.viewTokens.values().next().value as string | undefined : undefined;
-      const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers: token
-        ? { 'X-Image-View-Token': token } : { 'X-Image-Read-Intent': 'status' }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-      status = response.status;
-      state = response.ok ? { description: parseDescription(await response.json()), httpStatus: status } : { denied: [401, 403, 404].includes(status), error: true, httpStatus: status };
-    } catch { state = { error: true, ...(status ? { httpStatus: status } : {}) }; }
-    if (expected !== epoch || generation !== entry.generation || controller.signal.aborted || descriptors.get(entry.key) !== entry) return { error: true };
-    if (state.denied) {
-      invalidateFamily(entry.source, entry.account, true, state.httpStatus);
-      return state;
+      let state: HdSourceState, status = 0;
+      try {
+        const token = !readonly && !document.hidden ? entry.viewTokens.values().next().value as string | undefined : undefined;
+        const headers: Record<string, string> = token ? { 'X-Image-View-Token': token } : { 'X-Image-Read-Intent': 'status' };
+        if (imageConsumer) headers['X-Image-Accept'] = 'hd-open-v1';
+        const response = await fetch(entry.source, { credentials: 'same-origin', cache: 'no-store', headers,
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(imageConsumer ? 60000 : 15000)]) });
+        status = response.status;
+        if (response.ok && imageConsumer && response.headers.get('Content-Type')?.startsWith('image/')) {
+          imageResponse = response;
+          const description = parseDescription(JSON.parse(response.headers.get('X-Image-HD-Description') || 'null'));
+          if (status !== 200 || response.headers.has('Content-Range') || description.status !== 'ready' || description.original || description.format === 'original'
+            || response.headers.get('Content-Type') !== description.mime || response.headers.get('Content-Length') !== String(description.bytes)
+            || response.headers.get('X-Image-Source-Version') !== description.sourceVersion || !description.representationVersion
+            || response.headers.get('X-Image-Representation-Version') !== description.representationVersion) throw new Error('invalid_hd_image_response');
+          state = { description, httpStatus: status };
+        } else state = response.ok ? { description: parseDescription(await response.json()), httpStatus: status } : { denied: [401, 403, 404].includes(status), error: true, httpStatus: status };
+      } catch { state = { error: true, ...(status ? { httpStatus: status } : {}) }; }
+      if (expected !== epoch || generation !== entry.generation || controller.signal.aborted || descriptors.get(entry.key) !== entry) return { error: true };
+      if (imageResponse && !state.error && state.description) {
+        imageConsumer!.receive(imageResponse, state.description); imageAccepted = true;
+      }
+      if (state.denied) {
+        invalidateFamily(entry.source, entry.account, true, state.httpStatus);
+        return state;
+      }
+      if (state.error) {
+        const notPrepared = status === 409;
+        entry.state = !notPrepared && previous.description
+          ? { ...previous, error: true, httpStatus: state.httpStatus } : { error: true, httpStatus: state.httpStatus };
+        if (notPrepared) { entry.at = Date.now(); entry.retryAfter = Date.now() + READY_TTL; }
+        else entry.retryAfter = Date.now() + READY_TTL;
+      } else {
+        entry.unchangedPolls = previous.description?.status === state.description?.status
+          && previous.description?.sourceVersion === state.description?.sourceVersion
+          && previous.description?.reason === state.description?.reason ? Math.min(3, entry.unchangedPolls + 1) : 0;
+        entry.state = state; entry.at = Date.now(); entry.retryAfter = 0;
+      }
+      descriptors.delete(entry.key); descriptors.set(entry.key, entry);
+      notify(entry); poll(entry); return entry.state;
+    } finally {
+      if (imageResponse && !imageAccepted) void imageResponse.body?.cancel().catch(() => {});
+      releaseImageSlot?.();
     }
-    if (state.error) {
-      const notPrepared = status === 409;
-      entry.state = !notPrepared && previous.description
-        ? { ...previous, error: true, httpStatus: state.httpStatus } : { error: true, httpStatus: state.httpStatus };
-      if (notPrepared) { entry.at = Date.now(); entry.retryAfter = Date.now() + READY_TTL; }
-      else entry.retryAfter = Date.now() + READY_TTL;
-    } else {
-      entry.unchangedPolls = previous.description?.status === state.description?.status
-        && previous.description?.sourceVersion === state.description?.sourceVersion
-        && previous.description?.reason === state.description?.reason ? Math.min(3, entry.unchangedPolls + 1) : 0;
-      entry.state = state; entry.at = Date.now(); entry.retryAfter = 0;
-    }
-    descriptors.delete(entry.key); descriptors.set(entry.key, entry);
-    notify(entry); poll(entry); return entry.state;
   })();
   entry.pending = pending;
   const state = await pending;
@@ -149,11 +174,12 @@ export async function refreshHdImageSource(account: string, source: string, vers
   if (entry.refreshing === pending) entry.refreshing = undefined;
   return state;
 }
-export function acquireHdImageSource(account: string, source: string, version: string, listener: Listener, options: { intent?: 'status' | 'open'; viewToken?: string } = {}) {
+export function acquireHdImageSource(account: string, source: string, version: string, listener: Listener, options: { intent?: 'status' | 'open'; viewToken?: string; imageResponse?: ImageResponseConsumer } = {}) {
   const entry = getEntry(account, source, version);
   if (!entry) { listener({ error: true }); return () => {}; }
   entry.listeners.add(listener);
   if (options.intent === 'open' && /^[a-f0-9-]{36}$/.test(options.viewToken || '')) entry.viewTokens.set(listener, options.viewToken!);
+  if (options.intent === 'open' && options.imageResponse) entry.imageResponses.set(listener, options.imageResponse);
   const ready = entry.state.description?.status === 'ready';
   if (entry.at && ready) listener(entry.state);
   if (!entry.pending) {
@@ -174,7 +200,7 @@ export function acquireHdImageSource(account: string, source: string, version: s
   };
   document.addEventListener('visibilitychange', foreground);
   return () => {
-    document.removeEventListener('visibilitychange', foreground); entry.listeners.delete(listener); entry.viewTokens.delete(listener);
+    document.removeEventListener('visibilitychange', foreground); entry.listeners.delete(listener); entry.viewTokens.delete(listener); entry.imageResponses.delete(listener);
     if (!entry.listeners.size) { clearTimeout(entry.timer); entry.timer = undefined; if (!entry.prefetches) { stop(entry); entry.pending = undefined; } }
   };
 }
