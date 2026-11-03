@@ -86,8 +86,8 @@ export async function readIndexedWorkMethod(user: SessionUser, access: WorkAcces
       reason = executable ? '' : '原作品使用的模板版本已变化或缺少原版本凭据，不能改用新版';
     } else reason = '原模板已不可用或当前没有使用权限';
   } else if (row.template_module === 'image-module') {
-    const module = await db.imageStudioModule.findFirst({ where: { id: row.template_id, owner_id: user.id } });
-    if (module) template = { module: 'image-module', id: module.id, version: row.template_version, label: module.name };
+    const studioModule = await db.imageStudioModule.findFirst({ where: { id: row.template_id, owner_id: user.id } });
+    if (studioModule) template = { module: 'image-module', id: studioModule.id, version: row.template_version, label: studioModule.name };
     reason = '私人工作区的历史输入无法安全完整复原，保留成品参考';
   } else if (row.template_module === 'video-studio') {
     try { await getStudioTemplateUseAccess(user, row.template_id, 'studio', db); }
