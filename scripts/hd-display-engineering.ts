@@ -348,8 +348,8 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     checks.push('work_detail_reuses_hd_with_exact_work_version');
 
     reset();
-    const listedWork = { id: 'work-parallel', mediaVersion: 'work-v1', medium: 'image' as const, previewStatus: 'ready' as const,
-      detailPreviewUrl: '/api/works/work-parallel/media?version=work-v1&variant=detail', previewUrl: null, downloadUrl: '/download', reuse: true };
+    const listedWork: Parameters<typeof workImages.prepareWorkImage>[1] = { id: 'work-parallel', mediaVersion: 'work-v1', medium: 'image', previewStatus: 'ready',
+      detailPreviewUrl: '/api/works/work-parallel/media?version=work-v1&variant=detail', previewUrl: null, downloadUrl: '/download', reuse: { assetId: 'work-parallel-asset' } };
     combinedBodies.add(listedWork.id); heldBodies.add(listedWork.id);
     const pendingWork = workImages.prepareWorkImage(account, listedWork)!;
     await flush();
@@ -372,7 +372,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(workImages.matchesWorkImage(boundWork, account, { ...listedWork }), true);
     for (const changed of [{ ...listedWork, id: 'another-work' }, { ...listedWork, mediaVersion: 'work-v2' },
       { ...listedWork, detailPreviewUrl: '/api/works/another-work/media?version=work-v1&variant=detail' },
-      { ...listedWork, downloadUrl: null, reuse: false }]) {
+      { ...listedWork, downloadUrl: null, reuse: null }]) {
       assert.equal(workImages.matchesWorkImage(boundWork, account, changed), false,
         'fresh detail changes must never adopt the list preparation');
     }
