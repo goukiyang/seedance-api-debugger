@@ -21,11 +21,9 @@ export function WorkEmojiPicker({ disabled, onSelect }: { disabled: boolean; onS
   useDialogDismiss({ open, dialogRef: panel, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
   return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" aria-label="插入表情" title="表情" aria-controls={open ? id : undefined}
     aria-expanded={open} aria-haspopup="dialog" disabled={disabled} onClick={() => setOpen(value => !value)}><Smile size={18} /></button></Popper.Anchor>
-    {open && createPortal(<Popper.Content side="top" align="start" sideOffset={8} collisionPadding={12}>
-      <div ref={panel} id={id} role="dialog" aria-label="选择表情" className={styles.emojiPanel}>
+    {open && createPortal(<Popper.Content ref={panel} id={id} role="dialog" aria-label="选择表情" className={styles.emojiPanel} side="top" align="start" sideOffset={8} collisionPadding={12}>
         <EmojiPicker emojiStyle="native" colorScheme="auto" width="100%" height={350} previewConfig={{ showPreview: false }}
           suggestedEmojis={['👍', '❤️', '👏', '😀', '🎉', '🤔']} onEmojiClick={data => { onSelect(data.emoji); setOpen(false); }} />
-      </div>
     </Popper.Content>, trigger.current?.closest('dialog') || document.body)}
   </Popper.Root>;
 }
