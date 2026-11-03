@@ -498,6 +498,12 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
     const imageSource = await database.work.findUniqueOrThrow({ where: { id: methodImage.work.id } });
     const publicOrigin = (await projectWorkProvenance(colleague, [imageSource], database)).get(imageSource.id)!;
     assert.equal(publicOrigin.template?.label, methodPreset.name);
+    assert.equal(publicOrigin.template?.reuseVersion, originalDefinition.definition.sourceRevision);
+    await database.imageStudioPreset.update({ where: { id: methodPreset.id }, data: { updated_at: new Date(methodPreset.updated_at.getTime() + 1000) } });
+    const changedOrigin = (await projectWorkProvenance(colleague, [imageSource], database)).get(imageSource.id)!;
+    assert.equal(changedOrigin.template?.label, methodPreset.name);
+    assert.equal(changedOrigin.template?.reuseVersion, null, 'A changed template remains linkable but must not advertise exact reuse');
+    await database.imageStudioPreset.update({ where: { id: methodPreset.id }, data: { updated_at: methodPreset.updated_at } });
     assert.equal(new URL(publicOrigin.template!.href, 'https://fixture.invalid').searchParams.get('presetId'), methodPreset.id);
     await database.imageStudioPreset.update({ where: { id: methodPreset.id }, data: { is_shared: false, updated_at: methodPreset.updated_at } });
     assert.equal((await projectWorkProvenance(colleague, [imageSource], database)).get(imageSource.id)!.template, null, 'Output visibility must not expose a private template name');

@@ -3,7 +3,7 @@ export type WorkMedium = 'image' | 'video';
 export type WorkAudience = 'source' | 'team' | 'project' | 'private';
 export type WorkSourceKind = 'image_task' | 'video_task' | 'multiview_work' | 'upload_asset';
 export type WorkPersonal = { liked: boolean; favorited: boolean; hidden: boolean; version: number };
-export type WorkProvenance = { tool: { label: string; href: string }; template: { label: string; href: string; version: string | null } | null };
+export type WorkProvenance = { tool: { label: string; href: string }; template: { label: string; href: string; version: string | null; reuseVersion: string | null } | null };
 export type WorkCard = {
   id: string; title: string; medium: WorkMedium; mediaVersion: string; revision: number;
   width: number | null; height: number | null; duration: number | null; completedAt: string;

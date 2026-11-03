@@ -28,7 +28,7 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
   }
   if (!await worksContextSchemaReady(db)) return result;
   const rows = await db.workContext.findMany({ where: { work_id: { in: works.map(work => work.id) }, schema_version: 1 },
-    select: { work_id: true, media_version_id: true, template_module: true, template_id: true, template_version: true } });
+    select: { work_id: true, media_version_id: true, template_module: true, template_id: true, template_version: true, template_token: true } });
   const current = new Map(works.map(work => [work.id, work.current_version_id]));
   const metadata = rows.filter(row => row.media_version_id === current.get(row.work_id));
   if (!metadata.some(row => row.template_id)) return result;
@@ -36,12 +36,12 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
   const [modules, videos, legacy] = await Promise.all([
     db.imageStudioModule.findMany({ where: { id: { in: ids('image-module') }, owner_id: user.id }, select: { id: true, name: true, owner_id: true, source_preset_id: true } }),
     db.videoStudioTemplate.findMany({ where: { id: { in: ids('video-studio') }, status: { not: 'archived' } },
-      select: { id: true, name: true, owner_user_id: true, status: true, visibility: true, published_version: { select: { name: true } } } }),
+      select: { id: true, name: true, owner_user_id: true, status: true, visibility: true, revision: true, published_version: { select: { id: true, name: true } } } }),
     db.generationTemplate.findMany({ where: { id: { in: ids('video-legacy') }, status: 'active' }, select: { id: true, name: true } }),
   ]);
   const presetIds = Array.from(new Set([...ids('image-preset'), ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])]));
   const [presets, archived] = await Promise.all([
-    db.imageStudioPreset.findMany({ where: { id: { in: presetIds } }, select: { id: true, name: true, owner_id: true, scope: true, is_shared: true } }),
+    db.imageStudioPreset.findMany({ where: { id: { in: presetIds } }, select: { id: true, name: true, owner_id: true, scope: true, is_shared: true, updated_at: true } }),
     db.platformSetting.findMany({ where: { key: { in: presetIds.map(archivedPresetKey) } }, select: { key: true } }),
   ]);
   const revoked = new Set(archived.map(row => row.key));
@@ -54,17 +54,21 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
     const source = result.get(row.work_id)!;
     const query = new URLSearchParams();
     if (row.template_module === 'image-preset' || row.template_module === 'image-module') {
-      const template = row.template_module === 'image-preset' ? allowedPresets.get(row.template_id) : allowedModules.get(row.template_id);
+      const preset = row.template_module === 'image-preset' ? allowedPresets.get(row.template_id) : null;
+      const template = preset || (row.template_module === 'image-module' ? allowedModules.get(row.template_id) : null);
       if (!template) continue;
       query.set('type', 'image'); query.set(row.template_module === 'image-preset' ? 'presetId' : 'moduleId', template.id);
       source.tool = { label: '图片模板', href: '/template-studio?type=image' };
-      source.template = { label: template.name, href: '/template-studio?' + query, version: row.template_version };
+      source.template = { label: template.name, href: '/template-studio?' + query, version: row.template_version,
+        reuseVersion: preset && row.template_token && preset.updated_at.toISOString() === row.template_version ? row.template_version : null };
     } else {
       const video = row.template_module === 'video-studio' ? allowedVideos.get(row.template_id) : undefined, template = row.template_module === 'video-studio' ? video : row.template_module === 'video-legacy' ? legacyById.get(row.template_id) : null;
       if (!template) continue;
       query.set('type', 'video'); query.set('view', 'templates'); query.set('templateId', template.id); query.set('templateSource', row.template_module === 'video-studio' ? 'studio' : 'legacy');
       source.tool = { label: '视频模板', href: '/template-studio?type=video' };
-      source.template = { label: video?.visibility === 'shared' && video.status === 'published' ? video.published_version?.name || template.name : template.name, href: '/template-studio?' + query, version: row.template_version };
+      const published = video?.visibility === 'shared' && video.status === 'published' ? video.published_version : null;
+      source.template = { label: published?.name || template.name, href: '/template-studio?' + query, version: row.template_version,
+        reuseVersion: video && row.template_version === (published?.id || `studio:${video.revision}`) ? row.template_version : null };
     }
   }
   return result;
