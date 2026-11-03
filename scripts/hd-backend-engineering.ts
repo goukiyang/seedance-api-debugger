@@ -631,6 +631,99 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
       if (prior === undefined) delete process.env.HD_ENCODER_STRATEGY; else process.env.HD_ENCODER_STRATEGY = prior;
     }
   });
+  await check('HD03 WebP profile coexists with AVIF and preserves exact pinned reads', async () => {
+    await fixture();
+    const encoder = await import('../src/lib/media/hd-encoder');
+    const strategy = encoder.hdEncoderStrategy('hd-webp-q93-e4-v1');
+    const file = path.join(process.cwd(), 'public/uploads/webp-profile.png');
+    const pixels = Buffer.alloc(256 * 192 * 3);
+    let seed = 987654321;
+    for (let index = 0; index < pixels.length; index++) {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; pixels[index] = seed & 255;
+    }
+    await sharp(pixels, { raw: { width: 256, height: 192, channels: 3 } }).png().toFile(file);
+    const source = '/uploads/webp-profile.png', original = await fs.readFile(file);
+    ownerBindings = [{ id: 'webp-profile-asset', owner_id: 'fixture-owner', original_url: source }];
+    const legacy = (await core.requestHd(source, 0, false, undefined, undefined, 'hd-legacy-e6-v1'))!;
+    await processJob(legacy.key);
+    // Keep a real immutable output under an older-library key. A new direct
+    // profile must not make this previously issued representation disappear.
+    const oldManifest = (await core.readHdJob(legacy.key))!, oldKey = 'b'.repeat(64);
+    await fs.rename(path.join(core.hdDirectory(), oldManifest.file!), path.join(core.hdDirectory(), oldKey + '.avif'));
+    await core.atomicHdJson(path.join(core.hdDirectory(), oldKey + '.json'), { ...oldManifest, key: oldKey, file: oldKey + '.avif' });
+    await fs.unlink(path.join(core.hdDirectory(), legacy.key + '.json'));
+    const oldReady = (await core.lookupHd(source))!, oldVersion = (await core.hdRepresentationVersion(source, oldReady))!;
+    assert.equal(oldReady.format, 'avif');
+    const oldBytes = await fs.readFile(path.join(core.hdDirectory(), oldReady.file!));
+    const queued = (await core.requestHd(source, 0, false, undefined, undefined, strategy))!;
+    assert.notEqual(queued.key, legacy.key);
+    assert.equal(queued.version, oldReady.version);
+    assert.equal((await core.lookupHd(source))?.key, oldReady.key, 'a pending upgrade must keep the existing ready image');
+    assert.equal((await core.requestHd(source, 0, false))?.key, oldReady.key, 'ordinary reads must not start another upgrade');
+    await processJob(queued.key);
+    const ready = (await core.lookupHd(source))!;
+    assert.equal(ready.key, queued.key); assert.equal(ready.format, 'webp');
+    assert.equal(ready.width, 256); assert.equal(ready.height, 192);
+    assert.deepEqual(ready.parameters, { format: 'webp', lossless: false, effort: 4, orientation: 'auto', bitdepth: 8, quality: 93, smartSubsample: true });
+    assert.equal((await core.lookupHd(source, oldVersion))?.key, oldReady.key);
+    assert.deepEqual(await fs.readFile(path.join(core.hdDirectory(), oldReady.file!)), oldBytes);
+    assert.deepEqual(await fs.readFile(file), original);
+    const { authorizedImageResponse } = await import('../src/lib/media/authorized-image-response');
+    const oldResponse = await authorizedImageResponse(new Request('https://fixture.invalid/image?hd-version=' + encodeURIComponent(oldReady.version)
+      + '&hd-representation=' + encodeURIComponent(oldVersion)), source, 'hd', 'image/png');
+    assert.equal(oldResponse.status, 200); assert.equal(oldResponse.headers.get('Content-Type'), 'image/avif');
+    assert.deepEqual(Buffer.from(await oldResponse.arrayBuffer()), oldBytes);
+    const oldHead = await authorizedImageResponse(new Request('https://fixture.invalid/image?hd-version=' + encodeURIComponent(oldReady.version)
+      + '&hd-representation=' + encodeURIComponent(oldVersion), { method: 'HEAD' }), source, 'hd-download', 'image/png');
+    assert.equal(oldHead.status, 200); assert.equal(oldHead.headers.get('Content-Type'), 'image/avif');
+    assert.equal(oldHead.headers.get('X-Image-Representation-Version'), oldVersion);
+    const current = await authorizedImageResponse(new Request('https://fixture.invalid/image', {
+      headers: { 'X-Image-Read-Intent': 'status', 'X-Image-Accept': 'hd-open-v1' },
+    }), source, 'hd-description', 'image/png');
+    assert.equal(current.headers.get('Content-Type'), 'image/webp');
+    assert.deepEqual(Buffer.from(await current.arrayBuffer()), await fs.readFile(path.join(core.hdDirectory(), ready.file!)));
+    const description = await authorizedImageResponse(new Request('https://fixture.invalid/image', { method: 'HEAD' }), source, 'hd-description', 'image/png');
+    assert.equal(description.headers.get('X-Image-HD-Description'), null);
+    const json = await authorizedImageResponse(new Request('https://fixture.invalid/image', { headers: { 'X-Image-Read-Intent': 'status' } }), source, 'hd-description', 'image/png');
+    assert.equal((await json.json()).encodingStrategy, undefined, 'old open tabs must accept the optional descriptor fields');
+    const absent = await authorizedImageResponse(new Request('https://fixture.invalid/image?hd-representation=hd-representation-v1:' + '0'.repeat(64)), source, 'hd', 'image/png');
+    assert.equal(absent.status, 409, 'an unknown representation must not receive another profile');
+    await sharp({ create: { width: 32, height: 32, channels: 3, background: '#222' } }).png().toFile(file);
+    const changed = await authorizedImageResponse(new Request('https://fixture.invalid/image?hd-version=' + encodeURIComponent(oldReady.version)
+      + '&hd-representation=' + encodeURIComponent(oldVersion)), source, 'hd', 'image/png');
+    assert.equal(changed.status, 409, 'keeping old profiles must not bypass a changed original');
+  });
+  await check('HD03 WebP profile keeps alpha and text outputs lossless', async () => {
+    await fixture();
+    const encoder = await import('../src/lib/media/hd-encoder');
+    const strategy = encoder.hdEncoderStrategy('hd-webp-q93-e4-v1');
+    for (const preserveText of [false, true]) {
+      const source = '/uploads/protected-' + preserveText + '.png', file = path.join(process.cwd(), 'public', source);
+      const pixels = Buffer.alloc(128 * 96 * (preserveText ? 3 : 4));
+      for (let index = 0; index < pixels.length; index++) pixels[index] = (index * 37 + (index >>> 5)) % 256;
+      await sharp(pixels, { raw: { width: 128, height: 96, channels: preserveText ? 3 : 4 } }).png().toFile(file);
+      const original = await fs.readFile(file);
+      ownerBindings.push({ id: 'protected-' + preserveText, owner_id: 'fixture-owner', original_url: source });
+      const job = (await core.requestHd(source, 0, preserveText, undefined, undefined, strategy))!;
+      await processJob(job.key);
+      const ready = (await core.readHdJob(job.key))!;
+      assert.equal(ready.status, 'ready'); assert.equal(ready.format, 'webp');
+      assert.deepEqual(ready.parameters, { format: 'webp', lossless: true, effort: 4, orientation: 'auto', bitdepth: 8 });
+      const output = path.join(core.hdDirectory(), ready.file!);
+      const decoded = await sharp(output).raw().toBuffer(), input = await sharp(file).raw().toBuffer();
+      if (preserveText) assert.deepEqual(decoded, input);
+      else {
+        assert.equal(decoded.length, input.length);
+        for (let index = 0; index < input.length; index += 4) {
+          assert.equal(decoded[index + 3], input[index + 3], 'the alpha channel must remain exact');
+          // libwebp lossless normalizes invisible RGB at alpha=0 by default:
+          // https://developers.google.com/speed/webp/docs/cwebp#lossless_options
+          if (input[index + 3]) assert.deepEqual(decoded.subarray(index, index + 3), input.subarray(index, index + 3));
+        }
+      }
+      assert.deepEqual(await fs.readFile(file), original);
+    }
+  });
   process.chdir(applicationRoot);
   await (await import('../src/lib/media/hd-readonly-db')).hdReadonlyDb.$disconnect();
   const summary = { completed: true, checks: results.map(value => value.name), results, total: results.length,

@@ -61,7 +61,8 @@ export async function authorizedImageResponse(request: Request, source: string, 
   if (['hd', 'hd-description', 'hd-download'].includes(variant)) {
     const token = request.headers.get('x-image-view-token');
     const viewToken = token && /^[a-f0-9-]{36}$/.test(token) ? token : undefined;
-    const job = readOnly ? await lookupHd(source) : await requestHd(source, 1, undefined, undefined,
+    const requestedRepresentation = ['hd', 'hd-download'].includes(variant) ? new URL(request.url).searchParams.get('hd-representation') : null;
+    const job = requestedRepresentation ? await lookupHd(source, requestedRepresentation) : readOnly ? await lookupHd(source) : await requestHd(source, 1, undefined, undefined,
       context ? { ...context, viewToken } : undefined);
     const rawMime = previewMime(source, mime);
     // Only a foreground GET explicitly accepts a compressed ready body. The
@@ -88,7 +89,7 @@ export async function authorizedImageResponse(request: Request, source: string, 
         processingAvailability, ...(job?.stage && stages.includes(job.stage) ? { stage: job.stage } : {}),
         ...(job?.retryAt ? { retryAt: job.retryAt } : {}), ...(!schedulingKnown ? { errorKind: 'scheduling_unconfirmed' }
           : job?.errorKind && errors.includes(job.errorKind) ? { errorKind: job.errorKind } : {}),
-        ...(encodingStrategy && encodingStrategy !== 'hd-avif-q90-e4-v1' ? { encodingStrategy } : {}), ...(representationVersion ? { representationVersion } : {}),
+        ...(encodingStrategy && ['hd-legacy-e6-v1', 'hd-avif-e4-v1'].includes(encodingStrategy) ? { encodingStrategy } : {}), ...(representationVersion ? { representationVersion } : {}),
         ...(job?.status === 'ready' ? { width: job.width, height: job.height, bytes: job.bytes,
           format: job.format === 'original' ? rawMime.split('/')[1] : job.format,
           mime: job.format === 'original' ? rawMime : job.mime, original: job.format === 'original' } : {}) }, { headers: privateImageHeaders });
@@ -98,7 +99,6 @@ export async function authorizedImageResponse(request: Request, source: string, 
     const requestedVersion = new URL(request.url).searchParams.get('hd-version');
     if (requestedVersion && requestedVersion !== job.version) return Response.json({ error: '图片已更新，请重新打开' }, { status: 409, headers: privateImageHeaders });
     const representationVersion = await hdRepresentationVersion(source, job);
-    const requestedRepresentation = new URL(request.url).searchParams.get('hd-representation');
     if (requestedRepresentation && requestedRepresentation !== representationVersion) return Response.json({ error: '图片副本已更新，请重新打开' }, { status: 409, headers: privateImageHeaders });
     if (job.format === 'original') {
       if (variant === 'hd') response = await mediaPreviewResponse(request, source, rawMime, `protected-hd-original:${job.key}`);

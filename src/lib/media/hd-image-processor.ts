@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fork, ChildProcess } from 'node:child_process';
-import { HD_ENCODING_TIMEOUT_SECONDS, hdEncoderParameters, type HdIntegrity, type HdEncoderParameters, type HdEncoderStrategy } from './hd-encoder';
+import { HD_ENCODING_TIMEOUT_SECONDS, hdEncoderOutputFormat, hdEncoderParameters, type HdIntegrity, type HdEncoderParameters, type HdEncoderStrategy } from './hd-encoder';
 
 export const HD_IMAGE_PROTOCOL = 'hd-image-process-v1';
 // Full-size effort6 encoding needs more than three minutes for some valid
@@ -106,7 +106,8 @@ export function validateHdImageResult(value: unknown, request: HdImageRequest): 
     && typeof result.outputVersion === 'string' && /^\d+:\d+:\d+:[0-9.]+:[0-9.]+$/.test(result.outputVersion)
     && Number.isSafeInteger(result.bytes) && result.bytes! > 0 && result.integrity?.version === 'hd-output-integrity-v2'
     && Array.isArray(result.integrity.failedChecks) && result.integrity.failedChecks.length === 0
-    && JSON.stringify(result.parameters) === JSON.stringify(hdEncoderParameters(result.format as 'avif' | 'webp', request.encoderStrategy))
+    && result.format === hdEncoderOutputFormat(request.encoderStrategy, request.preserveText || result.metadata.hasAlpha)
+    && JSON.stringify(result.parameters) === JSON.stringify(hdEncoderParameters(result.format as 'avif' | 'webp', request.encoderStrategy, request.preserveText || result.metadata.hasAlpha))
     && Boolean(result.integrity.checks)
     && ['output_metadata', 'width', 'height', 'alpha', 'pages', 'color', 'bitdepth', 'depth', 'format', 'output_full_decode'].every(name => result.integrity!.checks[name]?.ok === true)
     && Object.values(result.integrity.checks).every(check => check && check.ok === true);

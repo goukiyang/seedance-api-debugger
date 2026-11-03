@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_CONTROL_PROTOCOL, HD_RETRY_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
-import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HD_ENCODER_STRATEGIES, HdOutputIntegrityError, validateHdOutput, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
+import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HD_ENCODER_STRATEGIES, HdOutputIntegrityError, validateHdOutput, hdEncoderOutputFormat, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
 import { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
 import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity, type HdChildClose, type HdGroupExit } from './hd-image-processor';
 export type { HdControl, HdResourceSample } from './hd-resource-state';
@@ -21,7 +21,7 @@ const ROOT_RESERVE = 512000 * 1024;
 const DATA_RESERVE = 2 * 1024 * 1024 * 1024;
 type HdEncoder = {
   policy: string; validation: string; sourceSha256: string; libraries: typeof sharp.versions;
-  parameters: { format: 'avif' | 'webp'; lossless: boolean; quality?: number; chromaSubsampling?: string; effort: number; orientation: string; bitdepth: number };
+  parameters: HdEncoderParameters;
 };
 type HdAttempt = {
   attempt: number; startedAt: string; finishedAt?: string; sourceVersion: string;
@@ -146,7 +146,8 @@ async function readHdJobRecord(key: string): Promise<HdJob | null> {
     hdEncoderStrategy(job.encoderStrategy);
     for (const value of [job, ...(job.attemptHistory || [])]) {
       if (value.encoderStrategy !== undefined) hdEncoderStrategy(value.encoderStrategy);
-      if (value.parameters && JSON.stringify(value.parameters) !== JSON.stringify(hdEncoderParameters(value.parameters.format, value.encoderStrategy || job.encoderStrategy))) throw new Error('invalid_hd_encoder_parameters');
+      if (value.parameters && JSON.stringify(value.parameters) !== JSON.stringify(hdEncoderParameters(value.parameters.format, value.encoderStrategy || job.encoderStrategy,
+        job.preserveText || value.parameters.lossless || (value.integrity?.checks.alpha?.expected as { hasAlpha?: boolean } | undefined)?.hasAlpha === true))) throw new Error('invalid_hd_encoder_parameters');
     }
     const executions = [...(job.attemptHistory || []), ...(job.verificationHistory || [])].map(value => value.executionId).filter(Boolean);
     if (new Set(executions).size !== executions.length) throw new Error('invalid_hd_manifest');
@@ -200,9 +201,11 @@ async function withControlLease<T>(action: () => Promise<T>): Promise<T | null> 
   return null;
 }
 function hdIdentity(current: NonNullable<Awaited<ReturnType<typeof hdSource>>>, preserveText: boolean, encoderStrategy: HdEncoderStrategy) {
-  const parameters = hdEncoderParameters('avif', encoderStrategy);
+  const webp = encoderStrategy === 'hd-webp-q93-e4-v1';
+  const parameters = hdEncoderParameters(webp ? 'webp' : 'avif', encoderStrategy);
   const key = createHash('sha256').update(JSON.stringify({ file: current.file, version: current.version,
-    policy: HD_POLICY, format: 'alpha-or-text-lossless-webp-otherwise-avif', q: parameters.quality, chroma: '4:4:4', effort: parameters.effort, orientation: 'auto', color: '8bit-srgb',
+    policy: HD_POLICY, format: webp ? 'alpha-or-text-lossless-webp-otherwise-webp-q93' : 'alpha-or-text-lossless-webp-otherwise-avif',
+    q: parameters.quality, chroma: webp ? '4:2:0-smart' : '4:4:4', effort: parameters.effort, orientation: 'auto', color: '8bit-srgb',
     library: sharp.versions, preserveText, ...(encoderStrategy !== 'hd-legacy-e6-v1' ? { encoderStrategy } : {}) })).digest('hex');
   return { current, key, preserveText: Boolean(preserveText), encoderStrategy };
 }
@@ -217,11 +220,12 @@ export async function hdRequestIdentity(source: string, preserveText?: boolean, 
   return hdIdentity(current, preserveText, encoderStrategy);
 }
 const compatibleHdKeys = new Map<string, string[]>();
-async function compatibleHdRecords(source: string, identity: NonNullable<Awaited<ReturnType<typeof hdRequestIdentity>>>) {
+async function compatibleHdRecords(source: string, identity: NonNullable<Awaited<ReturnType<typeof hdRequestIdentity>>>, strategy?: HdEncoderStrategy) {
   const local = siteUploadPathFromUrl(source);
-  const cacheKey = JSON.stringify([hdDirectory(), local, identity.current.version, identity.preserveText]);
+  const cacheKey = JSON.stringify([hdDirectory(), local, identity.current.version, identity.preserveText, strategy]);
   const matches = (job: HdJob | null): job is HdJob => Boolean(job && siteUploadPathFromUrl(job.source) === local
-    && job.version === identity.current.version && job.preserveText === identity.preserveText);
+    && job.version === identity.current.version && job.preserveText === identity.preserveText
+    && (!strategy || hdEncoderStrategy(job.encoderStrategy) === strategy));
   const cached = compatibleHdKeys.get(cacheKey);
   let jobs = cached ? (await Promise.all(cached.map(readHdJob))).filter(matches) : [];
   if (!jobs.length) {
@@ -235,7 +239,7 @@ async function compatibleHdRecords(source: string, identity: NonNullable<Awaited
   }
   return jobs.map(job => ({ job, identity: { ...identity, key: job.key, encoderStrategy: hdEncoderStrategy(job.encoderStrategy) } }));
 }
-async function registeredHd(source: string, preserveText?: boolean) {
+async function registeredHd(source: string, preserveText?: boolean, selection?: { strategy?: HdEncoderStrategy; representation?: string }) {
   const legacy = await hdRequestIdentity(source, preserveText);
   if (!legacy) return null;
   // All recipes refer to one observed source version; avoid re-resolving the
@@ -244,12 +248,23 @@ async function registeredHd(source: string, preserveText?: boolean) {
   const records = await Promise.all(identities.map(async identity => ({ identity, job: await readHdJob(identity.key) })));
   for (const row of records) if (row.job && (row.job.version !== row.identity.current.version
     || row.job.preserveText !== row.identity.preserveText || hdEncoderStrategy(row.job.encoderStrategy) !== row.identity.encoderStrategy)) throw new Error('invalid_hd_manifest');
-  if (!records.some(row => row.job)) records.push(...await compatibleHdRecords(source, legacy));
-  return records.find(row => row.job?.status === 'ready') || records.find(row => row.job && ['queued', 'running'].includes(row.job.status))
-    || records.find(row => row.job) || { identity: identities.find(value => value.encoderStrategy === defaultHdEncoderStrategy())!, job: null };
+  if (!records.some(row => row.job?.status === 'ready' && (!selection?.strategy || row.identity.encoderStrategy === selection.strategy)))
+    records.push(...await compatibleHdRecords(source, legacy, selection?.strategy));
+  const candidates = selection?.strategy ? records.filter(row => row.identity.encoderStrategy === selection.strategy) : records;
+  if (selection?.representation) {
+    for (const row of candidates) if (row.job?.status === 'ready'
+      && await hdRepresentationVersion(source, row.job).catch(() => undefined) === selection.representation) return row;
+    // A previously pinned file can have a key from an older libvips build,
+    // even when the new preferred recipe now has a directly registered key.
+    for (const row of await compatibleHdRecords(source, legacy, selection.strategy)) if (row.job.status === 'ready'
+      && await hdRepresentationVersion(source, row.job).catch(() => undefined) === selection.representation) return row;
+    return null;
+  }
+  return candidates.find(row => row.job?.status === 'ready') || candidates.find(row => row.job && ['queued', 'running'].includes(row.job.status))
+    || candidates.find(row => row.job) || { identity: identities.find(value => value.encoderStrategy === (selection?.strategy || defaultHdEncoderStrategy()))!, job: null };
 }
-export async function lookupHd(source: string) {
-  const registered = await registeredHd(source);
+export async function lookupHd(source: string, representation?: string) {
+  const registered = await registeredHd(source, undefined, representation ? { representation } : undefined);
   if (!registered) return null;
   const { identity, job } = registered;
   const { current, key, preserveText } = identity;
@@ -280,9 +295,11 @@ export async function hdRepresentationVersion(source: string, job: HdJob) {
     strategy: hdEncoderStrategy(job.encoderStrategy), format: job.format, bytes: job.bytes,
     identity: [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs] })).digest('hex');
 }
-export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string, context?: HdRequestContext) {
+export async function requestHd(source: string, priority = 1, preserveText?: boolean, batch?: string, context?: HdRequestContext, strategy?: HdEncoderStrategy) {
   if (!Number.isSafeInteger(priority) || priority < 0 || priority > 3) throw new Error('invalid_hd_priority');
-  const registered = await registeredHd(source, preserveText);
+  // An explicit strategy is server-only maintenance for one known source;
+  // ordinary viewer/producer requests keep existing ready or in-flight work.
+  const registered = await registeredHd(source, preserveText, strategy ? { strategy: hdEncoderStrategy(strategy) } : undefined);
   if (!registered) return null;
   const { identity } = registered;
   const { current, key } = identity;
@@ -605,9 +622,10 @@ async function assertHdProcessorOutput(result: HdImageResult, job: HdJob, input:
     || result.inputFile !== input.file || result.workDirectory !== directory || result.metadata.bytes !== input.size
     || JSON.stringify(result.libraries) !== JSON.stringify(sharp.versions)) throw new Error('hd_child_protocol');
   if (result.skipped || result.originalVerified) return;
-  const format = result.metadata.hasAlpha || job.preserveText ? 'webp' : 'avif';
+  const protectedImage = result.metadata.hasAlpha || job.preserveText;
+  const format = hdEncoderOutputFormat(job.encoderStrategy, protectedImage);
   if ((result.encoderStrategy || 'hd-legacy-e6-v1') !== hdEncoderStrategy(job.encoderStrategy)
-    || result.format !== format || JSON.stringify(result.parameters) !== JSON.stringify(hdEncoderParameters(format, job.encoderStrategy))
+    || result.format !== format || JSON.stringify(result.parameters) !== JSON.stringify(hdEncoderParameters(format, job.encoderStrategy, protectedImage))
     || result.outputFile !== 'output.' + format) throw new Error('hd_child_protocol');
   const file = path.join(directory, result.outputFile);
   if (await fs.realpath(file) !== file) throw new Error('hd_output_boundary');
@@ -843,8 +861,9 @@ export async function processHdJob(key: string, pausedSourceVersion?: string, de
           await atomicHdJson(jobPath(key), job);
         },
         onPrepared: async metadata => {
-          const format = metadata.hasAlpha || job.preserveText ? 'webp' : 'avif';
-          job.parameters = hdEncoderParameters(format, job.encoderStrategy); attempt!.parameters = job.parameters;
+          const protectedImage = metadata.hasAlpha || job.preserveText;
+          const format = hdEncoderOutputFormat(job.encoderStrategy, protectedImage);
+          job.parameters = hdEncoderParameters(format, job.encoderStrategy, protectedImage); attempt!.parameters = job.parameters;
           await atomicHdJson(jobPath(key), job);
           const safe = (await capacity(input.size * 3 + metadata.width * metadata.height * 8)).safe;
           if (!safe && pausedSourceVersion === undefined) await setHdControl(true, 'capacity_guard');

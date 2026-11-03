@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { HD_IMAGE_PROTOCOL, type HdImageMetadata, type HdImageRequest, type HdImageResult } from '../src/lib/media/hd-image-processor';
-import { HD_MAX_PIXELS, HdOutputIntegrityError, encodeHdOutput, hdEligibility, hdEncoderParameters, hdEncoderStrategy, validateHdOutput } from '../src/lib/media/hd-encoder';
+import { HD_MAX_PIXELS, HdOutputIntegrityError, encodeHdOutput, hdEligibility, hdEncoderOutputFormat, hdEncoderParameters, hdEncoderStrategy, validateHdOutput } from '../src/lib/media/hd-encoder';
 
 const versionOf = (stat: Awaited<ReturnType<typeof fs.stat>>) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 const sourceError = (error: unknown): never => {
@@ -62,7 +62,8 @@ async function run(value: HdImageRequest) {
     if (versionOf(await fs.stat(value.inputFile)) !== value.sourceVersion) throw new Error('source_changed');
     await send({ ...common, originalVerified: true }); finish(); return;
   }
-  const format = value.operation === 'validate' ? value.candidateFormat : meta.hasAlpha || value.preserveText ? 'webp' : 'avif';
+  const protectedImage = Boolean(meta.hasAlpha || value.preserveText);
+  const format = value.operation === 'validate' ? value.candidateFormat : hdEncoderOutputFormat(encoderStrategy, protectedImage);
   if (format !== 'webp' && format !== 'avif') throw new Error('hd_child_protocol');
   const output = path.join(value.workDirectory, `output.${format}`);
   if (value.operation === 'validate') {
@@ -70,7 +71,7 @@ async function run(value: HdImageRequest) {
     if (!candidate.isFile() || candidate.isSymbolicLink() || candidate.nlink !== 1) throw new Error('hd_child_protocol');
   } else {
     stage = 'encoding'; await send({ type: 'stage', stage });
-    await encodeHdOutput(value.inputFile, output, format, encoderStrategy);
+    await encodeHdOutput(value.inputFile, output, format, encoderStrategy, protectedImage);
   }
   stage = 'validating'; await send({ type: 'stage', stage });
   const integrity = await validateHdOutput(value.inputFile, meta, output, format);
@@ -79,7 +80,7 @@ async function run(value: HdImageRequest) {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !stat.size || meta.width! * meta.height! > HD_MAX_PIXELS) throw new Error('output_integrity');
   const handle = await fs.open(output, 'r');
   try { await handle.sync(); } finally { await handle.close(); }
-  const result: HdImageResult = { ...common, outputFile: path.basename(output), outputVersion: versionOf(stat), format, bytes: stat.size, integrity, parameters: hdEncoderParameters(format, encoderStrategy) };
+  const result: HdImageResult = { ...common, outputFile: path.basename(output), outputVersion: versionOf(stat), format, bytes: stat.size, integrity, parameters: hdEncoderParameters(format, encoderStrategy, protectedImage) };
   await send(result);
   finish();
 }
