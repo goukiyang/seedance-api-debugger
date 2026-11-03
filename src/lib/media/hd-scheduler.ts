@@ -5,6 +5,7 @@ import { atomicHdJson, hdDirectory, hdRequestIdentity, hdSource, readHdJob, with
 import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_ENCODER_STRATEGIES, hdEncoderStrategy } from './hd-encoder';
 import { observeOperation } from '@/lib/performance/server-operations';
+import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
 export const HD_SCHEDULER_PROTOCOL = 'hd-user-round-robin-v1';
 type OwnerEvidence = { kind: 'asset' | 'reference' | 'legacy'; id?: string; ownerId?: string; checkedAt: string };
@@ -71,18 +72,36 @@ async function mutate<T>(action: (state: Scheduler) => Promise<T> | T): Promise<
   }
   throw new Error('hd_scheduler_contention');
 }
-async function resolveOwner(job: HdJob): Promise<OwnerEvidence> {
+async function resolveOwner(job: HdJob, owner?: HdRequestContext['owner']): Promise<OwnerEvidence> {
   const source = await hdSource(job.source);
   if (!source || source.version !== job.version) throw new Error('hd_scheduler_source_changed');
-  const assets = await hdReadonlyDb.asset.findMany({ where: { status: 'active', type: 'image' },
-    orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_id: true, original_url: true } })
-    .catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
   const matches = async (url: string) => {
     try { const value = await hdSource(url); return value?.file === source.file && value.version === source.version; }
     catch (error) { if (['source_missing', 'source_unreadable'].includes((error as Error).message)) return false; throw error; }
   };
   const checkedAt = new Date().toISOString();
-  for (const asset of assets) if (await matches(asset.original_url)) return { kind: 'asset', id: asset.id, ownerId: asset.owner_id, checkedAt };
+  if (owner?.kind === 'asset') {
+    const asset = await hdReadonlyDb.asset.findFirst({ where: { id: owner.id, owner_id: owner.ownerId, status: 'active', type: 'image' },
+      select: { id: true, owner_id: true, original_url: true } }).catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
+    if (asset && await matches(asset.original_url)) return { kind: 'asset', id: asset.id, ownerId: asset.owner_id, checkedAt };
+  } else if (owner?.kind === 'reference') {
+    const reference = await hdReadonlyDb.referenceImage.findFirst({ where: { id: owner.id, owner_user_id: owner.ownerId, status: 'active', asset_id: null, album: { status: 'active' } },
+      select: { id: true, owner_user_id: true, url: true } }).catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
+    if (reference && await matches(reference.url)) return { kind: 'reference', id: reference.id, ownerId: reference.owner_user_id, checkedAt };
+  }
+  const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
+  const local = '/uploads/' + path.relative(root, source.file).split(path.sep).join('/');
+  const paths = new Set([siteUploadPathFromUrl(job.source)!, local, local.split('/').map(encodeURIComponent).join('/')]);
+  const bases = siteUploadBaseUrls(), urls = Array.from(paths).flatMap(value => [value, ...bases.map(base => base + value)]);
+  // Normal recovery uses existing URL indexes. Unmatched historical aliases
+  // retain the original complete lookup and asset-before-reference ordering.
+  for (const exact of [true, false]) {
+    const assets = await hdReadonlyDb.asset.findMany({ where: exact ? { original_url: { in: urls } } : { status: 'active', type: 'image' },
+      orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_id: true, original_url: true, status: true, type: true } })
+      .catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
+    const current = exact ? assets.filter(asset => asset.status === 'active' && asset.type === 'image') : assets;
+    for (const asset of current) if (await matches(asset.original_url)) return { kind: 'asset', id: asset.id, ownerId: asset.owner_id, checkedAt };
+  }
   const references = await hdReadonlyDb.referenceImage.findMany({ where: { status: 'active', asset_id: null, album: { status: 'active' } },
     orderBy: [{ created_at: 'asc' }, { id: 'asc' }], select: { id: true, owner_user_id: true, url: true } })
     .catch(() => { throw new Error('hd_scheduler_owner_unavailable'); });
@@ -105,7 +124,7 @@ export async function registerHdScheduling(job: HdJob, context?: HdRequestContex
   // No database operation is permitted inside the short scheduler lease. A
   // successful complete lookup alone can establish/upgrade a legacy bucket.
   const evidence = !prior || prior.ownerEvidence.kind === 'legacy' && Date.now() - Date.parse(prior.ownerEvidence.checkedAt) >= 60000
-    ? await resolveOwner(job) : prior.ownerEvidence;
+    ? await resolveOwner(job, context?.owner) : prior.ownerEvidence;
   await mutate(state => {
     const expected = identity(job), existing = state.entries[job.key];
     if (existing && (existing.sourceVersion !== expected.sourceVersion || existing.strategy !== expected.strategy)) throw new Error('invalid_hd_scheduler_identity');
