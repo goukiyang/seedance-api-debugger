@@ -11,13 +11,13 @@ export function hdEncoderStrategy(value: unknown = HD_LEGACY_ENCODER_STRATEGY): 
   if (!HD_ENCODER_STRATEGIES.includes(value as HdEncoderStrategy)) throw new Error('invalid_hd_encoder_strategy');
   return value as HdEncoderStrategy;
 }
-// Frozen legacy recipes remain readable. Only new, unregistered originals use
-// the reviewed WebP recipe; existing ready/queued jobs retain their strategy.
+// Recovery reads both WebP and legacy jobs while keeping the previous A
+// default for new originals. Registered jobs retain their frozen strategy.
 export function defaultHdEncoderStrategy(): HdEncoderStrategy {
   if (process.env.HD_ENCODER_STRATEGY !== undefined) return hdEncoderStrategy(process.env.HD_ENCODER_STRATEGY);
   if (process.env.NODE_ENV === 'test') return process.env.HD_CANDIDATE_ENCODER_STRATEGY === 'hd-avif-e4-v1'
     ? 'hd-avif-e4-v1' : HD_LEGACY_ENCODER_STRATEGY;
-  return 'hd-webp-q93-e4-v1';
+  return 'hd-avif-q90-e4-v1';
 }
 type HdIntegrityCheck = { expected: unknown; actual: unknown; ok: boolean };
 export type HdIntegrity = { version: string; checks: Record<string, HdIntegrityCheck>; failedChecks: string[] };
