@@ -146,6 +146,12 @@ export function readImageView(user: string, identity: string, pair: string, axis
   return { scale: v.scale as number, x: v.x as number, y: v.y as number, mode: v.mode as MediaPreviewZoomMode,
     ...(typeof v.original === 'boolean' ? { original: v.original } : {}) };
 }
+/** The first click and its viewer must start with the same persisted choice. */
+export function readImagePreviewPreferences(user: string, image: ImageComparisonSource, comparison?: ImageComparisonSource | null) {
+  const axis = readComparisonPreferences(user).axis || (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches ? 'vertical' : 'horizontal');
+  const identity = imageSourceIdentity(image), pair = [identity, comparison ? imageSourceIdentity(comparison) : 'single'].sort().join('|');
+  return { axis, original: Boolean(user && readImageView(user, `${identity}:current`, pair, axis)?.original) };
+}
 export function saveImageView(user: string, identity: string, pair: string, axis: string, view: ImageView) {
   if (identity.startsWith('blob:') || identity.startsWith('data:')) return;
   const value = read(`${prefix}:${encodeURIComponent(user)}:views`);

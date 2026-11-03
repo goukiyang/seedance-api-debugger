@@ -36,11 +36,13 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     }
   }
   const descriptorWait: { resolve?: (response: Response) => void } = {};
+  const savedViews = new Map<string, string>();
   let heldDescriptor = '';
   const globals = {
     URL: MemoryURL, URLSearchParams, Blob, Response, Request, Headers, AbortController, AbortSignal, DOMException,
     Image: DecodedImage, Date: Clock, queueMicrotask, console, crypto: webcrypto,
-    navigator: { connection: { saveData: false } }, location: new URL(`${origin}/template-studio`), window: { location: new URL(origin) },
+    navigator: { connection: { saveData: false } }, location: new URL(`${origin}/template-studio`), window: { location: new URL(origin), matchMedia: () => ({ matches: false }) },
+    localStorage: { getItem: (key: string) => savedViews.get(key) || null, setItem: (key: string, value: string) => savedViews.set(key, value) },
     document: { hidden: false, addEventListener: (_name: string, listener: () => void) => listeners.add(listener),
       removeEventListener: (_name: string, listener: () => void) => listeners.delete(listener),
       body: { appendChild: () => {} }, createElement: () => ({ href: '', download: '', rel: '', remove() {}, click() { clicked.push(this.href); } }) },
@@ -72,7 +74,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     },
   };
   const modules = new Map<string, Record<string, any>>();
-  const files = new Set(['src/lib/media/image-preview-session.ts', 'src/lib/media/image-read-session.ts', 'src/lib/media/hd-source-session.ts',
+  const files = new Set(['src/components/ResultImageCover.tsx', 'src/lib/media/image-preview-session.ts', 'src/lib/media/image-read-session.ts', 'src/lib/media/hd-source-session.ts',
     'src/lib/media/hd-display-policy.ts', 'src/lib/media/image-comparison.ts', 'src/lib/media/image-comparison-contract.ts', 'src/lib/media/native-download.ts',
     'src/lib/hooks/use-hd-image-source.ts', 'src/lib/hooks/use-media-preview-state.ts', 'src/lib/media/media-preview-state-contract.ts', 'src/lib/http/json-response.ts']);
   function load(file: string): Record<string, any> {
@@ -80,11 +82,17 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.ok(files.has(file), `unapproved engineering import: ${file}`);
     const exports: Record<string, any> = {}; modules.set(file, exports);
     const require = (name: string) => {
-      if (name === 'react' || name === '@/lib/context/AppSessionContext') return {};
+      if (name === 'react') return { forwardRef: (component: any) => (props: any) => component(props, null),
+        useState: (value: any) => [typeof value === 'function' ? value() : value, () => {}],
+        useRef: (value: any) => ({ current: value }), useCallback: (callback: any) => callback, useEffect: () => {} };
+      if (name === 'react/jsx-runtime') return { jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) };
+      if (name === 'lucide-react' || name === '@/lib/context/AppSessionContext') return {};
+      if (name.endsWith('.module.css')) return { default: {} };
+      if (name === '@/lib/auth/client-session-boundary') return { isClientSessionBlocked: () => false };
       const resolved = name.startsWith('@/') ? `src/${name.slice(2)}` : path.posix.normalize(path.posix.join(path.posix.dirname(file), name));
       return load(`${resolved}.ts`);
     };
-    const output = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+    const output = ts.transpileModule(readFileSync(path.join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX }, fileName: file }).outputText;
     vm.runInNewContext(output, { ...globals, exports, require }, { filename: file });
     return exports;
   }
@@ -118,6 +126,38 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   const hdSource = (id: string) => `/api/image-studio/assets/${id}?hd=1&hd-version=source-v1`;
   const proof = { sourceVersion: 'source-v1', bytes: 4, mime: 'image/avif', variant: 'hd' as const, policy: 'hd-f-v1' as const };
   try {
+    const preferenceImage = { src: '/api/image-studio/assets/preference', alt: 'result' };
+    const preferenceIdentity = sources.imageSourceIdentity(preferenceImage), preferencePair = [preferenceIdentity, 'single'].sort().join('|');
+    sources.saveComparisonPreferences('preference-owner', { axis: 'vertical', linked: false });
+    sources.saveImageView('preference-owner', `${preferenceIdentity}:current`, preferencePair, 'vertical', { scale: 1, x: 0, y: 0, mode: 'fit', original: true });
+    const preferences = sources.readImagePreviewPreferences('preference-owner', preferenceImage);
+    assert.equal(preferences.axis, 'vertical'); assert.equal(preferences.original, true);
+    assert.equal(sources.readImagePreviewPreferences('other-owner', preferenceImage).original, false, 'saved image modes stay account scoped');
+    assert.equal(sources.readImagePreviewPreferences('preference-owner', { ...preferenceImage, src: '/api/image-studio/assets/another-image' }).original, false);
+    checks.push('first_click_and_viewer_share_account_scoped_image_preference');
+
+    // Exercise the actual autosave callback with a stale restored view and a
+    // newer explicit HD selection. Closing must not restore the old raw mode.
+    const viewerFile = ts.createSourceFile('ZoomableImagePreview.tsx', readFileSync(path.join(root, 'src/components/ZoomableImagePreview.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let autosave: ts.Expression | undefined;
+    const findAutosave = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && node.name.getText(viewerFile) === 'flush' && node.initializer && ts.isCallExpression(node.initializer)) autosave = node.initializer.arguments[0];
+      ts.forEachChild(node, findAutosave);
+    };
+    findAutosave(viewerFile); assert.ok(autosave, 'the actual preview autosave callback exists');
+    const callback = ts.transpileModule(`(${autosave.getText(viewerFile)})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+    vm.runInNewContext(callback, { configRef: { current: { owner: 'preference-owner', pair: preferencePair, axis: 'vertical', linked: false,
+      originals: { [`${preferenceIdentity}:current`]: false } } },
+      sceneRef: { current: { initializedOwner: 'preference-owner', currentImage: preferenceImage, comparisonImage: null } },
+      viewsRef: { current: { [`${preferenceIdentity}:current`]: { scale: 1, x: 0, y: 0, mode: 'fit', original: true } } },
+      safeSideRef: { current: 'current' }, selectionWriteGuard: { current: { phase: 'dormant' } }, sides: ['current', 'comparison'],
+      viewIdentity: (side: string, image: typeof preferenceImage) => `${sources.imageSourceIdentity(image)}:${side}`,
+      imageSourceIdentity: sources.imageSourceIdentity, saveComparisonPreferences: sources.saveComparisonPreferences, saveImageView: sources.saveImageView,
+    });
+    assert.equal(sources.readImagePreviewPreferences('preference-owner', preferenceImage).original, false,
+      'autosave must preserve the latest explicit HD choice over a stale restored view');
+    checks.push('autosave_does_not_overwrite_latest_image_mode');
+
     reset(); heldDescriptor = 'cold-ready';
     const coldReady = mount('cold-ready'); await flush();
     assert.equal(coldReady.getSnapshot().displayKind, 'preview'); noOriginal();
@@ -144,6 +184,41 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(requests.filter(request => request.variant === 'hd').length, 0,
       'A saved original preference must not start a separate HD body during handoff');
     checks.push('first_confirmation_adopts_actual_original_preference');
+
+    // Invoke the real card's event handlers with the actual shared read modules.
+    // The 500ms double-click decision must overlap the selected image transfer.
+    for (const original of [false, true]) {
+      reset();
+      const Card = load('src/components/ResultImageCover.tsx').ResultImageCover;
+      let opened = 0, quickUsed = 0;
+      const card = Card({ src: '/thumbnail', alt: 'result', selected: false, applied: false, onSelect() {},
+        onPreview(handle: import('../src/lib/media/image-preview-session').ImagePreviewPreparation) {
+          opened++; releases.push(handle.subscribe(() => {})); handle.release();
+          assert.equal(handle.getSnapshot().result.decoded, true, 'the transferred first-click lease is already decoded');
+        }, onQuickUse() { quickUsed++; }, previewSource: { account, source: '/api/image-studio/assets/first-click', original } });
+      const click = (detail: number) => ({ defaultPrevented: false, button: 0, detail, ctrlKey: false,
+        currentTarget: { querySelector: () => ({ complete: true, naturalWidth: 640 }) }, stopPropagation() {}, preventDefault() {} });
+      card.props.onClick(click(1)); await flush();
+      assert.equal(opened, 0, 'the modal still respects double-click timing');
+      assert.equal(requests.filter(request => request.variant === (original ? 'original' : 'hd')).length, 1,
+        'the actual selected full representation starts before the 500ms decision');
+      assert.equal(requests.filter(request => request.variant === (original ? 'hd' : 'original')).length, 0,
+        'the other full representation must not start');
+      await advance();
+      assert.equal(opened, 1); assert.equal(quickUsed, 0);
+      assert.equal(requests.filter(request => request.variant === (original ? 'original' : 'hd')).length, 1,
+        'handoff keeps the same first-click transfer');
+      checks.push(original ? 'first_click_original_choice_starts_once_before_modal' : 'first_click_hd_starts_once_before_modal');
+
+      reset(); opened = 0;
+      const double = Card({ src: '/thumbnail', alt: 'result', selected: false, applied: false, onSelect() {},
+        onPreview() { opened++; }, onQuickUse() { quickUsed++; },
+        previewSource: { account, source: '/api/image-studio/assets/double-click', original } });
+      double.props.onClick(click(1)); double.props.onClick(click(2)); double.props.onDoubleClick(click(2)); await flush();
+      assert.equal(opened, 0); assert.equal(quickUsed, 1);
+      assert.equal(timers.size, 0, 'double-click releases the pending modal and all read polling');
+    }
+    checks.push('double_click_still_cancels_preview_and_recovers_input');
 
     reset();
     const workPreview = preview.prepareImagePreview({ account, source: '/api/works/work-a/media?version=work-v1&variant=detail' });

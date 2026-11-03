@@ -25,7 +25,7 @@ import { ImageComparisonPicker } from './ImageComparisonPicker';
 import {
   comparisonResolveFailure, fittedImageView, imageSourceIdentity,
   imageDisplaySource as displaySource, sourcePickerKey, resolveComparisonImage, comparisonImageChange, legacyImageSourceIdentity,
-  readComparisonPreferences, saveComparisonPreferences, readImageView, saveImageView,
+  readComparisonPreferences, saveComparisonPreferences, readImageView, readImagePreviewPreferences, saveImageView,
   readComparisonSelection, saveComparisonSelection,
   ComparisonResolveError, type ComparisonResolveFailureKind, type ComparisonSelectionRecord, type ImageComparisonSource, type ImageView,
 } from '@/lib/media/image-comparison';
@@ -293,7 +293,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const sideLabel = (side: Side) => sources[side]?.role === 'generated' ? '生成图' : sources[side]?.role === 'original' ? '原图' : sources[side]?.role === 'reference' ? '参考图' : side === 'current' ? '当前图' : '对比图';
   const sourcesRef = useRef(sources); sourcesRef.current = sources;
   const [comparisonMode, setComparisonMode] = useState(false), [linked, setLinked] = useState(false);
-  const [axis, setAxis] = useState<'horizontal' | 'vertical'>('horizontal'), [activeSide, setActiveSide] = useState<Side>('current');
+  const [axis, setAxis] = useState<'horizontal' | 'vertical'>(() => readImagePreviewPreferences(owner, incoming, comparison).axis), [activeSide, setActiveSide] = useState<Side>('current');
   const [pickerSide, setPickerSide] = useState<Side | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null), compareToggleRef = useRef<HTMLButtonElement | null>(null);
   const requests = useRef<Partial<Record<Side, ImageRequest>>>({}), sequence = useRef(0);
@@ -373,9 +373,13 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
   const selectionWriteGuard = useRef<SelectionWriteGuard>({ context: selectionContext, phase: 'pending' });
   if (selectionWriteGuard.current.context !== selectionContext) selectionWriteGuard.current = { context: selectionContext, phase: 'pending' };
   const pair = [identity(currentImage), comparisonImage ? identity(comparisonImage) : 'single'].sort().join('|');
+  const usesOriginal = (side: Side, image: ImageComparisonSource) => originals[viewIdentity(side, image)]
+    ?? (side === 'current' && preparation?.account === account && preparation.source === image.src
+      && preparation.sourceVersion === (image.version || '') && preparation.previewOnly === Boolean(previewOnly || image.previewOnly) && preparation.isCurrent()
+      ? preparation.original : readImageView(owner, viewIdentity(side, image), pair, axis)?.original ?? false);
   const legacyState = useMediaPreviewState(previewKey, contentKey, src);
-  const configRef = useRef({ linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext });
-  configRef.current = { linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext };
+  const configRef = useRef({ linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext, originals });
+  configRef.current = { linked, comparisonMode, axis, owner, pair, selectionAnchor, selectionContext, originals };
 
   const beginComparisonFeedback = useCallback(() => {
     const epoch = ++comparisonFeedbackEpoch.current;
@@ -698,7 +702,8 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
     saveComparisonPreferences(config.owner, { linked: config.linked, axis: config.axis });
     for (const side of sides) {
       const image = side === 'current' ? scene.currentImage : scene.comparisonImage;
-      if (!image) continue; const id = viewIdentity(side, image), view = viewsRef.current[id]; if (!view) continue;
+      if (!image) continue; const id = viewIdentity(side, image), savedView = viewsRef.current[id]; if (!savedView) continue;
+      const view = { ...savedView, original: config.originals[id] ?? savedView.original };
       saveImageView(config.owner, id, config.pair.includes('blob:') ? 'session' : config.pair, config.axis, view);
       if (side === safeSideRef.current) saveImageView(config.owner, imageSourceIdentity(image), config.pair.includes('blob:') ? 'session' : config.pair, config.axis, view);
     }
@@ -707,7 +712,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       saveComparisonSelection(config.owner, config.selectionAnchor, scene.currentImage, scene.comparisonImage, scene.comparisonMode);
     }
   }, []);
-  useEffect(() => { const timer = window.setTimeout(flush, 250); return () => window.clearTimeout(timer); }, [views, linked, axis, currentImage, comparisonImage, comparisonMode, initializedOwner, flush]);
+  useEffect(() => { const timer = window.setTimeout(flush, 250); return () => window.clearTimeout(timer); }, [views, originals, linked, axis, currentImage, comparisonImage, comparisonMode, initializedOwner, flush]);
   useEffect(() => {
     const visibility = () => { if (document.visibilityState === 'hidden') flush(); };
     window.addEventListener('pagehide', flush); document.addEventListener('visibilitychange', visibility);
@@ -972,7 +977,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       {image && (() => {
         const id = identity(image), view = views[viewIdentity(side, image)] || fittedImageView, base = baseSize(side, image);
         const dimensionsKnown = Boolean(thumbnailFrames[id] || sizes[id] || image.width && image.height);
-        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}:${originals[viewIdentity(side, image)] === undefined ? 'auto' : originals[viewIdentity(side, image)] ? 'original' : 'hd'}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly || image.previewOnly} original={!previewOnly && !image.previewOnly && (originals[viewIdentity(side, image)] ?? readImageView(owner, viewIdentity(side, image), pair, axis)?.original ?? false)}
+        return <PreviewImage key={`${id}:${image.src}:${image.version || ''}:${originals[viewIdentity(side, image)] === undefined ? 'auto' : originals[viewIdentity(side, image)] ? 'original' : 'hd'}`} src={image.src} thumbnailSrc={image.thumbnailSrc} version={image.version} alt={sideLabel(side)} previewOnly={previewOnly || image.previewOnly} original={!previewOnly && !image.previewOnly && usesOriginal(side, image)}
           preparation={side === 'current' && preparation?.source === image.src && preparation.sourceVersion === (image.version || '') ? preparation : internalPreparations.current[side]}
           localFrame={localFrame?.url === image.src ? localFrame : undefined}
           className={styles.compareImage}
@@ -983,7 +988,7 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
       })()}
     </div>;
   }
-  const activeOriginal = originals[viewIdentity(safeSide, selectedImage)] ?? readImageView(owner, viewIdentity(safeSide, selectedImage), pair, axis)?.original ?? false;
+  const activeOriginal = usesOriginal(safeSide, selectedImage);
   const candidateDecoded = decodedImages[viewIdentity(safeSide, selectedImage)];
   const decoded = account && candidateDecoded?.account === account ? candidateDecoded : undefined;
   const copySource = !selectedPreviewOnly && decoded?.fullSize ? decoded.source : '';

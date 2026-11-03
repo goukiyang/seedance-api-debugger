@@ -81,7 +81,12 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
       if (!active || isClientSessionBlocked()) { cancelPreview(); return; }
       if (event.detail > 1) { cancelPreview(); return; }
       cancelPreview();
-      if (previewSource) preparation.current = prepareImagePreview({ ...previewSource, intent: 'prepare' });
+      if (previewSource) {
+        preparation.current = prepareImagePreview({ ...previewSource, intent: 'prepare' });
+        // Read the chosen representation while deciding single/double click.
+        // The viewer adopts this lease; double click still cancels it below.
+        preparation.current.confirmOpen();
+      }
       try {
         onSelect();
         const image = event.currentTarget.querySelector('img');

@@ -20,6 +20,7 @@ import { ResultImageContextMenu, type ResultImageContextMenuItem } from './Resul
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { prepareImagePreview, type ImagePreviewPreparation, type ImagePreviewPreparationOptions } from '@/lib/media/image-preview-session';
+import { readImagePreviewPreferences } from '@/lib/media/image-comparison';
 import { TaskNotice } from './TaskNotice';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import type { StudioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
@@ -56,8 +57,9 @@ type ResultFeedback = ImageResultOperation & { id: string; busy: boolean; anchor
 
 type PreviewPreparation = { scope: string; itemId: string; handle: ImagePreviewPreparation };
 
-function previewPreparationOptions(item: GeneratedImageResult, account: string): ImagePreviewPreparationOptions | null {
-  return item.media?.src ? { account, source: item.media.src, sourceVersion: item.media.sourceVersion, previewOnly: Boolean(item.viewOnly || item.media.previewOnly) } : null;
+function previewPreparationOptions(item: GeneratedImageResult, account: string, owner: string): ImagePreviewPreparationOptions | null {
+  return item.media?.src ? { account, source: item.media.src, sourceVersion: item.media.sourceVersion, previewOnly: Boolean(item.viewOnly || item.media.previewOnly),
+    original: readImagePreviewPreferences(owner, item.media, item.media.comparison).original } : null;
 }
 
 function preparationMatches(handle: ImagePreviewPreparation, options: ImagePreviewPreparationOptions) {
@@ -160,7 +162,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
   const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
     secondaryAction={renderReactionAction ? null : undefined} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
-  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={prepared => changePreview(item, true, prepared)} previewSource={previewAccount ? previewPreparationOptions(item, previewAccount) || undefined : undefined} onViewed={item.onViewed} active={visible && Boolean(previewAccount)} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
+  const cover = item.media ? <ResultImageCover key={`${scope}:${item.id}`} src={item.media.thumbnailSrc || item.media.src} alt={item.label} selected={currentSelection === item.id} applied={Boolean(item.applied)} onSelect={() => select(item)} onPreview={prepared => changePreview(item, true, prepared)} previewSource={previewAccount ? previewPreparationOptions(item, previewAccount, user?.id || '') || undefined : undefined} onViewed={item.onViewed} active={visible && Boolean(previewAccount)} onQuickUse={onQuickUse && !item.viewOnly && (!contextActionsEnabled || !readOnly) ? () => onQuickUse(item) : undefined} loadingOverlay={waitDisplay?.finishing ? <span aria-hidden="true" /> : waitDisplay ? <ImageGenerationWaiting display={waitDisplay} visible={visible} loadingImage /> : undefined}
     contextMenuEnabled={contextActionsEnabled} menuOpen={menuOpen && menuActive} recoverFromThumbnailError={compactInformation} cancelPreviewRef={cancelPreviewRef} />
     : <div className={`${styles.pending}${item.generationWait && item.pending ? ` ${styles.generationPending}` : ' sd2-loading-surface'}`} data-busy={item.pending || undefined}
       data-result-choice={onSelect ? '' : undefined} role={onSelect || resultMenuEnabled ? 'button' : undefined} tabIndex={onSelect || resultMenuEnabled ? 0 : undefined} aria-label={onSelect ? `选择${item.label}` : resultMenuEnabled ? `${item.label}，图片操作` : undefined} aria-pressed={onSelect ? currentSelection === item.id : undefined}
@@ -258,8 +260,8 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const pendingOperation = useRef(false);
   const alive = useRef(true);
   const previewTrigger = useRef<HTMLElement | null>(null);
-  const previewContext = useRef({ scope, account: previewAccount, allowed: previewSessionAllowed, visible, items });
-  previewContext.current = { scope, account: previewAccount, allowed: previewSessionAllowed, visible, items };
+  const previewContext = useRef({ scope, account: previewAccount, owner: user?.id || '', allowed: previewSessionAllowed, visible, items });
+  previewContext.current = { scope, account: previewAccount, owner: user?.id || '', allowed: previewSessionAllowed, visible, items };
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; previewPreparationRef.current?.handle.release(); previewPreparationRef.current = null; };
@@ -329,8 +331,8 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
     let nextPreparation: PreviewPreparation | null = null;
     if (item) {
       const currentItem = context.items.find(value => value.id === item.id);
-      const options = currentItem && previewPreparationOptions(currentItem, context.account);
-      const requested = previewPreparationOptions(item, context.account);
+      const options = currentItem && previewPreparationOptions(currentItem, context.account, context.owner);
+      const requested = previewPreparationOptions(item, context.account, context.owner);
       if (!context.allowed || !context.visible || isClientSessionBlocked() || !options || !requested
         || options.source !== requested.source || options.sourceVersion !== requested.sourceVersion || options.previewOnly !== requested.previewOnly
         || prepared && !preparationMatches(prepared, options)) { prepared?.release(); return; }
@@ -359,7 +361,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
       requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); });
     }
   }, [activePreview, onPreviewChange, onSelect, pages, previewAccount, scope]);
-  const previewOptions = preview && previewPreparationOptions(preview, previewAccount);
+  const previewOptions = preview && previewPreparationOptions(preview, previewAccount, user?.id || '');
   const currentPreparation = previewPreparation?.scope === scope && previewPreparation.itemId === preview?.id
     && previewOptions && preparationMatches(previewPreparation.handle, previewOptions) ? previewPreparation.handle : undefined;
   useEffect(() => {

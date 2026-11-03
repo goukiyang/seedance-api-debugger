@@ -145,6 +145,7 @@ const results = load(resultsSource, {
   '@/lib/context/AppSessionContext': { useAppSession: () => ({ user: { id: 'fixture-user', role: 'admin' }, hasLoadedUser: true, sessionChanged: false }) },
   '@/lib/auth/client-session-boundary': { isClientSessionBlocked: () => false },
   '@/lib/media/image-preview-session': { prepareImagePreview: () => ({ release() {}, confirmOpen() {} }) },
+  '@/lib/media/image-comparison': { readImagePreviewPreferences: () => ({ axis: 'horizontal', original: false }) },
   './TaskNotice': { TaskNotice: Symbol('notice') },
   './ImageResultOperationFeedback': { ImageResultOperationFeedback: Symbol('operation-feedback') },
   './ImageResultStatusDetails': { ImageResultStatusDetails: StatusDetails },
