@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  */
 type Msg = { sd2b: 1; id?: string; re?: string; type?: string; ok?: boolean; stage?: string; payload?: any; data?: any; error?: string };
 type LogRow = { t: number; text: string; ok: boolean };
+type PanelOperation = { id: string; text: string; submit: boolean; unknown?: boolean };
 
 const PAGE_VERSION = '0.1.0';
 const newId = () => crypto.randomUUID();
@@ -23,7 +24,7 @@ export default function BridgePanelPage() {
   const [submit, setSubmit] = useState(true);
   const [busy, setBusy] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState(false);
-  const originalSend = useRef<{ id: string; text: string; submit: boolean } | null>(null);
+  const originalSend = useRef<PanelOperation | null>(null);
   const draftOwner = useRef('');
   const draftValue = useRef({ text: '', unconfirmed: false });
   const persistDraft = useCallback(() => {
@@ -84,7 +85,7 @@ export default function BridgePanelPage() {
         if (owner !== draftOwner.current) {
           const freshText = !draftOwner.current ? draftValue.current.text : '';
           persistDraft(); draftOwner.current = owner;
-          let saved: { text?: string; unconfirmed?: boolean; operation?: { id: string; text: string; submit: boolean } } = {};
+          let saved: { text?: string; unconfirmed?: boolean; operation?: PanelOperation } = {};
           try { const value = JSON.parse(sessionStorage.getItem(`sd2b-panel-draft:${owner}`) || '{}'); saved = value && typeof value === 'object' ? value : {}; } catch { /* Keep account drafts separate even when browser storage is unavailable. */ }
           const restored = { text: freshText || (typeof saved.text === 'string' ? saved.text : ''), unconfirmed: !freshText && saved.unconfirmed === true };
           const operation = saved.operation;
@@ -103,6 +104,9 @@ export default function BridgePanelPage() {
   async function sendToMj() {
     const t = text.trim();
     if (!t || busy) return;
+    if (!can('task.receipts') && originalSend.current?.unknown && originalSend.current.text === t && originalSend.current.submit === submit) {
+      setUnconfirmed(true); addLog('当前插件不支持按原号核对，请先更新到 0.5.0 或更新版本；未重新发送。', false); return;
+    }
     const owner = draftOwner.current;
     if (!originalSend.current || originalSend.current.text !== t || originalSend.current.submit !== submit) originalSend.current = { id: newId(), text: t, submit };
     draftValue.current.unconfirmed = true; persistDraft();
@@ -118,6 +122,7 @@ export default function BridgePanelPage() {
       setText(current => { const next = current.trim() === t ? '' : current; draftValue.current = { text: next, unconfirmed: false }; persistDraft(); return next; });
     } else {
       const unknown = r.stage === 'unknown' || /待确认|超时|中断/.test(r.error || '');
+      if (originalSend.current) originalSend.current.unknown = unknown;
       setUnconfirmed(unknown); draftValue.current.unconfirmed = unknown; persistDraft();
       addLog(r.error || '操作未完成，原内容已保留', false);
     }
@@ -137,8 +142,8 @@ export default function BridgePanelPage() {
       <textarea style={S.input} value={text} onChange={(e) => { const value = e.target.value; setText(value); setUnconfirmed(false); draftValue.current = { text: value, unconfirmed: false }; persistDraft(); }} placeholder="输入提示词，发送到 Midjourney" rows={5} />
       <div style={S.row}>
         <label style={S.muted}><input type="checkbox" checked={submit} onChange={(e) => setSubmit(e.target.checked)} /> 直接提交</label>
-        <button style={S.btn} disabled={!user || !can('mj.send') || !text.trim() || busy} onClick={sendToMj}>
-          {can('mj.send') ? (busy ? '处理中…' : unconfirmed ? '核对原发送' : submit ? '提交到 MJ' : '仅填入 MJ') : '插件版本不支持'}
+        <button style={S.btn} disabled={!user || !can('mj.send') || !text.trim() || busy || (unconfirmed && !can('task.receipts'))} onClick={sendToMj}>
+          {can('mj.send') ? (busy ? '处理中…' : unconfirmed ? (can('task.receipts') ? '核对原发送' : '请更新插件后核对') : submit ? '提交到 MJ' : '仅填入 MJ') : '插件版本不支持'}
         </button>
       </div>
       <ul style={S.log}>
