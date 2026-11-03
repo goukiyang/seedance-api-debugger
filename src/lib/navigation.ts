@@ -199,6 +199,7 @@ export function isNavItemActive(pathname: string, item: NavItem) {
 export function isNavItemVisible(
   item: NavItem,
   viewer: boolean | (AccountScopedUser & {
+    works_preview?: boolean;
     feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null; tenant_key?: string | null } | null;
   }) | null | undefined,
 ) {
@@ -208,6 +209,7 @@ export function isNavItemVisible(
     : !viewer || isExternalUser(viewer);
 
   if (item.adminOnly && !isAdmin) return false;
+  if (item.href === '/works' && (typeof viewer === 'boolean' || viewer?.works_preview !== true)) return false;
   if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && !hasInternalEmailAuthorization(viewer) && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
   if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;
   return true;

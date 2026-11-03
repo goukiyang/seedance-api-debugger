@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import { AuthError, getSession, type SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { WorkError, type WorkOperationReceipt } from './types';
+import { canUseWorksPreview } from './rollout.server';
 
 export type WorkOperationValue = string | number | boolean | null | string[];
 export type WorkOperationResult = Record<string, WorkOperationValue>;
@@ -160,6 +161,7 @@ export async function readWorkOperation(user: SessionUser, requestIdValue: unkno
 export async function workApiUser(request: Request): Promise<SessionUser> {
   const user = await getSession();
   if (!user) throw new WorkError('请先登录', 401, 'WORK_AUTH_REQUIRED');
+  if (!canUseWorksPreview(user)) throw new WorkError('页面暂不可用', 404, 'WORK_PREVIEW_UNAVAILABLE');
   const expectedUser = request.headers.get('x-app-session-user');
   if (expectedUser && expectedUser !== user.id) {
     throw new WorkError('账号已变化，请回原账号核对原操作', 409, 'WORK_VIEWER_CHANGED');

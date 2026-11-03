@@ -9,18 +9,19 @@ type Audience = 'team' | 'project' | 'private' | null;
 type Projection = { viewerId: string; projectId: string; audience: Audience; projectType?: string; expectedUpdatedAt: string; canManage: boolean };
 export function ProjectWorkAudience({ projectId, initialAudience, ownerId, projectType, compact = false }: { projectId: string; initialAudience?: Audience; ownerId?: string; projectType?: string; compact?: boolean }) {
   const { user, sessionChanged } = useAppSession(), viewerId = user?.id || '';
+  const previewEnabled = user?.works_preview === true;
   const [current, setCurrent] = useState<Projection | null>(null), [chosen, setChosen] = useState<Audience>(initialAudience ?? null), [editing, setEditing] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState(''), [retry, setRetry] = useState(0), [unknown, setUnknown] = useState(false);
   const [requested, setRequested] = useState(false);
   const epoch = useRef(0), lock = useRef(false), draft = useRef(false);
   useEffect(() => {
-    if (!viewerId || !projectId || sessionChanged) return;
+    if (!previewEnabled || !viewerId || !projectId || sessionChanged) return;
     setUnknown(pendingWorkOperations(viewerId).some(item => item.key === `project-audience:${projectId}`));
     if (compact && initialAudience !== undefined && !requested) return;
     const token = ++epoch.current; setCurrent(null); setEditing(requested); setNotice(''); draft.current = false;
     setUnknown(pendingWorkOperations(viewerId).some(item => item.key === `project-audience:${projectId}`));
     void worksRead<Projection>(`/api/works/project-audience?projectId=${encodeURIComponent(projectId)}`, viewerId).then(data => { if (token === epoch.current) { setCurrent(data); setChosen(data.audience); } }).catch(cause => { if (token === epoch.current && (!compact || requested)) setNotice(cause instanceof Error ? cause.message : '范围暂未读取'); });
     return () => { epoch.current++; };
-  }, [projectId, viewerId, sessionChanged, retry, compact, initialAudience, requested]);
+  }, [projectId, viewerId, sessionChanged, retry, compact, initialAudience, requested, previewEnabled]);
   async function save(reconcile = false) {
     if (lock.current || !viewerId || sessionChanged || !reconcile && !current) return;
     lock.current = true; setBusy(true); setNotice(''); const token = epoch.current;
@@ -35,7 +36,7 @@ export function ProjectWorkAudience({ projectId, initialAudience, ownerId, proje
       if (cause instanceof WorksClientError && cause.status === 409) { try { const fresh = await worksRead<Projection>(`/api/works/project-audience?projectId=${encodeURIComponent(projectId)}`, viewerId); if (token === epoch.current) { setCurrent(fresh); if (!draft.current) setChosen(fresh.audience); } } catch { /* Keep the submitted choice for a deliberate retry. */ } }
     } finally { lock.current = false; if (token === epoch.current) { setBusy(false); setUnknown(pendingWorkOperations(viewerId).some(item => item.key === `project-audience:${projectId}`)); } }
   }
-  if (!viewerId || sessionChanged) return null;
+  if (!previewEnabled || !viewerId || sessionChanged) return null;
   const audience = current ? current.audience : initialAudience ?? null;
   const type = current?.projectType || projectType;
   return <span className={styles.audience}>

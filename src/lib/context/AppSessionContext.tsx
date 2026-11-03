@@ -13,6 +13,7 @@ import boundaryStyles from './AppSessionBoundary.module.css';
 
 export interface AppSessionUser {
   id: string;
+  works_preview?: boolean;
   name: string | null;
   username: string | null;
   email: string | null;

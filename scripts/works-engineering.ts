@@ -87,6 +87,24 @@ db.close()
     const { readWorkOperation } = await import('../src/lib/works/operations');
     const { processWorksRegistrationPass } = await import('../src/lib/works/ingestion');
     const { setWorksControl, freezeWorkSourcePolicy } = await import('../src/lib/works/source-policy');
+    const { canUseWorksPreview } = await import('../src/lib/works/rollout.server');
+    const { isNavItemVisible } = await import('../src/lib/navigation');
+    const previewActor = { id: 'synthetic-preview-owner', account_type: 'internal' };
+    delete process.env.WORKS_PREVIEW_USER_ID;
+    assert.equal(canUseWorksPreview(previewActor), false);
+    process.env.WORKS_PREVIEW_USER_ID = previewActor.id;
+    assert.equal(canUseWorksPreview(previewActor), true);
+    assert.equal(canUseWorksPreview(null), false);
+    assert.equal(canUseWorksPreview({ ...previewActor, id: 'different-admin' }), false);
+    assert.equal(canUseWorksPreview({ ...previewActor, id: previewActor.id + '-suffix' }), false);
+    assert.equal(canUseWorksPreview({ ...previewActor, account_type: 'external' }), false);
+    const previewNav = { label: '作品广场', href: '/works', externalHidden: true };
+    assert.equal(isNavItemVisible(previewNav, true), false);
+    assert.equal(isNavItemVisible(previewNav, { role: 'admin', account_type: 'internal' }), false);
+    assert.equal(isNavItemVisible(previewNav, { role: 'admin', account_type: 'internal', works_preview: true }), true);
+    assert.equal(isNavItemVisible({ label: '资产', href: '/assets' }, { role: 'user', account_type: 'internal' }), true);
+    delete process.env.WORKS_PREVIEW_USER_ID;
+    metrics.previewRollout = { exactAccountOnly: true, unsetClosed: true, otherAdminDenied: true, externalDenied: true, navigationCapabilityRequired: true };
     const actor = async (id: string, accountType = 'internal', feishu = true, role = 'user') => {
       const user = await database.user.create({ data: { id, name: id === 'owner' ? 'owner@example.invalid' : '同事', username: `fixture-${id}`,
         email: `${id}@example.invalid`, password_hash: 'synthetic-not-a-credential', account_type: accountType, role,

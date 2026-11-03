@@ -5,6 +5,7 @@ import { getSession } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
 import { WorkError } from '@/lib/works/types';
 import { worksSchemaReady } from '@/lib/works/source-policy';
+import { canUseWorksPreview } from '@/lib/works/rollout.server';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) throw new WorkError('请先登录', 401, 'WORKS_UNAUTHENTICATED');
+    if (!canUseWorksPreview(user)) throw new WorkError('页面暂不可用', 404, 'WORK_PREVIEW_UNAVAILABLE');
     if (!await worksSchemaReady()) throw new WorkError('作品功能正在准备', 503, 'WORKS_SCHEMA_UNAVAILABLE');
     const requestId = request.nextUrl.searchParams.get('requestId');
     if (requestId) {
@@ -43,6 +45,7 @@ export async function POST(request: NextRequest) {
   try {
     const user = await getSession();
     if (!user) throw new WorkError('请先登录', 401, 'WORKS_UNAUTHENTICATED');
+    if (!canUseWorksPreview(user)) throw new WorkError('页面暂不可用', 404, 'WORK_PREVIEW_UNAVAILABLE');
     const body = await request.json();
     if (body.viewerId !== user.id || request.headers.get('x-app-session-user') && request.headers.get('x-app-session-user') !== user.id) throw new WorkError('账号已变化，请回原账号核对原操作', 409, 'WORKS_ACTOR_CHANGED');
     if (!id(body.projectId) || !uuid(body.requestId) || ![null, 'team', 'project', 'private'].includes(body.audience)
