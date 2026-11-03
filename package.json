@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.129.0+works-preview-guard.1",
+  "version": "0.129.1",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",

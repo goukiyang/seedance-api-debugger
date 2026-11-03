@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '团队作品广场', outline: [
-  '图片、视频和多视图成品一起浏览，可筛选、收藏并找回位置',
-  '新成品按项目范围展示，原件和配方继续遵守原权限',
+const notice = { title: '导航与访问体验优化', outline: [
+  '完善首页常用入口和导航展示',
+  '按账号控制试用范围，保留已有作品和操作记录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

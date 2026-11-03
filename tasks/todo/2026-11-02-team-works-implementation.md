@@ -1,5 +1,7 @@
 # Team works catalog
 
+The initial preview is restricted to one existing internal account configured privately as `WORKS_PREVIEW_USER_ID`. An unset value closes the preview. The page, all catalog APIs and media, project audience controls and navigation enforce this scope; the client receives only a display capability. The compatible recovery build retains the same gate. Existing project/source permissions and frozen sharing policies are unchanged.
+
 The works page combines completed images, saved videos and explicitly saved multiview collages. Uploads enter the catalog only after their owner explicitly adds them. Input references and intermediate frames are not automatically published.
 
 The catalog stores output references and small display fields. Logical work IDs remain stable when a saved collage receives a complete new revision. A current version is selected atomically; an older operation cannot silently switch to another file. Favorites and collections reference the logical work, and never duplicate or delete the source media.

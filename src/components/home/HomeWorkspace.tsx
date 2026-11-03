@@ -266,6 +266,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     { title: '我的任务', href: '/tasks', icon: ListTodo, visible: true },
   ];
   const entries = [
+    { title: '作品广场', href: '/works', icon: LayoutTemplate, visible: authorized && user?.works_preview === true, tone: 'mint' },
     { title: '普通视频', href: '/generate', icon: Clapperboard, visible: internal, tone: 'blue' },
     { title: 'IP视频', href: '/generate/ip', icon: Film, visible: internal, tone: 'yellow' },
     { title: '图片生成', href: '/template-studio?type=image', icon: ImageIcon, visible: images, tone: 'mint' },
