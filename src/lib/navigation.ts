@@ -28,6 +28,7 @@ export const shellRoutes = [
   '/template-studio',
   '/notifications',
   '/assets',
+  '/works',
   '/templates',
   '/template-generate',
   '/projects',
@@ -78,6 +79,7 @@ export const topbarQuickItems: NavItem[] = [
   { label: '创作首页', href: '/', match: ['/'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
   { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
+  { label: '作品广场', href: '/works', match: ['/works'], externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
@@ -104,6 +106,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '项目',
     items: [
+      { label: '作品广场', href: '/works', externalHidden: true },
       { label: '我的项目', href: '/projects', prefixMatch: true, externalHidden: true },
       { label: '我的用量', href: '/usage', prefixMatch: true },
       { label: 'IP生成', href: '/generate/ip' },
@@ -196,6 +199,7 @@ export function isNavItemActive(pathname: string, item: NavItem) {
 export function isNavItemVisible(
   item: NavItem,
   viewer: boolean | (AccountScopedUser & {
+    works_preview?: boolean;
     feishu?: { user_id?: string | null; open_id?: string | null; union_id?: string | null; tenant_key?: string | null } | null;
   }) | null | undefined,
 ) {
@@ -205,6 +209,7 @@ export function isNavItemVisible(
     : !viewer || isExternalUser(viewer);
 
   if (item.adminOnly && !isAdmin) return false;
+  if (item.href === '/works' && (typeof viewer === 'boolean' || viewer?.works_preview !== true)) return false;
   if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && !hasInternalEmailAuthorization(viewer) && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
   if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;
   return true;

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { AuthError } from '@/lib/auth/session';
 import type { UsageSourceKind } from './usage-types';
+import { freezeWorkSourcePolicy } from '@/lib/works/source-policy';
 import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 
 export interface UsageAttributionInput {
@@ -28,6 +29,11 @@ export async function recordUsageAttribution(db: AttributionDb, input: UsageAttr
     VALUES (${input.sourceKind}, ${input.sourceId}, ${input.actorUserId}, ${input.ownerUserId},
       ${input.billingSubjectType ?? null}, ${input.billingSubjectId ?? null}, ${input.projectId},
       ${input.occurredAt}, 1, ${input.parentSourceKind ?? null}, ${input.parentSourceId ?? null}, ${input.contextOrigin})`;
+  if ((input.sourceKind === 'image_task' || input.sourceKind === 'video_task') && input.ownerUserId) {
+    await freezeWorkSourcePolicy(db, { sourceKind: input.sourceKind, sourceId: input.sourceId, ownerId: input.ownerUserId,
+      projectId: input.projectId, occurredAt: input.occurredAt, inheritImageBatch: input.contextOrigin === 'image-parent-batch',
+      eligible: !input.parentSourceId && !['image-parent-batch', 'legacy-parent-unassigned', 'frozen-parent', 'enhance-video-create'].includes(input.contextOrigin) });
+  }
 }
 
 export async function inheritUsageAttribution(db: AttributionDb, input: Omit<UsageAttributionInput, 'projectId' | 'contextOrigin'>) {

@@ -60,6 +60,7 @@ async function main() {
     const lockPath = await multiviewWorkLockPath();
     if (!process.argv.includes(lockedFlag)) { await launchLocked(lockPath); return; }
     await assertMultiviewWorkConsumerLock(lockPath);
+    const { processNextWorkPreview } = await import('../src/lib/works/previews');
     const { startMultiviewWorksRuntime } = await import('../src/lib/video/multiview-works-runtime');
     runtime = await startMultiviewWorksRuntime({ lockPath,
       ...(process.env.NODE_ENV === 'production' ? {} : { fixtureRoot: path.join(path.dirname(lockPath), 'multiview-works') }),
@@ -74,11 +75,13 @@ async function main() {
         runtime.assertHealthy();
         const result = await processNextMultiviewWork();
         runtime.assertHealthy();
+        const preview = stopping ? { state: 'paused' } : await processNextWorkPreview().catch(() => ({ state: 'deferred' }));
+        runtime.assertHealthy();
         const message = JSON.stringify(result);
         if (result.state !== 'empty' || message !== lastMessage) console.log('[multiview-works]', message);
         lastMessage = message;
         if (once) break;
-        if (result.state !== 'empty') continue;
+        if (result.state !== 'empty' || !['empty', 'paused', 'deferred'].includes(preview.state)) continue;
       } catch {
         // No user content, source URLs or environment values are included in the service log.
         if (lastMessage !== 'deferred') console.warn('[multiview-works] preparation deferred; recipe and existing output retained');

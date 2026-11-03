@@ -10,6 +10,7 @@ import { MULTIVIEW_PRIVATE_BATCH_SOURCES } from './multiview-private-batch-engin
 import { MULTIVIEW_FLOW_SOURCES } from './multiview-flow-fixture-inputs.mjs';
 import { PRIVATE_PROMPTS_CHECKS, PRIVATE_PROMPTS_SOURCES } from './private-prompts-fixture-inputs.mjs';
 import { ARCH03_CHECKS, ARCH03_SOURCES } from './arch03-fixture-inputs.mjs';
+import { WORKS_CHECKS, WORKS_SOURCES } from './works-fixture-inputs.mjs';
 
 // The build and the protected release controller use the same offline gate.
 // No application database, credentials, provider or browser is accepted here.
@@ -52,6 +53,7 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
 ];
 const fixtures = [
+  { file: 'scripts/works-engineering.ts', schema: 'works-engineering.v1', marker: 'Works engineering receipt: ', checks: WORKS_CHECKS, sources: WORKS_SOURCES },
   { file: 'scripts/arch03-engineering.ts', schema: 'arch03-engineering.v1', marker: 'ARCH03 engineering receipt: ', checks: ARCH03_CHECKS, sources: ARCH03_SOURCES },
   { file: 'scripts/private-prompts-engineering.mjs', schema: 'private-prompts-engineering.v1',
     marker: 'Private prompts engineering receipt: ', checks: PRIVATE_PROMPTS_CHECKS, sources: PRIVATE_PROMPTS_SOURCES },

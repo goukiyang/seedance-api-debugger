@@ -13,6 +13,7 @@ import boundaryStyles from './AppSessionBoundary.module.css';
 
 export interface AppSessionUser {
   id: string;
+  works_preview?: boolean;
   name: string | null;
   username: string | null;
   email: string | null;
@@ -52,6 +53,7 @@ const AppSessionContext = createContext<AppSessionContextValue | null>(null);
 
 function SessionChangedNotice({ reason }: { reason: SessionBoundaryReason }) {
   const notice = clientSessionNotice(reason);
+  const worksRoute = typeof window !== 'undefined' && window.location.pathname === '/works';
   const dialog = useRef<HTMLDialogElement>(null);
   const login = useRef<HTMLButtonElement>(null);
   const { confirm, productDialog } = useProductDialog();
@@ -73,7 +75,7 @@ function SessionChangedNotice({ reason }: { reason: SessionBoundaryReason }) {
     <header className={dialogStyles.header}><h2 id="sd2-session-changed-title">{notice.title}</h2></header>
     <p className={dialogStyles.message}>{notice.message}</p>
     {error && <p className={dialogStyles.message} role="status">{error}</p>}
-    <footer className={dialogStyles.actions}><button ref={login} type="button" className={dialogStyles.primary} onClick={() => void leave()}>前往登录</button></footer>
+    <footer className={dialogStyles.actions}>{worksRoute && <button type="button" className={dialogStyles.secondary} onClick={() => window.location.reload()}>刷新后继续</button>}<button ref={login} type="button" className={dialogStyles.primary} onClick={() => void leave()}>前往登录</button></footer>
   </dialog>{productDialog}</>, document.body);
 }
 

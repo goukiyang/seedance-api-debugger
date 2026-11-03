@@ -9,6 +9,7 @@ import { ProductActionMenu } from './ProductActionMenu';
 import { ProjectManagementDialog, type ProjectManagementRequest } from './ProjectManagementDialog';
 import { useDialogDismiss } from './useDialogDismiss';
 import styles from './ProjectSelector.module.css';
+import { ProjectWorkAudience } from './works/ProjectWorkAudience';
 
 type Option = { value: string; label: string; disabled: boolean; group: string; projectId: string | null };
 /** Original options remain authoritative for each selection's purpose and permissions. */
@@ -99,6 +100,7 @@ export function ProjectSelector({ children, className, style, value, disabled, t
       onKeyDown={event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();if(!open)toggle();}}}>
       <span>{selectedOption?.label || (selected ? `${selected}（当前不可选）` : options[0]?.label || '选择项目')}</span><ChevronDown size={14}/>
     </button>
+    {selectedOption?.projectId && <ProjectWorkAudience key={`${ownerId}:${selectedOption.projectId}`} projectId={selectedOption.projectId} compact />}
     {open && host && createPortal(<div ref={panel} id={`${id}-choices`} role="dialog" aria-label={`${name}选择与管理`} className={styles.popover}
       style={position || {left:0,top:0,visibility:'hidden'}} onKeyDown={event=>{
         if(event.target instanceof HTMLInputElement || !['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
