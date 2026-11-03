@@ -10,12 +10,12 @@
 .learning button:focus-visible, .compare button:focus-visible, .learning select:focus-visible, .compare select:focus-visible, .learning textarea:focus-visible, .learning input:focus-visible, .compare input:focus-visible, .linkedWork a:focus-visible { outline: 2px solid var(--accent, #9b8cff); outline-offset: 3px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .experience { margin: 12px 0; }
-.entry { padding: 14px 0; border-bottom: 1px solid var(--border-color); }
+.entry { padding: 16px 0; border-bottom: 1px solid var(--border-color); }
 .experience > .entry { border-bottom: 0; padding-bottom: 0; }
 .entryMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary, #a6a6b2); }
 .entryMeta button { min-height: 28px; padding: 2px 7px; }
 .body { margin: 8px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.65; }
-.answers { padding: 8px 0 0 18px; margin-top: 8px; }
+.answers { padding: 0 0 0 16px; margin-top: 12px; border-left: 2px solid var(--border-color); }
 .answers .entry { margin-bottom: 8px; }
 .muted { color: var(--text-secondary, #a6a6b2); font-size: 13px; line-height: 1.6; margin: 8px 0; }
 .error { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
@@ -59,3 +59,15 @@
 .extras summary, .timeInput summary { cursor: pointer; min-height: 36px; padding: 8px 0; }
 .extras .derivations { margin-top: 12px; }
 .timeInput { font-size: 12px; color: var(--text-secondary); }
+.entryMeta { flex-wrap: nowrap; min-width: 0; }
+.entryMeta > :first-child { min-width: 0; flex: 1; }
+.entryMeta > time { flex-shrink: 0; }
+.entryActions, .composerActions { display: flex; align-items: center; gap: 8px; }
+.entryActions button { border: 0; background: transparent; color: var(--text-secondary); padding: 4px 6px; min-height: 32px; }
+.entryActions button:hover { color: var(--text-primary); background: var(--bg-panel); }
+.composerActions { margin-top: 8px; }
+.composerActions > button:first-child { display: inline-flex; align-items: center; justify-content: center; }
+.composerEnd { flex: 1; }
+.emojiPanel { width: min(340px, calc(100vw - 24px)); z-index: 2147000000; border-radius: 12px; box-shadow: 0 8px 32px #0003; background: var(--bg-panel); }
+.emojiPanel p { padding: 12px; }
+.editor textarea { min-height: 88px; font-size: 16px; }

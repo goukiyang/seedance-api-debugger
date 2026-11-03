@@ -4,6 +4,7 @@ export type WorkLearningEntry = {
   id: string; workId: string; mediaVersion: string; kind: WorkLearningKind; parentId: string | null;
   body: string; timeSeconds: number | null; revision: number; createdAt: string; updatedAt: string;
   author: { id: string; name: string; avatarUrl?: string | null }; canEdit: boolean;
+  replyCount?: number;
 };
 export type WorkLearningPage = {
   viewerId: string; workId: string; mediaVersion: string;

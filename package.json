@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.130.3",
+  "version": "0.130.4",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -59,7 +59,8 @@
     "yazl": "^3.3.1",
     "@smithy/node-http-handler": "4.6.1",
     "@tanstack/react-virtual": "3.14.25",
-    "@tanstack/virtual-core": "3.19.10"
+    "@tanstack/virtual-core": "3.19.10",
+    "emoji-picker-react": "5.1.4"
   },
   "devDependencies": {
     "@types/node": "^20",

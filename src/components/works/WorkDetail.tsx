@@ -172,7 +172,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, playback, onCl
               {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键复用'}</button>}
             </div>
             {notice && <p className={styles.notice} role="status">{notice}{notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>}</p>}
-            <WorkLearning work={work} viewerId={viewerId} onOpenWork={onOpen} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />
+            <WorkLearning work={work} viewerId={viewerId} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />
             <details className={styles.metadata}><summary>作品信息与操作</summary>
               {work.title && <p>{work.title}</p>}
               <p>{workAudienceLabels[work.audience]}{work.width && work.height ? ` · ${work.width} × ${work.height}` : ''}</p>

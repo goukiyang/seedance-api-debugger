@@ -83,6 +83,12 @@ export async function readWorkLearning(user: SessionUser, workId: string, params
       tx.workLearningEntry.findMany({ where, orderBy: [{ created_at: parentId ? 'asc' : 'desc' }, { id: parentId ? 'asc' : 'desc' }], take: 21 }),
     ]);
     const projected = await projectEntries(tx, [...(experience ? [experience] : []), ...rows.slice(0, 20)], user.id);
+    if (!parentId && rows.length) {
+      const counts = await tx.workLearningEntry.groupBy({ by: ['parent_id'], where: { work_id: workId, media_version_id: expected,
+        kind: 'answer', removed_at: null, parent_id: { in: rows.slice(0, 20).map(row => row.id) } }, _count: { _all: true } });
+      const byParent = new Map(counts.map(row => [row.parent_id, row._count._all]));
+      for (const entry of projected) if (entry.kind === 'question') entry.replyCount = byParent.get(entry.id) || 0;
+    }
     return { viewerId: user.id, workId, mediaVersion: expected, experience: experience ? projected[0] : null,
       items: experience ? projected.slice(1) : projected, nextCursor: rows.length > 20 ? cursorFor(rows[19]) : null };
   }, { timeout: 15000 });

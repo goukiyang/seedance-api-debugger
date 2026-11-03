@@ -169,7 +169,7 @@ type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: str
 type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior; expandParents?: boolean; recordUse?: boolean; forCoverEditor?: boolean; explicitSelection?: boolean };
 type PersonalStudioOverrides = Partial<Pick<StudioModule, 'prompt' | 'model' | 'quality' | 'resolution' | 'count' | 'aspectRatio'>>;
 type SharedStudioView = SharedStudioLiveDTO;
-type StudioNavigationEntry = Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId' | 'sourcePresetShared'> & { deletion?: StudioDeletionTarget; sharedLive?: Pick<SharedStudioView, 'intent' | 'mode' | 'available' | 'sourceRevision' | 'reasonCode' | 'capabilities'> | null; objectKind?: SharedStudioStateProjection['objectKind']; canManageGroup?: boolean; coverEditable?: boolean; presetId?: string; banner?: UploadedAssetPayload | null; fixedCover?: ModuleCoverDTO | null; shared?: boolean };
+type StudioNavigationEntry = Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId' | 'sourcePresetShared'> & { deletion?: StudioDeletionTarget; sharedLive?: Pick<SharedStudioView, 'intent' | 'mode' | 'methodDraft' | 'available' | 'sourceRevision' | 'reasonCode' | 'capabilities'> | null; objectKind?: SharedStudioStateProjection['objectKind']; canManageGroup?: boolean; coverEditable?: boolean; presetId?: string; banner?: UploadedAssetPayload | null; fixedCover?: ModuleCoverDTO | null; shared?: boolean };
 function galleryEntryKey(entry: { id: string; presetId?: string; sharedLive?: { intent: SharedStudioIntent } | null }) {
   const presetId = entry.presetId || entry.sharedLive?.intent.presetId;
   return presetId ? `preset:${presetId}` : `module:${entry.id}`;
@@ -743,7 +743,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
   }, [hydrateModules, modules, templateWorkbench, userId, navigationVisibility.ready, hiddenNavigationIds]);
   async function openSharedPreset(presetId: string, options: ModuleNavigationOptions = {}) {
-    const installed = modules.find(item => item.sharedLive?.intent.presetId === presetId);
+    const canonical = directory.find(item => item.sharedLive?.intent.presetId === presetId && item.sharedLive.mode === 'publisher')
+      || directory.find(item => item.sharedLive?.intent.presetId === presetId && !item.sharedLive.methodDraft && !item.id.startsWith('shared:'));
+    const installed = canonical ? modules.find(item => item.id === canonical.id) : modules.find(item => item.sharedLive?.intent.presetId === presetId && !item.sharedLive.methodDraft);
+    if (canonical && !installed && !options.forCoverEditor) { navigateToModule(canonical.groupName || '未分组', canonical.id, options); return true; }
     if (installed) {
       if (options.forCoverEditor) {
         if (installed.coverEditable !== true) { setError('当前模板封面不可编辑，请重新读取权限'); return false; }
@@ -755,7 +758,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       return true;
     }
     if (options.explicitSelection !== true) {
-      const existing = directory.find(item => (item.presetId === presetId || item.sharedLive?.intent.presetId === presetId) && !item.id.startsWith('shared:'));
+      const existing = directory.find(item => (item.presetId === presetId || item.sharedLive?.intent.presetId === presetId) && !item.sharedLive?.methodDraft && !item.id.startsWith('shared:'));
       if (existing) { navigateToModule(existing.groupName || '未分组', existing.id, options); return true; }
     }
     if (sharedOpenLock.current) return;
@@ -4205,6 +4208,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
     {!draftLoaded && <p role="status">正在恢复工作区…</p>}
     <div hidden={!draftLoaded}>
+    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 这里记录本次复用后生成的作品。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>查看原模板作品</a></p>}
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionReady ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
