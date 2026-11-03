@@ -109,6 +109,7 @@ export default function BridgePanelPage() {
     }
     const owner = draftOwner.current;
     if (!originalSend.current || originalSend.current.text !== t || originalSend.current.submit !== submit) originalSend.current = { id: newId(), text: t, submit };
+    originalSend.current.unknown = true;
     draftValue.current.unconfirmed = true; persistDraft();
     setBusy(true);
     const r = await call('task.run', { action: 'mj.send', params: { text: t, submit } }, 30000, originalSend.current.id);
