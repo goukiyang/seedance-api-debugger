@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { freezeWorkSourcePolicy } from '@/lib/works/source-policy';
 import { assertUsageProject, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits } from '@/lib/credits/policy';
 import { canUseCompanyTemplates, canViewStudioPreset } from './access';
@@ -371,6 +372,8 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       ...(billingQuote ? { billingMode: billingQuote.mode, billingContracts: billingQuote.contracts } : {}) };
     if (billingQuote?.contracts.some(contract => contract.pricing)) { batch.pricing = true; batch.version = 2; }
     await tx.platformSetting.create({ data: { key: key(ownerId, id, isChannelBatch(batch), batch.pricing), value_json: JSON.stringify(batch), updated_by: ownerId } });
+    await freezeWorkSourcePolicy(tx, { sourceKind: 'image_batch', sourceId: batch.id, ownerId: batch.ownerId,
+      projectId: batch.usageContext?.projectId ?? null, occurredAt: new Date(batch.createdAt) });
     created = true;
   }, { timeout: 15000 });
   if (created) await prepareBatch(ownerId, id);

@@ -103,7 +103,7 @@ export async function createTeamProject(user: SessionUser, body: Record<string, 
       const project = await tx.project.create({ data: {
         name: normalized.input.name!,
         description: typeof normalized.input.description === 'string' ? normalized.input.description : null,
-        type: 'team', visibility: 'private', owner_user_id: user.id, created_by: user.id, status: 'active',
+        type: 'team', visibility: 'private', work_audience: 'team', owner_user_id: user.id, created_by: user.id, status: 'active',
       } });
       projectId = project.id;
       await tx.projectMember.create({ data: { project_id: project.id, user_id: user.id, role: 'project_owner', joined_by: user.id } });

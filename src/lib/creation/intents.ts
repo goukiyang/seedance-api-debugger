@@ -2,6 +2,7 @@ import { assertNoPreparationRejection, originalPreparationRejection } from './pr
 import { writeCreationOperation } from './receipts';
 import type { Prisma, VideoCreationIntent } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { freezeWorkSourcePolicy } from '@/lib/works/source-policy';
 import type { SessionUser } from '@/lib/auth/session';
 import { pricingFingerprint } from '@/lib/pricing/catalog';
 import { quoteVideoPricing, requireVideoPricingRevision, type VideoPricingInput } from '@/lib/pricing/video';
@@ -129,7 +130,12 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
       parent_task_id: parentId, baseline_task_id: spec.baseline_task_id, count: spec.count, payer_kind: context.payer.kind,
       payer_account_id: context.payer.id, input_hash: inputHash, spec_json: JSON.stringify(spec), pricing_revision: quote.revision,
       quote_business_hash: businessHash, state: creationNeedsApproval(context.project.type, spec) ? 'awaiting_approval' : 'ready' };
-    if (!current) return tx.videoCreationIntent.create({ data: { ...data, owner_id: user.id, request_id: requestId } });
+    if (!current) {
+      const created = await tx.videoCreationIntent.create({ data: { ...data, owner_id: user.id, request_id: requestId } });
+      await freezeWorkSourcePolicy(tx, { sourceKind: 'video_intent', sourceId: created.id, ownerId: created.owner_id,
+        projectId: created.project_id, occurredAt: created.created_at });
+      return created;
+    }
     if (current && ['accepted', 'closed', 'batch_active', 'batch_settled'].includes(current.state)) return current;
     if (current.input_hash === inputHash && current.quote_business_hash === businessHash) return current;
     if (!['prepared', 'awaiting_approval', 'ready'].includes(current.state) || current.batch_id || current.accepted_task_id

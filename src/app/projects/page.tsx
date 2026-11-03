@@ -1,4 +1,5 @@
 'use client';
+import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 
 import { forwardRef, Suspense, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
@@ -29,6 +30,7 @@ interface ProjectItem {
   visibility: string;
   status: string;
   owner_user_id: string;
+  work_audience?: null | 'team' | 'project' | 'private';
   updated_at: string;
   my_role: string | null;
   thumbnail_url?: string | null;
@@ -1041,6 +1043,7 @@ function ProjectsPageContent() {
                 </span>
               </Link>
 
+              <ProjectWorkAudience projectId={project.id} initialAudience={project.work_audience} ownerId={project.owner_user_id} projectType={project.type} compact />
               <div className={styles.cardMeta}>
                 <span>{project._count?.tasks ?? 0} 个记录</span>
                 {(project.active_task_count ?? 0) > 0 && <span>{project.active_task_count} 个生成中</span>}

@@ -1,0 +1,2564 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model UsageAttribution {
+  source_kind          String
+  source_id            String
+  actor_user_id        String?
+  owner_user_id        String?
+  billing_subject_type String?
+  billing_subject_id   String?
+  project_id           String?
+  occurred_at          DateTime
+  context_version      Int @default(1)
+  parent_source_kind   String?
+  parent_source_id     String?
+  context_origin       String
+
+  @@id([source_kind, source_id])
+  @@index([owner_user_id, occurred_at])
+  @@index([project_id, occurred_at])
+  @@index([occurred_at])
+}
+
+model VideoTask {
+  id                   String  @id @default(cuid())
+  provider             String
+  model                String
+  generation_mode      String
+  prompt               String
+  source_type          String  @default("web") // web | codex_api
+  source_label         String?
+  source_request_id    String?
+  source_metadata_json String?
+
+  ratio             String?
+  duration          Int?
+  resolution        String?
+  seed              Int?
+  generate_audio    Boolean @default(true)
+  return_last_frame Boolean @default(false)
+  watermark         Boolean @default(false)
+
+  reference_image_urls String?
+  reference_video_urls String?
+  reference_audio_urls String?
+  first_frame_url      String?
+  last_frame_url       String?
+  frame_image_urls     String?
+
+  callback_url            String?
+  execution_expires_after Int?
+
+  local_status          String  @default("draft")
+  provider_task_id      String?
+  is_draft              Boolean @default(false)
+  provider_draft_task_id String?
+  draft_upgrade_mode    String? // draft | draft_upgrade
+  source_draft_task_id  String?
+  draft_contract_version String?
+  provider_status       String?
+  result_video_url      String?
+  result_last_frame_url String?
+  local_video_path      String?
+  public_video_url      String?
+  public_video_storage_provider String?
+  public_video_storage_key      String?
+  public_video_file_size        Int?
+  public_video_cached_at        DateTime?
+  delivery_status       String?
+  delivery_queued_at    DateTime?
+  delivery_started_at   DateTime?
+  delivery_completed_at DateTime?
+  delivery_attempts     Int?
+  delivery_error        String?
+
+  raw_create_response   String?
+  raw_status_response   String?
+  error_message         String?
+  error_code            String?
+  reference_album_ids   String?
+  reference_image_ids   String?
+  params_json           String?
+  reference_images_json String?
+  provider_payload_json String?
+
+  // 关联 workspace 和快照
+  workspace_id String?
+  snapshot_id  String? @unique
+
+  // 用户关联（P0-B）
+  user_id         String?
+  owner_user_id   String?
+  project_id      String?
+  video_card_id   String?
+  video_branch_id String?
+  creation_intent_id String?
+  creation_contract_version Int?
+  derived_from_task_id String?
+  derivation_kind String?
+  lineage_root_task_id String?
+  template_id     String?
+  agent_run_id    String?
+  template_studio_run_id String?
+  template_studio_snapshot_json String?
+  request_fingerprint String?
+  visibility      String  @default("project") // private | project | selected | public
+  version_role    String  @default("normal") // normal | candidate | current_best | final | discarded
+  selected_agent_plan_key String?
+  agent_prompt_snapshot   String?
+  final_prompt_snapshot   String?
+  prompt_user_edited      Boolean @default(false)
+
+  // 产出留存与用户删除（管理员仍可审计）
+  retention_status String    @default("active") // active | user_deleted | admin_hidden | retained
+  user_deleted_at  DateTime?
+  user_deleted_by  String?
+  admin_hidden_at  DateTime?
+  admin_hidden_by  String?
+  restored_at      DateTime?
+  restored_by      String?
+  delete_reason    String?
+
+  // 点数与计费（P0-B）
+  estimated_cost         Float?
+  actual_cost            Float?
+  frozen_cost            Float?
+  refund_amount          Float?
+  credit_freeze_snapshot String?
+  pricing_snapshot       String?
+  pricing_rule_id        String?
+  idempotency_key        String?
+  billing_scope          String  @default("user") // user | project | system
+  billing_account_id     String?
+
+  // 外部成本复盘（真实官方扣费接入前先保存状态与快照，不把点数当现金成本）
+  provider_cost_status            String    @default("not_recorded") // not_recorded | estimated_by_rule | provisional_settled | official_confirmed | reconciled | disputed | unknown
+  provider_cost_snapshot          String?
+  provider_cost_currency          String?
+  provider_estimated_amount_minor Int?
+  provider_rule_amount_minor      Int?
+  provider_official_amount_minor  Int?
+  provider_final_amount_minor     Int?
+  provider_official_amount_micros Int?
+  provider_final_amount_micros    Int?
+  provider_billing_status         String?
+  provider_billing_time           DateTime?
+  provider_usage_snapshot         String?
+  provider_client_request_id      String?
+  provider_cost_confirmed_at      DateTime?
+  provider_cost_reconciled_at     DateTime?
+  cost_allocation_status          String    @default("allocated") // allocated | unallocated | partially_allocated
+
+  workspace              Workspace?           @relation(fields: [workspace_id], references: [id])
+  user                   User?                @relation("VideoTaskUser", fields: [user_id], references: [id])
+  owner                  User?                @relation("VideoTaskOwner", fields: [owner_user_id], references: [id])
+  project                Project?             @relation(fields: [project_id], references: [id])
+  video_card             VideoCard?           @relation("VideoCardTasks", fields: [video_card_id], references: [id], onDelete: SetNull)
+  video_branch           VideoBranch?         @relation(fields: [video_branch_id], references: [id], onDelete: SetNull)
+  source_draft           VideoTask?           @relation("VideoTaskDraftUpgrade", fields: [source_draft_task_id], references: [id], onDelete: SetNull)
+  draft_upgrades         VideoTask[]          @relation("VideoTaskDraftUpgrade")
+  generation_template   GenerationTemplate?  @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  template_studio_run   VideoStudioRun? @relation(fields: [template_studio_run_id], references: [id], onDelete: SetNull)
+  current_best_for_cards VideoCard[]          @relation("VideoCardCurrentBest")
+  final_for_cards        VideoCard[]          @relation("VideoCardFinal")
+  provider_api_requests  ProviderApiRequest[]
+  video_delivery_jobs    VideoDeliveryJob[]
+  cost_ledgers           CostLedger[]
+  cost_allocations       CostAllocation[]
+  approval_records       ApprovalRecord[]
+  approval_usages        ApprovalUsage[]
+  creation_intent        VideoCreationIntent? @relation("VideoIntentTasks", fields: [creation_intent_id], references: [id], onDelete: Restrict)
+  derived_from           VideoTask? @relation("VideoTaskLineageParent", fields: [derived_from_task_id], references: [id], onDelete: Restrict)
+  derived_tasks          VideoTask[] @relation("VideoTaskLineageParent")
+  lineage_root           VideoTask? @relation("VideoTaskLineageRoot", fields: [lineage_root_task_id], references: [id], onDelete: Restrict)
+  lineage_tasks          VideoTask[] @relation("VideoTaskLineageRoot")
+  parent_intents         VideoCreationIntent[] @relation("VideoIntentParent")
+  baseline_intents       VideoCreationIntent[] @relation("VideoIntentBaseline")
+  accepted_intents       VideoCreationIntent[] @relation("VideoIntentAccepted")
+  delivery_roots         VideoDeliverySelection[] @relation("VideoDeliveryRoot")
+  delivery_selections    VideoDeliverySelection[] @relation("VideoDeliverySelected")
+
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  completed_at DateTime?
+
+  @@unique([user_id, idempotency_key])
+  @@index([user_id])
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([video_branch_id])
+  @@index([template_id])
+  @@index([agent_run_id])
+  @@index([template_studio_run_id])
+  @@index([version_role])
+  @@index([source_type])
+  @@index([source_request_id])
+  @@index([local_status])
+  @@index([provider_task_id])
+  @@index([provider_draft_task_id])
+  @@index([source_draft_task_id])
+  @@index([is_draft])
+  @@index([public_video_storage_provider, public_video_storage_key])
+  @@index([delivery_status])
+  @@index([delivery_completed_at])
+  @@index([provider_client_request_id])
+  @@index([provider_cost_status])
+  @@index([retention_status])
+  @@index([user_deleted_at])
+  @@index([creation_intent_id])
+  @@index([lineage_root_task_id, created_at, id])
+  @@index([derived_from_task_id])
+}
+
+// v2 is additive. Legacy tasks and their frozen billing/card contracts remain v1.
+model VideoCreationIntent {
+  id String @id @default(cuid())
+  owner_id String
+  request_id String
+  contract_version Int @default(2)
+  revision Int @default(1)
+  action String
+  entry String
+  project_id String
+  legacy_card_id String?
+  parent_task_id String?
+  baseline_task_id String?
+  batch_id String? @unique
+  count Int @default(1)
+  payer_kind String
+  payer_account_id String
+  input_hash String
+  spec_json String
+  pricing_revision String?
+  quote_business_hash String
+  state String @default("prepared")
+  accepted_task_id String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  owner User @relation("VideoIntentOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  legacy_card VideoCard? @relation(fields: [legacy_card_id], references: [id], onDelete: Restrict)
+  parent_task VideoTask? @relation("VideoIntentParent", fields: [parent_task_id], references: [id], onDelete: Restrict)
+  baseline_task VideoTask? @relation("VideoIntentBaseline", fields: [baseline_task_id], references: [id], onDelete: Restrict)
+  accepted_task VideoTask? @relation("VideoIntentAccepted", fields: [accepted_task_id], references: [id], onDelete: Restrict)
+  tasks VideoTask[] @relation("VideoIntentTasks")
+  batches CanvasVideoBatch[]
+  approvals ApprovalRecord[]
+  usages ApprovalUsage[]
+  @@unique([owner_id, request_id])
+  @@index([project_id, state, created_at])
+}
+
+model VideoDeliverySelection {
+  id String @id @default(cuid())
+  project_id String
+  lineage_root_task_id String
+  owner_id String
+  selected_task_id String?
+  state String @default("open")
+  revision Int @default(0)
+  selected_by String?
+  locked_by String?
+  locked_at DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  project Project @relation(fields: [project_id], references: [id], onDelete: Restrict)
+  owner User @relation("VideoDeliveryOwner", fields: [owner_id], references: [id], onDelete: Restrict)
+  root VideoTask @relation("VideoDeliveryRoot", fields: [lineage_root_task_id], references: [id], onDelete: Restrict)
+  selected VideoTask? @relation("VideoDeliverySelected", fields: [selected_task_id], references: [id], onDelete: Restrict)
+  @@unique([project_id, lineage_root_task_id])
+  @@index([owner_id, updated_at])
+}
+
+model VideoDeliveryJob {
+  id           String    @id @default(cuid())
+  task_id      String    @unique
+  status       String    @default("pending") // pending | running | succeeded | failed
+  priority     Int       @default(0)
+  attempts     Int       @default(0)
+  max_attempts Int       @default(5)
+  run_after    DateTime  @default(now())
+  locked_at    DateTime?
+  locked_by    String?
+  last_error   String?
+  payload_json String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  completed_at DateTime?
+
+  task VideoTask @relation(fields: [task_id], references: [id], onDelete: Cascade)
+
+  @@index([status, run_after, priority])
+  @@index([locked_at])
+  @@index([completed_at])
+}
+
+// ============================================================================
+// 用户与权限系统
+// ============================================================================
+
+model User {
+  content_reactions      ContentReaction[]
+  content_reaction_events ContentReactionEvent[]
+  id                    String    @id @default(cuid())
+  name                  String
+  username              String    @unique
+  email                 String    @unique
+  password_hash         String
+  role                  String    @default("user") // admin | user
+  account_type          String    @default("internal") // internal | external
+  status                String    @default("active") // active | disabled | pending | expired
+  user_profile          String    @default("other") // core_video | core_animation | core_design | noncore_planning | noncore_ops | noncore_pm | other
+  feature_profile_id    String?
+  expires_at            DateTime?
+  mobile                String?
+  avatar_url            String?
+  /// Latest Feishu profile photo; avatar_url follows it only while avatar_source is "feishu".
+  feishu_avatar_url     String?
+  /// "feishu" | "custom" | "initials"
+  avatar_source         String    @default("feishu")
+  custom_avatar_key     String?
+  feishu_user_id        String?   @unique
+  feishu_open_id        String?   @unique
+  feishu_union_id       String?
+  feishu_tenant_key     String?
+  feishu_employee_no    String?
+  feishu_department_ids String?
+  feishu_raw_profile    String?
+  last_feishu_sync_at   DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  last_login_at         DateTime?
+
+  credit_account          CreditAccount?
+  credit_ledger           CreditLedger[]
+  credit_buckets          CreditBucket[]
+  operation_logs          OperationLog[]
+  tasks                   VideoTask[]          @relation("VideoTaskUser")
+  owned_tasks             VideoTask[]          @relation("VideoTaskOwner")
+  video_studio_templates  VideoStudioTemplate[] @relation("VideoStudioTemplateOwner")
+  video_studio_drafts     VideoStudioDraft[]    @relation("VideoStudioDraftOwner")
+  video_studio_runs       VideoStudioRun[]      @relation("VideoStudioRunOwner")
+  owned_video_cards       VideoCard[]          @relation("VideoCardOwner")
+  created_video_cards     VideoCard[]          @relation("VideoCardCreator")
+  sealed_video_cards      VideoCard[]          @relation("VideoCardSealer")
+  reference_albums        ReferenceAlbum[]     @relation("ReferenceAlbumOwner")
+  reference_images        ReferenceImage[]     @relation("ReferenceImageOwner")
+  created_album_shares    AlbumShare[]         @relation("AlbumShareCreator")
+  owned_projects          Project[]            @relation("ProjectOwner")
+  created_projects        Project[]            @relation("ProjectCreator")
+  canvas_documents        CanvasDocument[]     @relation("CanvasDocumentOwner")
+  tool_flows              ToolFlow[]           @relation("ToolFlowOwner")
+  tool_flow_runs          ToolFlowRun[]        @relation("ToolFlowRunOwner")
+  project_memberships     ProjectMember[]      @relation("ProjectMemberUser")
+  joined_project_members  ProjectMember[]      @relation("ProjectMemberJoinedBy")
+  created_project_invites ProjectInvite[]      @relation("ProjectInviteCreatedBy")
+  provider_api_requests   ProviderApiRequest[]
+  cost_ledgers            CostLedger[]
+  cost_allocations        CostAllocation[]
+  content_audit_actions   ContentAuditLog[]    @relation("ContentAuditActor")
+  content_audit_owned     ContentAuditLog[]    @relation("ContentAuditOwner")
+  approval_requests       ApprovalRecord[]     @relation("ApprovalRequester")
+  approval_decisions      ApprovalRecord[]     @relation("ApprovalApprover")
+  approval_usages         ApprovalUsage[]      @relation("ApprovalUsageUser")
+  video_creation_intents  VideoCreationIntent[] @relation("VideoIntentOwner")
+  video_delivery_selections VideoDeliverySelection[] @relation("VideoDeliveryOwner")
+  notification_targets    Notification[]       @relation("NotificationTarget")
+  notification_actors     Notification[]       @relation("NotificationActor")
+  generated_review_cards  ReviewCard[]         @relation("ReviewCardGenerator")
+  feedbacks               Feedback[]
+  preferences             UserPreference[]
+  credit_requests         CreditRequest[] @relation("CreditRequester")
+  credit_decisions        CreditRequest[] @relation("CreditDecisionMaker")
+
+  @@index([username])
+  @@index([email])
+  @@index([account_type])
+  @@index([user_profile])
+  @@index([status])
+  @@index([feishu_union_id])
+  @@index([feishu_tenant_key])
+}
+
+model CreditRequest {
+  id                  String @id @default(cuid())
+  user_id             String
+  approver_id         String
+  pending_key         String? @unique
+  status              String @default("pending")
+  purpose             String
+  available_at_submit Float
+  amount              Int?
+  decision_reason     String?
+  nonce               String
+  proposed_amount     Int?
+  confirmation_nonce  String?
+  confirmation_until  DateTime?
+  applicant_open_id   String
+  approver_open_id    String
+  tenant_key          String
+  app_id              String
+  /// "credits" (积分申请) or "multiview_1080p" (one approval allows one 1080p multiview generation).
+  kind                String @default("credits")
+  expires_at          DateTime?
+  used_at             DateTime?
+  used_request_key    String?
+  created_at          DateTime @default(now())
+  decided_at          DateTime?
+  updated_at          DateTime @updatedAt
+  requester           User @relation("CreditRequester", fields: [user_id], references: [id], onDelete: Restrict)
+  approver            User @relation("CreditDecisionMaker", fields: [approver_id], references: [id], onDelete: Restrict)
+  deliveries          CreditRequestDelivery[]
+  @@index([user_id, created_at])
+  @@index([approver_id, status, created_at])
+  @@index([user_id, kind, status])
+}
+
+model CreditRequestDelivery {
+  id             String @id @default(cuid())
+  request_id     String
+  kind           String
+  status         String @default("pending")
+  payload_json   String
+  attempts       Int @default(0)
+  next_attempt   DateTime @default(now())
+  lease_until    DateTime?
+  lease_token    String?
+  error_code     String?
+  sent_at        DateTime?
+  created_at     DateTime @default(now())
+  request        CreditRequest @relation(fields: [request_id], references: [id], onDelete: Restrict)
+  @@unique([request_id, kind])
+  @@index([status, next_attempt])
+}
+
+model ImageStudioModule {
+  id            String   @id
+  owner_id      String
+  name          String   @default("未命名模块")
+  prompt        String   @default("")
+  context       String   @default("")
+  model         String?
+  quality       String        @default("auto")
+  resolution    String        @default("4K")
+  group_name    String        @default("未分组")
+  banner_asset_id String?
+  prices_json   String?
+  reproduce_task_id String?
+  source_preset_id String?
+  count         Int      @default(1)
+  reference_limit Int    @default(10)
+  aspect_ratio  String   @default("auto")
+  reference_ids String   @default("[]")
+  revision      Int      @default(0)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([owner_id, created_at])
+  @@index([source_preset_id])
+}
+
+model ImageStudioPreset {
+  id            String   @id
+  owner_id      String
+  scope         String   // admin | creator
+  is_shared     Boolean  @default(true)
+  name          String
+  group_name    String   @default("未分组")
+  prompt        String   @default("")
+  context       String   @default("")
+  model         String
+  quality       String   @default("auto")
+  resolution    String   @default("4K")
+  count         Int      @default(1)
+  reference_limit Int    @default(10)
+  aspect_ratio  String   @default("auto")
+  banner_asset_id String?
+  reference_ids String   @default("[]")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([scope, created_at])
+  @@index([owner_id, scope, created_at])
+}
+
+model ImageStudioTask {
+  id             String   @id
+  batch_id       String
+  owner_id       String
+  module_id      String?
+  source_preset_id String?
+  ordinal        Int
+  fingerprint    String
+  prompt         String
+  context        String
+  revision       Int
+  model          String
+  quality        String         @default("auto")
+  provider_cost_usd Float?
+  billing_mode String @default("fixed")
+  billing_status String @default("legacy_unknown")
+  billing_scope String?
+  billing_contract_json String?
+  gateway_request_id String?
+  actual_amount_micros Int?
+  actual_credits Float?
+  billing_deadline DateTime?
+  billing_next_check_at DateTime?
+  billing_attempts Int @default(0)
+  billing_settled_at DateTime?
+  snapshot_json  String?
+  aspect_ratio   String   @default("auto")
+  output_size    String?
+  deleted_at     DateTime?
+  reference_ids  String
+  unit_credits   Float
+  freeze_snapshot String?
+  status         String   @default("queued")
+  lease_token    String?
+  lease_until    DateTime?
+  asset_id       String?
+  tool_flow_run_id String?
+  tool_flow_node_id String?
+  tool_flow_version Int?
+  tool_flow_item_index Int?
+  error          String?
+  usage_json     String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  finished_at    DateTime?
+
+  cost_ledgers CostLedger[]
+  cost_allocations CostAllocation[]
+
+  @@index([owner_id, created_at])
+  @@index([status, created_at])
+  @@index([batch_id, owner_id])
+  @@index([owner_id, module_id, created_at])
+  @@index([source_preset_id, created_at])
+  @@index([tool_flow_run_id, tool_flow_node_id, status])
+  @@index([billing_status, billing_next_check_at])
+  @@index([billing_scope, gateway_request_id])
+}
+
+model MultiviewWork {
+  id                  String   @id @default(cuid())
+  owner_id            String
+  source_task_id      String
+  source_id           String?
+  save_state          String   @default("legacy")
+  write_epoch         Int      @default(0)
+  project_id          String?
+  video_card_id       String?
+  base_key            String?
+  branch_key          String?
+  parent_work_id      String?
+  title               String   @default("3D多视图作品")
+  schema_version      Int      @default(1)
+  revision            Int      @default(1)
+  source_version      String?
+  source_info_json    String?
+  draft_revision      Int      @default(0)
+  recipe_json         String?
+  recipe_hash         String?
+  ready_revision      Int?
+  ready_recipe_json   String?
+  ready_manifest_json String?
+  status              String   @default("waiting_source")
+  removed_at          DateTime?
+  lease_token         String?
+  lease_until         DateTime?
+  attempts            Int      @default(0)
+  next_attempt_at     DateTime @default(now())
+  last_error          String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  mutations MultiviewWorkMutation[]
+
+  @@unique([owner_id, source_task_id, base_key])
+  @@unique([owner_id, branch_key])
+  @@index([owner_id, removed_at, updated_at, id])
+  @@index([status, next_attempt_at, lease_until])
+  @@index([owner_id, source_id])
+}
+
+model MultiviewSource {
+  id             String   @id
+  owner_id       String
+  origin_task_id String
+  source_version String
+  info_json      String
+  file_path      String
+  file_sha256    String
+  file_bytes     Int
+  can_reshare     Boolean  @default(false)
+  created_at     DateTime @default(now())
+
+  @@index([owner_id, created_at])
+}
+
+model MultiviewShare {
+  id                  String   @id
+  owner_id            String
+  work_id             String
+  revision            Int
+  source_task_id      String
+  source_id           String?
+  source_version      String
+  title               String
+  recipe_json         String
+  info_json           String
+  manifest_json       String
+  revoked_at          DateTime?
+  created_at          DateTime @default(now())
+
+  recipients MultiviewShareRecipient[]
+  @@index([owner_id, work_id, revision])
+}
+
+model MultiviewShareRecipient {
+  id             String   @id
+  share_id       String
+  user_id        String
+  generation     String
+  revoked_at     DateTime?
+  created_at     DateTime @default(now())
+  share          MultiviewShare @relation(fields: [share_id], references: [id], onDelete: Restrict)
+
+  @@unique([share_id, user_id])
+  @@index([user_id, revoked_at])
+}
+
+model MultiviewShareMutation {
+  id             String   @id
+  actor_id       String
+  mutation_id    String
+  request_hash   String
+  request_json   String
+  action         String
+  state          String
+  receipt_json   String?
+  staging_path   String?
+  attempts       Int      @default(0)
+  lease_until    DateTime?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  @@unique([actor_id, mutation_id])
+  @@index([state, updated_at])
+}
+
+model MultiviewWorkMutation {
+  id             String   @id @default(cuid())
+  actor_id       String
+  mutation_id    String
+  work_id        String
+  request_hash   String
+  base_revision  Int?
+  action         String
+  receipt_json   String
+  created_at     DateTime @default(now())
+
+  work MultiviewWork @relation(fields: [work_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([actor_id, mutation_id])
+  @@index([work_id, created_at])
+}
+
+model PlatformSetting {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  value_json String
+  updated_by String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([key])
+}
+
+// References only. Content access is resolved from the original business object on every request.
+model ContentReaction {
+  id           String   @id @default(cuid())
+  user_id      String
+  content_key  String
+  category     String
+  liked        Boolean  @default(false)
+  favorited    Boolean  @default(false)
+  liked_at     DateTime?
+  favorited_at DateTime?
+  version      Int      @default(1)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, content_key])
+  @@index([content_key, liked])
+  @@index([user_id, favorited, favorited_at])
+  @@index([user_id, liked, liked_at])
+}
+
+model ContentReactionEvent {
+  id           String   @id @default(cuid())
+  user_id      String
+  request_id   String
+  content_key  String
+  action       String
+  active       Boolean
+  fingerprint  String
+  created_at   DateTime @default(now())
+  user         User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, request_id])
+  @@index([user_id, created_at])
+}
+
+model GenerationTemplate {
+  id                   String   @id @default(cuid())
+  template_key         String   @unique
+  name                 String
+  description          String?
+  status               String   @default("draft") // draft | active | archived
+  version              String   @default("v1")
+  module_bindings_json String   @default("{}")
+  temporal_json        String   @default("{\"enabled\":true,\"segment\":15,\"handoff\":false}")
+  default_ratio        String?
+  default_duration     Int?
+  default_resolution   String?
+  created_by           String
+  updated_by           String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  assets    TemplateAsset[]
+  rules     TemplateRule[]
+  prompts   TemplatePromptBlock[]
+  agentRuns AgentRun[]
+  memories  TemplateMemory[]
+  tasks     VideoTask[]
+
+  @@index([status])
+  @@index([created_by])
+  @@index([updated_at])
+}
+
+model TemplateAsset {
+  id                 String   @id @default(cuid())
+  template_id        String
+  asset_type         String // character | logo | style | other
+  label              String
+  url                String?
+  thumbnail_url      String?
+  reference_image_id String?
+  sort_order         Int      @default(0)
+  status             String   @default("active") // active | archived
+  metadata_json      String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([asset_type])
+  @@index([status])
+}
+
+model TemplateRule {
+  id          String   @id @default(cuid())
+  template_id String
+  rule_type   String // must | forbid | suggest
+  content     String
+  priority    Int      @default(50)
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | disabled
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([rule_type])
+  @@index([status])
+}
+
+model TemplatePromptBlock {
+  id          String   @id @default(cuid())
+  template_id String
+  block_type  String // character | logo | style | global
+  content     String
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | disabled
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([block_type])
+  @@index([status])
+}
+
+model AgentRun {
+  id                    String    @id @default(cuid())
+  template_id           String
+  user_id               String
+  video_task_id         String?
+  video_card_id         String?
+  status                String    @default("draft") // draft | planned | submitted | completed | failed
+  user_input_json       String
+  modifiers_json        String    @default("[]")
+  plans_json            String    @default("[]")
+  selected_plan_key     String?
+  agent_prompt_snapshot String?
+  final_prompt_snapshot String?
+  user_edited           Boolean   @default(false)
+  error_message         String?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  completed_at          DateTime?
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  steps    AgentRunStep[]
+
+  @@index([template_id])
+  @@index([user_id])
+  @@index([video_task_id])
+  @@index([video_card_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model AgentRunStep {
+  id           String   @id @default(cuid())
+  agent_run_id String
+  step_key     String
+  title        String
+  input_json   String?
+  output_json  String?
+  sort_order   Int      @default(0)
+  created_at   DateTime @default(now())
+
+  agentRun AgentRun @relation(fields: [agent_run_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_run_id])
+  @@index([step_key])
+  @@index([sort_order])
+}
+
+model VideoStudioTemplate {
+  id                  String   @id @default(cuid())
+  owner_user_id       String
+  name                String
+  description         String?
+  group_name          String   @default("未分组")
+  status              String   @default("draft") // draft | published | archived
+  visibility          String   @default("private") // private | shared
+  revision            Int      @default(1)
+  recipe_json         String   @default("{}")
+  published_version_id String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+
+  owner             User                         @relation("VideoStudioTemplateOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  versions          VideoStudioTemplateVersion[] @relation("VideoStudioTemplateVersions")
+  published_version VideoStudioTemplateVersion?  @relation("VideoStudioPublishedVersion", fields: [published_version_id], references: [id], onDelete: SetNull)
+
+  @@index([owner_user_id, status, updated_at])
+  @@index([visibility, status, updated_at])
+  @@index([published_version_id])
+}
+
+model VideoStudioTemplateVersion {
+  id             String   @id @default(cuid())
+  template_id    String
+  version_number Int
+  name           String
+  description    String?
+  group_name     String
+  recipe_json    String
+  created_by     String
+  created_at     DateTime @default(now())
+
+  template                 VideoStudioTemplate   @relation("VideoStudioTemplateVersions", fields: [template_id], references: [id], onDelete: Restrict)
+  published_by_templates   VideoStudioTemplate[] @relation("VideoStudioPublishedVersion")
+
+  @@unique([template_id, version_number])
+  @@index([template_id, created_at])
+  @@index([created_by])
+}
+
+model VideoStudioDraft {
+  id                    String   @id @default(cuid())
+  purpose               String   @default("studio") // studio | multiview-action
+  owner_user_id         String
+  name                  String
+  group_name            String   @default("未分组")
+  prompt                String   @default("")
+  values_json           String   @default("{}")
+  assets_json           String   @default("[]")
+  parameters_json       String   @default("{}")
+  revision              Int      @default(1)
+  template_source       String   @default("blank") // blank | legacy | studio
+  source_template_id    String?
+  source_version_id     String?
+  template_snapshot_json String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @default(now()) @updatedAt
+
+  owner User            @relation("VideoStudioDraftOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  runs  VideoStudioRun[]
+
+  @@index([owner_user_id, updated_at])
+  @@index([template_source, source_template_id])
+  @@index([owner_user_id, purpose, updated_at])
+}
+
+model VideoStudioRun {
+  id                 String    @id @default(cuid())
+  purpose               String   @default("studio") // studio | multiview-action
+  owner_user_id      String
+  draft_id           String
+  draft_revision     Int       @default(1)
+  request_id         String
+  request_fingerprint String
+  source             String // blank | legacy | studio
+  mode               String // direct | llm
+  status             String    @default("queued") // queued | running | succeeded | failed | uncertain | cancelled
+  delivery_state     String    @default("not_sent") // not_sent | sending | response_received | unknown
+  prompt             String?
+  snapshot_json      String
+  model              String?
+  usage_json         String?
+  error_message      String?
+  lease_token        String?
+  lease_expires_at   DateTime?
+  attempt            Int       @default(0)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @default(now()) @updatedAt
+  completed_at       DateTime?
+
+  owner  User             @relation("VideoStudioRunOwner", fields: [owner_user_id], references: [id], onDelete: Restrict)
+  draft  VideoStudioDraft @relation(fields: [draft_id], references: [id], onDelete: Restrict)
+  tasks  VideoTask[]
+
+  @@unique([owner_user_id, request_id])
+  @@index([owner_user_id, created_at])
+  @@index([draft_id, created_at])
+  @@index([status, delivery_state, created_at])
+  @@index([status, lease_expires_at])
+  @@index([owner_user_id, purpose, created_at])
+}
+
+model TemplateMemory {
+  id            String   @id @default(cuid())
+  template_id   String
+  user_id       String?
+  agent_run_id  String?
+  video_task_id String?
+  memory_type   String // plan_selected | prompt_edited | task_result | note
+  signal        String // positive | negative | neutral
+  summary       String
+  metadata_json String?
+  created_at    DateTime @default(now())
+
+  template GenerationTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([template_id])
+  @@index([user_id])
+  @@index([agent_run_id])
+  @@index([video_task_id])
+  @@index([memory_type])
+  @@index([created_at])
+}
+
+model UserPreference {
+  id         String   @id @default(cuid())
+  user_id    String
+  key        String
+  value_json String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, key])
+  @@index([user_id])
+  @@index([key])
+}
+
+model Project {
+  id            String    @id @default(cuid())
+  workspace_id  String?
+  name          String
+  description   String?
+  type          String    @default("team") // personal | team | public | system
+  visibility    String    @default("private") // private | internal_public | external_public | global_public
+  owner_user_id String
+  created_by    String
+  status        String    @default("active") // active | locked | archived | deleted
+  archived_at   DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  owner                 User                  @relation("ProjectOwner", fields: [owner_user_id], references: [id])
+  creator               User                  @relation("ProjectCreator", fields: [created_by], references: [id])
+  members               ProjectMember[]
+  invites               ProjectInvite[]
+  video_cards           VideoCard[]
+  tasks                 VideoTask[]
+  canvas_documents      CanvasDocument[]
+  reference_albums      ReferenceAlbum[]
+  reference_images      ReferenceImage[]
+  provider_api_requests ProviderApiRequest[]
+  cost_ledgers          CostLedger[]
+  cost_allocations      CostAllocation[]
+  budget_account        ProjectBudgetAccount?
+  budget_ledgers        ProjectBudgetLedger[]
+  approval_records      ApprovalRecord[]
+  content_audit_logs    ContentAuditLog[]
+  feishu_requirements   FeishuRequirement[]
+  review_cards          ReviewCard[]
+  notifications         Notification[]
+  tool_flows            ToolFlow[]
+  video_creation_intents VideoCreationIntent[]
+  video_delivery_selections VideoDeliverySelection[]
+
+  @@index([workspace_id])
+  @@index([owner_user_id])
+  @@index([created_by])
+  @@index([type])
+  @@index([visibility])
+  @@index([status])
+}
+
+model VideoCard {
+  id                   String    @id @default(cuid())
+  project_id           String
+  title                String
+  objective            String?
+  status               String    @default("active") // draft | active | reviewing | finalized | sealed | merged | archived | discarded
+  owner_user_id        String?
+  platform             String?
+  ratio                String?
+  duration             Int?
+  target_resolution    String?
+  original_ratio       String?
+  ratio_locked         Boolean   @default(false)
+  ratio_change_reason  String?
+  delivery_specs_json  String?
+  budget_credits       Float?
+  budget_currency      String?   @default("credits")
+  current_best_task_id String?
+  final_task_id        String?
+  is_fallback          Boolean   @default(false)
+  merged_into_card_id  String?
+  merged_at            DateTime?
+  merge_reason         String?
+  created_by           String
+  sealed_at            DateTime?
+  sealed_by            String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  project           Project          @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  owner             User?            @relation("VideoCardOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  creator           User             @relation("VideoCardCreator", fields: [created_by], references: [id])
+  sealedBy          User?            @relation("VideoCardSealer", fields: [sealed_by], references: [id], onDelete: SetNull)
+  tasks             VideoTask[]      @relation("VideoCardTasks")
+  current_best_task VideoTask?       @relation("VideoCardCurrentBest", fields: [current_best_task_id], references: [id], onDelete: SetNull)
+  final_task        VideoTask?       @relation("VideoCardFinal", fields: [final_task_id], references: [id], onDelete: SetNull)
+  approval_records  ApprovalRecord[]
+  branches          VideoBranch[]
+  notifications     Notification[]
+  video_creation_intents VideoCreationIntent[]
+
+  @@index([project_id])
+  @@index([status])
+  @@index([owner_user_id])
+  @@index([created_by])
+  @@index([current_best_task_id])
+  @@index([final_task_id])
+  @@index([is_fallback])
+  @@index([merged_into_card_id])
+}
+
+model VideoBranch {
+  id                    String    @id @default(cuid())
+  video_card_id         String
+  title                 String
+  description           String?
+  status                String    @default("exploring") // exploring | candidate | primary | closed | merged | promoted
+  is_primary            Boolean   @default(false)
+  promoted_card_id      String?
+  merged_into_branch_id String?
+  created_by            String
+  closed_at             DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  video_card VideoCard   @relation(fields: [video_card_id], references: [id], onDelete: Cascade)
+  tasks      VideoTask[]
+
+  @@index([video_card_id])
+  @@index([status])
+  @@index([is_primary])
+  @@index([promoted_card_id])
+}
+
+model CanvasDocument {
+  id                        String   @id @default(cuid())
+  owner_user_id             String
+  project_id                String?
+  title                     String
+  document_json             String
+  active_generation_node_id String?
+  status                    String   @default("active") // active | archived | deleted
+  revision                  Int      @default(0)
+  schema_version            Int      @default(1)
+  protocol_version          Int      @default(1)
+  access_scope              String   @default("private") // Personal canvases are owner-only.
+  legacy_document_json      String?  // Original snapshot retained once on v2 upgrade, not exposed by API.
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  owner   User     @relation("CanvasDocumentOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  revisions CanvasDocumentRevision[]
+  mutations CanvasDocumentMutation[]
+
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([status])
+  @@index([updated_at])
+  @@index([owner_user_id, project_id, status, updated_at, id])
+}
+
+// Durable batch/fee identities survive canvas deletion and snapshot retention.
+// Amounts are integer credit cents, not floating-point display totals.
+model CanvasVideoBatch {
+  id                    String   @id
+  owner_user_id         String
+  document_id           String
+  node_id               String
+  project_id            String
+  video_card_id         String?
+  video_branch_id       String?
+  client_request_id     String
+  request_hash          String
+  count                 Int
+  contract_version      Int      @default(1)
+  creation_intent_id    String?
+  authorization_round  Int      @default(1)
+  frozen_input_json     String
+  authorized_total      Int
+  admitted_total        Int      @default(0)
+  active_node_key       String?  @unique
+  state                 String   @default("prepared")
+  revision              Int      @default(1)
+  operations_json       String   @default("{}")
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  children              CanvasVideoBatchChild[]
+  creation_intent       VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
+
+  @@unique([owner_user_id, client_request_id])
+  @@index([owner_user_id, document_id, node_id, created_at, id])
+  @@index([document_id])
+}
+
+model CanvasVideoBatchChild {
+  id                    String   @id
+  batch_id              String
+  ordinal               Int
+  request_id            String   @unique
+  idempotency_key       String   @unique
+  business_fingerprint  String
+  route_fingerprint     String
+  frozen_input_json     String
+  authorized_maximum    Int
+  quote_revision        String?
+  quote_token           String?
+  quote_expires_at      DateTime
+  state                 String   @default("prepared")
+  task_id               String?  @unique
+  admitted_amount       Int      @default(0)
+  rejection_receipt     String?
+  revision              Int      @default(1)
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  batch CanvasVideoBatch @relation(fields: [batch_id], references: [id], onDelete: Restrict)
+  intent_spec_revision Int?
+  authorization_revision Int?
+  approval_record_id String?
+  approval_scope_hash String?
+
+  @@unique([batch_id, ordinal])
+  @@index([batch_id, state])
+}
+
+model CanvasDocumentRevision {
+  id                        String   @id @default(cuid())
+  document_id               String
+  revision                  Int
+  schema_version            Int
+  title                     String
+  document_json             String
+  active_generation_node_id String?
+  resource_refs_json        String
+  created_at                DateTime @default(now())
+  document CanvasDocument @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([document_id, revision])
+}
+
+// Metadata-only receipts expire after seven days, independently of snapshot history.
+model CanvasDocumentMutation {
+  id             String   @id @default(cuid())
+  actor_user_id  String
+  mutation_id    String
+  request_hash   String
+  document_id    String
+  response_json  String
+  created_at     DateTime @default(now())
+  document CanvasDocument @relation(fields: [document_id], references: [id], onDelete: Cascade)
+
+  @@unique([actor_user_id, mutation_id])
+  @@index([document_id])
+  @@index([created_at])
+}
+
+// Role history and idempotency are independent of canvas snapshot retention.
+// Existing users/documents remain soft authorization references, without new delete constraints.
+model CanvasRoleDefinition {
+  id              String   @id
+  owner_user_id   String
+  name            String
+  status          String   @default("active")
+  current_version Int      @default(1)
+  revision        Int      @default(1)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  versions        CanvasRoleVersion[]
+
+  @@index([owner_user_id, status, updated_at, id])
+}
+
+model CanvasRoleVersion {
+  id            String   @id
+  definition_id String
+  version       Int
+  schema        String   @default("role.v1")
+  snapshot_json String
+  created_at    DateTime @default(now())
+  definition    CanvasRoleDefinition @relation(fields: [definition_id], references: [id], onDelete: Restrict)
+  works         CanvasRoleWork[]
+
+  @@unique([definition_id, version])
+}
+
+model CanvasRoleTaskRun {
+  id                       String   @id
+  owner_user_id            String
+  document_id              String
+  requirements_revision    Int      @default(1)
+  revision                 Int      @default(1)
+  status                   String   @default("active")
+  paused                   Boolean  @default(false)
+  budget_points_limit      Int?
+  budget_usd_micros_limit  Int?
+  reserved_points          Int      @default(0)
+  reserved_usd_micros      Int      @default(0)
+  settled_points           Int      @default(0)
+  settled_usd_micros       Int      @default(0)
+  max_calls                Int?
+  call_count               Int      @default(0)
+  max_rounds               Int
+  wait_limit_seconds       Int?
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+  requirements             CanvasRoleTaskRevision[]
+  works                    CanvasRoleWork[]
+  events                   CanvasRoleEvent[]
+  control                  CanvasRoleRunControl?
+  authorizations           CanvasRoleAuthorization[]
+  dispatches               CanvasRoleDispatch[]
+  questions                CanvasRoleQuestion[]
+  media_bindings           CanvasRoleMediaBinding[]
+
+  @@index([owner_user_id, document_id, updated_at, id])
+}
+
+model CanvasRoleTaskRevision {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  snapshot_json         String
+  created_by            String
+  created_at            DateTime @default(now())
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+
+  @@unique([role_task_run_id, requirements_revision])
+}
+
+model CanvasRoleWork {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  node_id               String
+  round                 Int
+  role_version_id       String
+  revision              Int      @default(1)
+  phase                 String   @default("offered")
+  executor_user_id       String?
+  reviewer_node_id       String?
+  confirm_required      Boolean  @default(false)
+  snapshot_json         String
+  inputs_json           String   @default("[]")
+  draft_text            String   @default("")
+  current_delivery_id   String?
+  wait_reason           String?
+  wait_since            DateTime?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+  role_version          CanvasRoleVersion @relation(fields: [role_version_id], references: [id], onDelete: Restrict)
+  deliveries            CanvasRoleDelivery[]
+  attempts              CanvasRoleAttempt[]
+  dispatches            CanvasRoleDispatch[]
+  questions_from        CanvasRoleQuestion[] @relation("RoleQuestionFrom")
+  questions_to          CanvasRoleQuestion[] @relation("RoleQuestionTarget")
+  media_bindings        CanvasRoleMediaBinding[]
+
+  @@unique([role_task_run_id, requirements_revision, node_id, round])
+  @@index([role_task_run_id, phase, updated_at, id])
+}
+
+model CanvasRoleDelivery {
+  id                    String   @id
+  work_id               String
+  version               Int
+  requirements_revision Int
+  content_json          String
+  input_digest          String
+  submitted_by          String
+  submission_kind       String
+  supersedes_id          String?
+  created_at            DateTime @default(now())
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+
+  @@unique([work_id, version])
+}
+
+model CanvasRoleEvent {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  work_id               String?
+  actor_user_id         String
+  actor_kind            String
+  kind                  String
+  delivery_id           String?
+  from_node_id          String?
+  to_node_id            String?
+  detail_json           String
+  created_at            DateTime @default(now())
+  run                   CanvasRoleTaskRun @relation(fields: [role_task_run_id], references: [id], onDelete: Restrict)
+
+  authorization         CanvasRoleAuthorization?
+
+  @@index([role_task_run_id, created_at, id])
+  @@index([work_id, created_at, id])
+}
+
+model CanvasRoleAttempt {
+  id                    String   @id
+  work_id               String
+  round                 Int
+  purpose               String
+  attempt               Int
+  request_id            String   @unique
+  state                 String
+  input_snapshot_json   String
+  quote_json            String
+  reserved_points       Int
+  reserved_usd_micros   Int
+  fee_state             String
+  provider_scope        String?
+  provider_reference    String?
+  result_json           String?
+  settled_points        Int?
+  settled_usd_micros    Int?
+  settlement_receipt    String?
+  settlement_applied    Boolean  @default(false)
+  started_at            DateTime @default(now())
+  finished_at           DateTime?
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  dispatch              CanvasRoleDispatch?
+  questions             CanvasRoleQuestion[]
+
+  @@unique([work_id, round, purpose, attempt])
+  @@unique([provider_scope, provider_reference])
+}
+
+model CanvasRoleHandoff {
+  id                    String   @id
+  role_task_run_id      String
+  requirements_revision Int
+  source_work_id        String
+  source_delivery_id    String
+  target_work_id        String
+  bundle_json           String
+  created_at            DateTime @default(now())
+
+  @@unique([source_delivery_id, target_work_id, requirements_revision])
+  @@index([role_task_run_id, target_work_id])
+}
+
+model CanvasRoleMutationReceipt {
+  id             String   @id
+  owner_user_id  String
+  mutation_id    String
+  request_hash   String
+  object_id      String
+  response_json  String
+  created_at     DateTime @default(now())
+
+  @@unique([owner_user_id, mutation_id])
+}
+
+// Collaboration v2 is additive. Existing runs without a control row stay manual.
+model CanvasRoleRunControl {
+  run_id                    String   @id
+  workflow_id               String
+  schema                    String   @default("role.collaboration.v2")
+  mode                      String   @default("manual")
+  revision                  Int      @default(1)
+  active_grant_id            String?
+  pause_reason              String?
+  current_manifest_event_id String?
+  acceptance_event_id        String?
+  next_wake_at              DateTime?
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+  run                       CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+
+  @@index([workflow_id, updated_at, run_id])
+  @@index([mode, next_wake_at, run_id])
+}
+
+model CanvasRoleAuthorization {
+  id                    String   @id
+  run_id                String
+  sequence              Int
+  requirements_revision Int
+  consent_event_id       String   @unique
+  snapshot_json         String
+  snapshot_digest       String
+  granted_by            String
+  granted_at            DateTime @default(now())
+  expires_at            DateTime
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  consent_event         CanvasRoleEvent @relation(fields: [consent_event_id], references: [id], onDelete: Restrict)
+  dispatches            CanvasRoleDispatch[]
+
+  @@unique([run_id, sequence])
+}
+
+model CanvasRoleDispatch {
+  id                    String   @id
+  run_id                String
+  work_id               String?
+  grant_id              String?
+  attempt_id            String?  @unique
+  requirements_revision Int
+  lease_epoch           Int      @default(0)
+  action                String
+  target_key            String
+  dedupe_key            String
+  state                 String   @default("queued")
+  payload_json          String
+  lease_owner           String?
+  lease_token           String?
+  last_error            String?
+  lease_until           DateTime?
+  due_at                DateTime
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  work                  CanvasRoleWork? @relation(fields: [work_id], references: [id], onDelete: Restrict)
+  grant                 CanvasRoleAuthorization? @relation(fields: [grant_id], references: [id], onDelete: Restrict)
+  attempt               CanvasRoleAttempt? @relation(fields: [attempt_id], references: [id], onDelete: Restrict)
+
+  @@unique([run_id, dedupe_key])
+  @@index([state, due_at, id])
+  @@index([run_id, state, requirements_revision])
+}
+
+model CanvasRoleQuestion {
+  id                    String   @id
+  run_id                String
+  from_work_id          String
+  target_work_id        String?
+  source_attempt_id     String?
+  requirements_revision Int
+  exchange_count        Int      @default(0)
+  no_progress_count     Int      @default(0)
+  revision              Int      @default(1)
+  question_digest       String
+  input_digest          String
+  status                String   @default("open")
+  body_json             String
+  blocking              Boolean  @default(true)
+  answer_event_id       String?
+  resolution_event_id   String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  from_work             CanvasRoleWork @relation("RoleQuestionFrom", fields: [from_work_id], references: [id], onDelete: Restrict)
+  target_work           CanvasRoleWork? @relation("RoleQuestionTarget", fields: [target_work_id], references: [id], onDelete: Restrict)
+  source_attempt        CanvasRoleAttempt? @relation(fields: [source_attempt_id], references: [id], onDelete: Restrict)
+
+  @@unique([run_id, requirements_revision, from_work_id, input_digest, question_digest])
+  @@index([run_id, status, updated_at, id])
+  @@index([target_work_id, status, updated_at, id])
+}
+
+model CanvasRoleMediaBinding {
+  id                    String   @id
+  run_id                String
+  work_id               String
+  requirements_revision Int
+  batch_ordinal         Int
+  reserved_points       Int
+  settlement_applied    Boolean  @default(false)
+  settled_points        Int?
+  input_digest          String
+  context_digest        String
+  generation_node_id    String
+  output_slot_id        String
+  source_kind           String
+  source_task_id        String
+  source_request_id     String
+  state                 String
+  fee_state             String
+  original_refs_json    String   @default("[]")
+  receipt_json          String   @default("{}")
+  next_check_at         DateTime?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  run                   CanvasRoleTaskRun @relation(fields: [run_id], references: [id], onDelete: Restrict)
+  work                  CanvasRoleWork @relation(fields: [work_id], references: [id], onDelete: Restrict)
+
+  @@unique([source_kind, source_task_id])
+  @@unique([work_id, source_request_id, batch_ordinal])
+  @@index([run_id, state, updated_at, id])
+  @@index([state, next_check_at, id])
+}
+
+model CanvasRoleWorkflowTemplate {
+  id              String   @id
+  owner_user_id   String
+  name            String
+  status          String   @default("active")
+  current_version Int      @default(1)
+  revision        Int      @default(1)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+  versions        CanvasRoleWorkflowTemplateVersion[]
+
+  @@index([owner_user_id, status, updated_at, id])
+}
+
+model CanvasRoleWorkflowTemplateVersion {
+  id             String   @id
+  template_id    String
+  version        Int
+  schema         String   @default("role.workflow-template.v2")
+  content_digest String
+  snapshot_json  String
+  provenance_json String
+  created_at     DateTime @default(now())
+  template       CanvasRoleWorkflowTemplate @relation(fields: [template_id], references: [id], onDelete: Restrict)
+
+  @@unique([template_id, version])
+}
+
+model ToolFlow {
+  id          String   @id @default(cuid())
+  owner_id    String
+  project_id  String?
+  name        String
+  visibility  String   @default("private")
+  status      String   @default("draft")
+  version     Int      @default(1)
+  graph_json  String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  owner User @relation("ToolFlowOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  runs ToolFlowRun[]
+
+  @@index([owner_id, updated_at])
+  @@index([project_id, status])
+  @@index([visibility, status])
+}
+
+model ToolFlowRun {
+  id               String   @id @default(cuid())
+  flow_id          String
+  owner_id         String
+  flow_version     Int
+  status           String   @default("queued")
+  current_node_id  String?
+  snapshot_json    String
+  estimated_credits Float?
+  frozen_credits   Float?
+  actual_credits   Float?
+  error            String?
+  created_at       DateTime @default(now())
+  started_at       DateTime?
+  finished_at      DateTime?
+  updated_at       DateTime @updatedAt
+
+  flow ToolFlow @relation(fields: [flow_id], references: [id], onDelete: Cascade)
+  owner User @relation("ToolFlowRunOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  node_runs ToolFlowNodeRun[]
+
+  @@index([owner_id, created_at])
+  @@index([flow_id, flow_version])
+  @@index([status, updated_at])
+}
+
+model ToolFlowNodeRun {
+  id                 String   @id @default(cuid())
+  run_id             String
+  node_id            String
+  status             String   @default("pending")
+  input_asset_ids    String   @default("[]")
+  output_asset_ids   String   @default("[]")
+  selected_asset_ids String   @default("[]")
+  result_json        String?
+  error              String?
+  started_at         DateTime?
+  finished_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  run ToolFlowRun @relation(fields: [run_id], references: [id], onDelete: Cascade)
+
+  @@unique([run_id, node_id])
+  @@index([run_id, status])
+}
+
+model ProjectMember {
+  id         String   @id @default(cuid())
+  project_id String
+  user_id    String
+  role       String   @default("member") // project_owner | editor | member | viewer
+  joined_by  String?
+  joined_at  DateTime @default(now())
+  status     String   @default("active") // active | removed
+
+  project  Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  user     User    @relation("ProjectMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
+  joinedBy User?   @relation("ProjectMemberJoinedBy", fields: [joined_by], references: [id], onDelete: SetNull)
+
+  @@unique([project_id, user_id])
+  @@index([project_id])
+  @@index([user_id])
+  @@index([role])
+  @@index([status])
+}
+
+model ProjectInvite {
+  id                   String    @id @default(cuid())
+  project_id           String
+  token                String    @unique
+  default_role         String    @default("member")
+  allowed_account_type String?
+  max_uses             Int?
+  used_count           Int       @default(0)
+  expires_at           DateTime?
+  require_approval     Boolean   @default(false)
+  created_by           String
+  status               String    @default("active") // active | disabled | expired
+  created_at           DateTime  @default(now())
+
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  creator User    @relation("ProjectInviteCreatedBy", fields: [created_by], references: [id])
+
+  @@index([project_id])
+  @@index([created_by])
+  @@index([status])
+  @@index([expires_at])
+}
+
+model Feedback {
+  id              String    @id @default(cuid())
+  user_id         String?
+  task_id         String?
+  content         String
+  image_urls_json String?
+  page_url        String?
+  pathname        String?
+  user_agent      String?
+  status          String    @default("new") // new | reviewed | archived
+  admin_note      String?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+  archived_at     DateTime?
+  archived_by     String?
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([status])
+  @@index([pathname])
+  @@index([created_at])
+}
+
+// 点数账户
+model CreditAccount {
+  id             String   @id @default(cuid())
+  user_id        String   @unique
+  balance        Float    @default(0)
+  frozen_credits Float    @default(0)
+  monthly_used   Float    @default(0)
+  total_used     Float    @default(0)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+}
+
+// 可过期额度桶。长期点数仍走 CreditAccount.balance；每日配额等临时额度走 bucket。
+model CreditBucket {
+  id               String    @id @default(cuid())
+  user_id          String
+  source_type      String // daily_quota
+  amount_total     Float
+  amount_remaining Float
+  frozen_amount    Float     @default(0)
+  quota_date       String?
+  expires_at       DateTime?
+  status           String    @default("active") // active | expired | exhausted | cancelled
+  policy_key       String?
+  policy_snapshot  String?
+  idempotency_key  String?   @unique
+  created_by       String?
+  metadata_json    String?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([source_type])
+  @@index([quota_date])
+  @@index([status])
+  @@index([expires_at])
+}
+
+// 点数流水
+model CreditLedger {
+  id              String   @id @default(cuid())
+  user_id         String
+  type            String // admin_grant | admin_deduct | system_adjust | task_freeze | task_success_deduct | task_failed_refund | manual_refund | periodic_grant | new_user_initial_grant | daily_quota_grant | daily_quota_expire | expired_refund_closed
+  amount          Float
+  balance_before  Float
+  balance_after   Float
+  frozen_before   Float?
+  frozen_after    Float?
+  related_task_id String?
+  operator_id     String?
+  reason          String?
+  idempotency_key String?
+  metadata_json   String?
+  created_at      DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([type])
+  @@index([created_at])
+  @@index([idempotency_key])
+}
+
+// 项目预算账户。公共项目从这里冻结、实扣和返还，避免混用个人点数余额。
+model ProjectBudgetAccount {
+  id                      String   @id @default(cuid())
+  project_id              String   @unique
+  budget_credits          Float    @default(0)
+  used_credits            Float    @default(0)
+  frozen_credits          Float    @default(0)
+  currency                String   @default("credits")
+  status                  String   @default("active") // active | frozen | exhausted | cancelled
+  freeze_reason           String?
+  reconciliation_status   String   @default("normal") // normal | pending | abnormal | reconciled
+  threshold_notified_json String?
+  created_by              String?
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  project Project               @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  ledgers ProjectBudgetLedger[]
+
+  @@index([project_id])
+  @@index([status])
+}
+
+// 项目预算流水。记录预算追加、任务预占、成功实扣和失败释放。
+model ProjectBudgetLedger {
+  id              String   @id @default(cuid())
+  project_id      String
+  account_id      String
+  type            String // budget_grant | budget_adjust | task_freeze | task_success_deduct | task_failed_refund | task_freeze_release
+  amount          Float
+  budget_before   Float
+  budget_after    Float
+  used_before     Float
+  used_after      Float
+  frozen_before   Float
+  frozen_after    Float
+  related_task_id String?
+  operator_id     String?
+  reason          String?
+  idempotency_key String?  @unique
+  metadata_json   String?
+  created_at      DateTime @default(now())
+
+  project Project              @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  account ProjectBudgetAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
+  @@index([account_id])
+  @@index([type])
+  @@index([related_task_id])
+  @@index([operator_id])
+  @@index([created_at])
+  @@index([idempotency_key])
+}
+
+model ApprovalRecord {
+  id                     String    @id @default(cuid())
+  type                   String // project_create | budget_increase | resolution_1080p | ratio_change | video_card_reopen
+  status                 String    @default("pending") // pending | approved | rejected | expired | cancelled
+  project_id             String?
+  video_card_id          String?
+  task_id                String?
+  requester_user_id      String
+  approver_user_id       String?
+  usage_limit            Int?
+  used_count             Int       @default(0)
+  creation_intent_id     String?
+  intent_revision       Int?
+  scope_hash            String?
+  billing_scope         String?
+  billing_account_id    String?
+  revision              Int @default(1)
+  authorized_cost_cents Int @default(0)
+  used_cost_cents       Int @default(0)
+  effect_status          String    @default("pending") // pending | applied | failed | skipped
+  effect_error           String?
+  reason                 String?
+  decision_reason        String?
+  scope_json             String?
+  requested_payload_json String?
+  approved_at            DateTime?
+  rejected_at            DateTime?
+  expires_at             DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime  @updatedAt
+
+  project       Project?        @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  videoCard     VideoCard?      @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  task          VideoTask?      @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  requester     User            @relation("ApprovalRequester", fields: [requester_user_id], references: [id], onDelete: Cascade)
+  approver      User?           @relation("ApprovalApprover", fields: [approver_user_id], references: [id], onDelete: SetNull)
+  usages        ApprovalUsage[]
+  notifications Notification[]
+  creation_intent VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
+
+  @@index([type])
+  @@index([status])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([task_id])
+  @@index([requester_user_id])
+  @@index([approver_user_id])
+  @@index([expires_at])
+  @@index([created_at])
+  @@index([creation_intent_id, intent_revision])
+}
+
+model ApprovalUsage {
+  id            String   @id @default(cuid())
+  approval_id   String
+  task_id       String?
+  user_id       String
+  amount        Int      @default(1)
+  metadata_json String?
+  creation_intent_id String?
+  intent_revision Int?
+  authorization_revision Int?
+  child_key String?
+  authorized_cost_cents Int @default(0)
+  created_at    DateTime @default(now())
+
+  approval ApprovalRecord @relation(fields: [approval_id], references: [id], onDelete: Cascade)
+  task     VideoTask?     @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user     User           @relation("ApprovalUsageUser", fields: [user_id], references: [id], onDelete: Cascade)
+  creation_intent VideoCreationIntent? @relation(fields: [creation_intent_id], references: [id], onDelete: Restrict)
+
+  @@unique([approval_id, task_id])
+  @@unique([approval_id, creation_intent_id, child_key])
+  @@index([approval_id])
+  @@index([task_id])
+  @@index([user_id])
+}
+
+model FeishuRequirement {
+  id                 String    @id @default(cuid())
+  app_token          String
+  table_id           String
+  record_id          String
+  idempotency_key    String    @unique
+  record_type        String    @default("project") // project | video_item
+  sync_status        String    @default("draft") // draft | synced | needs_input | failed | confirmed
+  raw_fields_json    String
+  project_draft_json String?
+  video_cards_json   String?
+  created_project_id String?
+  error_message      String?
+  last_synced_at     DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  created_project Project? @relation(fields: [created_project_id], references: [id], onDelete: SetNull)
+
+  @@unique([app_token, table_id, record_id])
+  @@index([sync_status])
+  @@index([created_project_id])
+}
+
+model ReviewCard {
+  id                        String   @id @default(cuid())
+  project_id                String
+  status                    String   @default("draft") // draft | generated | archived
+  summary_json              String
+  total_credits             Float    @default(0)
+  total_amount_micros       Int?
+  currency                  String?
+  video_card_count          Int      @default(0)
+  final_task_count          Int      @default(0)
+  failure_rate              Float    @default(0)
+  budget_suggestion_credits Float?
+  budget_suggestion_reason  String?
+  admin_note                String?
+  generated_by              String?
+  generated_at              DateTime @default(now())
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  project   Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  generator User?   @relation("ReviewCardGenerator", fields: [generated_by], references: [id], onDelete: SetNull)
+
+  @@index([project_id])
+  @@index([status])
+  @@index([generated_at])
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  type           String
+  channel        String    @default("in_app") // in_app | feishu
+  status         String    @default("pending") // pending | sent | read | failed
+  target_user_id String
+  actor_user_id  String?
+  project_id     String?
+  video_card_id  String?
+  approval_id    String?
+  title          String
+  body           String?
+  metadata_json  String?
+  sent_at        DateTime?
+  read_at        DateTime?
+  error_message  String?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+
+  target    User            @relation("NotificationTarget", fields: [target_user_id], references: [id], onDelete: Cascade)
+  actor     User?           @relation("NotificationActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  project   Project?        @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  videoCard VideoCard?      @relation(fields: [video_card_id], references: [id], onDelete: SetNull)
+  approval  ApprovalRecord? @relation(fields: [approval_id], references: [id], onDelete: SetNull)
+
+  @@index([target_user_id])
+  @@index([actor_user_id])
+  @@index([project_id])
+  @@index([video_card_id])
+  @@index([approval_id])
+  @@index([type])
+  @@index([status])
+  @@index([created_at])
+}
+
+// 操作日志
+model OperationLog {
+  id          String   @id @default(cuid())
+  operator_id String
+  action      String
+  target_type String?
+  target_id   String?
+  detail      String?
+  created_at  DateTime @default(now())
+
+  operator User @relation(fields: [operator_id], references: [id], onDelete: Cascade)
+
+  @@index([operator_id])
+  @@index([target_type, target_id])
+  @@index([created_at])
+}
+
+model ContentAuditLog {
+  id            String   @id @default(cuid())
+  actor_user_id String?
+  action        String
+  content_type  String
+  content_id    String
+  owner_user_id String?
+  project_id    String?
+  detail_json   String?
+  created_at    DateTime @default(now())
+
+  actor   User?    @relation("ContentAuditActor", fields: [actor_user_id], references: [id], onDelete: SetNull)
+  owner   User?    @relation("ContentAuditOwner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([actor_user_id])
+  @@index([content_type, content_id])
+  @@index([owner_user_id])
+  @@index([project_id])
+  @@index([action])
+  @@index([created_at])
+}
+
+// ============================================================================
+// 外部成本与项目复盘账本
+// ============================================================================
+
+model ProviderApiRequest {
+  id                    String    @id @default(cuid())
+  task_id               String?
+  user_id               String?
+  project_id            String?
+  provider_name         String
+  provider_account_id   String?
+  endpoint              String
+  method                String    @default("POST")
+  idempotency_key       String?
+  provider_request_id   String?
+  provider_task_id      String?
+  status                String    @default("pending") // pending | accepted | failed | timeout | unknown
+  http_status           Int?
+  error_code            String?
+  error_message         String?
+  request_hash          String?
+  response_summary_json String?
+  started_at            DateTime  @default(now())
+  completed_at          DateTime?
+  created_at            DateTime  @default(now())
+
+  task         VideoTask?   @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  user         User?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project      Project?     @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  cost_ledgers CostLedger[]
+
+  @@index([task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([provider_name])
+  @@index([provider_task_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model CostLedger {
+  id                  String   @id @default(cuid())
+  source_type         String // task | provider_request | official_bill | adjustment | transfer
+  source_id           String?
+  task_id             String?
+  image_task_id       String?
+  user_id             String?
+  project_id          String?
+  provider_request_id String?
+  provider_name       String
+  provider_account_id String?
+  provider_task_id    String?
+  event_type          String // estimate | provider_request_submitted | rule_settlement | official_charge | refund | reversal | adjustment | allocation
+  amount_minor        Int?
+  currency            String?
+  amount_micros       Int?
+  usage_quantity      Float?
+  usage_unit          String?
+  cost_source         String // rule | provider_usage | official_bill | manual
+  confidence          String // estimated | provisional | confirmed | reconciled | unknown | disputed
+  pricing_rule_id     String?
+  pricing_snapshot    String?
+  official_charge_id  String?
+  reason              String?
+  idempotency_key     String?  @unique
+  occurred_at         DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
+
+  task             VideoTask?          @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  image_task       ImageStudioTask?    @relation(fields: [image_task_id], references: [id], onDelete: SetNull)
+  user             User?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project          Project?            @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  provider_request ProviderApiRequest? @relation(fields: [provider_request_id], references: [id], onDelete: SetNull)
+  allocations      CostAllocation[]
+
+  @@index([source_type, source_id])
+  @@index([task_id])
+  @@index([image_task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([provider_request_id])
+  @@index([provider_name])
+  @@index([provider_task_id])
+  @@index([event_type])
+  @@index([confidence])
+  @@index([occurred_at])
+  @@index([created_at])
+}
+
+model CostAllocation {
+  id              String   @id @default(cuid())
+  ledger_id       String
+  allocation_type String // project | user | task | cost_center | unallocated
+  allocation_id   String
+  task_id         String?
+  image_task_id   String?
+  user_id         String?
+  project_id      String?
+  amount_minor    Int?
+  amount_micros   Int?
+  currency        String?
+  usage_quantity  Float?
+  usage_unit      String?
+  reason          String?
+  rule_id         String?
+  created_by      String?
+  created_at      DateTime @default(now())
+
+  ledger  CostLedger @relation(fields: [ledger_id], references: [id], onDelete: Cascade)
+  task    VideoTask? @relation(fields: [task_id], references: [id], onDelete: SetNull)
+  image_task ImageStudioTask? @relation(fields: [image_task_id], references: [id], onDelete: SetNull)
+  user    User?      @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  project Project?   @relation(fields: [project_id], references: [id], onDelete: SetNull)
+
+  @@index([ledger_id])
+  @@index([allocation_type, allocation_id])
+  @@index([task_id])
+  @@index([image_task_id])
+  @@index([user_id])
+  @@index([project_id])
+  @@index([created_at])
+}
+
+model ProviderAccountSnapshot {
+  id                  String   @id @default(cuid())
+  provider_name       String   @default("seedance")
+  provider_account_id String?
+  balance_kind        String   @default("prepaid") // prepaid | quota | unknown
+  amount_decimal      String?
+  amount_minor        Int?
+  currency            String?
+  quota_amount        Float?
+  quota_unit          String?
+  source              String   @default("provider_api") // provider_api | manual
+  status              String   @default("synced") // synced | manual | failed
+  raw_snapshot        String?
+  note                String?
+  error_message       String?
+  fetched_at          DateTime @default(now())
+  created_by          String?
+  created_at          DateTime @default(now())
+
+  @@index([provider_name])
+  @@index([provider_account_id])
+  @@index([status])
+  @@index([source])
+  @@index([fetched_at])
+  @@index([created_at])
+}
+
+// ============================================================================
+// Seedance 资产管理（官方 asset 持久化）
+// ============================================================================
+
+// 注意：本表存储通过公网 URL 从 Seedance 官方创建的资产记录
+// 与本地 Asset 表（存储本地上传文件）是两套独立系统
+model SeedanceAsset {
+  id                String @id @default(cuid())
+  provider          String @default("seedance") // 固定 seedance
+  provider_asset_id String // 官方返回的 asset-xxxx
+  asset_type        String @default("Image") // Image | Video | Audio
+  name              String
+
+  // 用户提交的公网 URL
+  original_url String
+
+  // 官方详情同步回来的预览 URL（临时签名 URL，过期需重新同步）
+  provider_preview_url String?
+
+  // 官方状态
+  provider_status String?
+
+  // 本地状态：Active | Deleted | ProviderDeleted | DeleteFailed
+  local_status String @default("Active")
+
+  // 官方原始返回 JSON
+  raw_provider_response String?
+
+  // 最近一次同步官方详情的时间
+  last_synced_at DateTime?
+
+  // 本地软删除时间
+  deleted_at DateTime?
+
+  // 官方彻底删除时间
+  provider_deleted_at DateTime?
+
+  // 官方删除失败原因
+  delete_error String?
+
+  // 预留字段
+  group_id     String?
+  project_name String?
+
+  // 去重字段
+  file_hash        String? // sha256(文件buffer)，用于本地文件去重
+  storage_provider String? // tos | r2 | local，用于 R2/TOS 去重
+  storage_key      String? // 对象存储 key，用于 storage 去重
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([provider_asset_id])
+  @@index([provider, provider_asset_id])
+  @@index([file_hash])
+  @@index([original_url])
+  @@index([storage_provider, storage_key])
+}
+
+// ============================================================================
+// 资产管理系统（本地文件上传）
+// ============================================================================
+
+// 上传的文件（图片/视频/音频）
+model Asset {
+  id       String @id @default(cuid())
+  owner_id String // 固定为 "default-user"，后续支持多用户时扩展
+  type     String // image | video | audio
+
+  // 存储路径
+  original_url  String // /uploads/assets/{hash}.{ext}
+  thumbnail_url String? // /uploads/thumbs/{hash}_thumb.{ext}  (2:3 比例)
+
+  // 文件元信息
+  file_name String
+  mime_type String
+  width     Int?
+  height    Int?
+  file_size Int // bytes
+
+  // 去重
+  hash String?
+
+  // 生成流程归档标记；只存结构化引用，不存图片二进制。
+  metadata_json String?
+
+  status String @default("active") // active | hidden | deleted
+
+  created_at DateTime @default(now())
+
+  // 关联
+  workspace_assets  WorkspaceAsset[]
+  collection_items  AssetCollectionItem[]
+  collections_cover AssetCollection[]     @relation("CollectionCover")
+  reference_images  ReferenceImage[]
+
+  @@unique([owner_id, hash])
+  @@index([hash])
+  @@index([owner_id, type, status, created_at])
+  @@index([status])
+}
+
+// 工作区：管理当前会话的参考素材
+model Workspace {
+  id         String   @id @default(cuid())
+  owner_id   String   @default("default-user")
+  name       String   @default("默认工作台")
+  status     String   @default("active") // active | archived
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // 关联
+  assets    WorkspaceAsset[]
+  snapshots GenerationTaskSnapshot[]
+  tasks     VideoTask[]
+}
+
+// Workspace <-> Asset 关联表（含排序和角色）
+model WorkspaceAsset {
+  id                 String   @id @default(cuid())
+  workspace_id       String
+  asset_id           String
+  reference_image_id String?
+  sort_order         Int      @default(0) // 决定 图1/图2/图3 顺序
+  role               String? // reference_image | first_frame | last_frame | reference_video | reference_audio
+  created_at         DateTime @default(now())
+
+  workspace       Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  asset           Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  reference_image ReferenceImage? @relation(fields: [reference_image_id], references: [id], onDelete: SetNull)
+
+  @@unique([workspace_id, asset_id])
+  @@index([reference_image_id])
+}
+
+// ============================================================================
+// 参考图图集（可被生成流程调用的项目资产容器）
+// ============================================================================
+
+model ReferenceAlbum {
+  id               String   @id @default(cuid())
+  workspace_id     String?
+  project_id       String?
+  public_folder_id String?
+  owner_user_id    String
+  name             String
+  description      String?
+  album_type       String   @default("personal") // personal | project | public | system
+  visibility       String   @default("private") // private | project | shared | public
+  cover_image_id   String?
+  status           String   @default("active") // active | archived | deleted
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  owner        User                  @relation("ReferenceAlbumOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project      Project?              @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+  images       ReferenceImage[]
+  shares       AlbumShare[]
+
+  @@index([workspace_id])
+  @@index([project_id])
+  @@index([public_folder_id])
+  @@index([owner_user_id])
+  @@index([album_type])
+  @@index([visibility])
+  @@index([status])
+}
+
+model ReferenceAlbumFolder {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  scope       String   @default("public") // public
+  sort_order  Int      @default(0)
+  status      String   @default("active") // active | archived | deleted
+  created_by  String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  albums      ReferenceAlbum[]
+  submissions PublicAlbumSubmission[]
+
+  @@index([scope])
+  @@index([status])
+  @@index([sort_order])
+}
+
+model PublicAlbumSubmission {
+  id                   String    @id @default(cuid())
+  source_album_id      String
+  target_album_id      String?
+  public_folder_id     String?
+  submitted_by_user_id String
+  name                 String
+  description          String?
+  submit_note          String?
+  status               String    @default("pending") // pending | approved | rejected
+  review_note          String?
+  reviewed_by_user_id  String?
+  reviewed_at          DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  publicFolder ReferenceAlbumFolder? @relation(fields: [public_folder_id], references: [id], onDelete: SetNull)
+
+  @@unique([source_album_id, submitted_by_user_id, status])
+  @@index([source_album_id])
+  @@index([target_album_id])
+  @@index([public_folder_id])
+  @@index([submitted_by_user_id])
+  @@index([status])
+}
+
+model ReferenceImage {
+  id                String   @id @default(cuid())
+  album_id          String
+  workspace_id      String?
+  project_id        String?
+  owner_user_id     String
+  asset_id          String?
+  url               String
+  thumbnail_url     String?
+  source_type       String   @default("upload") // upload | generated | copied | shared
+  source_content_id String?
+  source_image_id   String?
+  sort_order        Int      @default(0)
+  metadata_json     String?
+  status            String   @default("active") // active | deleted
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  album            ReferenceAlbum   @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  owner            User             @relation("ReferenceImageOwner", fields: [owner_user_id], references: [id], onDelete: Cascade)
+  project          Project?         @relation(fields: [project_id], references: [id], onDelete: SetNull)
+  asset            Asset?           @relation(fields: [asset_id], references: [id], onDelete: SetNull)
+  workspace_assets WorkspaceAsset[]
+
+  @@index([album_id])
+  @@index([workspace_id])
+  @@index([project_id])
+  @@index([owner_user_id])
+  @@index([asset_id])
+  @@index([source_image_id])
+  @@index([status])
+}
+
+model AlbumShare {
+  id               String    @id @default(cuid())
+  album_id         String
+  grantee_type     String // user | project
+  grantee_id       String
+  permissions_json String
+  created_by       String
+  expires_at       DateTime?
+  status           String    @default("active") // active | revoked | expired
+  created_at       DateTime  @default(now())
+
+  album   ReferenceAlbum @relation(fields: [album_id], references: [id], onDelete: Cascade)
+  creator User           @relation("AlbumShareCreator", fields: [created_by], references: [id], onDelete: Cascade)
+
+  @@unique([album_id, grantee_type, grantee_id])
+  @@index([album_id])
+  @@index([grantee_type, grantee_id])
+  @@index([created_by])
+  @@index([status])
+}
+
+// 图片集：保存/复用素材组合
+model AssetCollection {
+  id             String   @id @default(cuid())
+  owner_id       String   @default("default-user")
+  name           String
+  description    String?
+  visibility     String   @default("private") // private | public
+  cover_asset_id String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // 关联
+  items       AssetCollectionItem[]
+  cover_asset Asset?                @relation("CollectionCover", fields: [cover_asset_id], references: [id])
+}
+
+// 图片集条目
+model AssetCollectionItem {
+  id            String   @id @default(cuid())
+  collection_id String
+  asset_id      String
+  sort_order    Int      @default(0)
+  role          String?
+  created_at    DateTime @default(now())
+
+  collection AssetCollection @relation(fields: [collection_id], references: [id], onDelete: Cascade)
+  asset      Asset           @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  @@unique([collection_id, asset_id])
+}
+
+// 任务快照：生成时的参数 + 素材状态冻结
+model GenerationTaskSnapshot {
+  id           String  @id @default(cuid())
+  task_id      String? // 可选关联 VideoTask
+  workspace_id String?
+
+  // 生成参数
+  generation_mode String
+  prompt_raw      String // 用户原始 prompt（含 图1 图2 等引用）
+  prompt_rendered String // 渲染后（将 图N 替换为实际 URL）
+
+  // 素材映射：{ "图1": assetId, "图2": assetId }
+  asset_mapping_json String? // JSON
+
+  // 完整 content 数组
+  content_json String? // JSON
+
+  // API 发送的原始 payload
+  provider_payload_json String?
+
+  created_at DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspace_id], references: [id])
+}
+
+// SD2 生产桥：GPT 队列预设（插件「组合」）。不关联对话，按账号归属；shared=true 进共享池。
+// items_json = [{ text, images: [{ name, type, url }] }]，图片只存 SD2 素材地址（不存图片本身）。
+model BridgeQueuePreset {
+  id          String   @id @default(cuid())
+  owner_id    String
+  client_id   String?  // 插件本机组合 id：首次上传去重用
+  name        String
+  items_json  String
+  shared      Boolean  @default(false)
+  team_id     String?  // 预留：团队范围（目前共享池全站可见）
+  like_count  Int      @default(0)
+  use_count   Int      @default(0)
+  copied_from String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@unique([owner_id, client_id])
+  @@index([owner_id, updated_at])
+  @@index([shared, updated_at])
+}
+
+model BridgeQueuePresetLike {
+  id         String   @id @default(cuid())
+  preset_id  String
+  user_id    String
+  created_at DateTime @default(now())
+
+  @@unique([preset_id, user_id])
+  @@index([user_id])
+}

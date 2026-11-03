@@ -4,6 +4,7 @@ import { realpath, stat, lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 import type { Prisma, MultiviewWork } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { freezeWorkSourcePolicy } from '@/lib/works/source-policy';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { assertCanViewTask, getTaskWhereForUser } from '@/lib/projects/permissions';
@@ -239,6 +240,10 @@ async function mutation(user: SessionUser, input: Json, action: MultiviewWorkRec
         await currentActor(user, db);
         const previous = await replay(db); if (previous) return previous;
         const row = await perform(db);
+        if (['create', 'save', 'branch'].includes(action) && row.save_state === 'saved' && input.draftOnly !== true) await freezeWorkSourcePolicy(db, {
+          sourceKind: 'multiview_work', sourceId: row.id, ownerId: row.owner_id, projectId: row.project_id,
+          occurredAt: new Date(), operationId: String(row.draft_revision),
+        });
         const result: MultiviewWorkReceipt = { state: 'committed', mutationId, action, workId: row.id, revision: row.revision, draftRevision: row.draft_revision };
         await db.multiviewWorkMutation.create({ data: { actor_id: user.id, mutation_id: mutationId, work_id: row.id,
           request_hash: requestHash, base_revision: typeof input.baseRevision === 'number' ? input.baseRevision : null, action, receipt_json: JSON.stringify(result) } });

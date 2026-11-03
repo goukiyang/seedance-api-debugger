@@ -1,4 +1,5 @@
 'use client';
+import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
@@ -107,6 +108,7 @@ interface ProjectDetail {
   visibility: string;
   status: string;
   owner_user_id: string;
+  work_audience?: null | 'team' | 'project' | 'private';
   updated_at?: string;
   status_version?: { status: string; updated_at: string };
   owner?: { id?: string; name: string | null; username: string | null; email?: string | null; avatar_url?: string | null; account_type?: string | null };
@@ -1338,6 +1340,8 @@ export default function ProjectDetailPage() {
           </div>
         )}</div>
       </header>
+
+      <ProjectWorkAudience key={`${currentUserId}:${project.id}`} projectId={project.id} initialAudience={project.work_audience} ownerId={project.owner_user_id} projectType={project.type} />
 
       {(message || error) && (
         <div className="card" style={{ borderColor: error ? 'var(--border-color)' : 'rgba(74,222,128,0.35)' }}>
