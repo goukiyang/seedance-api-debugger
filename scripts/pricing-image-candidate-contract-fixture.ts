@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import type { PrismaClient } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { getCanvasImageQuote, type CanvasQuoteInput } from '@/lib/canvas-quote';
-import { getPricingImageChannelOptions, resolvePricingImageCandidate } from '@/lib/pricing/image';
+import { capturePricingImageMenu, getPricingImageChannelOptions, resolvePricingImageCandidate } from '@/lib/pricing/image';
 import { PricingItemUnavailableError, isPricingItemUnavailable } from '@/lib/pricing/item-unavailable';
-import { getImageGenerationApiSettings, getImageGenerationChannels, readPricingImageActualReadiness,
+import { captureImageGenerationRequestChannel, getImageGenerationApiSettings, getImageGenerationChannels, readPricingImageActualReadiness,
   resolveImageGenerationChannelSnapshot, IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY } from '@/lib/integrations/image-generation';
 import { IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from '@/lib/image-studio/settings';
@@ -66,13 +66,13 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
   };
   try {
     const before = await snapshots(), initialOffset = transactionQueries.length, initial = await quote();
-    transactions(initialOffset, 1);
+    transactions(initialOffset, 0);
     equal(initial.unitCredits, 0.2); equal(initial.estimatedCredits, 0.6); equal(await snapshots(), before);
     const absent = initial.modelOptions.find(item => item.model === 'gemini-3-pro-image-preview')!;
     equal(absent.status, 'unavailable'); equal(absent.unitCredits, null); equal(absent.estimatedCredits, null); ok(absent.reasonText);
     const concurrentOffset = transactionQueries.length;
     const concurrent = await Promise.all([quote(), quote(), quote()]);
-    transactions(concurrentOffset, 3);
+    transactions(concurrentOffset, 0);
     for (const result of concurrent) {
       equal(result.unitCredits, 0.2); equal(result.estimatedCredits, 0.6);
       equal(result.pricingRevision, initial.pricingRevision); equal(result.modelOptions, initial.modelOptions);
@@ -205,6 +205,21 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     equal(alias.items.find(item => item.id === 'original')!.ready, true);
     await reject(() => quote({ model: 'gemini-3-pro-image-preview' }));
     await reject(() => quote({ model: 'gpt-image-2.5-flare', channelId: 'shared' }));
+    // A quote finishes against its captured inputs if configuration changes
+    // mid-read. Real acceptance still validates the live source and rejects it.
+    const captured = await capturePricingImageMenu();
+    const bananaBeforeChange = await db.platformSetting.findUniqueOrThrow({ where: { key: BANANA_IMAGE_API_SETTING_KEY } });
+    const snapshotsBeforeCapture = await snapshots();
+    await put(BANANA_IMAGE_API_SETTING_KEY, { enabled: false, provider: 'musk', api_key: 'fixture-replaced-key',
+      base_url: 'https://fixture.invalid/replaced', default_model: 'gpt-image-2.5-flare', max_outputs_per_request: 8 });
+    const capturedChannel = (await captureImageGenerationRequestChannel('gpt-image-2.5-flare', 'auto', undefined, db, captured))!;
+    equal(capturedChannel.channelId, 'banana'); equal(await snapshots(), snapshotsBeforeCapture + 1);
+    const capturedSettings = await resolveImageGenerationChannelSnapshot(capturedChannel, db, true, 'gpt-image-2.5-flare', captured);
+    equal(capturedSettings.api_key, captured.channels.banana.api_key);
+    await reject(() => resolveImageGenerationChannelSnapshot(capturedChannel, db, true, 'gpt-image-2.5-flare'),
+      error => error instanceof Error && 'code' in error && error.code === 'image_channel_quote_stale');
+    await reject(() => quote({ model: 'gpt-image-2.5-flare' }));
+    await putRaw(BANANA_IMAGE_API_SETTING_KEY, bananaBeforeChange.value_json);
     const otherIdentity = { ...flareRoute.identity, modelId: 'gemini-3-pro-image-preview' };
     equal(isPricingItemUnavailable(new PricingItemUnavailableError(otherIdentity, 'disabled', 'fixture'), flareRoute.identity), false);
     equal(await db.imageStudioTask.count(), taskCount); equal(await db.creditAccount.findMany({ orderBy: { id: 'asc' } }), accounts);

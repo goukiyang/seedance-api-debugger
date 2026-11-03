@@ -693,6 +693,37 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
       + '&hd-representation=' + encodeURIComponent(oldVersion)), source, 'hd', 'image/png');
     assert.equal(changed.status, 409, 'keeping old profiles must not bypass a changed original');
   });
+  await check('HD03 WebP profile keeps a smaller JPEG original', async () => {
+    await fixture();
+    const source = '/uploads/small-original.jpg', file = path.join(process.cwd(), 'public', source);
+    const pixels = Buffer.alloc(512 * 512 * 3);
+    for (let index = 0; index < pixels.length; index++) pixels[index] = (index * 37 + (index >>> 5)) % 256;
+    await sharp(pixels, { raw: { width: 512, height: 512, channels: 3 } }).jpeg({ quality: 25 }).toFile(file);
+    const original = await fs.readFile(file);
+    ownerBindings.push({ id: 'small-original', owner_id: 'fixture-owner', original_url: source });
+    const job = (await core.requestHd(source, 0, false, undefined, undefined, 'hd-webp-q93-e4-v1'))!;
+    let encodedBytes = 0;
+    await processJob(job.key, { processor: async (request, options) => {
+      const result = await runner.runHdImageProcessor(request, { ...options, applicationRoot });
+      encodedBytes = result.bytes!; return result;
+    } });
+    assert.ok(encodedBytes > original.length, 'exercise a real size increase');
+    const ready = (await core.readHdJob(job.key))!;
+    assert.equal(ready.status, 'ready'); assert.equal(ready.format, 'original');
+    assert.equal(ready.reason, 'original_smaller'); assert.equal(ready.mime, 'image/jpeg');
+    assert.equal(ready.bytes, original.length); assert.equal(ready.file, undefined);
+    assert.deepEqual(await fs.readFile(file), original);
+    const { authorizedImageResponse } = await import('../src/lib/media/authorized-image-response');
+    const description = await authorizedImageResponse(new Request('https://fixture.invalid/image', {
+      headers: { 'X-Image-Read-Intent': 'status', 'X-Image-Accept': 'hd-open-v1' },
+    }), source, 'hd-description', 'image/jpeg');
+    assert.equal(description.headers.get('Content-Type'), 'application/json');
+    const descriptor = await description.json();
+    assert.equal(descriptor.original, true); assert.equal(descriptor.bytes, original.length);
+    const response = await authorizedImageResponse(new Request('https://fixture.invalid/image?hd-version=' + encodeURIComponent(ready.version)), source, 'hd', 'image/jpeg');
+    assert.equal(response.status, 200); assert.equal(response.headers.get('Content-Type'), 'image/jpeg');
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), original);
+  });
   await check('HD03 WebP profile keeps alpha and text outputs lossless', async () => {
     await fixture();
     const encoder = await import('../src/lib/media/hd-encoder');
@@ -701,7 +732,7 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
       const source = '/uploads/protected-' + preserveText + '.png', file = path.join(process.cwd(), 'public', source);
       const pixels = Buffer.alloc(128 * 96 * (preserveText ? 3 : 4));
       for (let index = 0; index < pixels.length; index++) pixels[index] = (index * 37 + (index >>> 5)) % 256;
-      await sharp(pixels, { raw: { width: 128, height: 96, channels: preserveText ? 3 : 4 } }).png().toFile(file);
+      await sharp(pixels, { raw: { width: 128, height: 96, channels: preserveText ? 3 : 4 } }).png({ compressionLevel: 0 }).toFile(file);
       const original = await fs.readFile(file);
       ownerBindings.push({ id: 'protected-' + preserveText, owner_id: 'fixture-owner', original_url: source });
       const job = (await core.requestHd(source, 0, preserveText, undefined, undefined, strategy))!;

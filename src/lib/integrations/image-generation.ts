@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { CapturedPricingImageInputs } from '@/lib/pricing/image-menu-inputs';
+import type { PricingMenuContext } from '@/lib/pricing/policy';
 import { imageBillingIntent, imageBillingReady, imageBillingProofKey, type CapturedImageBillingInputs } from '@/lib/image-studio/billing-readiness';
 import { imageBillingScope } from '@/lib/image-studio/billing-scope';
 import { parsePrivateCredentials, stringifyPrivateCredentials } from '@/lib/security/private-credentials.server';
@@ -1426,9 +1427,9 @@ function emptyManagedSettings(record: ManagedChannelRegistryRecord): ImageGenera
 }
 
 export async function captureImageGenerationRequestChannel(model: string, quality: unknown,
-  requestedChannelId?: string | null, tx: Prisma.TransactionClient | typeof prisma = prisma) {
-  const route = await resolveImageGenerationRequestRoute(model, quality, requestedChannelId, tx);
-  return route.channelId ? captureImageGenerationChannel(model, route.channelId, tx, route.qualityRoute) : undefined;
+  requestedChannelId?: string | null, tx: Prisma.TransactionClient | typeof prisma = prisma, menu?: PricingMenuContext) {
+  const route = await resolveImageGenerationRequestRoute(model, quality, requestedChannelId, tx, menu?.routes);
+  return route.channelId ? captureImageGenerationChannel(model, route.channelId, tx, route.qualityRoute, menu) : undefined;
 }
 
 export async function captureImageGenerationChannel(
@@ -1436,17 +1437,18 @@ export async function captureImageGenerationChannel(
   channelId: ImageGenerationChannelId = 'original',
   tx: Prisma.TransactionClient | typeof prisma = prisma,
   qualityRoute?: ImageQualityRouteSnapshot,
+  menu?: PricingMenuContext,
 ): Promise<ImageGenerationChannelSnapshot> {
   assertImageGenerationChannelId(channelId);
   if (!IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)) {
     throw new ImageGenerationChannelError('所选图片型号不在允许列表中', 400, 'image_channel_model_not_allowed');
   }
   if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
-    const channels = await getImageGenerationChannels(tx);
+    const channels = menu ? menu.channels : await getImageGenerationChannels(tx);
     let current = selectImageGenerationSettings(channels, model, channelId);
     if (qualityRoute) {
       const { withImagePricing } = await import('@/lib/pricing/image');
-      current = (await withImagePricing(current, model, tx, undefined, { quality: qualityRoute.quality })).settings;
+      current = (await withImagePricing(current, model, tx, undefined, { quality: qualityRoute.quality }, menu)).settings;
     }
     if (!current.configRevision || current.configRevision === 'unconfigured' || current.deleted || !current.enabled || !current.api_key) {
       throw new ImageGenerationChannelError('该图片供应商尚未配置或已停用，不能提交新任务', 409, 'image_channel_not_available');
@@ -1459,9 +1461,10 @@ export async function captureImageGenerationChannel(
   }
 
   const sourceChannelId = channelId === 'original' ? (isGeminiImageModel(model) ? 'banana' : 'shared') : channelId;
-  const settings = await getImageGenerationApiSettings(tx, sourceChannelId === 'banana' ? 'banana' : 'default');
-  const modelApis = await readLegacyModelApiRegistry(sourceChannelId, tx);
-  const studioSettings = await getImageStudioSettings(tx).catch(() => null);
+  const inputs = menu?.inputs.image;
+  const settings = await getImageGenerationApiSettings(tx, sourceChannelId === 'banana' ? 'banana' : 'default', Boolean(menu), sourceChannelId === 'banana' ? inputs?.banana : inputs?.shared);
+  const modelApis = await readLegacyModelApiRegistry(sourceChannelId, tx, sourceChannelId === 'banana' ? inputs?.bananaModels : inputs?.sharedModels);
+  const studioSettings = menu ? await getImageStudioSettings(tx, menu.inputs.image.studio) : await getImageStudioSettings(tx).catch(() => null);
   const prices = studioSettings?.prices || Object.fromEntries(IMAGE_STUDIO_MODELS.map(item => [item, null])) as Record<ImageStudioModel, number | null>;
   const resolved = channelId === 'original' ? resolveLegacySettings(settings, model, channelId, prices)
     : applyLegacyModelApis(resolveLegacySettings(settings, model, channelId, prices), modelApis, model);
@@ -1473,7 +1476,7 @@ export async function captureImageGenerationChannel(
     if (!capability?.enabled) {
       throw new ImageGenerationChannelError('当前旧接口协议未确认支持该型号，未创建报价', 409, 'image_channel_capability_unknown');
     }
-    const billingIntent = await legacyBillingIntentState(resolved, model, tx);
+    const billingIntent = await legacyBillingIntentState(resolved, model, tx, Boolean(menu), inputs);
     if (billingIntent.selected) {
       capability = {
         ...capability,
@@ -1483,7 +1486,7 @@ export async function captureImageGenerationChannel(
       };
       resolved.modelCapabilities = { ...resolved.modelCapabilities, [model]: capability };
     }
-    const reason = await modelDisabledReason(resolved, model as ImageStudioModel, tx);
+    const reason = await modelDisabledReason(resolved, model as ImageStudioModel, tx, Boolean(menu), inputs);
     if (reason) throw new ImageGenerationChannelError(reason, 409, 'image_channel_not_ready');
     const configRevision = randomUUID();
     const version: PrivateImageGenerationChannelVersion = {
@@ -1534,17 +1537,22 @@ export async function resolveImageGenerationChannelSnapshot(
   tx: Prisma.TransactionClient | typeof prisma = prisma,
   forSubmission = false,
   model?: string,
+  menu?: PricingMenuContext,
 ): Promise<ImageGenerationResolvedSettings> {
   assertImageGenerationChannelId(snapshot.channelId);
   if (!/^[0-9a-f-]{36}$/i.test(snapshot.configRevision)) {
     throw new ImageGenerationChannelError('图片供应商配置修订无效', 400, 'image_channel_invalid_revision');
   }
-  const version = await readPrivateChannelVersion(tx, snapshot.channelId, snapshot.configRevision);
+  // A selected legacy quote has just appended its immutable version. Managed
+  // revisions are already part of the captured inputs; neither reads live config.
+  const legacy = ['original', 'shared', 'banana'].includes(snapshot.channelId);
+  const inputs = menu?.inputs.image;
+  const version = await readPrivateChannelVersion(tx, snapshot.channelId, snapshot.configRevision, legacy ? undefined : inputs);
   const settings = managedSettingsFromVersion(version);
   if (forSubmission) {
     if (snapshot.qualityRoute) {
       const route = await resolveImageGenerationRequestRoute(model || snapshot.qualityRoute.model,
-        snapshot.qualityRoute.quality, snapshot.channelId, tx);
+        snapshot.qualityRoute.quality, snapshot.channelId, tx, menu?.routes);
       if (route.qualityRoute?.revision !== snapshot.qualityRoute.revision) {
         throw new ImageGenerationChannelError('图片质量路由已变化，请重新报价；未使用旧路由提交', 409, 'image_quality_route_stale');
       }
@@ -1553,8 +1561,8 @@ export async function resolveImageGenerationChannelSnapshot(
       if (!version.sourceChannelId || !version.sourceFingerprint) {
         throw new ImageGenerationChannelError('原接口快照缺少报价版本信息', 409, 'image_channel_quote_snapshot_invalid');
       }
-      const current = await getImageGenerationApiSettings(tx, version.sourceChannelId === 'banana' ? 'banana' : 'default');
-      const modelApis = await readLegacyModelApiRegistry(version.sourceChannelId, tx);
+      const current = await getImageGenerationApiSettings(tx, version.sourceChannelId === 'banana' ? 'banana' : 'default', Boolean(menu), version.sourceChannelId === 'banana' ? inputs?.banana : inputs?.shared);
+      const modelApis = await readLegacyModelApiRegistry(version.sourceChannelId, tx, version.sourceChannelId === 'banana' ? inputs?.bananaModels : inputs?.sharedModels);
       if (version.selectedModel && model && version.selectedModel !== model) throw new ImageGenerationChannelError('报价型号与任务不匹配，请重新报价', 409, 'image_channel_quote_model_mismatch');
       if (Object.prototype.hasOwnProperty.call(version, 'modelOverrideRevision')
         ? version.modelOverrideRevision !== modelApis.revision
@@ -1563,7 +1571,7 @@ export async function resolveImageGenerationChannelSnapshot(
       }
       if (snapshot.channelId !== 'original' && version.billingIntentRevision !== undefined) {
         const { imageBillingIntent } = await import('@/lib/image-studio/billing-readiness');
-        const currentIntent = await imageBillingIntent(tx);
+        const currentIntent = await imageBillingIntent(tx, inputs?.intent);
         if (currentIntent.revision !== version.billingIntentRevision) {
           throw new ImageGenerationChannelError('实际计费意图已变化，请重新获取报价后再提交', 409, 'image_channel_quote_stale');
         }
@@ -1575,16 +1583,16 @@ export async function resolveImageGenerationChannelSnapshot(
       if (snapshot.channelId !== 'original' && !isImageGenerationApiReady(model ? resolveImageGenerationModelSettings(settings, model) : settings)) {
         throw new ImageGenerationChannelError('所选图片接口已停用或配置不完整，请重新选择', 409, 'image_channel_not_available');
       }
-      const hydrated = await hydrateActualBilling(settings, tx);
+      const hydrated = await hydrateActualBilling(settings, tx, Boolean(menu), inputs);
       return model ? resolveImageGenerationModelSettings(hydrated, model) : hydrated;
     }
-    const registry = await readManagedChannelRegistry(tx);
+    const registry = await readManagedChannelRegistry(tx, inputs?.registry);
     const current = registry.channels.find(item => item.id === snapshot.channelId);
     if (!current || current.deleted || !current.enabled || current.configRevision !== snapshot.configRevision) {
       throw new ImageGenerationChannelError('图片供应商配置已停用或修订过期，请重新报价', 409, 'image_channel_revision_stale');
     }
   }
-  const hydrated = await hydrateActualBilling(settings, tx);
+  const hydrated = await hydrateActualBilling(settings, tx, Boolean(menu), inputs);
   return model ? resolveImageGenerationModelSettings(hydrated, model) : hydrated;
 }
 
