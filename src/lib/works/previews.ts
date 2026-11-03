@@ -57,12 +57,21 @@ async function existingPoster(taskId: string) {
 async function run(binary: string, args: string[], fd: number, signal: AbortSignal, timeout: number) {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe', fd], signal });
-    let stdout = '', count = 0, overflow = false;
+    let stdout = '', count = 0, overflow = false, spawnError: Error | null = null;
+    let abortTimer: ReturnType<typeof setTimeout> | null = null;
+    const abort = () => { abortTimer = setTimeout(() => child.kill('SIGKILL'), 2000); };
+    signal.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => child.kill('SIGKILL'), timeout);
     child.stdout!.on('data', chunk => { count += chunk.length; if (count > 1024 * 1024) { overflow = true; child.kill('SIGKILL'); } else stdout += chunk.toString(); });
     child.stderr!.on('data', chunk => { count += chunk.length; if (count > 1024 * 1024) { overflow = true; child.kill('SIGKILL'); } });
-    child.once('error', error => { clearTimeout(timer); reject(error); });
-    child.once('close', code => { clearTimeout(timer); if (code === 0 && !overflow) resolve(stdout); else reject(new Error('WORKS_PREVIEW_ENCODER_DEFERRED')); });
+    // The shared media slot is released only after the encoder has actually exited.
+    child.once('error', error => { spawnError = error; });
+    child.once('close', code => {
+      clearTimeout(timer); if (abortTimer) clearTimeout(abortTimer);
+      signal.removeEventListener('abort', abort);
+      if (code === 0 && !overflow && !spawnError && !signal.aborted) resolve(stdout);
+      else reject(spawnError || new Error('WORKS_PREVIEW_ENCODER_DEFERRED'));
+    });
   });
 }
 function probeInfo(raw: string) {
@@ -74,12 +83,16 @@ function probeInfo(raw: string) {
 const probeArgs = (input: string) => ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', input];
 
 /** Called only by the existing multiview consumer while holding its cross-release flock. No GET ever encodes. */
-export async function processNextWorkPreview() {
+export async function processNextWorkPreview(options: { signal?: AbortSignal } = {}) {
+  if (options.signal?.aborted) return { state: 'yielded' };
   if (!await worksSchemaReady() || await worksRegistrationPaused()) return { state: 'paused' };
   await assertMultiviewWorkConsumerLock();
   const job = await claimWorkRegistrationJob(['media_preview'], 90_000);
   if (!job) return { state: 'empty' };
   const controller = new AbortController();
+  const yieldPreview = () => controller.abort();
+  options.signal?.addEventListener('abort', yieldPreview, { once: true });
+  if (options.signal?.aborted) yieldPreview();
   let renewal: Promise<unknown> | null = null;
   const timer = setInterval(() => {
     if (!renewal) renewal = prisma.workRegistrationJob.updateMany({ where: workRegistrationLeaseWhere(job), data: { lease_until: new Date(Date.now() + 90_000) } })
@@ -222,9 +235,19 @@ export async function processNextWorkPreview() {
     });
     return { state: 'ready' };
   } catch {
+    if (options.signal?.aborted) {
+      // A ready collage gets the one heavy-media slot. This is a local pause,
+      // never an upstream failure or a new generation request. Avoid retry churn.
+      await prisma.workRegistrationJob.updateMany({ where: workRegistrationLeaseWhere(job), data: {
+        status: 'pending', attempts: { decrement: 1 }, run_after: new Date(Date.now() + 60_000),
+        error_code: 'WORKS_PREVIEW_YIELDED', lease_token: null, lease_until: null,
+      } });
+      return { state: 'yielded' };
+    }
     await failWorkRegistrationJob(job, 'WORKS_PREVIEW_DEFERRED');
     return { state: 'deferred' };
   } finally {
+    options.signal?.removeEventListener('abort', yieldPreview);
     clearInterval(timer); if (renewal) await renewal;
     if (temporary) await fs.rm(temporary, { force: true });
     try { await source?.handle.close(); }

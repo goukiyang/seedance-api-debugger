@@ -9,6 +9,14 @@ export const MULTIVIEW_WORKS_RUNTIME_PROTOCOL = 'multiview.works.v1' as const;
 export const MULTIVIEW_WORKS_RUNTIME_ROOT = '/data/video-api-debugger/var-lib/storage/multiview-works';
 export const MULTIVIEW_WORKS_RUNTIME_SOURCES = Object.freeze([
   'scripts/process-multiview-works.ts',
+  'scripts/works-consumer-scheduler.ts',
+  'src/lib/works/previews.ts',
+  'src/lib/works/preview-files.ts',
+  'src/lib/works/video-storage.ts',
+  'src/lib/works/ingestion.ts',
+  'src/lib/works/context-index.ts',
+  'src/lib/works/context-types.ts',
+  'src/lib/works/source-policy.ts',
   'src/lib/video/multiview-works-runtime.ts',
   'src/lib/video/multiview-work-render.ts',
   'src/lib/video/multiview-output-assets.server.ts',

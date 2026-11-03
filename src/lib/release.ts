@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '大图打开与关闭优化', outline: [
-  '减少打开大图时的重复请求',
-  '修复刷新后大图无法关闭',
-  '保留高清、原图选择与双击回填',
+const notice = { title: '作品详情、同组比较与交流', outline: [
+  '图片和视频同页浏览，返回保留原位置',
+  '查看真实来源与同组作品，安全准备模板草稿',
+  '并排比较作品，自愿分享经验和提问',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

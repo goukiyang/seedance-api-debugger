@@ -7,7 +7,8 @@ import type { SessionUser } from '@/lib/auth/session';
 import { authorizeStudioAssets } from './assets';
 import { encodeCursor, parseCursor } from './common';
 import { StudioError } from './errors';
-import { getStudioTemplate } from './templates';
+import { getStudioTemplate, getStudioTemplateUseAccess } from './templates';
+import type { Prisma } from '@prisma/client';
 import { publicRecipe } from './projection';
 import { copyModuleContext } from './context';
 import {
@@ -293,6 +294,31 @@ export async function createStudioDraft(user: SessionUser, input: CreateStudioDr
     },
   });
   return serializeDraft(row);
+}
+
+/** Exact source version and fresh permissions are checked in the caller's original operation transaction. */
+export async function prepareStudioTemplateMethodDraft(db: Prisma.TransactionClient, user: SessionUser, templateId: string, expectedVersion: string,
+  actualParameters: Record<string, import('./types').StudioJsonValue>) {
+  await getStudioTemplateUseAccess(user, templateId, 'studio', db);
+  const row = await db.videoStudioTemplate.findUnique({ where: { id: templateId }, include: { published_version: true } });
+  if (!row || row.status === 'archived') throw new StudioError('原模板已不可用', 409, 'CONFLICT');
+  const published = row.visibility === 'shared' && row.status === 'published' ? row.published_version : null;
+  const currentVersion = published?.id || `studio:${row.revision}`;
+  if (expectedVersion !== currentVersion) throw new StudioError('原作品使用的模板版本已变化，不能改用新版', 409, 'CONFLICT');
+  const recipe = published
+    ? readPrivateVideoRecipe(published.recipe_json, 'video-template-version', published.id, videoTemplateOrigins(row.id, row.owner_user_id))
+    : readPrivateVideoRecipe(row.recipe_json, 'video-template', row.id, videoTemplateOrigins(row.id, row.owner_user_id));
+  const snapshot: TemplateSnapshot = { ref: { templateId, templateSource: 'studio', versionId: published?.id || null,
+    versionNumber: published?.version_number || null, templateName: published?.name || row.name,
+    sourceRevision: published ? null : currentVersion }, recipe };
+  const values: Record<string, unknown> = {};
+  for (const field of recipe.fields) if ('defaultValue' in field && field.defaultValue !== undefined) values[field.key] = field.defaultValue;
+  const draftId = randomUUID();
+  await db.videoStudioDraft.create({ data: { id: draftId, owner_user_id: user.id, name: snapshot.ref.templateName,
+    group_name: published?.group_name || row.group_name, values_json: JSON.stringify(values), parameters_json: JSON.stringify(normalizeParameters(actualParameters)),
+    template_source: 'studio', source_template_id: row.id, source_version_id: published?.id || null,
+    template_snapshot_json: writeTemplateSnapshot(snapshot, draftId) } });
+  return draftId;
 }
 
 export async function getStudioDraft(user: SessionUser, id: string) {

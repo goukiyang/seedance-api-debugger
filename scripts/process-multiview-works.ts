@@ -4,15 +4,16 @@ import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
+import { WorkMediaScheduler } from './works-consumer-scheduler';
 import type { MultiviewWorksRuntime } from '../src/lib/video/multiview-works-runtime';
 
 loadEnvConfig(process.cwd());
 
 const lockedFlag = '--multiview-worker-lock-held';
 let stopping = false;
-let finishWait: (() => void) | null = null;
+const finishWaits = new Set<() => void>();
 let runtimeStopping: (() => void) | null = null;
-function requestStop() { stopping = true; finishWait?.(); runtimeStopping?.(); }
+function requestStop() { stopping = true; finishWaits.forEach(finish => finish()); runtimeStopping?.(); }
 process.on('SIGTERM', requestStop);
 process.on('SIGINT', requestStop);
 
@@ -46,8 +47,8 @@ async function waitForNextScan() {
   if (stopping) return;
   await new Promise<void>(resolve => {
     const timer = setTimeout(done, 15000);
-    function done() { clearTimeout(timer); finishWait = null; resolve(); }
-    finishWait = done;
+    function done() { clearTimeout(timer); finishWaits.delete(done); resolve(); }
+    finishWaits.add(done);
     if (stopping) done();
   });
 }
@@ -69,27 +70,42 @@ async function main() {
     runtimeStopping = () => runtime?.markStopping();
     if (stopping) runtime.markStopping();
     const once = process.argv.includes('--once');
-    let lastMessage = '';
-    while (!stopping) {
-      try {
-        runtime.assertHealthy();
-        const result = await processNextMultiviewWork();
-        runtime.assertHealthy();
-        const preview = stopping ? { state: 'paused' } : await processNextWorkPreview().catch(() => ({ state: 'deferred' }));
-        runtime.assertHealthy();
-        const message = JSON.stringify(result);
-        if (result.state !== 'empty' || message !== lastMessage) console.log('[multiview-works]', message);
-        lastMessage = message;
-        if (once) break;
-        if (result.state !== 'empty' || !['empty', 'paused', 'deferred'].includes(preview.state)) continue;
-      } catch {
-        // No user content, source URLs or environment values are included in the service log.
-        if (lastMessage !== 'deferred') console.warn('[multiview-works] preparation deferred; recipe and existing output retained');
-        lastMessage = 'deferred';
-        if (once) { process.exitCode = 1; break; }
+    const media = new WorkMediaScheduler();
+    const currentRuntime = runtime;
+    const consume = async (name: 'multiview-works' | 'works-preview', next: () => Promise<{ state: string }>) => {
+      let lastMessage = '';
+      while (!stopping) {
+        try {
+          currentRuntime.assertHealthy();
+          const result = await next();
+          currentRuntime.assertHealthy();
+          const message = JSON.stringify(result);
+          if (result.state !== 'empty' || message !== lastMessage) console.log(`[${name}]`, message);
+          lastMessage = message;
+          if (once) break;
+          if (!['empty', 'paused', 'deferred', 'yielded'].includes(result.state)) continue;
+        } catch {
+          // No user content, source URLs or environment values enter the service log.
+          if (lastMessage !== 'deferred') console.warn(`[${name}] preparation deferred; existing outputs retained`);
+          lastMessage = 'deferred';
+          if (once) { process.exitCode = 1; break; }
+        }
+        await waitForNextScan();
       }
-      await waitForNextScan();
-    }
+    };
+    await Promise.all([
+      consume('multiview-works', async () => {
+        const slot: { release: (() => void) | null } = { release: null };
+        try {
+          return await processNextMultiviewWork({ beforePrepare: async () => {
+            // Empty scans do not interrupt a video. The selected output owns priority.
+            if (!slot.release) slot.release = await media.acquireMultiview();
+            currentRuntime.assertHealthy();
+          } });
+        } finally { slot.release?.(); }
+      }),
+      consume('works-preview', () => media.preview(signal => processNextWorkPreview({ signal }))),
+    ]);
   } finally {
     runtimeStopping = null;
     try {

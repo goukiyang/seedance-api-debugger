@@ -11,6 +11,7 @@ import https from 'node:https';
 import dns from 'node:dns/promises';
 import os from 'node:os';
 import { WORKS_CHECKS, WORKS_SOURCES } from './works-fixture-inputs.mjs';
+import { WorkMediaScheduler } from './works-consumer-scheduler';
 
 const hash = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
 async function main() {
@@ -62,6 +63,24 @@ assert indexes <= {r[0] for r in db.execute("SELECT name FROM sqlite_master WHER
 print(json.dumps({'newTables':len(expected),'oldTablesPreserved':len(tables),'oldRowsPreserved':sum(map(len,before.values())),'projectNullableColumnAdded':True}))
 db.close()
 `, databasePath, path.join(root, 'prisma/migrations/20261102_team_works_catalog/migration.sql')], { env, encoding: 'utf8', timeout: 30000 }));
+  const learningMigrationProof = JSON.parse(execFileSync('python3', ['-c', `
+import sqlite3, sys, json, re
+db=sqlite3.connect(sys.argv[1]); db.row_factory=sqlite3.Row
+sql=open(sys.argv[2]).read()
+assert not re.search(r'^\\s*(ALTER|DROP|DELETE|UPDATE|REPLACE|INSERT)\\s',sql,re.I|re.M)
+before={r['name']:r['sql'] for r in db.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+rows={t:[dict(r) for r in db.execute('SELECT * FROM "'+t+'" ORDER BY id')] for t in ['User','Project','PlatformSetting','WorkOperation']}
+indexes={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+db.executescript('BEGIN IMMEDIATE;\\n'+sql+'\\nCOMMIT;')
+after={r['name']:r['sql'] for r in db.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+expected={'WorkContext','WorkSourceLink','WorkLearningEntry','WorkDerivedLink'}
+assert set(after)-set(before)==expected
+assert all(after[t]==ddl for t,ddl in before.items())
+for t,values in rows.items(): assert values==[dict(r) for r in db.execute('SELECT * FROM "'+t+'" ORDER BY id')]
+assert indexes <= {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),'oldRowsPreserved':sum(map(len,rows.values())),'newIndexes':len({r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}-indexes)}))
+`, databasePath, path.join(root, 'prisma/migrations/20261103_works_learning/migration.sql')], { env, encoding: 'utf8', timeout: 30000 }));
   for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
   Object.assign(process.env, env);
   const { PrismaClient } = await import('@prisma/client');
@@ -73,7 +92,7 @@ db.close()
   const forbidden = () => { forbiddenCalls++; throw new Error('Works engineering cannot use network, providers or application services'); };
   mock.method(globalThis, 'fetch', forbidden); mock.method(http, 'request', forbidden); mock.method(http, 'get', forbidden);
   mock.method(https, 'request', forbidden); mock.method(https, 'get', forbidden); mock.method(dns, 'lookup', forbidden);
-  const checks: string[] = [], metrics: Record<string, unknown> = { migration: migrationProof };
+  const checks: string[] = [], metrics: Record<string, unknown> = { migration: migrationProof, learningMigration: learningMigrationProof };
   try {
     const { getWorkAccess } = await import('../src/lib/works/access');
     const { resolveContent } = await import('../src/lib/content-reactions/content');
@@ -85,6 +104,13 @@ db.close()
     const { mutateWorkPersonalState } = await import('../src/lib/works/interactions');
     const { createWorkCollection, addWorkCollectionMembership } = await import('../src/lib/works/collections');
     const { readWorkOperation } = await import('../src/lib/works/operations');
+    const { prepareWorkMethod } = await import('../src/lib/works/context-method');
+    const { resolveSharedStudioDefinition, getSharedStudioPersonalOverrides } = await import('../src/lib/image-studio/shared-contract');
+    const { indexWorkContext } = await import('../src/lib/works/context-index');
+    const { readWorkContext } = await import('../src/lib/works/context');
+    const { mutateWorkLearning, readWorkLearning } = await import('../src/lib/works/learning');
+    const { mutateWorkDerivation, readWorkDerivations } = await import('../src/lib/works/learning-derivations');
+    const { requestWorkPreview } = await import('../src/lib/works/preview-request');
     const { processWorksRegistrationPass } = await import('../src/lib/works/ingestion');
     const { setWorksControl, freezeWorkSourcePolicy } = await import('../src/lib/works/source-policy');
     const { canUseWorksPreview } = await import('../src/lib/works/rollout.server');
@@ -301,16 +327,23 @@ db.close()
       user_id: owner.id, owner_user_id: owner.id, project_id: project.id, local_status: 'succeeded', local_video_path: '/videos/legacy-saved-video.mp4', delivery_status: 'succeeded',
       delivery_completed_at: videoTime, created_at: new Date(Date.now() - 86400000) } });
     await processWorksRegistrationPass({ pageSize: 12, jobs: 12 });
+    await processWorksRegistrationPass({ pageSize: 12, jobs: 12 });
     const legacyWork = await database.work.findFirstOrThrow({ where: { source_kind: 'video_task', source_id: legacyVideo.id } });
     assert.equal(await database.workRegistrationJob.count({ where: { source_kind: 'media_preview', source_id: legacyWork.current_version_id! } }), 0, 'History indexing must not enqueue a bulk video transcode');
     const legacyDetail = await readWorkDetail(owner, legacyWork.id); assert.ok(legacyDetail?.detailPreviewUrl); assert.equal(legacyDetail.previewUrl, null);
-    assert.equal(await database.workRegistrationJob.count({ where: { source_kind: 'media_preview', source_id: legacyWork.current_version_id! } }), 1, 'An explicit detail requests only its own optional derivative');
+    assert.equal(await database.workRegistrationJob.count({ where: { source_kind: 'media_preview', source_id: legacyWork.current_version_id! } }), 0, 'A detail GET must remain read only');
+    const previewIntent = { viewerId: owner.id, requestId: 'prepare-legacy-preview', expectedMediaVersion: legacyWork.current_version_id };
+    const previewReceipt = await requestWorkPreview(owner, legacyWork.id, previewIntent);
+    assert.equal(previewReceipt.result.state, 'preparing');
+    assert.deepEqual(await requestWorkPreview(owner, legacyWork.id, previewIntent), previewReceipt);
+    assert.equal(await database.workRegistrationJob.count({ where: { source_kind: 'media_preview', source_id: legacyWork.current_version_id! } }), 1, 'Only the explicit original POST queues its own derivative once');
     await setWorksControl('pause');
     await database.imageStudioTask.update({ where: { id: late.id }, data: { status: 'succeeded', asset_id: current.asset.id, finished_at: new Date() } });
     assert.equal((await processWorksRegistrationPass()).state, 'paused');
     assert.equal(await database.work.count({ where: { source_id: late.id } }), 0);
     await setWorksControl('resume');
     await database.$disconnect();
+    await processWorksRegistrationPass({ pageSize: 12, jobs: 12 });
     await processWorksRegistrationPass({ pageSize: 12, jobs: 12 });
     assert.equal(await database.work.count({ where: { source_id: late.id } }), 1);
     const durableWork = await database.work.findFirstOrThrow({ where: { source_id: late.id } });
@@ -354,6 +387,142 @@ db.close()
     await database.$disconnect(); assert.equal(await database.workCollectionItem.count(), saved); assert.equal(await database.workOperation.count(), receipts);
     assert.equal(await database.asset.count({ where: { id: current.asset.id } }), 1);
     metrics.personalFacts = { memberships: saved, receipts }; checks.push(WORKS_CHECKS[5]);
+    const { checkWorkMethodPin } = await import('./works-method-pin-engineering');
+    metrics.methodReader = await checkWorkMethodPin(database);
+    const scheduler = new WorkMediaScheduler();
+    let activeMedia = 0, maximumMedia = 0, yielded = false, cleanupFinished = false;
+    let finishCleanup!: () => void, markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    const cleanup = new Promise<void>(resolve => { finishCleanup = resolve; });
+    const pendingPreview = scheduler.preview(async signal => {
+      activeMedia++; maximumMedia = Math.max(maximumMedia, activeMedia); markStarted();
+      await new Promise<void>(resolve => signal.addEventListener('abort', () => { yielded = true; resolve(); }, { once: true }));
+      await cleanup; cleanupFinished = true; activeMedia--;
+      return { state: 'yielded' };
+    });
+    await started;
+    assert.deepEqual(await scheduler.preview(async () => ({ state: 'invalid-overlap' })), { state: 'paused' });
+    let primaryStarted = false;
+    const primarySlot = scheduler.acquireMultiview().then(release => {
+      assert.equal(cleanupFinished, true, 'An encoder and lease cleanup must finish before the next heavy preparation');
+      primaryStarted = true; activeMedia++; maximumMedia = Math.max(maximumMedia, activeMedia); return release;
+    });
+    await Promise.resolve(); assert.equal(yielded, true); assert.equal(primaryStarted, false);
+    assert.deepEqual(await scheduler.preview(async () => ({ state: 'invalid-priority' })), { state: 'paused' });
+    finishCleanup(); await pendingPreview;
+    const releasePrimary = await primarySlot;
+    assert.deepEqual(await scheduler.preview(async () => ({ state: 'invalid-overlap' })), { state: 'paused' });
+    activeMedia--; releasePrimary();
+    assert.deepEqual(await scheduler.preview(async () => ({ state: 'ready' })), { state: 'ready' });
+    assert.equal(maximumMedia, 1);
+    metrics.mediaScheduling = { maximumHeavyMedia: maximumMedia, previewYielded: yielded, cleanupBeforePrimary: cleanupFinished };
+    checks.push(WORKS_CHECKS[6]);
+    const learningBase = await createImage('learning-base'), learningSibling = await createImage('learning-sibling');
+    const opaqueBatch = 'same-submission-synthetic';
+    for (const fixture of [learningBase, learningSibling, privateWork]) {
+      await database.imageStudioTask.update({ where: { id: fixture.task.id }, data: { batch_id: opaqueBatch,
+        snapshot_json: JSON.stringify({ version: 1, batchId: opaqueBatch, inputFingerprint: hash('same-submission-input'), referencePolicy: { primaryIds: [] }, primaryReferenceImages: [], referenceImages: [] }) } });
+      await database.$transaction(tx => indexWorkContext(tx, fixture.work, fixture.media.id));
+    }
+    const discussion = { viewerId: colleague.id, requestId: 'learning-question-original', expectedMediaVersion: learningBase.media.id,
+      kind: 'question', parentId: null, body: 'A synthetic question about the public result', timeSeconds: null };
+    const question = await mutateWorkLearning(colleague, learningBase.work.id, discussion, 'create');
+    assert.deepEqual(await mutateWorkLearning(colleague, learningBase.work.id, discussion, 'create'), question);
+    assert.equal(await database.workLearningEntry.count({ where: { work_id: learningBase.work.id } }), 1);
+    await assert.rejects(mutateWorkLearning(colleague, learningBase.work.id, { ...discussion, body: 'changed original intent' }, 'create'), error => (error as { status?: number }).status === 409);
+    await assert.rejects(mutateWorkLearning(colleague, learningBase.work.id, { ...discussion, requestId: 'learning-experience-denied', kind: 'experience' }, 'create'), error => (error as { status?: number }).status === 403);
+    const experience = await mutateWorkLearning(owner, learningBase.work.id, { ...discussion, viewerId: owner.id, requestId: 'learning-author-experience', kind: 'experience', body: 'A voluntary author note' }, 'create');
+    assert.equal(experience.operation.state, 'committed');
+    await assert.rejects(mutateWorkLearning(owner, learningBase.work.id, { viewerId: owner.id, requestId: 'learning-edit-other-denied', expectedMediaVersion: learningBase.media.id,
+      entryId: question.operation.result.entryId, expectedRevision: 1, body: 'cannot edit another author' }, 'edit'), error => (error as { status?: number }).status === 403);
+    const answer = await mutateWorkLearning(owner, learningBase.work.id, { viewerId: owner.id, requestId: 'learning-answer-original', expectedMediaVersion: learningBase.media.id,
+      kind: 'answer', parentId: question.operation.result.entryId, body: 'A synthetic answer', timeSeconds: null }, 'create');
+    assert.equal(answer.operation.state, 'committed');
+    const questionPage = await readWorkLearning(colleague, learningBase.work.id, new URLSearchParams({ version: learningBase.media.id }));
+    assert.equal(questionPage.items.length, 1); assert.equal(questionPage.experience?.body, 'A voluntary author note');
+    await assert.rejects(readWorkLearning(colleague, learningBase.work.id, new URLSearchParams({ version: 'old-unknown-version' })), error => (error as { status?: number }).status === 409);
+    const unknownDurationVersion = (await database.work.findUniqueOrThrow({ where: { id: videoWork.id } })).current_version_id!;
+    await database.workMediaVersion.update({ where: { id: unknownDurationVersion }, data: { duration: null } });
+    await assert.rejects(mutateWorkLearning(owner, videoWork.id, { viewerId: owner.id, requestId: 'unknown-video-time-denied', expectedMediaVersion: unknownDurationVersion,
+      kind: 'question', parentId: null, body: 'Unknown duration must not create a fake timestamp', timeSeconds: 1 }, 'create'), error => (error as { status?: number }).status === 400);
+    const context = await readWorkContext(colleague, learningBase.work.id, new URLSearchParams({ version: learningBase.media.id }));
+    assert.deepEqual(context.groups.find(group => group.id === 'same-submission')?.items.map(item => item.id), [learningSibling.work.id]);
+    assert.ok(!JSON.stringify(context).includes('PRIVATE_'));
+    await database.workPersonalState.upsert({ where: { owner_id_work_id: { owner_id: colleague.id, work_id: learningSibling.work.id } },
+      create: { owner_id: colleague.id, work_id: learningSibling.work.id, hidden: true }, update: { hidden: true } });
+    const hiddenContext = await readWorkContext(colleague, learningBase.work.id);
+    assert.ok(!hiddenContext.groups.some(group => group.items.some(item => item.id === learningSibling.work.id)));
+    const derivationInput = { viewerId: owner.id, requestId: 'learning-derivation-original', expectedMediaVersion: learningBase.media.id,
+      derivedWorkId: learningSibling.work.id, expectedDerivedMediaVersion: learningSibling.media.id, expectedRevision: 0 };
+    const linked = await mutateWorkDerivation(owner, learningBase.work.id, derivationInput, false);
+    assert.deepEqual(await mutateWorkDerivation(owner, learningBase.work.id, derivationInput, false), linked);
+    assert.equal(await database.workDerivedLink.count({ where: { source_work_id: learningBase.work.id } }), 1);
+    await assert.rejects(mutateWorkDerivation(colleague, learningBase.work.id, { ...derivationInput, viewerId: colleague.id, requestId: 'learning-other-output-denied' }, false), error => (error as { status?: number }).status === 403);
+    assert.equal((await readWorkDerivations(owner, learningBase.work.id, new URLSearchParams({ version: learningBase.media.id }))).items.length, 1);
+    await database.work.update({ where: { id: learningSibling.work.id }, data: { withdrawn_at: new Date() } });
+    assert.equal((await readWorkDerivations(colleague, learningBase.work.id, new URLSearchParams({ version: learningBase.media.id }))).items.length, 0);
+    metrics.learning = { sameSubmissionAuthorizedOnly: true, privateFieldsAbsent: true, authorOnlyExperience: true,
+      originalReceiptIdempotent: true, exactMediaVersionRequired: true, unknownTimestampDenied: true, derivationOwnerAndVisibilityRequired: true };
+    checks.push(WORKS_CHECKS[7]);
+    const registrationTime = new Date(Date.now() - 1000);
+    const queuedVideo = await database.videoTask.create({ data: { id: 'queued-video-through-bad-history', provider: 'synthetic', model: 'synthetic', generation_mode: 'text-to-video',
+      prompt: 'synthetic', user_id: owner.id, owner_user_id: owner.id, project_id: project.id, local_status: 'succeeded',
+      local_video_path: '/videos/queued-video-through-bad-history.mp4', delivery_status: 'succeeded', delivery_completed_at: registrationTime } });
+    const queuedRevision = hash(JSON.stringify([queuedVideo.local_video_path, registrationTime.toISOString(), null]));
+    await database.workRegistrationJob.create({ data: { source_kind: 'video_task', source_id: queuedVideo.id, source_revision: queuedRevision, source_updated_at: queuedVideo.updated_at } });
+    const malformed = await database.videoTask.create({ data: { id: 'synthetic-malformed-history', provider: 'synthetic', model: 'synthetic', generation_mode: 'text-to-video',
+      prompt: 'synthetic', user_id: owner.id, owner_user_id: owner.id, local_status: 'succeeded', local_video_path: '/videos/synthetic-malformed.mp4', delivery_status: 'succeeded', delivery_completed_at: registrationTime } });
+    // SQLite legacy values can fail ORM conversion even when the discovery key is valid.
+    await database.$executeRawUnsafe('UPDATE VideoTask SET duration = ? WHERE id = ?', 'synthetic-invalid-legacy-integer', malformed.id);
+    for (const kind of ['image_task', 'video_task', 'multiview_work']) await database.workDiscoveryCheckpoint.upsert({ where: { source_kind: kind },
+      create: { source_kind: kind }, update: { cursor_at: null, cursor_id: null, upper_at: null } });
+    const recoveredPass = await processWorksRegistrationPass({ pageSize: 40, jobs: 12 });
+    assert.equal(recoveredPass.state, 'processed');
+    assert.equal(await database.work.count({ where: { source_kind: 'video_task', source_id: queuedVideo.id } }), 1, 'A bad history row must not starve an already queued video');
+    const deferredSource = await database.workRegistrationJob.findFirst({ where: { source_kind: 'video_task', source_id: malformed.id, error_code: 'WORKS_SOURCE_DISCOVERY_DEFERRED' } });
+    assert.ok(deferredSource, 'The exact bad source remains in a durable bounded retry job');
+    assert.ok((await database.workDiscoveryCheckpoint.findUniqueOrThrow({ where: { source_kind: 'video_task' } })).cursor_id, 'The history page must advance past a malformed source');
+    await database.$executeRawUnsafe('UPDATE VideoTask SET duration = ? WHERE id = ?', 5, malformed.id);
+    metrics.registrationIsolation = { readyVideoRegistered: true, exactBadSourceDeferred: true, historyPageAdvanced: true };
+    checks.push(WORKS_CHECKS[8]);
+    const methodImage = await createImage('exact-method-settings');
+    const methodPreset = await database.imageStudioPreset.create({ data: { id: randomUUID(), owner_id: owner.id, scope: 'creator', is_shared: true,
+      name: 'Synthetic exact image method', model: 'gemini-nano-banana-2.1', quality: 'auto', resolution: '4K', aspect_ratio: '1:1' } });
+    const originalDefinition = await resolveSharedStudioDefinition(owner, methodPreset.id, database);
+    await database.imageStudioTask.update({ where: { id: methodImage.task.id }, data: { source_preset_id: methodPreset.id, model: 'gpt-image-2', quality: 'medium', aspect_ratio: '16:9',
+      snapshot_json: JSON.stringify({ version: 1, resolution: '2K', sourcePresetId: methodPreset.id, sharedSourceRevision: originalDefinition.definition.sourceRevision,
+        sharedLive: { protocol: 'shared-live-v1', presetId: methodPreset.id, definitionToken: originalDefinition.definition.intent.definitionToken },
+        referencePolicy: { primaryIds: [] }, primaryReferenceImages: [], referenceImages: [] }) } });
+    await database.$transaction(tx => indexWorkContext(tx, methodImage.work, methodImage.media.id));
+    const moduleCountBefore = await database.imageStudioModule.count();
+    const methodInput = { viewerId: owner.id, requestId: 'prepare-exact-image-method', expectedMediaVersion: methodImage.media.id,
+      expectedTemplateVersion: originalDefinition.definition.sourceRevision };
+    const methodReceipt = await prepareWorkMethod(owner, methodImage.work.id, methodInput);
+    assert.deepEqual(await prepareWorkMethod(owner, methodImage.work.id, methodInput), methodReceipt);
+    assert.equal(await database.imageStudioModule.count(), moduleCountBefore + 1);
+    assert.deepEqual(await getSharedStudioPersonalOverrides(owner.id, String(methodReceipt.result.moduleId), database),
+      { model: 'gpt-image-2', quality: 'medium', resolution: '2K', aspectRatio: '16:9' });
+    const template = await database.videoStudioTemplate.create({ data: { owner_user_id: owner.id, name: 'Synthetic exact video method',
+      recipe_json: JSON.stringify({ instruction: 'Synthetic template', fields: [], assetSlots: [], defaultParameters: { model: 'do-not-inherit-model', ratio: '1:1', seed: 999, duration: 8, resolution: '1080p' } }) } });
+    const methodVideo = await database.videoTask.create({ data: { provider: 'seedance', model: 'dreamina-seedance-2-0-260128', generation_mode: 'all_in_one_reference',
+      prompt: 'synthetic', user_id: owner.id, owner_user_id: owner.id, project_id: project.id, local_status: 'succeeded',
+      local_video_path: '/videos/exact-method-settings.mp4', delivery_status: 'succeeded', delivery_completed_at: registrationTime,
+      ratio: '16:9', duration: 6, resolution: '720p', seed: 123, generate_audio: true, return_last_frame: false, watermark: false, is_draft: false,
+      template_studio_snapshot_json: JSON.stringify({ sourceSnapshot: { templateVersion: { templateId: template.id, templateSource: 'studio', sourceRevision: 'studio:1' } } }) } });
+    const methodVideoWork = await database.work.create({ data: { source_kind: 'video_task', source_id: methodVideo.id, author_id: owner.id, project_id: project.id,
+      title: 'Synthetic exact video method', medium: 'video', completed_at: registrationTime } });
+    const methodVideoMedia = await database.workMediaVersion.create({ data: { work_id: methodVideoWork.id, source_revision: 'exact-video-method', video_task_id: methodVideo.id,
+      source_url: methodVideo.local_video_path, source_updated_at: registrationTime, duration: 6, preview_status: 'pending' } });
+    await database.work.update({ where: { id: methodVideoWork.id }, data: { current_version_id: methodVideoMedia.id } });
+    await database.$transaction(tx => indexWorkContext(tx, methodVideoWork, methodVideoMedia.id));
+    const videoMethodInput = { viewerId: owner.id, requestId: 'prepare-exact-video-method', expectedMediaVersion: methodVideoMedia.id, expectedTemplateVersion: 'studio:1' };
+    const videoMethodReceipt = await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput);
+    assert.deepEqual(await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput), videoMethodReceipt);
+    const actualDraft = await database.videoStudioDraft.findUniqueOrThrow({ where: { id: String(videoMethodReceipt.result.draftId) } });
+    assert.deepEqual(JSON.parse(actualDraft.parameters_json), { provider: 'seedance', model: 'dreamina-seedance-2-0-260128', generationMode: 'all_in_one_reference',
+      ratio: '16:9', duration: 6, resolution: '720p', seed: 123, generateAudio: true, returnLastFrame: false, watermark: false, draft: false });
+    metrics.methodSettings = { imageActualOverridesPreserved: true, videoActualParametersPreserved: true, defaultsNotInherited: true, originalRequestIdempotent: true };
+    checks.push(WORKS_CHECKS[9]);
     assert.deepEqual(checks, WORKS_CHECKS); assert.equal(forbiddenCalls, 0); completed = true;
   } finally {
     await database.$disconnect(); mock.restoreAll();
