@@ -5,22 +5,26 @@ import type { WorkCard } from '@/lib/works/types';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { prepareImagePreview, type ImagePreviewPreparation, type PreparedImagePreviewState } from '@/lib/media/image-preview-session';
 import { invalidateImageReadSource } from '@/lib/media/image-read-session';
+import { matchesWorkImage, type PreparedWorkImage } from '@/lib/works/image-preview';
 
-export function WorkPreviewImage({ work, attempt, onFailure }: { work: WorkCard; attempt: number; onFailure: () => void }) {
+export function WorkPreviewImage({ work, preparation, attempt, onFailure }: { work: WorkCard; preparation?: PreparedWorkImage; attempt: number; onFailure: () => void }) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const source = work.detailPreviewUrl || work.previewUrl || '', previewOnly = !work.downloadUrl && !work.reuse;
   const key = JSON.stringify([account, source, attempt, previewOnly]);
   const [prepared, setPrepared] = useState<{ key: string; handle: ImagePreviewPreparation; state: PreparedImagePreviewState } | null>(null);
   const failure = useRef(onFailure); failure.current = onFailure;
+  const preparedHandle = !attempt && matchesWorkImage(preparation, account, work) ? preparation?.handle : undefined;
   useEffect(() => {
     if (!account || !source) return;
     if (attempt) invalidateImageReadSource(source, account);
     // The URL binds the Work version; HD describes its own file version.
-    const handle = prepareImagePreview({ account, source, previewOnly });
+    const handle = preparedHandle?.isCurrent() ? preparedHandle : prepareImagePreview({ account, source, previewOnly });
     const release = handle.subscribe(state => setPrepared({ key, handle, state }));
-    handle.release(); return release;
-  }, [key, account, source, attempt, previewOnly]);
+    handle.release();
+    if (preparation?.handle !== handle) preparation?.handle.release();
+    return release;
+  }, [key, account, source, attempt, previewOnly, preparedHandle, preparation]);
   const current = prepared?.key === key ? prepared : null;
   useEffect(() => {
     if (current && (current.state.denied || current.state.result.unconfirmed || ['unavailable', 'unsupported'].includes(current.state.result.progress.phase))) failure.current();

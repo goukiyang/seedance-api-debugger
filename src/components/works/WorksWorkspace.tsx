@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Bookmark, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { prepareWorkImage, type PreparedWorkImage } from '@/lib/works/image-preview';
 import { AssetPlaybackCoordinator } from '@/lib/media/asset-playback';
 import { parseWorksQuery, pendingWorkOperations, queryWorkOperation, worksMutate, worksQueryString, worksRead, WorksClientError, type PendingWorkOperation } from '@/lib/works/client';
 import type { WorkCard, WorkPage, WorkQuery } from '@/lib/works/types';
@@ -21,9 +22,9 @@ export default function WorksWorkspace() {
   if (!session.hasLoadedUser || session.loadingUser) return <div className={styles.page}><div className={styles.skeleton} role="status">正在读取账号…</div></div>;
   if (!session.user) return <div className="container" role="status">{session.userLoadError || '请先登录后查看作品。'}<button type="button" onClick={() => void session.refreshUser({ force: true })}>重试读取账号</button></div>;
   if (!session.user.works_preview) return <div className="container" role="status">此页面暂不可用。</div>;
-  return <AccountWorks key={session.user.id} viewerId={session.user.id} />;
+  return <AccountWorks key={session.user.id} viewerId={session.user.id} account={`${session.user.id}:${session.user.role || ''}:${session.user.account_type || ''}`} />;
 }
-function AccountWorks({ viewerId }: { viewerId: string }) {
+function AccountWorks({ viewerId, account }: { viewerId: string; account: string }) {
   const router = useRouter(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
   const query = useMemo(() => parseWorksQuery(new URLSearchParams(paramsKey)), [paramsKey]), queryKey = worksQueryString(query).toString(), workId = searchParams.get('work') || '';
   const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [methodHref, setMethodHref] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
@@ -31,6 +32,8 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
   const epoch = useRef(0), alive = useRef(true), loadBusy = useRef(false), pagesRef = useRef(pages), queryRef = useRef(queryKey), loadedQueryRef = useRef(queryKey), resetWindow = useRef(false), restoringList = useRef(false), operationLocks = useRef(new Set<string>()), detailOpenedHere = useRef(false), pendingDetailBack = useRef(false), navigationEpoch = useRef(0), restoreGeneration = useRef(0), workIdRef = useRef(workId), previousWorkId = useRef<string | null>(null), sentinel = useRef<HTMLDivElement>(null), autoAttempt = useRef(''), autoMore = useRef<() => void>(() => {});
   pagesRef.current = pages; queryRef.current = queryKey; workIdRef.current = workId;
   const playback = useMemo(() => new AssetPlaybackCoordinator(), []), directory = useWorkCollections(viewerId, collectionRevision);
+  const imagePreparation = useRef<PreparedWorkImage>();
+  useEffect(() => () => { imagePreparation.current?.handle.release(); imagePreparation.current = undefined; }, [account]);
   const items = useMemo(() => pages.flatMap(page => page.items).filter((work, index, all) => all.findIndex(other => other.id === work.id) === index).filter(work => {
     if (query.scope === 'managed') return true;
     if (work.withdrawn || !work.discoverable && query.scope !== 'favorites' && !query.collection || (query.scope === 'hidden' ? !work.personal.hidden : work.personal.hidden)) return false;
@@ -92,6 +95,9 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
     const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); window.scrollTo({ top: 0 });
   }
   useLayoutEffect(() => {
+    if (imagePreparation.current && imagePreparation.current.workId !== workId) {
+      imagePreparation.current.handle.release(); imagePreparation.current = undefined;
+    }
     if (previousWorkId.current === workId) return;
     const wasDetail = Boolean(previousWorkId.current); previousWorkId.current = workId;
     const state = window.history.state || {}, marker = state.__sd2WorksPage;
@@ -116,6 +122,8 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
       if (saved?.anchor) saveWorkView(viewerId, { ...saved, anchor: { ...saved.anchor, focusId: work.id, focusAction: document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>('[data-work-action]')?.dataset.workAction || 'preview' : 'preview' } });
     }
     playback.stopAll('page');
+    imagePreparation.current?.handle.release();
+    imagePreparation.current = prepareWorkImage(account, work);
     const params = new URLSearchParams(searchParams); params.set('work', work.id); router.push(`/works?${params}`, { scroll: false });
   }
   function close() { navigationEpoch.current++; if (detailOpenedHere.current) { router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`/works?${params}`, { scroll: false }); }
@@ -202,7 +210,7 @@ function AccountWorks({ viewerId }: { viewerId: string }) {
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}
       </section>
     </div>}
-    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} revision={detailRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
+    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} preparation={imagePreparation.current} revision={detailRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
     {classify && <ClassifyWork work={classify} directory={directory} operate={operate} busy={busyKeys.includes(`work:${classify.id}`) || busyKeys.includes('collection:create')} onClose={() => setClassify(null)} />}
     {adding && <AddWorkPicker viewerId={viewerId} operate={operate} onClose={() => setAdding(false)} />}
   </div>;

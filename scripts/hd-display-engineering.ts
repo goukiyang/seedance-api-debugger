@@ -98,7 +98,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     },
   };
   const modules = new Map<string, Record<string, any>>();
-  const files = new Set(['src/components/ResultImageCover.tsx', 'src/lib/media/image-preview-session.ts', 'src/lib/media/image-read-session.ts', 'src/lib/media/hd-source-session.ts',
+  const files = new Set(['src/components/ResultImageCover.tsx', 'src/lib/works/image-preview.ts', 'src/lib/media/image-preview-session.ts', 'src/lib/media/image-read-session.ts', 'src/lib/media/hd-source-session.ts',
     'src/lib/media/hd-display-policy.ts', 'src/lib/media/image-comparison.ts', 'src/lib/media/image-comparison-contract.ts', 'src/lib/media/native-download.ts',
     'src/lib/hooks/use-hd-image-source.ts', 'src/lib/hooks/use-media-preview-state.ts', 'src/lib/media/media-preview-state-contract.ts', 'src/lib/http/json-response.ts']);
   function load(file: string): Record<string, any> {
@@ -122,6 +122,7 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
   }
   const reads = load('src/lib/media/image-read-session.ts') as typeof import('../src/lib/media/image-read-session');
   const preview = load('src/lib/media/image-preview-session.ts') as typeof import('../src/lib/media/image-preview-session');
+  const workImages = load('src/lib/works/image-preview.ts') as typeof import('../src/lib/works/image-preview');
   const downloads = load('src/lib/media/native-download.ts') as typeof import('../src/lib/media/native-download');
   const sources = load('src/lib/media/image-comparison.ts') as typeof import('../src/lib/media/image-comparison');
   const releases: Array<() => void> = [];
@@ -345,6 +346,54 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     assert.equal(workPreview.getSnapshot().displayKind, 'hd');
     assert.equal(workPreview.getSnapshot().result.decoded, true); noOriginal();
     checks.push('work_detail_reuses_hd_with_exact_work_version');
+
+    reset();
+    const listedWork = { id: 'work-parallel', mediaVersion: 'work-v1', medium: 'image' as const, previewStatus: 'ready' as const,
+      detailPreviewUrl: '/api/works/work-parallel/media?version=work-v1&variant=detail', previewUrl: null, downloadUrl: '/download', reuse: true };
+    combinedBodies.add(listedWork.id); heldBodies.add(listedWork.id);
+    const pendingWork = workImages.prepareWorkImage(account, listedWork)!;
+    await flush();
+    assert.equal(requests.filter(request => request.id === listedWork.id && request.variant === 'hd-description').length, 1,
+      'the clicked Work begins its actual HD body before detail data or a viewer subscriber exists');
+    assert.equal(workImages.matchesWorkImage(pendingWork, account, { ...listedWork }), true);
+    const workConsumer = pendingWork.handle.subscribe(() => {});
+    pendingWork.handle.release(); await flush();
+    assert.equal(cancelledBodies.has(listedWork.id), false, 'subscribing before releasing the click must retain the original body');
+    assert.equal(requests.filter(request => request.id === listedWork.id && request.variant === 'hd-description').length, 1);
+    workConsumer(); await flush();
+    assert.equal(cancelledBodies.has(listedWork.id), true, 'leaving the detail releases its last body consumer');
+    heldBodies.delete(listedWork.id);
+    checks.push('work_click_starts_before_detail_and_handoff_keeps_one_body');
+
+    reset();
+    const boundWork = workImages.prepareWorkImage(account, listedWork)!;
+    await flush();
+    assert.equal(boundWork.handle.getSnapshot().result.decoded, true);
+    assert.equal(workImages.matchesWorkImage(boundWork, account, { ...listedWork }), true);
+    for (const changed of [{ ...listedWork, id: 'another-work' }, { ...listedWork, mediaVersion: 'work-v2' },
+      { ...listedWork, detailPreviewUrl: '/api/works/another-work/media?version=work-v1&variant=detail' },
+      { ...listedWork, downloadUrl: null, reuse: false }]) {
+      assert.equal(workImages.matchesWorkImage(boundWork, account, changed), false,
+        'fresh detail changes must never adopt the list preparation');
+    }
+    assert.equal(workImages.matchesWorkImage(boundWork, 'another-account', listedWork), false);
+    reads.setImageReadSessionOwner('changed-account');
+    assert.equal(workImages.matchesWorkImage(boundWork, account, listedWork), false);
+    boundWork.handle.release();
+    checks.push('work_handoff_binds_fresh_identity_version_url_authority_and_account_epoch');
+
+    reset();
+    assert.equal(workImages.prepareWorkImage(account, { ...listedWork, medium: 'video' }), undefined);
+    assert.equal(workImages.prepareWorkImage('', listedWork), undefined);
+    assert.equal(workImages.prepareWorkImage(account, { ...listedWork, detailPreviewUrl: null, previewStatus: 'preparing' }), undefined);
+    assert.equal(requests.length, 0, 'videos and unavailable image inputs must not start image reads');
+    const abandonedInput = { ...listedWork, id: 'work-abandoned', detailPreviewUrl: '/api/works/work-abandoned/media?version=work-v1&variant=detail' };
+    combinedBodies.add(abandonedInput.id); heldBodies.add(abandonedInput.id);
+    const abandonedWork = workImages.prepareWorkImage(account, abandonedInput)!;
+    await flush(); abandonedWork.handle.release(); await flush();
+    assert.equal(cancelledBodies.has(abandonedInput.id), true, 'closing before detail arrives cancels the unclaimed body');
+    heldBodies.delete(abandonedInput.id);
+    checks.push('work_early_close_releases_preparation_and_video_keeps_existing_path');
 
     for (const status of ['queued', 'running', 'failed', 'skipped'] as const) {
       reset(); heldDescriptor = `fallback-${status}`;

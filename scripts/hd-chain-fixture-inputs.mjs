@@ -26,6 +26,8 @@ export const HD_CHAIN_FIXTURE_SOURCES = [
   'src/lib/hooks/use-hd-image-source.ts', 'src/lib/hooks/use-image-neighbors.ts',
   'src/lib/hooks/use-media-preview-state.ts',
   'src/components/ZoomableImagePreview.tsx', 'src/components/ResultImageCover.tsx',
+  'src/lib/works/image-preview.ts', 'src/components/works/WorksWorkspace.tsx',
+  'src/components/works/WorkDetail.tsx', 'src/components/works/WorkPreviewImage.tsx',
   'src/components/HdDerivativeManagement.tsx',
   'src/components/HdDerivativeManagement.module.css', 'src/components/ZoomableImagePreview.module.css',
   'src/app/api/admin/hd-derivatives/route.ts',

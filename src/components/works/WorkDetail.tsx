@@ -10,6 +10,8 @@ import { workAudienceLabels, type WorkCard } from '@/lib/works/types';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
 import { WorkPreviewImage } from './WorkPreviewImage';
+import { matchesWorkImage, type PreparedWorkImage } from '@/lib/works/image-preview';
+import { invalidateImageReadSource } from '@/lib/media/image-read-session';
 import { WorkAuthor } from './WorkAuthor';
 import { WorkLearning } from './WorkLearning';
 import { WorkCompare } from './WorkCompare';
@@ -40,8 +42,9 @@ function RelatedGroup({ group, viewerId, workId, medium, playback, loading, erro
   </section>;
 }
 
-export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, onOpen, onWork, onFilter, onClassify, busy, operate }: {
+export function WorkDetail({ id, viewerId, preparation, revision, playback, onClose, onList, onOpen, onWork, onFilter, onClassify, busy, operate }: {
   id: string; viewerId: string; revision: number; playback: AssetPlaybackCoordinator; onClose: () => void; onList: () => void; onOpen: (work: WorkCard) => void;
+  preparation?: PreparedWorkImage;
   onWork: (work: WorkCard) => void; onFilter: (key: 'author' | 'project', id: string) => void;
   onClassify: (work: WorkCard) => void; busy: boolean; operate: WorkOperate;
 }) {
@@ -71,6 +74,7 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
     void (async () => {
       const data = await worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(id)}`, viewerId, controller.signal);
       if (controller.signal.aborted) return;
+      if (preparation && !matchesWorkImage(preparation, preparation.handle.account, data.work)) preparation.handle.release();
       const previous = currentWork.current;
       onWorkRef.current(data.work);
       if (previous && previous.mediaVersion !== data.work.mediaVersion) { playback.stopAll('source'); if (video.current) releaseAssetMediaSource(video.current); setContext(null); setReplacement(data.work); return; }
@@ -79,12 +83,15 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
       if (reloadMedia) { setMediaAttempt(value => value + 1); setMediaFailed(false); }
     })().catch(cause => {
       if (controller.signal.aborted) return;
+      if (preparation && cause instanceof WorksClientError && [403, 404].includes(cause.status))
+        invalidateImageReadSource(preparation.handle.source, preparation.handle.account);
+      preparation?.handle.release();
       if (cause instanceof WorksClientError && [403, 404].includes(cause.status)) { playback.stopAll('source'); if (video.current) releaseAssetMediaSource(video.current); setContext(null); setError('当前无法访问这件作品，可能是分享范围或权限已变化。'); }
       else if (currentWork.current && reloadMedia) { setMediaFailed(true); setNotice('预览读取未完成，可重试预览。'); }
       else setError(cause instanceof Error ? cause.message : '作品读取未完成');
     }).finally(() => { if (!controller.signal.aborted) setReading(false); });
     return () => controller.abort();
-  }, [id, viewerId, revision, retry, playback]);
+  }, [id, viewerId, preparation, revision, retry, playback]);
   useEffect(() => {
     if (!mediaVersion || error || replacement) return;
     const controller = new AbortController(); contextGeneration.current++; setContextError('');
@@ -155,7 +162,7 @@ export function WorkDetail({ id, viewerId, revision, playback, onClose, onList, 
       <div className={styles.detailLayout}>
         <div className={styles.detailPrimary}>
           {!comparing && <div className={styles.detailMedia} style={{ aspectRatio: work.width && work.height ? `${work.width}/${work.height}` : undefined }}>
-            {replacement ? <div className={styles.previewMessage} role="status"><p>媒体版本已变化，请打开当前版本后重新操作。</p><button type="button" onClick={openCurrentVersion}>打开当前版本</button></div> : mediaFailed || !previewSource ? <div className={styles.previewMessage} role="status"><p>{mediaFailed ? '预览读取未完成。' : work.previewStatus === 'preparing' ? '预览正在准备。' : '当前预览不可用。'}</p><button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : mediaFailed ? '重试预览' : '重新读取预览'}</button></div> : work.medium === 'image' ? <button type="button" className={styles.imageZoomTrigger} onClick={() => setZoomed(true)} aria-label="放大图片"><WorkPreviewImage key={`${work.mediaVersion}:${mediaAttempt}`} work={work} attempt={mediaAttempt} onFailure={() => setMediaFailed(true)} /><span className={styles.zoomHint}><Maximize2 size={16} /></span></button> : <video key={`${work.mediaVersion}:${mediaAttempt}`} ref={video} src={previewSource!} poster={work.thumbnailUrl || undefined} controls playsInline muted preload="metadata" onError={() => setMediaFailed(true)} onLoadedMetadata={event => { if (seekTarget.current !== null) { event.currentTarget.currentTime = Math.min(seekTarget.current, event.currentTarget.duration); seekTarget.current = null; } }} onPlay={event => { detailLease.current = playback.claimDetail(`${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); }} onPause={event => { if (detailLease.current !== null) playback.releaseDetail(detailLease.current, `${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); detailLease.current = null; }} />}
+            {replacement ? <div className={styles.previewMessage} role="status"><p>媒体版本已变化，请打开当前版本后重新操作。</p><button type="button" onClick={openCurrentVersion}>打开当前版本</button></div> : mediaFailed || !previewSource ? <div className={styles.previewMessage} role="status"><p>{mediaFailed ? '预览读取未完成。' : work.previewStatus === 'preparing' ? '预览正在准备。' : '当前预览不可用。'}</p><button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : mediaFailed ? '重试预览' : '重新读取预览'}</button></div> : work.medium === 'image' ? <button type="button" className={styles.imageZoomTrigger} onClick={() => setZoomed(true)} aria-label="放大图片"><WorkPreviewImage key={`${work.mediaVersion}:${mediaAttempt}`} work={work} preparation={preparation} attempt={mediaAttempt} onFailure={() => setMediaFailed(true)} /><span className={styles.zoomHint}><Maximize2 size={16} /></span></button> : <video key={`${work.mediaVersion}:${mediaAttempt}`} ref={video} src={previewSource!} poster={work.thumbnailUrl || undefined} controls playsInline muted preload="metadata" onError={() => setMediaFailed(true)} onLoadedMetadata={event => { if (seekTarget.current !== null) { event.currentTarget.currentTime = Math.min(seekTarget.current, event.currentTarget.duration); seekTarget.current = null; } }} onPlay={event => { detailLease.current = playback.claimDetail(`${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); }} onPause={event => { if (detailLease.current !== null) playback.releaseDetail(detailLease.current, `${work.id}:${work.mediaVersion}`, previewSource!, event.currentTarget); detailLease.current = null; }} />}
           </div>}
           <div className={styles.detailInfo}>
             <div className={styles.detailByline}><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /><RelativeTime value={work.completedAt} /><WorkActions work={work} busy={blocked} operate={operate} onClassify={onClassify} /></div>
