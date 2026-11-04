@@ -1,4 +1,4 @@
-import type { PricingAdminFilter, PricingAdminRow } from './admin-contract';
+import { RMB_INTEGER_ROUNDING, type PricingAdminFilter, type PricingAdminRow } from './admin-contract';
 import { imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import type { ImageQualityRoutes } from '@/lib/image-studio/quality-routing';
 
@@ -29,6 +29,7 @@ export function pricingDisplayScope(row: PricingAdminRow, specifications = row.i
 }
 
 export function pricingDisplayRounding(row: PricingAdminRow) {
+  if (row.rounding === RMB_INTEGER_ROUNDING) return '整单四舍五入到整数点';
   if (row.mode === 'free') return '明确免费';
   if (row.mode === 'legacy_actual') return '原费用合同：保留两位小数';
   if (row.mode === 'legacy_fixed') return row.legacyRounding === 'ceil_task' ? '原规则：整任务向上取整' : '原固定单价';

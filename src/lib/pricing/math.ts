@@ -79,6 +79,10 @@ export function roundDecimal(value: string, scale: number, mode: 'half_up' | 'ce
   return format(quotient + (up ? ONE : ZERO), scale);
 }
 
+export function roundFixedPricingCredits(exact: string, rounding: 'half_up_integer' | 'half_up_tenth' = 'half_up_tenth') {
+  return roundDecimal(exact, rounding === 'half_up_integer' ? 0 : 1, 'half_up');
+}
+
 export function divideDecimal(numerator: string, denominator: string, scale = 8) {
   if (!Number.isSafeInteger(scale) || scale < 0 || scale > 16) throw new PricingNumberError();
   const a = parse(numerator), b = parse(denominator);
@@ -93,7 +97,7 @@ export function fixedPricingCredits(baseCny: string, pointsPerCny: string, quant
   normalizeDecimal(pointsPerCny, { min: '0.1', max: '10000', maxScale: 1 });
   normalizeDecimal(quantity, { min: '0', max: '10000000', maxScale: 8, allowZero: false });
   const exactCredits = multiplyDecimal([baseCny, pointsPerCny, quantity]);
-  const credits = roundDecimal(exactCredits, 1, 'half_up');
+  const credits = roundFixedPricingCredits(exactCredits);
   if (compareDecimal(credits, '10000000') > 0) throw new PricingNumberError('收费超出单任务上限');
   return { credits, exactCredits, roundedToZero: credits === '0' && exactCredits !== '0' };
 }
