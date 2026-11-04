@@ -37,6 +37,15 @@ export function pricingDisplayRounding(row: PricingAdminRow) {
   return '每个任务最终四舍五入到 0.1 点';
 }
 
+export function canEditPricingBase(row: PricingAdminRow, globalRate: string | null | undefined) {
+  return row.enabled && row.availability === 'ready' && row.identity.billingMode === 'fixed' && row.mode !== 'free'
+    && Boolean(row.currentPointsPerCny || globalRate);
+}
+
+export function showPricingImageRow(row: PricingAdminRow, globalRate: string | null | undefined, includeAlternate: boolean) {
+  return canEditPricingBase(row, globalRate) && (row.isDefault || includeAlternate);
+}
+
 export const allPricingFilters: PricingAdminFilter = { kind: 'all', difference: 'all', defaultsOnly: false, search: '', channelId: '', basisKind: undefined };
 
 export function pricingActiveFilters(filter: PricingAdminFilter, rows: PricingAdminRow[]) {
