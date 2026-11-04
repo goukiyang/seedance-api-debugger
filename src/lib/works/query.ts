@@ -51,23 +51,28 @@ export function workMediaUrl(id: string, version: string, variant: string) {
 export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: Prisma.TransactionClient = prisma): Promise<WorkCard[]> {
   if (!keys.length) return [];
   const ids = keys.map(key => key.id);
+  const mediaIds = keys.map(key => key.media_id);
   const [works, versions, states, memberships, likes, activity] = await Promise.all([
     db.work.findMany({ where: { id: { in: ids } } }),
-    db.workMediaVersion.findMany({ where: { id: { in: keys.map(key => key.media_id) } } }),
+    db.workMediaVersion.findMany({ where: { id: { in: mediaIds } } }),
     db.workPersonalState.findMany({ where: { owner_id: user.id, work_id: { in: ids } } }),
     db.workCollectionItem.findMany({ where: { work_id: { in: ids }, collection: { owner_id: user.id, removed_at: null } }, select: { work_id: true, collection_id: true } }),
     db.$queryRaw<Array<{ work_id: string; amount: bigint | number }>>(Prisma.sql`SELECT work_id, count(*) AS amount FROM WorkPersonalState
       WHERE work_id IN (${Prisma.join(ids)}) AND liked = 1 GROUP BY work_id`),
     readWorkActivity(db, keys.filter(key => key.can_preview).map(key => key.id)),
   ]);
-  const [authors, projects, provenance] = await Promise.all([
+  const pending = versions.filter(version => version.preview_status === 'pending').map(version => version.id);
+  const [authors, projects, provenance, jobs] = await Promise.all([
     db.user.findMany({ where: { id: { in: Array.from(new Set(works.map(work => work.author_id))) } }, select: { id: true, name: true, avatar_url: true } }),
     db.project.findMany({ where: { id: { in: Array.from(new Set(works.flatMap(work => work.project_id ? [work.project_id] : []))) } }, select: { id: true, name: true } }),
     projectWorkProvenance(user, works, db),
+    pending.length ? db.workRegistrationJob.findMany({ where: { source_kind: 'media_preview', source_id: { in: pending },
+      status: { in: ['pending', 'running'] } }, select: { source_id: true } }) : [],
   ]);
   const workById = new Map(works.map(work => [work.id, work])), versionById = new Map(versions.map(version => [version.id, version]));
   const stateById = new Map(states.map(state => [state.work_id, state])), authorById = new Map(authors.map(author => [author.id, author]));
   const projectById = new Map(projects.map(project => [project.id, project])), countById = new Map(likes.map(row => [row.work_id, Number(row.amount)]));
+  const preparing = new Set(jobs.map(job => job.source_id));
   return keys.flatMap(key => {
     const work = workById.get(key.id), media = versionById.get(key.media_id);
     // A concurrent replacement never pairs the old authorization result with a newer file.
@@ -84,11 +89,14 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
       width: media.width, height: media.height, duration: media.duration, completedAt: work.completed_at.toISOString(),
       author: { id: work.author_id, name: safeName, avatarUrl: author?.avatar_url || null }, provenance: provenance.get(work.id),
       project: key.project_visible && project ? { id: project.id, name: project.name } : null,
-      thumbnailUrl: canPreview && media.thumbnail_url ? workMediaUrl(work.id, media.id, 'thumbnail') : null,
+      thumbnailUrl: canPreview && media.thumbnail_url ? workMediaUrl(work.id, media.id, 'thumbnail')
+        : canPreview && work.medium === 'video' && media.video_task_id && media.source_url?.startsWith('/videos/')
+          ? workMediaUrl(work.id, media.id, 'thumbnail') + '&cached=1' : null,
       previewUrl: hasPreview ? workMediaUrl(work.id, media.id, 'preview') : null,
       detailPreviewUrl: hasDetail ? workMediaUrl(work.id, media.id, 'detail') : null,
       downloadUrl: canDownload ? workMediaUrl(work.id, media.id, 'download') : null,
-      previewStatus: hasPreview ? 'ready' : media.preview_status === 'unavailable' ? 'unavailable' : 'preparing',
+      previewStatus: hasPreview ? 'ready' : preparing.has(media.id) ? 'preparing'
+        : media.preview_status === 'pending' && canPreview ? 'not-prepared' : 'unavailable',
       reuse, sourceHref: nativePreview ? work.source_kind === 'video_task' ? `/tasks/${encodeURIComponent(work.source_id)}`
         : work.source_kind === 'multiview_work' && owned ? `/multiview?work=${encodeURIComponent(work.source_id)}`
           : media.asset_id ? `/assets?content=${encodeURIComponent(`asset:${media.asset_id}`)}` : null : null,

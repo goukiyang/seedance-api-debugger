@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, Plus, RefreshCw, RotateCcw, RotateCw, Scissors, UserRound } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -12,6 +13,8 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import type { HomeProject, HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import styles from '@/app/home.module.css';
+
+const WorksWorkspace = dynamic(() => import('@/components/works/WorksWorkspace'));
 
 function Thumbnail({ src, project = false }: { src: string | null; project?: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -32,11 +35,14 @@ function CardSkeletons({ className, count }: { className: string; count: number 
   </div>;
 }
 
-export default function HomeWorkspace({ accountId, internal, images, admin }: { accountId: string; internal: boolean; images: boolean; admin: boolean }) {
+export default function HomeWorkspace({ accountId, internal, images, admin, worksEnabled, showWorks }: {
+  accountId: string; internal: boolean; images: boolean; admin: boolean; worksEnabled: boolean; showWorks: boolean;
+}) {
   const { user, hasLoadedUser } = useAppSession();
   const router = useRouter();
   const authorized = hasLoadedUser && user?.id === accountId;
   const identity = authorized ? accountId : '';
+  const overviewIdentity = showWorks ? '' : identity;
   const identityRef = useRef(identity);
   identityRef.current = identity;
   const [loadedIdentity, setLoadedIdentity] = useState('');
@@ -63,7 +69,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
   const workspace = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   useDialogDismiss({ open: workspaceOpen, dialogRef: workspace, branchRefs: [menuButton], modal: false, onDismiss: () => setOpen(false) });
-  const resetScroll = useRememberedScroll(`home:${identity}`, Boolean(identity && preferencesReady && (!internal || projectLoaded)), { localFallback: true });
+  const resetScroll = useRememberedScroll(`home:${identity}`, Boolean(overviewIdentity && preferencesReady && (!internal || projectLoaded)), { localFallback: true });
 
   useEffect(() => {
     if (hasLoadedUser && user?.id !== accountId) router.refresh();
@@ -94,11 +100,11 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     }, { rootMargin: '160px' });
     observer.observe(section);
     return () => observer.disconnect();
-  }, [images]);
+  }, [images, showWorks]);
 
   const loadProjects = useCallback(async () => {
     projectsRequest.current?.abort();
-    if (!identity || !internal) return;
+    if (!overviewIdentity || !internal) return;
     const requestIdentity = identity;
     const controller = new AbortController();
     projectsRequest.current = controller;
@@ -118,11 +124,11 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
         setProjectLoaded(true);
       }
     }
-  }, [identity, internal]);
+  }, [identity, internal, overviewIdentity]);
 
   const loadTemplates = useCallback(async (after: string | null = null, retained: HomeTemplate[] = []) => {
     templatesRequest.current?.abort();
-    if (!identity || !images) return;
+    if (!overviewIdentity || !images) return;
     const requestIdentity = identity;
     const controller = new AbortController();
     templatesRequest.current = controller;
@@ -162,7 +168,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
         setTemplateLoaded(true);
       }
     }
-  }, [identity, images]);
+  }, [identity, images, overviewIdentity]);
 
   useEffect(() => {
     projectsRequest.current?.abort();
@@ -183,7 +189,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
   }, [identity]);
 
   useEffect(() => {
-    if (!identity || !internal) {
+    if (!overviewIdentity || !internal) {
       setProjects([]);
       setProjectError('');
       setProjectLoading(false);
@@ -192,11 +198,11 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     }
     void loadProjects();
     return () => projectsRequest.current?.abort();
-  }, [identity, internal, loadProjects]);
+  }, [overviewIdentity, internal, loadProjects]);
 
   useEffect(() => {
-    if (!identity || !images || !needed) {
-      if (!identity || !images) {
+    if (!overviewIdentity || !images || !needed) {
+      if (!overviewIdentity || !images) {
         setTemplates([]);
         setCursor(null);
         setTemplateError('');
@@ -207,16 +213,16 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     }
     void loadTemplates();
     return () => templatesRequest.current?.abort();
-  }, [identity, images, needed, loadTemplates]);
+  }, [overviewIdentity, images, needed, loadTemplates]);
 
   useEffect(() => {
-    if (!identity) return;
+    if (!overviewIdentity) return;
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
       void loadProjects();
       if (needed && !writing.current.size) void loadTemplates();
     };
-    const unwatch = watchReactionChanges(identity, () => { if (needed) void loadTemplates(); });
+    const unwatch = watchReactionChanges(overviewIdentity, () => { if (needed) void loadTemplates(); });
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     const timer = window.setInterval(refresh, 60_000);
@@ -226,7 +232,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [identity, loadProjects, loadTemplates, needed]);
+  }, [overviewIdentity, loadProjects, loadTemplates, needed]);
 
   async function cancelFavorite(item: HomeTemplate) {
     if (!identity || !authorized) return;
@@ -259,6 +265,8 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
   }
 
   const links = [
+    { title: '作品广场', href: '/', icon: LayoutTemplate, visible: worksEnabled && authorized, current: showWorks },
+    { title: '创作概览', href: '/?view=overview', icon: Network, visible: worksEnabled && authorized, current: !showWorks },
     { title: '新建项目', href: '/projects#create-project', icon: Plus, visible: internal },
     { title: '我的项目', href: '/projects', icon: Folder, visible: internal },
     { title: '资产管理', href: '/assets', icon: ImageIcon, visible: true },
@@ -266,7 +274,6 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
     { title: '我的任务', href: '/tasks', icon: ListTodo, visible: true },
   ];
   const entries = [
-    { title: '作品广场', href: '/works', icon: LayoutTemplate, visible: authorized && user?.works_preview === true, tone: 'mint' },
     { title: '普通视频', href: '/generate', icon: Clapperboard, visible: internal, tone: 'blue' },
     { title: 'IP视频', href: '/generate/ip', icon: Film, visible: internal, tone: 'yellow' },
     { title: '图片生成', href: '/template-studio?type=image', icon: ImageIcon, visible: images, tone: 'mint' },
@@ -285,17 +292,17 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
       <div ref={workspace} id="home-workspace-links" className={styles.workspaceLinks} data-open={workspaceOpen ? 'true' : 'false'}>
         <h1>工作区</h1>
         <nav aria-label="工作区">
-          {links.filter(link => link.visible).map(link => <Link key={link.href} href={link.href} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={() => setOpen(false)}>
+          {links.filter(link => link.visible).map(link => <Link key={link.href} href={link.href} aria-current={link.current ? 'page' : undefined} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={() => setOpen(false)}>
             <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
           </Link>)}
         </nav>
-        <button type="button" className={styles.reset} onClick={() => { setOpen(false); resetScroll(); }} title="重置首页位置" aria-label="重置首页位置">
+        {!showWorks && <button type="button" className={styles.reset} onClick={() => { setOpen(false); resetScroll(); }} title="重置首页位置" aria-label="重置首页位置">
           <RotateCcw size={15} aria-hidden="true" />重置位置
-        </button>
+        </button>}
       </div>
     </aside>
 
-    <div className={styles.content}>
+    {showWorks ? <div className={styles.gallery}><Suspense fallback={<div className="container" role="status">正在读取作品…</div>}><WorksWorkspace /></Suspense></div> : <div className={styles.content}>
       {internal && <section className={styles.canvasSection} aria-labelledby="home-canvas-title">
         <Link href="/tools/ultimate-canvas" className={styles.canvas}>
           <span className={styles.canvasIcon}><Network size={28} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -376,6 +383,6 @@ export default function HomeWorkspace({ accountId, internal, images, admin }: { 
         </button>}
         {(!authorized || !accountDataReady) && <span className={styles.visuallyHidden} role="status">正在确认账号…</span>}
       </section>}
-    </div>
+    </div>}
   </div>;
 }

@@ -83,6 +83,7 @@
 }
 
 .sideLink:hover,
+.sideLink[aria-current="page"],
 .reset:hover {
   border-color: var(--border-color);
   background: var(--bg-hover);
@@ -120,6 +121,8 @@
   width: 100%;
   padding: 28px 30px 52px;
 }
+
+.gallery { min-width: 0; }
 
 .canvasSection {
   margin-bottom: 30px;

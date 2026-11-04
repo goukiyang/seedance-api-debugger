@@ -1,8 +1,32 @@
 import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 
 export const WORK_PREVIEW_MAX_BYTES = 128 * 1024 ** 2;
 export const workPreviewRootPath = () => process.env.NODE_ENV === 'production' ? '/data/video-api-debugger/var-lib/storage/works-previews' : path.join(process.cwd(), '.cache/works-previews');
+
+/** Resolve a pre-existing task poster only for a current, local video version. */
+export async function resolveExistingWorkVideoPoster(taskId: string, sourceUrl: string, sourceUpdatedAt: Date) {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(taskId) || !sourceUrl.startsWith('/videos/')) return null;
+  try {
+    const root = await fs.realpath(path.join(process.cwd(), 'public/videos'));
+    const source = await fs.realpath(path.resolve(root, sourceUrl.slice('/videos/'.length)));
+    if (!source.startsWith(root + path.sep)) return null;
+    const video = await fs.lstat(source);
+    const poster = path.join(root, 'thumbnails', taskId + '.jpg');
+    if (!video.isFile() || !video.size || await fs.realpath(poster) !== poster) return null;
+    const entry = await fs.lstat(poster);
+    if (!entry.isFile() || entry.nlink !== 1 || entry.size < 4 || entry.size > 8 * 1024 ** 2 ||
+      entry.mtimeMs < Math.max(video.mtimeMs, sourceUpdatedAt.getTime())) return null;
+    const file = await fs.open(poster, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const header = Buffer.alloc(2), opened = await file.stat();
+      if (opened.ino !== entry.ino || opened.dev !== entry.dev || opened.size !== entry.size ||
+        (await file.read(header, 0, 2, 0)).bytesRead !== 2 || header[0] !== 255 || header[1] !== 216) return null;
+    } finally { await file.close(); }
+    return poster;
+  } catch { return null; }
+}
 
 /** Only private version-bound preview/poster references are eligible; callers still enforce current source authorization. */
 export async function resolveWorkPreviewFile(reference: string): Promise<string | null> {

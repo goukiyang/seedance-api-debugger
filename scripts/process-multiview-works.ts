@@ -83,7 +83,7 @@ async function main() {
           if (result.state !== 'empty' || message !== lastMessage) console.log(`[${name}]`, message);
           lastMessage = message;
           if (once) break;
-          if (!['empty', 'paused', 'deferred', 'yielded'].includes(result.state)) continue;
+          if (!['empty', 'paused', 'deferred', 'yielded', 'poster-pass'].includes(result.state)) continue;
         } catch {
           // No user content, source URLs or environment values enter the service log.
           if (lastMessage !== 'deferred') console.warn(`[${name}] preparation deferred; existing outputs retained`);

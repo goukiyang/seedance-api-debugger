@@ -200,7 +200,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
               <div className={styles.detailControls}>
                 {!replacement && work.downloadUrl && <a href={work.downloadUrl} download className={styles.textAction}><Download size={16} />下载原件</a>}
                 {work.reuse && <button type="button" disabled={blocked || methodReading} onClick={async () => { const result = await operate(`work:${work.id}`, `/api/works/${work.id}/reference`, { expectedMediaVersion: work.mediaVersion, tabId: workWorkspaceTabId() }); if (result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。'); }}><Plus size={16} />用作参考图</button>}
-                {work.medium === 'video' && work.previewStatus === 'preparing' && <button type="button" disabled={blocked} onClick={() => void operate(`preview:${work.id}:${work.mediaVersion}`, `/api/works/${work.id}/preview`, { expectedMediaVersion: work.mediaVersion })}>准备轻预览</button>}
+                {work.medium === 'video' && work.previewStatus === 'not-prepared' && <button type="button" disabled={blocked} onClick={() => void operate(`preview:${work.id}:${work.mediaVersion}`, `/api/works/${work.id}/preview`, { expectedMediaVersion: work.mediaVersion })}>准备轻预览</button>}
                 <button type="button" disabled={reading} onClick={retryPreview}>{reading ? '正在读取…' : '重新读取预览'}</button>
               </div>
               {work.withdrawn && <p>已撤回分享</p>}{!work.discoverable && <p>已移出广场</p>}

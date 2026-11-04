@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -28,7 +28,7 @@ export default function WorksWorkspace() {
   return <AccountWorks key={session.user.id} viewerId={session.user.id} account={`${session.user.id}:${session.user.role || ''}:${session.user.account_type || ''}`} />;
 }
 function AccountWorks({ viewerId, account }: { viewerId: string; account: string }) {
-  const router = useRouter(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
+  const router = useRouter(), pathname = usePathname(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
   const query = useMemo(() => parseWorksQuery(new URLSearchParams(paramsKey)), [paramsKey]), queryKey = worksQueryString(query).toString(), workId = searchParams.get('work') || '';
   const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [methodHref, setMethodHref] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
   const [refresh, setRefresh] = useState(0), [detailRevision, setDetailRevision] = useState(0), [detailLikesRevision, setDetailLikesRevision] = useState(0), [collectionRevision, setCollectionRevision] = useState(0), [classify, setClassify] = useState<WorkCard | null>(null), [adding, setAdding] = useState(false), [search, setSearch] = useState(query.q || ''), [busy, setBusy] = useState<string[]>([]), [pending, setPending] = useState<PendingWorkOperation[]>([]), [restore, setRestore] = useState<WorkRestore | null>(null), [filtersOpen, setFiltersOpen] = useState(false), [filterNames, setFilterNames] = useState<Record<string, string>>({});
@@ -56,7 +56,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   useEffect(() => { alive.current = true; return () => { alive.current = false; epoch.current++; playback.stopAll('account'); }; }, [playback]);
   useEffect(() => {
     setPending(pendingWorkOperations(viewerId)); const saved = savedWorkView(viewerId);
-    if (!paramsKey && saved) router.replace(savedWorkUrl(saved), { scroll: false });
+    if (!paramsKey && saved) router.replace(savedWorkUrl(pathname === '/' ? { ...saved, query: { ...saved.query, work: undefined } } : saved, pathname), { scroll: false });
     setReady(true);
     // URL changes after initial recovery are authoritative.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +97,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   function updateQuery(patch: Partial<WorkQuery>) {
     navigationEpoch.current++; remember(); resetWindow.current = true; setRestore(null); setClassify(null); const next = { ...query, ...patch };
     for (const key of Object.keys(next) as Array<keyof WorkQuery>) if (!next[key] || next[key] === 'all') delete next[key];
-    const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); window.scrollTo({ top: 0 });
+    const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`${pathname}?${params}`, { scroll: false }); window.scrollTo({ top: 0 });
   }
   useLayoutEffect(() => {
     if (imagePreparation.current && imagePreparation.current.workId !== workId) {
@@ -129,10 +129,10 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     playback.stopAll('page');
     imagePreparation.current?.handle.release();
     imagePreparation.current = prepareWorkImage(account, work);
-    const params = new URLSearchParams(searchParams); params.set('work', work.id); router.push(`/works?${params}`, { scroll: false });
+    const params = new URLSearchParams(searchParams); params.set('work', work.id); router.push(`${pathname}?${params}`, { scroll: false });
   }
-  function close() { navigationEpoch.current++; if (detailOpenedHere.current) { router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`/works?${params}`, { scroll: false }); }
-  function returnToList() { navigationEpoch.current++; remember(); const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); }
+  function close() { navigationEpoch.current++; if (detailOpenedHere.current) { router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`${pathname}?${params}`, { scroll: false }); }
+  function returnToList() { navigationEpoch.current++; remember(); const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.push(`${pathname}?${params}`, { scroll: false }); }
   const updateWork = useCallback((work: WorkCard) => { setPages(old => old.map(page => ({ ...page, items: page.items.map(item => item.id === work.id ? work : item) }))); setClassify(old => old?.id === work.id ? work : old); }, []);
   const updateActivity = useCallback((id: string, mediaVersion: string, activity: NonNullable<WorkCard['activity']>) => {
     setPages(old => old.map(page => ({ ...page, items: page.items.map(work => {
@@ -157,7 +157,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     }) })));
     if (result.kind === 'collection-delete') {
       const params = new URLSearchParams(queryRef.current);
-      if (params.get('collection') === result.collectionId) { params.delete('collection'); resetWindow.current = true; router.replace(`/works?${params}`, { scroll: false }); }
+      if (params.get('collection') === result.collectionId) { params.delete('collection'); resetWindow.current = true; router.replace(`${pathname}?${params}`, { scroll: false }); }
     }
     if (result.kind === 'work-state' && result.action === 'like') {
       if (workIdRef.current === idForPatch) {
@@ -170,7 +170,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     }
     const id = typeof result.workId === 'string' ? result.workId : key.startsWith('work:') ? key.slice(5) : '';
     if (id) { try { const data = await worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(id)}`, viewerId); if (alive.current) updateWork(data.work); } catch { if (alive.current) setNotice('操作已保存，作品信息暂未更新，可重新读取。'); } }
-  }, [viewerId, updateWork, router]);
+  }, [viewerId, updateWork, router, pathname]);
   const operate: WorkOperate = useCallback(async (key, url, body, method = 'POST') => {
     if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]);
     const isLike = url.endsWith('/state') && body.action === 'like';

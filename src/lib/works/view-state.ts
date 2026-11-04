@@ -40,9 +40,9 @@ export function saveWorkView(viewerId: string, view: SavedWorkView) {
   try { sessionStorage.setItem(sessionKey(viewerId), JSON.stringify([clean, ...sessionViews(viewerId).filter(item => worksQueryString(item.query).toString() !== key)].slice(0, 6))); } catch { /* Optional per-tab restoration. */ }
   try { localStorage.setItem(fallbackKey(viewerId), JSON.stringify(clean)); } catch { /* Browsing remains usable when optional storage is unavailable. */ }
 }
-export function savedWorkUrl(view: SavedWorkView) {
+export function savedWorkUrl(view: SavedWorkView, pathname = '/works') {
   const params = worksQueryString(view.query);
   if (view.query.work) params.set('work', view.query.work);
   if (!params.size) params.set('scope', 'all');
-  return `/works?${params}`;
+  return `${pathname}?${params}`;
 }

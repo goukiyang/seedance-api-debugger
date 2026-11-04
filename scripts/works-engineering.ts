@@ -2,7 +2,7 @@ import './server-runtime.cjs';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mock } from 'node:test';
@@ -233,6 +233,26 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.equal((await getWorkAccess(colleague, videoWork.id))?.canDownload, false);
     await assert.rejects(assertCanViewTask(colleague, video));
     await assert.rejects(workMediaResponse(new Request(`https://fixture.invalid/api/works/${videoWork.id}/media?version=${videoMedia.id}&variant=preview`), colleague, videoWork.id), error => (error as { status?: number }).status === 409);
+    const cachedPosterFixture = mkdtempSync(path.join(directory, 'cached-poster-'));
+    mkdirSync(path.join(cachedPosterFixture, 'public'), { recursive: true });
+    const storedVideos = path.join(cachedPosterFixture, 'stored-videos');
+    mkdirSync(path.join(storedVideos, 'thumbnails'), { recursive: true });
+    symlinkSync(storedVideos, path.join(cachedPosterFixture, 'public/videos'), 'dir');
+    writeFileSync(path.join(storedVideos, 'video-fixture-01.mp4'), Buffer.from('synthetic source'));
+    const cachedPoster = path.join(storedVideos, 'thumbnails', video.id + '.jpg');
+    writeFileSync(cachedPoster, await sharp({ create: { width: 8, height: 8, channels: 3, background: '#888' } }).jpeg().toBuffer());
+    try {
+      process.chdir(cachedPosterFixture);
+      const card = await readWorkDetail(colleague, videoWork.id);
+      assert.equal(card?.previewStatus, 'not-prepared');
+      assert.ok(card?.thumbnailUrl?.includes('cached=1'));
+      const request = new Request('https://fixture.invalid' + card!.thumbnailUrl!, { method: 'HEAD' });
+      assert.equal((await workMediaResponse(request, colleague, videoWork.id)).headers.get('Content-Type'), 'image/jpeg');
+      await assert.rejects(workMediaResponse(request, external, videoWork.id), error => (error as { status?: number }).status === 404);
+      utimesSync(cachedPoster, new Date(0), new Date(0));
+      await assert.rejects(workMediaResponse(request, colleague, videoWork.id), error => (error as { status?: number }).status === 404);
+      assert.equal(await database.workRegistrationJob.count({ where: { source_kind: 'media_preview', source_id: videoMedia.id } }), 0);
+    } finally { process.chdir(root); }
     const multiAsset = await database.asset.create({ data: { owner_id: owner.id, type: 'image', original_url: '/uploads/multi-fixture.png', thumbnail_url: '/uploads/multi-fixture-640.webp',
       file_name: 'collage.png', mime_type: 'image/png', file_size: 128, width: 1600, height: 900, hash: hash('multi'), metadata_json: '{"multiviewOutput":{"schema":1}}' } });
     const { DEFAULT_MULTIVIEW_LAYOUT } = await import('../src/lib/video/multiview-contract');
@@ -593,6 +613,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.deepEqual(await trialScore(), []);
     delete process.env.WORKS_PREVIEW_USER_ID;
     checks.push(WORKS_CHECKS[10]);
+    checks.push(WORKS_CHECKS[11]);
     assert.deepEqual(checks, WORKS_CHECKS); assert.equal(forbiddenCalls, 0); completed = true;
   } finally {
     await database.$disconnect(); mock.restoreAll();

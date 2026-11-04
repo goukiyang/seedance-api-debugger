@@ -11,7 +11,7 @@ export type WorkCard = {
   author: { id: string; name: string; avatarUrl: string | null };
   project: { id: string; name: string } | null;
   thumbnailUrl: string | null; previewUrl: string | null; detailPreviewUrl: string | null; downloadUrl: string | null;
-  previewStatus: 'ready' | 'preparing' | 'unavailable';
+  previewStatus: 'ready' | 'preparing' | 'not-prepared' | 'unavailable';
   reuse: { assetId?: string; referenceImageId?: string } | null;
   sourceHref: string | null; audience: WorkAudience; canManage: boolean;
   discoverable: boolean; withdrawn: boolean; personal: WorkPersonal;

@@ -8,11 +8,10 @@ import { prisma } from '@/lib/prisma';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { assertMultiviewWorkConsumerLock, multiviewWorkAdmission } from '@/lib/video/multiview-work-render';
-import { thumbnailFilePath } from '@/lib/video/thumbnail';
 import { claimWorkRegistrationJob, failWorkRegistrationJob, workRegistrationLeaseWhere } from './ingestion';
 import { worksRegistrationPaused, worksSchemaReady } from './source-policy';
 import { openWorkStoredVideo, type WorkStoredVideoOrigin, type WorkStoredVideoTask } from './video-storage';
-import { WORK_PREVIEW_MAX_BYTES as MAX_BYTES, workPreviewRootPath as rootPath } from './preview-files';
+import { resolveExistingWorkVideoPoster, WORK_PREVIEW_MAX_BYTES as MAX_BYTES, workPreviewRootPath as rootPath } from './preview-files';
 export { resolveWorkPreviewFile } from './preview-files';
 
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -39,20 +38,6 @@ async function localSource(reference: string) {
   const opened = await handle.stat();
   if (entry.ino !== opened.ino || entry.dev !== opened.dev || entry.size !== opened.size) { await handle.close(); throw new Error('WORKS_PREVIEW_SOURCE_CHANGED'); }
   return { handle, before: opened };
-}
-async function existingPoster(taskId: string) {
-  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(taskId)) return null;
-  const file = thumbnailFilePath(taskId);
-  const entry = await fs.lstat(file).catch(() => null);
-  if (!entry || !entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1 || entry.size < 4 || entry.size > 8 * 1024 ** 2
-    || await fs.realpath(file).catch(() => null) !== file) return null;
-  const handle = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const opened = await handle.stat();
-    if (opened.ino !== entry.ino || opened.dev !== entry.dev || opened.size !== entry.size) return null;
-    const bytes = await handle.readFile();
-    return bytes.length === entry.size && bytes[0] === 255 && bytes[1] === 216 ? bytes : null;
-  } finally { await handle.close(); }
 }
 async function run(binary: string, args: string[], fd: number, signal: AbortSignal, timeout: number) {
   return new Promise<string>((resolve, reject) => {
@@ -82,13 +67,80 @@ function probeInfo(raw: string) {
 }
 const probeArgs = (input: string) => ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', input];
 
+type PosterCandidate = { work_id: string; id: string | null; task_id: string | null; source_url: string | null; source_updated_at: Date | null };
+
+/** Idle worker pass. At most one frame is encoded and no remote original is fetched. */
+async function processWorkPosterPass(signal: AbortSignal) {
+  const key = 'video_poster:v1';
+  const checkpoint = await prisma.workDiscoveryCheckpoint.findUnique({ where: { source_kind: key } });
+  if (checkpoint?.upper_at && checkpoint.upper_at > new Date()) return { state: 'empty' };
+  const page = await prisma.$queryRaw<PosterCandidate[]>`WITH page AS MATERIALIZED (
+    SELECT id, current_version_id, discoverable, withdrawn_at FROM Work
+    WHERE id < ${checkpoint?.cursor_id || '\uffff'} ORDER BY id DESC LIMIT 24
+  )
+  SELECT page.id AS work_id, v.id, v.video_task_id AS task_id, v.source_url, v.source_updated_at FROM page
+  LEFT JOIN WorkMediaVersion v ON v.id = page.current_version_id AND v.work_id = page.id
+    AND page.discoverable = 1 AND page.withdrawn_at IS NULL AND v.thumbnail_url IS NULL
+    AND v.video_task_id IS NOT NULL AND v.source_url LIKE '/videos/%'
+  ORDER BY page.id DESC`;
+  let cursor = checkpoint?.cursor_id || null;
+  let encoded = false;
+  for (const entry of page) {
+    if (signal.aborted) return { state: 'yielded' };
+    cursor = entry.work_id;
+    if (!entry.id || !entry.task_id || !entry.source_url || !entry.source_updated_at ||
+      await resolveExistingWorkVideoPoster(entry.task_id, entry.source_url, entry.source_updated_at)) continue;
+    const input = await localSource(entry.source_url).catch(() => null);
+    if (!input) continue;
+    let temporary: string | null = null;
+    try {
+      await multiviewWorkAdmission();
+      const root = rootPath(), directory = path.join(root, entry.id);
+      await secureDirectory(directory);
+      const disk = await fs.statfs(directory);
+      if (disk.bavail * disk.bsize < 5 * 1024 ** 3) throw new Error('WORKS_PREVIEW_RESOURCE_WAIT');
+      temporary = path.join(directory, `.poster-${randomUUID()}.jpg`);
+      await run(process.env.FFMPEG_PATH || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '1', '-filter_threads', '1',
+        '-ss', '0.25', '-i', '/proc/self/fd/3', '-frames:v', '1', '-vf', "scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease",
+        '-threads', '1', '-q:v', '5', temporary], input.handle.fd, signal, 12_000);
+      const after = await input.handle.stat(), output = await fs.stat(temporary);
+      if (signal.aborted || after.ino !== input.before.ino || after.size !== input.before.size ||
+        after.mtimeMs !== input.before.mtimeMs || after.ctimeMs !== input.before.ctimeMs ||
+        output.size < 4 || output.size > 8 * 1024 ** 2) throw new Error('WORKS_POSTER_SOURCE_CHANGED');
+      const poster = path.join(directory, 'poster.jpg');
+      await fs.chmod(temporary, 0o600); await fs.rename(temporary, poster); temporary = null;
+      await assertMultiviewWorkConsumerLock();
+      const updated = await prisma.$executeRaw`UPDATE WorkMediaVersion SET thumbnail_url = ${poster}
+        WHERE id = ${entry.id} AND thumbnail_url IS NULL AND EXISTS (
+          SELECT 1 FROM Work w JOIN VideoTask t ON t.id = ${entry.task_id}
+          WHERE w.id = ${entry.work_id} AND w.current_version_id = ${entry.id} AND w.withdrawn_at IS NULL
+            AND w.discoverable = 1 AND t.local_video_path = ${entry.source_url} AND t.local_status = 'succeeded'
+            AND t.retention_status IN ('active','retained')
+            AND COALESCE(t.public_video_cached_at,t.delivery_completed_at) = ${entry.source_updated_at})`;
+      encoded = updated === 1;
+    } catch (error) {
+      if (signal.aborted) return { state: 'yielded' };
+      if (!(error instanceof Error) || !['WORKS_PREVIEW_ENCODER_DEFERRED', 'WORKS_POSTER_SOURCE_CHANGED'].includes(error.message)) throw error;
+    } finally {
+      await input.handle.close();
+      if (temporary) await fs.rm(temporary, { force: true });
+    }
+    break; // Keep full preview jobs and multi-view saves ahead of historical poster work.
+  }
+  if (signal.aborted) return { state: 'yielded' };
+  const finished = !page.length || page.length < 24 && cursor === page[page.length - 1].work_id;
+  const data = { cursor_id: finished ? null : cursor, upper_at: finished ? new Date(Date.now() + 60 * 60_000) : null };
+  await prisma.workDiscoveryCheckpoint.upsert({ where: { source_kind: key }, create: { source_kind: key, ...data }, update: data });
+  return { state: encoded ? 'poster-pass' : 'empty' };
+}
+
 /** Called only by the existing multiview consumer while holding its cross-release flock. No GET ever encodes. */
 export async function processNextWorkPreview(options: { signal?: AbortSignal } = {}) {
   if (options.signal?.aborted) return { state: 'yielded' };
   if (!await worksSchemaReady() || await worksRegistrationPaused()) return { state: 'paused' };
   await assertMultiviewWorkConsumerLock();
   const job = await claimWorkRegistrationJob(['media_preview'], 90_000);
-  if (!job) return { state: 'empty' };
+  if (!job) return processWorkPosterPass(options.signal ?? new AbortController().signal);
   const controller = new AbortController();
   const yieldPreview = () => controller.abort();
   options.signal?.addEventListener('abort', yieldPreview, { once: true });
@@ -194,7 +246,9 @@ export async function processNextWorkPreview(options: { signal?: AbortSignal } =
       previewBytes = await generated.readFile();
     } finally { await generated.close(); }
     const poster = path.join(directory, 'poster.jpg');
-    let posterBytes = version.video_task_id ? await existingPoster(version.video_task_id) : null;
+    const cachedPoster = version.video_task_id && version.source_updated_at
+      ? await resolveExistingWorkVideoPoster(version.video_task_id, version.source_url, version.source_updated_at) : null;
+    let posterBytes = cachedPoster ? await fs.readFile(cachedPoster).catch(() => null) : null;
     if (!posterBytes) {
       const posterTemp = path.join(directory, `.poster-${randomUUID()}.jpg`);
       try {

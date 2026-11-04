@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品卡片显示查看和复用次数', outline: [
-  '在作品卡片底部查看打开和一键复用次数',
-  '同一账号短时间内重复打开只计一次',
+const notice = { title: '创作首页与作品封面优化', outline: [
+  '在创作首页工作区切换作品广场和创作概览',
+  '已有视频封面可以先显示，缺失的由后台分批补齐',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

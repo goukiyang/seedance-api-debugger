@@ -10,8 +10,11 @@ export const WORKS_CHECKS = [
   'source_discovery_fault_does_not_starve_ready_video_jobs',
   'method_drafts_preserve_actual_settings_and_original_receipt',
   'activity_projection_and_checkpointed_recommendation_trial',
+  'cached_video_poster_is_versioned_authorized_and_read_only',
 ];
 export const WORKS_SOURCES = [
+  'src/app/page.tsx', 'src/app/home.module.css', 'src/components/works/WorksWorkspace.tsx', 'src/lib/works/view-state.ts',
+  'src/components/works/WorkMedia.tsx', 'src/components/works/WorkDetail.tsx',
   'prisma/migrations/20261104_works_activity_trial/migration.sql',
   'src/lib/works/activity.ts', 'src/lib/works/recommendation-trial.ts',
   'src/lib/works/recommendation-shadow.ts', 'src/lib/works/recommendation-score.ts',

@@ -9,7 +9,7 @@ import { authorizedImageResponse, type ImageVariant } from '@/lib/media/authoriz
 import { mediaPreviewResponse, parsePreviewRange, previewMime } from '@/lib/media/preview-response';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { getWorkAccess, type WorkAccess } from './access';
-import { resolveWorkPreviewFile } from './preview-files';
+import { resolveExistingWorkVideoPoster, resolveWorkPreviewFile } from './preview-files';
 import { WorkError } from './types';
 import { workHeaders } from './http';
 
@@ -85,8 +85,13 @@ export async function workMediaResponse(request: Request, user: SessionUser, wor
     response = await authorizedImageResponse(new Request(request, { headers }), media.source_url, variant as ImageVariant,
       asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`);
   } else if (variant === 'thumbnail') {
-    if (!media.thumbnail_url) throw new WorkError('封面仍在准备，成品记录已保留', 404);
-    response = await storedPreview(request, media.thumbnail_url);
+    if (media.thumbnail_url) response = await storedPreview(request, media.thumbnail_url);
+    else {
+      const poster = work.medium === 'video' && media.video_task_id && media.source_url && media.source_updated_at
+        ? await resolveExistingWorkVideoPoster(media.video_task_id, media.source_url, media.source_updated_at) : null;
+      if (!poster) throw new WorkError('暂无可读取的封面', 404, 'WORKS_POSTER_UNAVAILABLE');
+      response = await privatePreview(request, poster);
+    }
   } else if (variant === 'download') {
     if (!access.canDownload || !media.source_url) throw new WorkError('当前仅可预览成品，未获得原件下载权限', 403);
     const asset = media.asset_id ? await prisma.asset.findUnique({ where: { id: media.asset_id }, select: { mime_type: true, file_name: true } }) : null;
