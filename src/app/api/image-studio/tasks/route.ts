@@ -23,6 +23,7 @@ import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
 import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
+import { studioMethodHistoryModuleId } from '@/lib/image-studio/shared-contract';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -74,9 +75,11 @@ export async function GET(request: NextRequest) {
       const ids = Array.from(new Set(params.getAll('id')));
       if (ids.length > 24 || ids.some(id => !/^[a-zA-Z0-9-]{1,120}$/.test(id))
         || moduleId && !validStudioModuleId(moduleId, user.id)) throw new StudioError('记录查询无效');
-      const excludedToolBatches = await characterLabTaskBatchIds(user.id, prisma);
+      const [excludedToolBatches, historyModuleId] = await Promise.all([
+        characterLabTaskBatchIds(user.id, prisma), moduleId ? studioMethodHistoryModuleId(user, moduleId) : undefined,
+      ]);
       let rows = await prisma.imageStudioTask.findMany({ where: { AND: [
-        studioTemplateTaskWhere(user.id, moduleId, false, excludedToolBatches), { id: { in: ids } },
+        studioTemplateTaskWhere(user.id, moduleId, false, excludedToolBatches, historyModuleId), { id: { in: ids } },
       ] } });
       if (params.get('liked') === '1') {
         const marks = await prisma.contentReaction.findMany({ where: { user_id: user.id,
@@ -103,9 +106,13 @@ export async function GET(request: NextRequest) {
     const entering = !likedOnly && params.get('attention') === 'entry' && moduleId && !params.has('cursor') && !params.has('taskId') && !params.has('requestId');
     const entrySnapshot = entering ? await studioTemplateEntrySnapshot(user.id, moduleId) : undefined;
     const pinnedFeed = params.get('feed') === STUDIO_RESULT_FEED && moduleId && !params.has('taskId') && !params.has('requestId');
+    const taskId = params.get('taskId') || undefined;
+    const requestId = params.get('requestId') || undefined;
+    const historyModuleId = moduleId && taskId && !requestId && validStudioModuleId(moduleId, user.id)
+      ? await studioMethodHistoryModuleId(user, moduleId) : undefined;
     const result = pinnedFeed
       ? await listStudioResultFeed(user, moduleId, params.get('cursor') || undefined, likedOnly)
-      : await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', params.get('taskId') || undefined, params.get('requestId') || undefined, likedOnly);
+      : await listStudioTasks(user.id, params.get('cursor') || undefined, moduleId, user.role === 'admin', taskId, requestId, likedOnly, historyModuleId);
     const response = { ...result, ...(summary ? { projection: STUDIO_TASK_SUMMARY, tasks: result.tasks.map(projectStudioTaskSummary) } : {}),
       ...(likedOnly ? { viewerId: user.id } : {}), ...(entrySnapshot ? { entrySnapshot } : {}) };
     observed({ rows: result.tasks.length, bytes: Buffer.byteLength(JSON.stringify(response)) });
