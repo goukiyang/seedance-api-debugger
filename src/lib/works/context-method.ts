@@ -1,6 +1,6 @@
 import 'server-only';
 import type { Prisma, WorkContext as ContextRow } from '@prisma/client';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { canViewStudioPreset } from '@/lib/image-studio/access';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
@@ -134,7 +134,7 @@ export async function readIndexedWorkMethod(user: SessionUser, access: WorkAcces
 
 export async function prepareWorkMethod(user: SessionUser, workId: string, input: { viewerId: unknown; requestId: unknown; expectedMediaVersion: unknown; expectedTemplateVersion?: unknown }) {
   if (typeof input.expectedMediaVersion !== 'string' || typeof input.expectedTemplateVersion !== 'string') throw new WorkError('请重新读取作品方法后再操作', 409, 'WORKS_METHOD_VERSION_REQUIRED');
-  return runWorkOperation(user, { viewerId: input.viewerId, requestId: input.requestId,
+  return retrySqliteBusy(() => runWorkOperation(user, { viewerId: input.viewerId, requestId: input.requestId,
     intent: { action: 'prepare-work-method', workId, mediaVersion: input.expectedMediaVersion, templateVersion: input.expectedTemplateVersion } }, async (db, actor) => {
     const access = await getWorkAccess(actor, workId, db);
     if (!access?.canPreview) throw new WorkError('作品不存在或无权查看', 404, 'WORKS_NOT_FOUND');
@@ -161,5 +161,5 @@ export async function prepareWorkMethod(user: SessionUser, workId: string, input
       throw error;
     }
     throw new WorkError('原方法暂不支持安全复用', 409, 'WORKS_METHOD_UNAVAILABLE');
-  });
+  }), 2);
 }

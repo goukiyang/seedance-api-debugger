@@ -32,32 +32,41 @@ export async function queryWorkOperation(viewerId: string, pending: PendingWorkO
     writePending(viewerId, pendingWorkOperations(viewerId).filter(item => item.requestId !== pending.requestId));
     return data.operation.result;
   }
-  throw new WorksClientError('提交结果待确认，请继续核对原操作', 0, 'WORKS_UNKNOWN');
+  throw new WorksClientError(pending.key.startsWith('method:')
+    ? '还没查到草稿，请再点同一作品的「一键参考」继续'
+    : '提交结果待确认，请继续核对原操作', 0, 'WORKS_UNKNOWN');
 }
 export async function worksMutate(viewerId: string, key: string, url: string, body: Record<string, unknown>, method = 'POST') {
   const existing = pendingWorkOperations(viewerId).find(item => item.key === key);
-  if (existing) return queryWorkOperation(viewerId, existing);
-  const requestId = crypto.randomUUID();
+  // Preparing a reference draft and its receipt commit together. An explicit
+  // second click can use the same ID even if the first response was lost.
+  const canResume = method === 'POST' && key.startsWith('method:') && url === `/api/works/${encodeURIComponent(key.slice(7))}/method`;
+  if (existing && !canResume) return queryWorkOperation(viewerId, existing);
+  const requestId = existing?.requestId ?? crypto.randomUUID();
   const pending = { requestId, key, ...(url === '/api/works/project-audience' ? { endpoint: 'project-audience' } : {}) };
-  try { writePending(viewerId, [...pendingWorkOperations(viewerId), pending]); }
-  catch { throw new WorksClientError('浏览器无法保存原操作编号，本次尚未提交'); }
+  if (!existing) {
+    try { writePending(viewerId, [...pendingWorkOperations(viewerId), pending]); }
+    catch { throw new WorksClientError('浏览器无法保存原操作编号，本次尚未提交'); }
+  }
+  const unknown = canResume ? '参考草稿暂未确认，请再点同一作品的「一键参考」继续' : '提交结果待确认，请核对原操作';
   let response: Response;
   try {
     response = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'x-app-session-user': viewerId }, body: JSON.stringify({ ...body, viewerId, requestId }), signal: AbortSignal.timeout(25000) });
-  } catch { throw new WorksClientError('提交结果待确认，请核对原操作', 0, 'WORKS_UNKNOWN'); }
+  } catch { throw new WorksClientError(unknown, 0, 'WORKS_UNKNOWN'); }
   let data: OperationResponse & { error?: string; code?: string };
   try { data = await response.json(); }
-  catch { throw new WorksClientError('提交结果待确认，请核对原操作', 0, 'WORKS_UNKNOWN'); }
+  catch { throw new WorksClientError(unknown, 0, 'WORKS_UNKNOWN'); }
   if (data.viewerId && data.viewerId !== viewerId) throw new WorksClientError('账号已变化，请回原账号核对', 409, 'WORKS_ACTOR_CHANGED');
   if (response.ok && data.operation?.state === 'committed') {
     writePending(viewerId, pendingWorkOperations(viewerId).filter(item => item.requestId !== requestId));
     return data.operation.result;
   }
+  if (existing && data.code === 'WORK_OPERATION_CONFLICT') return queryWorkOperation(viewerId, existing);
   if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) {
     writePending(viewerId, pendingWorkOperations(viewerId).filter(item => item.requestId !== requestId));
     throw new WorksClientError(data.error || '操作未完成，输入已保留', response.status, data.code);
   }
-  throw new WorksClientError('提交结果待确认，请核对原操作', 0, 'WORKS_UNKNOWN');
+  throw new WorksClientError(unknown, 0, 'WORKS_UNKNOWN');
 }
 export function worksQueryString(query: WorkQuery) {
   const params = new URLSearchParams();

@@ -142,7 +142,10 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   }, []);
   const applyResult = useCallback(async (result: Record<string, unknown>, key: string) => {
     if (!alive.current) return;
-    if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) setMethodHref(result.href);
+    if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) {
+      setMethodHref(result.href);
+      return;
+    }
     const idForPatch = typeof result.workId === 'string' ? result.workId : '';
     if (idForPatch) setPages(old => old.map(page => ({ ...page, items: page.items.map(work => {
       if (work.id !== idForPatch) return work;
