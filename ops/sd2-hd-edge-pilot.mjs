@@ -62,17 +62,19 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     const denial = status => Response.json({ error: '高清图片暂不可读取' }, { status, headers: privateHeaders });
     const cookie = request.headers.get('cookie');
     if (!cookie) return denial(401);
+    const authHeaders = new Headers({ Cookie: cookie, 'Cache-Control': 'no-store, no-cache' });
+    const expectedUser = request.headers.get('x-app-session-user');
+    if (entry.route === 'works' && expectedUser) authHeaders.set('X-App-Session-User', expectedUser);
     const authStarted = Date.now();
     let permission;
     try {
-      permission = await fetchImpl(origin, { method: 'HEAD', redirect: 'manual', signal: request.signal,
-        headers: { Cookie: cookie, 'Cache-Control': 'no-store, no-cache' } });
+      permission = await fetchImpl(origin, { method: 'HEAD', redirect: 'manual', signal: request.signal, headers: authHeaders });
     } catch {
       return denial(503);
     }
     const authMs = Math.max(0, Date.now() - authStarted);
     if ([401, 403, 404].includes(permission.status)) return denial(permission.status);
-    // The existing combined GET returns the actual pending state on this path.
+    // The existing combined GET handles a pending representation or a changed account.
     if (permission.status === 409) return;
     if (permission.status !== 200) return denial(503);
     const allowed = permission.headers;
@@ -99,10 +101,14 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
       void bytes.body?.cancel().catch(() => {});
       return;
     }
+    // Forward only the fixed numeric phases from the same permission HEAD.
+    const originTiming = /^access;dur=(\d+(?:\.\d+)?),\s*media;dur=(\d+(?:\.\d+)?)$/.exec(allowed.get('server-timing') || '');
+    const timing = [`hd_edge_auth;dur=${authMs}`, `hd_edge_object_headers;dur=${objectHeadersMs}`];
+    if (originTiming) timing.push(`hd_origin_access;dur=${originTiming[1]}`, `hd_origin_media;dur=${originTiming[2]}`);
     return new Response(bytes.body, { headers: { ...privateHeaders,
       'Content-Type': entry.mime, 'Content-Length': String(entry.bytes), 'Content-Disposition': 'inline',
       ETag: allowed.get('etag'), 'X-Image-Source-Version': entry.sourceVersion,
-      'Server-Timing': 'hd_edge_auth;dur=' + authMs + ', hd_edge_object_headers;dur=' + objectHeadersMs,
+      'Server-Timing': timing.join(', '),
       'X-Image-Representation-Version': entry.representationVersion, 'X-Image-HD-Description': entry.description } });
   };
 }

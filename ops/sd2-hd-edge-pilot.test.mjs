@@ -29,7 +29,8 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
   const seen = [];
   let revoked = false, originStatus = 200, objectStatus = 200, holdTail, releaseTail;
   const originHeaders = { 'content-type': 'image/avif', 'content-length': String(bytes), 'cache-control': 'private, no-store',
-    'x-image-source-version': sourceVersion, 'x-image-representation-version': representationVersion, etag: originEtag };
+    'x-image-source-version': sourceVersion, 'x-image-representation-version': representationVersion, etag: originEtag,
+    'server-timing': 'access;dur=19.2,media;dur=6.4' };
   const objectHeaders = { 'content-type': 'image/avif', 'content-length': String(bytes), etag: objectEtag,
     'x-cos-meta-sha256': sha256, 'x-cos-request-id': 'internal-marker' };
   const server = createServer((req, res) => {
@@ -37,6 +38,8 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
     seen.push(call);
     if (req.url.startsWith('/app/')) {
       if (req.headers.cookie !== 'session=owner' || revoked) return res.writeHead(403).end();
+      const expectedUser = req.headers['x-app-session-user'];
+      if (req.url.startsWith('/app' + works) && expectedUser && expectedUser !== 'owner') return res.writeHead(409).end();
       if (originStatus !== 200) return res.writeHead(originStatus, { Location: objectOrigin + '/never-follow' }).end();
       return res.writeHead(200, originHeaders).end();
     }
@@ -66,14 +69,16 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
       [workOpen, '/app' + works + '?variant=hd&version=work-v1']]) {
       seen.length = 0;
       holdTail = new Promise(resolve => { releaseTail = resolve; });
-      const response = await open(path);
+      const response = await open(path, { headers: { 'X-App-Session-User': 'owner' } });
       assert.equal(response.status, 200);
       assert.deepEqual(seen.map(row => [row.method, row.url]), [
         ['HEAD', expectedHead], ['GET', '/object' + objectPath + '?signature=synthetic-only'],
       ]);
       assert.equal(seen[0].headers.cookie, 'session=owner');
       assert.match(seen[0].headers['cache-control'], /no-cache/);
+      assert.equal(seen[0].headers['x-app-session-user'], path === workOpen ? 'owner' : undefined);
       assert.equal(seen[1].headers.cookie, undefined);
+      assert.equal(seen[1].headers['x-app-session-user'], undefined);
       assert.equal(seen[1].headers['if-match'], objectEtag);
       assert.equal(response.headers.get('cache-control'), 'private, no-store');
       assert.equal(response.headers.get('content-type'), 'image/avif');
@@ -81,7 +86,7 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
       assert.equal(response.headers.get('x-image-source-version'), sourceVersion);
       assert.equal(response.headers.get('x-image-representation-version'), representationVersion);
       assert.equal(response.headers.get('etag'), originEtag);
-      assert.match(response.headers.get('server-timing'), /^hd_edge_auth;dur=\d+, hd_edge_object_headers;dur=\d+$/);
+      assert.match(response.headers.get('server-timing'), /^hd_edge_auth;dur=\d+, hd_edge_object_headers;dur=\d+, hd_origin_access;dur=19\.2, hd_origin_media;dur=6\.4$/);
       assert.equal(response.headers.get('location'), null);
       assert.equal(response.headers.get('x-cos-request-id'), null);
       assert.deepEqual(JSON.parse(response.headers.get('x-image-hd-description')), {
@@ -121,6 +126,22 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
     assert.equal((await open(templateOpen)).status, 503);
     assert.deepEqual(seen.map(x => x.method), ['HEAD']);
     originHeaders['cache-control'] = 'private, no-store';
+  });
+
+  await t.test('changed Works account reaches no object and unknown source timings stay private', async () => {
+    seen.length = 0;
+    assert.equal(await open(workOpen, { headers: { 'X-App-Session-User': 'previous-owner' } }), undefined);
+    assert.deepEqual(seen.map(x => x.method), ['HEAD']);
+    assert.equal(seen[0].headers['x-app-session-user'], 'previous-owner');
+    originHeaders['server-timing'] = 'access;dur=19.2,media;dur=6.4,internal;desc="private"';
+    try {
+      const response = await open(workOpen);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('server-timing'), /^hd_edge_auth;dur=\d+, hd_edge_object_headers;dur=\d+$/);
+      await response.arrayBuffer();
+    } finally {
+      originHeaders['server-timing'] = 'access;dur=19.2,media;dur=6.4';
+    }
   });
 
   await t.test('pending or changed representation delegates to the current application', async () => {
