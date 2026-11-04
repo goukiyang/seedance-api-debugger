@@ -34,7 +34,7 @@ const promptTitles: Record<PromptTarget, string> = {
   'body-front': '正面全身提示词', 'body-back': '背面全身提示词',
 };
 function pendingLabPlans(payload: CharacterLabWorkspacePayload, pending: string[]) {
-  return [...new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)])]
+  return Array.from(new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)]))
     .filter(id => !payload.taskByRequestId[id] && payload.submissionByRequestId[id] !== 'rejected');
 }
 const sharedStyleField = ['styleConstraints', '共用风格约束', '摄影质感、光线和统一画面要求'] as const;
@@ -100,7 +100,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const sessionReady = session.hasLoadedUser && !session.userLoadError && !session.sessionChanged && session.user?.id === ownerId;
   const active = useRef(false); active.current = sessionReady && !isClientSessionBlocked();
   const positionKey = `sd2:character-lab:position:v1:${ownerId}`;
-  const pendingKey = (id: string) => `sd2:character-lab:submission:v1:${ownerId}:${id}`;
+  const pendingKey = useCallback((id: string) => `sd2:character-lab:submission:v1:${ownerId}:${id}`, [ownerId]);
   const dirty = Boolean(workspace && draft && savedSignature.current !== JSON.stringify([workspace.name, draft]));
   const activePromptTarget = promptTarget === 'current' ? (draft?.stage === 'result' ? 'result' : 'faces') : promptTarget;
   const activePromptFields: readonly (readonly [keyof CharacterLabPromptFields, string, string])[] =
@@ -150,7 +150,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     localStorage.removeItem(key);
     pendingRef.current = ids;
     setPendingPlanIds(ids);
-  }, [ownerId]);
+  }, [pendingKey]);
   const acceptWorkspace = useCallback((value: CharacterLabWorkspacePayload) => {
     const input = value.workspace.views ? { ...value.workspace.draft, views: value.workspace.views } : value.workspace.draft;
     workspaceRef.current = value.workspace; draftRef.current = input;
@@ -171,7 +171,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     catch { pendingRef.current = unresolved; setPendingPlanIds(unresolved); }
     const address = new URL(window.location.href); address.searchParams.set('workspace', value.workspace.id); window.history.replaceState(window.history.state, '', address);
     setBootstrap(current => current ? { ...current, workspaces: [value.workspace, ...current.workspaces.filter(item => item.id !== value.workspace.id)] } : current);
-  }, [positionKey, writePending]);
+  }, [positionKey, pendingKey, writePending]);
   async function openWorkspace(id: string) {
     assertActive(); const sequence = ++loadSequence.current; scope.current++; setLoading(true); setError('');
     try { const value = await labApi<CharacterLabWorkspacePayload>(undefined, `?workbench=2&workspace=${encodeURIComponent(id)}`); if (alive.current && sequence === loadSequence.current && active.current) acceptWorkspace(value); }

@@ -28,7 +28,8 @@ export async function composeLabSheet(user: SessionUser, workspace: CharacterLab
   ] as const;
   const width = 1600, height = 2400, background = { r: 232, g: 232, b: 232, alpha: 1 };
   const panels: sharp.OverlayOptions[] = [];
-  for (const [index, [slot, choice]] of references.entries()) {
+  for (let index = 0; index < references.length; index++) {
+    const [slot, choice] = references[index];
     const plan = await readLabReference(user, workspace.id, sourceAssetId, choice, slot);
     if (slot === 'side' && !sameLabReference(plan.mainFace, mainFace)) throw new StudioError('当前侧脸对应旧正脸，请选用与当前正脸匹配的侧脸', 409);
     const rect = labCellRect(width, height, { kind: 'result', count: 4 }, index);
